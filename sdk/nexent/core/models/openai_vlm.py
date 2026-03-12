@@ -35,19 +35,37 @@ class OpenAIVLModel(OpenAIModel):
     async def check_connectivity(self) -> bool:
         """
         Check the connectivity of the VLM model by sending a test request with
-        a text prompt and an image URL. VLM APIs (especially DashScope qwen-vl)
+        a text prompt and an image. VLM APIs (especially DashScope qwen-vl)
         require specific format: content as a list with 'type': 'image' and
         'type': 'text' objects.
 
         Returns:
             bool: True if the model responds successfully, otherwise False.
         """
-        # DashScope VLM format: each part needs 'type' field
-        test_image_url = "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250925/thtclx/input1.png"
-        content_parts: List[Dict[str, Any]] = [
-            {"type": "image_url", "image_url": {"url": test_image_url}},
-            {"type": "text", "text": "Hello"},
-        ]
+        # Use local test image from assets folder
+        test_image_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))),
+                                       "assets", "git-flow.png")
+
+        if os.path.exists(test_image_path):
+            base64_image = self.encode_image(test_image_path)
+            # Detect image format for proper MIME type
+            _, ext = os.path.splitext(test_image_path)
+            image_format = ext.lower()[1:] if ext else "png"
+            if image_format == "jpg":
+                image_format = "jpeg"
+
+            content_parts: List[Dict[str, Any]] = [
+                {"type": "image_url", "image_url": {"url": f"data:image/{image_format};base64,{base64_image}"}},
+                {"type": "text", "text": "Hello"},
+            ]
+        else:
+            # Fallback to remote URL if local image not found
+            test_image_url = "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250925/thtclx/input1.png"
+            content_parts = [
+                {"type": "image_url", "image_url": {"url": test_image_url}},
+                {"type": "text", "text": "Hello"},
+            ]
+
         try:
             await asyncio.to_thread(
                 self.client.chat.completions.create,
