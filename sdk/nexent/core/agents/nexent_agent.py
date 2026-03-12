@@ -8,7 +8,7 @@ from smolagents.tools import Tool
 
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
-from ..utils.constants import THINK_TAG_PATTERN
+from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
@@ -225,8 +225,13 @@ class NexentAgent:
             else:
                 # prepare for multi-modal final_answer
                 final_answer_str = convert_code_format(str(final_answer))
-            final_answer_str = re.sub(THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
-            observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, final_answer_str)
+            final_answer_str = re.sub(
+                THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
+            # Remove "思考：" or "思考:" prefix content (until two newlines)
+            final_answer_str = re.sub(
+                THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+            observer.add_message(self.agent.agent_name,
+                                 ProcessType.FINAL_ANSWER, final_answer_str)
 
             # Check if we need to stop from external stop_event
             if self.agent.stop_event.is_set():
