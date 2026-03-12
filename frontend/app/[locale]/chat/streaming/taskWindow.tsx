@@ -1105,14 +1105,15 @@ const messageHandlers: MessageHandler[] = [
 interface TaskWindowProps {
   messages: TaskMessageType[];
   isStreaming?: boolean;
+  defaultExpanded?: boolean;
 }
 
-export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
+export function TaskWindow({ messages, isStreaming = false, defaultExpanded = true }: TaskWindowProps) {
   const { t } = useTranslation("common");
   const { appConfig } = useConfig();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [isExpanded, setIsExpanded] = useState(true); // default expand task details interface
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded); // default expand task details interface
   const [contentHeight, setContentHeight] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -1145,6 +1146,20 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
       setContentHeight(height);
     }
   }, [isExpanded, groupedMessages, messages]);
+
+  // Force recalculate content height after mount for cached error messages
+  useEffect(() => {
+    if (isExpanded && contentHeight === 0) {
+      // Delay to ensure DOM is rendered
+      const timer = setTimeout(() => {
+        if (contentRef.current) {
+          const height = contentRef.current.scrollHeight;
+          setContentHeight(height);
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isExpanded, contentHeight]);
 
   // Dynamic threshold calculation based on content growth
   const calculateDynamicThreshold = (baseThreshold: number) => {
