@@ -28,6 +28,15 @@ class TestErrorCodeEnum:
         """Test that ME service error code is defined."""
         assert ErrorCode.ME_CONNECTION_FAILED is not None
 
+    def test_idata_error_codes_exist(self):
+        """Test that all iData-related error codes are defined."""
+        assert ErrorCode.IDATA_SERVICE_ERROR is not None
+        assert ErrorCode.IDATA_CONFIG_INVALID is not None
+        assert ErrorCode.IDATA_CONNECTION_ERROR is not None
+        assert ErrorCode.IDATA_AUTH_ERROR is not None
+        assert ErrorCode.IDATA_RATE_LIMIT is not None
+        assert ErrorCode.IDATA_RESPONSE_ERROR is not None
+
 
 class TestErrorCodeValues:
     """Test class for ErrorCode string values with leading zeros."""
@@ -63,6 +72,30 @@ class TestErrorCodeValues:
     def test_me_connection_failed_value(self):
         """Test ME_CONNECTION_FAILED has correct string value."""
         assert ErrorCode.ME_CONNECTION_FAILED.value == "130301"
+
+    def test_idata_service_error_value(self):
+        """Test IDATA_SERVICE_ERROR has correct string value."""
+        assert ErrorCode.IDATA_SERVICE_ERROR.value == "130401"
+
+    def test_idata_config_invalid_value(self):
+        """Test IDATA_CONFIG_INVALID has correct string value."""
+        assert ErrorCode.IDATA_CONFIG_INVALID.value == "130402"
+
+    def test_idata_connection_error_value(self):
+        """Test IDATA_CONNECTION_ERROR has correct string value."""
+        assert ErrorCode.IDATA_CONNECTION_ERROR.value == "130403"
+
+    def test_idata_auth_error_value(self):
+        """Test IDATA_AUTH_ERROR has correct string value."""
+        assert ErrorCode.IDATA_AUTH_ERROR.value == "130404"
+
+    def test_idata_rate_limit_value(self):
+        """Test IDATA_RATE_LIMIT has correct string value."""
+        assert ErrorCode.IDATA_RATE_LIMIT.value == "130405"
+
+    def test_idata_response_error_value(self):
+        """Test IDATA_RESPONSE_ERROR has correct string value."""
+        assert ErrorCode.IDATA_RESPONSE_ERROR.value == "130406"
 
     def test_common_validation_error_value(self):
         """Test COMMON_VALIDATION_ERROR has correct string value."""
@@ -216,6 +249,26 @@ class TestErrorCodeHttpStatusMapping:
         """Test SYSTEM_TIMEOUT maps to HTTP 504."""
         assert ERROR_CODE_HTTP_STATUS[ErrorCode.SYSTEM_TIMEOUT] == 504
 
+    def test_idata_auth_error_maps_to_401(self):
+        """Test IDATA_AUTH_ERROR maps to HTTP 401."""
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.IDATA_AUTH_ERROR] == 401
+
+    def test_idata_config_invalid_maps_to_400(self):
+        """Test IDATA_CONFIG_INVALID maps to HTTP 400."""
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.IDATA_CONFIG_INVALID] == 400
+
+    def test_idata_connection_error_maps_to_502(self):
+        """Test IDATA_CONNECTION_ERROR maps to HTTP 502."""
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.IDATA_CONNECTION_ERROR] == 502
+
+    def test_idata_response_error_maps_to_502(self):
+        """Test IDATA_RESPONSE_ERROR maps to HTTP 502."""
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.IDATA_RESPONSE_ERROR] == 502
+
+    def test_idata_rate_limit_maps_to_429(self):
+        """Test IDATA_RATE_LIMIT maps to HTTP 429."""
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.IDATA_RATE_LIMIT] == 429
+
 
 class TestErrorCodeFormat:
     """Test class for error code format consistency."""
@@ -231,7 +284,8 @@ class TestErrorCodeFormat:
             ErrorCode.DIFY_RESPONSE_ERROR,
         ]
         for code in dify_codes:
-            assert str(code.value).startswith("1302"), f"{code} should start with 1302"
+            assert str(code.value).startswith(
+                "1302"), f"{code} should start with 1302"
 
     def test_all_datamate_codes_start_with_1301(self):
         """Test DataMate error code starts with 1301 (module 13, sub-module 01)."""
@@ -240,6 +294,20 @@ class TestErrorCodeFormat:
     def test_all_me_codes_start_with_1303(self):
         """Test ME service error code starts with 1303 (module 13, sub-module 03)."""
         assert str(ErrorCode.ME_CONNECTION_FAILED.value).startswith("1303")
+
+    def test_all_idata_codes_start_with_1304(self):
+        """Test all iData error codes start with 1304 (module 13, sub-module 04)."""
+        idata_codes = [
+            ErrorCode.IDATA_SERVICE_ERROR,
+            ErrorCode.IDATA_CONFIG_INVALID,
+            ErrorCode.IDATA_CONNECTION_ERROR,
+            ErrorCode.IDATA_AUTH_ERROR,
+            ErrorCode.IDATA_RATE_LIMIT,
+            ErrorCode.IDATA_RESPONSE_ERROR,
+        ]
+        for code in idata_codes:
+            assert str(code.value).startswith(
+                "1304"), f"{code} should start with 1304"
 
     def test_all_common_auth_codes_start_with_0002(self):
         """Test common auth error codes start with 0002."""
@@ -250,7 +318,8 @@ class TestErrorCodeFormat:
             ErrorCode.COMMON_FORBIDDEN,
         ]
         for code in auth_codes:
-            assert str(code.value).startswith("0002"), f"{code} should start with 0002"
+            assert str(code.value).startswith(
+                "0002"), f"{code} should start with 0002"
 
     def test_all_common_validation_codes_start_with_0001(self):
         """Test common validation error codes start with 0001."""
@@ -260,7 +329,8 @@ class TestErrorCodeFormat:
             ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
         ]
         for code in validation_codes:
-            assert str(code.value).startswith("0001"), f"{code} should start with 0001"
+            assert str(code.value).startswith(
+                "0001"), f"{code} should start with 0001"
 
     def test_all_system_codes_start_with_99(self):
         """Test system error codes start with 99."""
@@ -272,7 +342,8 @@ class TestErrorCodeFormat:
             ErrorCode.SYSTEM_INTERNAL_ERROR,
         ]
         for code in system_codes:
-            assert str(code.value).startswith("99"), f"{code} should start with 99"
+            assert str(code.value).startswith(
+                "99"), f"{code} should start with 99"
 
     def test_all_chat_codes_start_with_01(self):
         """Test chat error codes start with 01."""
@@ -330,6 +401,8 @@ class TestErrorCodeStringFormat:
             ErrorCode.KNOWLEDGE_NOT_FOUND,
             ErrorCode.MCP_CONNECTION_FAILED,
             ErrorCode.SYSTEM_UNKNOWN_ERROR,
+            ErrorCode.IDATA_AUTH_ERROR,
+            ErrorCode.IDATA_SERVICE_ERROR,
         ]
         for code in all_codes:
             assert len(code.value) == 6, f"{code} should have 6 digits"
@@ -343,6 +416,7 @@ class TestErrorCodeIntConversion:
         # The response should use int() to convert string to number
         assert int(ErrorCode.DIFY_AUTH_ERROR.value) == 130204
         assert int(ErrorCode.COMMON_VALIDATION_ERROR.value) == 101
+        assert int(ErrorCode.IDATA_AUTH_ERROR.value) == 130404
 
     def test_error_code_in_conditional(self):
         """Test ErrorCode can be used in conditionals."""

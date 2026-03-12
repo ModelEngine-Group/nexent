@@ -21,7 +21,6 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 # Mock consts.model module and ToolSourceEnum
 # Create a mock ToolSourceEnum that supports .value attribute access
 
-
 class MockEnumMember:
     def __init__(self, value):
         self.value = value
@@ -264,6 +263,7 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
     assert isinstance(result, MockToolInstanceClass)
     session.add.assert_called_once()
     session.flush.assert_called_once()
+
 
 
 def test_query_all_tools(monkeypatch, mock_session):

@@ -11,9 +11,10 @@ class ToolSign(Enum):
     TAVILY_SEARCH = "d"  # Tavily search tool identifier
     DATAMATE_SEARCH = "e"  # DataMate search tool identifier
     DIFY_SEARCH = "g"  # Dify search tool identifier
+    IDATA_SEARCH = "h"  # iData search tool identifier
     FILE_OPERATION = "f"      # File operation tool identifier
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
-    MULTIMODAL_OPERATION = "m" # Multimodal operation tool identifier
+    MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
 
 
 # Tool sign mapping for backward compatibility
@@ -24,6 +25,7 @@ TOOL_SIGN_MAPPING = {
     "exa_search": ToolSign.EXA_SEARCH.value,
     "datamate_search": ToolSign.DATAMATE_SEARCH.value,
     "dify_search": ToolSign.DIFY_SEARCH.value,
+    "idata_search": ToolSign.IDATA_SEARCH.value,
     "file_operation": ToolSign.FILE_OPERATION.value,
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,
@@ -67,9 +69,9 @@ class SearchResultTextMessage:
     def to_dict(self) -> Dict[str, Any]:
         """Convert SearchResult object to dictionary format to save all data."""
         return {"title": self.title, "url": self.url, "text": self.text, "published_date": self.published_date,
-            "source_type": self.source_type, "filename": self.filename, "score": self.score,
-            "score_details": self.score_details, "cite_index": self.cite_index, "search_type": self.search_type,
-            "tool_sign": self.tool_sign}
+                "source_type": self.source_type, "filename": self.filename, "score": self.score,
+                "score_details": self.score_details, "cite_index": self.cite_index, "search_type": self.search_type,
+                "tool_sign": self.tool_sign}
 
     def to_model_dict(self) -> Dict[str, Any]:
         """Format for input to the large model summary."""

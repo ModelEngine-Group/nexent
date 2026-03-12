@@ -38,10 +38,12 @@ interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
   // Selection validation props
   isSelectable?: (kb: KnowledgeBase) => boolean;
   currentEmbeddingModel?: string | null;
-  // Dify configuration for fetching Dify knowledge bases
+  // Dify/iData configuration for fetching knowledge bases
   difyConfig?: {
     serverUrl?: string;
     apiKey?: string;
+    userId?: string;
+    knowledgeSpaceId?: string;
   };
 }
 
