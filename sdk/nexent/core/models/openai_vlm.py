@@ -9,6 +9,8 @@ from smolagents.models import ChatMessage
 from ..models import OpenAIModel
 from ..utils.observer import MessageObserver
 
+logger = logging.getLogger(__name__)
+
 
 class OpenAIVLModel(OpenAIModel):
     def __init__(
@@ -121,7 +123,7 @@ class OpenAIVLModel(OpenAIModel):
 
         messages = [{"role": "system", "content": [{"text": system_prompt, "type": "text"}]}, {"role": "user",
             "content": [{"type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "auto"}}]}]
+                "image_url": {"url": f"data:image/{image_format};base64,{base64_image}", "detail": "auto"}}]}]
 
         return messages
 

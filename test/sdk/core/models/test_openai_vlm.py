@@ -23,7 +23,8 @@ class DummyOpenAIServerModel:
         return {}
 
 mock_models_module.OpenAIServerModel = DummyOpenAIServerModel
-mock_models_module.ChatMessage = MagicMock()
+# Must be a type for isinstance() checks inside the SDK
+mock_models_module.ChatMessage = type("ChatMessage", (), {})
 mock_smolagents.models = mock_models_module
 
 # Assemble smolagents.* paths and openai.* placeholders
@@ -78,10 +79,6 @@ async def test_check_connectivity_success(vl_model_instance):
     """check_connectivity should return True when no exception is raised."""
 
     with patch.object(
-        vl_model_instance,
-        "_prepare_completion_kwargs",
-        return_value={},
-    ) as mock_prepare_kwargs, patch.object(
         asyncio,
         "to_thread",
         new_callable=AsyncMock,
@@ -90,7 +87,6 @@ async def test_check_connectivity_success(vl_model_instance):
         result = await vl_model_instance.check_connectivity()
 
         assert result is True
-        mock_prepare_kwargs.assert_called_once()
         mock_to_thread.assert_awaited_once()
 
 
@@ -99,10 +95,6 @@ async def test_check_connectivity_failure(vl_model_instance):
     """check_connectivity should return False when an exception is raised inside to_thread."""
 
     with patch.object(
-        vl_model_instance,
-        "_prepare_completion_kwargs",
-        return_value={},
-    ), patch.object(
         asyncio,
         "to_thread",
         new_callable=AsyncMock,
@@ -244,12 +236,20 @@ def test_analyze_image_calls_prepare_image_message(vl_model_instance, tmp_path):
     test_image = tmp_path / "test.png"
     test_image.write_bytes(b"fake png data")
 
-    with patch.object(vl_model_instance, "prepare_image_message", return_value=[{"role": "user", "content": "test"}]) as mock_prepare:
-        with patch.object(vl_model_instance, "__call__", return_value=MagicMock()) as mock_call:
+    with patch.object(
+        vl_model_instance,
+        "prepare_image_message",
+        return_value=[{"role": "user", "content": "test"}],
+    ) as mock_prepare:
+        with patch.object(
+            vl_model_instance,
+            "__call__",
+            return_value=MagicMock(),
+        ) as mock_call:
             vl_model_instance.analyze_image(str(test_image), system_prompt="Test prompt", stream=False)
 
             mock_prepare.assert_called_once_with(str(test_image), "Test prompt")
-            mock_call.assert_called_once()
+            mock_call.assert_called_once_with(messages=[{"role": "user", "content": "test"}])
 
 
 def test_analyze_image_with_custom_params(vl_model_instance, tmp_path):
@@ -263,6 +263,7 @@ def test_analyze_image_with_custom_params(vl_model_instance, tmp_path):
             vl_model_instance.analyze_image(str(test_image), temperature=0.5, top_p=0.9)
 
             mock_call.assert_called_once()
-            # Check that kwargs were passed
             call_kwargs = mock_call.call_args.kwargs
-            assert "temperature" in call_kwargs or call_kwargs == {"messages": [{"role": "user", "content": "test"}]}
+            assert call_kwargs["messages"] == [{"role": "user", "content": "test"}]
+            assert call_kwargs["temperature"] == 0.5
+            assert call_kwargs["top_p"] == 0.9
