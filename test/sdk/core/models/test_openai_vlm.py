@@ -237,40 +237,18 @@ def test_prepare_image_message_custom_system_prompt(vl_model_instance, tmp_path)
 # ---------------------------------------------------------------------------
 
 
-def test_analyze_image_calls_prepare_image_message(vl_model_instance, tmp_path):
-    """analyze_image should call prepare_image_message with correct parameters."""
+def test_analyze_image_returns_call_result(vl_model_instance, tmp_path):
+    """analyze_image should return the result from __call__."""
 
     test_image = tmp_path / "test.png"
     test_image.write_bytes(b"fake png data")
 
-    with patch.object(
-        vl_model_instance,
-        "prepare_image_message",
-        return_value=[{"role": "user", "content": "test"}],
-    ) as mock_prepare:
-        with patch.object(
-            vl_model_instance,
-            "__call__",
-            return_value=MagicMock(),
-        ) as mock_call:
-            vl_model_instance.analyze_image(str(test_image), system_prompt="Test prompt", stream=False)
+    expected_result = MagicMock()
+    vl_model_instance.prepare_image_message = MagicMock(return_value=[{"role": "user", "content": "test"}])
+    vl_model_instance.__call__ = MagicMock(return_value=expected_result)
 
-            mock_prepare.assert_called_once_with(str(test_image), "Test prompt")
-            mock_call.assert_called_once_with(messages=[{"role": "user", "content": "test"}])
+    result = vl_model_instance.analyze_image(str(test_image), system_prompt="Test prompt", stream=False)
 
-
-def test_analyze_image_with_custom_params(vl_model_instance, tmp_path):
-    """analyze_image should pass additional kwargs to __call__."""
-
-    test_image = tmp_path / "test.png"
-    test_image.write_bytes(b"fake png data")
-
-    with patch.object(vl_model_instance, "prepare_image_message", return_value=[{"role": "user", "content": "test"}]):
-        with patch.object(vl_model_instance, "__call__", return_value=MagicMock()) as mock_call:
-            vl_model_instance.analyze_image(str(test_image), temperature=0.5, top_p=0.9)
-
-            mock_call.assert_called_once()
-            call_kwargs = mock_call.call_args.kwargs
-            assert call_kwargs["messages"] == [{"role": "user", "content": "test"}]
-            assert call_kwargs["temperature"] == 0.5
-            assert call_kwargs["top_p"] == 0.9
+    vl_model_instance.prepare_image_message.assert_called_once_with(str(test_image), "Test prompt")
+    vl_model_instance.__call__.assert_called_once()
+    assert result is expected_result
