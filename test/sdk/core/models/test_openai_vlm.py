@@ -24,7 +24,10 @@ class DummyOpenAIServerModel:
 
 mock_models_module.OpenAIServerModel = DummyOpenAIServerModel
 # Must be a type for isinstance() checks inside the SDK
-mock_models_module.ChatMessage = type("ChatMessage", (), {})
+# Also add from_dict to support __call__ method in the real code
+mock_chat_message_cls = type("ChatMessage", (), {})
+mock_chat_message_cls.from_dict = classmethod(lambda cls, d: MagicMock())
+mock_models_module.ChatMessage = mock_chat_message_cls
 mock_smolagents.models = mock_models_module
 
 # Assemble smolagents.* paths and openai.* placeholders
