@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Clock,
   Plus,
@@ -102,12 +102,17 @@ export function ChatSidebar({
 }: ChatSidebarProps) {
   const { t } = useTranslation();
   const { confirm } = useConfirmModal();
-  const { today, week, older } = categorizeConversations(conversationManagement.conversationList);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
+
+  // Memoize conversation categorization to avoid redundant work on unrelated state changes
+  const { today, week, older } = useMemo(
+    () => categorizeConversations(conversationManagement.conversationList),
+    [conversationManagement.conversationList]
+  );
 
   const onToggleSidebar = () => setCollapsed((prev) => !prev);
 
