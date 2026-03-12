@@ -55,19 +55,18 @@ export default function Homepage() {
   const navigateToSpace = () => navigateWithPermissionCheck("/space");
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center">
+    <div className="w-full min-h-full flex flex-col items-center justify-start px-4 py-6 md:px-6 md:py-8">
       {/* Hero area */}
-      <section className="relative w-full py-4 flex flex-col items-center justify-center text-center">
+      <section className="relative w-full py-4 flex flex-col items-center text-center">
         <div className="absolute inset-0 bg-grid-slate-200 dark:bg-grid-slate-800 [mask-image:radial-gradient(ellipse_at_center,white_20%,transparent_75%)] -z-10"></div>
         <motion.h2
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight"
+          className="text-3xl md:text-4xl lg:text-5xl font-bold leading-tight text-slate-900 dark:text-white mb-4 tracking-tight max-w-4xl"
         >
-          {t("page.title")}
-          <span className="text-blue-600 dark:text-blue-500">
-            {" "}
+          <span className="block">{t("page.title")}</span>
+          <span className="block mt-1 hero-gradient-text">
             {t("page.subtitle")}
           </span>
         </motion.h2>
@@ -87,7 +86,6 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.4 }}
           className="flex flex-col sm:flex-row gap-4"
         >
-          
           <Button
             onClick={navigateToChat}
             className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"

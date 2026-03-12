@@ -1098,8 +1098,7 @@ export default function ToolConfigModal({
   return (
     <>
       <Modal
-        mask={true}
-        maskClosable={false}
+        mask={{ closable: false }}
         title={
           <div className="flex justify-between items-center w-full pr-8">
             <span>{`${tool?.name}`}</span>
