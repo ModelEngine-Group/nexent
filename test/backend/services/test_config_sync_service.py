@@ -994,6 +994,7 @@ class TestLoadConfigImpl:
                 "TENANT_NAME": "Test Tenant",
                 "DEFAULT_GROUP_ID": "default-group-123",
                 "ICON_TYPE": "preset",
+                "ICON_KEY": "keyboard",
                 "AVATAR_URI": "avatar-uri",
                 "CUSTOM_ICON_URL": "https://custom-icon.com",
                 "DATAMATE_URL": "https://datamate.example.com"
@@ -1022,6 +1023,7 @@ class TestLoadConfigImpl:
         assert result["app"]["tenantName"] == "Test Tenant"
         assert result["app"]["defaultGroupId"] == "default-group-123"
         assert result["app"]["icon"]["type"] == "preset"
+        assert result["app"]["icon"]["iconKey"] == "keyboard"
         assert result["app"]["icon"]["avatarUri"] == "avatar-uri"
         assert result["app"]["icon"]["customUrl"] == "https://custom-icon.com"
         assert result["models"]["llm"]["displayName"] == "Test LLM"
@@ -1406,6 +1408,7 @@ class TestBuildAppConfig:
                 "TENANT_NAME": None,  # TENANT_NAME (use default)
                 "DEFAULT_GROUP_ID": None,  # DEFAULT_GROUP_ID (use default)
                 "ICON_TYPE": "custom",
+                "ICON_KEY": "book",
                 "AVATAR_URI": "avatar-uri",
                 "CUSTOM_ICON_URL": "https://custom-icon.com",
                 "DATAMATE_URL": "https://datamate.example.com"
@@ -1425,6 +1428,7 @@ class TestBuildAppConfig:
             assert result["tenantName"] == ""  # None returns default empty string
             assert result["defaultGroupId"] == ""  # None returns default empty string
             assert result["icon"]["type"] == "custom"
+            assert result["icon"]["iconKey"] == "book"
             assert result["icon"]["avatarUri"] == "avatar-uri"
             assert result["icon"]["customUrl"] == "https://custom-icon.com"
             assert result["modelEngineEnabled"] == False
@@ -1436,11 +1440,12 @@ class TestBuildAppConfig:
             ("TENANT_NAME", tenant_id),
             ("DEFAULT_GROUP_ID", tenant_id),
             ("ICON_TYPE", tenant_id),
+            ("ICON_KEY", tenant_id),
             ("AVATAR_URI", tenant_id),
             ("CUSTOM_ICON_URL", tenant_id),
             ("DATAMATE_URL", tenant_id)
         ]
-        assert service_mocks['tenant_config_manager'].get_app_config.call_count == 8
+        assert service_mocks['tenant_config_manager'].get_app_config.call_count == 9
         service_mocks['tenant_config_manager'].get_app_config.assert_has_calls(
             [call(key, tenant_id=tenant_id)
              for key, _ in expected_calls]
@@ -1465,6 +1470,7 @@ class TestBuildAppConfig:
             # DEFAULT_APP_DESCRIPTION_ZH
             assert result["description"] == "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
             assert result["icon"]["type"] == "preset"
+            assert result["icon"]["iconKey"] == "search"  # Default value
             assert result["icon"]["avatarUri"] == ""
             assert result["icon"]["customUrl"] == ""
             assert result["modelEngineEnabled"] == False
@@ -1488,6 +1494,7 @@ class TestBuildAppConfig:
             # DEFAULT_APP_DESCRIPTION_EN
             assert result["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
             assert result["icon"]["type"] == "preset"
+            assert result["icon"]["iconKey"] == "search"  # Default value
             assert result["icon"]["avatarUri"] == ""
             assert result["icon"]["customUrl"] == ""
             assert result["modelEngineEnabled"] == False
@@ -1504,6 +1511,7 @@ class TestBuildAppConfig:
                 "APP_NAME": "Custom App Name",
                 "APP_DESCRIPTION": None,  # Will use default
                 "ICON_TYPE": "custom",
+                "ICON_KEY": "globe2",
                 "AVATAR_URI": None,  # Will use empty string
                 "CUSTOM_ICON_URL": "https://custom-icon.com"
             }
@@ -1521,6 +1529,7 @@ class TestBuildAppConfig:
             # Default
             assert result["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
             assert result["icon"]["type"] == "custom"
+            assert result["icon"]["iconKey"] == "globe2"
             assert result["icon"]["avatarUri"] == ""  # Default empty
             assert result["icon"]["customUrl"] == "https://custom-icon.com"
             assert result["modelEngineEnabled"] == False
@@ -1540,6 +1549,113 @@ class TestBuildAppConfig:
             build_app_config(language, tenant_id)
 
         assert "Database timeout" in str(exc_info.value)
+
+    def test_build_app_config_with_icon_key(self, service_mocks):
+        """Test build_app_config with iconKey value present"""
+        # Setup
+        language = "en"
+        tenant_id = "test_tenant_id"
+
+        # Mock all app config values including ICON_KEY
+        def mock_get_app_config(key, tenant_id=None):
+            config_map = {
+                "APP_NAME": "Custom App Name",
+                "APP_DESCRIPTION": "Custom description",
+                "TENANT_NAME": None,
+                "DEFAULT_GROUP_ID": None,
+                "ICON_TYPE": "preset",
+                "ICON_KEY": "keyboard",
+                "AVATAR_URI": "avatar-uri",
+                "CUSTOM_ICON_URL": "https://custom-icon.com",
+                "DATAMATE_URL": "https://datamate.example.com"
+            }
+            return config_map.get(key)
+
+        service_mocks['tenant_config_manager'].get_app_config.side_effect = mock_get_app_config
+
+        # Mock MODEL_ENGINE_ENABLED
+        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+            # Execute
+            result = build_app_config(language, tenant_id)
+
+            # Assert - verify iconKey is returned correctly
+            assert result["name"] == "Custom App Name"
+            assert result["icon"]["type"] == "preset"
+            assert result["icon"]["iconKey"] == "keyboard"
+            assert result["icon"]["avatarUri"] == "avatar-uri"
+            assert result["icon"]["customUrl"] == "https://custom-icon.com"
+
+        # Verify ICON_KEY was called
+        service_mocks['tenant_config_manager'].get_app_config.assert_any_call(
+            "ICON_KEY", tenant_id=tenant_id
+        )
+
+    def test_build_app_config_icon_key_defaults(self, service_mocks):
+        """Test build_app_config with iconKey missing (should use default 'search')"""
+        # Setup
+        language = "en"
+        tenant_id = "test_tenant_id"
+
+        # Mock app config values without ICON_KEY
+        def mock_get_app_config(key, tenant_id=None):
+            config_map = {
+                "APP_NAME": "Test App",
+                "APP_DESCRIPTION": "Test description",
+                "TENANT_NAME": None,
+                "DEFAULT_GROUP_ID": None,
+                "ICON_TYPE": "preset",
+                # ICON_KEY not present - should default to "search"
+                "AVATAR_URI": "",
+                "CUSTOM_ICON_URL": "",
+                "DATAMATE_URL": ""
+            }
+            return config_map.get(key)
+
+        service_mocks['tenant_config_manager'].get_app_config.side_effect = mock_get_app_config
+
+        # Mock MODEL_ENGINE_ENABLED
+        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+            # Execute
+            result = build_app_config(language, tenant_id)
+
+            # Assert - verify iconKey defaults to "search"
+            assert result["name"] == "Test App"
+            assert result["icon"]["type"] == "preset"
+            assert result["icon"]["iconKey"] == "search"  # Default value
+
+    def test_build_app_config_all_icon_fields(self, service_mocks):
+        """Test build_app_config with all icon-related fields present"""
+        # Setup
+        language = "zh"
+        tenant_id = "test_tenant_id"
+
+        # Mock all icon-related config values
+        def mock_get_app_config(key, tenant_id=None):
+            config_map = {
+                "APP_NAME": "Test App",
+                "APP_DESCRIPTION": "Test description",
+                "TENANT_NAME": None,
+                "DEFAULT_GROUP_ID": None,
+                "ICON_TYPE": "custom",
+                "ICON_KEY": "lightbulb",
+                "AVATAR_URI": "generated-avatar-uri",
+                "CUSTOM_ICON_URL": "https://example.com/custom.png",
+                "DATAMATE_URL": ""
+            }
+            return config_map.get(key)
+
+        service_mocks['tenant_config_manager'].get_app_config.side_effect = mock_get_app_config
+
+        # Mock MODEL_ENGINE_ENABLED
+        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+            # Execute
+            result = build_app_config(language, tenant_id)
+
+            # Assert - verify all icon fields
+            assert result["icon"]["type"] == "custom"
+            assert result["icon"]["iconKey"] == "lightbulb"
+            assert result["icon"]["avatarUri"] == "generated-avatar-uri"
+            assert result["icon"]["customUrl"] == "https://example.com/custom.png"
 
 
 class TestBuildModelConfig:

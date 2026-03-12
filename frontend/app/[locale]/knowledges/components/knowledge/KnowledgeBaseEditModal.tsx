@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Select, message } from "antd";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -35,6 +35,9 @@ export function KnowledgeBaseEditModal({
   // Store original name for comparison
   const originalNameRef = useRef<string>("");
 
+  // Track current permission value for conditional logic
+  const [currentPermission, setCurrentPermission] = useState<string>("READ_ONLY");
+
   // Fetch groups for group selection
   const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
@@ -42,15 +45,18 @@ export function KnowledgeBaseEditModal({
   // Reset form and states when knowledge base changes
   React.useEffect(() => {
     if (knowledgeBase && open) {
+      const permission = knowledgeBase.ingroup_permission || "READ_ONLY";
       form.setFieldsValue({
         knowledge_name: knowledgeBase.name,
-        ingroup_permission: knowledgeBase.ingroup_permission || "READ_ONLY",
-        group_ids: knowledgeBase.group_ids || [],
+        ingroup_permission: permission,
+        group_ids: permission === "PRIVATE" ? [] : (knowledgeBase.group_ids || []),
       });
       // Store original name for comparison
       originalNameRef.current = knowledgeBase.name;
       // Reset error state
       setNameError(null);
+      // Set current permission
+      setCurrentPermission(permission);
     }
   }, [knowledgeBase, open, form]);
 
@@ -90,10 +96,13 @@ export function KnowledgeBaseEditModal({
         return; // Error message is displayed via Form.Item help
       }
 
+      // Ensure group_ids is empty when permission is PRIVATE
+      const groupIds = values.ingroup_permission === "PRIVATE" ? [] : values.group_ids;
+
       await knowledgeBaseService.updateKnowledgeBase(knowledgeBase.id, {
         knowledge_name: values.knowledge_name,
         ingroup_permission: values.ingroup_permission,
-        group_ids: values.group_ids,
+        group_ids: groupIds,
       });
 
       message.success(t("tenantResources.knowledgeBase.updated"));
@@ -103,7 +112,7 @@ export function KnowledgeBaseEditModal({
         ...knowledgeBase,
         name: values.knowledge_name,
         ingroup_permission: values.ingroup_permission,
-        group_ids: values.group_ids,
+        group_ids: groupIds,
       };
 
       // Trigger knowledge base list refresh to seamlessly update UI
@@ -118,6 +127,17 @@ export function KnowledgeBaseEditModal({
       message.error(error.message || t("tenantResources.knowledgeBase.updateFailed"));
     }
   };
+
+  // Handle permission change - clear group_ids when PRIVATE is selected
+  const handlePermissionChange = (value: string) => {
+    setCurrentPermission(value);
+    if (value === "PRIVATE") {
+      form.setFieldsValue({ group_ids: [] });
+    }
+  };
+
+  // Check if group select should be disabled
+  const isGroupSelectDisabled = currentPermission === "PRIVATE";
 
   return (
     <Modal
@@ -152,6 +172,7 @@ export function KnowledgeBaseEditModal({
           >
             <Select
               placeholder={t("tenantResources.knowledgeBase.permission")}
+              onChange={handlePermissionChange}
               options={[
                 { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
                 { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
@@ -165,11 +186,13 @@ export function KnowledgeBaseEditModal({
           <Form.Item name="group_ids" label={t("tenantResources.knowledgeBase.groupNames")}>
             <Select
               mode="multiple"
-              placeholder={t("tenantResources.knowledgeBase.groupNames")}
+              placeholder={isGroupSelectDisabled ? t("knowledgeBase.create.permission.groupPlaceholder") : t("tenantResources.knowledgeBase.groupNames")}
+              value={isGroupSelectDisabled ? [] : form.getFieldValue("group_ids")}
               options={groups.map((group) => ({
                 label: group.group_name,
                 value: group.group_id,
               }))}
+              disabled={isGroupSelectDisabled}
             />
           </Form.Item>
         </Can>

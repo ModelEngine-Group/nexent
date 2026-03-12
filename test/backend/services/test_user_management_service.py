@@ -1256,6 +1256,88 @@ class TestFormatRolePermissions(unittest.TestCase):
         assert result["accessibleRoutes"] == []
 
 
+class TestCreateToken(unittest.IsolatedAsyncioTestCase):
+    """Tests for create_token function in user_management_service."""
+
+    @patch('backend.services.user_management_service.create_token_record')
+    @patch('backend.services.user_management_service.generate_access_key')
+    def test_create_token_success(self, mock_generate_access_key, mock_create_token_record):
+        """Test successful token creation."""
+        from backend.services import user_management_service as ums
+
+        mock_generate_access_key.return_value = "nexent-abc123"
+        mock_create_token_record.return_value = {
+            "token_id": 1,
+            "access_key": "nexent-abc123",
+            "user_id": "user-123"
+        }
+
+        result = ums.create_token("user-123")
+
+        assert result["token_id"] == 1
+        assert result["access_key"] == "nexent-abc123"
+        assert result["user_id"] == "user-123"
+        mock_generate_access_key.assert_called_once()
+        mock_create_token_record.assert_called_once_with("nexent-abc123", "user-123")
+
+
+class TestListTokensByUser(unittest.IsolatedAsyncioTestCase):
+    """Tests for list_tokens_by_user function in user_management_service."""
+
+    @patch('backend.services.user_management_service.list_tokens_by_user_record')
+    def test_list_tokens_by_user_success(self, mock_list_tokens):
+        """Test successful token listing."""
+        from backend.services import user_management_service as ums
+
+        mock_list_tokens.return_value = [
+            {"token_id": 1, "access_key": "nexent-key1", "user_id": "user-123"},
+            {"token_id": 2, "access_key": "nexent-key2", "user_id": "user-123"}
+        ]
+
+        result = ums.list_tokens_by_user("user-123")
+
+        assert len(result) == 2
+        mock_list_tokens.assert_called_once_with("user-123")
+
+    @patch('backend.services.user_management_service.list_tokens_by_user_record')
+    def test_list_tokens_by_user_empty(self, mock_list_tokens):
+        """Test listing tokens when user has none."""
+        from backend.services import user_management_service as ums
+
+        mock_list_tokens.return_value = []
+
+        result = ums.list_tokens_by_user("user-no-tokens")
+
+        assert result == []
+
+
+class TestDeleteToken(unittest.IsolatedAsyncioTestCase):
+    """Tests for delete_token function in user_management_service."""
+
+    @patch('backend.services.user_management_service.delete_token_record')
+    def test_delete_token_success(self, mock_delete_token):
+        """Test successful token deletion."""
+        from backend.services import user_management_service as ums
+
+        mock_delete_token.return_value = True
+
+        result = ums.delete_token(1, "user-123")
+
+        assert result is True
+        mock_delete_token.assert_called_once_with(1, "user-123")
+
+    @patch('backend.services.user_management_service.delete_token_record')
+    def test_delete_token_not_found(self, mock_delete_token):
+        """Test deleting non-existent token."""
+        from backend.services import user_management_service as ums
+
+        mock_delete_token.return_value = False
+
+        result = ums.delete_token(999, "user-123")
+
+        assert result is False
+
+
 class TestIntegrationScenarios(unittest.IsolatedAsyncioTestCase):
     """Integration test scenarios"""
 

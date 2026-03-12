@@ -26,6 +26,7 @@ const defaultConfig: GlobalConfig = {
     appName: "",
     appDescription: "",
     iconType: ICON_TYPES.PRESET,
+    iconKey: "search",
     customIconUrl: "",
     avatarUri: "",
     modelEngineEnabled: false,
@@ -112,12 +113,16 @@ function transformModelEntry(
  * Transform backend config format to frontend format
  */
 function transformBackendToFrontend(backendConfig: any): GlobalConfig {
+  // Get iconKey from backend - if not available, use default "search"
+  const iconKey = backendConfig.app?.icon?.iconKey || "search";
+
   const app: AppConfig = backendConfig.app
     ? {
         appName: backendConfig.app.name || "",
         appDescription: backendConfig.app.description || "",
         iconType:
           (backendConfig.app.icon?.type as "preset" | "custom") || "preset",
+        iconKey: iconKey,
         customIconUrl: backendConfig.app.icon?.customUrl || null,
         avatarUri: backendConfig.app.icon?.avatarUri || null,
         modelEngineEnabled: backendConfig.app.modelEngineEnabled ?? false,

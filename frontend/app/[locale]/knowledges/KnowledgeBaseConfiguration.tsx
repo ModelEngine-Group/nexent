@@ -604,6 +604,10 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Handle new knowledge base creation
   const handleCreateNew = () => {
+    // Clear active knowledge base selection when entering create mode
+    // This prevents issues with chunk loading from previously selected KB
+    setActiveKnowledgeBase(null);
+
     // Generate default knowledge base name
     const defaultName = generateUniqueKbName(kbState.knowledgeBases);
     setNewKbName(defaultName);
@@ -917,6 +921,7 @@ function DataConfig({ isActive }: DataConfigProps) {
           >
             {isCreatingMode ? (
               <DocumentList
+                key="create-mode"
                 documents={[]}
                 onDelete={() => {}}
                 knowledgeBaseSource={""}
@@ -942,6 +947,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               />
             ) : kbState.activeKnowledgeBase ? (
               <DocumentList
+                key={`kb-${kbState.activeKnowledgeBase.id}`}
                 documents={viewingDocuments}
                 onDelete={handleDeleteDocument}
                 knowledgeBaseSource={kbState.activeKnowledgeBase?.source}

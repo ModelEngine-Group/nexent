@@ -113,7 +113,7 @@ export const KnowledgeBaseContext = createContext<{
   ) => Promise<KnowledgeBase | null>;
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
-  setActiveKnowledgeBase: (kb: KnowledgeBase) => void;
+  setActiveKnowledgeBase: (kb: KnowledgeBase | null) => void;
   isKnowledgeBaseSelectable: (kb: KnowledgeBase) => boolean;
   hasKnowledgeBaseModelMismatch: (kb: KnowledgeBase) => boolean;
   refreshKnowledgeBaseData: (forceRefresh?: boolean) => Promise<void>;
@@ -304,7 +304,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   );
 
   // Set current active knowledge base - memoized with useCallback
-  const setActiveKnowledgeBase = useCallback((kb: KnowledgeBase) => {
+  const setActiveKnowledgeBase = useCallback((kb: KnowledgeBase | null) => {
     dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.SET_ACTIVE, payload: kb });
   }, []);
 

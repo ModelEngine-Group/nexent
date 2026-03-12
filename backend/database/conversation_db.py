@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from sqlalchemy import asc, desc, func, insert, select, update
 
-from .client import as_dict, get_db_session
+from .client import as_dict, db_client, get_db_session
 from .db_models import (
     ConversationMessage,
     ConversationMessageUnit,
@@ -328,11 +328,12 @@ def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[
         # Ensure conversation_id is of integer type
         conversation_id = int(conversation_id)
 
-        # Prepare update data
+        # Prepare update data with UTF-8 encoding for title
         update_data = {
             "conversation_title": new_title,
             "update_time": func.current_timestamp()
         }
+        update_data = db_client.clean_string_values(update_data)
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
 

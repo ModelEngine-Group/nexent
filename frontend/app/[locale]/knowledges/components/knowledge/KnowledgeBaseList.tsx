@@ -589,16 +589,17 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 </span>
                               )}
 
-                            {/* User group tags */}
+                            {/* User group tags - only show when not PRIVATE */}
                             <Can permission="group:read">
-                              {getGroupNames(kb.group_ids).map((groupName, idx) => (
-                                <span
-                                  key={idx}
-                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
-                                >
-                                  {groupName}
-                                </span>
-                              ))}
+                              {kb.ingroup_permission !== "PRIVATE" &&
+                                getGroupNames(kb.group_ids).map((groupName, idx) => (
+                                  <span
+                                    key={idx}
+                                    className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
+                                  >
+                                    {groupName}
+                                  </span>
+                                ))}
                             </Can>
                           </>
                         )}

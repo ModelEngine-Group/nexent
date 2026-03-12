@@ -821,5 +821,205 @@ class TestDataValidation:
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
+class TestCreateTokenEndpoint:
+    """Tests for POST /tokens endpoint."""
+
+    @patch('apps.user_management_app.create_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_create_token_success(self, mock_get_user_id, mock_create_token):
+        """Test successful token creation."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_create_token.return_value = {
+            "token_id": 1,
+            "access_key": "nexent-abc123",
+            "user_id": "user-123"
+        }
+
+        response = client.post(
+            "/user/tokens",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "success"
+        assert data["data"]["token_id"] == 1
+
+    @patch('apps.user_management_app.create_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_create_token_no_authorization(self, mock_get_user_id, mock_create_token):
+        """Test token creation without authorization header."""
+        response = client.post("/user/tokens")
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        data = response.json()
+        assert "No authorization header" in data["detail"]
+
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_create_token_missing_user_id(self, mock_get_user_id):
+        """Test token creation when user_id is missing from JWT."""
+        mock_get_user_id.return_value = (None, None)
+
+        response = client.post(
+            "/user/tokens",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        data = response.json()
+        assert "missing user_id" in data["detail"]
+
+    @patch('apps.user_management_app.create_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_create_token_exception(self, mock_get_user_id, mock_create_token):
+        """Test token creation with exception."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_create_token.side_effect = Exception("Database error")
+
+        response = client.post(
+            "/user/tokens",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+class TestListTokensEndpoint:
+    """Tests for GET /tokens endpoint."""
+
+    @patch('apps.user_management_app.list_tokens_by_user')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_list_tokens_success(self, mock_get_user_id, mock_list_tokens):
+        """Test successful token listing."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_list_tokens.return_value = [
+            {"token_id": 1, "access_key": "nexent-key1", "user_id": "user-123"},
+            {"token_id": 2, "access_key": "nexent-key2", "user_id": "user-123"}
+        ]
+
+        response = client.get(
+            "/user/tokens?user_id=user-123",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "success"
+        assert len(data["data"]) == 2
+
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_list_tokens_no_authorization(self, mock_get_user_id):
+        """Test token listing without authorization header."""
+        response = client.get("/user/tokens?user_id=user-123")
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        data = response.json()
+        assert "No authorization header" in data["detail"]
+
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_list_tokens_forbidden_other_user(self, mock_get_user_id):
+        """Test listing tokens for a different user is forbidden."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+
+        response = client.get(
+            "/user/tokens?user_id=user-other",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        data = response.json()
+        assert "cannot list tokens for other users" in data["detail"]
+
+    @patch('apps.user_management_app.list_tokens_by_user')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_list_tokens_empty(self, mock_get_user_id, mock_list_tokens):
+        """Test listing tokens when user has none."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_list_tokens.return_value = []
+
+        response = client.get(
+            "/user/tokens?user_id=user-123",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["data"] == []
+
+    @patch('apps.user_management_app.list_tokens_by_user')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_list_tokens_exception(self, mock_get_user_id, mock_list_tokens):
+        """Test token listing with exception."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_list_tokens.side_effect = Exception("Database error")
+
+        response = client.get(
+            "/user/tokens?user_id=user-123",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+class TestDeleteTokenEndpoint:
+    """Tests for DELETE /tokens/{token_id} endpoint."""
+
+    @patch('apps.user_management_app.delete_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_delete_token_success(self, mock_get_user_id, mock_delete_token):
+        """Test successful token deletion."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_delete_token.return_value = True
+
+        response = client.delete(
+            "/user/tokens/1",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "success"
+        assert data["data"]["token_id"] == 1
+
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_delete_token_no_authorization(self, mock_get_user_id):
+        """Test token deletion without authorization header."""
+        response = client.delete("/user/tokens/1")
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        data = response.json()
+        assert "No authorization header" in data["detail"]
+
+    @patch('apps.user_management_app.delete_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_delete_token_not_found(self, mock_get_user_id, mock_delete_token):
+        """Test deleting non-existent token."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_delete_token.return_value = False
+
+        response = client.delete(
+            "/user/tokens/999",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        data = response.json()
+        assert "not found" in data["detail"]
+
+    @patch('apps.user_management_app.delete_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_delete_token_exception(self, mock_get_user_id, mock_delete_token):
+        """Test token deletion with exception."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_delete_token.side_effect = Exception("Database error")
+
+        response = client.delete(
+            "/user/tokens/1",
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
 if __name__ == "__main__":
     pytest.main([__file__]) 

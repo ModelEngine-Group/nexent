@@ -53,6 +53,7 @@ export interface AppConfig {
   appName: string;
   appDescription: string;
   iconType: "preset" | "custom";
+  iconKey: string; // Selected preset icon key
   customIconUrl: string | null;
   avatarUri: string | null;
   modelEngineEnabled: boolean;

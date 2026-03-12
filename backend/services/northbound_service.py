@@ -13,11 +13,7 @@ from consts.exceptions import (
 )
 from consts.model import AgentRequest
 from database.conversation_db import get_conversation_messages
-from database.partner_db import (
-    add_mapping_id,
-    get_external_id_by_internal,
-    get_internal_id_by_external
-)
+from database.token_db import log_token_usage, get_latest_usage_metadata
 from services.agent_service import (
     run_agent_stream,
     stop_agent_tasks,
@@ -40,6 +36,7 @@ class NorthboundContext:
     tenant_id: str
     user_id: str
     authorization: str
+    token_id: int = 0
 
 
 # -----------------------------
@@ -115,26 +112,6 @@ def _build_idempotency_key(*parts: Any) -> str:
 
 
 # -----------------------------
-# ID mapping helpers
-# -----------------------------
-async def to_external_conversation_id(internal_id: int) -> str:
-    if not internal_id:
-        raise Exception("invalid internal conversation id")
-    external_id = get_external_id_by_internal(internal_id=internal_id, mapping_type="CONVERSATION")
-    if not external_id:
-        logger.error(f"cannot find external id for conversation_id: {internal_id}")
-        raise Exception("cannot find external id")
-    return external_id
-
-
-async def to_internal_conversation_id(external_id: str) -> int:
-    if not external_id:
-        raise Exception("invalid external conversation id")
-    internal_id = get_internal_id_by_external(external_id=external_id, mapping_type="CONVERSATION")
-    return internal_id
-
-
-# -----------------------------
 # Agent resolver
 # -----------------------------
 async def get_agent_info_by_name(agent_name: str, tenant_id: str) -> int:
@@ -146,30 +123,30 @@ async def get_agent_info_by_name(agent_name: str, tenant_id: str) -> int:
 
 async def start_streaming_chat(
     ctx: NorthboundContext,
-    external_conversation_id: str,
+    conversation_id: Optional[int],
     agent_name: str,
     query: str,
+    meta_data: Optional[Dict[str, Any]] = None,
     idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
     try:
         # Simple rate limit
         await check_and_consume_rate_limit(ctx.tenant_id)
 
-        internal_conversation_id = await to_internal_conversation_id(external_conversation_id)
-        # Add mapping to postgres database
-        if internal_conversation_id is None:
-            logging.info(f"Conversation {external_conversation_id} not found, creating a new conversation")
-            # Create a new conversation and get its internal ID
+        # If conversation_id is not provided, create a new conversation
+        if conversation_id is None:
+            logging.info("No conversation_id provided, creating a new conversation")
             new_conversation = create_new_conversation(title="New Conversation", user_id=ctx.user_id)
-            internal_conversation_id = new_conversation["conversation_id"]
-            # Add the new mapping to the database
-            add_mapping_id(internal_id=internal_conversation_id, external_id=external_conversation_id, tenant_id=ctx.tenant_id, user_id=ctx.user_id)
+            conversation_id = new_conversation["conversation_id"]
+            logging.info(f"Created new conversation with id: {conversation_id}")
+
+        internal_conversation_id = conversation_id
 
         # Get history according to internal_conversation_id
-        history_resp = await get_conversation_history(ctx, external_conversation_id)
+        history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
         agent_id = await get_agent_id_by_name(agent_name=agent_name, tenant_id=ctx.tenant_id)
         # Idempotency: only prevent concurrent duplicate starts
-        composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, external_conversation_id, agent_id, query)
+        composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, str(conversation_id), agent_id, query)
         await idempotency_start(composed_key)
         agent_request = AgentRequest(
             conversation_id=internal_conversation_id,
@@ -192,7 +169,7 @@ async def start_streaming_chat(
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
     except Exception as e:
-        raise Exception(f"Failed to start streaming chat for external conversation id {external_conversation_id}: {str(e)}")
+        raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
 
     try:
         response = await run_agent_stream(
@@ -207,34 +184,82 @@ async def start_streaming_chat(
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
 
-    # Attach request id header
+    # Log token usage
+    if ctx.token_id > 0:
+        try:
+            log_token_usage(
+                token_id=ctx.token_id,
+                call_function_name="run_chat",
+                related_id=conversation_id,
+                created_by=ctx.user_id,
+                metadata=meta_data
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log token usage: {str(e)}")
+
+    # Attach request id header and conversation_id (internal id)
     response.headers["X-Request-Id"] = ctx.request_id
-    response.headers["conversation_id"] = external_conversation_id
+    response.headers["conversation_id"] = str(conversation_id)
     return response
 
 
-async def stop_chat(ctx: NorthboundContext, external_conversation_id: str) -> Dict[str, Any]:
+async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
-        internal_id = await to_internal_conversation_id(external_conversation_id)
+        stop_result = stop_agent_tasks(conversation_id, ctx.user_id)
 
-        stop_result = stop_agent_tasks(internal_id, ctx.user_id)
-        return {"message": stop_result.get("message", "success"), "data": external_conversation_id, "requestId": ctx.request_id}
+        # Log token usage
+        if ctx.token_id > 0:
+            try:
+                log_token_usage(
+                    token_id=ctx.token_id,
+                    call_function_name="stop_chat_stream",
+                    related_id=conversation_id,
+                    created_by=ctx.user_id,
+                    metadata=meta_data
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log token usage: {str(e)}")
+
+        return {"message": stop_result.get("message", "success"), "data": conversation_id, "requestId": ctx.request_id}
     except Exception as e:
-        raise Exception(f"Failed to stop chat for external conversation id {external_conversation_id}: {str(e)}")
+        raise Exception(f"Failed to stop chat for conversation_id {conversation_id}: {str(e)}")
 
 
 async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
     conversations = get_conversation_list_service(ctx.user_id)
     # get_conversation_list_service is sync
-    for item in conversations:
-        item["conversation_id"] = await to_external_conversation_id(int(item["conversation_id"]))
+
+    # Add meta_data from token usage log if available
+    if ctx.token_id > 0:
+        for item in conversations:
+            # Ensure we do not leak empty meta_data keys
+            if "meta_data" in item and not item.get("meta_data"):
+                item.pop("meta_data", None)
+
+            conversation_id = item.get("conversation_id")
+            if conversation_id:
+                try:
+                    meta_data = get_latest_usage_metadata(
+                        token_id=ctx.token_id,
+                        related_id=int(conversation_id),
+                        call_function_name="run_chat"
+                    )
+                    # Only return meta_data when there is a usage log record and meta_data is non-empty
+                    if meta_data:
+                        item["meta_data"] = meta_data
+                    else:
+                        item.pop("meta_data", None)
+                except Exception as e:
+                    logger.warning(f"Failed to get meta_data for conversation {conversation_id}: {str(e)}")
+                    item.pop("meta_data", None)
+
+    # Now return internal conversation_id directly
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
 
 
-async def get_conversation_history(ctx: NorthboundContext, external_conversation_id: str) -> Dict[str, Any]:
-    internal_id = await to_internal_conversation_id(external_conversation_id)
-
-    history = get_conversation_messages(internal_id)
+async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
+    """Internal helper to get conversation history without logging."""
+    history = get_conversation_messages(conversation_id)
     # Remove unnecessary fields
     result = []
     for message in history:
@@ -244,44 +269,63 @@ async def get_conversation_history(ctx: NorthboundContext, external_conversation
         })
 
     response = {
-        "conversation_id": external_conversation_id,
+        "conversation_id": conversation_id,
         "history": result
     }
-    # Ensure external id in response
     return {"message": "success", "data": response, "requestId": ctx.request_id}
+
+
+async def get_conversation_history(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
+    try:
+        return await get_conversation_history_internal(ctx, conversation_id)
+    except Exception as e:
+        raise Exception(f"Failed to get conversation history for conversation_id {conversation_id}: {str(e)}")
 
 
 async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
     try:
-        agent_info_list = await list_all_agent_info_impl(tenant_id=ctx.tenant_id)
+        agent_info_list = await list_all_agent_info_impl(tenant_id=ctx.tenant_id, user_id=ctx.user_id)
         # Remove internal information that partner don't need
         for agent_info in agent_info_list:
             agent_info.pop("agent_id", None)
+
         return {"message": "success", "data": agent_info_list, "requestId": ctx.request_id}
     except Exception as e:
         raise Exception(f"Failed to get agent info list for tenant {ctx.tenant_id}: {str(e)}")
 
 
-async def update_conversation_title(ctx: NorthboundContext, external_conversation_id: str, title: str, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+async def update_conversation_title(ctx: NorthboundContext, conversation_id: int, title: str, meta_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
     composed_key: Optional[str] = None
     try:
-        internal_id = await to_internal_conversation_id(external_conversation_id)
-
         # Idempotency: avoid concurrent duplicate title update for same conversation
-        composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, external_conversation_id, title)
+        composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, str(conversation_id), title)
         await idempotency_start(composed_key)
 
-        update_conversation_title_service(internal_id, title, ctx.user_id)
+        update_conversation_title_service(conversation_id, title, ctx.user_id)
+
+        # Log token usage
+        if ctx.token_id > 0:
+            try:
+                log_token_usage(
+                    token_id=ctx.token_id,
+                    call_function_name="update_conversation_title",
+                    related_id=conversation_id,
+                    created_by=ctx.user_id,
+                    metadata=meta_data
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log token usage: {str(e)}")
+
         return {
             "message": "success",
-            "data": external_conversation_id,
+            "data": conversation_id,
             "requestId": ctx.request_id,
             "idempotency_key": composed_key,
         }
     except LimitExceededError as _:
         raise LimitExceededError("Duplicate request is still running, please wait.")
     except Exception as e:
-        raise Exception(f"Failed to update conversation title for external conversation id {external_conversation_id}: {str(e)}")
+        raise Exception(f"Failed to update conversation title for conversation_id {conversation_id}: {str(e)}")
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
