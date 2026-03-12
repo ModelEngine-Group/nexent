@@ -452,7 +452,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           </Button>
         ]}
         width={700}
-        maskClosable={false}
+        mask={{ closable: false }}
       >
         <Spin spinning={isLoadingDetail}>
           <Form form={form} layout="vertical">
