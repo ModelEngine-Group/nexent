@@ -58,6 +58,10 @@ async def _get_northbound_context(request: Request) -> NorthboundContext:
 
     except HTTPException:
         raise
+    except LimitExceededError as e:
+        logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
     except UnauthorizedError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
