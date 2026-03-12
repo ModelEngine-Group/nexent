@@ -6,6 +6,7 @@ import httpx
 from pydantic import Field
 from smolagents.tools import Tool
 
+from ..models.rerank_model import BaseRerank
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
@@ -75,8 +76,18 @@ class DifySearchTool(Tool):
             description="Search method: keyword_search, semantic_search, full_text_search, hybrid_search",
             default="semantic_search",
         ),
+        rerank: bool = Field(
+            description="Whether to enable reranking for search results",
+            default=False,
+        ),
+        rerank_model_name: str = Field(
+            description="The name of the rerank model to use",
+            default="",
+        ),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
+        rerank_model: BaseRerank = Field(
+            description="The rerank model to use", default=None, exclude=True),
     ):
         """Initialize the DifySearchTool.
 
@@ -123,6 +134,9 @@ class DifySearchTool(Tool):
         self.top_k = top_k
         self.search_method = search_method
         self.observer = observer
+        self.rerank = rerank
+        self.rerank_model_name = rerank_model_name
+        self.rerank_model = rerank_model
 
         # Cache HTTP client for reuse (uses shared HttpClientManager internally)
         self._http_client = http_client_manager.get_sync_client(
@@ -176,6 +190,45 @@ class DifySearchTool(Tool):
             if not all_search_results:
                 raise Exception(
                     "No results found! Try a less restrictive/shorter query.")
+
+            # Apply reranking if enabled
+            if self.rerank and self.rerank_model and all_search_results:
+                try:
+                    documents = []
+                    for r in all_search_results:
+                        segment = r.get("segment", {}) or {}
+                        documents.append(segment.get("content", "") or "")
+
+                    reranked_results = self.rerank_model.rerank(
+                        query=query,
+                        documents=documents,
+                        top_n=len(documents),
+                    )
+
+                    if reranked_results:
+                        original_results_map = {
+                            i: all_search_results[i] for i in range(len(all_search_results))
+                        }
+                        reordered = []
+                        for reranked_item in reranked_results:
+                            orig_idx = reranked_item.get("index")
+                            if orig_idx is None or orig_idx not in original_results_map:
+                                continue
+                            result = original_results_map[orig_idx]
+                            result["score"] = reranked_item.get(
+                                "relevance_score", result.get("score", 0)
+                            )
+                            reordered.append(result)
+
+                        if reordered:
+                            all_search_results = reordered
+                            logger.info(
+                                f"Reranking applied, reordered {len(all_search_results)} results"
+                            )
+                except Exception as e:
+                    logger.warning(
+                        f"Reranking failed, using original results: {str(e)}"
+                    )
 
             # Collect all document info for batch URL fetching
             document_dataset_pairs = []

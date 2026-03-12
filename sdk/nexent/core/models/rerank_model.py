@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Optional
 import requests
 
 
-class BaseReranker(ABC):
+class BaseRerank(ABC):
     """
-    Abstract base class for reranker models, defining methods that all reranker models should implement.
+    Abstract base class for rerank models, defining methods that all rerank models should implement.
     """
 
     @abstractmethod
@@ -20,12 +20,12 @@ class BaseReranker(ABC):
         ssl_verify: bool = True,
     ):
         """
-        Initialize the reranker model.
+        Initialize the rerank model.
 
         Args:
-            model_name: Name of the reranker model
-            base_url: Base URL of the reranker API
-            api_key: API key for the reranker API
+            model_name: Name of the rerank model
+            base_url: Base URL of the rerank API
+            api_key: API key for the rerank API
             ssl_verify: Whether to verify SSL certificates for network requests
         """
         pass
@@ -53,7 +53,7 @@ class BaseReranker(ABC):
     @abstractmethod
     async def connectivity_check(self, timeout: float = 5.0) -> bool:
         """
-        Test the connectivity to the reranker API.
+        Test the connectivity to the rerank API.
 
         Args:
             timeout: Timeout in seconds
@@ -64,9 +64,9 @@ class BaseReranker(ABC):
         pass
 
 
-class OpenAICompatibleReranker(BaseReranker):
+class OpenAICompatibleRerank(BaseRerank):
     """
-    OpenAI-compatible reranker implementation.
+    OpenAI-compatible rerank implementation.
     Supports any API that follows the OpenAI reranking format.
     """
 
@@ -78,12 +78,12 @@ class OpenAICompatibleReranker(BaseReranker):
         ssl_verify: bool = True,
     ):
         """
-        Initialize OpenAICompatibleReranker with configuration.
+        Initialize OpenAICompatibleRerank with configuration.
 
         Args:
-            model_name: Name of the reranker model
-            base_url: Base URL of the reranker API
-            api_key: API key for the reranker API
+            model_name: Name of the rerank model
+            base_url: Base URL of the rerank API
+            api_key: API key for the rerank API
             ssl_verify: Whether to verify SSL certificates for network requests
         """
         self.model = model_name
@@ -199,16 +199,16 @@ class OpenAICompatibleReranker(BaseReranker):
 
             except requests.exceptions.Timeout as e:
                 logging.warning(
-                    f"Reranker API timed out in {current_timeout}s (attempt {attempt_index + 1}/{attempts})"
+                    f"Rerank API timed out in {current_timeout}s (attempt {attempt_index + 1}/{attempts})"
                 )
                 last_exception = e
                 if attempt_index == attempts - 1:
-                    logging.error("Reranker API timed out after all retries.")
+                    logging.error("Rerank API timed out after all retries.")
                     raise
                 continue
 
             except requests.exceptions.RequestException as e:
-                logging.error(f"Reranker API request failed: {str(e)}")
+                logging.error(f"Rerank API request failed: {str(e)}")
                 raise
 
         if last_exception:
@@ -236,7 +236,7 @@ class OpenAICompatibleReranker(BaseReranker):
 
     async def connectivity_check(self, timeout: float = 5.0) -> bool:
         """
-        Test the connectivity to the reranker API.
+        Test the connectivity to the rerank API.
 
         Args:
             timeout: Timeout in seconds
@@ -254,35 +254,35 @@ class OpenAICompatibleReranker(BaseReranker):
             return True
 
         except requests.exceptions.Timeout:
-            logging.error(f"Reranker API connection test timed out ({timeout} seconds)")
+            logging.error(f"Rerank API connection test timed out ({timeout} seconds)")
             return False
         except requests.exceptions.ConnectionError:
-            logging.error("Reranker API connection error, unable to establish connection")
+            logging.error("Rerank API connection error, unable to establish connection")
             return False
         except Exception as e:
-            logging.error(f"Reranker API connectivity check failed: {str(e)}")
+            logging.error(f"Rerank API connectivity check failed: {str(e)}")
             return False
 
 
-class JinaReranker(OpenAICompatibleReranker):
+class JinaRerank(OpenAICompatibleRerank):
     """
-    Jina AI reranker implementation.
+    Jina AI rerank implementation.
     """
 
     def __init__(
         self,
         api_key: str,
         base_url: str = "https://api.jina.ai/v1/rerank",
-        model_name: str = "jina-reranker-v2-base",
+        model_name: str = "jina-rerank-v2-base",
         ssl_verify: bool = True,
     ):
         """
-        Initialize JinaReranker with configuration.
+        Initialize JinaRerank with configuration.
 
         Args:
             api_key: API key for Jina AI
-            base_url: Base URL of the Jina reranker API
-            model_name: Name of the Jina reranker model
+            base_url: Base URL of the Jina rerank API
+            model_name: Name of the Jina rerank model
             ssl_verify: Whether to verify SSL certificates for network requests
         """
         super().__init__(
@@ -293,9 +293,9 @@ class JinaReranker(OpenAICompatibleReranker):
         )
 
 
-class CohereReranker(OpenAICompatibleReranker):
+class CohereRerank(OpenAICompatibleRerank):
     """
-    Cohere reranker implementation.
+    Cohere rerank implementation.
     """
 
     def __init__(
@@ -306,12 +306,12 @@ class CohereReranker(OpenAICompatibleReranker):
         ssl_verify: bool = True,
     ):
         """
-        Initialize CohereReranker with configuration.
+        Initialize CohereRerank with configuration.
 
         Args:
             api_key: API key for Cohere
-            base_url: Base URL of the Cohere reranker API
-            model_name: Name of the Cohere reranker model
+            base_url: Base URL of the Cohere rerank API
+            model_name: Name of the Cohere rerank model
             ssl_verify: Whether to verify SSL certificates for network requests
         """
         super().__init__(
