@@ -399,7 +399,7 @@ You have been provided with these additional arguments, that you can access usin
         try:
             self.observer.add_message(
                 self.name, ProcessType.AGENT_FINISH, str(report))
-        except:
+        except Exception:
             self.observer.add_message(self.name, ProcessType.AGENT_FINISH, "")
 
         answer = Template(self.prompt_templates["managed_agent"]["report"], undefined=StrictUndefined).render({
