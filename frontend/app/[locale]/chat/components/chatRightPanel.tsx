@@ -8,6 +8,231 @@ import { convertImageUrlToApiUrl, extractObjectNameFromUrl, storageService } fro
 import { message, Button } from "antd";
 import log from "@/lib/logger";
 import { useConfig } from "@/hooks/useConfig";
+import type { AppConfig } from "@/types/modelConfig";
+
+interface SearchResultItemProps {
+  result: SearchResult;
+  t: any; // TFunction from react-i18next
+  appConfig: AppConfig | null;
+}
+
+// Search result item component - moved to module scope to prevent re-creation on each render
+function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const title = result.title || t("chatRightPanel.unknownTitle");
+  const url = result.url || "#";
+  const text = result.text || t("chatRightPanel.noContentDescription");
+  const published_date = result.published_date || "";
+  const source_type = result.source_type || "url";
+  const filename = result.filename || result.title || "";
+  const datamateDatasetId = result.score_details?.datamate_dataset_id;
+  const datamateFileId = result.score_details?.datamate_file_id;
+  const datamateBaseUrl = result.score_details?.datamate_base_url;
+
+  // Handle file download
+  const handleFileDownload = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!filename && !url) {
+      message.error(t("chatRightPanel.fileDownloadError", "File name or URL is missing"));
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      if (source_type === "datamate") {
+        if (!appConfig?.modelEngineEnabled) {
+          message.error("DataMate download not available: ModelEngine is not enabled");
+          return;
+        }
+        if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
+          if (!url || url === "#") {
+            message.error(t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information"));
+            return;
+          }
+        }
+        await storageService.downloadDatamateFile({
+          url: url !== "#" ? url : undefined,
+          baseUrl: datamateBaseUrl,
+          datasetId: datamateDatasetId,
+          fileId: datamateFileId,
+          filename: filename || undefined,
+        });
+        message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+        return;
+      }
+
+      let objectName: string | undefined = undefined;
+
+      if (url && url !== "#") {
+        objectName = extractObjectNameFromUrl(url) || undefined;
+      }
+
+      if (!objectName) {
+        message.error(t("chatRightPanel.fileDownloadError", "Cannot determine file object name"));
+        return;
+      }
+
+      await storageService.downloadFile(objectName, filename || "download");
+      message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+    } catch (error) {
+      log.error("Failed to download file:", error);
+      message.error(t("chatRightPanel.fileDownloadError", "Failed to download file. Please try again."));
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
+    <div className="p-3 rounded-lg border border-gray-200 text-xs hover:bg-gray-50 transition-colors overflow-hidden">
+      <div className="flex flex-col">
+        <div>
+          {source_type === "url" ? (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-blue-600 hover:underline block text-base"
+              style={{
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                wordBreak: "break-word",
+              }}
+              title={title}
+            >
+              {title}
+            </a>
+          ) : source_type === "file" || source_type === "datamate" ? (
+            <a
+              href="#"
+              onClick={handleFileDownload}
+              className="font-medium text-blue-600 hover:underline block text-base cursor-pointer"
+              style={{
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                wordBreak: "break-word",
+              }}
+              title={title}
+            >
+              {isDownloading ? (
+                <span className="inline-flex items-center gap-1">
+                  <span className="animate-spin">⏳</span>
+                  {t("chatRightPanel.downloading", "Downloading...")}
+                </span>
+              ) : (
+                title
+              )}
+            </a>
+          ) : (
+            <div
+              className="font-medium text-base"
+              style={{
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                wordBreak: "break-word",
+              }}
+              title={title}
+            >
+              {title}
+            </div>
+          )}
+
+          {published_date && (
+            <div className="text-gray-500 mt-1 text-sm">
+              {formatDate(published_date)}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p
+            className={`text-gray-700 mt-1 text-sm ${
+              isExpanded ? "" : "line-clamp-3"
+            }`}
+          >
+            {text}
+          </p>
+        </div>
+
+        <div className="mt-2 text-sm flex justify-between items-center">
+          <div
+            className="flex flex-col overflow-hidden"
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            {source_type === "file" || source_type === "datamate" ? (
+              <>
+                <div className="flex items-center min-w-0">
+                  <div className="w-3 h-3 flex-shrink-0 mr-1">
+                    <Database className="w-full h-full" />
+                  </div>
+                  <a
+                    href="#"
+                    onClick={handleFileDownload}
+                    className="text-blue-600 hover:underline truncate cursor-pointer"
+                    style={{
+                      maxWidth: "75%",
+                      display: "inline-block",
+                    }}
+                    title={formatUrl(result)}
+                  >
+                    {filename || formatUrl(result)}
+                  </a>
+                </div>
+                <div className="flex items-center mt-0.5 min-w-0">
+                  <div className="w-3 h-3 flex-shrink-0 mr-1">
+                    <Server className="w-full h-full" />
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {source_type === "datamate"
+                      ? t("chatRightPanel.source.datamate", "Source: Datamate")
+                      : source_type === "file"
+                      ? t("chatRightPanel.source.nexent", "Source: Nexent")
+                      : ""}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center min-w-0">
+                <div className="w-3 h-3 flex-shrink-0 mr-1">
+                  <ExternalLink className="w-full h-full" />
+                </div>
+                <span
+                  className="text-gray-500 truncate"
+                  style={{
+                    maxWidth: "75%",
+                    display: "inline-block",
+                  }}
+                  title={formatUrl(result)}
+                >
+                  {formatUrl(result)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {text.length > 150 && (
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="text-sm text-gray-500 hover:text-gray-700 flex-shrink-0 ml-2 transition-colors"
+            >
+              {isExpanded
+                ? t("chatRightPanel.collapse")
+                : t("chatRightPanel.expand")}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 
 export function ChatRightPanel({
@@ -215,228 +440,6 @@ export function ChatRightPanel({
     setViewingImage(imageUrl);
   };
 
-  // Search result item component
-  const SearchResultItem = ({ result }: { result: SearchResult }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
-    const [isDownloading, setIsDownloading] = useState(false);
-    const title = result.title || t("chatRightPanel.unknownTitle");
-    const url = result.url || "#";
-    const text = result.text || t("chatRightPanel.noContentDescription");
-    const published_date = result.published_date || "";
-    const source_type = result.source_type || "url";
-    const filename = result.filename || result.title || "";
-    const datamateDatasetId = result.score_details?.datamate_dataset_id;
-    const datamateFileId = result.score_details?.datamate_file_id;
-    const datamateBaseUrl = result.score_details?.datamate_base_url;
-
-    // Handle file download
-    const handleFileDownload = async (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (!filename && !url) {
-        message.error(t("chatRightPanel.fileDownloadError", "File name or URL is missing"));
-        return;
-      }
-
-      setIsDownloading(true);
-      try {
-        // Handle datamate source type
-        if (source_type === "datamate") {
-          if (!appConfig?.modelEngineEnabled) {
-            message.error("DataMate download not available: ModelEngine is not enabled");
-            return;
-          }
-          if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
-            if (!url || url === "#") {
-              message.error(t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information"));
-              return;
-            }
-          }
-          await storageService.downloadDatamateFile({
-            url: url !== "#" ? url : undefined,
-            baseUrl: datamateBaseUrl,
-            datasetId: datamateDatasetId,
-            fileId: datamateFileId,
-            filename: filename || undefined,
-          });
-          message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
-          return;
-        }
-
-        // Handle regular file source type (source_type === "file")
-        // For knowledge base files, backend stores the MinIO object_name in path_or_url,
-        // so we should always try to extract it from the URL and avoid guessing from filename.
-        let objectName: string | undefined = undefined;
-
-        if (url && url !== "#") {
-          objectName = extractObjectNameFromUrl(url) || undefined;
-        }
-
-        if (!objectName) {
-          message.error(t("chatRightPanel.fileDownloadError", "Cannot determine file object name"));
-          return;
-        }
-
-        await storageService.downloadFile(objectName, filename || "download");
-        message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
-      } catch (error) {
-        log.error("Failed to download file:", error);
-        message.error(t("chatRightPanel.fileDownloadError", "Failed to download file. Please try again."));
-      } finally {
-        setIsDownloading(false);
-      }
-    };
-
-    return (
-      <div className="p-3 rounded-lg border border-gray-200 text-xs hover:bg-gray-50 transition-colors overflow-hidden">
-        <div className="flex flex-col">
-          <div>
-            {source_type === "url" ? (
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-blue-600 hover:underline block text-base"
-                style={{
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                  wordBreak: "break-word",
-                }}
-                title={title}
-              >
-                {title}
-              </a>
-            ) : source_type === "file" || source_type === "datamate" ? (
-              <a
-                href="#"
-                onClick={handleFileDownload}
-                className="font-medium text-blue-600 hover:underline block text-base cursor-pointer"
-                style={{
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                  wordBreak: "break-word",
-                }}
-                title={title}
-              >
-                {isDownloading ? (
-                  <span className="inline-flex items-center gap-1">
-                    <span className="animate-spin">⏳</span>
-                    {t("chatRightPanel.downloading", "Downloading...")}
-                  </span>
-                ) : (
-                  title
-                )}
-              </a>
-            ) : (
-              <div
-                className="font-medium text-base"
-                style={{
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                  wordBreak: "break-word",
-                }}
-                title={title}
-              >
-                {title}
-              </div>
-            )}
-
-            {published_date && (
-              <div className="text-gray-500 mt-1 text-sm">
-                {formatDate(published_date)}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <p
-              className={`text-gray-700 mt-1 text-sm ${
-                isExpanded ? "" : "line-clamp-3"
-              }`}
-            >
-              {text}
-            </p>
-          </div>
-
-          <div className="mt-2 text-sm flex justify-between items-center">
-            <div
-              className="flex flex-col overflow-hidden"
-              style={{ flex: 1, minWidth: 0 }}
-            >
-              {source_type === "file" || source_type === "datamate" ? (
-                <>
-                  <div className="flex items-center min-w-0">
-                    <div className="w-3 h-3 flex-shrink-0 mr-1">
-                      <Database className="w-full h-full" />
-                    </div>
-                    <a
-                      href="#"
-                      onClick={handleFileDownload}
-                      className="text-blue-600 hover:underline truncate cursor-pointer"
-                      style={{
-                        maxWidth: "75%",
-                        display: "inline-block",
-                      }}
-                      title={formatUrl(result)}
-                    >
-                      {filename || formatUrl(result)}
-                    </a>
-                  </div>
-                  <div className="flex items-center mt-0.5 min-w-0">
-                    <div className="w-3 h-3 flex-shrink-0 mr-1">
-                      <Server className="w-full h-full" />
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {source_type === "datamate"
-                        ? t("chatRightPanel.source.datamate", "Source: Datamate")
-                        : source_type === "file"
-                        ? t("chatRightPanel.source.nexent", "Source: Nexent")
-                        : ""}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="flex items-center min-w-0">
-                  <div className="w-3 h-3 flex-shrink-0 mr-1">
-                    <ExternalLink className="w-full h-full" />
-                  </div>
-                  <span
-                    className="text-gray-500 truncate"
-                    style={{
-                      maxWidth: "75%",
-                      display: "inline-block",
-                    }}
-                    title={formatUrl(result)}
-                  >
-                    {formatUrl(result)}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {text.length > 150 && (
-              <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="text-sm text-gray-500 hover:text-gray-700 flex-shrink-0 ml-2 transition-colors"
-              >
-                {isExpanded
-                  ? t("chatRightPanel.collapse")
-                  : t("chatRightPanel.expand")}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // Render image component
   const renderImage = (imageUrl: string, index: number) => {
     const item = imageData[imageUrl];
@@ -589,6 +592,8 @@ export function ChatRightPanel({
                         <SearchResultItem
                           key={`result-${index}`}
                           result={result}
+                          t={t}
+                          appConfig={appConfig}
                         />
                       ))}
                     </div>
