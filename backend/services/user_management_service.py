@@ -129,11 +129,12 @@ async def check_auth_service_health():
 
 async def signup_user_with_invitation(email: EmailStr,
                                       password: str,
-                                      invite_code: Optional[str] = None):
+                                      invite_code: Optional[str] = None,
+                                      auto_login: Optional[bool] = True):
     """User registration with invitation code support"""
     client = get_supabase_client()
     logging.info(
-        f"Receive registration request: email={email}, invite_code={'provided' if invite_code else 'not provided'}")
+        f"Receive registration request: email={email}, invite_code={'provided' if invite_code else 'not provided'}, auto_login={auto_login}")
 
     # Default user role is USER
     user_role = "USER"
@@ -228,7 +229,7 @@ async def signup_user_with_invitation(email: EmailStr,
                     f"Failed to use invitation code {invite_code} for user {user_id}: {str(e)}")
 
         logging.info(
-            f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}")
+            f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}, auto_login={auto_login}")
 
         if user_role == "ADMIN":
             await generate_tts_stt_4_admin(tenant_id, user_id)
@@ -236,7 +237,7 @@ async def signup_user_with_invitation(email: EmailStr,
         # Initialize tool list for the new tenant (only once per tenant)
         await init_tool_list_for_tenant(tenant_id, user_id)
 
-        return await parse_supabase_response(False, response, user_role)
+        return await parse_supabase_response(False, response, user_role, auto_login)
     else:
         logging.error(
             "Supabase registration request returned no user object")
@@ -244,7 +245,7 @@ async def signup_user_with_invitation(email: EmailStr,
             "Registration service is temporarily unavailable, please try again later")
 
 
-async def parse_supabase_response(is_admin, response, user_role):
+async def parse_supabase_response(is_admin, response, user_role, auto_login: bool = True):
     """Parse Supabase response and build standardized user registration response"""
     user_data = {
         "id": response.user.id,
@@ -253,7 +254,7 @@ async def parse_supabase_response(is_admin, response, user_role):
     }
 
     session_data = None
-    if response.session:
+    if response.session and auto_login:
         session_data = {
             "access_token": response.session.access_token,
             "refresh_token": response.session.refresh_token,
