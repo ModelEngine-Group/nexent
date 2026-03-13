@@ -209,45 +209,86 @@ export default function ToolManagement({
       const newSelectedTools = currentSelectdTools.filter((t) => parseInt(t.id) !== numericId);
       updateTools(newSelectedTools);
     } else {
-      // If not selected, determine tool params and check if modal is needed
-      const configuredTool = currentSelectdTools.find((t) => parseInt(t.id) === numericId);
-      // Merge configured tool with original tool to ensure all fields are present
-      const toolToUse = configuredTool
-        ? { ...tool, ...configuredTool, initParams: configuredTool.initParams }
-        : tool;
+      // Helper function to proceed with tool selection after duplicate check
+      async function proceedWithToolSelection() {
+        // Get latest tools again to ensure we have the most up-to-date list
+        const currentSelectdTools =
+          useAgentConfigStore.getState().editedAgent.tools;
 
-      // Get merged parameters (for editing mode, merge with instance params)
-      const mergedParams = await mergeToolParamsWithInstance(
-        tool,
-        toolToUse,
-        isCreatingMode ? undefined : currentAgentId!
-      );
+        // Determine tool params and check if modal is needed
+        const configuredTool = currentSelectdTools.find(
+          (t) => parseInt(t.id) === numericId
+        );
+        // Merge configured tool with original tool to ensure all fields are present
+        const toolToUse = configuredTool
+          ? { ...tool, ...configuredTool, initParams: configuredTool.initParams }
+          : tool;
 
-      // Check if there are empty required params
-      const hasEmptyRequiredParams = mergedParams.some(
-        (param: ToolParam) =>
-          param.required &&
-          (param.value === undefined ||
-            param.value === "" ||
-            param.value === null)
-      );
+        // Get merged parameters (for editing mode, merge with instance params)
+        const mergedParams = await mergeToolParamsWithInstance(
+          tool,
+          toolToUse,
+          isCreatingMode ? undefined : currentAgentId!
+        );
 
-      if (hasEmptyRequiredParams) {
-        // Need to configure, open modal
-        setSelectedTool(toolToUse);
-        setToolParams(mergedParams);
-        setIsToolModalOpen(true);
-      } else {
-        // No required params missing, add directly
-        const newSelectedTools = [
-          ...currentSelectdTools,
-          {
-            ...toolToUse,
-            initParams: mergedParams,
-          },
-        ];
-        updateTools(newSelectedTools);
+        // Check if there are empty required params
+        const hasEmptyRequiredParams = mergedParams.some(
+          (param: ToolParam) =>
+            param.required &&
+            (param.value === undefined ||
+              param.value === "" ||
+              param.value === null)
+        );
+
+        if (hasEmptyRequiredParams) {
+          // Need to configure, open modal
+          setSelectedTool(toolToUse);
+          setToolParams(mergedParams);
+          setIsToolModalOpen(true);
+        } else {
+          // No required params missing, add directly
+          const newSelectedTools = [
+            ...currentSelectdTools,
+            {
+              ...toolToUse,
+              initParams: mergedParams,
+            },
+          ];
+          updateTools(newSelectedTools);
+        }
       }
+
+      // If not selected, check for duplicate tool names first
+      const duplicateTool = currentSelectdTools.find(
+        (selectedTool) => selectedTool.name === tool.name
+      );
+
+      if (duplicateTool) {
+        // Show confirmation modal for duplicate tool name
+        return new Promise<void>((resolve) => {
+          confirm({
+            title: t("toolPool.duplicateToolName.title"),
+            content: t("toolPool.duplicateToolName.content", {
+              toolName: tool.name,
+            }),
+            okText: t("toolPool.duplicateToolName.confirm"),
+            cancelText: t("toolPool.duplicateToolName.cancel"),
+            danger: true,
+            onOk: async () => {
+              // User confirmed, proceed with tool selection
+              await proceedWithToolSelection();
+              resolve();
+            },
+            onCancel: () => {
+              // User cancelled, do nothing
+              resolve();
+            },
+          });
+        });
+      }
+
+      // No duplicate, proceed with normal tool selection
+      await proceedWithToolSelection();
     }
   };
 
