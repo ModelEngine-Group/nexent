@@ -57,7 +57,13 @@ export const validateFileType = (file: File, t: TFunction, message: any): boolea
     'text/markdown',
     'text/plain',
     'text/csv',
-    'application/csv'
+    'application/csv',
+    'application/epub',
+    'application/epub+zip',
+    'text/html',
+    'application/json',
+    'application/xml',
+    'text/xml'
   ];
 
   // First check MIME type
