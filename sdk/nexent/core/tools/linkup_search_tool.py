@@ -18,7 +18,31 @@ class LinkupSearchTool(Tool):
         "A tool for retrieving publicly available information, news, general knowledge, or non-proprietary data from the internet. "
         "Use this for real-time open-domain updates, broad topics, or general knowledge queries."
     )
-    inputs = {"query": {"type": "string", "description": "The search query to perform."}}
+
+    description_zh = "使用 Linkup API 进行搜索，返回最相关的搜索结果。适用于获取公开信息、新闻、通用知识或互联网上的非专有数据。特别适合实时信息更新、广泛话题或通用知识查询。"
+
+    inputs = {
+        "query": {
+            "type": "string",
+            "description": "The search query to perform.",
+            "description_zh": "要执行的搜索查询词"
+        }
+    }
+
+    init_param_descriptions = {
+        "linkup_api_key": {
+            "description": "Linkup API key",
+            "description_zh": "Linkup API 密钥"
+        },
+        "max_results": {
+            "description": "Maximum number of search results",
+            "description_zh": "搜索结果的最大数量"
+        },
+        "image_filter": {
+            "description": "Whether to enable image filtering",
+            "description_zh": "是否启用图片过滤"
+        }
+    }
     output_type = "string"
     category = ToolCategory.SEARCH.value
     tool_sign = ToolSign.LINKUP_SEARCH.value  # Used to distinguish different index sources in summary
