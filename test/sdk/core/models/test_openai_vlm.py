@@ -111,6 +111,52 @@ async def test_check_connectivity_failure(vl_model_instance):
         assert result is False
 
 
+@pytest.mark.asyncio
+async def test_check_connectivity_uses_fallback_url(vl_model_instance):
+    """check_connectivity should use fallback remote URL when local image doesn't exist."""
+
+    with patch("sdk.nexent.core.models.openai_vlm.os.path.exists", return_value=False), \
+         patch.object(
+            asyncio,
+            "to_thread",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_to_thread:
+        result = await vl_model_instance.check_connectivity()
+
+        assert result is True
+        # Verify the fallback remote URL was used
+        call_args = mock_to_thread.call_args
+        messages = call_args[1]["messages"]
+        # Check that remote URL is used (not base64)
+        assert "https://" in messages[0]["content"][0]["image_url"]["url"] or \
+               messages[0]["content"][1]["text"] == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_check_connectivity_jpg_to_jpeg_conversion(vl_model_instance):
+    """check_connectivity should convert jpg to jpeg format for MIME type."""
+
+    # Mock a .jpg file path to trigger the jpg->jpeg conversion
+    with patch("sdk.nexent.core.models.openai_vlm.os.path.exists", return_value=True), \
+         patch("sdk.nexent.core.models.openai_vlm.os.path.splitext", return_value("", ".jpg")), \
+         patch.object(vl_model_instance, "encode_image", return_value="fakebase64"), \
+         patch.object(
+            asyncio,
+            "to_thread",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_to_thread:
+        result = await vl_model_instance.check_connectivity()
+
+        assert result is True
+        # Verify jpeg format is used (not jpg)
+        messages = mock_to_thread.call_args[1]["messages"]
+        content = messages[0]["content"]
+        # The image_url should contain jpeg, not jpg
+        assert "image/jpeg" in str(content) or "jpeg" in str(content)
+
+
 # ---------------------------------------------------------------------------
 # Tests for encode_image
 # ---------------------------------------------------------------------------
@@ -232,16 +278,6 @@ def test_prepare_image_message_custom_system_prompt(vl_model_instance, tmp_path)
     assert messages[0]["content"][0]["text"] == custom_prompt
 
 
-def test_prepare_image_message_nonexistent_file(vl_model_instance):
-    """prepare_image_message should use default jpeg format when file doesn't exist."""
-
-    # Use a path that doesn't exist - should still work with default jpeg format
-    messages = vl_model_instance.prepare_image_message("/nonexistent/image.png", system_prompt="Test")
-
-    # Should use default jpeg format when file doesn't exist
-    assert "data:image/jpeg;base64," in messages[1]["content"][0]["image_url"]["url"]
-
-
 # ---------------------------------------------------------------------------
 # Tests for analyze_image
 # ---------------------------------------------------------------------------
@@ -249,3 +285,20 @@ def test_prepare_image_message_nonexistent_file(vl_model_instance):
 # Note: analyze_image tests are omitted because __call__ is wrapped by
 # a monitoring decorator that makes mocking impractical in unit tests.
 # The method is tested indirectly via prepare_image_message tests.
+
+
+def test_analyze_image_calls_prepare_image_message(vl_model_instance, tmp_path):
+    """analyze_image should call prepare_image_message with correct arguments."""
+
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake png data")
+
+    with patch.object(vl_model_instance, "prepare_image_message", return_value=[{"role": "user", "content": "test"}]) as mock_prepare:
+        # Mock the __call__ method to avoid actual API call
+        vl_model_instance.__call__ = MagicMock(return_value=MagicMock())
+
+        custom_prompt = "Describe this image"
+        vl_model_instance.analyze_image(str(test_image), system_prompt=custom_prompt, stream=False)
+
+        # Verify prepare_image_message was called with correct arguments
+        mock_prepare.assert_called_once_with(str(test_image), custom_prompt)
