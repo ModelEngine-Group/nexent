@@ -103,6 +103,7 @@ export function ChatSidebar({
   const { today, week, older } = categorizeConversations(conversationManagement.conversationList);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
 
   const onToggleSidebar = () => setCollapsed((prev) => !prev);
 
@@ -208,8 +209,9 @@ export function ChatSidebar({
             </Tooltip>
             </div>
 
-            <div className="shrink-0 w-9 flex items-center justify-center">
+            <div className={`shrink-0 w-9 flex items-center justify-center invisible group-hover:visible ${openDropdownId === conversation.conversation_id ? "!visible" : ""}`}>
               <Dropdown
+              onOpenChange={(open) => setOpenDropdownId(open ? conversation.conversation_id : null)}
               menu={{
                 items: [
                   {
