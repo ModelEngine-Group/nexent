@@ -121,6 +121,13 @@ class ErrorCode(Enum):
     MODEL_CONFIG_INVALID = "090102"  # Invalid model configuration
     MODEL_HEALTH_CHECK_FAILED = "090103"  # Health check failed
     MODEL_PROVIDER_ERROR = "090104"  # Model provider error
+    MODEL_PROMPT_GENERATION_FAILED = "090105"  # Model prompt generation failed
+    # 02 - Model API errors
+    MODEL_API_KEY_INVALID = "090201"  # API key is invalid or expired
+    MODEL_API_KEY_NO_PERMISSION = "090202"  # API key does not have permission
+    MODEL_RATE_LIMIT_EXCEEDED = "090203"  # Rate limit exceeded
+    MODEL_SERVICE_UNAVAILABLE = "090204"  # Model service is temporarily unavailable
+    MODEL_CONNECTION_ERROR = "090205"  # Failed to connect to model service
 
     # ==================== 10 Memory / 记忆管理 ====================
     # 01 - Memory
@@ -156,6 +163,14 @@ class ErrorCode(Enum):
 
     # 03 - ME Service
     ME_CONNECTION_FAILED = "130301"  # ME service connection failed
+
+    # 04 - iData Service
+    IDATA_SERVICE_ERROR = "130401"  # iData service error
+    IDATA_CONFIG_INVALID = "130402"  # Invalid iData configuration
+    IDATA_CONNECTION_ERROR = "130403"  # iData connection error
+    IDATA_AUTH_ERROR = "130404"  # iData auth error
+    IDATA_RATE_LIMIT = "130405"  # iData rate limit
+    IDATA_RESPONSE_ERROR = "130406"  # iData response error
 
     # ==================== 14 Northbound / 北向接口 ====================
     # 01 - Request
@@ -216,4 +231,10 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.DIFY_CONNECTION_ERROR: 502,
     ErrorCode.DIFY_RESPONSE_ERROR: 502,
     ErrorCode.DIFY_RATE_LIMIT: 429,
+    # iData (module 13)
+    ErrorCode.IDATA_CONFIG_INVALID: 400,
+    ErrorCode.IDATA_AUTH_ERROR: 401,
+    ErrorCode.IDATA_CONNECTION_ERROR: 502,
+    ErrorCode.IDATA_RESPONSE_ERROR: 502,
+    ErrorCode.IDATA_RATE_LIMIT: 429,
 }

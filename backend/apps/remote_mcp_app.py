@@ -387,7 +387,13 @@ async def add_mcp_from_config(
             except MCPContainerError as e:
                 logger.error(
                     f"Failed to start MCP container {service_name}: {e}")
-                errors.append(f"{service_name}: {str(e)}")
+                error_str = str(e)
+                # Check if error is related to image not found
+                if "not found" in error_str.lower() or "404" in error_str:
+                    errors.append(
+                        f"{service_name}: Image not found - MCP service startup image is missing")
+                else:
+                    errors.append(f"{service_name}: {error_str}")
             except Exception as e:
                 logger.error(
                     f"Unexpected error adding MCP {service_name}: {e}")

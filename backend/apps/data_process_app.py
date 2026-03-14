@@ -11,6 +11,7 @@ from consts.model import (
     ConvertStateRequest,
     TaskRequest,
 )
+from consts.exceptions import OfficeConversionException
 from data_process.tasks import process_and_forward, process_sync
 from services.data_process_service import get_data_process_service
 
@@ -310,4 +311,36 @@ async def convert_state(request: ConvertStateRequest):
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Error converting state: {str(e)}"
+        )
+
+
+@router.post("/convert_to_pdf")
+async def convert_office_to_pdf(
+        object_name: str = Form(...),
+        pdf_object_name: str = Form(...)
+):
+    """
+    Convert an Office document stored in MinIO to PDF.
+
+    Parameters:
+        object_name: Source Office file path in MinIO
+        pdf_object_name: Destination PDF path in MinIO
+    """
+    try:
+        await service.convert_office_to_pdf_impl(
+            object_name=object_name,
+            pdf_object_name=pdf_object_name,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
+    except OfficeConversionException as exc:
+        logger.error(f"Office conversion failed for '{object_name}': {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=str(exc)
+        )
+    except Exception as exc:
+        logger.error(f"Unexpected error during conversion for '{object_name}': {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Office conversion failed: {exc}"
         )

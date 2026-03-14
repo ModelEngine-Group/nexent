@@ -31,6 +31,7 @@ class UserSignUpRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6)
     invite_code: Optional[str] = None
+    auto_login: Optional[bool] = True  # Whether to return session after signup
 
 
 class UserSignInRequest(BaseModel):
@@ -114,6 +115,7 @@ class AppConfig(BaseModel):
     appName: str
     appDescription: str
     iconType: str
+    iconKey: Optional[str] = "search"
     customIconUrl: Optional[str] = None
     avatarUri: Optional[str] = None
     modelEngineEnabled: bool = False

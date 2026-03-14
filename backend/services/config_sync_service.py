@@ -13,6 +13,7 @@ from consts.const import (
     DEFAULT_APP_NAME_ZH,
     DEFAULT_GROUP_ID,
     ICON_TYPE,
+    ICON_KEY,
     LANGUAGE,
     MODEL_CONFIG_MAPPING,
     LANGUAGE,
@@ -139,6 +140,7 @@ def build_app_config(language: str, tenant_id: str) -> dict:
         "defaultGroupId": tenant_config_manager.get_app_config(DEFAULT_GROUP_ID, tenant_id=tenant_id) or "",
         "icon": {
             "type": tenant_config_manager.get_app_config(ICON_TYPE, tenant_id=tenant_id) or "preset",
+            "iconKey": tenant_config_manager.get_app_config(ICON_KEY, tenant_id=tenant_id) or "search",
             "avatarUri": tenant_config_manager.get_app_config(AVATAR_URI, tenant_id=tenant_id) or "",
             "customUrl": tenant_config_manager.get_app_config(CUSTOM_ICON_URL, tenant_id=tenant_id) or ""
         },

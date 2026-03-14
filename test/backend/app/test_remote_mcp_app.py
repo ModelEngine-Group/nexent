@@ -1155,6 +1155,163 @@ class TestAddMCPFromConfig:
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_image_not_found_lowercase(self, mock_check_name, mock_container_manager_class, mock_get_user_info):
+        """Test adding MCP server when image not found (lowercase 'not found')"""
+        from consts.exceptions import MCPContainerError
+
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        # Error message contains "not found" (lowercase)
+        mock_container_manager.start_mcp_container = AsyncMock(
+            side_effect=MCPContainerError("Container startup failed: Container startup failed: 404 Client Error for http+docker://localnpipe/v1.52/images/create?tag=latest&fromImage=nexent%2Fnexent-mcp: Not Found (\"failed to resolve reference \"docker.io/nexent/nexent-mcp:latest\": docker.io/nexent/nexent-mcp:latest: not found\")"))
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "Image not found - MCP service startup image is missing" in data["detail"]
+        assert "test-service" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_image_not_found_uppercase(self, mock_check_name, mock_container_manager_class, mock_get_user_info):
+        """Test adding MCP server when image not found (uppercase 'Not Found')"""
+        from consts.exceptions import MCPContainerError
+
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        # Error message contains "Not Found" (uppercase)
+        mock_container_manager.start_mcp_container = AsyncMock(
+            side_effect=MCPContainerError("Container startup failed: Image Not Found"))
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "Image not found - MCP service startup image is missing" in data["detail"]
+        assert "test-service" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_image_not_found_with_404(self, mock_check_name, mock_container_manager_class, mock_get_user_info):
+        """Test adding MCP server when image not found (contains '404')"""
+        from consts.exceptions import MCPContainerError
+
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        # Error message contains "404"
+        mock_container_manager.start_mcp_container = AsyncMock(
+            side_effect=MCPContainerError("Container startup failed: 404 Client Error for http+docker://localnpipe/v1.52/images/create"))
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "Image not found - MCP service startup image is missing" in data["detail"]
+        assert "test-service" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_image_not_found_multiple_services(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_info):
+        """Test adding multiple MCP servers when one has image not found error"""
+        from consts.exceptions import MCPContainerError
+
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        # First service fails with image not found, second succeeds
+        mock_container_manager.start_mcp_container = AsyncMock(side_effect=[
+            MCPContainerError("Container startup failed: Image not found"),
+            {
+                "container_id": "container-2",
+                "mcp_url": "http://localhost:5021/mcp",
+                "host_port": "5021",
+                "status": "started",
+                "container_name": "service2-user1234"
+            }
+        ])
+        mock_add_server.return_value = None
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "service1": {
+                        "command": "npx",
+                        "args": ["-y", "service1"],
+                        "port": 5020
+                    },
+                    "service2": {
+                        "command": "npx",
+                        "args": ["-y", "service2"],
+                        "port": 5021
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert len(data["results"]) == 1
+        assert data["results"][0]["service_name"] == "service2"
+        assert len(data["errors"]) == 1
+        assert "Image not found - MCP service startup image is missing" in data["errors"][0]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
     def test_add_mcp_from_config_unexpected_error_in_loop(self, mock_check_name, mock_container_manager_class, mock_get_user_info):
         """Test adding MCP server when unexpected exception occurs in loop (covers line 253-255)"""
         mock_get_user_info.return_value = ("user123", "tenant456", "en")

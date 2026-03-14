@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Row,
   Col,
@@ -27,6 +28,7 @@ import {
   updateTenant,
   deleteTenant,
   getTenantUsers,
+  getTenant,
 } from "@/services/tenantService";
 import { createInvitation, deleteInvitation } from "@/services/invitationService";
 import { authService } from "@/services/authService";
@@ -191,10 +193,12 @@ function TenantList({
             });
 
             // Register admin account using the invitation code
+            // Do not auto-login for tenant admin creation
             const signupResult = await authService.signUp(
               values.adminEmail,
               values.adminPassword,
-              invitation.invitation_code
+              invitation.invitation_code,
+              false
             );
 
             if (signupResult.error) {
@@ -562,6 +566,31 @@ export default function UserManageComp() {
     refetch: refetchTenants,
   } = useTenantList({ page: currentPage, page_size: DEFAULT_PAGE_SIZE });
 
+  // For non-super admins, automatically select their own tenant based on user.tenantId
+  // This must be declared before useQuery that uses tenantId
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isSuperAdmin && user?.tenantId && !tenantId) {
+      setTenantId(user.tenantId);
+    }
+  }, [isSuperAdmin, tenantId, user?.tenantId]);
+
+  // For non-super-admin users, directly fetch their tenant details
+  // This ensures they always get the correct tenant info regardless of pagination
+  const {
+    data: directTenantData,
+    isLoading: directTenantLoading,
+    refetch: refetchDirectTenant,
+  } = useQuery({
+    queryKey: ["tenant", tenantId],
+    queryFn: async () => {
+      if (!tenantId || isSuperAdmin) return null;
+      return await getTenant(tenantId);
+    },
+    enabled: !!tenantId && !isSuperAdmin,
+    staleTime: 1000 * 60, // Cache for 1 minute
+  });
+
   // Handle page change
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
@@ -583,17 +612,21 @@ export default function UserManageComp() {
   // Invitation list refresh key - increment to trigger invitation list refetch
   const [invitationListRefreshKey, setInvitationListRefreshKey] = useState(0);
 
-  // For non-super admins, automatically select their own tenant based on user.tenantId
-  const [tenantId, setTenantId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!isSuperAdmin && user?.tenantId && !tenantId) {
-      setTenantId(user.tenantId);
-    }
-  }, [isSuperAdmin, tenantId, user?.tenantId]);
-
   // Get current tenant name
-  const currentTenant = tenantData?.data?.find((t: Tenant) => t.tenant_id === tenantId);
-  const currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
+  // For non-super-admin: use directly fetched tenant data (directTenantData)
+  // For super-admin: use paginated tenant list (tenantData)
+  let currentTenant: Tenant | undefined;
+  let currentTenantName: string;
+
+  if (!isSuperAdmin && directTenantData) {
+    // Non-super-admin: use directly fetched tenant info
+    currentTenant = directTenantData;
+    currentTenantName = directTenantData.tenant_name || t("tenantResources.tenants.unnamed");
+  } else {
+    // Super-admin: search in paginated list
+    currentTenant = tenantData?.data?.find((t: Tenant) => t.tenant_id === tenantId);
+    currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
+  }
 
   // Tenant name editing states
   const [isEditingTenantName, setIsEditingTenantName] = useState(false);
@@ -625,7 +658,12 @@ export default function UserManageComp() {
     }
     try {
       await updateTenant(tenantId, { tenant_name: trimmedName });
-      await refetchTenants();
+      // For non-super-admin, refetch the direct tenant data; for super-admin, refetch the list
+      if (!isSuperAdmin) {
+        await refetchDirectTenant();
+      } else {
+        await refetchTenants();
+      }
       message.success(t("tenantResources.tenants.updated"));
       setIsEditingTenantName(false);
     } catch (error) {
@@ -651,29 +689,27 @@ export default function UserManageComp() {
   return (
     <div className="w-full h-full">
       {/* Page header: grouped header without dividing line */}
-      <div className="w-full px-4 md:px-8 lg:px-16 py-6">
-        <div className="max-w-7xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35 }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
-                <Building2 className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">
-                  {t("tenantResources.title") || "Tenant Resource Management"}
-                </h1>
-                <p className="text-slate-600 dark:text-slate-300 mt-1">
-                  {t("tenantResources.subtitle") ||
-                    "Manage tenants, users, groups and resources"}
-                </p>
-              </div>
+      <div className="w-full px-10 pt-10">
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
+              <Building2 className="h-6 w-6 text-white" />
             </div>
-          </motion.div>
-        </div>
+            <div>
+              <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">
+                {t("tenantResources.title") || "Tenant Resource Management"}
+              </h1>
+              <p className="text-slate-600 dark:text-slate-300 mt-1">
+                {t("tenantResources.subtitle") ||
+                  "Manage tenants, users, groups and resources"}
+              </p>
+            </div>
+          </div>
+        </motion.div>
       </div>
       <Row className="flex-1 min-h-0 h-full" align="stretch">
         <Can permission="tenant.list:read">

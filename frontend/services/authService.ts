@@ -173,6 +173,7 @@ export const authService = {
           email,
           password,
           invite_code: inviteCode || null,
+          auto_login: autoLogin,
         }),
       });
 

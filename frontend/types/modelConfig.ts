@@ -17,6 +17,8 @@ export type ModelSource =
   | "openai"
   | "custom"
   | "silicon"
+  | "dashscope"
+  | "tokenpony"
   | "OpenAI-API-Compatible"
   | "modelengine";
 
@@ -51,6 +53,7 @@ export interface AppConfig {
   appName: string;
   appDescription: string;
   iconType: "preset" | "custom";
+  iconKey: string; // Selected preset icon key
   customIconUrl: string | null;
   avatarUri: string | null;
   modelEngineEnabled: boolean;

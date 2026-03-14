@@ -5,28 +5,16 @@ import os
 from datetime import datetime
 
 # Create all necessary mocks
-mock_tavily_client = MagicMock()
-mock_tavily = MagicMock()
-mock_tavily.TavilyClient = mock_tavily_client
-
 mock_exa = MagicMock()
 mock_exa_client = MagicMock()
 mock_exa.Exa = mock_exa_client
-
-mock_linkup = MagicMock()
-mock_linkup_client = MagicMock()
-mock_linkup.LinkupClient = mock_linkup_client
-mock_linkup.LinkupSearchImageResult = MagicMock()
-mock_linkup.LinkupSearchTextResult = MagicMock()
 
 mock_aiohttp = MagicMock()
 mock_aiohttp.ClientSession = MagicMock()
 
 # Use module-level mocks
 module_mocks = {
-    'tavily': mock_tavily,
     'exa_py': mock_exa,
-    'linkup': mock_linkup,
     'aiohttp': mock_aiohttp
 }
 
