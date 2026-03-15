@@ -106,6 +106,8 @@ class OpenAIModel(OpenAIServerModel):
 
         try:
             for chunk in current_request:
+                if not chunk.choices:
+                    continue 
                 new_token = chunk.choices[0].delta.content
                 reasoning_content = getattr(
                     chunk.choices[0].delta, 'reasoning_content', None)
