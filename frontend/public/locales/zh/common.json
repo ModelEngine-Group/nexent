@@ -1748,6 +1748,36 @@
   "profile.deleteAkSkSuccess": "API 密钥删除成功",
   "profile.deleteAkSkFailed": "删除 API 密钥失败",
 
+  "promptTemplate.managerTitle": "提示词模板管理",
+  "promptTemplate.create": "新建模板",
+  "promptTemplate.createTitle": "新建提示词模板",
+  "promptTemplate.editTitle": "编辑提示词模板",
+  "promptTemplate.searchPlaceholder": "按名称/描述/内容搜索",
+  "promptTemplate.table.name": "名称",
+  "promptTemplate.table.description": "描述",
+  "promptTemplate.table.actions": "操作",
+  "promptTemplate.form.name": "模板名称",
+  "promptTemplate.form.description": "模板描述",
+"promptTemplate.form.promptText": "模板内容",
+  "promptTemplate.form.nameRequired": "请输入模板名称",
+  "promptTemplate.form.promptTextRequired": "请输入模板内容",
+  "promptTemplate.form.namePlaceholder": "例如：通用结构",
+  "promptTemplate.form.descriptionPlaceholder": "简要说明该模板用途",
+  "promptTemplate.form.promptTextPlaceholder": "输入模板内容",
+  "promptTemplate.message.loadError": "加载模板失败",
+  "promptTemplate.message.createSuccess": "模板创建成功",
+  "promptTemplate.message.updateSuccess": "模板更新成功",
+  "promptTemplate.message.deleteSuccess": "模板删除成功",
+  "promptTemplate.message.deleteError": "模板删除失败",
+  "promptTemplate.message.saveError": "模板保存失败",
+  "promptTemplate.message.applySuccess": "模板已应用",
+  "promptTemplate.confirmDeleteTitle": "确认删除模板？",
+  "promptTemplate.confirmDeleteContent": "确定要删除模板“{{name}}”吗？",
+  "promptTemplate.builtin": "内置",
+  "promptTemplate.openManager": "提示词模板",
+  "promptTemplate.selectPlaceholder": "选择提示词模板",
+  "promptTemplate.apply": "应用模板",
+  "promptTemplate.use": "使用"
   "agent.version.manage": "版本管理",
   "agent.version.currentVersion": "当前版本",
   "agent.version.totalVersions": "共 {{count}} 个版本",
@@ -1808,6 +1838,8 @@
   "agent.version.deleteWarning": "此操作无法撤销。",
   "agent.version.statusUpdateSuccess": "版本状态更新成功",
   "agent.version.statusUpdateError": "更新版本状态失败",
+  "agent.error.agentNotFound": "未找到智能体"
+=======
   "agent.version.needTwoVersions": "至少需要两个版本才能进行对比",
   "agent.version.selectDifferentVersions": "请选择两个不同的版本进行对比",
   "agent.error.agentNotFound": "未找到智能体",
@@ -1992,4 +2024,5 @@
   "errorCode.990105": "服务器内部错误，请稍后重试",
   "errorCode.990201": "配置不存在",
   "errorCode.990202": "配置更新失败"
+
 }
