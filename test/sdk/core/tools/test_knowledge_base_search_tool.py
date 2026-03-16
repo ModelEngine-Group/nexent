@@ -303,6 +303,175 @@ class TestKnowledgeBaseSearchTool:
         assert len(search_results) == 1
         assert search_results[0]["title"] == "test.txt"
 
+
+class TestKnowledgeBaseSearchToolRerank:
+    """Tests for KnowledgeBaseSearchTool rerank functionality."""
+
+    def test_init_with_rerank_params(self):
+        """Test initialization with rerank parameters."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1", "kb2"],
+            search_mode="hybrid",
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=None,
+            vdb_core=None,
+            embedding_model=None,
+        )
+
+        assert tool.rerank is True
+        assert tool.rerank_model_name == "gte-rerank-v2"
+        assert tool.rerank_model is None
+
+    def test_init_without_rerank_params(self):
+        """Test initialization without rerank parameters (defaults)."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="semantic",
+            vdb_core=None,
+            embedding_model=None,
+        )
+
+        assert tool.rerank is False
+        assert tool.rerank_model_name == ""
+        assert tool.rerank_model is None
+
+    def test_forward_with_rerank_enabled(self, mocker):
+        """Test forward method when rerank is enabled and model is provided."""
+        # Create mock vdb_core
+        mock_vdb_core = MagicMock()
+        mock_embedding_model = MagicMock()
+
+        # Mock search results
+        mock_results = [
+            {
+                "document": {
+                    "title": "doc1",
+                    "content": "content 1 about machine learning",
+                    "filename": "doc1.txt",
+                    "path_or_url": "/path/doc1.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "score": 0.9,
+                "index": "kb1"
+            },
+            {
+                "document": {
+                    "title": "doc2",
+                    "content": "content 2 about deep learning",
+                    "filename": "doc2.txt",
+                    "path_or_url": "/path/doc2.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "score": 0.8,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        # Create mock rerank model
+        mock_rerank_model = MagicMock()
+        mock_rerank_model.rerank.return_value = [
+            {"index": 1, "relevance_score": 0.95, "document": "content 2 about deep learning"},
+            {"index": 0, "relevance_score": 0.85, "document": "content 1 about machine learning"},
+        ]
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=mock_rerank_model,
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+        )
+
+        result = tool.forward("test query")
+        results = json.loads(result)
+
+        # Verify rerank was called
+        mock_rerank_model.rerank.assert_called_once()
+        call_args = mock_rerank_model.rerank.call_args
+        assert call_args[1]["query"] == "test query"
+        assert len(call_args[1]["documents"]) == 2
+
+    def test_forward_rerank_disabled(self, mocker):
+        """Test forward method when rerank is disabled."""
+        mock_vdb_core = MagicMock()
+        mock_embedding_model = MagicMock()
+
+        # Mock search results
+        mock_results = [
+            {
+                "document": {
+                    "title": "doc1",
+                    "content": "content 1",
+                    "filename": "doc1.txt",
+                    "path_or_url": "/path/doc1.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "score": 0.9,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            rerank=False,
+            rerank_model=None,
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+        )
+
+        result = tool.forward("test query")
+
+        # Should work normally without reranking
+        assert result is not None
+
+    def test_forward_rerank_error_continues(self, mocker):
+        """Test that forward continues when rerank raises an exception."""
+        mock_vdb_core = MagicMock()
+        mock_embedding_model = MagicMock()
+
+        # Mock search results
+        mock_results = [
+            {
+                "document": {
+                    "title": "doc1",
+                    "content": "content 1",
+                    "filename": "doc1.txt",
+                    "path_or_url": "/path/doc1.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "score": 0.9,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        # Create mock rerank model that raises exception
+        mock_rerank_model = MagicMock()
+        mock_rerank_model.rerank.side_effect = Exception("Rerank API error")
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            rerank=True,
+            rerank_model=mock_rerank_model,
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+        )
+
+        # Should not raise, should continue with original results
+        result = tool.forward("test query")
+        assert result is not None
+
     def test_forward_requires_index_names(self, knowledge_base_search_tool):
         """Test forward method requires index_names parameter"""
         # Test that TypeError is raised when index_names is not provided

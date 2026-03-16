@@ -172,6 +172,13 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_embedding.model = "test-model"
         self.mock_get_embedding.return_value = self.mock_embedding
 
+        # Patch get_rerank_model for all tests
+        self.get_rerank_model_patcher = patch(
+            'backend.services.vectordatabase_service.get_rerank_model')
+        self.mock_get_rerank = self.get_rerank_model_patcher.start()
+        self.mock_rerank = MagicMock()
+        self.mock_get_rerank.return_value = self.mock_rerank
+
         ElasticSearchService.accurate_search = staticmethod(
             _accurate_search_impl)
         ElasticSearchService.semantic_search = staticmethod(
@@ -180,6 +187,7 @@ class TestElasticSearchService(unittest.TestCase):
     def tearDown(self):
         """Clean up resources after each test."""
         self.get_embedding_model_patcher.stop()
+        self.get_rerank_model_patcher.stop()
         if hasattr(ElasticSearchService, 'accurate_search'):
             del ElasticSearchService.accurate_search
         if hasattr(ElasticSearchService, 'semantic_search'):
@@ -4745,6 +4753,269 @@ class TestRethrowOrPlain(unittest.TestCase):
 
             messages = asyncio.run(run_test())
             self.assertTrue(any("error" in msg for msg in messages))
+
+    # Tests for get_rerank_model function
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_with_specific_model_name_found(
+        self, mock_get_model_name, mock_tenant_config, mock_get_records
+    ):
+        """Test get_rerank_model when specific model name is provided and found."""
+        # Setup
+        mock_get_records.return_value = [
+            {
+                "model_name": "gte-rerank-v2",
+                "model_repo": "Alibaba-NLP",
+                "base_url": "https://api.example.com",
+                "api_key": "test-key",
+                "ssl_verify": True
+            }
+        ]
+        mock_get_model_name.return_value = "gte-rerank-v2"
+
+        mock_config = {"model_type": "embedding"}
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123", "Alibaba-NLP/gte-rerank-v2")
+
+                # Assert
+                self.assertIsNotNone(result)
+                mock_get_records.assert_called_once_with({"model_type": "rerank"}, "tenant-123")
+                mock_rerank_class.assert_called_once_with(
+                    model_name="gte-rerank-v2",
+                    base_url="https://api.example.com",
+                    api_key="test-key",
+                    ssl_verify=True
+                )
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_with_specific_model_name_not_found(
+        self, mock_get_model_name, mock_tenant_config, mock_get_records
+    ):
+        """Test get_rerank_model when specific model name is not found, falls back to default."""
+        # Setup
+        mock_get_records.return_value = [
+            {
+                "model_name": "other-model",
+                "model_repo": "some-repo",
+                "base_url": "https://other.api.com",
+                "api_key": "other-key",
+                "ssl_verify": False
+            }
+        ]
+        mock_get_model_name.return_value = "other-model"
+
+        mock_config = {
+            "model_type": "rerank",
+            "model_name": "default-rerank",
+            "base_url": "https://default.api.com",
+            "api_key": "default-key",
+            "ssl_verify": True
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123", "nonexistent-model")
+
+                # Assert
+                self.assertIsNotNone(result)
+                mock_get_records.assert_called_once()
+                mock_tenant_config.get_model_config.assert_called_with(
+                    key="RERANK_ID", tenant_id="tenant-123"
+                )
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_with_specific_model_name_exception(
+        self, mock_get_model_name, mock_tenant_config, mock_get_records
+    ):
+        """Test get_rerank_model when get_model_records throws an exception."""
+        # Setup
+        mock_get_records.side_effect = Exception("Database error")
+
+        mock_config = {
+            "model_type": "rerank",
+            "model_name": "default-rerank",
+            "base_url": "https://default.api.com",
+            "api_key": "default-key",
+            "ssl_verify": True
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123", "some-model")
+
+                # Assert
+                # Should fall back to default model when exception occurs
+                self.assertIsNotNone(result)
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_default_rerank_type(self, mock_get_model_name, mock_tenant_config):
+        """Test get_rerank_model with default rerank model when model_type is rerank."""
+        # Setup
+        mock_get_model_name.return_value = "default-rerank"
+
+        mock_config = {
+            "model_type": "rerank",
+            "model_name": "default-rerank",
+            "base_url": "https://api.dashscope.aliyuncs.com",
+            "api_key": "secret-key",
+            "ssl_verify": True
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123")
+
+                # Assert
+                self.assertIsNotNone(result)
+                mock_tenant_config.get_model_config.assert_called_once_with(
+                    key="RERANK_ID", tenant_id="tenant-123"
+                )
+                mock_rerank_class.assert_called_once_with(
+                    model_name="default-rerank",
+                    base_url="https://api.dashscope.aliyuncs.com",
+                    api_key="secret-key",
+                    ssl_verify=True
+                )
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_non_rerank_type_returns_none(self, mock_get_model_name, mock_tenant_config):
+        """Test get_rerank_model returns None when model_type is not rerank."""
+        # Setup
+        mock_config = {
+            "model_type": "embedding",
+            "model_name": "embedding-model",
+            "base_url": "https://api.example.com",
+            "api_key": "key"
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123")
+
+                # Assert
+                self.assertIsNone(result)
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_empty_config(self, mock_get_model_name, mock_tenant_config):
+        """Test get_rerank_model returns None when model config is empty."""
+        # Setup
+        mock_tenant_config.get_model_config.return_value = {}
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123")
+
+                # Assert
+                self.assertIsNone(result)
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_with_model_name_no_repo(
+        self, mock_get_model_name, mock_tenant_config, mock_get_records
+    ):
+        """Test get_rerank_model when model has no model_repo."""
+        # Setup
+        mock_get_records.return_value = [
+            {
+                "model_name": "gte-rerank-v2",
+                "model_repo": None,
+                "base_url": "https://api.example.com",
+                "api_key": "test-key",
+                "ssl_verify": True
+            }
+        ]
+        mock_get_model_name.return_value = "gte-rerank-v2"
+
+        mock_config = {"model_type": "embedding"}
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123", "gte-rerank-v2")
+
+                # Assert
+                self.assertIsNotNone(result)
+                mock_rerank_class.assert_called_once()
+        finally:
+            self.get_rerank_model_patcher.start()
 
 
 if __name__ == '__main__':

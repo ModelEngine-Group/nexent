@@ -526,3 +526,160 @@ class TestDataMateSearchToolURL:
 
         with pytest.raises(ValueError, match="Invalid server_url format"):
             DataMateSearchTool(server_url="http://", observer=mock_observer)
+
+
+class TestDataMateSearchToolRerank:
+    """Tests for DataMateSearchTool rerank functionality."""
+
+    def test_init_with_rerank_params(self, mock_observer: MessageObserver):
+        """Test initialization with rerank parameters."""
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            top_k=3,
+            threshold=0.5,
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=None,
+            observer=mock_observer,
+        )
+
+        assert tool.rerank is True
+        assert tool.rerank_model_name == "gte-rerank-v2"
+        assert tool.rerank_model is None
+
+    def test_init_without_rerank_params(self, mock_observer: MessageObserver):
+        """Test initialization without rerank parameters (defaults)."""
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            observer=mock_observer,
+        )
+
+        assert tool.rerank is False
+        assert tool.rerank_model_name == ""
+        assert tool.rerank_model is None
+
+    def test_forward_with_rerank_enabled(self, mock_observer: MessageObserver, mocker: MockFixture):
+        """Test forward method when rerank is enabled and model is provided."""
+        # Mock DataMateCore
+        mock_datamate_core = mocker.patch(
+            "sdk.nexent.core.tools.datamate_search_tool.DataMateCore")
+
+        # Create mock core instance
+        mock_core_instance = MagicMock()
+        mock_datamate_core.return_value = mock_core_instance
+
+        # Mock knowledge base list
+        mock_core_instance.list_knowledge_bases.return_value = {
+            "knowledge_bases": [{"id": "kb1", "chunkCount": 5}]
+        }
+
+        # Mock search results
+        mock_core_instance.search.return_value = {
+            "results": [
+                {"entity": {"text": "content 1", "score": 0.9}},
+                {"entity": {"text": "content 2", "score": 0.8}},
+            ]
+        }
+
+        # Create mock rerank model
+        mock_rerank_model = MagicMock()
+        mock_rerank_model.rerank.return_value = [
+            {"index": 1, "relevance_score": 0.95, "document": "content 2"},
+            {"index": 0, "relevance_score": 0.85, "document": "content 1"},
+        ]
+
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            top_k=3,
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=mock_rerank_model,
+            observer=mock_observer,
+        )
+
+        result_json = tool.forward("test query")
+        results = json.loads(result_json)
+
+        # Verify rerank was called
+        mock_rerank_model.rerank.assert_called_once()
+        call_args = mock_rerank_model.rerank.call_args
+        assert call_args[1]["query"] == "test query"
+        assert len(call_args[1]["documents"]) == 2
+
+    def test_forward_rerank_disabled(self, mock_observer: MessageObserver, mocker: MockFixture):
+        """Test forward method when rerank is disabled."""
+        # Mock DataMateCore
+        mock_datamate_core = mocker.patch(
+            "sdk.nexent.core.tools.datamate_search_tool.DataMateCore")
+
+        # Create mock core instance
+        mock_core_instance = MagicMock()
+        mock_datamate_core.return_value = mock_core_instance
+
+        # Mock knowledge base list
+        mock_core_instance.list_knowledge_bases.return_value = {
+            "knowledge_bases": [{"id": "kb1", "chunkCount": 5}]
+        }
+
+        # Mock search results
+        mock_core_instance.search.return_value = {
+            "results": [
+                {"entity": {"text": "content 1", "score": 0.9}},
+            ]
+        }
+
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            top_k=3,
+            rerank=False,
+            rerank_model=None,
+            observer=mock_observer,
+        )
+
+        result_json = tool.forward("test query")
+
+        # Should work normally without reranking
+        assert result_json is not None
+
+    def test_forward_rerank_error_continues(self, mock_observer: MessageObserver, mocker: MockFixture):
+        """Test that forward continues when rerank raises an exception."""
+        # Mock DataMateCore
+        mock_datamate_core = mocker.patch(
+            "sdk.nexent.core.tools.datamate_search_tool.DataMateCore")
+
+        # Create mock core instance
+        mock_core_instance = MagicMock()
+        mock_datamate_core.return_value = mock_core_instance
+
+        # Mock knowledge base list
+        mock_core_instance.list_knowledge_bases.return_value = {
+            "knowledge_bases": [{"id": "kb1", "chunkCount": 5}]
+        }
+
+        # Mock search results
+        mock_core_instance.search.return_value = {
+            "results": [
+                {"entity": {"text": "content 1", "score": 0.9}},
+            ]
+        }
+
+        # Create mock rerank model that raises exception
+        mock_rerank_model = MagicMock()
+        mock_rerank_model.rerank.side_effect = Exception("Rerank API error")
+
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            top_k=3,
+            rerank=True,
+            rerank_model=mock_rerank_model,
+            observer=mock_observer,
+        )
+
+        # Should not raise, should continue with original results
+        result_json = tool.forward("test query")
+        assert result_json is not None

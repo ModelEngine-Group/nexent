@@ -564,3 +564,185 @@ class TestForward:
         assert len(results) == 2  # Still processes results even with download URL failure
         assert results[0]["title"] == "document1.txt"
         # URL should be empty string due to download failure
+
+
+class TestDifySearchToolRerank:
+    """Tests for DifySearchTool rerank functionality."""
+
+    def test_init_with_rerank_params(self, mock_observer: MessageObserver):
+        """Test initialization with rerank parameters."""
+        tool = DifySearchTool(
+            server_url="https://api.dify.ai/v1",
+            api_key="test_key",
+            dataset_ids='["ds1", "ds2"]',
+            top_k=5,
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=None,
+            observer=mock_observer,
+        )
+
+        assert tool.rerank is True
+        assert tool.rerank_model_name == "gte-rerank-v2"
+        assert tool.rerank_model is None
+
+    def test_init_without_rerank_params(self, mock_observer: MessageObserver):
+        """Test initialization without rerank parameters (defaults)."""
+        tool = DifySearchTool(
+            server_url="https://api.dify.ai/v1",
+            api_key="test_key",
+            dataset_ids='["ds1"]',
+            observer=mock_observer,
+        )
+
+        assert tool.rerank is False
+        assert tool.rerank_model_name == ""
+        assert tool.rerank_model is None
+
+    def test_forward_with_rerank_enabled(self, mock_observer: MessageObserver):
+        """Test forward method when rerank is enabled and model is provided."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            # Create mock rerank model
+            mock_rerank_model = MagicMock()
+            mock_rerank_model.rerank.return_value = [
+                {"index": 1, "relevance_score": 0.95, "document": "content 2"},
+                {"index": 0, "relevance_score": 0.85, "document": "content 1"},
+            ]
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                top_k=3,
+                rerank=True,
+                rerank_model_name="gte-rerank-v2",
+                rerank_model=mock_rerank_model,
+                observer=mock_observer,
+            )
+
+            # Setup mock search response
+            search_response = {
+                "query": "test query",
+                "records": [
+                    {
+                        "segment": {"content": "content 1", "document": {"id": "doc1", "name": "doc1.txt"}},
+                        "score": 0.9
+                    },
+                    {
+                        "segment": {"content": "content 2", "document": {"id": "doc2", "name": "doc2.txt"}},
+                        "score": 0.8
+                    }
+                ]
+            }
+
+            mock_search_response = MagicMock()
+            mock_search_response.status_code = 200
+            mock_search_response.json.return_value = search_response
+
+            mock_download_response = MagicMock()
+            mock_download_response.status_code = 200
+            mock_download_response.json.return_value = {"download_url": "https://example.com/file.pdf"}
+
+            mock_client.post.return_value = mock_search_response
+            mock_client.get.return_value = mock_download_response
+
+            result_json = tool.forward("test query")
+            results = json.loads(result_json)
+
+            # Verify rerank was called
+            mock_rerank_model.rerank.assert_called_once()
+            call_args = mock_rerank_model.rerank.call_args
+            assert call_args[1]["query"] == "test query"
+            assert len(call_args[1]["documents"]) == 2
+
+    def test_forward_rerank_disabled(self, mock_observer: MessageObserver):
+        """Test forward method when rerank is disabled."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                top_k=3,
+                rerank=False,
+                rerank_model=None,
+                observer=mock_observer,
+            )
+
+            # Setup mock search response
+            search_response = {
+                "query": "test query",
+                "records": [
+                    {
+                        "segment": {"content": "content 1", "document": {"id": "doc1", "name": "doc1.txt"}},
+                        "score": 0.9
+                    }
+                ]
+            }
+
+            mock_search_response = MagicMock()
+            mock_search_response.status_code = 200
+            mock_search_response.json.return_value = search_response
+
+            mock_download_response = MagicMock()
+            mock_download_response.status_code = 200
+            mock_download_response.json.return_value = {"download_url": "https://example.com/file.pdf"}
+
+            mock_client.post.return_value = mock_search_response
+            mock_client.get.return_value = mock_download_response
+
+            result_json = tool.forward("test query")
+
+            # Should work normally without reranking
+            assert result_json is not None
+
+    def test_forward_rerank_error_continues(self, mock_observer: MessageObserver):
+        """Test that forward continues when rerank raises an exception."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            # Create mock rerank model that raises exception
+            mock_rerank_model = MagicMock()
+            mock_rerank_model.rerank.side_effect = Exception("Rerank API error")
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                top_k=3,
+                rerank=True,
+                rerank_model=mock_rerank_model,
+                observer=mock_observer,
+            )
+
+            # Setup mock search response
+            search_response = {
+                "query": "test query",
+                "records": [
+                    {
+                        "segment": {"content": "content 1", "document": {"id": "doc1", "name": "doc1.txt"}},
+                        "score": 0.9
+                    }
+                ]
+            }
+
+            mock_search_response = MagicMock()
+            mock_search_response.status_code = 200
+            mock_search_response.json.return_value = search_response
+
+            mock_download_response = MagicMock()
+            mock_download_response.status_code = 200
+            mock_download_response.json.return_value = {"download_url": "https://example.com/file.pdf"}
+
+            mock_client.post.return_value = mock_search_response
+            mock_client.get.return_value = mock_download_response
+
+            # Should not raise, should continue with original results
+            result_json = tool.forward("test query")
+            assert result_json is not None
