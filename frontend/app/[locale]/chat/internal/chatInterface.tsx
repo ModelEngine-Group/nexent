@@ -36,7 +36,7 @@ import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import {
   extractUserMsgFromResponse,
   extractAssistantMsgFromResponse,
-} from "./extractMsgFromHistoryResponse";
+} from "@/lib/chatMessageExtractor";
 
 import { Layout } from "antd";
 import log from "@/lib/logger";
