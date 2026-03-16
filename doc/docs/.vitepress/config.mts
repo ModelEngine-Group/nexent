@@ -100,6 +100,7 @@ export default defineConfig({
                 link: "/en/user-guide/memory-management",
               },
               { text: "User Management", link: "/en/user-guide/user-management" },
+              { text: "Integrate ModelEngine", link: "/en/user-guide/modelengine" },
               {
                 text: "Local Tools",
                 items: [
@@ -285,6 +286,7 @@ export default defineConfig({
               { text: "模型管理", link: "/zh/user-guide/model-management" },
               { text: "记忆管理", link: "/zh/user-guide/memory-management" },
               { text: "用户管理", link: "/zh/user-guide/user-management" },
+              { text: "对接ModelEngine", link: "/zh/user-guide/modelengine" },
               {
                 text: "本地工具",
                 items: [
