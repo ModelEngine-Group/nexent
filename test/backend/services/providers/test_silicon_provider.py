@@ -501,3 +501,80 @@ class TestSiliconModelProvider:
 
         assert len(result) == 1
         assert result[0]["max_tokens"] == 4096
+
+    @pytest.mark.asyncio
+    async def test_get_models_rerank_success(self, mocker: MockFixture):
+        """Test successful model retrieval for rerank models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "gte-rerank-v2", "name": "GTE Rerank V2"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+        mocker.patch(
+            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "https://api.siliconflow.com/v1/models"
+        )
+
+        provider = SiliconModelProvider()
+        provider_config = {
+            "model_type": "rerank",
+            "api_key": "test-api-key"
+        }
+
+        result = await provider.get_models(provider_config)
+
+        assert len(result) == 1
+        assert result[0]["id"] == "gte-rerank-v2"
+        assert result[0]["model_type"] == "rerank"
+        assert result[0]["model_tag"] == "rerank"
+
+    @pytest.mark.asyncio
+    async def test_get_models_correct_url_for_rerank(self, mocker: MockFixture):
+        """Test that correct URL is used for rerank models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": [{"id": "test"}]}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+        mocker.patch(
+            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "https://api.siliconflow.com/models"
+        )
+
+        provider = SiliconModelProvider()
+        provider_config = {
+            "model_type": "rerank",
+            "api_key": "test-api-key"
+        }
+
+        await provider.get_models(provider_config)
+
+        # Verify the URL contains sub_type=reranker for rerank
+        call_args = mock_client.get.call_args
+        assert "sub_type=reranker" in call_args[0][0]
