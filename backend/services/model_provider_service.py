@@ -132,6 +132,11 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
             model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/embeddings"
         # The embedding dimension might differ from the provided max_tokens.
         model_dict["max_tokens"] = await embedding_dimension_check(model_dict)
+    elif model["model_type"] == "rerank":
+        if provider == ProviderEnum.DASHSCOPE.value:
+            model_dict["base_url"] = f"{model_url.replace('compatible-mode/v1','api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
+        else:
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/rerank" 
     else:
         # For non-embedding models
         if provider == ProviderEnum.MODELENGINE.value:
