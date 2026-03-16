@@ -450,7 +450,8 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
                 {
@@ -478,10 +479,11 @@ class TestCreateToolConfigList:
             mock_get_vector_db_core.assert_called_once()
             mock_embedding.assert_called_once_with(tenant_id="tenant_1")
 
-            # Verify metadata contains ONLY vdb_core and embedding_model (no index_names or name_resolver)
+            # Verify metadata contains vdb_core, embedding_model and rerank_model
             expected_metadata = {
                 "vdb_core": mock_vdb_core,
                 "embedding_model": mock_embedding_model,
+                "rerank_model": mock_rerank.return_value,
             }
             assert mock_tool_instance.metadata == expected_metadata
 
@@ -505,7 +507,8 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.side_effect = [mock_tool_kb, mock_tool_other]
 
@@ -542,6 +545,7 @@ class TestCreateToolConfigList:
             assert mock_tool_kb.metadata == {
                 "vdb_core": "vdb_core_instance",
                 "embedding_model": "embedding_instance",
+                "rerank_model": mock_rerank.return_value,
             }
 
             # Verify OtherTool has no special metadata (should not have metadata attribute set)
@@ -562,7 +566,8 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -588,6 +593,7 @@ class TestCreateToolConfigList:
             assert mock_tool_instance.metadata == {
                 "vdb_core": "vdb_core",
                 "embedding_model": "embedding",
+                "rerank_model": mock_rerank.return_value,
             }
 
     @pytest.mark.asyncio
@@ -694,7 +700,8 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
                 {
@@ -729,6 +736,7 @@ class TestCreateToolConfigList:
             expected_metadata = {
                 "vdb_core": "vdb_core",
                 "embedding_model": "embedding",
+                "rerank_model": mock_rerank.return_value,
             }
             assert mock_tool_1.metadata == expected_metadata
             assert mock_tool_2.metadata == expected_metadata

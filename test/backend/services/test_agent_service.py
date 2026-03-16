@@ -110,7 +110,19 @@ sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
 sys.modules['nexent.core.models'] = MagicMock()
-sys.modules['nexent.core.models.rerank_model'] = MagicMock()
+
+# Mock rerank_model module with proper class exports
+class MockBaseRerank:
+    pass
+
+class MockOpenAICompatibleRerank(MockBaseRerank):
+    def __init__(self, *args, **kwargs):
+        pass
+
+rerank_module = MagicMock()
+rerank_module.BaseRerank = MockBaseRerank
+rerank_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
+sys.modules['nexent.core.models.rerank_model'] = rerank_module
 # Don't mock agent_model yet, we need to import ToolConfig first
 sys.modules['nexent.memory'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()

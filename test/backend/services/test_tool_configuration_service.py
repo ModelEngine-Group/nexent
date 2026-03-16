@@ -151,8 +151,19 @@ embedding_model_module.OpenAICompatibleEmbedding = MockOpenAICompatibleEmbedding
 embedding_model_module.JinaEmbedding = MockJinaEmbedding
 sys.modules['nexent.core.models.embedding_model'] = embedding_model_module
 
-# Mock rerank_model module
+# Mock rerank_model module with proper class exports
+class MockBaseRerank:
+    """Mock BaseRerank class"""
+    pass
+
+class MockOpenAICompatibleRerank(MockBaseRerank):
+    """Mock OpenAICompatibleRerank class"""
+    def __init__(self, *args, **kwargs):
+        pass
+
 rerank_model_module = types.ModuleType('nexent.core.models.rerank_model')
+rerank_model_module.BaseRerank = MockBaseRerank
+rerank_model_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
 sys.modules['nexent.core.models.rerank_model'] = rerank_model_module
 
 # Provide model class used by file_management_service imports

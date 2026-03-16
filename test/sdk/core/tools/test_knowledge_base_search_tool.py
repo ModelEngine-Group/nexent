@@ -334,10 +334,12 @@ class TestKnowledgeBaseSearchToolRerank:
             observer=mock_observer,
         )
 
-        # Check default values - pydantic Field returns FieldInfo
-        assert tool.rerank is False
-        assert tool.rerank_model_name == ""
-        assert tool.rerank_model is None
+        # smolagents Tool doesn't properly handle Field defaults, so we check FieldInfo.default
+        from pydantic import FieldInfo
+        assert isinstance(tool.rerank, FieldInfo)
+        assert tool.rerank.default is False
+        assert tool.rerank_model_name.default == ""
+        assert tool.rerank_model.default is None
 
     def test_forward_with_rerank_enabled(self, mock_observer, mock_vdb_core, mock_embedding_model, mocker):
         """Test forward method when rerank is enabled and model is provided."""
