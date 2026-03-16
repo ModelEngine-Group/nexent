@@ -32,6 +32,7 @@ sys.modules['nexent.core.agents'] = MockModule()
 sys.modules['nexent.core.agents.agent_model'] = MockModule()
 sys.modules['nexent.core.models'] = MockModule()
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
+sys.modules['nexent.core.models.rerank_model'] = MockModule()
 
 # Mock services packages
 sys.modules['services'] = MockModule()
