@@ -32,7 +32,19 @@ sys.modules['nexent.core.agents'] = MockModule()
 sys.modules['nexent.core.agents.agent_model'] = MockModule()
 sys.modules['nexent.core.models'] = MockModule()
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
-sys.modules['nexent.core.models.rerank_model'] = MockModule()
+
+# Mock rerank_model module with proper class exports
+class MockBaseRerank:
+    pass
+
+class MockOpenAICompatibleRerank(MockBaseRerank):
+    def __init__(self, *args, **kwargs):
+        pass
+
+rerank_module = MockModule()
+rerank_module.BaseRerank = MockBaseRerank
+rerank_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
+sys.modules['nexent.core.models.rerank_model'] = rerank_module
 
 # Mock services packages
 sys.modules['services'] = MockModule()

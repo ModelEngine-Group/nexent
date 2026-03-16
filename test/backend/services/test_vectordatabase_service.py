@@ -3963,8 +3963,15 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.mock_embedding.model = "test-model"
         self.mock_get_embedding.return_value = self.mock_embedding
 
+        self.get_rerank_model_patcher = patch(
+            'backend.services.vectordatabase_service.get_rerank_model')
+        self.mock_get_rerank = self.get_rerank_model_patcher.start()
+        self.mock_rerank = MagicMock()
+        self.mock_get_rerank.return_value = self.mock_rerank
+
     def tearDown(self):
         self.get_embedding_model_patcher.stop()
+        self.get_rerank_model_patcher.stop()
 
     def test_rethrow_or_plain_rethrows_json_error_code(self):
         """_rethrow_or_plain should re-raise JSON payload when error_code present."""
