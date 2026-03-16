@@ -177,7 +177,7 @@ export function LoginModal() {
       width={420}
       centered
       forceRender
-      maskClosable={false}
+      mask={{ closable: false }}
       closable={true}
     >
       <div className="relative bg-white p-4 rounded-2xl">

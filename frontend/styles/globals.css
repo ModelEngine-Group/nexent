@@ -66,6 +66,18 @@
   .bg-grid-slate-800 {
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(30 41 59 / 0.8)'%3e%3cpath d='M0 .5H31.5V32'/%3e%3c/svg%3e");
   }
+
+  .hero-gradient-text {
+    background-image: linear-gradient(94deg, #2563eb 0%, #3b82f6 48%, #06b6d4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 2px 18px rgba(59, 130, 246, 0.18);
+  }
+
+  .dark .hero-gradient-text {
+    text-shadow: 0 2px 18px rgba(56, 189, 248, 0.22);
+  }
 }
 
 /* Ant Design Button Icon with Lucide icons */

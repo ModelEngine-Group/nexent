@@ -55,19 +55,18 @@ export default function Homepage() {
   const navigateToSpace = () => navigateWithPermissionCheck("/space");
 
   return (
-    <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
+    <div className="w-full min-h-full flex flex-col items-center justify-start px-4 pt-6 pb-8 md:px-6">
       {/* Hero area */}
-      <section className="relative w-full p-4 flex flex-col items-center justify-center text-center flex-shrink-0">
+      <section className="relative w-full p-4 flex flex-col items-center text-center flex-shrink-0">
         <div className="absolute inset-0 bg-grid-slate-200 dark:bg-grid-slate-800 [mask-image:radial-gradient(ellipse_at_center,white_20%,transparent_75%)] -z-10"></div>
         <motion.h2
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight"
+          className="text-3xl md:text-4xl lg:text-5xl font-bold leading-tight text-slate-900 dark:text-white mb-4 tracking-tight max-w-4xl"
         >
-          {t("page.title")}
-          <span className="text-blue-600 dark:text-blue-500">
-            {" "}
+          <span className="block">{t("page.title")}</span>
+          <span className="block mt-1 hero-gradient-text">
             {t("page.subtitle")}
           </span>
         </motion.h2>
