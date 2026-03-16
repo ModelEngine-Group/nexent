@@ -109,6 +109,8 @@ nexent_mock = MagicMock()
 sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
+sys.modules['nexent.core.models'] = MagicMock()
+sys.modules['nexent.core.models.rerank_model'] = MagicMock()
 # Don't mock agent_model yet, we need to import ToolConfig first
 sys.modules['nexent.memory'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()

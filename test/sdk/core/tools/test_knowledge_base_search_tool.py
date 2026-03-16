@@ -307,7 +307,7 @@ class TestKnowledgeBaseSearchTool:
 class TestKnowledgeBaseSearchToolRerank:
     """Tests for KnowledgeBaseSearchTool rerank functionality."""
 
-    def test_init_with_rerank_params(self):
+    def test_init_with_rerank_params(self, mock_observer):
         """Test initialization with rerank parameters."""
         tool = KnowledgeBaseSearchTool(
             index_names=["kb1", "kb2"],
@@ -317,31 +317,30 @@ class TestKnowledgeBaseSearchToolRerank:
             rerank_model=None,
             vdb_core=None,
             embedding_model=None,
+            observer=mock_observer,
         )
 
         assert tool.rerank is True
         assert tool.rerank_model_name == "gte-rerank-v2"
         assert tool.rerank_model is None
 
-    def test_init_without_rerank_params(self):
+    def test_init_without_rerank_params(self, mock_observer):
         """Test initialization without rerank parameters (defaults)."""
         tool = KnowledgeBaseSearchTool(
             index_names=["kb1"],
             search_mode="semantic",
             vdb_core=None,
             embedding_model=None,
+            observer=mock_observer,
         )
 
+        # Check default values - pydantic Field returns FieldInfo
         assert tool.rerank is False
         assert tool.rerank_model_name == ""
         assert tool.rerank_model is None
 
-    def test_forward_with_rerank_enabled(self, mocker):
+    def test_forward_with_rerank_enabled(self, mock_observer, mock_vdb_core, mock_embedding_model, mocker):
         """Test forward method when rerank is enabled and model is provided."""
-        # Create mock vdb_core
-        mock_vdb_core = MagicMock()
-        mock_embedding_model = MagicMock()
-
         # Mock search results
         mock_results = [
             {
@@ -386,6 +385,7 @@ class TestKnowledgeBaseSearchToolRerank:
             rerank_model=mock_rerank_model,
             vdb_core=mock_vdb_core,
             embedding_model=mock_embedding_model,
+            observer=mock_observer,
         )
 
         result = tool.forward("test query")
@@ -397,11 +397,8 @@ class TestKnowledgeBaseSearchToolRerank:
         assert call_args[1]["query"] == "test query"
         assert len(call_args[1]["documents"]) == 2
 
-    def test_forward_rerank_disabled(self, mocker):
+    def test_forward_rerank_disabled(self, mock_observer, mock_vdb_core, mock_embedding_model):
         """Test forward method when rerank is disabled."""
-        mock_vdb_core = MagicMock()
-        mock_embedding_model = MagicMock()
-
         # Mock search results
         mock_results = [
             {
@@ -426,6 +423,7 @@ class TestKnowledgeBaseSearchToolRerank:
             rerank_model=None,
             vdb_core=mock_vdb_core,
             embedding_model=mock_embedding_model,
+            observer=mock_observer,
         )
 
         result = tool.forward("test query")
@@ -433,11 +431,8 @@ class TestKnowledgeBaseSearchToolRerank:
         # Should work normally without reranking
         assert result is not None
 
-    def test_forward_rerank_error_continues(self, mocker):
+    def test_forward_rerank_error_continues(self, mock_observer, mock_vdb_core, mock_embedding_model):
         """Test that forward continues when rerank raises an exception."""
-        mock_vdb_core = MagicMock()
-        mock_embedding_model = MagicMock()
-
         # Mock search results
         mock_results = [
             {
@@ -466,6 +461,7 @@ class TestKnowledgeBaseSearchToolRerank:
             rerank_model=mock_rerank_model,
             vdb_core=mock_vdb_core,
             embedding_model=mock_embedding_model,
+            observer=mock_observer,
         )
 
         # Should not raise, should continue with original results

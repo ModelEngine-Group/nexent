@@ -36,6 +36,11 @@ openai_model_module = ModuleType('nexent.core.models')
 openai_model_module.OpenAIModel = MagicMock
 sys.modules['nexent.core.models'] = openai_model_module
 sys.modules['nexent.core.models.embedding_model'] = MagicMock()
+# Mock rerank_model module with proper class exports
+rerank_model_module = ModuleType('nexent.core.models.rerank_model')
+rerank_model_module.OpenAICompatibleRerank = MagicMock()
+rerank_model_module.BaseRerank = MagicMock()
+sys.modules['nexent.core.models.rerank_model'] = rerank_model_module
 sys.modules['nexent.core.models.stt_model'] = MagicMock()
 sys.modules['nexent.core.nlp'] = _create_package_mock('nexent.core.nlp')
 sys.modules['nexent.core.nlp.tokenizer'] = MagicMock()
