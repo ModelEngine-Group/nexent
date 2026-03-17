@@ -2278,6 +2278,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
             "index_names": ["default_index"],
             "vdb_core": mock_vdb_core,
             "embedding_model": "mock_embedding_model",
+            "rerank_model": None,
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
@@ -2421,6 +2422,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
             "index_names": [],
             "vdb_core": mock_vdb_core,
             "embedding_model": "mock_embedding_model",
+            "rerank_model": None,
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
@@ -2589,6 +2591,7 @@ class TestValidateLocalToolDatamateSearchTool:
             "param": "config",
             # Filled from signature default
             "index_names": [],
+            "rerank_model": None,
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
@@ -2692,6 +2695,7 @@ class TestValidateLocalToolDatamateSearchTool:
         expected_params = {
             "param": "config",
             "index_names": [],  # Empty list since no datamate sources
+            "rerank_model": None,
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
@@ -2732,6 +2736,7 @@ class TestValidateLocalToolDatamateSearchTool:
         expected_params = {
             "param": "config",
             "index_names": [],  # Empty list since no datamate sources
+            "rerank_model": None,
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")

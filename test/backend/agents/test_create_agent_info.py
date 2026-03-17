@@ -460,15 +460,21 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [{"name": "index_names", "default": []}],
+                    "params": [
+                        {"name": "index_names", "default": []},
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 }
             ]
             mock_vdb_core = "mock_elastic_core"
             mock_embedding_model = "mock_embedding_model"
+            mock_rerank_model = "mock_rerank_model"
             mock_get_vector_db_core.return_value = mock_vdb_core
             mock_embedding.return_value = mock_embedding_model
+            mock_rerank.return_value = mock_rerank_model
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -519,7 +525,11 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "index_names", "default": []},
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 },
@@ -536,6 +546,7 @@ class TestCreateToolConfigList:
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
             mock_embedding.return_value = "embedding_instance"
+            mock_rerank.return_value = "rerank_instance"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -578,13 +589,17 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "mcp",
                     "usage": "mcp_server_1"
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
             mock_embedding.return_value = "embedding"
+            mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -710,7 +725,10 @@ class TestCreateToolConfigList:
                     "description": "First knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 },
@@ -720,13 +738,17 @@ class TestCreateToolConfigList:
                     "description": "Second knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
             mock_embedding.return_value = "embedding"
+            mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
