@@ -1608,6 +1608,90 @@ class TestGetLangchainTools:
         assert mock_build_tool_info.call_count == 2
 
 
+class TestBuildToolInfoFromLangchain:
+    """Test _build_tool_info_from_langchain function edge cases."""
+
+    def test_build_tool_info_from_langchain_with_empty_args(self):
+        """Test _build_tool_info_from_langchain when tool has no args."""
+        from backend.services.tool_configuration_service import _build_tool_info_from_langchain
+
+        # Create mock tool with no args attribute
+        mock_tool = MagicMock()
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool description"
+        mock_tool.args = {}
+        mock_tool.func = MagicMock()
+        mock_tool.func.__name__ = "test_func"
+
+        result = _build_tool_info_from_langchain(mock_tool)
+
+        assert result.name == "test_tool"
+        assert result.description == "Test tool description"
+
+    def test_build_tool_info_from_langchain_with_args_missing_description(self):
+        """Test _build_tool_info_from_langchain when args lacks description."""
+        from backend.services.tool_configuration_service import _build_tool_info_from_langchain
+
+        # Create mock tool with args missing description
+        mock_tool = MagicMock()
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool description"
+        mock_tool.args = {"param1": {"type": "string"}}  # Missing description
+        mock_tool.func = MagicMock()
+        mock_tool.func.__name__ = "test_func"
+
+        result = _build_tool_info_from_langchain(mock_tool)
+
+        # Verify description was added
+        import json
+        inputs = json.loads(result.inputs)
+        assert "description" in inputs["param1"]
+
+    def test_build_tool_info_from_langchain_with_invalid_signature(self):
+        """Test _build_tool_info_from_langchain when signature raises TypeError."""
+        from backend.services.tool_configuration_service import _build_tool_info_from_langchain
+
+        # Create mock tool that causes signature() to fail
+        mock_tool = MagicMock()
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool description"
+        mock_tool.args = {}
+        mock_tool.func = "not_callable"  # This will cause TypeError
+
+        result = _build_tool_info_from_langchain(mock_tool)
+
+        # Should fall back to string output type
+        assert result.output_type == "string"
+
+    def test_build_tool_info_from_langchain_with_invalid_return_annotation(self):
+        """Test _build_tool_info_from_langchain when return annotation raises ValueError."""
+        from backend.services.tool_configuration_service import _build_tool_info_from_langchain
+
+        # Create mock tool with func that raises ValueError on signature
+        mock_func = MagicMock()
+        mock_func.__name__ = "test_func"
+        # Make inspect.signature raise ValueError
+        import inspect
+        original_signature = inspect.signature
+
+        def mock_signature(obj):
+            if obj == mock_func:
+                raise ValueError("Cannot get signature")
+            return original_signature(obj)
+
+        mock_tool = MagicMock()
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool description"
+        mock_tool.args = {}
+        mock_tool.func = mock_func
+
+        with patch('inspect.signature', side_effect=mock_signature):
+            result = _build_tool_info_from_langchain(mock_tool)
+
+        # Should fall back to string output type
+        assert result.output_type == "string"
+
+
 class TestLoadLastToolConfigImpl:
     """Test load_last_tool_config_impl function"""
 

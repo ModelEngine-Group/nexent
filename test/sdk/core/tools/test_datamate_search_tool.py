@@ -677,3 +677,71 @@ class TestDataMateSearchToolRerank:
         # Should not raise, should continue with original results
         result_json = tool.forward("test query")
         assert result_json is not None
+
+
+class TestDataMateSearchToolEdgeCases:
+    """Tests for edge cases and partial coverage scenarios."""
+
+    def test_verify_ssl_default_for_https(self, mock_observer: MessageObserver):
+        """Test that verify_ssl defaults correctly for HTTPS URLs when not specified."""
+        # When verify_ssl is None and use_https is True, verify_ssl should be False
+        tool = DataMateSearchTool(
+            server_url="https://datamate.example.com:8443",
+            verify_ssl=None,  # Not specified - should default based on protocol
+            observer=mock_observer,
+        )
+
+        # For HTTPS, default should be False (for self-signed certificates)
+        assert tool.verify_ssl is False
+
+    def test_verify_ssl_explicit_true_for_https(self, mock_observer: MessageObserver):
+        """Test explicit verify_ssl=True for HTTPS URLs."""
+        tool = DataMateSearchTool(
+            server_url="https://datamate.example.com:8443",
+            verify_ssl=True,
+            observer=mock_observer,
+        )
+
+        assert tool.verify_ssl is True
+
+    def test_verify_ssl_explicit_false_for_http(self, mock_observer: MessageObserver):
+        """Test explicit verify_ssl=False for HTTP URLs."""
+        tool = DataMateSearchTool(
+            server_url="http://datamate.example.com:8080",
+            verify_ssl=False,
+            observer=mock_observer,
+        )
+
+        # Even if explicitly set to False, HTTP should verify SSL
+        assert tool.verify_ssl is True
+
+    def test_parse_metadata_with_dict_input(self, datamate_tool):
+        """Test _parse_metadata with dict input (passthrough)."""
+        metadata_dict = {"file_name": "test.txt", "author": "test"}
+        result = datamate_tool._parse_metadata(metadata_dict)
+
+        assert result == metadata_dict
+
+    def test_parse_metadata_with_empty_string(self, datamate_tool):
+        """Test _parse_metadata with empty string."""
+        result = datamate_tool._parse_metadata("")
+
+        assert result == {}
+
+    def test_extract_dataset_id_empty_path(self, datamate_tool):
+        """Test _extract_dataset_id with empty path."""
+        result = datamate_tool._extract_dataset_id("")
+
+        assert result == ""
+
+    def test_extract_dataset_id_root_path(self, datamate_tool):
+        """Test _extract_dataset_id with root path."""
+        result = datamate_tool._extract_dataset_id("/")
+
+        assert result == ""
+
+    def test_extract_dataset_id_single_segment(self, datamate_tool):
+        """Test _extract_dataset_id with single path segment."""
+        result = datamate_tool._extract_dataset_id("dataset123")
+
+        assert result == "dataset123"

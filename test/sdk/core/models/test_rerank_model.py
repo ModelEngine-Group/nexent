@@ -391,3 +391,209 @@ class TestBaseRerank:
 
         with pytest.raises(TypeError):
             BaseRerank()
+
+
+class TestOpenAICompatibleRerankEdgeCases:
+    """Additional edge case tests for OpenAICompatibleRerank."""
+
+    def test_prepare_request_openai_format(self):
+        """Test _prepare_request with OpenAI-compatible format."""
+        from nexent.core.models.rerank_model import OpenAICompatibleRerank
+
+        rerank = OpenAICompatibleRerank(
+            model_name="gte-rerank-v1",
+            base_url="https://api.example.com/v1/rerank",
+            api_key="test-key",
+        )
+
+        result = rerank._prepare_request(
+            query="test query",
+            documents=["doc1", "doc2", "doc3"],
+            top_n=3
+        )
+
+        assert result["model"] == "gte-rerank-v1"
+        assert result["query"] == "test query"
+        assert result["documents"] == ["doc1", "doc2", "doc3"]
+        assert result["top_n"] == 3
+
+    def test_prepare_request_dashscope_format(self):
+        """Test _prepare_request with DashScope format."""
+        from nexent.core.models.rerank_model import OpenAICompatibleRerank
+
+        rerank = OpenAICompatibleRerank(
+            model_name="qwen3-rerank",
+            base_url="https://dashscope.aliyuncs.com/api/v1",
+            api_key="test-key",
+        )
+
+        result = rerank._prepare_request(
+            query="test query",
+            documents=["doc1", "doc2"],
+            top_n=2
+        )
+
+        # DashScope format has nested input
+        assert "input" in result
+        assert result["input"]["query"] == "test query"
+        assert result["input"]["documents"] == ["doc1", "doc2"]
+        assert "parameters" in result
+        assert result["parameters"]["top_n"] == 2
+
+    def test_prepare_request_empty_top_n(self):
+        """Test _prepare_request when top_n is None (defaults to len of documents)."""
+        from nexent.core.models.rerank_model import OpenAICompatibleRerank
+
+        rerank = OpenAICompatibleRerank(
+            model_name="gte-rerank-v1",
+            base_url="https://api.example.com/v1/rerank",
+            api_key="test-key",
+        )
+
+        result = rerank._prepare_request(
+            query="test query",
+            documents=["doc1", "doc2", "doc3"],
+            top_n=None
+        )
+
+        # Should default to len of documents
+        assert result["top_n"] == 3
+
+    def test_rerank_empty_documents(self):
+        """Test rerank returns empty list when documents is empty."""
+        from nexent.core.models.rerank_model import OpenAICompatibleRerank
+
+        rerank = OpenAICompatibleRerank(
+            model_name="gte-rerank-v1",
+            base_url="https://api.example.com/v1/rerank",
+            api_key="test-key",
+        )
+
+        result = rerank.rerank(query="test", documents=[], top_n=1)
+
+        assert result == []
+
+    def test_rerank_response_with_output_results(self):
+        """Test rerank handles DashScope response format with output.results."""
+        from nexent.core.models.rerank_model import OpenAICompatibleRerank
+        import requests
+
+        rerank = OpenAICompatibleRerank(
+            model_name="qwen3-rerank",
+            base_url="https://dashscope.aliyuncs.com/api/v1/services/rerank",
+            api_key="test-key",
+        )
+
+        # Mock the response to simulate DashScope format
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "output": {
+                "results": [
+                    {"index": 0, "relevance_score": 0.95, "document": {"text": "doc1"}},
+                    {"index": 1, "relevance_score": 0.85, "document": {"text": "doc2"}},
+                ]
+            }
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(requests, 'post', return_value=mock_response):
+            result = rerank.rerank(
+                query="test query",
+                documents=["doc1", "doc2"],
+                top_n=2
+            )
+
+        assert len(result) == 2
+        assert result[0]["index"] == 0
+        assert result[0]["relevance_score"] == 0.95
+
+    def test_rerank_response_with_string_document(self):
+        """Test rerank handles response where document is a string (not dict)."""
+        from nexent.core.models.rerank_model import OpenAICompatibleRerank
+        import requests
+
+        rerank = OpenAICompatibleRerank(
+            model_name="gte-rerank-v1",
+            base_url="https://api.example.com/v1/rerank",
+            api_key="test-key",
+        )
+
+        # Mock the response where document is a string
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [
+                {"index": 0, "relevance_score": 0.95, "document": "doc1_text"},
+                {"index": 1, "relevance_score": 0.85, "document": "doc2_text"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(requests, 'post', return_value=mock_response):
+            result = rerank.rerank(
+                query="test query",
+                documents=["doc1", "doc2"],
+                top_n=2
+            )
+
+        assert len(result) == 2
+        assert result[0]["document"] == "doc1_text"
+
+    def test_connectivity_check_timeout(self):
+        """Test connectivity_check handles timeout."""
+        import requests
+        from nexent.core.models.rerank_model import OpenAICompatibleRerank
+
+        rerank = OpenAICompatibleRerank(
+            model_name="gte-rerank-v1",
+            base_url="https://api.example.com/v1/rerank",
+            api_key="test-key",
+        )
+
+        # Mock a timeout exception
+        with patch.object(requests, 'post', side_effect=requests.exceptions.Timeout("timeout")):
+            import asyncio
+            result = asyncio.get_event_loop().run_until_complete(
+                rerank.connectivity_check(timeout=5.0)
+            )
+
+        assert result is False
+
+    def test_connectivity_check_connection_error(self):
+        """Test connectivity_check handles connection error."""
+        import requests
+        from nexent.core.models.rerank_model import OpenAICompatibleRerank
+
+        rerank = OpenAICompatibleRerank(
+            model_name="gte-rerank-v1",
+            base_url="https://api.example.com/v1/rerank",
+            api_key="test-key",
+        )
+
+        # Mock a connection error
+        with patch.object(requests, 'post', side_effect=requests.exceptions.ConnectionError("connection error")):
+            import asyncio
+            result = asyncio.get_event_loop().run_until_complete(
+                rerank.connectivity_check(timeout=5.0)
+            )
+
+        assert result is False
+
+    def test_connectivity_check_generic_exception(self):
+        """Test connectivity_check handles generic exception."""
+        import requests
+        from nexent.core.models.rerank_model import OpenAICompatibleRerank
+
+        rerank = OpenAICompatibleRerank(
+            model_name="gte-rerank-v1",
+            base_url="https://api.example.com/v1/rerank",
+            api_key="test-key",
+        )
+
+        # Mock a generic exception
+        with patch.object(requests, 'post', side_effect=Exception("generic error")):
+            import asyncio
+            result = asyncio.get_event_loop().run_until_complete(
+                rerank.connectivity_check(timeout=5.0)
+            )
+
+        assert result is False

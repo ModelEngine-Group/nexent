@@ -763,6 +763,150 @@ class TestCreateToolConfigList:
             assert mock_tool_1.metadata == expected_metadata
             assert mock_tool_2.metadata == expected_metadata
 
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_dify_tool(self):
+        """Test that DifySearchTool gets correct metadata including rerank model."""
+        mock_tool = MagicMock()
+        mock_tool.class_name = "DifySearchTool"
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DifySearchTool",
+                    "name": "dify_search",
+                    "description": "Dify knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_rerank.return_value = "mock_rerank_model"
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was fetched
+            mock_rerank.assert_called_once_with(
+                tenant_id="tenant_1", model_name="gte-rerank-v2"
+            )
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0].metadata == {"rerank_model": "mock_rerank_model"}
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_dify_tool_no_rerank(self):
+        """Test that DifySearchTool without rerank gets None metadata."""
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DifySearchTool",
+                    "name": "dify_search",
+                    "description": "Dify knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": False},
+                        {"name": "rerank_model_name", "default": ""},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was NOT fetched
+            mock_rerank.assert_not_called()
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0].metadata == {"rerank_model": None}
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool(self):
+        """Test that DataMateSearchTool gets correct metadata including rerank model."""
+        mock_tool = MagicMock()
+        mock_tool.class_name = "DataMateSearchTool"
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateSearchTool",
+                    "name": "datamate_search",
+                    "description": "DataMate knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "jina-rerank-v2"},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_rerank.return_value = "mock_datamate_rerank_model"
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was fetched
+            mock_rerank.assert_called_once_with(
+                tenant_id="tenant_1", model_name="jina-rerank-v2"
+            )
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0].metadata == {"rerank_model": "mock_datamate_rerank_model"}
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool_no_rerank(self):
+        """Test that DataMateSearchTool without rerank gets None metadata."""
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateSearchTool",
+                    "name": "datamate_search",
+                    "description": "DataMate knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": False},
+                        {"name": "rerank_model_name", "default": ""},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was NOT fetched
+            mock_rerank.assert_not_called()
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0].metadata == {"rerank_model": None}
+
 
 class TestCreateAgentConfig:
     """Tests for the create_agent_config function"""
