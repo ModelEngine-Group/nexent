@@ -107,6 +107,8 @@ export default function KnowledgeBaseSelectorModal({
   const [searchKeyword, setSearchKeyword] = useState("");
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  // Track the embedding model from selected knowledge bases for auto-filtering
+  const [selectedEmbeddingModel, setSelectedEmbeddingModel] = useState<string | null>(null);
 
   // Initialize selection state when modal opens
   useEffect(() => {
@@ -179,43 +181,16 @@ export default function KnowledgeBaseSelectorModal({
       }
 
       // Default selection logic:
-      // 1. Empty knowledge bases cannot be selected
+      // Only empty knowledge bases (0 documents AND 0 chunks) cannot be selected
       const isEmpty =
         (kb.documentCount || 0) === 0 && (kb.chunkCount || 0) === 0;
       if (isEmpty) {
         return false;
       }
 
-      // 2. For nexent source, check model matching
-      if (kb.source === "nexent" && currentEmbeddingModel) {
-        if (
-          kb.embeddingModel &&
-          kb.embeddingModel !== "unknown" &&
-          kb.embeddingModel !== currentEmbeddingModel
-        ) {
-          return false;
-        }
-      }
-
       return true;
     },
-    [isSelectable, currentEmbeddingModel]
-  );
-
-  // Check if a knowledge base has model mismatch (for display purposes)
-  const checkModelMismatch = useCallback(
-    (kb: KnowledgeBase): boolean => {
-      if (kb.source !== "nexent" || !currentEmbeddingModel) {
-        return false;
-      }
-      const embeddingModel = kb.embeddingModel;
-      return Boolean(
-        embeddingModel &&
-        embeddingModel !== "unknown" &&
-        embeddingModel !== currentEmbeddingModel
-      );
-    },
-    [currentEmbeddingModel]
+    [isSelectable]
   );
 
   // Filter knowledge bases based on tool type, search, and filters
@@ -284,12 +259,26 @@ export default function KnowledgeBaseSelectorModal({
 
       setTempSelectedIds((prev) => {
         if (prev.includes(id)) {
-          return prev.filter((itemId) => itemId !== id);
+          // When deselecting, check if we need to clear the model filter
+          const newSelected = prev.filter((itemId) => itemId !== id);
+          // If no more selections, clear the model filter
+          if (newSelected.length === 0) {
+            setSelectedEmbeddingModel(null);
+            setSelectedModels([]); // Clear the model filter dropdown as well
+          }
+          return newSelected;
         }
 
         // Check max select limit
         if (maxSelect && prev.length >= maxSelect) {
           return prev;
+        }
+
+        // Auto-filter by the selected knowledge base's embedding model
+        // Only for nexent source with valid embedding model
+        if (kb.source === "nexent" && kb.embeddingModel && kb.embeddingModel !== "unknown") {
+          setSelectedEmbeddingModel(kb.embeddingModel);
+          setSelectedModels([kb.embeddingModel]);
         }
 
         return [...prev, id];
@@ -301,6 +290,8 @@ export default function KnowledgeBaseSelectorModal({
   // Clear all selections
   const clearAllSelections = useCallback(() => {
     setTempSelectedIds([]);
+    setSelectedEmbeddingModel(null);
+    setSelectedModels([]); // Clear the model filter as well
   }, []);
 
   // Handle confirm
@@ -583,7 +574,6 @@ export default function KnowledgeBaseSelectorModal({
                   String(selectedId).trim() === String(kb.id).trim()
               );
               const canSelect = checkCanSelect(kb);
-              const hasModelMismatch = checkModelMismatch(kb);
 
               return (
                 <div
@@ -711,14 +701,6 @@ export default function KnowledgeBaseSelectorModal({
                               })}
                             </span>
                           )}
-                        {/* Model mismatch tag - only for nexent source */}
-                        {hasModelMismatch && (
-                          <span
-                            className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.warning} mr-1`}
-                          >
-                            {t("knowledgeBase.tag.modelMismatch")}
-                          </span>
-                        )}
                       </div>
                     </div>
                   </div>
