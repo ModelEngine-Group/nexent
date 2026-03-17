@@ -1651,12 +1651,13 @@ class TestBuildToolInfoFromLangchain:
         """Test _build_tool_info_from_langchain when signature raises TypeError."""
         from backend.services.tool_configuration_service import _build_tool_info_from_langchain
 
-        # Create mock tool where signature raises TypeError
+        # Create a mock tool with a callable that will raise TypeError on signature
+        mock_func = lambda: None  # A simple callable
         mock_tool = MagicMock()
         mock_tool.name = "test_tool"
         mock_tool.description = "Test tool description"
         mock_tool.args = {}
-        mock_tool.func = MagicMock()  # Callable but inspect.signature will fail
+        mock_tool.func = mock_func
 
         # Make inspect.signature raise TypeError
         import inspect
@@ -1670,13 +1671,14 @@ class TestBuildToolInfoFromLangchain:
         """Test _build_tool_info_from_langchain when return annotation raises ValueError."""
         from backend.services.tool_configuration_service import _build_tool_info_from_langchain
 
-        # Create mock tool with func that raises ValueError on signature
-        mock_func = MagicMock()
+        # Create a mock tool with a callable that will raise ValueError on signature
+        mock_func = lambda: None
         mock_tool = MagicMock()
         mock_tool.name = "test_tool"
         mock_tool.description = "Test tool description"
         mock_tool.args = {}
         mock_tool.func = mock_func
+
         # Make inspect.signature raise ValueError for this specific callable
         import inspect
 
