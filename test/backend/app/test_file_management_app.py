@@ -1233,6 +1233,26 @@ async def test_preview_file_not_found_from_stream(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_preview_file_unexpected_error_from_stream(monkeypatch):
+    """Unexpected exception from get_preview_stream should map to HTTP 500."""
+    monkeypatch.setattr(file_management_app, "resolve_preview_file",
+                        AsyncMock(return_value=("docs/test.pdf", "application/pdf", 1024)))
+
+    def fake_stream(actual_name, start=None, end=None):
+        raise RuntimeError("stream broken")
+
+    monkeypatch.setattr(file_management_app, "get_preview_stream", fake_stream)
+
+    with pytest.raises(Exception) as ei:
+        await file_management_app.preview_file(
+            object_name="docs/test.pdf",
+            filename=None,
+            range_header=None,
+        )
+    assert "Failed to preview file" in str(ei.value)
+
+
+@pytest.mark.asyncio
 async def test_preview_file_unsupported_format_error(monkeypatch):
     """UnsupportedFileTypeException from resolve_preview_file → HTTP 400."""
     _UnsupportedFileTypeException = sys.modules["consts.exceptions"].UnsupportedFileTypeException
@@ -1340,5 +1360,9 @@ class TestParseRangeHeader:
     def test_non_numeric_returns_none(self):
         """Non-numeric values are rejected."""
         assert file_management_app._parse_range_header("bytes=abc-def", 1000) is None
+
+    def test_missing_dash_returns_none(self):
+        """bytes=N without '-' is malformed and rejected."""
+        assert file_management_app._parse_range_header("bytes=100", 1000) is None
 
 

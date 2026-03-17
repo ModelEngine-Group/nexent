@@ -1297,6 +1297,33 @@ class TestConvertOfficeToCachedPdf:
         mock_delete.assert_called_with("preview/converting/docs/report_deadbeef.pdf.tmp")
 
     @pytest.mark.asyncio
+    async def test_office_conversion_exception_passthrough(self):
+        """Existing OfficeConversionException should be re-raised without wrapping."""
+        from backend.services.file_management_service import _convert_office_to_cached_pdf
+        from consts.exceptions import OfficeConversionException
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=OfficeConversionException("upstream conversion failed"))
+
+        mock_http_ctx = MagicMock()
+        mock_http_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_http_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch('backend.services.file_management_service._is_pdf_cache_valid', return_value=False), \
+             patch('httpx.AsyncClient', return_value=mock_http_ctx), \
+             patch('backend.services.file_management_service.file_exists', return_value=False), \
+             patch('backend.services.file_management_service.delete_file'):
+
+            with pytest.raises(OfficeConversionException) as exc_info:
+                await _convert_office_to_cached_pdf(
+                    "docs/report.docx",
+                    "preview/converted/docs/report_deadbeef.pdf",
+                    "preview/converting/docs/report_deadbeef.pdf.tmp",
+                )
+
+        assert "upstream conversion failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
     async def test_reuses_existing_lock_for_same_object(self):
         """If a lock for object_name already exists, it is reused."""
         import asyncio as _asyncio
