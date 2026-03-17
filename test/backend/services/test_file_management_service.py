@@ -369,6 +369,27 @@ class TestUploadFilesImpl:
             assert uploaded_names == ["a.txt"]
             mock_logger.warning.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_minio_conflict_resolution_empty_filename(self):
+        """Empty uploaded filename should be preserved during conflict resolution."""
+        mock_file = MagicMock()
+        mock_file.filename = ""
+
+        minio_return = [
+            {"success": True, "file_name": "", "object_name": "folder/"},
+        ]
+
+        with patch('backend.services.file_management_service.upload_to_minio', AsyncMock(return_value=minio_return)), \
+                patch('backend.services.file_management_service.get_vector_db_core', MagicMock()), \
+                patch('backend.services.file_management_service.ElasticSearchService.list_files', AsyncMock(return_value={"files": []})):
+
+            errors, uploaded_paths, uploaded_names = await upload_files_impl(
+                destination="minio", file=[mock_file], folder="folder", index_name="kb1")
+
+            assert errors == []
+            assert uploaded_paths == ["folder/"]
+            assert uploaded_names == [""]
+
 
 class TestUploadToMinio:
     """Test cases for upload_to_minio function"""
@@ -1322,6 +1343,34 @@ class TestConvertOfficeToCachedPdf:
                 )
 
         assert "upstream conversion failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_non_office_exception_is_wrapped(self):
+        """Unexpected exceptions should be wrapped as OfficeConversionException with cause."""
+        from backend.services.file_management_service import _convert_office_to_cached_pdf
+        from consts.exceptions import OfficeConversionException
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=RuntimeError("network broken"))
+
+        mock_http_ctx = MagicMock()
+        mock_http_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_http_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch('backend.services.file_management_service._is_pdf_cache_valid', return_value=False), \
+             patch('httpx.AsyncClient', return_value=mock_http_ctx), \
+             patch('backend.services.file_management_service.file_exists', return_value=False), \
+             patch('backend.services.file_management_service.delete_file'):
+
+            with pytest.raises(OfficeConversionException) as exc_info:
+                await _convert_office_to_cached_pdf(
+                    "docs/report.docx",
+                    "preview/converted/docs/report_deadbeef.pdf",
+                    "preview/converting/docs/report_deadbeef.pdf.tmp",
+                )
+
+        assert "Office file conversion failed" in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
 
     @pytest.mark.asyncio
     async def test_reuses_existing_lock_for_same_object(self):
