@@ -752,3 +752,162 @@ class TestDifySearchToolRerank:
             # Should not raise, should continue with original results
             result_json = tool.forward("test query")
             assert result_json is not None
+
+
+class TestDifySearchToolEdgeCases:
+    """Edge case tests for DifySearchTool."""
+
+    def test_get_document_download_url_empty_id(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url returns empty string for empty document_id."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+            )
+
+            result = tool._get_document_download_url("")
+            assert result == ""
+
+    def test_get_document_download_url_request_error(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url handles RequestError."""
+        import httpx
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+            mock_client.get.side_effect = httpx.RequestError("request failed")
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+            )
+
+            result = tool._get_document_download_url("doc123", "dataset1")
+            assert result == ""
+
+    def test_get_document_download_url_http_status_error(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url handles HTTPStatusError."""
+        import httpx
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "404 Not Found", request=MagicMock(), response=MagicMock()
+            )
+            mock_client.get.return_value = mock_response
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+            )
+
+            result = tool._get_document_download_url("doc123", "dataset1")
+            assert result == ""
+
+    def test_get_document_download_url_json_decode_error(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url handles JSONDecodeError."""
+        import json
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.side_effect = json.JSONDecodeError("invalid json", "", 0)
+            mock_client.get.return_value = mock_response
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+            )
+
+            result = tool._get_document_download_url("doc123", "dataset1")
+            assert result == ""
+
+    def test_get_document_download_url_missing_key(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url handles missing download_url key."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = {}  # No download_url key
+            mock_client.get.return_value = mock_response
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+            )
+
+            result = tool._get_document_download_url("doc123", "dataset1")
+            assert result == ""
+
+    def test_batch_get_download_urls_empty_pairs(self, mock_observer: MessageObserver):
+        """Test _batch_get_download_urls with empty pairs."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+            )
+
+            result = tool._batch_get_download_urls([])
+            assert result == {}
+
+    def test_batch_get_download_urls_with_empty_document_id(self, mock_observer: MessageObserver):
+        """Test _batch_get_download_urls handles empty document_id."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+            )
+
+            # Include an empty document_id in the pairs
+            result = tool._batch_get_download_urls([("", "dataset1"), ("doc123", "dataset1")])
+            assert result == {"": "", "doc123": ""}
+
+    def test_search_dify_knowledge_base_missing_records_key(self, mock_observer: MessageObserver):
+        """Test _search_dify_knowledge_base raises when records key is missing."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"query": "test"}  # Missing "records" key
+            mock_response.raise_for_status = MagicMock()
+            mock_client.post.return_value = mock_response
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+            )
+
+            with pytest.raises(Exception, match="Unexpected Dify API response format"):
+                tool._search_dify_knowledge_base("test", 3, "semantic_search", "dataset1")
