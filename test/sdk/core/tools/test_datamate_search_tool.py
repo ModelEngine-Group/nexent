@@ -557,7 +557,10 @@ class TestDataMateSearchToolRerank:
         )
 
         # smolagents Tool doesn't properly handle Field defaults, so we check FieldInfo.default
-        from pydantic import FieldInfo
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
         assert isinstance(tool.rerank, FieldInfo)
         assert tool.rerank.default is False
         assert tool.rerank_model_name.default == ""
