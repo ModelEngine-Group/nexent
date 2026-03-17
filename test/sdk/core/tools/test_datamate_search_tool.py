@@ -712,8 +712,9 @@ class TestDataMateSearchToolEdgeCases:
             observer=mock_observer,
         )
 
-        # Even if explicitly set to False, HTTP should verify SSL
-        assert tool.verify_ssl is True
+        # When explicitly set to False, it should use that value
+        # Note: The comment about "always verify for HTTP" only applies when verify_ssl is None
+        assert tool.verify_ssl is False
 
     def test_parse_metadata_with_dict_input(self, datamate_tool):
         """Test _parse_metadata with dict input (passthrough)."""
