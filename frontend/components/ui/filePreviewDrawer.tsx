@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import dynamic from 'next/dynamic';
 import { Drawer, Spin, Button, Table } from 'antd';
 import { Download, X, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
+import Papa from 'papaparse';
 import { FilePreviewProps } from '@/types/chat';
 import { storageService } from '@/services/storageService';
 import { MarkdownRenderer, extractMarkdownHeadings, type MarkdownHeading } from '@/components/ui/markdownRenderer';
@@ -28,22 +29,21 @@ const TXT_VIRTUAL_OVERSCAN = 10;
 const CSV_ROW_HEIGHT = 40;
 
 function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === ',' && !inQuotes) {
-      result.push(current.trim());
-      current = '';
-    } else {
-      current += char;
-    }
+  const parsed = Papa.parse<string[]>(line, {
+    header: false,
+    skipEmptyLines: false,
+    dynamicTyping: false,
+    delimiter: ',',
+    quoteChar: '"',
+    escapeChar: '"',
+  });
+
+  const row = parsed.data[0];
+  if (Array.isArray(row)) {
+    return row.map((cell) => (typeof cell === 'string' ? cell.trim() : String(cell ?? '').trim()));
   }
-  result.push(current.trim());
-  return result;
+
+  return line.split(',').map((cell) => cell.trim());
 }
 
 type DetectedFileType = 'pdf' | 'image' | 'markdown' | 'csv' | 'text' | 'unknown';
@@ -86,6 +86,7 @@ export function FilePreviewDrawer({
   const remainderRef = useRef('');
   const isFetchingRef = useRef(false);
   const previewUrlRef = useRef('');
+  const textDecoderRef = useRef<TextDecoder | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const markdownContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -161,11 +162,9 @@ export function FilePreviewDrawer({
       }
       if (!resp.ok && resp.status !== 206) throw new Error(`HTTP ${resp.status}`);
 
-      const buf = await resp.arrayBuffer();
-      const raw = new TextDecoder('utf-8').decode(buf);
-
       const contentRange = resp.headers.get('Content-Range');
       let hasMore = false;
+      const buf = await resp.arrayBuffer();
       if (contentRange) {
         const m = contentRange.match(/bytes (\d+)-(\d+)\/(\d+)/);
         if (m) {
@@ -178,6 +177,15 @@ export function FilePreviewDrawer({
       } else {
         byteOffsetRef.current += buf.byteLength;
         hasMore = false;
+      }
+
+      if (!textDecoderRef.current) {
+        textDecoderRef.current = new TextDecoder('utf-8');
+      }
+      let raw = textDecoderRef.current.decode(buf, { stream: hasMore });
+      if (!hasMore) {
+        // Flush pending bytes in decoder state for the final chunk.
+        raw += textDecoderRef.current.decode();
       }
 
       // Keep incomplete trailing line for next chunk to avoid broken rows.
@@ -287,6 +295,7 @@ export function FilePreviewDrawer({
       remainderRef.current = '';
       isFetchingRef.current = false;
       previewUrlRef.current = '';
+      textDecoderRef.current = null;
       observerRef.current?.disconnect();
       observerRef.current = null;
     }

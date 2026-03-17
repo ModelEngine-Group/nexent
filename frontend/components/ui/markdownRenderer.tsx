@@ -3,6 +3,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
+import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
@@ -67,12 +68,28 @@ const flattenTextContent = (value: React.ReactNode): string => {
   return "";
 };
 
+const replaceUntilStable = (
+  value: string,
+  pattern: RegExp,
+  replacement: string,
+  maxIterations = 8
+): string => {
+  let current = value;
+  for (let i = 0; i < maxIterations; i += 1) {
+    const next = current.replace(pattern, replacement);
+    if (next === current) {
+      break;
+    }
+    current = next;
+  }
+  return current;
+};
+
 const normalizeMarkdownHeadingText = (value: string): string => {
-  return value
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+  return replaceUntilStable(value, /!\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
-    .replace(/<[^>]+>/g, "")
+    .replace(/[<>]/g, "")
     .replace(/[*_~]/g, "")
     .replace(/\s+#+\s*$/, "")
     .replace(/\\/g, "")
@@ -121,7 +138,6 @@ const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[]
     const createId = createHeadingIdGenerator();
     const headings: ParsedMarkdownHeading[] = [];
     const { unified } = require("unified") as { unified: () => any };
-    const remarkParse = require("remark-parse").default;
     const tree = unified()
       .use(remarkParse)
       .use(remarkGfm)

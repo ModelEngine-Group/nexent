@@ -17,7 +17,7 @@ from consts.const import (
     OFFICE_MIME_TYPES,
     UPLOAD_FOLDER,
 )
-from consts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException
+from consts.exceptions import FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
 from database.attachment_db import (
     copy_file,
     delete_file,
@@ -335,21 +335,34 @@ async def _convert_office_to_cached_pdf(
                         },
                     )
                 if response.status_code != 200:
-                    raise Exception(
-                        f"data-process conversion returned {response.status_code}: {response.text}"
+                    logger.error(
+                        "Office conversion failed with non-200 response: object=%s, status=%s, body=%s",
+                        object_name,
+                        response.status_code,
+                        response.text,
                     )
+                    raise OfficeConversionException("Office file conversion failed")
 
                 # Atomic move from temp to final location, then clean up temp
                 copy_result = copy_file(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
                 if not copy_result.get('success'):
-                    raise Exception(f"Failed to finalize PDF cache: {copy_result.get('error', 'Unknown error')}")
+                    logger.error(
+                        "Failed to finalize converted PDF cache: object=%s, temp=%s, dest=%s, error=%s",
+                        object_name,
+                        temp_pdf_object_name,
+                        pdf_object_name,
+                        copy_result.get('error', 'Unknown error'),
+                    )
+                    raise OfficeConversionException("Office file conversion failed")
                 delete_file(temp_pdf_object_name)
 
             except Exception as e:
                 if file_exists(temp_pdf_object_name):
                     delete_file(temp_pdf_object_name)
                 logger.error(f"Office conversion failed: {str(e)}")
-                raise
+                if isinstance(e, OfficeConversionException):
+                    raise
+                raise OfficeConversionException("Office file conversion failed") from e
     finally:
         # Clean up the file lock (prevents memory leak for many unique files)
         async with _conversion_locks_guard:

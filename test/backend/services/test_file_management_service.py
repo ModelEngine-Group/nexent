@@ -1233,8 +1233,9 @@ class TestConvertOfficeToCachedPdf:
 
     @pytest.mark.asyncio
     async def test_http_error_re_raises_exception(self):
-        """Non-200 HTTP response from data-process re-raises the underlying Exception."""
+        """Non-200 HTTP response from data-process raises a sanitized OfficeConversionException."""
         from backend.services.file_management_service import _convert_office_to_cached_pdf
+        from consts.exceptions import OfficeConversionException
 
         mock_response = MagicMock()
         mock_response.status_code = 503
@@ -1252,19 +1253,20 @@ class TestConvertOfficeToCachedPdf:
              patch('backend.services.file_management_service.file_exists', return_value=False), \
              patch('backend.services.file_management_service.delete_file'):
 
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(OfficeConversionException) as exc_info:
                 await _convert_office_to_cached_pdf(
                     "docs/report.docx",
                     "preview/converted/docs/report_deadbeef.pdf",
                     "preview/converting/docs/report_deadbeef.pdf.tmp",
                 )
 
-        assert "503" in str(exc_info.value)
+        assert "Office file conversion failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_copy_failure_re_raises_and_cleans_up_temp(self):
-        """copy_file failure re-raises the underlying Exception and cleans up temp file."""
+        """copy_file failure raises a sanitized OfficeConversionException and cleans up temp file."""
         from backend.services.file_management_service import _convert_office_to_cached_pdf
+        from consts.exceptions import OfficeConversionException
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -1284,14 +1286,14 @@ class TestConvertOfficeToCachedPdf:
              patch('backend.services.file_management_service.file_exists', return_value=True), \
              patch('backend.services.file_management_service.delete_file') as mock_delete:
 
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(OfficeConversionException) as exc_info:
                 await _convert_office_to_cached_pdf(
                     "docs/report.docx",
                     "preview/converted/docs/report_deadbeef.pdf",
                     "preview/converting/docs/report_deadbeef.pdf.tmp",
                 )
 
-        assert "bucket full" in str(exc_info.value)
+        assert "Office file conversion failed" in str(exc_info.value)
         mock_delete.assert_called_with("preview/converting/docs/report_deadbeef.pdf.tmp")
 
     @pytest.mark.asyncio

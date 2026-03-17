@@ -935,16 +935,18 @@ def _make_mock_stream(content: bytes = b"content"):
     """Helper: return a mock boto3 Body with iter_chunks."""
     mock_s = MagicMock()
     mock_s.iter_chunks = MagicMock(return_value=iter([content]))
+    mock_s.close = MagicMock()
     return mock_s
 
 
 @pytest.mark.asyncio
 async def test_preview_file_pdf_success(monkeypatch):
     """PDF file: 200 response with inline disposition, Accept-Ranges, ETag."""
+    mock_stream = _make_mock_stream(b"PDF content")
     monkeypatch.setattr(file_management_app, "resolve_preview_file",
                         AsyncMock(return_value=("documents/test.pdf", "application/pdf", 2048)))
     monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream(b"PDF content")))
+                        MagicMock(return_value=mock_stream))
 
     resp = await file_management_app.preview_file(
         object_name="documents/test.pdf",
@@ -961,6 +963,9 @@ async def test_preview_file_pdf_success(monkeypatch):
     assert resp.headers.get("content-length") == "2048"
     assert resp.headers.get("cache-control") == "public, max-age=3600"
     assert "documents/test.pdf" in resp.headers.get("etag", "")
+    assert resp.background is not None
+    await resp.background()
+    mock_stream.close.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1075,10 +1080,11 @@ async def test_preview_file_office_converted_to_pdf(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_range_request_returns_206(monkeypatch):
     """Valid Range header: 206 with Content-Range and correct Content-Length."""
+    mock_stream = _make_mock_stream(b"partial chunk")
     monkeypatch.setattr(file_management_app, "resolve_preview_file",
                         AsyncMock(return_value=("docs/test.pdf", "application/pdf", 10000)))
     monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream(b"partial chunk")))
+                        MagicMock(return_value=mock_stream))
 
     resp = await file_management_app.preview_file(
         object_name="docs/test.pdf",
@@ -1090,6 +1096,9 @@ async def test_preview_file_range_request_returns_206(monkeypatch):
     assert resp.headers.get("content-range") == "bytes 0-4095/10000"
     assert resp.headers.get("content-length") == "4096"
     assert resp.headers.get("accept-ranges") == "bytes"
+    assert resp.background is not None
+    await resp.background()
+    mock_stream.close.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1257,6 +1266,7 @@ async def test_preview_file_internal_error(monkeypatch):
             range_header=None,
         )
     assert "Failed to preview file" in str(ei.value)
+    assert "Internal server error" not in str(ei.value)
 
 
 @pytest.mark.asyncio

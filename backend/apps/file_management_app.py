@@ -8,6 +8,7 @@ from urllib.parse import urlparse, urlunparse, unquote, quote
 import httpx
 from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Path as PathParam, Query, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 from consts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException
 from consts.model import ProcessParams
@@ -614,7 +615,7 @@ async def preview_file(
         logger.error(f"[preview_file] Unexpected error: object_name={object_name}, error={str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
-            detail=f"Failed to preview file: {str(e)}"
+            detail="Failed to preview file"
         )
 
     display_filename = filename or (object_name.split("/")[-1] if "/" in object_name else object_name)
@@ -647,6 +648,7 @@ async def preview_file(
                 stream.iter_chunks(chunk_size=64 * 1024),
                 status_code=HTTPStatus.PARTIAL_CONTENT,
                 media_type=content_type,
+                background=BackgroundTask(stream.close),
                 headers={
                     **common_headers,
                     "Content-Range": f"bytes {start}-{end}/{total_size}",
@@ -660,6 +662,7 @@ async def preview_file(
                 stream.iter_chunks(chunk_size=64 * 1024),
                 status_code=HTTPStatus.OK,
                 media_type=content_type,
+                background=BackgroundTask(stream.close),
                 headers={
                     **common_headers,
                     "Content-Length": str(total_size),
@@ -670,7 +673,7 @@ async def preview_file(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"File not found: {object_name}")
     except Exception as e:
         logger.error(f"[preview_file] Unexpected error when streaming: object_name={object_name}, error={str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Failed to preview file: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to preview file")
 
 
 def _parse_range_header(range_header: str, total_size: int) -> Optional[tuple]:
