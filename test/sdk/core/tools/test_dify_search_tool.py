@@ -875,7 +875,9 @@ class TestDifySearchToolEdgeCases:
 
     def test_batch_get_download_urls_with_empty_document_id(self, mock_observer: MessageObserver):
         """Test _batch_get_download_urls handles empty document_id."""
-        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager, \
+             patch.object(DifySearchTool, "_get_document_download_url", return_value=""):
+
             mock_client = MagicMock()
             mock_manager.get_sync_client.return_value = mock_client
 

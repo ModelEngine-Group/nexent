@@ -538,7 +538,8 @@ class TestOpenAICompatibleRerankEdgeCases:
         assert len(result) == 2
         assert result[0]["document"] == "doc1_text"
 
-    def test_connectivity_check_timeout(self):
+    @pytest.mark.asyncio
+    async def test_connectivity_check_timeout(self):
         """Test connectivity_check handles timeout."""
         import requests
         from nexent.core.models.rerank_model import OpenAICompatibleRerank
@@ -551,14 +552,12 @@ class TestOpenAICompatibleRerankEdgeCases:
 
         # Mock a timeout exception
         with patch.object(requests, 'post', side_effect=requests.exceptions.Timeout("timeout")):
-            import asyncio
-            result = asyncio.get_event_loop().run_until_complete(
-                rerank.connectivity_check(timeout=5.0)
-            )
+            result = await rerank.connectivity_check(timeout=5.0)
 
         assert result is False
 
-    def test_connectivity_check_connection_error(self):
+    @pytest.mark.asyncio
+    async def test_connectivity_check_connection_error(self):
         """Test connectivity_check handles connection error."""
         import requests
         from nexent.core.models.rerank_model import OpenAICompatibleRerank
@@ -571,14 +570,12 @@ class TestOpenAICompatibleRerankEdgeCases:
 
         # Mock a connection error
         with patch.object(requests, 'post', side_effect=requests.exceptions.ConnectionError("connection error")):
-            import asyncio
-            result = asyncio.get_event_loop().run_until_complete(
-                rerank.connectivity_check(timeout=5.0)
-            )
+            result = await rerank.connectivity_check(timeout=5.0)
 
         assert result is False
 
-    def test_connectivity_check_generic_exception(self):
+    @pytest.mark.asyncio
+    async def test_connectivity_check_generic_exception(self):
         """Test connectivity_check handles generic exception."""
         import requests
         from nexent.core.models.rerank_model import OpenAICompatibleRerank
@@ -591,9 +588,6 @@ class TestOpenAICompatibleRerankEdgeCases:
 
         # Mock a generic exception
         with patch.object(requests, 'post', side_effect=Exception("generic error")):
-            import asyncio
-            result = asyncio.get_event_loop().run_until_complete(
-                rerank.connectivity_check(timeout=5.0)
-            )
+            result = await rerank.connectivity_check(timeout=5.0)
 
         assert result is False
