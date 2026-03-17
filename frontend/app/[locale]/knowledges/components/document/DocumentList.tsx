@@ -12,6 +12,7 @@ const { TextArea } = Input;
 import { InfoCircleFilled } from "@ant-design/icons";
 import { BookText, Pilcrow, PencilRuler, Eye, Glasses, CircleOff } from "lucide-react";
 import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
+import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
 
 import {
   UI_CONFIG,
@@ -141,6 +142,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       label: group.group_name,
       value: group.group_id,
     }));
+
+    // Preview drawer state
+    const [selectedFile, setSelectedFile] = useState<{
+      objectName: string;
+      fileName: string;
+      fileType?: string;
+      fileSize?: number;
+    } | null>(null);
 
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
@@ -812,18 +821,34 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       </td>
                       {!isDataMate && (
                         <td className={LAYOUT.CELL_PADDING}>
-                          <button
-                            onClick={() => onDelete(doc.id)}
-                            className={LAYOUT.ACTION_TEXT}
-                            title={
-                              doc.status === DOCUMENT_STATUS.PROCESSING ||
-                              doc.status === DOCUMENT_STATUS.FORWARDING
-                                ? t("document.delete.terminateTask")
-                                : undefined
-                            }
-                          >
-                            {t("common.delete")}
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() =>
+                                setSelectedFile({
+                                  objectName: doc.id, 
+                                  fileName: doc.name,
+                                  fileType: doc.type,
+                                  fileSize: doc.size,
+                                })
+                              }
+                              className={LAYOUT.ACTION_TEXT}
+                              title={t("common.preview")}
+                            >
+                              {t("common.preview")}
+                            </button>
+                            <button
+                              onClick={() => onDelete(doc.id)}
+                              className={LAYOUT.ACTION_TEXT}
+                              title={
+                                doc.status === DOCUMENT_STATUS.PROCESSING ||
+                                doc.status === DOCUMENT_STATUS.FORWARDING
+                                  ? t("document.delete.terminateTask")
+                                  : undefined
+                              }
+                            >
+                              {t("common.delete")}
+                            </button>
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -871,6 +896,18 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               modelMismatch={modelMismatch}
             />
           ))}
+
+        {/* File preview drawer */}
+        {selectedFile && (
+          <FilePreviewDrawer
+            open={!!selectedFile}
+            objectName={selectedFile.objectName}
+            fileName={selectedFile.fileName}
+            fileType={selectedFile.fileType}
+            fileSize={selectedFile.fileSize}
+            onClose={() => setSelectedFile(null)}
+          />
+        )}
       </div>
     );
   }

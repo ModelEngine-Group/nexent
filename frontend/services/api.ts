@@ -92,6 +92,12 @@ export const API_ENDPOINTS = {
       if (filename) queryParams.append("filename", filename);
       return `${API_BASE_URL}/file/download/${objectName}?${queryParams.toString()}`;
     },
+    preview: (objectName: string, filename?: string) => {
+      const queryParams = new URLSearchParams();
+      if (filename) queryParams.append("filename", filename);
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/file/preview/${objectName}${queryString ? `?${queryString}` : ''}`;
+    },
     datamateDownload: (params: {
       url?: string;
       baseUrl?: string;
