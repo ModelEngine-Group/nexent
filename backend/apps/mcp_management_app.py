@@ -1,9 +1,10 @@
 import logging
-from typing import Optional
+from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
+from pydantic import BaseModel, Field
 
 from consts.exceptions import MCPConnectionError, MCPNameIllegal
 from services.mcp_management_service import (
@@ -21,28 +22,52 @@ router = APIRouter(prefix="/mcp-tools")
 logger = logging.getLogger("mcp_management_app")
 
 
+class AddMcpServiceRequest(BaseModel):
+    name: str = Field(min_length=1)
+    server_url: str = Field(min_length=1)
+    description: Optional[str] = None
+    source: Literal["local", "market"] = "local"
+    server_type: Literal["http", "sse", "container"] = "http"
+    tags: Optional[list[str]] = None
+    authorization_token: Optional[str] = None
+    container_config: Optional[dict[str, Any]] = None
+
+
+class UpdateMcpServiceRequest(BaseModel):
+    current_name: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    description: Optional[str] = None
+    server_url: str = Field(min_length=1)
+    tags: Optional[list[str]] = None
+    authorization_token: Optional[str] = None
+
+
+class EnableMcpServiceRequest(BaseModel):
+    name: str = Field(min_length=1)
+    enabled: bool
+
+
+class HealthcheckMcpServiceRequest(BaseModel):
+    name: str = Field(min_length=1)
+    server_url: str = Field(min_length=1)
+
+
 @router.post("/add")
 async def add_mcp_service_api(
-    payload: dict,
+    payload: AddMcpServiceRequest,
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        name = (payload.get("name") or "").strip()
-        server_url = (payload.get("server_url") or "").strip()
-        description = payload.get("description")
-        source = payload.get("source") or "本地"
-        server_type = payload.get("server_type") or "HTTP"
-        tags = payload.get("tags")
-        authorization_token = (payload.get("authorization_token") or "").strip() or None
-        container_config = payload.get("container_config")
-
-        if not name or not server_url:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Missing required fields",
-            )
+        name = payload.name.strip()
+        server_url = payload.server_url.strip()
+        description = payload.description
+        source = payload.source
+        server_type = payload.server_type
+        tags = payload.tags
+        authorization_token = (payload.authorization_token or "").strip() or None
+        container_config = payload.container_config
 
         await add_mcp_service(
             tenant_id=tenant_id,
@@ -142,24 +167,18 @@ async def list_market_mcp_services_api(
 
 @router.put("/update")
 async def update_mcp_service_api(
-    payload: dict,
+    payload: UpdateMcpServiceRequest,
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        current_name = payload.get("current_name")
-        new_name = payload.get("name")
-        description = payload.get("description")
-        server_url = payload.get("server_url")
-        tags = payload.get("tags")
-        authorization_token = (payload.get("authorization_token") or "").strip() or None
-
-        if not current_name or not new_name or not server_url:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Missing required fields",
-            )
+        current_name = payload.current_name
+        new_name = payload.name
+        description = payload.description
+        server_url = payload.server_url
+        tags = payload.tags
+        authorization_token = (payload.authorization_token or "").strip() or None
 
         update_mcp_service(
             tenant_id=tenant_id,
@@ -187,25 +206,20 @@ async def update_mcp_service_api(
 
 @router.post("/manage/enable")
 async def update_mcp_service_enable_api(
-    payload: dict,
+    payload: EnableMcpServiceRequest,
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        name = payload.get("name")
-        enabled = payload.get("enabled")
-        if name is None or enabled is None:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Missing required fields",
-            )
+        name = payload.name
+        enabled = payload.enabled
 
         update_mcp_service_enabled(
             tenant_id=tenant_id,
             user_id=user_id,
             name=name,
-            enabled=bool(enabled),
+            enabled=enabled,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -223,19 +237,14 @@ async def update_mcp_service_enable_api(
 
 @router.post("/healthcheck")
 async def check_mcp_health_api(
-    payload: dict,
+    payload: HealthcheckMcpServiceRequest,
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        name = payload.get("name")
-        server_url = payload.get("server_url")
-        if not name or not server_url:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Missing required fields",
-            )
+        name = payload.name
+        server_url = payload.server_url
 
         health_status = await check_mcp_service_health(
             tenant_id=tenant_id,
@@ -265,18 +274,12 @@ async def check_mcp_health_api(
 
 @router.delete("/delete")
 async def delete_mcp_service_api(
-    name: str,
+    name: str = Query(min_length=1),
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        if not name:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Missing required fields",
-            )
-
         delete_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
