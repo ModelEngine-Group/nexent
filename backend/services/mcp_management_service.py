@@ -253,19 +253,22 @@ async def add_mcp_service(
     if check_mcp_manage_name_exists(tenant_id=tenant_id, name=name):
         raise MCPNameIllegal("MCP name already exists")
 
-    normalized_server_type = (server_type or "HTTP").strip().upper()
+    normalized_source = (source or "local").strip().lower()
+    normalized_server_type = (server_type or "http").strip().lower()
 
     # mcp-tools add flow does not perform connectivity checks.
     # All newly added services remain disabled and unchecked until manual enable/health check.
     status: bool | None = None
 
-    source_type = "registry" if source == "公共市场" else "local"
-    if normalized_server_type == "SSE":
+    source_type = "registry" if normalized_source == "market" else "local"
+    if normalized_server_type == "sse":
         transport_type = "sse"
-    elif normalized_server_type == "HTTP":
+    elif normalized_server_type == "http":
         transport_type = "streamable-http"
-    else:
+    elif normalized_server_type == "container":
         transport_type = "stdio"
+    else:
+        raise ValueError(f"Invalid server_type: {server_type}")
 
     config_json: Dict[str, Any] = {}
     if authorization_token:
@@ -303,16 +306,16 @@ def list_mcp_services(tenant_id: str) -> List[Dict[str, Any]]:
         config_json = _safe_config_dict(record)
 
         services.append({
-            "name": record.get("mcp_name") or "未命名 MCP",
-            "description": record.get("category") or "MCP 服务",
-            "source": "公共市场" if source_type == "registry" else "本地",
-            "status": "已启用" if enabled else "未启用",
+            "name": record.get("mcp_name") or "Unnamed MCP",
+            "description": record.get("category") or "MCP service",
+            "source": "market" if source_type == "registry" else "local",
+            "status": "enabled" if enabled else "disabled",
             "updatedAt": _format_time(record.get("update_time")),
             "tags": _split_tags(record.get("tags")),
-            "serverType": "容器" if transport_type == "stdio" else "SSE" if transport_type == "sse" else "HTTP",
+            "serverType": "container" if transport_type == "stdio" else "sse" if transport_type == "sse" else "http",
             "serverUrl": record.get("mcp_server") or "-",
             "tools": record.get("tools") or [],
-            "healthStatus": "正常" if status is True else "异常" if status is False else "未检测",
+            "healthStatus": "healthy" if status is True else "unhealthy" if status is False else "unchecked",
             "containerStatus": record.get("container_status") or None,
             "authorizationToken": config_json.get("authorization_token") or "",
         })
@@ -470,7 +473,7 @@ async def check_mcp_service_health(
             remote_mcp_server=server_url,
             authorization_token=authorization_token,
         )
-    except BaseException as exc:
+    except Exception as exc:
         logger.error(f"MCP health check failed: {exc}")
         status = False
 
@@ -484,4 +487,4 @@ async def check_mcp_service_health(
     if not status:
         raise MCPConnectionError("MCP connection failed")
 
-    return "正常"
+    return "healthy"

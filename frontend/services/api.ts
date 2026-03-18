@@ -216,6 +216,15 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
   },
+  mcpTools: {
+    list: `${API_BASE_URL}/mcp-tools/list`,
+    add: `${API_BASE_URL}/mcp-tools/add`,
+    update: `${API_BASE_URL}/mcp-tools/v2/update`,
+    delete: `${API_BASE_URL}/mcp-tools/v2/delete`,
+    enable: `${API_BASE_URL}/mcp-tools/v2/manage/enable`,
+    healthcheck: `${API_BASE_URL}/mcp-tools/v2/healthcheck`,
+    marketList: `${API_BASE_URL}/mcp-tools/market/list`,
+  },
   memory: {
     // ---------------- Memory configuration ----------------
     config: {

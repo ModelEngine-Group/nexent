@@ -14,7 +14,7 @@ interface McpToolListModalProps {
   onRefresh?: () => void;
 }
 
-export default function McpToolListModal({
+export default function McpServiceDetailToolListModal({
   open,
   onCancel,
   loading,

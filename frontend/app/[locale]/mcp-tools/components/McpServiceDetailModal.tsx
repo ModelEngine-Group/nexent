@@ -1,72 +1,62 @@
 import { Modal, Input, Button, Tag } from "antd";
 import { useTranslation } from "react-i18next";
-
-type McpTab = "本地" | "公共市场";
-type McpServerType = "HTTP" | "SSE" | "容器";
-type McpServiceStatus = "已启用" | "未启用";
-type McpHealthStatus = "正常" | "异常" | "未检测";
-type McpContainerStatus = "运行中" | "已停止" | "未知";
-
-const MCP_TAB = { LOCAL: "本地", MARKET: "公共市场" } as const;
-const MCP_SERVER_TYPE = { HTTP: "HTTP", SSE: "SSE", CONTAINER: "容器" } as const;
-const MCP_SERVICE_STATUS = { ENABLED: "已启用", DISABLED: "未启用" } as const;
-const MCP_HEALTH_STATUS = { HEALTHY: "正常", UNHEALTHY: "异常" } as const;
-const MCP_CONTAINER_STATUS = { RUNNING: "运行中", STOPPED: "已停止" } as const;
-
-type McpCard = {
-  name: string;
-  description: string;
-  source: McpTab;
-  status: McpServiceStatus;
-  updatedAt: string;
-  tags: string[];
-  serverType: McpServerType;
-  serverUrl: string;
-  tools: string[];
-  healthStatus: McpHealthStatus;
-  containerStatus?: McpContainerStatus;
-  authorizationToken?: string;
-};
+import {
+  MCP_CONTAINER_STATUS,
+  MCP_HEALTH_STATUS,
+  MCP_SERVER_TYPE,
+  MCP_SERVICE_STATUS,
+  MCP_TAB,
+} from "@/const/mcpTools";
+import {
+  type McpContainerStatus,
+  type McpServiceDetailActions,
+  type McpServiceDetailState,
+  type McpHealthStatus,
+  type McpServiceItem,
+  type McpServerType,
+  type McpServiceStatus,
+  type McpTab,
+} from "@/types/mcpTools";
+import McpServiceDetailToolListModal from "./McpServiceDetailToolListModal";
 
 interface McpServiceDetailModalProps {
   open: boolean;
-  selectedService: McpCard | null;
-  draftService: McpCard | null;
-  tagDrafts: string[];
-  tagInputValue: string;
-  healthCheckLoading: boolean;
-  loadingTools: boolean;
-  onClose: () => void;
-  onDraftServiceChange: (service: McpCard) => void;
-  onTagInputChange: (value: string) => void;
-  onAddDetailTag: () => void;
-  onRemoveTag: (index: number) => void;
-  onHealthCheck: () => void;
-  onViewTools: () => void;
+  detailState: McpServiceDetailState;
+  detailActions: McpServiceDetailActions;
   onDeleteConfirm: (serviceName: string) => void;
-  onSaveUpdates: () => void;
-  onToggleEnable: (service: McpCard) => void;
+  onToggleEnable: (service: McpServiceItem) => void;
+  onClose: () => void;
 }
 
 export default function McpServiceDetailModal({
   open,
-  selectedService,
-  draftService,
-  tagDrafts,
-  tagInputValue,
-  healthCheckLoading,
-  loadingTools,
-  onClose,
-  onDraftServiceChange,
-  onTagInputChange,
-  onAddDetailTag,
-  onRemoveTag,
-  onHealthCheck,
-  onViewTools,
+  detailState,
+  detailActions,
   onDeleteConfirm,
-  onSaveUpdates,
   onToggleEnable,
+  onClose,
 }: McpServiceDetailModalProps) {
+  const {
+    selectedService,
+    draftService,
+    tagDrafts,
+    tagInputValue,
+    healthCheckLoading,
+    loadingTools,
+    toolsModalVisible,
+    currentServerTools,
+  } = detailState;
+  const {
+    onDraftServiceChange,
+    onTagInputChange,
+    onAddDetailTag,
+    onRemoveTag,
+    onHealthCheck,
+    onViewTools,
+    onSaveUpdates,
+    onCloseToolsModal,
+    onRefreshTools,
+  } = detailActions;
   const { t } = useTranslation("common");
 
   const getHealthStatusLabel = (status: McpHealthStatus) => {
@@ -94,20 +84,21 @@ export default function McpServiceDetailModal({
   }
 
   return (
-    <Modal
-      open
-      footer={null}
-      closable
-      maskClosable={false}
-      centered
-      width={900}
-      onCancel={onClose}
-      styles={{
-        mask: { background: "rgba(15,23,42,0.6)", backdropFilter: "blur(2px)" },
-        body: { padding: 0 },
-      }}
-    >
-      <div>
+    <>
+      <Modal
+        open
+        footer={null}
+        closable
+        maskClosable={false}
+        centered
+        width={900}
+        onCancel={onClose}
+        styles={{
+          mask: { background: "rgba(15,23,42,0.6)", backdropFilter: "blur(2px)" },
+          body: { padding: 0 },
+        }}
+      >
+        <div>
         <div className="border-b border-slate-100 px-6 py-5">
           <div>
             <h2 className="text-2xl font-semibold text-slate-900">{t("mcpTools.detail.title")}</h2>
@@ -290,7 +281,17 @@ export default function McpServiceDetailModal({
               : t("mcpTools.detail.enable")}
           </Button>
         </div>
-      </div>
-    </Modal>
+        </div>
+      </Modal>
+
+      <McpServiceDetailToolListModal
+        open={toolsModalVisible}
+        onCancel={onCloseToolsModal}
+        loading={loadingTools}
+        tools={currentServerTools}
+        serverName={draftService.name || String(t("mcpTools.service.defaultName"))}
+        onRefresh={onRefreshTools}
+      />
+    </>
   );
 }
