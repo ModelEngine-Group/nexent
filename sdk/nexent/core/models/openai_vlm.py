@@ -44,10 +44,9 @@ class OpenAIVLModel(OpenAIModel):
         Returns:
             bool: True if the model responds successfully, otherwise False.
         """
-        # Use local test image from assets folder
-        test_image_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))),
-                                       "assets", "git-flow.png")
-
+        # Use local test image from images folder - use absolute path based on module location
+        module_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        test_image_path = os.path.join(module_dir, "assets", "git-flow.png")
         if os.path.exists(test_image_path):
             base64_image = self.encode_image(test_image_path)
             # Detect image format for proper MIME type
