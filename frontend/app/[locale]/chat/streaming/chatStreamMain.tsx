@@ -237,6 +237,49 @@ export function ChatStreamMain({
     shouldScrollToBottom,
   ]);
 
+  // Observe async content height changes (e.g., diagrams/images) and scroll when near bottom
+  useEffect(() => {
+    const scrollAreaElement = scrollAreaRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    ) as HTMLElement | null;
+
+    // Guard for environments without DOM / ResizeObserver
+    if (!scrollAreaElement || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    let previousScrollHeight = scrollAreaElement.scrollHeight;
+
+    const observer = new ResizeObserver(() => {
+      // Only auto-scroll when enabled
+      if (!autoScroll) {
+        previousScrollHeight = scrollAreaElement.scrollHeight;
+        return;
+      }
+
+      const { scrollTop, scrollHeight, clientHeight } = scrollAreaElement;
+      const heightIncreased = scrollHeight > previousScrollHeight;
+      previousScrollHeight = scrollHeight;
+
+      if (!heightIncreased) {
+        return;
+      }
+
+      const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+
+      // If user is already near the bottom, keep them pinned when content grows
+      if (distanceToBottom < 200) {
+        requestAnimationFrame(() => scrollToBottom());
+      }
+    });
+
+    observer.observe(scrollAreaElement);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [autoScroll]);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative custom-scrollbar bg-white">
       {/* Main message area */}
