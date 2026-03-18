@@ -1182,6 +1182,21 @@ class TestIsPdfCacheValid:
         with patch('backend.services.file_management_service.file_exists', return_value=True), \
              patch('backend.services.file_management_service.get_file_range', return_value=mock_stream):
             assert _is_pdf_cache_valid("preview/converted/doc_abc12345.pdf") is True
+            mock_stream.close.assert_called_once()
+
+    def test_still_returns_true_when_close_fails(self):
+        """close() failures should be logged and not change validity result."""
+        from backend.services.file_management_service import _is_pdf_cache_valid
+
+        mock_stream = MagicMock()
+        mock_stream.close.side_effect = RuntimeError("close failed")
+
+        with patch('backend.services.file_management_service.file_exists', return_value=True), \
+             patch('backend.services.file_management_service.get_file_range', return_value=mock_stream), \
+             patch('backend.services.file_management_service.logger') as mock_logger:
+            assert _is_pdf_cache_valid("preview/converted/doc_abc12345.pdf") is True
+            mock_stream.close.assert_called_once()
+            mock_logger.warning.assert_called()
 
     def test_returns_false_when_file_not_exist(self):
         """Returns False immediately when the cached file does not exist."""

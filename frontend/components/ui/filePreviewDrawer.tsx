@@ -28,6 +28,21 @@ const TXT_VIRTUAL_OVERSCAN = 10;
 
 const CSV_ROW_HEIGHT = 40;
 
+function normalizeCharsetLabel(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'gbk' || normalized === 'gb2312' || normalized === 'cp936') {
+    return 'gb18030';
+  }
+  return normalized;
+}
+
+function extractCharsetFromContentType(contentType: string | null): string | null {
+  if (!contentType) return null;
+  const match = contentType.match(/charset\s*=\s*([^;\s]+)/i);
+  if (!match?.[1]) return null;
+  return normalizeCharsetLabel(match[1].replace(/^"|"$/g, ''));
+}
+
 function parseCsvLine(line: string): string[] {
   const parsed = Papa.parse<string[]>(line, {
     header: false,
@@ -87,8 +102,32 @@ export function FilePreviewDrawer({
   const isFetchingRef = useRef(false);
   const previewUrlRef = useRef('');
   const textDecoderRef = useRef<TextDecoder | null>(null);
+  const decoderEncodingRef = useRef<string | null>(null);
+  const decoderHasExplicitCharsetRef = useRef(false);
+  const decoderAllowGbFallbackRef = useRef(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const markdownContainerRef = useRef<HTMLDivElement | null>(null);
+  const textFetchSessionRef = useRef(0);
+
+  const resetTextPreviewState = useCallback(() => {
+    setTextContent('');
+    setTxtLines([]);
+    setTxtScrollTop(0);
+    setCsvRows([]);
+    setLoadingMore(false);
+
+    byteOffsetRef.current = 0;
+    totalBytesRef.current = null;
+    remainderRef.current = '';
+    isFetchingRef.current = false;
+    textDecoderRef.current = null;
+    decoderEncodingRef.current = null;
+    decoderHasExplicitCharsetRef.current = false;
+    decoderAllowGbFallbackRef.current = false;
+
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+  }, []);
 
   const getDetectedFileType = useCallback((): DetectedFileType => {
     const mime = providedFileType?.toLowerCase() || '';
@@ -135,7 +174,8 @@ export function FilePreviewDrawer({
   
   const isTooLargeToPreview = !!(fileSize && fileSize > 100 * 1024 * 1024);
 
-  const fetchTextChunk = useCallback(async (url: string, isFirst = false): Promise<void> => {
+  const fetchTextChunk = useCallback(async (url: string, isFirst = false, sessionId?: number): Promise<void> => {
+    const activeSessionId = sessionId ?? textFetchSessionRef.current;
     if (isFetchingRef.current) return;
     if (totalBytesRef.current !== null && byteOffsetRef.current >= totalBytesRef.current) return;
 
@@ -145,7 +185,11 @@ export function FilePreviewDrawer({
     try {
       const start = byteOffsetRef.current;
       const end   = start + CHUNK_SIZE - 1;
-      const resp  = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
+      const resp = await fetch(url, {
+        headers: { Range: `bytes=${start}-${end}` },
+        cache: 'no-store',
+      });
+      if (activeSessionId !== textFetchSessionRef.current) return;
       if (resp.status === 413) {
         setServerTooLarge(true);
         if (isFirst) setLoading(false);
@@ -165,6 +209,7 @@ export function FilePreviewDrawer({
       const contentRange = resp.headers.get('Content-Range');
       let hasMore = false;
       const buf = await resp.arrayBuffer();
+      if (activeSessionId !== textFetchSessionRef.current) return;
       if (contentRange) {
         const m = contentRange.match(/bytes (\d+)-(\d+)\/(\d+)/);
         if (m) {
@@ -180,16 +225,56 @@ export function FilePreviewDrawer({
       }
 
       if (!textDecoderRef.current) {
-        textDecoderRef.current = new TextDecoder('utf-8');
+        const headerCharset = extractCharsetFromContentType(resp.headers.get('Content-Type'));
+        if (headerCharset) {
+          const normalized = normalizeCharsetLabel(headerCharset);
+          const isUtf8 = normalized === 'utf-8' || normalized === 'utf8';
+
+          textDecoderRef.current = isUtf8
+            ? new TextDecoder('utf-8', { fatal: true })
+            : new TextDecoder(normalized);
+          decoderEncodingRef.current = isUtf8 ? 'utf-8' : normalized;
+          decoderHasExplicitCharsetRef.current = true;
+          decoderAllowGbFallbackRef.current = isUtf8;
+        } else {
+          // Start with strict UTF-8; if invalid bytes appear in later chunks, fallback to GB18030.
+          textDecoderRef.current = new TextDecoder('utf-8', { fatal: true });
+          decoderEncodingRef.current = 'utf-8';
+          decoderHasExplicitCharsetRef.current = false;
+          decoderAllowGbFallbackRef.current = true;
+        }
       }
-      let raw = textDecoderRef.current.decode(buf, { stream: hasMore });
-      if (!hasMore) {
-        // Flush pending bytes in decoder state for the final chunk.
-        raw += textDecoderRef.current.decode();
+
+      let raw = '';
+      try {
+        raw = textDecoderRef.current.decode(buf, { stream: hasMore });
+        if (!hasMore) {
+          // Flush pending bytes in decoder state for the final chunk.
+          raw += textDecoderRef.current.decode();
+        }
+      } catch (decodeErr) {
+        const canFallbackToGb18030 =
+          decoderAllowGbFallbackRef.current &&
+          decoderEncodingRef.current === 'utf-8';
+
+        if (!canFallbackToGb18030) {
+          throw decodeErr;
+        }
+
+        log.warn('UTF-8 decode failed for preview stream, fallback to GB18030:', decodeErr);
+        textDecoderRef.current = new TextDecoder('gb18030');
+        decoderEncodingRef.current = 'gb18030';
+        decoderAllowGbFallbackRef.current = false;
+
+        raw = textDecoderRef.current.decode(buf, { stream: hasMore });
+        if (!hasMore) {
+          raw += textDecoderRef.current.decode();
+        }
       }
 
       // Keep incomplete trailing line for next chunk to avoid broken rows.
       let safeText = remainderRef.current + raw;
+      if (activeSessionId !== textFetchSessionRef.current) return;
       if (hasMore && detectedFileType !== 'markdown') {
         const lastNl = safeText.lastIndexOf('\n');
         if (lastNl !== -1) {
@@ -219,6 +304,9 @@ export function FilePreviewDrawer({
       }
       if (!hasMore) observerRef.current?.disconnect();
     } finally {
+      if (activeSessionId !== textFetchSessionRef.current) {
+        return;
+      }
       isFetchingRef.current = false;
       if (isFirst) setLoading(false);
       else setLoadingMore(false);
@@ -257,19 +345,22 @@ export function FilePreviewDrawer({
         previewUrlRef.current = url;
 
         if (['markdown', 'csv', 'text'].includes(detectedFileType)) {
-          await fetchTextChunk(url, true);
+          textFetchSessionRef.current += 1;
+          const sessionId = textFetchSessionRef.current;
+          resetTextPreviewState();
+          await fetchTextChunk(url, true, sessionId);
         } else {
           setLoading(false);
         }
       } catch (err) {
         log.error('Failed to load preview:', err);
-        setError(err instanceof Error ? err.message : t('filePreview.loadError'));
+        setError(err instanceof Error ? err.message : t('filePreview.previewFailed'));
         setLoading(false);
       }
     };
 
     loadPreview();
-  }, [open, objectName, fileName, detectedFileType, t, fetchTextChunk]);
+  }, [open, objectName, fileName, detectedFileType, t, fetchTextChunk, resetTextPreviewState]);
 
   useEffect(() => {
     if (!open) {
@@ -290,12 +381,16 @@ export function FilePreviewDrawer({
       setImageLoadError(false);
       setLoadingMore(false);
       setShowMarkdownToc(false);
+      textFetchSessionRef.current += 1;
       byteOffsetRef.current = 0;
       totalBytesRef.current = null;
       remainderRef.current = '';
       isFetchingRef.current = false;
       previewUrlRef.current = '';
       textDecoderRef.current = null;
+      decoderEncodingRef.current = null;
+      decoderHasExplicitCharsetRef.current = false;
+      decoderAllowGbFallbackRef.current = false;
       observerRef.current?.disconnect();
       observerRef.current = null;
     }
@@ -364,21 +459,15 @@ export function FilePreviewDrawer({
     </div>
   );
 
-  const renderError = () => (
-    <div className="flex flex-col items-center justify-center h-full gap-4">
-      <div className="text-red-500 text-center">
-        <p className="font-medium">{t('filePreview.previewFailed')}</p>
-        <p className="text-sm mt-2">{error}</p>
+  const renderCenteredErrorState = () => (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center max-w-md px-4">
+        <p className="text-red-500 text-sm">{t('filePreview.previewFailed')}</p>
       </div>
-      <Button
-        type="primary"
-        icon={<Download size={16} />}
-        onClick={handleDownload}
-      >
-        {t('filePreview.downloadInstead')}
-      </Button>
     </div>
   );
+
+  const renderError = () => renderCenteredErrorState();
 
   const renderPdfViewer = () => (
     <PdfViewer
@@ -419,17 +508,7 @@ export function FilePreviewDrawer({
       </div>
       <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-gray-100">
         {imageLoadError ? (
-          <div className="text-center">
-            <p className="text-red-500">{t('filePreview.loadError')}</p>
-            <Button
-              type="primary"
-              icon={<Download size={16} />}
-              onClick={handleDownload}
-              className="mt-4"
-            >
-              {t('filePreview.downloadInstead')}
-            </Button>
-          </div>
+          renderCenteredErrorState()
         ) : (
           <img
             src={previewUrl}
@@ -513,11 +592,7 @@ export function FilePreviewDrawer({
 
   const renderCsvViewer = () => {
     if (csvRows.length === 0) {
-      return (
-        <div className="h-full flex items-center justify-center">
-          <p className="text-gray-500">{t('filePreview.loadError')}</p>
-        </div>
-      );
+      return renderCenteredErrorState();
     }
 
     const headerRow = csvRows[0];
@@ -626,16 +701,18 @@ export function FilePreviewDrawer({
         }}
       >
         <div className="font-mono text-sm px-6 py-4">
-          <div style={{ height: topPad }} />
-          {txtLines.slice(renderFrom, renderTo + 1).map((line, i) => (
-            <div
-              key={renderFrom + i}
-              style={{ height: TXT_LINE_HEIGHT, lineHeight: `${TXT_LINE_HEIGHT}px`, whiteSpace: 'pre' }}
-            >
-              {line || '\u00A0'}
-            </div>
-          ))}
-          <div style={{ height: bottomPad }} />
+          <div>
+            <div style={{ height: topPad }} />
+            {txtLines.slice(renderFrom, renderTo + 1).map((line, i) => (
+              <div
+                key={renderFrom + i}
+                style={{ height: TXT_LINE_HEIGHT, lineHeight: `${TXT_LINE_HEIGHT}px`, whiteSpace: 'pre' }}
+              >
+                {line || '\u00A0'}
+              </div>
+            ))}
+            <div style={{ height: bottomPad }} />
+          </div>
         </div>
         {loadingMore && (
           <div className="flex justify-center py-4">
@@ -653,20 +730,8 @@ export function FilePreviewDrawer({
   );
 
   const renderUnsupported = () => (
-    <div className="flex flex-col items-center justify-center h-full gap-4">
-      <div className="text-gray-500 text-center">
-        <p className="font-medium">{t('filePreview.notSupported')}</p>
-        <p className="text-sm mt-2">
-          {t('filePreview.notSupportedDescription', { type: providedFileType || 'unknown' })}
-        </p>
-      </div>
-      <Button
-        type="primary"
-        icon={<Download size={16} />}
-        onClick={handleDownload}
-      >
-        {t('filePreview.downloadFile')}
-      </Button>
+    <div className="flex items-center justify-center h-full">
+      <p className="text-gray-500 text-sm">{t('filePreview.unsupportedSingleLine')}</p>
     </div>
   );
 
@@ -724,8 +789,10 @@ export function FilePreviewDrawer({
         </Button>
       }
     >
-      <div className="flex-1 overflow-hidden">
+      <div className="flex h-full flex-col">
+        <div className="flex-1 overflow-hidden">
         {renderContent()}
+        </div>
       </div>
     </Drawer>
   );

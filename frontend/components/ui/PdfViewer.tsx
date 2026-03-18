@@ -190,7 +190,7 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
 
   const onDocumentLoadError = useCallback((err: Error) => {
     log.error('Failed to load PDF:', err);
-    setError(t('filePreview.loadError'));
+    setError(t('filePreview.previewFailed'));
     setLoading(false);
   }, [t]);
 
@@ -245,15 +245,21 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
     goToPage(pageNumber + 1);
   }, [pageNumber, goToPage]);
 
-  const zoomIn = useCallback(() => {
+  const adjustCustomScale = useCallback((delta: number) => {
+    setCustomScale(prev => {
+      const baseScale = scaleMode === 'custom' ? prev : pageScale;
+      return Math.min(Math.max(baseScale + delta, 0.5), 3.0);
+    });
     setScaleMode('custom');
-    setCustomScale(prev => Math.min(prev + 0.25, 3.0));
-  }, []);
+  }, [scaleMode, pageScale]);
+
+  const zoomIn = useCallback(() => {
+    adjustCustomScale(0.25);
+  }, [adjustCustomScale]);
 
   const zoomOut = useCallback(() => {
-    setScaleMode('custom');
-    setCustomScale(prev => Math.max(prev - 0.25, 0.5));
-  }, []);
+    adjustCustomScale(-0.25);
+  }, [adjustCustomScale]);
 
   const onOutlineItemClick = useCallback((item: OutlineItem) => {
     if (item.pageNumber) {
@@ -344,8 +350,7 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-red-500 text-center">
-          <p className="font-medium">{t('filePreview.previewFailed')}</p>
-          <p className="text-sm mt-2">{error}</p>
+          <p className="text-sm">{error}</p>
         </div>
       </div>
     );

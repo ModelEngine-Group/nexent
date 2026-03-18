@@ -1,6 +1,7 @@
 import React, {
   useState,
   useRef,
+  useCallback,
   forwardRef,
   useImperativeHandle,
   useEffect,
@@ -24,6 +25,7 @@ import {
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
+import { extractObjectNameFromUrl } from "@/services/storageService";
 import { Document } from "@/types/knowledgeBase";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
@@ -226,6 +228,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const { t } = useTranslation();
     const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
+
+    const resolvePreviewObjectName = useCallback((docId: string): string | null => {
+      const candidate = (docId || "").trim();
+      if (!candidate) return null;
+      return extractObjectNameFromUrl(candidate) || null;
+    }, []);
 
     // Determine if user has read-only permission
     const isReadOnlyMode = permission === "READ_ONLY";
@@ -823,14 +831,20 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         <td className={LAYOUT.CELL_PADDING}>
                           <div className="flex gap-2">
                             <button
-                              onClick={() =>
+                              onClick={() => {
+                                const objectName = resolvePreviewObjectName(doc.id);
+                                if (!objectName) {
+                                  message.warning("Preview is unavailable for this file.");
+                                  return;
+                                }
+
                                 setSelectedFile({
-                                  objectName: doc.id, 
+                                  objectName,
                                   fileName: doc.name,
                                   fileType: doc.type,
                                   fileSize: doc.size,
-                                })
-                              }
+                                });
+                              }}
                               className={LAYOUT.ACTION_TEXT}
                               title={t("common.preview")}
                             >

@@ -294,7 +294,15 @@ def _is_pdf_cache_valid(pdf_object_name: str) -> bool:
             logger.warning(f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
             delete_file(pdf_object_name)
             return False
-        return True
+        try:
+            return True
+        finally:
+            close_fn = getattr(stream, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception as e:
+                    logger.warning(f"Failed to close cache probe stream for {pdf_object_name}: {str(e)}")
     return False
 
 
@@ -326,7 +334,7 @@ async def _convert_office_to_cached_pdf(
             # Conversion semaphore is enforced inside the data-process service
             try:
                 # Request conversion: data-process downloads, converts, uploads to temp path, validates
-                async with httpx.AsyncClient(timeout=600.0) as client:
+                async with httpx.AsyncClient(timeout=120.0) as client:
                     response = await client.post(
                         f"{DATA_PROCESS_SERVICE}/tasks/convert_to_pdf",
                         data={
