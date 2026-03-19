@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import dynamic from 'next/dynamic';
 import { Drawer, Spin, Button, Table } from 'antd';
-import { Download, X, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
+import { Download, Minus, Plus, RotateCw, X } from 'lucide-react';
 import Papa from 'papaparse';
 import { FilePreviewProps } from '@/types/chat';
 import { storageService } from '@/services/storageService';
@@ -108,6 +108,8 @@ export function FilePreviewDrawer({
   const observerRef = useRef<IntersectionObserver | null>(null);
   const markdownContainerRef = useRef<HTMLDivElement | null>(null);
   const textFetchSessionRef = useRef(0);
+  const previewStartRef = useRef<number | null>(null);
+  const previewMetricLoggedRef = useRef(false);
 
   const resetTextPreviewState = useCallback(() => {
     setTextContent('');
@@ -164,6 +166,26 @@ export function FilePreviewDrawer({
   }, [providedFileType, fileName]);
 
   const detectedFileType = getDetectedFileType();
+
+  const reportPreviewFirstContent = useCallback((source: string) => {
+    if (previewMetricLoggedRef.current) {
+      return;
+    }
+
+    const start = previewStartRef.current;
+    if (start === null) {
+      return;
+    }
+
+    previewMetricLoggedRef.current = true;
+    const elapsedMs = Math.round((performance.now() - start) * 10) / 10;
+    log.info('File preview first-content time:', {
+      fileName,
+      fileType: detectedFileType,
+      source,
+      elapsedMs,
+    });
+  }, [detectedFileType, fileName]);
 
   const markdownHeadings = useMemo<MarkdownHeading[]>(() => {
     if (detectedFileType !== 'markdown' || !textContent) {
@@ -477,36 +499,8 @@ export function FilePreviewDrawer({
   );
 
   const renderImageViewer = () => (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-center p-2 border-b bg-gray-50">
-        <div className="flex items-center gap-2">
-          <Button
-            type="text"
-            onClick={() => setImageScale(prev => Math.max(prev - 0.25, 0.5))}
-            title={t('filePreview.zoomOut')}
-            disabled={imageScale <= 0.5}
-            icon={<ZoomOut size={20} />}
-          />
-          <span className="text-sm font-medium min-w-[60px] text-center">
-            {Math.round(imageScale * 100)}%
-          </span>
-          <Button
-            type="text"
-            onClick={() => setImageScale(prev => Math.min(prev + 0.25, 3))}
-            title={t('filePreview.zoomIn')}
-            disabled={imageScale >= 3}
-            icon={<ZoomIn size={20} />}
-          />
-          <div className="w-px h-6 bg-gray-300 mx-2" />
-          <Button
-            type="text"
-            onClick={() => setImageRotation(prev => (prev + 90) % 360)}
-            title={t('filePreview.rotate')}
-            icon={<RotateCw size={20} />}
-          />
-        </div>
-      </div>
-      <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-gray-100">
+    <div className="h-full relative bg-gray-100">
+      <div className="h-full overflow-auto flex items-center justify-center p-4 pb-20">
         {imageLoadError ? (
           renderCenteredErrorState()
         ) : (
@@ -522,10 +516,49 @@ export function FilePreviewDrawer({
             }}
             className="select-none"
             draggable={false}
+            onLoad={() => reportPreviewFirstContent('image-onload')}
             onError={() => setImageLoadError(true)}
           />
         )}
       </div>
+
+      {!imageLoadError && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10">
+          <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-full shadow-lg px-3 py-1">
+            <button
+              onClick={() => setImageScale(prev => Math.max(prev - 0.25, 0.5))}
+              disabled={imageScale <= 0.5}
+              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
+              title={t('filePreview.zoomOut')}
+            >
+              <Minus size={16} />
+            </button>
+
+            <span className="px-1 text-sm text-gray-500 select-none min-w-[52px] text-center">
+              {Math.round(imageScale * 100)}%
+            </span>
+
+            <button
+              onClick={() => setImageScale(prev => Math.min(prev + 0.25, 3))}
+              disabled={imageScale >= 3}
+              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
+              title={t('filePreview.zoomIn')}
+            >
+              <Plus size={16} />
+            </button>
+
+            <div className="w-px h-5 bg-gray-200 mx-1" />
+
+            <button
+              onClick={() => setImageRotation(prev => (prev + 90) % 360)}
+              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
+              title={t('filePreview.rotate')}
+            >
+              <RotateCw size={16} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 
