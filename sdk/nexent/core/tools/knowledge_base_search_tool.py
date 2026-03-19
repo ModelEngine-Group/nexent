@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from pydantic import Field
 from smolagents.tools import Tool
-
+from pydantic.fields import FieldInfo
 from ...vector_database.base import VectorDatabaseCore
 from ..models.embedding_model import BaseEmbedding
 from ..models.rerank_model import BaseRerank
@@ -108,7 +108,6 @@ class KnowledgeBaseSearchTool(Tool):
         # Compute effective top_k for initial search:
         # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
         # Note: smolagents Tool may not expand Field defaults, so use getattr with FieldInfo fallback.
-        from pydantic.fields import FieldInfo
         effective_top_k = self.top_k
         is_rerank = self.rerank
         if isinstance(effective_top_k, FieldInfo):
