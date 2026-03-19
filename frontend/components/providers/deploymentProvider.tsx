@@ -16,6 +16,7 @@ interface DeploymentContextType {
   isDeploymentReady: boolean;
   appVersion: string;
   deploymentVersion: string;
+  modelEngineClawEnabled: boolean;
 }
 
 const DeploymentContext = createContext<DeploymentContextType>({
@@ -23,12 +24,14 @@ const DeploymentContext = createContext<DeploymentContextType>({
   isDeploymentReady: false,
   appVersion: APP_VERSION,
   deploymentVersion: "",
+  modelEngineClawEnabled: false,
 });
 
 interface DeploymentVersionResponse {
   deployment_version: string;
   app_version: string;
   status: string;
+  model_engine_claw_enabled?: boolean;
 }
 
 export function DeploymentProvider({ children }: { children: ReactNode }) {
@@ -36,6 +39,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
   const [isDeploymentReady, setIsDeploymentReady] = useState(false);
   const [appVersion, setAppVersion] = useState(APP_VERSION);
   const [deploymentVersion, setDeploymentVersion] = useState("");
+  const [modelEngineClawEnabled, setModelEngineClawEnabled] = useState(false);
 
   useEffect(() => {
     const fetchDeploymentInfo = async () => {
@@ -48,6 +52,9 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         setIsSpeedMode(data.deployment_version === "speed");
         if (data.app_version) {
           setAppVersion(data.app_version);
+        }
+        if (data.model_engine_claw_enabled !== undefined) {
+          setModelEngineClawEnabled(data.model_engine_claw_enabled);
         }
       } catch (error) {
         log.error("Failed to fetch deployment info:", error);
@@ -62,7 +69,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
 
   return (
     <DeploymentContext.Provider
-      value={{ isSpeedMode, isDeploymentReady, appVersion, deploymentVersion }}
+      value={{ isSpeedMode, isDeploymentReady, appVersion, deploymentVersion, modelEngineClawEnabled }}
     >
       {children}
     </DeploymentContext.Provider>

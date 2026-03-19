@@ -18,6 +18,9 @@ import {
   Puzzle,
   Activity,
   Building2,
+  PawPrint,
+  MessageSquare,
+  Monitor,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -47,20 +50,24 @@ interface RouteConfig {
  * All available routes with their metadata
  */
 const ROUTE_CONFIG: RouteConfig[] = [
+  { path: "/clawchat", Icon: MessageSquare, labelKey: "sidebar.mechat", order: 2 },
+  { path: "/clawmonitor", Icon: Activity, labelKey: "sidebar.memonitor", order: 3 },
   { path: "/", Icon: Home, labelKey: "sidebar.homePage", order: 0 },
-  { path: "/chat", Icon: Bot, labelKey: "sidebar.startChat", order: 1 },
-  { path: "/setup", Icon: Zap, labelKey: "sidebar.quickConfig", order: 2 },
-  { path: "/space", Icon: Globe, labelKey: "sidebar.agentSpace", order: 3 },
-  { path: "/market", Icon: ShoppingBag, labelKey: "sidebar.agentMarket", order: 4 },
-  { path: "/agents", Icon: Code, labelKey: "sidebar.agentDev", order: 5 },
-  { path: "/knowledges", Icon: BookOpen, labelKey: "sidebar.knowledgeBase", order: 6 },
-  { path: "/mcp-tools", Icon: Puzzle, labelKey: "sidebar.mcpToolsManagement", order: 7 },
-  { path: "/monitoring", Icon: Activity, labelKey: "sidebar.monitoringManagement", order: 8 },
-  { path: "/models", Icon: Settings, labelKey: "sidebar.modelManagement", order: 9 },
-  { path: "/memory", Icon: Database, labelKey: "sidebar.memoryManagement", order: 10 },
-  { path: "/users", Icon: User, labelKey: "sidebar.userManagement", order: 11 },
-  { path: "/tenant-resources", Icon: Building2, labelKey: "sidebar.tenantResources", order: 12 },
+  { path: "/chat", Icon: Bot, labelKey: "sidebar.startChat", order: 11 },
+  { path: "/setup", Icon: Zap, labelKey: "sidebar.quickConfig", order: 12 },
+  { path: "/space", Icon: Globe, labelKey: "sidebar.agentSpace", order: 13 },
+  { path: "/market", Icon: ShoppingBag, labelKey: "sidebar.agentMarket", order: 14 },
+  { path: "/agents", Icon: Code, labelKey: "sidebar.agentDev", order: 15 },
+  { path: "/knowledges", Icon: BookOpen, labelKey: "sidebar.knowledgeBase", order: 16 },
+  { path: "/mcp-tools", Icon: Puzzle, labelKey: "sidebar.mcpToolsManagement", order: 17 },
+  { path: "/monitoring", Icon: Activity, labelKey: "sidebar.monitoringManagement", order: 18 },
+  { path: "/models", Icon: Settings, labelKey: "sidebar.modelManagement", order: 19 },
+  { path: "/memory", Icon: Database, labelKey: "sidebar.memoryManagement", order: 20 },
+  { path: "/users", Icon: User, labelKey: "sidebar.userManagement", order: 21 },
+  { path: "/tenant-resources", Icon: Building2, labelKey: "sidebar.tenantResources", order: 22 },
 ];
+
+const CLAW_ROUTE_PATHS = ["/", "/clawchat", "/clawmonitor", "/users", "/tenant-resources"];
 
 /**
  * Extract all available route paths from ROUTE_CONFIG
@@ -77,7 +84,7 @@ export function SideNavigation({
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
-  const { isSpeedMode } = useDeployment();
+  const { isSpeedMode, modelEngineClawEnabled } = useDeployment();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -120,15 +127,20 @@ export function SideNavigation({
 
   // Filter and sort routes based on accessibleRoutes from authorization context
   const accessibleMenuItems = useMemo((): RouteConfig[] => {
-    if (!accessibleRoutes || accessibleRoutes.length === 0) {
+    // When modelEngineClawEnabled is true, only show claw routes
+    const effectiveRoutes = modelEngineClawEnabled
+      ? CLAW_ROUTE_PATHS
+      : accessibleRoutes;
+
+    if (!effectiveRoutes || effectiveRoutes.length === 0) {
       // If no accessibleRoutes available, show all routes (fallback)
       return [];
     }
 
     return ROUTE_CONFIG.filter((route) =>
-      accessibleRoutes.includes(route.path)
+      effectiveRoutes.includes(route.path)
     ).sort((a, b) => a.order - b.order);
-  }, [accessibleRoutes]);
+  }, [accessibleRoutes, modelEngineClawEnabled]);
 
   /**
    * Create a menu item from route configuration

@@ -17,13 +17,20 @@ import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import ClawHomepage from "./clawPage";
 
 /**
  * Homepage main content component
  */
 export default function Homepage() {
+  const { isDeploymentReady, modelEngineClawEnabled, isSpeedMode } = useDeployment();
+
+  // Show claw homepage when model_engine_claw_enabled is true
+  if (isDeploymentReady && modelEngineClawEnabled) {
+    return <ClawHomepage />;
+  }
+
   const { t } = useTranslation("common");
-  const { isSpeedMode } = useDeployment();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
   const router = useRouter();

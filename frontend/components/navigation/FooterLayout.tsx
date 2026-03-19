@@ -17,8 +17,8 @@ export function FooterLayout() {
     <div className="py-[9px] px-4 w-full flex items-center justify-between border-t border-b">
       <div className="flex items-center gap-8">
         <span className="text-sm text-slate-900 dark:text-white">
-          {t("page.copyright", { year: new Date().getFullYear() })}
-          <span className="ml-1">· {appVersion || APP_VERSION}</span>
+          
+          <span className="ml-1"> MeClaw 2026 - v1.0.0</span>
         </span>
       </div>
       <div className="flex items-center gap-6">

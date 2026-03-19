@@ -95,6 +95,7 @@ PERMISSION_PRIVATE = "PRIVATE"
 # Deployment Version Configuration
 DEPLOYMENT_VERSION = os.getenv("DEPLOYMENT_VERSION", "speed")
 IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
+MODEL_ENGINE_CLAW_ENABLED = os.getenv("MODEL_ENGINE_CLAW_ENABLED", "false").lower() == "true"
 DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
 DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
 DEFAULT_APP_NAME_ZH = "Nexent 智能体"
