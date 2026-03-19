@@ -597,6 +597,7 @@ export default function McpConfigModal({
         onCancel={actionsLocked ? undefined : onCancel}
         width={1200}
         closable={!actionsLocked}
+        mask={{ closable: !actionsLocked }}
         footer={[
           <Button key="cancel" onClick={onCancel} disabled={actionsLocked}>
             {actionsLocked
