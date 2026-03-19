@@ -1,4 +1,5 @@
 from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -508,3 +509,31 @@ class AgentVersion(TableBase):
     source_version_no = Column(Integer, doc="Source version number. If this version is a rollback, record the source version")
     source_type = Column(String(30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
     status = Column(String(30), default="RELEASED", doc="Version status: RELEASED / DISABLED / ARCHIVED")
+
+
+class UserTokenInfo(TableBase):
+    """
+    User token (AK/SK) information table
+    """
+    __tablename__ = "user_token_info_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    token_id = Column(Integer, Sequence("user_token_info_t_token_id_seq", schema=SCHEMA),
+                      primary_key=True, nullable=False, doc="Token ID, unique primary key")
+    access_key = Column(String(100), nullable=False, doc="Access Key (AK)")
+    user_id = Column(String(100), nullable=False, doc="User ID who owns this token")
+
+
+class UserTokenUsageLog(TableBase):
+    """
+    User token usage log table
+    """
+    __tablename__ = "user_token_usage_log_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    token_usage_id = Column(Integer, Sequence("user_token_usage_log_t_token_usage_id_seq", schema=SCHEMA),
+                            primary_key=True, nullable=False, doc="Token usage log ID, unique primary key")
+    token_id = Column(Integer, nullable=False, doc="Foreign key to user_token_info_t.token_id")
+    call_function_name = Column(String(100), doc="API function name being called")
+    related_id = Column(Integer, doc="Related resource ID (e.g., conversation_id)")
+    meta_data = Column(JSONB, doc="Additional metadata for this usage log entry, stored as JSON")

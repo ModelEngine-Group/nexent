@@ -74,7 +74,7 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     status_code=http_status,
                     content={
-                        "code": int(exc.error_code.value),
+                        "code": exc.error_code.value,  # Keep as string to preserve leading zeros
                         "message": exc.message,
                         "trace_id": trace_id,
                         "details": exc.details if exc.details else None
@@ -88,7 +88,7 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     status_code=exc.status_code,
                     content={
-                        "code": int(error_code.value),
+                        "code": error_code.value,  # Keep as string to preserve leading zeros
                         "message": exc.detail,
                         "trace_id": trace_id
                     }
@@ -141,7 +141,7 @@ def create_error_response(
     return JSONResponse(
         status_code=status,
         content={
-            "code": int(error_code.value),
+            "code": error_code.value,  # Keep as string to preserve leading zeros
             "message": message or ErrorMessage.get_message(error_code),
             "trace_id": trace_id,
             "details": details

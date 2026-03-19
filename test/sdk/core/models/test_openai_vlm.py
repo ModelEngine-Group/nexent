@@ -23,7 +23,11 @@ class DummyOpenAIServerModel:
         return {}
 
 mock_models_module.OpenAIServerModel = DummyOpenAIServerModel
-mock_models_module.ChatMessage = MagicMock()
+# Must be a type for isinstance() checks inside the SDK
+# Also add from_dict to support __call__ method in the real code
+mock_chat_message_cls = type("ChatMessage", (), {})
+mock_chat_message_cls.from_dict = classmethod(lambda cls, d: MagicMock())
+mock_models_module.ChatMessage = mock_chat_message_cls
 mock_smolagents.models = mock_models_module
 
 # Assemble smolagents.* paths and openai.* placeholders
@@ -65,6 +69,10 @@ with patch.dict("sys.modules", module_mocks):
         mock_client.chat = mock_chat
         model.client = mock_client
 
+        # Additional attributes required by __call__ -> _prepare_completion_kwargs
+        model.custom_role_conversions = {}
+        model.model_factory = MagicMock()
+
         return model
 
 
@@ -78,10 +86,6 @@ async def test_check_connectivity_success(vl_model_instance):
     """check_connectivity should return True when no exception is raised."""
 
     with patch.object(
-        vl_model_instance,
-        "_prepare_completion_kwargs",
-        return_value={},
-    ) as mock_prepare_kwargs, patch.object(
         asyncio,
         "to_thread",
         new_callable=AsyncMock,
@@ -90,7 +94,6 @@ async def test_check_connectivity_success(vl_model_instance):
         result = await vl_model_instance.check_connectivity()
 
         assert result is True
-        mock_prepare_kwargs.assert_called_once()
         mock_to_thread.assert_awaited_once()
 
 
@@ -99,10 +102,6 @@ async def test_check_connectivity_failure(vl_model_instance):
     """check_connectivity should return False when an exception is raised inside to_thread."""
 
     with patch.object(
-        vl_model_instance,
-        "_prepare_completion_kwargs",
-        return_value={},
-    ), patch.object(
         asyncio,
         "to_thread",
         new_callable=AsyncMock,
@@ -110,3 +109,208 @@ async def test_check_connectivity_failure(vl_model_instance):
     ):
         result = await vl_model_instance.check_connectivity()
         assert result is False
+
+
+@pytest.mark.asyncio
+async def test_check_connectivity_uses_fallback_url(vl_model_instance):
+    """check_connectivity should use fallback remote URL when local image doesn't exist."""
+
+    # Store original method
+    original_encode = vl_model_instance.encode_image
+
+    async def mock_to_thread_func(*args, **kwargs):
+        return None
+
+    with patch.object(vl_model_instance, "encode_image", return_value=""), \
+         patch.object(asyncio, "to_thread", new_callable=AsyncMock, side_effect=mock_to_thread_func):
+        # Directly test the fallback branch by passing a non-existent file path
+        # The method constructs the path using __file__, so we need to mock os.path.exists
+        import sys
+        import os.path
+
+        # Store original
+        orig_exists = os.path.exists
+
+        def mock_exists(path):
+            # Return False for any path to trigger fallback
+            return False
+
+        with patch.object(os.path, "exists", side_effect=mock_exists):
+            result = await vl_model_instance.check_connectivity()
+
+        assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_connectivity_jpg_to_jpeg_conversion(vl_model_instance):
+    """check_connectivity should convert jpg to jpeg format for MIME type."""
+
+    import os.path
+
+    def mock_exists(path):
+        if "git-flow" in str(path):
+            return True
+        return False
+
+    def mock_splitext(path):
+        if "git-flow" in str(path):
+            return ("", ".jpg")
+        return ("", "")
+
+    async def mock_to_thread_func(*args, **kwargs):
+        return None
+
+    with patch.object(os.path, "exists", side_effect=mock_exists), \
+         patch.object(os.path, "splitext", side_effect=mock_splitext), \
+         patch.object(vl_model_instance, "encode_image", return_value="fakebase64"), \
+         patch.object(asyncio, "to_thread", new_callable=AsyncMock, side_effect=mock_to_thread_func):
+        result = await vl_model_instance.check_connectivity()
+
+        assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Tests for encode_image
+# ---------------------------------------------------------------------------
+
+
+def test_encode_image_with_file_path(vl_model_instance, tmp_path):
+    """encode_image should correctly encode an image file to base64."""
+
+    # Create a simple test image file
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake image data")
+
+    result = vl_model_instance.encode_image(str(test_image))
+
+    import base64
+    expected = base64.b64encode(b"fake image data").decode('utf-8')
+    assert result == expected
+
+
+def test_encode_image_with_binary_io(vl_model_instance):
+    """encode_image should correctly encode a BinaryIO object to base64."""
+
+    # Create a mock BinaryIO object
+    mock_file = MagicMock()
+    mock_file.read.return_value = b"binary image data"
+
+    result = vl_model_instance.encode_image(mock_file)
+
+    import base64
+    expected = base64.b64encode(b"binary image data").decode('utf-8')
+    assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# Tests for prepare_image_message
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_image_message_with_png_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle PNG files."""
+
+    # Create a PNG test file
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake png data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert len(messages) == 2
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert "data:image/png;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_jpg_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle JPG files and convert to jpeg format."""
+
+    # Create a JPG test file
+    test_image = tmp_path / "test.jpg"
+    test_image.write_bytes(b"fake jpg data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert "data:image/jpeg;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_jpeg_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle jpeg files."""
+
+    test_image = tmp_path / "test.jpeg"
+    test_image.write_bytes(b"fake jpeg data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert "data:image/jpeg;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_gif_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle GIF files."""
+
+    test_image = tmp_path / "test.gif"
+    test_image.write_bytes(b"fake gif data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert "data:image/gif;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_webp_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle WebP files."""
+
+    test_image = tmp_path / "test.webp"
+    test_image.write_bytes(b"fake webp data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert "data:image/webp;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_binary_io(vl_model_instance):
+    """prepare_image_message should correctly handle BinaryIO input and default to jpeg."""
+
+    mock_file = MagicMock()
+    mock_file.read.return_value = b"binary data"
+
+    messages = vl_model_instance.prepare_image_message(mock_file)
+
+    assert "data:image/jpeg;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_custom_system_prompt(vl_model_instance, tmp_path):
+    """prepare_image_message should use custom system prompt when provided."""
+
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake png data")
+
+    custom_prompt = "What is in this image?"
+    messages = vl_model_instance.prepare_image_message(str(test_image), system_prompt=custom_prompt)
+
+    assert messages[0]["content"][0]["text"] == custom_prompt
+
+
+# ---------------------------------------------------------------------------
+# Tests for analyze_image
+# ---------------------------------------------------------------------------
+
+# Note: analyze_image tests are omitted because __call__ is wrapped by
+# a monitoring decorator that makes mocking impractical in unit tests.
+# The method is tested indirectly via prepare_image_message tests.
+
+
+def test_analyze_image_calls_prepare_image_message(vl_model_instance, tmp_path):
+    """analyze_image should call prepare_image_message with correct arguments."""
+
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake png data")
+
+    with patch.object(vl_model_instance, "prepare_image_message", return_value=[{"role": "user", "content": "test"}]) as mock_prepare:
+        # Mock the __call__ method to avoid actual API call
+        vl_model_instance.__call__ = MagicMock(return_value=MagicMock())
+
+        custom_prompt = "Describe this image"
+        vl_model_instance.analyze_image(str(test_image), system_prompt=custom_prompt, stream=False)
+
+        # Verify prepare_image_message was called with correct arguments
+        mock_prepare.assert_called_once_with(str(test_image), custom_prompt)

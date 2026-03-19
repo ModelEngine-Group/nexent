@@ -17,6 +17,8 @@ export const API_ENDPOINTS = {
     currentUserInfo: `${API_BASE_URL}/user/current_user_info`,
     serviceHealth: `${API_BASE_URL}/user/service_health`,
     revoke: `${API_BASE_URL}/user/revoke`,
+    tokens: `${API_BASE_URL}/user/tokens`,
+    deleteToken: (tokenId: number) => `${API_BASE_URL}/user/tokens/${tokenId}`,
   },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
@@ -183,6 +185,10 @@ export const API_ENDPOINTS = {
   },
   dify: {
     datasets: `${API_BASE_URL}/dify/datasets`,
+  },
+  idata: {
+    knowledgeSpaces: `${API_BASE_URL}/idata/knowledge-space`,
+    datasets: `${API_BASE_URL}/idata/datasets`,
   },
   datamate: {
     syncDatamateKnowledges: `${API_BASE_URL}/datamate/sync_datamate_knowledges`,

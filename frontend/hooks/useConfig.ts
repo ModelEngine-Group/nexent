@@ -26,6 +26,7 @@ const defaultConfig: GlobalConfig = {
     appName: "",
     appDescription: "",
     iconType: ICON_TYPES.PRESET,
+    iconKey: "search",
     customIconUrl: "",
     avatarUri: "",
     modelEngineEnabled: false,
@@ -112,12 +113,16 @@ function transformModelEntry(
  * Transform backend config format to frontend format
  */
 function transformBackendToFrontend(backendConfig: any): GlobalConfig {
+  // Get iconKey from backend - if not available, use default "search"
+  const iconKey = backendConfig.app?.icon?.iconKey || "search";
+
   const app: AppConfig = backendConfig.app
     ? {
         appName: backendConfig.app.name || "",
         appDescription: backendConfig.app.description || "",
         iconType:
           (backendConfig.app.icon?.type as "preset" | "custom") || "preset",
+        iconKey: iconKey,
         customIconUrl: backendConfig.app.icon?.customUrl || null,
         avatarUri: backendConfig.app.icon?.avatarUri || null,
         modelEngineEnabled: backendConfig.app.modelEngineEnabled ?? false,
@@ -258,6 +263,15 @@ export function useConfig() {
 
   const config: GlobalConfig = (query.data as GlobalConfig | undefined) ?? defaultConfig;
 
+  // Whether config has selected a VLM model
+  const isVlmAvailable = !!(config?.models?.vlm?.modelName || config?.models?.vlm?.displayName);
+
+  // Whether config has selected an Embedding model
+  const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);
+
+  // Default LLM model name from config (modelName or displayName)
+  const defaultLlmModelName = config?.models?.llm?.modelName || config?.models?.llm?.displayName || "";
+
   const updateAppConfig = useCallback(
     (partial: Partial<AppConfig>) => {
       if (!config) return;
@@ -332,6 +346,9 @@ export function useConfig() {
     config,
     appConfig: config?.app,
     modelConfig: config?.models,
+    isVlmAvailable,
+    isEmbeddingAvailable,
+    defaultLlmModelName,
     updateAppConfig,
     updateModelConfig,
     updateConfig,

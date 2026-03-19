@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Globe,
@@ -1105,14 +1105,15 @@ const messageHandlers: MessageHandler[] = [
 interface TaskWindowProps {
   messages: TaskMessageType[];
   isStreaming?: boolean;
+  defaultExpanded?: boolean;
 }
 
-export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
+function TaskWindowInner({ messages, isStreaming = false, defaultExpanded = true }: TaskWindowProps) {
   const { t } = useTranslation("common");
   const { appConfig } = useConfig();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [isExpanded, setIsExpanded] = useState(true); // default expand task details interface
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded); // default expand task details interface
   const [contentHeight, setContentHeight] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -1145,6 +1146,20 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
       setContentHeight(height);
     }
   }, [isExpanded, groupedMessages, messages]);
+
+  // Force recalculate content height after mount for cached error messages
+  useEffect(() => {
+    if (isExpanded && contentHeight === 0) {
+      // Delay to ensure DOM is rendered
+      const timer = setTimeout(() => {
+        if (contentRef.current) {
+          const height = contentRef.current.scrollHeight;
+          setContentHeight(height);
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isExpanded, contentHeight]);
 
   // Dynamic threshold calculation based on content growth
   const calculateDynamicThreshold = (baseThreshold: number) => {
@@ -1576,3 +1591,18 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
     </>
   );
 }
+
+function areEqualTaskWindow(prev: TaskWindowProps, next: TaskWindowProps): boolean {
+  if (prev.isStreaming !== next.isStreaming) return false;
+  if (prev.messages.length !== next.messages.length) return false;
+  // During streaming the last message grows in content without the array length changing.
+  if (prev.messages.length > 0) {
+    const prevLast = prev.messages[prev.messages.length - 1];
+    const nextLast = next.messages[next.messages.length - 1];
+    if (prevLast.id !== nextLast.id || prevLast.content !== nextLast.content) return false;
+  }
+  // defaultExpanded is only meaningful on initial mount; exclude from equality check.
+  return true;
+}
+
+export const TaskWindow = React.memo(TaskWindowInner, areEqualTaskWindow);

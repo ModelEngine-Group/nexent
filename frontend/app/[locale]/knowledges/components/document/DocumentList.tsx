@@ -276,6 +276,16 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     }, [isCreatingMode, tenantId]);
 
+    // Clear group IDs when permission is set to PRIVATE
+    React.useEffect(() => {
+      if (ingroupPermission === "PRIVATE" && onSelectedGroupIdsChange) {
+        onSelectedGroupIdsChange([]);
+      }
+    }, [ingroupPermission, onSelectedGroupIdsChange]);
+
+    // Check if group select should be disabled (when permission is PRIVATE)
+    const isGroupSelectDisabled = ingroupPermission === "PRIVATE";
+
     // Load available models when showing detail
     useEffect(() => {
       const loadModels = async () => {
@@ -283,7 +293,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           setIsLoadingModels(true);
           try {
             const models = await modelService.getLLMModels();
-            setAvailableModels(models);
+            setAvailableModels(models.filter(m => m.connect_status === "available"));
 
             // Determine initial selection order:
             // 1) Knowledge base's own configured model (server-side config)
@@ -472,13 +482,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                     <Can permission="kb.groups:update">
                       <Select
                         mode="multiple"
-                        value={selectedGroupIds}
+                        value={isGroupSelectDisabled ? [] : selectedGroupIds}
                         onChange={onSelectedGroupIdsChange}
                         style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={t("knowledgeBase.create.permission.groupPlaceholder")}
                         options={groupOptions}
                         maxTagCount={2}
                         allowClear
+                        disabled={isGroupSelectDisabled}
                       />
                     </Can>
                     {/* Group permission dropdown - second position */}

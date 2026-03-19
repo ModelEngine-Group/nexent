@@ -30,6 +30,7 @@ export const generatePromptStream = async (
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
+    let hasError = false;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -44,6 +45,10 @@ export const generatePromptStream = async (
             const json = JSON.parse(line.replace('data: ', ''));
             if (json.success) {
               onData(json.data);
+            } else if (json.success === false && json.error) {
+              // Handle error response from backend
+              hasError = true;
+              if (onError) onError(json.error);
             }
           } catch (e) {
             if (onError) onError(e);
@@ -51,7 +56,8 @@ export const generatePromptStream = async (
         }
       }
     }
-    if (onComplete) onComplete();
+    // Only call onComplete if no error occurred
+    if (!hasError && onComplete) onComplete();
   } catch (err) {
     if (onError) onError(err);
     if (onComplete) onComplete();

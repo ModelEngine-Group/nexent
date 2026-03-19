@@ -715,3 +715,23 @@ Happy to find a easy-to-use AI Agent Platform
 ::: info sisyphus0x - 2026-03-04
 对多智能体编排和协同工作很感兴趣，学习一下
 :::
+
+::: info hmh_mike - 2026-03-05
+感觉很有意思，试用一下看看对工作有没有帮助
+:::
+
+::: tip GZX- 2026-03-08
+感谢 Nexent 期待与Nexent一起进步。
+:::
+
+::: info xingzhewujiang - 2026-03-09
+偶然发现Nexent是一个开源的零代码智能体自动生成平台，非常值的研究与尝试，祝福Nexent让零代码走向AI全球。
+:::
+
+::: info ichigoichie - 2026-03-10
+被 Nexent 官网吸引，希望深入了解产品并应用于工作场景，提升工作效率。
+:::
+
+::: info BigBen0724 - 2026-03-16
+在体验一众AI工具后，被 Nexent 产品所吸引，希望这一智能体开发平台能赋能我的工作生活！
+:::

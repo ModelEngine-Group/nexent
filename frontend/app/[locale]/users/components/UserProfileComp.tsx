@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Button,
   Typography,
@@ -25,6 +25,9 @@ import {
   Edit,
   Key,
   ChevronRight,
+  KeySquare,
+  KeyRound,
+  Copy,
 } from "lucide-react";
 import { USER_ROLES } from "@/const/modelConfig";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -32,6 +35,12 @@ import { useAuthenticationContext } from "@/components/providers/AuthenticationP
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useMemo } from "react";
 import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
+import log from "@/lib/logger";
+import {
+  getUserTokens,
+  deleteUserToken,
+  createUserToken,
+} from "@/services/tokenService";
 
 /**
  * UserProfileComp - User profile and account settings component
@@ -77,6 +86,12 @@ export default function UserProfileComp() {
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
+  // AK/SK state
+  const [akInfo, setAkInfo] = useState<string | null>(null);
+  const [existingTokenIds, setExistingTokenIds] = useState<number[]>([]);
+  const [isLoadingAkSk, setIsLoadingAkSk] = useState(false);
+  const [isGeneratingAkSk, setIsGeneratingAkSk] = useState(false);
+
   // Form instances
   const [editForm] = Form.useForm();
   const [passwordForm] = Form.useForm();
@@ -118,6 +133,58 @@ export default function UserProfileComp() {
       window.location.href = "/";
     } catch (error) {
       antdMessage.error(t("auth.revokeFailed"));
+    }
+  };
+
+  // Fetch AK/SK info on mount
+  useEffect(() => {
+    const fetchAkSkInfo = async () => {
+      if (!user?.id) return;
+      setIsLoadingAkSk(true);
+      try {
+        const tokens = await getUserTokens(user.id);
+        if (tokens.length > 0) {
+          setAkInfo(tokens[0].access_key);
+          setExistingTokenIds(tokens.map((t) => t.token_id));
+        }
+      } catch (error) {
+        log.error("Failed to fetch AK/SK info:", error);
+      } finally {
+        setIsLoadingAkSk(false);
+      }
+    };
+
+    fetchAkSkInfo();
+  }, [user?.id]);
+
+  // Handle generate AK/SK: delete existing tokens first, then create a new one
+  const handleGenerateAkSk = async () => {
+    setIsGeneratingAkSk(true);
+    try {
+      for (const tokenId of existingTokenIds) {
+        await deleteUserToken(tokenId);
+      }
+
+      const newToken = await createUserToken();
+      setAkInfo(newToken.access_key);
+      setExistingTokenIds([newToken.token_id]);
+      antdMessage.success(t("profile.generateAkSkSuccess") || "Access key generated successfully");
+    } catch (error) {
+      antdMessage.error(t("profile.generateAkSkFailed") || "Failed to generate access key");
+    } finally {
+      setIsGeneratingAkSk(false);
+    }
+  };
+
+  // Handle copy AK to clipboard
+  const handleCopyAk = async () => {
+    if (akInfo) {
+      try {
+        await navigator.clipboard.writeText(akInfo);
+        antdMessage.success(t("profile.copyAkSuccess") || "Access key copied to clipboard");
+      } catch (error) {
+        antdMessage.error(t("profile.copyAkFailed") || "Failed to copy access key");
+      }
     }
   };
 
@@ -272,7 +339,7 @@ export default function UserProfileComp() {
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
-                      <Key className="h-4 w-4 text-green-500" />
+                      <KeyRound className="h-4 w-4 text-green-500" />
                     </div>
                     <div>
                       <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -281,6 +348,86 @@ export default function UserProfileComp() {
                       <div className="text-xs text-gray-500 dark:text-gray-400">
                         {t("profile.passwordDesc") || "Update your password"}
                       </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                </div>
+
+                {/* Generate Access Token Option */}
+                <div
+                  className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+                  onClick={() => {
+                    if (akInfo) {
+                      Modal.confirm({
+                        title: t("profile.generateAkSkConfirmTitle") || "Generate New Access Key",
+                        content: t("profile.generateAkSkConfirmContent") || "You already have an access key. Generating a new one will overwrite the existing key. Continue?",
+                        okText: t("common.confirm") || "Confirm",
+                        cancelText: t("common.cancel") || "Cancel",
+                        onOk: handleGenerateAkSk,
+                        okButtonProps: { loading: isGeneratingAkSk },
+                      });
+                    } else {
+                      handleGenerateAkSk();
+                    }
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center">
+                      <KeySquare className="h-4 w-4 text-purple-500" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {t("profile.generateAkSk") || "Generate Access Token"}
+                      </div>
+                      {akInfo ? (
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-mono text-purple-600 dark:text-purple-400">
+                            {akInfo}
+                          </span>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<Copy className="h-3 w-3" />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopyAk();
+                            }}
+                            className="text-gray-400 hover:text-purple-500 p-0 h-auto"
+                          />
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<Trash2 className="h-3 w-3" />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              Modal.confirm({
+                                title: t("profile.deleteAkSkConfirmTitle") || "Delete Access Key",
+                                content: t("profile.deleteAkSkConfirmContent") || "Are you sure you want to delete this access key? This action cannot be undone.",
+                                okText: t("common.confirm") || "Confirm",
+                                cancelText: t("common.cancel") || "Cancel",
+                                okButtonProps: { danger: true },
+                                onOk: async () => {
+                                  try {
+                                    for (const tokenId of existingTokenIds) {
+                                      await deleteUserToken(tokenId);
+                                    }
+                                    setAkInfo(null);
+                                    setExistingTokenIds([]);
+                                    antdMessage.success(t("profile.deleteAkSkSuccess") || "Access key deleted successfully");
+                                  } catch (error) {
+                                    antdMessage.error(t("profile.deleteAkSkFailed") || "Failed to delete access key");
+                                  }
+                                },
+                              });
+                            }}
+                            className="text-gray-400 hover:text-red-500 p-0 h-auto"
+                          />
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {t("profile.generateAkSkDesc") || "Create or regenerate your API access key"}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <ChevronRight className="h-4 w-4 text-gray-400" />

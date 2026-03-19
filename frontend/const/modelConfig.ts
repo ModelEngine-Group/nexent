@@ -16,6 +16,8 @@ export const MODEL_SOURCES = {
   MODELENGINE: "modelengine",
   OPENAI_API_COMPATIBLE: "OpenAI-API-Compatible",
   CUSTOM: "custom",
+  DASHSCOPE: "dashscope",
+  TOKENPONY: "tokenpony",
 } as const;
 
 // Model status constants
@@ -40,6 +42,8 @@ export const MODEL_PROVIDER_KEYS = [
   "jina",
   "deepseek",
   "aliyuncs",
+  "tokenpony",
+  "dashscope",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -52,6 +56,8 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   jina: "jina",
   deepseek: "deepseek",
   aliyuncs: "aliyuncs",
+  tokenpony: "tokenpony",
+  dashscope: "dashscope",
 };
 
 // Icon filenames for providers
@@ -62,6 +68,8 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   jina: "/jina.png",
   deepseek: "/deepseek.png",
   aliyuncs: "/aliyuncs.png",
+  dashscope:"/aliyuncs.png",
+  tokenpony: "/tokenpony.png",
 };
 
 export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";
@@ -76,7 +84,9 @@ export const PROVIDER_LINKS: Record<string, string> = {
   deepseek: "https://platform.deepseek.com/",
   qwen: "https://bailian.console.aliyun.com/",
   jina: "https://jina.ai/",
-  baai: "https://www.baai.ac.cn/"
+  baai: "https://www.baai.ac.cn/",
+  dashscope: "https://dashscope.aliyun.com/",
+  tokenpony: "https://www.tokenpony.cn/"
 };
 
 // User role constants

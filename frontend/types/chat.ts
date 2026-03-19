@@ -262,27 +262,6 @@ export interface SettingsMenuItem {
   onClick: () => void;
 }
 
-// Chat sidebar props type
-export interface ChatSidebarProps {
-  conversationList: ConversationListItem[];
-  selectedConversationId: number | null;
-  openDropdownId: string | null;
-  streamingConversations: Set<number>;
-  completedConversations: Set<number>;
-  onNewConversation: () => void;
-  onDialogClick: (dialog: ConversationListItem) => void;
-  onRename: (dialogId: number, title: string) => void;
-  onDelete: (dialogId: number) => void;
-  onSettingsClick: () => void;
-  settingsMenuItems?: SettingsMenuItem[];
-  onDropdownOpenChange: (open: boolean, id: string | null) => void;
-  onToggleSidebar: () => void;
-  expanded: boolean;
-  userEmail: string | undefined;
-  userAvatarUrl: string | undefined;
-  userRole: string | undefined;
-}
-
 // Image item type for chat right panel
 export interface ImageItem {
   base64Data: string;
