@@ -1,5 +1,3 @@
-"use client";
-
 import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
 import {
   ApiMessage,
@@ -11,17 +9,14 @@ import {
 } from "@/types/chat";
 import log from "@/lib/logger";
 
-// function: process the user break tag
+// Replace <user_break> tag with the localized natural language string
 const processSpecialTag = (content: string, t: any): string => {
   if (!content || typeof content !== "string") {
     return content;
   }
 
-  // check if the content is equal to <user_break> tag
   if (content == "<user_break>") {
-    // replace the content with the corresponding natural language according to the current language environment
-    const userBreakMessage = t("chatStreamHandler.userInterrupted");
-    return userBreakMessage;
+    return t("chatStreamHandler.userInterrupted");
   }
 
   return content;
@@ -70,13 +65,11 @@ export function extractAssistantMsgFromResponse(
     dialog_msg.message.forEach((msg: ApiMessageItem) => {
       switch (msg.type) {
         case chatConfig.messageTypes.FINAL_ANSWER: {
-          // process the final_answer content and identify the user break tag
           finalAnswer += processSpecialTag(msg.content, t);
           break;
         }
 
         case chatConfig.messageTypes.STEP_COUNT: {
-          // create a new step
           steps.push({
             id: `step-${steps.length + 1}`,
             title: msg.content.trim(),
@@ -112,11 +105,9 @@ export function extractAssistantMsgFromResponse(
         case chatConfig.messageTypes.EXECUTION_LOGS: {
           const currentStep = steps[steps.length - 1];
           if (currentStep) {
-            // create a new execution output
             const contentId = `execution-${Date.now()}-${Math.random()
               .toString(36)
               .substring(2, 7)}`;
-
             currentStep.contents.push({
               id: contentId,
               type: "execution",
@@ -131,7 +122,6 @@ export function extractAssistantMsgFromResponse(
         case chatConfig.messageTypes.ERROR: {
           const currentStep = steps[steps.length - 1];
           if (currentStep) {
-            // create the error content
             const contentId = `error-${Date.now()}-${Math.random()
               .toString(36)
               .substring(2, 7)}`;
@@ -150,7 +140,6 @@ export function extractAssistantMsgFromResponse(
           const currentStep = steps[steps.length - 1];
           if (currentStep) {
             try {
-              // parse placeholder content to get unit_id
               const placeholderData = JSON.parse(msg.content);
               const unitId = placeholderData.unit_id;
 
@@ -159,14 +148,10 @@ export function extractAssistantMsgFromResponse(
                 dialog_msg.search_unit_id &&
                 dialog_msg.search_unit_id[unitId.toString()]
               ) {
-                // get the corresponding search results according to unit_id
                 const unitSearchResults =
                   dialog_msg.search_unit_id[unitId.toString()];
-
-                // create the JSON string of search content
                 const searchContent = JSON.stringify(unitSearchResults);
 
-                // add the search content as a search_content type message
                 const contentId = `search-content-${Date.now()}-${Math.random()
                   .toString(36)
                   .substring(2, 7)}`;
@@ -196,7 +181,6 @@ export function extractAssistantMsgFromResponse(
         case chatConfig.messageTypes.CARD: {
           const currentStep = steps[steps.length - 1];
           if (currentStep) {
-            // create the card content
             const contentId = `card-${Date.now()}-${Math.random()
               .toString(36)
               .substring(2, 7)}`;
@@ -214,7 +198,6 @@ export function extractAssistantMsgFromResponse(
         case chatConfig.messageTypes.TOOL: {
           const currentStep = steps[steps.length - 1];
           if (currentStep) {
-            // create the tool call content
             const contentId = `tool-${Date.now()}-${Math.random()
               .toString(36)
               .substring(2, 7)}`;
@@ -230,13 +213,11 @@ export function extractAssistantMsgFromResponse(
         }
 
         default:
-          // handle other types of messages
           break;
       }
     });
   }
 
-  // create the formatted assistant message
   const formattedAssistantMsg: ChatMessageType = {
     id: `assistant-${index}-${Date.now()}`,
     role: MESSAGE_ROLES.ASSISTANT,
@@ -274,14 +255,12 @@ export function extractUserMsgFromResponse(
     userContent = msgObj.content || "";
   }
 
-  // handle the minio_files of the user message
   let userAttachments: MinioFileItem[] = [];
   if (
     dialog_msg.minio_files &&
     Array.isArray(dialog_msg.minio_files) &&
     dialog_msg.minio_files.length > 0
   ) {
-    // handle the minio_files
     userAttachments = dialog_msg.minio_files.map((item) => {
       return {
         type: item.type || "",
@@ -299,11 +278,10 @@ export function extractUserMsgFromResponse(
     role: MESSAGE_ROLES.USER,
     message_id: dialog_msg.message_id,
     content: userContent,
-    opinion_flag: dialog_msg.opinion_flag, // user message does not have the like/dislike status
+    opinion_flag: dialog_msg.opinion_flag,
     timestamp: new Date(create_time),
     showRawContent: true,
     isComplete: true,
-    // add the attachments field, no longer use minio_files
     attachments: userAttachments.length > 0 ? userAttachments : undefined,
   };
   return formattedUserMsg;
