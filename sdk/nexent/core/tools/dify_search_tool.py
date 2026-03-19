@@ -8,6 +8,7 @@ from smolagents.tools import Tool
 
 from ..models.rerank_model import BaseRerank
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
 
@@ -135,9 +136,17 @@ class DifySearchTool(Tool):
         search_top_k = self.top_k
         search_method = self.search_method
 
+        # Compute effective top_k for initial search:
+        # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
+        effective_top_k = (
+            search_top_k * RERANK_OVERSEARCH_MULTIPLIER
+            if self.rerank else search_top_k
+        )
+
         # Log the search parameters
         logger.info(
-            f"DifySearchTool called with query: '{query}', top_k: {search_top_k}, search_method: '{search_method}'"
+            f"DifySearchTool called with query: '{query}', top_k: {search_top_k}, "
+            f"effective_top_k: {effective_top_k}, search_method: '{search_method}'"
         )
 
         # Perform searches across all datasets
@@ -150,7 +159,7 @@ class DifySearchTool(Tool):
             all_search_results = []
             for dataset_id in self.dataset_ids:
                 search_results_data = self._search_dify_knowledge_base(
-                    query, search_top_k, search_method, dataset_id)
+                    query, effective_top_k, search_method, dataset_id)
                 search_results = search_results_data.get("records", [])
                 # Add dataset_id to each result for URL generation
                 for result in search_results:
@@ -180,7 +189,7 @@ class DifySearchTool(Tool):
                             i: all_search_results[i] for i in range(len(all_search_results))
                         }
                         reordered = []
-                        for reranked_item in reranked_results:
+                        for reranked_item in reranked_results[: search_top_k]:
                             orig_idx = reranked_item.get("index")
                             if orig_idx is None or orig_idx not in original_results_map:
                                 continue
@@ -193,7 +202,8 @@ class DifySearchTool(Tool):
                         if reordered:
                             all_search_results = reordered
                             logger.info(
-                                f"Reranking applied, reordered {len(all_search_results)} results"
+                                f"Reranking applied: selected top {search_top_k} from "
+                                f"{len(documents)} candidates"
                             )
                 except Exception as e:
                     logger.warning(

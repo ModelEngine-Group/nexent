@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from ...vector_database import DataMateCore
 from ..models.rerank_model import BaseRerank
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
 # Get logger instance
@@ -193,13 +194,20 @@ class DataMateSearchTool(Tool):
             if len(knowledge_base_ids) == 0:
                 return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
+            # Compute effective top_k for initial search:
+            # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
+            effective_top_k = (
+                self.top_k * RERANK_OVERSEARCH_MULTIPLIER
+                if self.rerank else self.top_k
+            )
+
             # Step 2: Retrieve knowledge base content using DataMateCore hybrid search
             kb_search_results = []
             for knowledge_base_id in knowledge_base_ids:
                 kb_search = self.datamate_core.hybrid_search(
                     query_text=query,
                     index_names=[knowledge_base_id],
-                    top_k=self.top_k,
+                    top_k=effective_top_k,
                     weight_accurate=self.threshold,
                 )
                 if not kb_search:
@@ -226,7 +234,7 @@ class DataMateSearchTool(Tool):
                             i: kb_search_results[i] for i in range(len(kb_search_results))
                         }
                         reordered = []
-                        for reranked_item in reranked_results:
+                        for reranked_item in reranked_results[: self.top_k]:
                             orig_idx = reranked_item.get("index")
                             if orig_idx is None or orig_idx not in original_results_map:
                                 continue
@@ -241,7 +249,8 @@ class DataMateSearchTool(Tool):
                         if reordered:
                             kb_search_results = reordered
                             logger.info(
-                                f"Reranking applied, reordered {len(kb_search_results)} results"
+                                f"Reranking applied: selected top {self.top_k} from "
+                                f"{len(documents)} candidates"
                             )
                 except Exception as e:
                     logger.warning(

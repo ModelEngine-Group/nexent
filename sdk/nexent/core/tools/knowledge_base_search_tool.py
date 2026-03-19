@@ -9,6 +9,7 @@ from ...vector_database.base import VectorDatabaseCore
 from ..models.embedding_model import BaseEmbedding
 from ..models.rerank_model import BaseRerank
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
 
@@ -104,18 +105,25 @@ class KnowledgeBaseSearchTool(Tool):
             f"KnowledgeBaseSearchTool called with query: '{query}', search_mode: '{search_mode}', index_names: {search_index_names}"
         )
 
+        # Compute effective top_k for initial search:
+        # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
+        effective_top_k = (
+            self.top_k * RERANK_OVERSEARCH_MULTIPLIER
+            if self.rerank else self.top_k
+        )
+
         if len(search_index_names) == 0:
             return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
         if search_mode == "hybrid":
             kb_search_data = self.search_hybrid(
-                query=query, index_names=search_index_names)
+                query=query, index_names=search_index_names, top_k=effective_top_k)
         elif search_mode == "accurate":
             kb_search_data = self.search_accurate(
-                query=query, index_names=search_index_names)
+                query=query, index_names=search_index_names, top_k=effective_top_k)
         elif search_mode == "semantic":
             kb_search_data = self.search_semantic(
-                query=query, index_names=search_index_names)
+                query=query, index_names=search_index_names, top_k=effective_top_k)
         else:
             raise Exception(
                 f"Invalid search mode: {search_mode}, only support: hybrid, accurate, semantic")
@@ -133,28 +141,30 @@ class KnowledgeBaseSearchTool(Tool):
                 documents = [
                     result.get("content", "") for result in kb_search_results
                 ]
-                # Perform reranking
+                # Perform reranking on all retrieved candidates
                 reranked_results = self.rerank_model.rerank(
                     query=query,
                     documents=documents,
                     top_n=len(documents)
                 )
-                # Reorder kb_search_results based on reranking results
+                # Reorder and trim to top_k after reranking
                 if reranked_results:
-                    # Create a mapping of original index to reranked position
                     original_results_map = {
                         i: kb_search_results[i] for i in range(len(kb_search_results))
                     }
-                    # Reorder results based on reranking
                     kb_search_results = []
-                    for reranked_item in reranked_results:
+                    for reranked_item in reranked_results[: self.top_k]:
                         orig_idx = reranked_item.get("index")
                         if orig_idx is not None and orig_idx in original_results_map:
                             result = original_results_map[orig_idx]
-                            # Update score with relevance score from rerank model
-                            result["score"] = reranked_item.get("relevance_score", result.get("score", 0))
+                            result["score"] = reranked_item.get(
+                                "relevance_score", result.get("score", 0)
+                            )
                             kb_search_results.append(result)
-                    logger.info(f"Reranking applied, reordered {len(kb_search_results)} results")
+                    logger.info(
+                        f"Reranking applied: selected top {self.top_k} from "
+                        f"{len(documents)} candidates"
+                    )
             except Exception as e:
                 logger.warning(f"Reranking failed, using original results: {str(e)}")
 
@@ -195,10 +205,10 @@ class KnowledgeBaseSearchTool(Tool):
                 "", ProcessType.SEARCH_CONTENT, search_results_data)
         return json.dumps(search_results_return, ensure_ascii=False)
 
-    def search_hybrid(self, query, index_names):
+    def search_hybrid(self, query, index_names, top_k):
         try:
             results = self.vdb_core.hybrid_search(
-                index_names=index_names, query_text=query, embedding_model=self.embedding_model, top_k=self.top_k
+                index_names=index_names, query_text=query, embedding_model=self.embedding_model, top_k=top_k
             )
 
             # Format results
@@ -217,10 +227,10 @@ class KnowledgeBaseSearchTool(Tool):
         except Exception as e:
             raise Exception(f"Error during semantic search: {str(e)}")
 
-    def search_accurate(self, query, index_names):
+    def search_accurate(self, query, index_names, top_k):
         try:
             results = self.vdb_core.accurate_search(
-                index_names=index_names, query_text=query, top_k=self.top_k)
+                index_names=index_names, query_text=query, top_k=top_k)
 
             # Format results
             formatted_results = []
@@ -238,10 +248,10 @@ class KnowledgeBaseSearchTool(Tool):
         except Exception as e:
             raise Exception(detail=f"Error during accurate search: {str(e)}")
 
-    def search_semantic(self, query, index_names):
+    def search_semantic(self, query, index_names, top_k):
         try:
             results = self.vdb_core.semantic_search(
-                index_names=index_names, query_text=query, embedding_model=self.embedding_model, top_k=self.top_k
+                index_names=index_names, query_text=query, embedding_model=self.embedding_model, top_k=top_k
             )
 
             # Format results
