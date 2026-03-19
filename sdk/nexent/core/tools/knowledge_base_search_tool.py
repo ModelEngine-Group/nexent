@@ -107,10 +107,16 @@ class KnowledgeBaseSearchTool(Tool):
 
         # Compute effective top_k for initial search:
         # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
-        effective_top_k = (
-            self.top_k * RERANK_OVERSEARCH_MULTIPLIER
-            if self.rerank else self.top_k
-        )
+        # Note: smolagents Tool may not expand Field defaults, so use getattr with FieldInfo fallback.
+        from pydantic.fields import FieldInfo
+        effective_top_k = self.top_k
+        is_rerank = self.rerank
+        if isinstance(effective_top_k, FieldInfo):
+            effective_top_k = effective_top_k.default
+        if isinstance(is_rerank, FieldInfo):
+            is_rerank = is_rerank.default
+        if is_rerank:
+            effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
 
         if len(search_index_names) == 0:
             return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
