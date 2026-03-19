@@ -23,6 +23,7 @@ def datamate_tool(mock_observer: MessageObserver) -> DataMateSearchTool:
         index_names=["kb1"],
         top_k=2,
         threshold=0.5,
+        rerank=False,
     )
     return tool
 
@@ -204,7 +205,7 @@ class TestForward:
 
     def test_forward_no_observer(self, mocker: MockFixture):
         tool = DataMateSearchTool(
-            server_url="http://127.0.0.1:8080", observer=None, index_names=["kb1"])
+            server_url="http://127.0.0.1:8080", observer=None, index_names=["kb1"], rerank=False)
 
         # Mock the hybrid_search method to return search results
         mock_hybrid_search = mocker.patch.object(
@@ -263,6 +264,7 @@ class TestForward:
         datamate_tool.index_names = ["default_kb1", "default_kb2"]
         datamate_tool.top_k = 3
         datamate_tool.threshold = 0.2
+        datamate_tool.rerank = False  # Ensure rerank is disabled
 
         # Mock the hybrid_search method to return results for each knowledge base
         mock_hybrid_search = mocker.patch.object(
@@ -303,6 +305,7 @@ class TestForward:
         datamate_tool.index_names = ["kb1", "kb2"]
         datamate_tool.top_k = 3
         datamate_tool.threshold = 0.2
+        datamate_tool.rerank = False  # Ensure rerank is disabled
 
         # Mock the hybrid_search method to return results from multiple KBs
         mock_hybrid_search = mocker.patch.object(
@@ -345,6 +348,7 @@ class TestForward:
         datamate_tool.index_names = ["kb1"]
         datamate_tool.top_k = 5
         datamate_tool.threshold = 0.8
+        datamate_tool.rerank = False  # Ensure rerank is disabled
 
         # Mock the hybrid_search method
         mock_hybrid_search = mocker.patch.object(
