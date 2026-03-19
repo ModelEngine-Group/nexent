@@ -551,7 +551,7 @@ export default function UserManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
-  const { isSpeedMode } = useDeployment();
+  const { isSpeedMode, modelEngineClawEnabled } = useDeployment();
 
   // Check if user is super admin (speed mode or admin role)
   const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
@@ -782,27 +782,28 @@ export default function UserManageComp() {
                     label: t("tenantResources.tabs.groups") || "Groups",
                     children: <GroupList tenantId={tenantId} />,
                   },
-                  {
-                    key: "models",
-                    label: t("tenantResources.tabs.models") || "Models",
-                    children: <ModelList tenantId={tenantId} />,
-                  },
-                  {
-                    key: "knowledge",
-                    label:
-                      t("tenantResources.tabs.knowledge") || "Knowledge Base",
-                    children: <KnowledgeList tenantId={tenantId} />,
-                  },
-                  {
-                          key: "agents",
-                          label: t("tenantResources.tabs.agents") || "Agents",
-                          children: <AgentList tenantId={tenantId} />,
-                  },
-                  {
-                    key: "mcp",
-                    label: t("tenantResources.tabs.mcp") || "MCP",
-                    children: <McpList tenantId={tenantId} />,
-                  },
+                  ...(!modelEngineClawEnabled ? [
+                    {
+                      key: "models",
+                      label: t("tenantResources.tabs.models") || "Models",
+                      children: <ModelList tenantId={tenantId} />,
+                    },
+                    {
+                      key: "knowledge",
+                      label: t("tenantResources.tabs.knowledge") || "Knowledge Base",
+                      children: <KnowledgeList tenantId={tenantId} />,
+                    },
+                    {
+                      key: "agents",
+                      label: t("tenantResources.tabs.agents") || "Agents",
+                      children: <AgentList tenantId={tenantId} />,
+                    },
+                    {
+                      key: "mcp",
+                      label: t("tenantResources.tabs.mcp") || "MCP",
+                      children: <McpList tenantId={tenantId} />,
+                    },
+                  ] : []),
                   {
                     key: "invitations",
                     label: t("tenantResources.invitation.tab") || "Invitations",
