@@ -71,7 +71,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(1)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        knowledge_base_search_tool.forward("hello world")
+        knowledge_base_search_tool.forward("hello world", index_names="test_index1,test_index2")
 
         knowledge_base_search_tool.observer.add_message.assert_any_call(
             "", ProcessType.TOOL, "Searching the knowledge base..."
@@ -196,7 +196,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         # Parse result
         search_results = json.loads(result)
@@ -213,7 +213,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(4)
         knowledge_base_search_tool.vdb_core.semantic_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         # Parse result
         search_results = json.loads(result)
@@ -227,20 +227,10 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.search_mode = "invalid"
 
         with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.forward("test query")
+            knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         assert "Invalid search mode" in str(excinfo.value)
         assert "hybrid, accurate, semantic" in str(excinfo.value)
-
-    def test_forward_no_index_names(self, knowledge_base_search_tool):
-        """Test forward method with no index names"""
-        # Set empty index names
-        knowledge_base_search_tool.index_names = []
-
-        result = knowledge_base_search_tool.forward("test query")
-
-        # Should return no results message
-        assert result == json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
     def test_forward_no_results(self, knowledge_base_search_tool):
         """Test forward method with no search results"""
@@ -248,22 +238,20 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = []
 
         with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.forward("test query")
+            knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         assert "No results found" in str(excinfo.value)
 
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
-        """Test forward method with custom index names"""
-        # Set custom index names
-        knowledge_base_search_tool.index_names = ["custom_index1", "custom_index2"]
-
+        """Test forward method with custom index names passed as parameter"""
         # Mock search results
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        # Pass index_names as parameter (comma-separated string)
+        result = knowledge_base_search_tool.forward("test query", index_names="custom_index1,custom_index2")
 
-        # Verify vdb_core was called with custom index names
+        # Verify vdb_core was called with parsed index names
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
             index_names=["custom_index1", "custom_index2"],
             query_text="test query",
@@ -280,7 +268,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         # Verify Chinese running prompt
         knowledge_base_search_tool.observer.add_message.assert_any_call(
@@ -306,7 +294,7 @@ class TestKnowledgeBaseSearchTool:
         ]
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         # Parse result
         search_results = json.loads(result)
@@ -314,3 +302,56 @@ class TestKnowledgeBaseSearchTool:
         # Verify title fallback
         assert len(search_results) == 1
         assert search_results[0]["title"] == "test.txt"
+
+    def test_forward_requires_index_names(self, knowledge_base_search_tool):
+        """Test forward method requires index_names parameter"""
+        # Test that TypeError is raised when index_names is not provided
+        with pytest.raises(TypeError) as excinfo:
+            knowledge_base_search_tool.forward("test query")
+
+        assert "index_names" in str(excinfo.value)
+
+    def test_forward_empty_index_names_string(self, knowledge_base_search_tool):
+        """Test forward method with empty index_names string returns no results"""
+        # Mock search results
+        mock_results = create_mock_search_result(2)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        # Pass empty string as index_names
+        result = knowledge_base_search_tool.forward("test query", index_names="")
+
+        # Should return no results message
+        assert result == json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
+
+    def test_forward_single_index_name(self, knowledge_base_search_tool):
+        """Test forward method with single index name"""
+        # Mock search results
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.forward("test query", index_names="single_index")
+
+        # Verify vdb_core was called with single index
+        knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
+            index_names=["single_index"],
+            query_text="test query",
+            embedding_model=knowledge_base_search_tool.embedding_model,
+            top_k=5
+        )
+
+    def test_forward_with_whitespace_in_index_names(self, knowledge_base_search_tool):
+        """Test forward method handles whitespace in index_names correctly"""
+        # Mock search results
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        # Pass index_names with extra whitespace
+        result = knowledge_base_search_tool.forward("test query", index_names="  index1  ,  index2  ")
+
+        # Verify whitespace is stripped
+        knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
+            index_names=["index1", "index2"],
+            query_text="test query",
+            embedding_model=knowledge_base_search_tool.embedding_model,
+            top_k=5
+        )

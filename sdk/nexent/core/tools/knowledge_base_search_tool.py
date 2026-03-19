@@ -28,6 +28,7 @@ class KnowledgeBaseSearchTool(Tool):
     )
     inputs = {
         "query": {"type": "string", "description": "The search query to perform."},
+        "index_names": {"type": "string", "description": "The list of index names to search, comma-separated. Required - must specify at least one index name."},
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value
@@ -74,7 +75,13 @@ class KnowledgeBaseSearchTool(Tool):
         self.running_prompt_en = "Searching the knowledge base..."
 
 
-    def forward(self, query: str) -> str:
+    def forward(self, query: str, index_names: str) -> str:
+        # Parse index_names from string (always required)
+        search_index_names = [name.strip() for name in index_names.split(",") if name.strip()]
+
+        # Use the instance search_mode
+        search_mode = self.search_mode
+
         # Send tool run message
         if self.observer:
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
@@ -82,10 +89,6 @@ class KnowledgeBaseSearchTool(Tool):
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(
                 card_content, ensure_ascii=False))
-
-        # Use the instance index_names and search_mode
-        search_index_names = self.index_names
-        search_mode = self.search_mode
 
         # Log the index_names being used for this search
         logger.info(
