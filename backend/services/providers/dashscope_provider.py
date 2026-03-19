@@ -58,7 +58,7 @@ class DashScopeModelProvider(AbstractModelProvider):
                 "chat": [],  # Maps to "llm"
                 "vlm": [],  # Maps to "vlm"
                 "embedding": [],  # Maps to "embedding" / "multi_embedding"
-                "reranker": [],  # Maps to "reranker"
+                "rerank": [],  # Maps to "rerank"
                 "tts": [],  # Maps to "tts"
                 "stt": []  # Maps to "stt"
             }
@@ -88,10 +88,10 @@ class DashScopeModelProvider(AbstractModelProvider):
                     categorized_models['embedding'].append(cleaned_model)
                     continue
 
-                # 2. Reranker
+                # 2. Rerank
                 if 'rerank' in m_id.lower() or '重排序' in desc:
-                    cleaned_model.update({"model_tag": "reranker", "model_type": "reranker"})
-                    categorized_models['reranker'].append(cleaned_model)
+                    cleaned_model.update({"model_tag": "rerank", "model_type": "rerank"})
+                    categorized_models['rerank'].append(cleaned_model)
                     continue
 
                 # 3. STT

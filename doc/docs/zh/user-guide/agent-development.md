@@ -130,10 +130,11 @@
      - 检索的模式 `search_mode`（默认为 `hybrid`）
      - 目标检索的知识库列表 `index_names`，如 `["医疗", "维生素知识大全"]`
      - 若不输入 `index_names`，则默认检索知识库页面所选中的全部知识库
+     - 是否启用重排模型（默认为 `false`），启用后配置重排模型，实现对检索结果的重排优化 
 6. 输入完成后点击"执行测试"开始测试，并在下方查看测试结果
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/agent-development/tool-test-run.png" style="width: 80%; height: auto;" />
+  <img src="./assets/agent-development/tool-test-run-1.png" style="width: 80%; height: auto;" />
 </div>
 
 ## 📝 描述业务逻辑

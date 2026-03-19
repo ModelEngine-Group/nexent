@@ -14,6 +14,7 @@ from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model,
+    get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
 from services.memory_config_service import build_memory_context
@@ -237,11 +238,32 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                     tool_config.metadata = langchain_tool
                     break
 
-        # special logic for knowledge base search tool
+        # special logic for search tools that may use reranking models
         if tool_config.class_name == "KnowledgeBaseSearchTool":
-           tool_config.metadata = {
+            rerank = param_dict.get("rerank", False)
+            rerank_model_name = param_dict.get("rerank_model_name", "")
+            rerank_model = None
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(
+                    tenant_id=tenant_id, model_name=rerank_model_name
+                )
+
+            tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
+                "rerank_model": rerank_model,
+            }
+        elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
+            rerank = param_dict.get("rerank", False)
+            rerank_model_name = param_dict.get("rerank_model_name", "")
+            rerank_model = None
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(
+                    tenant_id=tenant_id, model_name=rerank_model_name
+                )
+
+            tool_config.metadata = {
+                "rerank_model": rerank_model,
             }
         elif tool_config.class_name == "AnalyzeTextFileTool":
             tool_config.metadata = {
