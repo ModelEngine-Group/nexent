@@ -1,0 +1,39 @@
+# FusionCompute 配置
+fc_ip: 100.199.5.10
+cpu: 4
+memory: 8192  # 单位：MB
+X-Auth-User: test
+X-Auth-Key: Huawei@4321
+site_id: ABCDE
+vm_id: i00001
+gateway: "192.168.1.1"
+netmask: "255.255.255.0"
+# 任务超时时间（秒），默认 600 = 10 分钟
+task_timeout: 600
+
+# Kafka 配置（将传输到虚拟机）
+kafka:
+  bootstrap_servers: "192.168.1.100:9092"
+  sasl_username: "kafka_user"
+  sasl_password: "kafka_password"
+  security_protocol: "SASL_PLAINTEXT"
+  sasl_mechanism: "PLAIN"
+
+# SSH 配置（用于连接虚拟机传输配置）
+ssh:
+  username: "root"
+  password: "VM_PASSWORD"
+  port: 22
+  # SSH 连接超时（秒）
+  connect_timeout: 30
+  # 等待 VM SSH 就绪的最大时间（秒）
+  ready_timeout: 300
+
+# 配置文件传输设置
+config_transfer:
+  # 是否启用配置传输
+  enabled: true
+  # 目标路径
+  remote_path: "/opt/nexent/config"
+  # 配置文件名
+  config_filename: "agent_config.yaml"
