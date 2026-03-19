@@ -67,7 +67,14 @@ const ROUTE_CONFIG: RouteConfig[] = [
   { path: "/tenant-resources", Icon: Building2, labelKey: "sidebar.tenantResources", order: 22 },
 ];
 
-const CLAW_ROUTE_PATHS = ["/", "/clawchat", "/clawmonitor", "/users", "/tenant-resources"];
+/** Routes shown in speed mode when MODEL_ENGINE_CLAW_ENABLED=true */
+const SPEED_CLAW_ROUTES = ["/clawchat", "/clawmonitor"];
+
+/** Routes shown in non-speed mode when MODEL_ENGINE_CLAW_ENABLED=true */
+const NON_SPEED_CLAW_ROUTES = ["/clawchat", "/clawmonitor", "/users", "/tenant-resources"];
+
+/** Claw-specific routes that should be hidden when MODEL_ENGINE_CLAW_ENABLED=false */
+const CLAW_ONLY_PATHS = new Set(["/clawchat", "/clawmonitor"]);
 
 /**
  * Extract all available route paths from ROUTE_CONFIG
@@ -125,22 +132,36 @@ export function SideNavigation({
     return cleanup;
   }, []);
 
-  // Filter and sort routes based on accessibleRoutes from authorization context
+  // Filter and sort routes based on accessibleRoutes and deployment configuration
   const accessibleMenuItems = useMemo((): RouteConfig[] => {
-    // When modelEngineClawEnabled is true, only show claw routes
-    const effectiveRoutes = modelEngineClawEnabled
-      ? CLAW_ROUTE_PATHS
-      : accessibleRoutes;
+    let effectiveRoutes: string[];
 
-    if (!effectiveRoutes || effectiveRoutes.length === 0) {
-      // If no accessibleRoutes available, show all routes (fallback)
+    if (modelEngineClawEnabled) {
+      if (isSpeedMode) {
+        // Speed mode: only show clawchat and clawmonitor (no permission check needed)
+        effectiveRoutes = SPEED_CLAW_ROUTES;
+      } else {
+        // Non-speed mode: always show clawchat/clawmonitor, plus other routes by permission
+        const permittedNonClawRoutes = NON_SPEED_CLAW_ROUTES.filter(
+          (path) => !CLAW_ONLY_PATHS.has(path) && (accessibleRoutes ?? []).includes(path)
+        );
+        effectiveRoutes = [...SPEED_CLAW_ROUTES, ...permittedNonClawRoutes];
+      }
+    } else {
+      // Claw disabled: show user's accessible routes excluding claw-only paths
+      effectiveRoutes = (accessibleRoutes ?? []).filter(
+        (path) => !CLAW_ONLY_PATHS.has(path)
+      );
+    }
+
+    if (effectiveRoutes.length === 0) {
       return [];
     }
 
     return ROUTE_CONFIG.filter((route) =>
       effectiveRoutes.includes(route.path)
     ).sort((a, b) => a.order - b.order);
-  }, [accessibleRoutes, modelEngineClawEnabled]);
+  }, [accessibleRoutes, modelEngineClawEnabled, isSpeedMode]);
 
   /**
    * Create a menu item from route configuration

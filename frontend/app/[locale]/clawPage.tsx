@@ -51,8 +51,8 @@ export default function ClawHomepage() {
     return true;
   };
 
-  const navigateToMeChat = () => navigateWithPermissionCheck("/mechat");
-  const navigateToMEMonitor = () => navigateWithPermissionCheck("/memonitor");
+  const navigateToMeChat = () => navigateWithPermissionCheck("/clawchat");
+  const navigateToMEMonitor = () => navigateWithPermissionCheck("/clawmonitor");
 
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
