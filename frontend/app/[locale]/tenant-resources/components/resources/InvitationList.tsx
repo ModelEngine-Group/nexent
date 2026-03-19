@@ -425,7 +425,6 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         width={600}
-        maskClosable={false}
       >
         <Form form={form} layout="vertical">
           {!editingInvitation && (
