@@ -38,7 +38,8 @@ def knowledge_base_search_tool(mock_observer, mock_vdb_core, mock_embedding_mode
         observer=mock_observer,
         embedding_model=mock_embedding_model,
         vdb_core=mock_vdb_core,
-        search_mode="hybrid"
+        search_mode="hybrid",
+        rerank=False,
     )
     return tool
 
@@ -88,7 +89,8 @@ class TestKnowledgeBaseSearchTool:
             observer=mock_observer,
             embedding_model=mock_embedding_model,
             vdb_core=mock_vdb_core,
-            search_mode="semantic"
+            search_mode="semantic",
+            rerank=False,
         )
 
         assert tool.top_k == 10
@@ -106,7 +108,8 @@ class TestKnowledgeBaseSearchTool:
             observer=None,
             embedding_model=mock_embedding_model,
             vdb_core=mock_vdb_core,
-            search_mode="hybrid"
+            search_mode="hybrid",
+            rerank=False,
         )
 
         assert tool.index_names == []

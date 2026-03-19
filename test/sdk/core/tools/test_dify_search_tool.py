@@ -28,6 +28,7 @@ def dify_tool(mock_observer: MessageObserver) -> DifySearchTool:
             dataset_ids='["dataset1", "dataset2"]',
             top_k=3,
             observer=mock_observer,
+            rerank=False,
         )
         # Store the mock client for tests to use
         tool._mock_http_client = mock_client
@@ -73,6 +74,7 @@ class TestDifySearchToolInit:
             dataset_ids='["ds1", "ds2"]',
             top_k=5,
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.server_url == "https://api.dify.ai/v1"
@@ -90,6 +92,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids='["single_dataset"]',
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.server_url == "https://api.dify.ai/v1"
@@ -101,6 +104,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids='["0ab7096c-dfa5-4e0e-9dad-9265781447a3"]',
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.server_url == "https://api.dify.ai/v1"
@@ -112,6 +116,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids='["ds1", "ds2", "ds3"]',
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.server_url == "https://api.dify.ai/v1"
@@ -176,6 +181,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids=["ds1", "ds2", "ds3"],
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.dataset_ids == ["ds1", "ds2", "ds3"]
@@ -188,6 +194,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids=["single_dataset"],
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.dataset_ids == ["single_dataset"]
@@ -200,6 +207,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids=[123, 456, 789],
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.dataset_ids == ["123", "456", "789"]
@@ -219,6 +227,7 @@ class TestDifySearchToolInit:
                 api_key="test_key",
                 dataset_ids=invalid_json,
                 observer=mock_observer,
+                rerank=False,
             )
         assert expected_error_contains in str(excinfo.value)
 
@@ -230,6 +239,7 @@ class TestDifySearchToolInit:
                 api_key="test_key",
                 dataset_ids='["ds1", "ds2"',  # Missing closing bracket
                 observer=mock_observer,
+                rerank=False,
             )
         assert "dataset_ids must be a valid JSON string array or list" in str(excinfo.value)
 
@@ -240,6 +250,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids='["ds1", 123, true, null]',
             observer=mock_observer,
+            rerank=False,
         )
 
         # Elements should be converted to strings using Python's str()
@@ -497,6 +508,7 @@ class TestForward:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=None,
+                rerank=False,
             )
             tool._mock_http_client = mock_client
             self._setup_success_flow(tool)
@@ -768,6 +780,7 @@ class TestDifySearchToolEdgeCases:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=mock_observer,
+                rerank=False,
             )
 
             result = tool._get_document_download_url("")
@@ -786,6 +799,7 @@ class TestDifySearchToolEdgeCases:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=mock_observer,
+                rerank=False,
             )
 
             result = tool._get_document_download_url("doc123", "dataset1")
@@ -809,6 +823,7 @@ class TestDifySearchToolEdgeCases:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=mock_observer,
+                rerank=False,
             )
 
             result = tool._get_document_download_url("doc123", "dataset1")
@@ -831,6 +846,7 @@ class TestDifySearchToolEdgeCases:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=mock_observer,
+                rerank=False,
             )
 
             result = tool._get_document_download_url("doc123", "dataset1")
@@ -852,6 +868,7 @@ class TestDifySearchToolEdgeCases:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=mock_observer,
+                rerank=False,
             )
 
             result = tool._get_document_download_url("doc123", "dataset1")
@@ -868,6 +885,7 @@ class TestDifySearchToolEdgeCases:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=mock_observer,
+                rerank=False,
             )
 
             result = tool._batch_get_download_urls([])
@@ -886,6 +904,7 @@ class TestDifySearchToolEdgeCases:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=mock_observer,
+                rerank=False,
             )
 
             # Include an empty document_id in the pairs
@@ -909,6 +928,7 @@ class TestDifySearchToolEdgeCases:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=mock_observer,
+                rerank=False,
             )
 
             with pytest.raises(Exception, match="Unexpected Dify API response format"):
