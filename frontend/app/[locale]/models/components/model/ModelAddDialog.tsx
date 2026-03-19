@@ -1300,19 +1300,47 @@ export const ModelAddDialog = ({
                 </a>
               </Tooltip>
               {form.isBatchImport && (
-                <Tooltip title="SiliconFlow">
-                  <a
-                    href={PROVIDER_LINKS.siliconflow}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <img
-                      src="/siliconflow.png"
-                      alt="SiliconFlow"
-                      className="h-4 ml-1.5 cursor-pointer"
-                    />
-                  </a>
-                </Tooltip>
+                <>
+                  <Tooltip title="SiliconFlow">
+                    <a
+                      href={PROVIDER_LINKS.siliconflow}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/siliconflow.png"
+                        alt="SiliconFlow"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                  <Tooltip title={t("model.provider.dashscope")}>
+                    <a
+                      href={PROVIDER_LINKS.dashscope}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/aliyuncs.png"
+                        alt="DashScope"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                  <Tooltip title={t("model.provider.tokenpony")}>
+                    <a
+                      href={PROVIDER_LINKS.tokenpony}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/tokenpony.png"
+                        alt="TokenPony"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                </>
               )}
               {form.type === "llm" && !form.isBatchImport && (
                 <>
