@@ -120,7 +120,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(3)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"])
+        result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
 
         # Verify result structure
         assert result["total"] == 3
@@ -148,7 +148,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"])
+        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"], top_k=5)
 
         # Verify result structure
         assert result["total"] == 2
@@ -167,7 +167,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(4)
         knowledge_base_search_tool.vdb_core.semantic_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.search_semantic("test query", ["test_index1"])
+        result = knowledge_base_search_tool.search_semantic("test query", ["test_index1"], top_k=5)
 
         # Verify result structure
         assert result["total"] == 4
@@ -186,7 +186,7 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.vdb_core.hybrid_search.side_effect = Exception("Search error")
 
         with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.search_hybrid("test query", ["test_index1"])
+            knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
 
         assert "Error during semantic search" in str(excinfo.value)
 
@@ -388,6 +388,7 @@ class TestKnowledgeBaseSearchToolRerank:
         tool = KnowledgeBaseSearchTool(
             index_names=["kb1"],
             search_mode="hybrid",
+            top_k=3,
             rerank=True,
             rerank_model_name="gte-rerank-v2",
             rerank_model=mock_rerank_model,
@@ -465,6 +466,7 @@ class TestKnowledgeBaseSearchToolRerank:
         tool = KnowledgeBaseSearchTool(
             index_names=["kb1"],
             search_mode="hybrid",
+            top_k=3,
             rerank=True,
             rerank_model=mock_rerank_model,
             vdb_core=mock_vdb_core,
