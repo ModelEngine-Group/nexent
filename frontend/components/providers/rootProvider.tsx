@@ -50,7 +50,11 @@ function AppReadyWrapper({ children }: { children?: ReactNode }) {
  */
 export function RootProvider({ children }: { children: ReactNode }) {
   return (
-    <ConfigProvider getPopupContainer={() => document.body}>
+    <ConfigProvider
+      getPopupContainer={() => document.body}
+      modal={{ mask: { closable: false } }}
+      drawer={{ mask: { closable: false } }}
+    >
       <QueryClientProvider client={queryClient}>
         <App>
             <AuthenticationProvider>
