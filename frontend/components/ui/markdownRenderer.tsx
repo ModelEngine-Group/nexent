@@ -3,6 +3,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
+import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
@@ -33,6 +34,16 @@ interface MarkdownRendererProps {
   resolveS3Media?: boolean;
 }
 
+export interface MarkdownHeading {
+  id: string;
+  level: number;
+  text: string;
+}
+
+interface ParsedMarkdownHeading extends MarkdownHeading {
+  offset: number;
+}
+
 // Simple in-memory cache to avoid refetching the same S3 object multiple times
 const s3MediaCache = new Map<string, string>();
 const mediaObjectUrlCache = new Map<string, string>();
@@ -40,6 +51,140 @@ const mediaObjectUrlPromiseCache = new Map<string, Promise<string | null>>();
 const S3_MEDIA_SESSION_PREFIX = "s3-media-cache:";
 
 const isBrowserEnvironment = typeof window !== "undefined";
+
+const flattenTextContent = (value: React.ReactNode): string => {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(flattenTextContent).join("");
+  }
+
+  if (React.isValidElement(value)) {
+    return flattenTextContent(value.props?.children);
+  }
+
+  return "";
+};
+
+const replaceUntilStable = (
+  value: string,
+  pattern: RegExp,
+  replacement: string,
+  maxIterations = 8
+): string => {
+  let current = value;
+  for (let i = 0; i < maxIterations; i += 1) {
+    const next = current.replace(pattern, replacement);
+    if (next === current) {
+      break;
+    }
+    current = next;
+  }
+  return current;
+};
+
+const normalizeMarkdownHeadingText = (value: string): string => {
+  return replaceUntilStable(value, /!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[<>]/g, "")
+    .replace(/[*_~]/g, "")
+    .replace(/\s+#+\s*$/, "")
+    .replace(/\\/g, "")
+    .trim();
+};
+
+const slugifyHeadingText = (value: string): string => {
+  const normalized = normalizeMarkdownHeadingText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
+
+  return normalized || "section";
+};
+
+const createHeadingIdGenerator = () => {
+  const counts = new Map<string, number>();
+
+  return (text: string): string => {
+    const baseId = slugifyHeadingText(text);
+    const currentCount = counts.get(baseId) ?? 0;
+    counts.set(baseId, currentCount + 1);
+    return currentCount === 0 ? baseId : `${baseId}-${currentCount}`;
+  };
+};
+
+const extractTextFromMarkdownNode = (node: any): string => {
+  if (!node) {
+    return "";
+  }
+
+  if (typeof node.value === "string") {
+    return node.value;
+  }
+
+  if (Array.isArray(node.children)) {
+    return node.children.map(extractTextFromMarkdownNode).join("");
+  }
+
+  return "";
+};
+
+const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[] => {
+  try {
+    const createId = createHeadingIdGenerator();
+    const headings: ParsedMarkdownHeading[] = [];
+    const { unified } = require("unified") as { unified: () => any };
+    const tree = unified()
+      .use(remarkParse)
+      .use(remarkGfm)
+      .use(remarkMath)
+      .parse(content);
+
+    visit(tree, "heading", (node: any) => {
+      const rawText = normalizeMarkdownHeadingText(extractTextFromMarkdownNode(node));
+      if (!rawText) {
+        return;
+      }
+
+      headings.push({
+        offset: typeof node.position?.start?.offset === "number" ? node.position.start.offset : headings.length,
+        id: createId(rawText),
+        level: typeof node.depth === "number" ? node.depth : 1,
+        text: rawText,
+      });
+    });
+
+    return headings;
+  } catch {
+    const createId = createHeadingIdGenerator();
+    const fallbackHeadings: ParsedMarkdownHeading[] = [];
+    const headingPattern = /^(#{1,6})\s+(.+)$/gm;
+
+    for (const match of content.matchAll(headingPattern)) {
+      const rawText = normalizeMarkdownHeadingText(match[2]);
+      if (!rawText) {
+        continue;
+      }
+
+      fallbackHeadings.push({
+        offset: typeof match.index === "number" ? match.index : fallbackHeadings.length,
+        id: createId(rawText),
+        level: match[1].length,
+        text: rawText,
+      });
+    }
+
+    return fallbackHeadings;
+  }
+};
+
+export const extractMarkdownHeadings = (content: string): MarkdownHeading[] => {
+  return extractParsedMarkdownHeadings(content).map(({ id, level, text }) => ({ id, level, text }));
+};
 
 const getSessionCachedValue = (key: string): string | null => {
   if (!isBrowserEnvironment) {
@@ -860,6 +1005,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 
   // Convert LaTeX delimiters to markdown math delimiters
   const processedContent = convertLatexDelimiters(content);
+  const extractedHeadings = React.useMemo(() => extractParsedMarkdownHeadings(content), [content]);
+  let renderedHeadingIndex = 0;
 
   const renderCodeFallback = (text: string, key?: React.Key) => (
     <code
@@ -1014,6 +1161,28 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     return children;
   };
 
+  const renderHeading = (level: 1 | 2 | 3 | 4 | 5 | 6, children: React.ReactNode, node?: any) => {
+    const headingIndex = renderedHeadingIndex;
+    const headingText = normalizeMarkdownHeadingText(flattenTextContent(children));
+    const headingOffset = typeof node?.position?.start?.offset === "number"
+      ? node.position.start.offset
+      : extractedHeadings[headingIndex]?.offset ?? headingIndex;
+    const matchedHeading = extractedHeadings.find((heading) => heading.offset === headingOffset);
+    const headingId = matchedHeading?.id ?? slugifyHeadingText(headingText);
+    renderedHeadingIndex += 1;
+    const HeadingTag = `h${level}` as keyof JSX.IntrinsicElements;
+
+    return (
+      <HeadingTag
+        id={headingId}
+        className={`markdown-h${level}`}
+        style={{ scrollMarginTop: 0 }}
+      >
+        <TextWrapper>{children}</TextWrapper>
+      </HeadingTag>
+    );
+  };
+
   class MarkdownErrorBoundary extends React.Component<
     { children: React.ReactNode; rawContent: string },
     { hasError: boolean }
@@ -1063,36 +1232,12 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             skipHtml={false}
             components={{
               // Heading components - now using CSS classes
-              h1: ({ children }: any) => (
-                <h1 className="markdown-h1">
-                  <TextWrapper>{children}</TextWrapper>
-                </h1>
-              ),
-              h2: ({ children }: any) => (
-                <h2 className="markdown-h2">
-                  <TextWrapper>{children}</TextWrapper>
-                </h2>
-              ),
-              h3: ({ children }: any) => (
-                <h3 className="markdown-h3">
-                  <TextWrapper>{children}</TextWrapper>
-                </h3>
-              ),
-              h4: ({ children }: any) => (
-                <h4 className="markdown-h4">
-                  <TextWrapper>{children}</TextWrapper>
-                </h4>
-              ),
-              h5: ({ children }: any) => (
-                <h5 className="markdown-h5">
-                  <TextWrapper>{children}</TextWrapper>
-                </h5>
-              ),
-              h6: ({ children }: any) => (
-                <h6 className="markdown-h6">
-                  <TextWrapper>{children}</TextWrapper>
-                </h6>
-              ),
+              h1: ({ children, node }: any) => renderHeading(1, children, node),
+              h2: ({ children, node }: any) => renderHeading(2, children, node),
+              h3: ({ children, node }: any) => renderHeading(3, children, node),
+              h4: ({ children, node }: any) => renderHeading(4, children, node),
+              h5: ({ children, node }: any) => renderHeading(5, children, node),
+              h6: ({ children, node }: any) => renderHeading(6, children, node),
               // Paragraph
               p: ({ children }: any) => (
                 <p className="markdown-paragraph">

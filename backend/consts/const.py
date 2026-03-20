@@ -40,6 +40,8 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
 # Limit concurrent Office-to-PDF conversions
 MAX_CONCURRENT_CONVERSIONS = 5
+# LibreOffice profile directory
+LIBREOFFICE_PROFILE_DIR = os.getenv("LIBREOFFICE_PROFILE_DIR", "/tmp/nexent-lo-profile")
 # Supported Office file MIME types
 OFFICE_MIME_TYPES = [
     'application/msword',  # .doc

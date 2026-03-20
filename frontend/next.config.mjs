@@ -24,6 +24,10 @@ const nextConfig = {
   compress: true,
   // Fix workspace root detection for multiple lockfiles
   outputFileTracingRoot: process.cwd(),
+  webpack: (config) => {
+    config.resolve.alias.canvas = false;
+    return config;
+  },
 }
 
 mergeConfig(nextConfig, userConfig)

@@ -8,12 +8,13 @@ from urllib.parse import urlparse, urlunparse, unquote, quote
 import httpx
 from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Path as PathParam, Query, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
-from consts.exceptions import FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
+from consts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException
 from consts.model import ProcessParams
 from services.file_management_service import upload_to_minio, upload_files_impl, \
     get_file_url_impl, get_file_stream_impl, delete_file_impl, list_files_impl, \
-    preview_file_impl
+    resolve_preview_file, get_preview_stream
 from utils.file_management_utils import trigger_data_process
 
 logger = logging.getLogger("file_management_app")
@@ -578,38 +579,20 @@ async def get_storage_file_batch_urls(
 @file_management_config_router.get("/preview/{object_name:path}")
 async def preview_file(
     object_name: str = PathParam(..., description="File object name to preview"),
-    filename: Optional[str] = Query(None, description="Original filename for display (optional)")
+    filename: Optional[str] = Query(None, description="Original filename for display (optional)"),
+    range_header: Optional[str] = Header(None, alias="range"),
 ):
     """
-    Preview file inline in browser 
-    
+    Preview file inline in browser
+
     - **object_name**: File object name in storage
     - **filename**: Original filename for Content-Disposition header (optional)
-    
-    Returns file stream with Content-Disposition: inline for browser preview
+
+    Supports HTTP Range requests (RFC 7233) for partial content delivery.
+    Returns 206 Partial Content when a valid Range header is present.
     """
     try:
-        # Get file stream from preview service
-        file_stream, content_type = await preview_file_impl(object_name=object_name)
-        
-        # Use provided filename or extract from object_name
-        display_filename = filename
-        if not display_filename:
-            display_filename = object_name.split("/")[-1] if "/" in object_name else object_name
-        
-        # Build Content-Disposition header for inline display
-        content_disposition = build_content_disposition_header(display_filename, inline=True)
-
-        return StreamingResponse(
-            file_stream,
-            media_type=content_type,
-            headers={
-                "Content-Disposition": content_disposition,
-                "Cache-Control": "public, max-age=3600",
-                "ETag": f'"{object_name}"',
-            }
-        )
-    
+        actual_name, content_type, total_size = await resolve_preview_file(object_name=object_name)
     except FileTooLargeException as e:
         logger.warning(f"[preview_file] File too large: object_name={object_name}, error={str(e)}")
         raise HTTPException(
@@ -625,18 +608,130 @@ async def preview_file(
     except UnsupportedFileTypeException as e:
         logger.error(f"[preview_file] Unsupported file type: object_name={object_name}, error={str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
+            status_code=HTTPStatus.BAD_REQUEST, 
             detail=f"File format not supported for preview: {str(e)}"
-        )
-    except OfficeConversionException as e:
-        logger.error(f"[preview_file] Conversion failed: object_name={object_name}, error={str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to preview file: {str(e)}"
         )
     except Exception as e:
         logger.error(f"[preview_file] Unexpected error: object_name={object_name}, error={str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to preview file: {str(e)}"
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+            detail="Failed to preview file"
         )
+
+    display_filename = filename or (object_name.split("/")[-1] if "/" in object_name else object_name)
+    content_disposition = build_content_disposition_header(display_filename, inline=True)
+
+    common_headers = {
+        "Content-Disposition": content_disposition,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600",
+        "ETag": f'"{object_name}"',
+    }
+
+    if total_size == 0:
+        return StreamingResponse(
+            iter([]),
+            status_code=HTTPStatus.OK,
+            media_type=content_type,
+            headers={
+                **common_headers,
+                "Content-Length": "0",
+            },
+        )
+
+    # Parse Range header
+    start, end = None, None
+    if range_header:
+        parsed = _parse_range_header(range_header, total_size)
+        if parsed is None:
+            return StreamingResponse(
+                iter([]),
+                status_code=HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+                headers={"Content-Range": f"bytes */{total_size}"},
+            )
+        start, end = parsed
+
+    try:
+        if start is not None:
+            # 206 Partial Content
+            stream = get_preview_stream(actual_name, start, end)
+            return StreamingResponse(
+                stream.iter_chunks(chunk_size=64 * 1024),
+                status_code=HTTPStatus.PARTIAL_CONTENT,
+                media_type=content_type,
+                background=BackgroundTask(stream.close),
+                headers={
+                    **common_headers,
+                    "Content-Range": f"bytes {start}-{end}/{total_size}",
+                    "Content-Length": str(end - start + 1),
+                },
+            )
+        else:
+            # 200 Full Content — no Range header present.
+            stream = get_preview_stream(actual_name)
+            return StreamingResponse(
+                stream.iter_chunks(chunk_size=64 * 1024),
+                status_code=HTTPStatus.OK,
+                media_type=content_type,
+                background=BackgroundTask(stream.close),
+                headers={
+                    **common_headers,
+                    "Content-Length": str(total_size),
+                },
+            )
+    except NotFoundException as e:
+        logger.error(f"[preview_file] File not found when streaming: object_name={object_name}, error={str(e)}")
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"File not found: {object_name}")
+    except Exception as e:
+        logger.error(f"[preview_file] Unexpected error when streaming: object_name={object_name}, error={str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to preview file")
+
+
+def _parse_range_header(range_header: str, total_size: int) -> Optional[tuple]:
+    """
+    Parse an HTTP Range header and return (start, end) byte offsets (both inclusive).
+
+    Supports:
+      - bytes=start-end
+      - bytes=start-      (to end of file)
+      - bytes=-suffix     (last N bytes)
+
+    Returns None if the range is malformed or not satisfiable.
+    """
+    try:
+        if total_size <= 0:
+            return None
+        if not range_header.startswith("bytes="):
+            return None
+        range_spec = range_header[6:].strip()
+        if "-" not in range_spec:
+            return None
+        start_str, end_str = range_spec.split("-", 1)
+        start_str = start_str.strip()
+        end_str = end_str.strip()
+
+        if start_str == "":
+            # Suffix range: bytes=-N
+            if not end_str:
+                return None
+            suffix = int(end_str)
+            start = max(0, total_size - suffix)
+            end = total_size - 1
+        elif end_str == "":
+            # Open-ended range: bytes=N-
+            start = int(start_str)
+            end = total_size - 1
+        else:
+            start = int(start_str)
+            end = int(end_str)
+
+        # Clamp end to last byte (RFC 7233 §2.1 allows end to exceed file size)
+        end = min(end, total_size - 1)
+
+        # Validate bounds
+        if start < 0 or start >= total_size or end < start:
+            return None
+
+        return start, end
+    except (ValueError, AttributeError):
+        return None

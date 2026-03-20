@@ -11,7 +11,7 @@ import httpx
 import requests
 from fastapi import UploadFile
 
-from consts.const import DATA_PROCESS_SERVICE
+from consts.const import DATA_PROCESS_SERVICE, LIBREOFFICE_PROFILE_DIR
 from consts.model import ProcessParams
 from database.attachment_db import get_file_size_from_minio
 from utils.auth_utils import get_current_user_id
@@ -357,11 +357,20 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
 
     def _run_libreoffice_conversion():
         """Synchronous LibreOffice conversion to run in thread executor."""
+        os.makedirs(LIBREOFFICE_PROFILE_DIR, exist_ok=True)
+        profile_uri = Path(LIBREOFFICE_PROFILE_DIR).resolve().as_uri()
         cmd = [
-            'libreoffice',
-            '--headless',
-            '--convert-to', 'pdf',
-            '--outdir', output_dir,
+            "soffice",
+            "--headless",
+            "--nologo",
+            "--nodefault",
+            "--nofirststartwizard",
+            "--norestore",
+            "--invisible",
+            "--nolockcheck",
+            f"-env:UserInstallation={profile_uri}",
+            "--convert-to", "pdf",
+            "--outdir", output_dir,
             input_path
         ]
         return subprocess.run(

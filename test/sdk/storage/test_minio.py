@@ -972,3 +972,144 @@ class TestMinIOStorageClientCopyFile:
 
         assert success is False
         assert "copy failed" in result
+
+
+class TestMinIOStorageClientGetFileRange:
+    """Test cases for get_file_range method"""
+
+    @patch('nexent.storage.minio.boto3')
+    def test_get_file_range_success(self, mock_boto3):
+        """Test successful byte-range retrieval returns body stream"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_bucket.return_value = None
+        mock_body = MagicMock()
+        mock_client.get_object.return_value = {'Body': mock_body}
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            default_bucket="test-bucket"
+        )
+
+        success, result = client.get_file_range('test.pdf', 0, 4095, 'test-bucket')
+
+        assert success is True
+        assert result is mock_body
+        mock_client.get_object.assert_called_once_with(
+            Bucket='test-bucket',
+            Key='test.pdf',
+            Range='bytes=0-4095',
+        )
+
+    @patch('nexent.storage.minio.boto3')
+    def test_get_file_range_uses_default_bucket(self, mock_boto3):
+        """Test get_file_range falls back to default_bucket when bucket is omitted"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_bucket.return_value = None
+        mock_body = MagicMock()
+        mock_client.get_object.return_value = {'Body': mock_body}
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            default_bucket="test-bucket"
+        )
+
+        success, result = client.get_file_range('test.pdf', 100, 199)
+
+        assert success is True
+        mock_client.get_object.assert_called_once_with(
+            Bucket='test-bucket',
+            Key='test.pdf',
+            Range='bytes=100-199',
+        )
+
+    @patch('nexent.storage.minio.boto3')
+    def test_get_file_range_without_bucket(self, mock_boto3):
+        """Test get_file_range fails when no bucket is configured"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin"
+        )
+
+        success, result = client.get_file_range('test.pdf', 0, 99)
+
+        assert success is False
+        assert result == "Bucket name is required"
+        mock_client.get_object.assert_not_called()
+
+    @patch('nexent.storage.minio.boto3')
+    def test_get_file_range_not_found(self, mock_boto3):
+        """Test get_file_range handles 404 ClientError"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_bucket.return_value = None
+        error_404 = ClientError(
+            {'Error': {'Code': '404', 'Message': 'Not Found'}},
+            'GetObject'
+        )
+        mock_client.get_object.side_effect = error_404
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            default_bucket="test-bucket"
+        )
+
+        success, result = client.get_file_range('missing.pdf', 0, 99)
+
+        assert success is False
+        assert "File not found" in result
+
+    @patch('nexent.storage.minio.boto3')
+    def test_get_file_range_client_error(self, mock_boto3):
+        """Test get_file_range handles non-404 ClientError"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_bucket.return_value = None
+        error_403 = ClientError(
+            {'Error': {'Code': '403', 'Message': 'Forbidden'}},
+            'GetObject'
+        )
+        mock_client.get_object.side_effect = error_403
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            default_bucket="test-bucket"
+        )
+
+        success, result = client.get_file_range('test.pdf', 0, 99)
+
+        assert success is False
+        assert "Failed to get file range" in result
+
+    @patch('nexent.storage.minio.boto3')
+    def test_get_file_range_unexpected_error(self, mock_boto3):
+        """Test get_file_range handles unexpected exceptions"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_bucket.return_value = None
+        mock_client.get_object.side_effect = Exception("network failure")
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            default_bucket="test-bucket"
+        )
+
+        success, result = client.get_file_range('test.pdf', 0, 99)
+
+        assert success is False
+        assert "network failure" in result
