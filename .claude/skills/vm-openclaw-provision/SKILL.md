@@ -4,11 +4,11 @@ description: |
   FusionCompute 平台虚拟机发放与生命周期管理技能。
   
   适用场景：
-  - 从模板创建新虚拟机
-  - 管理虚拟机生命周期（启动、停止、休眠、修改、删除)
+  - 从模板创建单个或多个虚拟机（批量创建）
+  - 管理虚拟机生命周期（启动、停止、休眠、修改、删除）
   - 查询虚拟机模板和站点信息
   - 操作 FusionCompute API 接口
-  - 通过 CSV 状态文件自动分配可用 IP
+  - 通过 CSV 状态文件自动分配可用 IP，防止并发冲突
   - 自动传输配置文件到虚拟机（SCP）
   
   核心功能:
@@ -16,6 +16,7 @@ description: |
   - 异步任务处理(10 分钟超时,POST|PUT|DELETE 操作需等待任务完成)
   - 基于模板的虚拟机创建与自定义配置
   - 基于 CSV 状态文件的 IP 自动分配,防止并发冲突
+  - 支持批量创建虚拟机，自动确保 IP 不冲突
   - SSH/SCP 配置传输,等待虚拟机 SSH 就绪后自动传输配置文件
   - 自动清理超时 15 分钟的 allocating 记录
   
@@ -121,6 +122,14 @@ IP 分配通过 CSV 状态文件实现并发安全。
 - 更新 CSV (状态=allocated, vm_id)
 - 自动清理超过 15 分钟的 `allocating` 记录
 ### 工作流程
+#### 批量创建虚拟机(自动分配 IP)
+1. **加载配置** → 读取 config/config.yaml
+2. **创建客户端** → 使用凭据初始化
+3. **登录** → 获取 token
+4. **批量克隆** → 逐个分配 IP 并克隆虚拟机
+5. **等待任务** → 轮询所有任务直到完成
+6. **传输配置** → **必须**通过 SCP 传输配置文件到虚拟机
+7. **报告结果** → 返回所有虚拟机的创建结果
 #### 创建虚拟机(自动分配 IP)
 1. **加载配置** → 读取 config/config.yaml
 2. **创建客户端** → 使用凭据初始化
@@ -153,7 +162,7 @@ task_id, ip = client.clone_vm_auto_ip(
     name="my-new-vm",
     gateway="192.168.1.1",
     netmask="255.255.255.0",
-    cpu=4
+    cpu=4,
     memory=8192
 )
 print(f"正在创建虚拟机,分配的 IP: {ip}")
@@ -166,6 +175,62 @@ client.wait_for_task_and_update_ip(
     transfer_config=True  # 必须传输配置
 )
 print(f"虚拟机创建成功, IP: {ip}")
+```
+### 批量创建虚拟机
+```python
+from fc_client import create_client_from_config
+
+client = create_client_from_config("config/config.yaml")
+token = client.login()
+
+vm_configs = [
+    {
+        "name": "vm-1",
+        "gateway": "192.168.1.1",
+        "netmask": "255.255.255.0",
+        "cpu": 4,
+        "memory": 8192,
+    },
+    {
+        "name": "vm-2",
+        "gateway": "192.168.1.1",
+        "netmask": "255.255.255.0",
+        "cpu": 2,
+        "memory": 4096,
+    },
+    {
+        "name": "vm-3",
+        "gateway": "192.168.1.1",
+        "netmask": "255.255.255.0",
+    },
+]
+
+results = client.clone_vms_batch(
+    site_id="ABCDE",
+    vm_id="i00001",
+    vm_configs=vm_configs,
+)
+
+for result in results:
+    if result["success"]:
+        print(f"✅ {result['name']}: IP={result['ip']}, task_id={result['task_id']}")
+    else:
+        print(f"❌ {result['name']}: {result['error']}")
+
+# 等待所有任务完成并传输配置
+task_results = client.wait_for_tasks_batch(
+    site_id="ABCDE",
+    tasks=results,
+    transfer_config=True,
+)
+
+for result in task_results:
+    name = result.get("name", "")
+    if result.get("task_completed"):
+        print(f"✅ {name}: 任务完成")
+    else:
+        error = result.get("error", "Unknown error")
+        print(f"❌ {name}: {error}")
 ```
 ### 创建虚拟机(指定 IP)
 ```python
@@ -316,6 +381,10 @@ ssh:
 `scripts/fc_client.py` 提供:
 - `FusionComputeClient` - 主要客户端类
 - `IPAllocationManager` - CSV 状态文件管理
+- `clone_vm_auto_ip()` - 创建单个虚拟机（自动分配 IP）
+- `clone_vms_batch()` - 批量创建虚拟机（防止 IP 冲突）
+- `wait_for_task_and_update_ip()` - 等待单个任务完成并更新 IP
+- `wait_for_tasks_batch()` - 等待批量任务完成并更新 IP
 - `get_available_ip()` - 获取可用 IP
 - `Config` - 配置加载类
 - `create_client_from_config()` - 工厂函数

@@ -546,6 +546,149 @@ class FusionComputeClient:
             self.ip_manager.mark_failed(ip)
             raise
 
+    def clone_vms_batch(
+        self,
+        site_id: str,
+        vm_id: str,
+        vm_configs: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Batch create VMs with IP conflict prevention.
+
+        Args:
+            site_id: Site ID
+            vm_id: Template VM ID
+            vm_configs: List of VM config dicts, each containing:
+                - name: VM name
+                - cpu: CPU cores (optional, default 4)
+                - memory: Memory in MB (optional, default 8192)
+                - gateway: Gateway address
+                - netmask: Netmask
+                - hostname: Hostname (optional)
+                - description: Description (optional)
+
+        Returns:
+            List of results, each containing:
+                - name: VM name
+                - success: bool
+                - task_id: str | None
+                - ip: str | None
+                - error: str | None
+        """
+        if not self.ip_manager:
+            raise RuntimeError("IP manager not configured")
+
+        results = []
+        allocated_ips = []
+
+        for config in vm_configs:
+            name = config.get("name", "")
+            gateway = config.get("gateway", "")
+            netmask = config.get("netmask", "")
+            cpu = config.get("cpu", 4)
+            memory = config.get("memory", 8192)
+            hostname = config.get("hostname", "")
+            description = config.get("description", "")
+
+            result = {
+                "name": name,
+                "success": False,
+                "task_id": None,
+                "ip": None,
+                "error": None,
+            }
+
+            try:
+                ip = get_available_ip(
+                    self.ip_manager, gateway, netmask, exclude_ips=allocated_ips
+                )
+
+                if not ip:
+                    result["error"] = f"No available IP in subnet {gateway}/{netmask}"
+                    results.append(result)
+                    continue
+
+                allocated_ips.append(ip)
+                task_id, _ = self.clone_vm(
+                    site_id=site_id,
+                    vm_id=vm_id,
+                    name=name,
+                    cpu=cpu,
+                    memory=memory,
+                    ip=ip,
+                    gateway=gateway,
+                    netmask=netmask,
+                    hostname=hostname,
+                    description=description,
+                )
+
+                self.ip_manager.allocate_ip(
+                    ip, task_id, site_id, name, gateway, netmask
+                )
+
+                result["success"] = True
+                result["task_id"] = task_id
+                result["ip"] = ip
+
+            except Exception as e:
+                result["error"] = str(e)
+
+            results.append(result)
+
+        return results
+
+    def wait_for_tasks_batch(
+        self,
+        site_id: str,
+        tasks: List[Dict[str, Any]],
+        timeout: Optional[int] = None,
+        transfer_config: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Wait for batch tasks and update IP status.
+
+        Args:
+            site_id: Site ID
+            tasks: List of task results from clone_vms_batch
+            timeout: Timeout in seconds (optional)
+            transfer_config: Whether to transfer config after success
+
+        Returns:
+            List of updated results with task completion status
+        """
+        if not self.ip_manager:
+            return tasks
+
+        results = []
+
+        for task in tasks:
+            name = task.get("name", "")
+            task_id = task.get("task_id")
+            ip = task.get("ip")
+
+            result = task.copy()
+
+            try:
+                if task_id and ip:
+                    wait_result = self.wait_for_task_and_update_ip(
+                        site_id=site_id,
+                        task_id=task_id,
+                        ip=ip,
+                        timeout=timeout,
+                        transfer_config=transfer_config,
+                    )
+
+                    result["task_completed"] = wait_result
+                else:
+                    result["task_completed"] = False
+                    result["error"] = "No task_id or IP"
+
+            except Exception as e:
+                result["task_completed"] = False
+                result["error"] = str(e)
+
+            results.append(result)
+
+        return results
+
     def _transfer_config_to_vm(self, vm_ip: str) -> bool:
         if not self.config_transfer or not self.config_transfer.get("enabled", False):
             print("Config transfer disabled, skipping...")
