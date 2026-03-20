@@ -628,6 +628,17 @@ async def preview_file(
         "ETag": f'"{object_name}"',
     }
 
+    if total_size == 0:
+        return StreamingResponse(
+            iter([]),
+            status_code=HTTPStatus.OK,
+            media_type=content_type,
+            headers={
+                **common_headers,
+                "Content-Length": "0",
+            },
+        )
+
     # Parse Range header
     start, end = None, None
     if range_header:
@@ -688,6 +699,8 @@ def _parse_range_header(range_header: str, total_size: int) -> Optional[tuple]:
     Returns None if the range is malformed or not satisfiable.
     """
     try:
+        if total_size <= 0:
+            return None
         if not range_header.startswith("bytes="):
             return None
         range_spec = range_header[6:].strip()

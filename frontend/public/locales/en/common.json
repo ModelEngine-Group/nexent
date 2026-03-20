@@ -17,6 +17,7 @@
   "filePreview.loadingDocument": "Loading document...",
   "filePreview.loadingPage": "Loading page...",
   "filePreview.previewFailed": "File preview failed",
+  "filePreview.emptyFile": "This file content is empty",
   "filePreview.download": "Download",
   "filePreview.zoomIn": "Zoom in",
   "filePreview.zoomOut": "Zoom out",

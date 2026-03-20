@@ -1140,6 +1140,45 @@ async def test_preview_file_range_open_ended(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_preview_file_empty_file_returns_200_without_stream(monkeypatch):
+    """Empty file: return 200 with zero content length and no stream fetch."""
+    mock_get_stream = MagicMock()
+    monkeypatch.setattr(file_management_app, "resolve_preview_file",
+                        AsyncMock(return_value=("docs/empty.txt", "text/plain", 0)))
+    monkeypatch.setattr(file_management_app, "get_preview_stream", mock_get_stream)
+
+    resp = await file_management_app.preview_file(
+        object_name="docs/empty.txt",
+        filename="empty.txt",
+        range_header=None,
+    )
+
+    assert resp.status_code == 200
+    assert resp.media_type == "text/plain"
+    assert resp.headers.get("content-length") == "0"
+    mock_get_stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_preview_file_empty_file_ignores_range_and_returns_200(monkeypatch):
+    """Empty file with Range header: still return 200 empty response."""
+    mock_get_stream = MagicMock()
+    monkeypatch.setattr(file_management_app, "resolve_preview_file",
+                        AsyncMock(return_value=("docs/empty.txt", "text/plain", 0)))
+    monkeypatch.setattr(file_management_app, "get_preview_stream", mock_get_stream)
+
+    resp = await file_management_app.preview_file(
+        object_name="docs/empty.txt",
+        filename="empty.txt",
+        range_header="bytes=0-10",
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers.get("content-length") == "0"
+    mock_get_stream.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_preview_file_invalid_range_returns_416(monkeypatch):
     """Out-of-bounds Range: 416 with Content-Range: bytes */total."""
     monkeypatch.setattr(file_management_app, "resolve_preview_file",
@@ -1365,4 +1404,7 @@ class TestParseRangeHeader:
         """bytes=N without '-' is malformed and rejected."""
         assert file_management_app._parse_range_header("bytes=100", 1000) is None
 
+    def test_zero_size_file_returns_none(self):
+        """Empty files do not support satisfiable ranges."""
+        assert file_management_app._parse_range_header("bytes=0-10", 0) is None
 

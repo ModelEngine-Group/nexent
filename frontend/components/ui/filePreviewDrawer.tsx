@@ -172,6 +172,7 @@ export function FilePreviewDrawer({
     return extractMarkdownHeadings(textContent);
   }, [detectedFileType, textContent]);
   
+  const isEmptyFile = fileSize === 0;
   const isTooLargeToPreview = !!(fileSize && fileSize > 100 * 1024 * 1024);
 
   const fetchTextChunk = useCallback(async (url: string, isFirst = false, sessionId?: number): Promise<void> => {
@@ -340,6 +341,12 @@ export function FilePreviewDrawer({
       setError(null);
 
       try {
+        if (isEmptyFile) {
+          setPreviewUrl('');
+          setLoading(false);
+          return;
+        }
+
         const url = storageService.getPreviewUrl(objectName, fileName);
         setPreviewUrl(url);
         previewUrlRef.current = url;
@@ -360,7 +367,7 @@ export function FilePreviewDrawer({
     };
 
     loadPreview();
-  }, [open, objectName, fileName, detectedFileType, t, fetchTextChunk, resetTextPreviewState]);
+  }, [open, objectName, fileName, detectedFileType, t, fetchTextChunk, resetTextPreviewState, isEmptyFile]);
 
   useEffect(() => {
     if (!open) {
@@ -739,6 +746,12 @@ export function FilePreviewDrawer({
     </div>
   );
 
+  const renderEmptyFile = () => (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-gray-500 text-sm">{t('filePreview.emptyFile')}</p>
+    </div>
+  );
+
   const renderUnsupported = () => (
     <div className="flex items-center justify-center h-full">
       <p className="text-gray-500 text-sm">{t('filePreview.unsupportedSingleLine')}</p>
@@ -747,6 +760,7 @@ export function FilePreviewDrawer({
 
   const renderContent = () => {
     if (isTooLargeToPreview || serverTooLarge) return renderTooLarge();
+    if (isEmptyFile) return renderEmptyFile();
     if (loading) return renderLoading();
     if (error) return renderError();
 
