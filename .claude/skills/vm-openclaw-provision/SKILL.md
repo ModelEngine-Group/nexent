@@ -9,15 +9,19 @@ description: |
   - 查询虚拟机模板和站点信息
   - 操作 FusionCompute API 接口
   - 通过 CSV 状态文件自动分配可用 IP
-  - 自动传输配置文件到虚拟机
+  - 自动传输配置文件到虚拟机（SCP）
   
   核心功能:
   - 自动 Token 管理(每次会话前自动登录获取)
   - 异步任务处理(10 分钟超时,POST|PUT|DELETE 操作需等待任务完成)
   - 基于模板的虚拟机创建与自定义配置
   - 基于 CSV 状态文件的 IP 自动分配,防止并发冲突
-  - SSH/SFTP 配置传输,等待虚拟机 SSH 就绪后自动传输配置文件
+  - SSH/SCP 配置传输,等待虚拟机 SSH 就绪后自动传输配置文件
   - 自动清理超时 15 分钟的 allocating 记录
+  
+  创建虚拟机时的必要技能调用:
+  - 创建虚拟机后必须调用配置传输功能（transfer_config）
+  - 将环境 IP 和 Kafka 凭证传输到新创建的虚拟机
 ---
 
 # 虚拟机发放技能
@@ -122,14 +126,16 @@ IP 分配通过 CSV 状态文件实现并发安全。
 2. **创建客户端** → 使用凭据初始化
 3. **登录** → 获取 token
 4. **克隆虚拟机** → 通过 CSV 状态文件自动分配可用 IP
-5. **轮询任务** → 独轮询,不更新 CSV
-6. **报告结果** → 返回虚拟机详情和分配的 IP
+5. **轮询任务** → 轮询直到任务完成
+6. **传输配置** → **必须**通过 SCP 传输配置文件到虚拟机
+7. **报告结果** → 返回虚拟机详情和分配的 IP
 #### 使用指定 IP 创建虚拟机
 1. **登录** → 获取 token
 2. **获取站点** → 找到目标 site_id
 3. **列出虚拟机** → 找到模板 vm_id
 4. **克隆虚拟机** → 使用指定 IP
-5. **轮询任务** → 独轮询,不更新 CSV
+5. **轮询任务** → 轮询直到任务完成
+6. **传输配置** → **必须**通过 SCP 传输配置文件到虚拟机
 ## API 参考
 完整接口文档请参阅 [references/api_reference.md](references/api_reference.md)
 ## 使用示例
@@ -152,10 +158,12 @@ task_id, ip = client.clone_vm_auto_ip(
 )
 print(f"正在创建虚拟机,分配的 IP: {ip}")
 
+# 必须启用配置传输
 client.wait_for_task_and_update_ip(
     site_id="ABCDE",
-    task_id=task_id
-    ip=ip
+    task_id=task_id,
+    ip=ip,
+    transfer_config=True  # 必须传输配置
 )
 print(f"虚拟机创建成功, IP: {ip}")
 ```
@@ -175,7 +183,9 @@ task_id, ip = client.clone_vm(
     netmask="255.255.255.0"
 )
 
+# 必须传输配置
 client.wait_for_task(site_id="ABCDE", task_id=task_id)
+client._transfer_config_to_vm("192.168.1.150")
 ```
 ### 查看已分配的 IP
 ```python
@@ -195,10 +205,12 @@ print(f"Cleaned {cleaned} stale records")
 
 ### 功能说明
 
-虚拟机创建完成后，可以通过 SSH/SFTP 自动传输配置文件到虚拟机。配置文件包含：
+**重要：创建虚拟机后必须调用配置传输功能。**
+
+虚拟机创建完成后，必须通过 SSH/SCP 自动传输配置文件到虚拟机。配置文件包含：
 - 虚拟机 IP 地址
-- Kafka 连接配置
-- SSH 连接配置（不含密码）
+- 当前环境 IP
+- Kafka 连接配置（用户名、密码等）
 
 ### 配置设置
 
@@ -249,9 +261,9 @@ config_transfer:
 ### 工作流程
 
 1. **创建虚拟机** → 克隆虚拟机并等待任务完成
-2. **等待 SSH 就绪** → 轮询检测 SSH 服务可用性
+2. **等待 SSH 就绪** → 轮询检测 SSH 服务可用性（指数退避）
 3. **连接虚拟机** → 使用 SSH 用户名/密码连接
-4. **传输配置** → 通过 SFTP 传输配置文件
+4. **传输配置** → 通过 SCP 传输配置文件（使用 SSH exec_command）
 5. **验证成功** → 确认文件传输成功
 
 ### 使用示例
@@ -271,12 +283,12 @@ task_id, ip = client.clone_vm_auto_ip(
     netmask="255.255.255.0",
 )
 
-# 等待任务完成并传输配置
+# 等待任务完成并传输配置（transfer_config=True 是必须的）
 client.wait_for_task_and_update_ip(
     site_id="ABCDE",
     task_id=task_id,
     ip=ip,
-    transfer_config=True  # 启用配置传输
+    transfer_config=True  # 必须启用配置传输
 )
 
 print(f"虚拟机创建成功，配置已传输: {ip}")

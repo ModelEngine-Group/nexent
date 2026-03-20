@@ -4,7 +4,7 @@ FusionCompute VM Provisioning Helper
 
 This script provides helper functions for common VM operations on FusionCompute platform.
 Uses CSV state file to track IP allocations and prevent race conditions.
-Includes SSH/SFTP config transfer functionality.
+Includes SSH/SCP config transfer functionality.
 """
 
 import csv
@@ -282,56 +282,36 @@ def create_ssh_client(
     return client
 
 
-def transfer_config_via_sftp(
+def transfer_config_via_scp(
     ssh_client: paramiko.SSHClient,
     config_content: str,
     remote_path: str,
     chmod: int = 0o600,
 ) -> bool:
-    sftp = ssh_client.open_sftp()
-    temp_path = ""
-    try:
-        remote_dir = os.path.dirname(remote_path)
-        try:
-            sftp.stat(remote_dir)
-        except FileNotFoundError:
-            _mkdir_p_sftp(sftp, remote_dir)
+    """Transfer config content to remote VM via SSH exec_command (SCP-like)."""
+    remote_dir = os.path.dirname(remote_path)
 
-        temp_path = f"{remote_path}.tmp"
-        with sftp.file(temp_path, "w") as f:
-            f.write(config_content)
-        sftp.chmod(temp_path, chmod)
-        sftp.posix_rename(temp_path, remote_path)
-        print(f"Config transferred: {remote_path}")
-        return True
-    except Exception as e:
-        print(f"Config transfer failed: {e}")
-        if temp_path:
-            try:
-                sftp.remove(temp_path)
-            except Exception:
-                pass
-        raise
-    finally:
-        sftp.close()
+    if remote_dir:
+        stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p '{remote_dir}'")
+        stdout.channel.recv_exit_status()
 
+    cat_cmd = f"cat > '{remote_path}' << 'EOFCONFIG'\n{config_content}\nEOFCONFIG"
+    stdin, stdout, stderr = ssh_client.exec_command(cat_cmd)
+    exit_status = stdout.channel.recv_exit_status()
 
-def _mkdir_p_sftp(sftp: paramiko.SFTPClient, path: str) -> None:
-    dirs_to_create = []
-    current = path
-    while current and current != "/":
-        try:
-            sftp.stat(current)
-            break
-        except FileNotFoundError:
-            dirs_to_create.append(current)
-            current = os.path.dirname(current)
+    if exit_status != 0:
+        err_output = stderr.read().decode()
+        raise Exception(
+            f"SCP transfer failed with exit code {exit_status}: {err_output}"
+        )
 
-    for d in reversed(dirs_to_create):
-        try:
-            sftp.mkdir(d)
-        except Exception:
-            pass
+    stdin, stdout, stderr = ssh_client.exec_command(
+        f"chmod {oct(chmod)[2:]} '{remote_path}'"
+    )
+    stdout.channel.recv_exit_status()
+
+    print(f"Config transferred via SCP: {remote_path}")
+    return True
 
 
 def generate_vm_config_yaml(
@@ -597,9 +577,7 @@ class FusionComputeClient:
                 vm_ip, self.kafka_config, self.ssh_config
             )
             print(f"Transferring config to {full_remote_path}...")
-            return transfer_config_via_sftp(
-                ssh_client, config_content, full_remote_path
-            )
+            return transfer_config_via_scp(ssh_client, config_content, full_remote_path)
         finally:
             ssh_client.close()
 

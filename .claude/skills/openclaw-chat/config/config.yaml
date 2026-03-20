@@ -1,0 +1,3 @@
+host: "localhost"
+port: "18789"
+token: "your-token-here"
