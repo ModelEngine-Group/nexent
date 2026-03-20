@@ -19,375 +19,249 @@ description: |
   - 支持批量创建虚拟机，自动确保 IP 不冲突
   - SSH/SCP 配置传输,等待虚拟机 SSH 就绪后自动传输配置文件
   - 自动清理超时 15 分钟的 allocating 记录
-  
-  创建虚拟机时的必要技能调用:
-  - 创建虚拟机后必须调用配置传输功能（transfer_config）
-  - 将环境 IP 和 Kafka 凭证传输到新创建的虚拟机
 ---
 
 # 虚拟机发放技能
 
-FusionCompute 平台上管理虚拟机，支持自动 Token 处理、异步任务管理和基于 CSV 状态文件的 IP 自动分配。
-## 关键要求
-### 1. 必须先登录
-在执行任何操作之前,必须调用登录接口获取 `X-Auth-Token`：
-```
-POST /service/session
-Headers:
-  Accept: application/json;version=8.1;charset=UTF-8
-  X-Auth-User: <用户名>
-  X-Auth-Key: <密码>
-  X-Auth-UserType: 2
-  X-ENCRYPT-ALGORITHM: 1
+FusionCompute 平台上管理虚拟机，每个功能由独立的可执行脚本实现。
 
-Response Headers:
-  X-Auth-Token: <token>
-```
+## ⚠️ 重要提醒：创建虚拟机后必须传输配置
 
-### 2. 处理异步任务(10 分钟超时)
-所有 POST|PUT|DELETE 操作都会返回 `task_id`。必须:
-1. 从响应中提取 `task_id`
-2. 轮询任务状态接口直到成功
-3. 任务完成后才能继续下一步操作
-```
-GET /service/sites/<site_id>/tasks/<task_id>
-Headers:
-  X-Auth-Token: <token>
+**创建虚拟机完成后，必须执行配置传输操作！**
 
-超时时间: 600 秒(10 分钟)
+新创建的虚拟机需要接收以下配置才能正常工作：
+- 虚拟机自身的 IP 地址
+- 环境服务器 IP 地址
+- Kafka 连接凭证
+
+**正确用法：**
+```bash
+# 方式一：创建时自动传输配置（推荐）
+python scripts/create.py --name my-vm --wait --transfer-config
+
+# 方式二：创建后手动传输配置
+python scripts/create.py --name my-vm --wait
+python scripts/transfer_config.py --ip 192.168.1.100
 ```
 
-### 3. 仅支持单虚拟机操作
-此技能每次只处理一台虚拟机
-- 每次请求创建一台虚拟机
-- 每次修改一台虚拟机
-- 每次启动/停止/休眠/删除一台虚拟机
-## 配置文件
-### config/config.yaml 结构
-从 `config/config.yaml` 加载凭据和网络配置
-```yaml
-# FusionCompute 配置
-fc_ip: 100.199.5.10
-cpu: 4
-memory: 8192  # 单位:MB
-X-Auth-User: test
-X-Auth-Key: Huawei@4321
-site_id: ABCDE
-vm_id: i00001
-gateway: "192.168.1.1"
-netmask: "255.255.255.0"
-task_timeout: 600  # 任务超时时间(秒)
+**如果跳过配置传输，环境将无法监管虚拟机！**
+
+## 脚本结构
+
 ```
-### 配置项说明
-| 配置项 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| fc_ip | string | 是 | FusionCompute 服务器 IP |
-| cpu | int | 否 | 默认 CPU 核数,默认 4 |
-| memory | int | 否 | 默认内存大小（MB)，默认 8192 |
-| X-Auth-User | string | 是 | 登录用户名 |
-| X-Auth-Key | string | 是 | 登录密码 |
-| site_id | string | 是 | 站点 ID |
-| vm_id | string | 是 | 模板虚拟机 ID |
-| gateway | string | 是 | 网关地址 |
-| netmask | string | 是 | 子网掩码 |
-| task_timeout | int | 否 | 任务超时时间(秒)，默认 600 |
-## IP 自动分配
-### 基于 CSV 状态文件
-IP 分配通过 CSV 状态文件实现并发安全。
-文件位置: `config/.ip_allocations.csv`
-#### CSV 结构
-| 字段 | 说明 |
+scripts/
+├── _common.py         # 共享代码（不直接运行）
+├── create.py          # 创建虚拟机
+├── delete.py          # 删除虚拟机
+├── list.py            # 列出资源（站点/虚拟机/IP分配）
+├── start.py           # 启动虚拟机
+├── stop.py            # 停止虚拟机
+├── hibernate.py       # 休眠虚拟机
+├── modify.py          # 修改虚拟机配置
+├── status.py          # 查询任务状态
+└── transfer_config.py # 传输配置到虚拟机
+```
+
+## 获取必需参数
+
+以下参数在多数脚本中是必需的，可以通过以下方式获取：
+
+### site-id 获取方式
+
+1. **从配置文件读取**（推荐）：
+   ```bash
+   # 优先级：/mnt/nexent/vm-config.yaml > config/config.yaml
+   cat /mnt/nexent/vm-config.yaml | grep site_id
+   # 或
+   cat config/config.yaml | grep site_id
+   ```
+
+2. **查询所有站点**：
+   ```bash
+   python scripts/list.py sites
+   ```
+
+### vm-id 获取方式
+
+1. **从 IP 分配记录查询**（推荐）：
+   ```bash
+   # CSV 文件位置：/mnt/nexent/.ip_allocations.csv 或 config/.ip_allocations.csv
+   # CSV 字段：ip, status, task_urn, vm_id, site_id, name, gateway, netmask, created_at, updated_at
+   
+   # 通过虚拟机名称查询 vm-id
+   grep "<vm-name>" /mnt/nexent/.ip_allocations.csv
+   # 或
+   grep "<vm-name>" config/.ip_allocations.csv
+   ```
+
+2. **查询所有虚拟机并筛选**：
+   ```bash
+   python scripts/list.py vms --site-id <site-id>
+   ```
+
+## 通用参数
+
+所有脚本支持以下通用参数：
+
+| 参数 | 说明 |
 |------|------|
-| ip | IP 地址 |
-| status | `allocating` / `allocated` / `failed` |
-| task_id | 异步任务 ID |
-| vm_id | 虚拟机 ID（创建成功后写入) |
-| site_id | 站点 ID |
-| name | 虚拟机名称 |
-| gateway | 网关地址 |
-| netmask | 子网掩码 |
-| created_at | 创建时间 |
-| updated_at | 更新时间 |
-**状态说明:**
-- `allocating`: IP 已预占用，正在创建中，异步任务等待
-- `allocated`: 创建成功, VM 已运行
-- `failed`: 创建失败, 可手动标记为 failed (allocating 超时 15 分钟)
-### 并发安全
-- 读取 CSV 跳过所有 `allocating` / `allocated` 状态的 IP
-- 装载网关/子网不匹配的 IP 也跳过
-- 选择第一个未在 CSV 中出现的 IP
-- 写入 CSV (状态=allocating) 预占用
-- 调用 clone_vm API
-- 等待任务完成
-- 更新 CSV (状态=allocated, vm_id)
-- 自动清理超过 15 分钟的 `allocating` 记录
-### 工作流程
-#### 批量创建虚拟机(自动分配 IP)
-1. **加载配置** → 读取 config/config.yaml
-2. **创建客户端** → 使用凭据初始化
-3. **登录** → 获取 token
-4. **批量克隆** → 逐个分配 IP 并克隆虚拟机
-5. **等待任务** → 轮询所有任务直到完成
-6. **传输配置** → **必须**通过 SCP 传输配置文件到虚拟机
-7. **报告结果** → 返回所有虚拟机的创建结果
-#### 创建虚拟机(自动分配 IP)
-1. **加载配置** → 读取 config/config.yaml
-2. **创建客户端** → 使用凭据初始化
-3. **登录** → 获取 token
-4. **克隆虚拟机** → 通过 CSV 状态文件自动分配可用 IP
-5. **轮询任务** → 轮询直到任务完成
-6. **传输配置** → **必须**通过 SCP 传输配置文件到虚拟机
-7. **报告结果** → 返回虚拟机详情和分配的 IP
-#### 使用指定 IP 创建虚拟机
-1. **登录** → 获取 token
-2. **获取站点** → 找到目标 site_id
-3. **列出虚拟机** → 找到模板 vm_id
-4. **克隆虚拟机** → 使用指定 IP
-5. **轮询任务** → 轮询直到任务完成
-6. **传输配置** → **必须**通过 SCP 传输配置文件到虚拟机
-## API 参考
-完整接口文档请参阅 [references/api_reference.md](references/api_reference.md)
-## 使用示例
-### 创建虚拟机(自动分配 IP)
-```python
-from fc_client import create_client_from_config
+| `--config, -c` | 配置文件路径（默认: /mnt/nexent/vm-config.yaml 或 config/config.yaml）|
+| `--site-id, -s` | 站点 ID（覆盖配置文件）|
+| `--fc-ip` | FusionCompute IP（覆盖配置文件）|
+| `--username, -u` | 用户名（覆盖配置文件）|
+| `--password, -p` | 密码（覆盖配置文件）|
 
-client = create_client_from_config("config/config.yaml")
-token = client.login()
-print(f"登录成功, token: {token[:20]}...")
+## 脚本使用
 
-task_id, ip = client.clone_vm_auto_ip(
-    site_id="ABCDE",
-    vm_id="i00001",
-    name="my-new-vm",
-    gateway="192.168.1.1",
-    netmask="255.255.255.0",
-    cpu=4,
-    memory=8192
-)
-print(f"正在创建虚拟机,分配的 IP: {ip}")
+### create.py - 创建虚拟机
 
-# 必须启用配置传输
-client.wait_for_task_and_update_ip(
-    site_id="ABCDE",
-    task_id=task_id,
-    ip=ip,
-    transfer_config=True  # 必须传输配置
-)
-print(f"虚拟机创建成功, IP: {ip}")
-```
-### 批量创建虚拟机
-```python
-from fc_client import create_client_from_config
+```bash
+# 创建单个虚拟机（自动分配 IP）
+python scripts/create.py --name my-vm --wait
 
-client = create_client_from_config("config/config.yaml")
-token = client.login()
+# 创建单个虚拟机（指定 IP）
+python scripts/create.py --name my-vm --ip 192.168.1.100 --wait
 
-vm_configs = [
-    {
-        "name": "vm-1",
-        "gateway": "192.168.1.1",
-        "netmask": "255.255.255.0",
-        "cpu": 4,
-        "memory": 8192,
-    },
-    {
-        "name": "vm-2",
-        "gateway": "192.168.1.1",
-        "netmask": "255.255.255.0",
-        "cpu": 2,
-        "memory": 4096,
-    },
-    {
-        "name": "vm-3",
-        "gateway": "192.168.1.1",
-        "netmask": "255.255.255.0",
-    },
-]
+# 批量创建虚拟机
+python scripts/create.py --names "vm-1,vm-2,vm-3" --wait
 
-results = client.clone_vms_batch(
-    site_id="ABCDE",
-    vm_id="i00001",
-    vm_configs=vm_configs,
-)
+# 创建后传输配置
+python scripts/create.py --name my-vm --wait --transfer-config
 
-for result in results:
-    if result["success"]:
-        print(f"✅ {result['name']}: IP={result['ip']}, task_id={result['task_id']}")
-    else:
-        print(f"❌ {result['name']}: {result['error']}")
-
-# 等待所有任务完成并传输配置
-task_results = client.wait_for_tasks_batch(
-    site_id="ABCDE",
-    tasks=results,
-    transfer_config=True,
-)
-
-for result in task_results:
-    name = result.get("name", "")
-    if result.get("task_completed"):
-        print(f"✅ {name}: 任务完成")
-    else:
-        error = result.get("error", "Unknown error")
-        print(f"❌ {name}: {error}")
-```
-### 创建虚拟机(指定 IP)
-```python
-from fc_client import create_client_from_config
-
-client = create_client_from_config("config/config.yaml")
-client.login()
-
-task_id, ip = client.clone_vm(
-    site_id="ABCDE",
-    vm_id="i00001",
-    name="my-specific-ip-vm",
-    ip="192.168.1.150",
-    gateway="192.168.1.1",
-    netmask="255.255.255.0"
-)
-
-# 必须传输配置
-client.wait_for_task(site_id="ABCDE", task_id=task_id)
-client._transfer_config_to_vm("192.168.1.150")
-```
-### 查看已分配的 IP
-```python
-client.ip_manager.get_allocated_ips("192.168.1.1", "255.255.255.0")
-```
-### 查看特定 IP 的分配信息
-```python
-allocation = client.ip_manager.get_allocation("192.168.1.100")
-print(f"VM ID: {allocation.get('vm_id')}")
-```
-### 清理超时记录
-```python
-cleaned = client.ip_manager.cleanup_stale()
-print(f"Cleaned {cleaned} stale records")
-```
-## 配置传输到虚拟机
-
-### 功能说明
-
-**重要：创建虚拟机后必须调用配置传输功能。**
-
-虚拟机创建完成后，必须通过 SSH/SCP 自动传输配置文件到虚拟机。配置文件包含：
-- 虚拟机 IP 地址
-- 当前环境 IP
-- Kafka 连接配置（用户名、密码等）
-
-### 配置设置
-
-在 `config/config.yaml` 中添加以下配置：
-
-```yaml
-# SSH 配置（用于连接虚拟机传输配置）
-ssh:
-  username: "root"
-  password: "VM_PASSWORD"
-  port: 22
-  connect_timeout: 30
-  ready_timeout: 300
-
-# Kafka 配置（将传输到虚拟机）
-kafka:
-  bootstrap_servers: "192.168.1.100:9092"
-  sasl_username: "kafka_user"
-  sasl_password: "kafka_password"
-  security_protocol: "SASL_PLAINTEXT"
-  sasl_mechanism: "PLAIN"
-
-# 配置文件传输设置
-config_transfer:
-  enabled: true
-  remote_path: "/opt/nexent/config"
-  config_filename: "agent_config.yaml"
+# 指定资源配置
+python scripts/create.py --name my-vm --cpu 8 --memory 16384 --wait
 ```
 
-### 配置项说明
+**参数说明：**
+| 参数 | 说明 |
+|------|------|
+| `--name, -n` | 虚拟机名称（单个）|
+| `--names` | 虚拟机名称列表，逗号分隔（批量）|
+| `--vm-id` | 模板虚拟机 ID |
+| `--ip` | 指定 IP 地址（不指定则自动分配）|
+| `--gateway` | 网关 |
+| `--netmask` | 子网掩码 |
+| `--cpu` | CPU 核数 |
+| `--memory` | 内存（MB）|
+| `--hostname` | 主机名|
+| `--description, -d` | 描述 |
+| `--wait, -w` | 等待任务完成 |
+| `--transfer-config` | **必须**：创建后传输配置（推荐）|
+| `--skip-config-warning` | 跳过配置传输警告（不推荐）|
+| `--json` | JSON 格式输出 |
 
-| 配置项 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| ssh.username | string | 是 | SSH 用户名 |
-| ssh.password | string | 是 | SSH 密码 |
-| ssh.port | int | 否 | SSH 端口，默认 22 |
-| ssh.connect_timeout | int | 否 | SSH 连接超时（秒），默认 30 |
-| ssh.ready_timeout | int | 否 | 等待 SSH 就绪超时（秒），默认 300 |
-| kafka.bootstrap_servers | string | 是 | Kafka 服务器地址 |
-| kafka.sasl_username | string | 否 | Kafka SASL 用户名 |
-| kafka.sasl_password | string | 否 | Kafka SASL 密码 |
-| kafka.security_protocol | string | 否 | 安全协议，默认 SASL_PLAINTEXT |
-| kafka.sasl_mechanism | string | 否 | SASL 机制，默认 PLAIN |
-| config_transfer.enabled | bool | 否 | 是否启用配置传输，默认 false |
-| config_transfer.remote_path | string | 否 | 远程目录，默认 /opt/nexent/config |
-| config_transfer.config_filename | string | 否 | 配置文件名，默认 agent_config.yaml |
+### delete.py - 删除虚拟机
 
-### 工作流程
-
-1. **创建虚拟机** → 克隆虚拟机并等待任务完成
-2. **等待 SSH 就绪** → 轮询检测 SSH 服务可用性（指数退避）
-3. **连接虚拟机** → 使用 SSH 用户名/密码连接
-4. **传输配置** → 通过 SCP 传输配置文件（使用 SSH exec_command）
-5. **验证成功** → 确认文件传输成功
-
-### 使用示例
-
-```python
-from fc_client import create_client_from_config
-
-client = create_client_from_config("config/config.yaml")
-token = client.login()
-
-# 克隆虚拟机
-task_id, ip = client.clone_vm_auto_ip(
-    site_id="ABCDE",
-    vm_id="i00001",
-    name="my-new-vm",
-    gateway="192.168.1.1",
-    netmask="255.255.255.0",
-)
-
-# 等待任务完成并传输配置（transfer_config=True 是必须的）
-client.wait_for_task_and_update_ip(
-    site_id="ABCDE",
-    task_id=task_id,
-    ip=ip,
-    transfer_config=True  # 必须启用配置传输
-)
-
-print(f"虚拟机创建成功，配置已传输: {ip}")
+```bash
+python scripts/delete.py --vm-id <vm-id> --wait
 ```
 
-### 生成的配置文件示例
+### list.py - 列出资源
 
-```yaml
-vm:
-  ip: 192.168.1.100
+```bash
+# 列出站点
+python scripts/list.py sites
 
-kafka:
-  bootstrap_servers: "192.168.1.100:9092"
-  sasl_username: "kafka_user"
-  sasl_password: "kafka_password"
-  security_protocol: "SASL_PLAINTEXT"
-  sasl_mechanism: "PLAIN"
+# 列出虚拟机
+python scripts/list.py vms --site-id <site-id>
 
-ssh:
-  username: "root"
-  port: 22
+# 列出 IP 分配
+python scripts/list.py ips
+
+# 按状态过滤
+python scripts/list.py ips --status allocated
 ```
 
-## 辅助脚本
-`scripts/fc_client.py` 提供:
-- `FusionComputeClient` - 主要客户端类
-- `IPAllocationManager` - CSV 状态文件管理
-- `clone_vm_auto_ip()` - 创建单个虚拟机（自动分配 IP）
-- `clone_vms_batch()` - 批量创建虚拟机（防止 IP 冲突）
-- `wait_for_task_and_update_ip()` - 等待单个任务完成并更新 IP
-- `wait_for_tasks_batch()` - 等待批量任务完成并更新 IP
-- `get_available_ip()` - 获取可用 IP
-- `Config` - 配置加载类
-- `create_client_from_config()` - 工厂函数
+### start.py - 启动虚拟机
+
+```bash
+python scripts/start.py --vm-id <vm-id> --wait
+```
+
+### stop.py - 停止虚拟机
+
+```bash
+python scripts/stop.py --vm-id <vm-id> --wait
+```
+
+### hibernate.py - 休眠虚拟机
+
+```bash
+python scripts/hibernate.py --vm-id <vm-id> --wait
+```
+
+### modify.py - 修改虚拟机配置
+
+```bash
+# 修改 CPU
+python scripts/modify.py --vm-id <vm-id> --cpu 8 --wait
+
+# 修改内存
+python scripts/modify.py --vm-id <vm-id> --memory 16384 --wait
+
+# 同时修改
+python scripts/modify.py --vm-id <vm-id> --cpu 8 --memory 16384 --wait
+```
+
+### status.py - 查询任务状态
+
+```bash
+# 查询状态
+python scripts/status.py --task-id <task-id>
+
+# 等待完成
+python scripts/status.py --task-id <task-id> --wait
+```
+
+
+### transfer_config.py - 传输配置
+
+```bash
+# 1234: 传输完整配置（默认：VM + Kafka + SSH）
+python scripts/transfer_config.py --ip 192.168.1.100
+
+# 只传输 Kafka 配置
+python scripts/transfer_config.py --ip 192.168.1.100 --no-include-vm --no-include-ssh
+
+# 只传输 VM 配置
+python scripts/transfer_config.py --ip 192.168.1.100 --no-include-kafka --no-include-ssh
+
+# 只传输 SSH 配置
+python scripts/transfer_config.py --ip 192.168.1.100 --no-include-vm --no-include-kafka
+
+```
+
+**参数说明：**
+| 参数 | 说明 |
+|------|------|
+| `--ip` | 虚拟机 IP 地址 |
+| `--ssh-username` | SSH 用户名 |
+| `--ssh-password` | SSH 密码 |
+| `--ssh-port` | SSH 端口（默认 22）|
+| `--remote-path` | 远程目录（默认 /opt/nexent/config）|
+| `--filename` | 配置文件名（默认 agent_config.yaml）|
+| `--timeout` | SSH 就绪超时（秒，默认 300）|
+| `--include-vm` | 包含 VM 配置（默认 True）|
+| `--no-include-vm` | 不包含 VM 配置 |
+| `--include-kafka` | 包含 Kafka 配置（默认 True）|
+| `--no-include-kafka` | 不包含 Kafka 配置 |
+| `--include-ssh` | 包含 SSH 配置（默认 True）|
+| `--no-include-ssh` | 不包含 SSH 配置 |
+| `--json` | JSON 格式输出 |
+## IP 自动分配
+
+IP 分配通过 CSV 状态文件实现并发安全：
+- 文件位置: `/mnt/nexent/.ip_allocations.csv` 或 `config/.ip_allocations.csv`
+- 状态: `allocating` / `allocated` / `failed` / `released`
+- 超时清理: 15 分钟
+
+### IP 重复使用约束
+
+**禁止使用相同 IP 地址多次调用创建接口。**
+
+`create.py` 在调用 API 前会检查指定的 IP 是否已在 CSV 状态文件中处于 `allocating` 或 `allocated` 状态。如果 IP 已被占用，将报错退出。
+
 ## 任务超时
-所有异步操作的默认超时时间为 **600 秒(10 分钟)
+
+所有异步操作的默认超时时间为 **600 秒（10 分钟）**
 可以在配置文件中通过 `task_timeout` 修改

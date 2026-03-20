@@ -264,11 +264,25 @@ X-Auth-Token: <token>
 **接口**: `GET /service/sites/<site_id>/tasks/<task_id>`
 
 **请求头**:
-```http
+```
 Accept: application/json;version=8.1;charset=UTF-8
 Content-Type: application/json;charset=UTF-8
 X-Auth-Token: <token>
 ```
+
+**响应**: 包含 `taskUrn` 的任务对象
+
+```json
+{
+    "taskUrn": "urn:sites:E3600FCD:tasks:145498"
+}
+```
+
+响应示例：
+- `taskUrn`: 格式为 `urn:sites:E3600FCD:tasks:145498`
+- `taskUri`: 格式为 `/service/sites/E3600FCD/tasks/145489`
+
+从 `taskUrn` 中提取 task_id (如 145498) 用于后续的 wait_for_task 等操作。task_id | `145498` | `urn:sites:E3600FCD:tasks:145498` |
 
 **响应**: 包含状态的任务对象
 
