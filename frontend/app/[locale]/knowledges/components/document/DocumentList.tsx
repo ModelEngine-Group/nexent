@@ -229,12 +229,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const { t } = useTranslation();
     const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
 
-    const resolvePreviewObjectName = useCallback((docId: string): string | null => {
-      const candidate = (docId || "").trim();
-      if (!candidate) return null;
-      return extractObjectNameFromUrl(candidate) || null;
-    }, []);
-
     // Determine if user has read-only permission
     const isReadOnlyMode = permission === "READ_ONLY";
 
@@ -832,9 +826,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           <div className="flex gap-2">
                             <button
                               onClick={() => {
-                                const objectName = resolvePreviewObjectName(doc.id);
+                                const objectName =  extractObjectNameFromUrl(doc.id) || undefined;
                                 if (!objectName) {
-                                  message.warning("Preview is unavailable for this file.");
+                                  message.warning(t("filePreview.previewFailed"));
                                   return;
                                 }
 

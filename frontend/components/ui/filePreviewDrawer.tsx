@@ -108,8 +108,6 @@ export function FilePreviewDrawer({
   const observerRef = useRef<IntersectionObserver | null>(null);
   const markdownContainerRef = useRef<HTMLDivElement | null>(null);
   const textFetchSessionRef = useRef(0);
-  const previewStartRef = useRef<number | null>(null);
-  const previewMetricLoggedRef = useRef(false);
 
   const resetTextPreviewState = useCallback(() => {
     setTextContent('');
@@ -166,26 +164,6 @@ export function FilePreviewDrawer({
   }, [providedFileType, fileName]);
 
   const detectedFileType = getDetectedFileType();
-
-  const reportPreviewFirstContent = useCallback((source: string) => {
-    if (previewMetricLoggedRef.current) {
-      return;
-    }
-
-    const start = previewStartRef.current;
-    if (start === null) {
-      return;
-    }
-
-    previewMetricLoggedRef.current = true;
-    const elapsedMs = Math.round((performance.now() - start) * 10) / 10;
-    log.info('File preview first-content time:', {
-      fileName,
-      fileType: detectedFileType,
-      source,
-      elapsedMs,
-    });
-  }, [detectedFileType, fileName]);
 
   const markdownHeadings = useMemo<MarkdownHeading[]>(() => {
     if (detectedFileType !== 'markdown' || !textContent) {
@@ -516,7 +494,6 @@ export function FilePreviewDrawer({
             }}
             className="select-none"
             draggable={false}
-            onLoad={() => reportPreviewFirstContent('image-onload')}
             onError={() => setImageLoadError(true)}
           />
         )}

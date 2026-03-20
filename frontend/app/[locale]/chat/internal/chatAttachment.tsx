@@ -20,8 +20,9 @@ import {
 import { cn } from "@/lib/utils";
 import { AttachmentItem, ChatAttachmentProps } from "@/types/chat";
 import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
+import { App } from "antd";
 
-/** Selected file state for preview drawer */
+// Selected file state for preview drawer
 interface SelectedFileState {
   objectName: string;
   fileName: string;
@@ -109,12 +110,11 @@ export function ChatAttachment({
 }: ChatAttachmentProps) {
   const [selectedFile, setSelectedFile] = useState<SelectedFileState | null>(null);
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
 
   if (!attachments || attachments.length === 0) return null;
 
-  /**
-   * Handle file click - open preview drawer for all file types
-   */
+  //Handle file click
   const handleFileClick = (attachment: AttachmentItem) => {
     let objectName = attachment.object_name;
     
@@ -123,6 +123,7 @@ export function ChatAttachment({
     }
     
     if (!objectName) {
+      message.warning(t("filePreview.previewFailed"));
       return;
     }
 
