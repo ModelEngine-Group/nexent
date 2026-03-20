@@ -155,6 +155,17 @@ class NexentAgent:
             )
             from nexent.core.tools.read_skill_md_tool import read_skill_md
             return read_skill_md
+        elif class_name == "WriteSkillFileTool":
+            from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool
+            metadata = tool_config.metadata or {}
+            get_write_skill_file_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.write_skill_file_tool import write_skill_file
+            return write_skill_file
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 

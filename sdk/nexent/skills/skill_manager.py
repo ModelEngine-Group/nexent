@@ -539,43 +539,6 @@ class SkillManager:
         logger.info(f"Deleted skill '{name}' from local storage")
         return True
 
-    def _get_available_skills_for_error(
-        self,
-        agent_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
-        version_no: int = 0,
-    ) -> List[Dict[str, str]]:
-        """Get available skills for error messages.
-
-        If agent_id and tenant_id are provided, queries the database for enabled
-        skills for that agent. Otherwise falls back to local filesystem listing.
-
-        Returns:
-            List of skill dicts with name, description, and tags
-        """
-        if agent_id is not None and tenant_id is not None:
-            try:
-                from backend.database import skill_db as skill_db_module
-                from backend.services.skill_repository import SkillRepository
-                enabled_instances = skill_db_module.search_skills_for_agent(
-                    agent_id=agent_id,
-                    tenant_id=tenant_id,
-                    version_no=version_no,
-                )
-                repo = SkillRepository()
-                result = []
-                for inst in enabled_instances:
-                    skill = repo.get_skill_by_id(inst.get("skill_id"))
-                    if skill:
-                        result.append({
-                            "name": skill.get("name"),
-                            "description": skill.get("description", ""),
-                            "tags": skill.get("tags", []),
-                        })
-                return result
-            except Exception:
-                pass
-        return self.list_skills()
 
     def build_skills_summary(self, available_skills: Optional[List[str]] = None) -> str:
         """Build XML-formatted summary of available skills.
@@ -714,10 +677,7 @@ class SkillManager:
         """
         local_skill_dir = os.path.join(self.local_skills_dir, skill_name)
         if not os.path.isdir(local_skill_dir):
-            raise SkillNotFoundError(
-                f"Skill '{skill_name}' not found. Available skills: "
-                f"{self._get_available_skills_for_error(agent_id, tenant_id, version_no)}"
-            )
+            raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
 
         full_path = os.path.join(local_skill_dir, script_path)
         if not os.path.isfile(full_path):
