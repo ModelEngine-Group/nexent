@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-config
+  annotations:
+    "helm.sh/hook-weight": "20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-config
+  template:
+    metadata:
+      labels:
+        app: nexent-config
+    spec:
+      containers:
+        - name: nexent-config
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          ports:
+            - containerPort: 5010
+              name: http
+          command:
+            - /bin/bash
+            - -c
+            - python backend/config_service.py
+          envFrom:
+            - configMapRef:
+                name: nexent-config
+            - secretRef:
+                name: nexent-secrets
+          env:
+            - name: skip_proxy
+              value: {{ .Values.config.skipProxy | quote }}
+            - name: UMASK
+              value: {{ .Values.config.umask | quote }}
+          resources:
+            requests:
+              memory: {{ .Values.resources.backend.requests.memory }}
+              cpu: {{ .Values.resources.backend.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.backend.limits.memory }}
+              cpu: {{ .Values.resources.backend.limits.cpu }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-config
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5010
+      targetPort: 5010
+      name: http
+  selector:
+    app: nexent-config

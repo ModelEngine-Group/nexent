@@ -1,0 +1,61 @@
+{{- if .Values.services.openssh.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-openssh-server
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-openssh-server
+  annotations:
+    "helm.sh/hook-weight": "25"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-openssh-server
+  template:
+    metadata:
+      labels:
+        app: nexent-openssh-server
+    spec:
+      containers:
+        - name: openssh-server
+          image: {{ .Values.images.openssh.repository }}:{{ .Values.images.openssh.tag }}
+          imagePullPolicy: {{ .Values.images.openssh.pullPolicy }}
+          ports:
+            - containerPort: 22
+              name: ssh
+          env:
+            - name: DEV_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: SSH_USERNAME
+            - name: DEV_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: SSH_PASSWORD
+          resources:
+            requests:
+              memory: {{ .Values.resources.openssh.requests.memory }}
+              cpu: {{ .Values.resources.openssh.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.openssh.limits.memory }}
+              cpu: {{ .Values.resources.openssh.limits.cpu }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-openssh-server
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: {{ .Values.services.openssh.type }}
+  ports:
+    - port: 22
+      targetPort: 22
+      name: ssh
+      nodePort: {{ .Values.services.openssh.nodePort }}
+  selector:
+    app: nexent-openssh-server
+{{- end }}

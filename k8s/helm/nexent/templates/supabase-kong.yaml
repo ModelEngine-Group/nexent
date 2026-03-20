@@ -1,0 +1,368 @@
+{{- if eq .Values.global.deploymentVersion "full" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-supabase-kong-config
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-1"
+data:
+  wrapper.sh: |
+    #!/bin/bash
+
+    set -euo pipefail
+
+    echo "Replacing env placeholders of /usr/local/kong/kong.yml"
+
+    sed \
+    -e "s|\${SUPABASE_ANON_KEY}|${SUPABASE_ANON_KEY}|" \
+    -e "s|\${SUPABASE_SERVICE_KEY}|${SUPABASE_SERVICE_KEY}|" \
+    -e "s|\${DASHBOARD_USERNAME}|${DASHBOARD_USERNAME}|" \
+    -e "s|\${DASHBOARD_PASSWORD}|${DASHBOARD_PASSWORD}|" \
+    /usr/local/kong/template.yml \
+    > /usr/local/kong/kong.yml
+
+    exec /docker-entrypoint.sh kong docker-start
+  template.yml: |
+    _format_version: '2.1'
+    _transform: true
+
+    consumers:
+    {{- if .Values.secret.dashboard }}
+      - username: DASHBOARD
+    {{- end }}
+      - username: anon
+        keyauth_credentials:
+            - key: ${SUPABASE_ANON_KEY}
+      - username: service_role
+        keyauth_credentials:
+            - key: ${SUPABASE_SERVICE_KEY}
+    acls:
+      - consumer: anon
+        group: anon
+      - consumer: service_role
+        group: admin
+    {{- if .Values.secret.dashboard }}
+    basicauth_credentials:
+      - consumer: DASHBOARD
+        username: ${DASHBOARD_USERNAME}
+        password: ${DASHBOARD_PASSWORD}
+    {{- end }}
+    services:
+    {{- if .Values.deployment.auth.enabled }}
+      - name: auth-v1-open
+        url: http://{{ include "supabase.auth.fullname" . }}:{{ .Values.service.auth.port }}/verify
+        routes:
+          - name: auth-v1-open
+            strip_path: true
+            paths:
+              - /auth/v1/verify
+        plugins:
+          - name: cors
+      - name: auth-v1-open-callback
+        url: http://{{ include "supabase.auth.fullname" . }}:{{ .Values.service.auth.port }}/callback
+        routes:
+          - name: auth-v1-open-callback
+            strip_path: true
+            paths:
+              - /auth/v1/callback
+        plugins:
+          - name: cors
+      - name: auth-v1-open-authorize
+        url: http://{{ include "supabase.auth.fullname" . }}:{{ .Values.service.auth.port }}/authorize
+        routes:
+          - name: auth-v1-open-authorize
+            strip_path: true
+            paths:
+              - /auth/v1/authorize
+        plugins:
+          - name: cors
+      - name: auth-v1
+        _comment: "GoTrue: /auth/v1/* -> http://{{ include "supabase.auth.fullname" . }}:{{ .Values.service.auth.port }}/*"
+        url: http://{{ include "supabase.auth.fullname" . }}:{{ .Values.service.auth.port }}
+        routes:
+          - name: auth-v1-all
+            strip_path: true
+            paths:
+              - /auth/v1/
+        plugins:
+          - name: cors
+          - name: key-auth
+            config:
+              hide_credentials: false
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+                - anon
+    {{- end }}
+    {{- if .Values.deployment.rest.enabled }}
+      - name: rest-v1
+        _comment: "PostgREST: /rest/v1/* -> http://{{ include "supabase.rest.fullname" . }}:{{ .Values.service.rest.port }}/*"
+        url: http://{{ include "supabase.rest.fullname" . }}:{{ .Values.service.rest.port }}/
+        routes:
+          - name: rest-v1-all
+            strip_path: true
+            paths:
+              - /rest/v1/
+        plugins:
+          - name: cors
+          - name: key-auth
+            config:
+              hide_credentials: true
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+                - anon
+      - name: graphql-v1
+        _comment: 'PostgREST: /graphql/v1/* -> http://{{ include "supabase.rest.fullname" . }}:{{ .Values.service.rest.port }}/rpc/graphql'
+        url: http://{{ include "supabase.rest.fullname" . }}:{{ .Values.service.rest.port }}/rpc/graphql
+        routes:
+          - name: graphql-v1-all
+            strip_path: true
+            paths:
+              - /graphql/v1
+        plugins:
+          - name: cors
+          - name: key-auth
+            config:
+              hide_credentials: true
+          - name: request-transformer
+            config:
+              add:
+                headers:
+                  - Content-Profile:graphql_public
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+                - anon
+    {{- end }}
+    {{- if .Values.deployment.realtime.enabled }}
+      - name: realtime-v1-ws
+        _comment: "Realtime: /realtime/v1/* -> ws://{{ include "supabase.realtime.fullname" . }}:{{ .Values.service.realtime.port }}/socket/*"
+        url: http://{{ include "supabase.realtime.fullname" . }}:{{ .Values.service.realtime.port }}/socket
+        protocol: ws
+        routes:
+          - name: realtime-v1-ws
+            strip_path: true
+            paths:
+              - /realtime/v1/
+        plugins:
+          - name: cors
+          - name: key-auth
+            config:
+              hide_credentials: false
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+                - anon
+      - name: realtime-v1-rest
+        _comment: 'Realtime: /realtime/v1/* -> http://{{ include "supabase.realtime.fullname" . }}:{{ .Values.service.realtime.port }}/api/*'
+        url: http://{{ include "supabase.realtime.fullname" . }}:{{ .Values.service.realtime.port }}/api
+        protocol: http
+        routes:
+          - name: realtime-v1-rest
+            strip_path: true
+            paths:
+              - /realtime/v1/api
+        plugins:
+          - name: cors
+          - name: key-auth
+            config:
+              hide_credentials: false
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+                - anon
+    {{- end }}
+    {{- if .Values.deployment.storage.enabled }}
+      - name: storage-v1
+        _comment: "Storage: /storage/v1/* -> http://{{ include "supabase.storage.fullname" . }}:{{ .Values.service.storage.port }}/*"
+        url: http://{{ include "supabase.storage.fullname" . }}:{{ .Values.service.storage.port }}/
+        routes:
+          - name: storage-v1-all
+            strip_path: true
+            paths:
+              - /storage/v1/
+        plugins:
+          - name: cors
+    {{- end }}
+    {{- if .Values.deployment.functions.enabled }}
+      - name: functions-v1
+        _comment: 'Edge Functions: /functions/v1/* -> http://{{ include "supabase.functions.fullname" . }}:{{ .Values.service.functions.port }}/*'
+        url: http://{{ include "supabase.functions.fullname" . }}:{{ .Values.service.functions.port }}/
+        routes:
+          - name: functions-v1-all
+            strip_path: true
+            paths:
+              - /functions/v1/
+        plugins:
+          - name: cors
+    {{- end }}
+    
+    {{/*
+    ## Not used - Studio and Vector talk directly to analytics via Docker networking.
+    ## If external access is needed, add routes with key-auth matching Logflare's x-api-key auth.
+    */}}
+    
+    {{/*
+    {{- if .Values.deployment.analytics.enabled }}
+      - name: analytics-v1
+        _comment: 'Analytics: /analytics/v1/* -> http://{{ include "supabase.analytics.fullname" . }}:{{ .Values.service.analytics.port }}/*'
+        url: http://{{ include "supabase.analytics.fullname" . }}:{{ .Values.service.analytics.port }}/
+        routes:
+          - name: analytics-v1-all
+            strip_path: true
+            paths:
+              - /analytics/v1/
+    {{- end }}
+    */}}
+    
+    {{- if .Values.deployment.meta.enabled }}
+      - name: meta
+        _comment: "pg-meta: /pg/* -> http://{{ include "supabase.meta.fullname" . }}:{{ .Values.service.meta.port }}/*"
+        url: http://{{ include "supabase.meta.fullname" . }}:{{ .Values.service.meta.port }}/
+        routes:
+          - name: meta-all
+            strip_path: true
+            paths:
+              - /pg/
+        plugins:
+          - name: key-auth
+            config:
+              hide_credentials: false
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+    {{- end }}
+      - name: dashboard
+        _comment: 'Studio: /* -> http://{{ include "supabase.studio.fullname" . }}:{{ .Values.service.studio.port }}/*'
+        url: http://{{ include "supabase.studio.fullname" . }}:{{ .Values.service.studio.port }}/
+        routes:
+          - name: dashboard-all
+            strip_path: true
+            paths:
+              - /
+    {{- if .Values.secret.dashboard }}
+        plugins:
+          - name: cors
+          - name: basic-auth
+            config:
+              hide_credentials: true
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-supabase-kong
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-supabase-kong
+  annotations:
+    "helm.sh/hook-weight": "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-supabase-kong
+  template:
+    metadata:
+      labels:
+        app: nexent-supabase-kong
+    spec:
+      containers:
+        - name: kong
+          image: "{{ .Values.images.supabase.kong.repository }}:{{ .Values.images.supabase.kong.tag }}"
+          imagePullPolicy: {{ .Values.images.supabase.kong.pullPolicy }}
+          ports:
+            - containerPort: 8000
+              name: proxy
+            - containerPort: 8443
+              name: proxy-ssl
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /tmp/kong/kong.yml
+            - name: KONG_DNS_ORDER
+              value: LAST,A,CNAME
+            - name: KONG_PLUGINS
+              value: request-transformer,cors,key-auth,acl,basic-auth
+            - name: KONG_NGINX_PROXY_PROXY_BUFFER_SIZE
+              value: "160k"
+            - name: KONG_NGINX_PROXY_PROXY_BUFFERS
+              value: "64 160k"
+          volumeMounts:
+            - mountPath: /usr/local/kong/template.yml
+              name: config
+              subPath: template.yml
+            - mountPath: /scripts
+              name: wrapper
+          lifecycle:
+            preStop:
+              exec:
+                command: ["kong", "quit"]
+          livenessProbe:
+            exec:
+              command: ["kong", "health"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command: ["kong", "health"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: {{ .Values.resources.supabaseKong.requests.memory }}
+              cpu: {{ .Values.resources.supabaseKong.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.supabaseKong.limits.memory }}
+              cpu: {{ .Values.resources.supabaseKong.limits.cpu }}
+      volumes:
+         - name: config
+          configMap:
+            name: nexent-supabase-kong-config
+            defaultMode: 0777
+            items:
+            - key: template.yml
+              path: template.yml
+        - name: wrapper
+          configMap:
+            name: nexent-supabase-kong-config
+            defaultMode: 0777
+            items:
+            - key: wrapper.sh
+              path: wrapper.sh
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-supabase-kong
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: proxy
+    - port: 8443
+      targetPort: 8443
+      name: proxy-ssl
+  selector:
+    app: nexent-supabase-kong
+{{- end }}
