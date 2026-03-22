@@ -551,6 +551,7 @@ update_env_var() {
 
   # Ensure the .env file exists
   touch "$env_file"
+  chmod 600 "$env_file"
 
   if grep -q "^${key}=" "$env_file"; then
     # Key exists, so update it. Escape \ and & for sed's replacement string.
@@ -708,6 +709,7 @@ select_deployment_version() {
 
   # Ensure the .env file exists
   touch "$env_file"
+  chmod 600 "$env_file"
 
   if grep -q "^${key}=" "$env_file"; then
     # Key exists, so update it. Escape \ and & for sed's replacement string.

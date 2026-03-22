@@ -25,10 +25,12 @@ prepare_env_file() {
   if [ -f ".env" ]; then
     echo "   📋 Copying docker/.env to root directory..."
     cp ".env" "../.env"
+    chmod 600 "../.env"
     echo "   ✅ Copied docker/.env to ../.env"
   elif [ -f ".env.example" ]; then
     echo "   📋 docker/.env not found, copying .env.example to root directory..."
     cp ".env.example" "../.env"
+    chmod 600 "../.env"
     echo "   ✅ Copied docker/.env.example to ../.env"
   else
     echo "   ❌ ERROR Neither docker/.env nor docker/.env.example exists in docker directory"
