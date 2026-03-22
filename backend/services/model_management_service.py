@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
-from consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, TOKENPONY_BASE_URL
+from consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, TOKENPONY_BASE_URL, MINIMAX_BASE_URL
 
 from database.model_management_db import (
     create_model_record,
@@ -146,6 +146,8 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             model_url = DASHSCOPE_BASE_URL
         elif provider == ProviderEnum.TOKENPONY.value:
             model_url = TOKENPONY_BASE_URL
+        elif provider == ProviderEnum.MINIMAX.value:
+            model_url = MINIMAX_BASE_URL
         else:
             model_url = ""
 
