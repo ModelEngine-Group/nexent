@@ -704,6 +704,10 @@ Nexent 加油！希望能达成所愿！
 探索个人智能体平台，从小红书发现Nexent是个非常值得一试的好产品，祝Nexent发展越来越好！
 :::
 
+::: info SZShowmaker - 2026-3-3
+Happy to find a easy-to-use AI Agent Platform
+:::
+
 ::: info Passion - 2026-3-4
 华为开发者大会接触到Nexent，祝越来越好！
 :::
