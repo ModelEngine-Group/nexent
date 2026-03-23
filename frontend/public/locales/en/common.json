@@ -1554,6 +1554,10 @@
   "clawmonitor.memory": "Memory",
   "clawmonitor.totalSkills": "Total Skills",
   "clawmonitor.noSkills": "No skills",
+  "clawmonitor.tokenUsage": "Token Usage",
+  "clawmonitor.plugins": "Plugins",
+  "clawmonitor.noPlugins": "No plugins",
+  "clawmonitor.instanceList": "Instance List",
 
   "market.title": "Agent Market",
   "market.description": "Discover and download pre-built intelligent Agents",

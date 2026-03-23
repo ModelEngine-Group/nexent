@@ -303,6 +303,12 @@ export const API_ENDPOINTS = {
     check: (invitationCode: string) =>
       `${API_BASE_URL}/invitations/${invitationCode}/check`,
   },
+  meclaw: {
+    overview: `${API_BASE_URL}/meclaw/overview`,
+    instances: `${API_BASE_URL}/meclaw/instances`,
+    instanceDetail: (instanceId: string) =>
+      `${API_BASE_URL}/meclaw/instances/${instanceId}`,
+  },
 };
 
 // Common error handling

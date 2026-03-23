@@ -1712,6 +1712,10 @@
   "clawmonitor.memory": "内存",
   "clawmonitor.totalSkills": "技能总数",
   "clawmonitor.noSkills": "暂无技能",
+  "clawmonitor.tokenUsage": "Token 用量",
+  "clawmonitor.plugins": "插件",
+  "clawmonitor.noPlugins": "暂无插件",
+  "clawmonitor.instanceList": "实例列表",
 
   "common.loading": "加载中",
   "common.save": "保存",

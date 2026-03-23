@@ -68,13 +68,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
 ];
 
 /** Routes shown in speed mode when MODEL_ENGINE_CLAW_ENABLED=true */
-const SPEED_CLAW_ROUTES = ["/clawchat", "/clawmonitor"];
+const SPEED_CLAW_ROUTES = ["/", "/clawchat", "/clawmonitor"];
 
 /** Routes shown in non-speed mode when MODEL_ENGINE_CLAW_ENABLED=true */
-const NON_SPEED_CLAW_ROUTES = ["/clawchat", "/clawmonitor", "/users", "/tenant-resources"];
+const NON_SPEED_CLAW_ROUTES = ["/", "/clawchat", "/clawmonitor", "/users", "/tenant-resources"];
 
 /** Claw-specific routes that should be hidden when MODEL_ENGINE_CLAW_ENABLED=false */
-const CLAW_ONLY_PATHS = new Set(["/clawchat", "/clawmonitor"]);
+const CLAW_ONLY_PATHS = new Set(["/", "/clawchat", "/clawmonitor"]);
 
 /**
  * Extract all available route paths from ROUTE_CONFIG
