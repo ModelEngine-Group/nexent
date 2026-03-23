@@ -22,6 +22,7 @@ from apps.tenant_app import router as tenant_router
 from apps.group_app import router as group_router
 from apps.user_app import router as user_router
 from apps.invitation_app import router as invitation_router
+from apps.meclaw_app import router as meclaw_router
 from consts.const import IS_SPEED_MODE
 
 # Create logger instance
@@ -41,6 +42,7 @@ app.include_router(proxy_router)
 app.include_router(tool_config_router)
 app.include_router(dify_router)
 app.include_router(idata_router)
+app.include_router(meclaw_router)
 
 # Choose user management router based on IS_SPEED_MODE
 if IS_SPEED_MODE:
