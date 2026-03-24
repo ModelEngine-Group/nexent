@@ -47,24 +47,6 @@ python scripts/chat.py --message "列出可用的 skills"
 python scripts/chat.py --host 192.168.1.100 --port 8080 --token "xxx" --message "安装 skill"
 ```
 
-### 作为模块导入
-
-```python
-import asyncio
-from scripts.chat import send_message
-
-async def main():
-    result = await send_message(
-        host="localhost",
-        port="18789",
-        token="your-token",
-        message="你的消息"
-    )
-    print(result)
-
-asyncio.run(main())
-```
-
 ## 参数说明
 
 | 参数 | 说明 | 默认值 |
