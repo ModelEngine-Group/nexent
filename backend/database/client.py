@@ -268,10 +268,19 @@ def get_db_session(db_session=None):
 
 
 def as_dict(obj):
+    from datetime import datetime
 
     # Handle SQLAlchemy ORM objects (both TableBase and other DeclarativeBase subclasses)
     if hasattr(obj, '__class__') and hasattr(obj.__class__, '__mapper__'):
-        return {c.key: getattr(obj, c.key) for c in class_mapper(obj.__class__).columns}
+        result = {}
+        for c in class_mapper(obj.__class__).columns:
+            value = getattr(obj, c.key)
+            # Convert datetime to ISO format string for JSON serialization
+            if isinstance(value, datetime):
+                result[c.key] = value.isoformat()
+            else:
+                result[c.key] = value
+        return result
 
     # noinspection PyProtectedMember
     return dict(obj._mapping)
