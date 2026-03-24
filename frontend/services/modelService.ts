@@ -464,7 +464,7 @@ export const modelService = {
     config: {
       modelName: string;
       modelType: ModelType;
-      baseUrl: string;
+      baseUrl?: string;
       apiKey: string;
       maxTokens?: number;
       embeddingDim?: number;
@@ -472,17 +472,19 @@ export const modelService = {
     signal?: AbortSignal
   ): Promise<ModelValidationResponse> => {
     try {
+      const requestBody: any = {
+        model_name: config.modelName,
+        model_type: config.modelType,
+        api_key: config.apiKey || "sk-no-api-key",
+        base_url: config.baseUrl || "",
+        max_tokens: config.maxTokens || 4096,
+        embedding_dim: config.embeddingDim || 1024,
+      };
+
       const response = await fetch(API_ENDPOINTS.model.verifyModelConfig, {
         method: "POST",
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          model_name: config.modelName,
-          model_type: config.modelType,
-          base_url: config.baseUrl,
-          api_key: config.apiKey || "sk-no-api-key",
-          max_tokens: config.maxTokens || 4096,
-          embedding_dim: config.embeddingDim || 1024,
-        }),
+        body: JSON.stringify(requestBody),
         signal,
       });
 

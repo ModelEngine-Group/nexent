@@ -413,7 +413,7 @@ class STTModel:
         full_client_request.extend(payload_bytes)  # payload
 
         # Prepare headers
-        header = {"X-Api-Resource-Id": self.config.resourceid, "X-Api-Request-Id": reqid}
+        header = {"X-Api-Resource-Id": self.config.resourceid, "X-Api-Connect-Id": reqid}
 
         if self.config.token:
             header["X-Api-Access-Key"] = self.config.token
@@ -422,6 +422,7 @@ class STTModel:
             header["X-Api-App-Key"] = self.config.appid
 
         logger.info(f"Config: {self.config}")
+        logger.info(f"Request headers: {header}")
 
         try:
             # Connect to STT service

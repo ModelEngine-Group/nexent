@@ -343,7 +343,7 @@ export function ChatInput({
   const { t } = useTranslation("common");
 
   // Use the configuration hook to get the application avatar
-  const { appConfig, getAppAvatarUrl } = useConfig();
+  const { appConfig, getAppAvatarUrl, modelConfig } = useConfig();
   const avatarUrl = getAppAvatarUrl(40); // Avatar size is 40 in initial mode
 
   // When the recording status changes, notify the parent component
@@ -592,6 +592,17 @@ export function ChatInput({
         ws.onopen = () => {
           setIsRecording(true);
           setRecordingStatus("recording");
+
+          // Send STT config to backend
+          const sttConfig = {
+            api_key: modelConfig?.stt?.apiConfig?.apiKey || "",
+            model: modelConfig?.stt?.modelName || modelConfig?.stt?.name || "qwen3-asr-flash-realtime",
+            language: "zh",
+            base_url: modelConfig?.stt?.apiConfig?.modelUrl || modelConfig?.stt?.apiConfig?.modelUrl || ""
+          };
+          const configJson = JSON.stringify(sttConfig);
+          ws.send(configJson);
+
           try {
             mediaRecorder.start(250);
           } catch (error) {
@@ -607,9 +618,15 @@ export function ChatInput({
             const response = JSON.parse(event.data);
 
             if (response.result && response.result.text) {
-              onInputChange(response.result.text);
+              // Only update input on final transcription result
+              if (response.result.is_final !== false) {
+                onInputChange(response.result.text);
+              }
             } else if (response.text) {
-              onInputChange(response.text);
+              // Only update input on final transcription result
+              if (response.is_final !== false) {
+                onInputChange(response.text);
+              }
             } else if (response.status === "ready") {
             } else if (response.error) {
               log.error("❌ STT service error:", response.error);

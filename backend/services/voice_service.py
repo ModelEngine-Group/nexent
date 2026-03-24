@@ -1,11 +1,12 @@
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Dict
 
 from nexent.core.models.stt_model import STTConfig, STTModel
 from nexent.core.models.tts_model import TTSConfig, TTSModel
+from nexent.core.models.ali_stt_model import AliSTTConfig, AliSTTModel
 
-from consts.const import APPID, CLUSTER, SPEED_RATIO, TEST_VOICE_PATH, TOKEN, VOICE_TYPE
+from consts.const import APPID, CLUSTER, SPEED_RATIO, TEST_VOICE_PATH, TEST_PCM_PATH, TOKEN, VOICE_TYPE
 from consts.exceptions import (
     VoiceServiceException,
     STTConnectionException,
@@ -22,7 +23,7 @@ class VoiceService:
     def __init__(self):
         """Initialize the voice service with configurations from const.py"""
         try:
-            # Initialize STT configuration
+            # Initialize STT configuration (for default/volcengine STT)
             self.stt_config = STTConfig(
                 appid=APPID,
                 token=TOKEN
@@ -45,19 +46,58 @@ class VoiceService:
             logger.error(f"Failed to initialize voice service: {str(e)}")
             raise VoiceConfigException(f"Voice service initialization failed: {str(e)}") from e
 
-    async def start_stt_streaming_session(self, websocket) -> None:
+    async def start_stt_streaming_session(
+        self,
+        websocket,
+        stt_config: Optional[Dict[str, Any]] = None,
+        api_key: Optional[str] = None,
+        language: str = "zh",
+        model: str = "qwen3-asr-flash-realtime",
+        base_url: Optional[str] = None
+    ) -> None:
         """
-        Start STT streaming session
+        Start STT streaming session.
 
         Args:
             websocket: WebSocket connection for real-time audio streaming
+            stt_config: STT configuration dict from client (preferred)
+            api_key: API key for DashScope (if provided, use Ali STT)
+            language: Language for speech recognition (default: zh)
+            model: STT model name (default: qwen3-asr-flash-realtime)
+            base_url: Custom WebSocket URL (optional)
 
         Raises:
             STTConnectionException: If STT streaming fails
         """
         try:
-            logger.info("Starting STT streaming session")
-            await self.stt_model.start_streaming_session(websocket)
+            # Extract config from stt_config dict if provided
+            logger.info(f"Received stt_config: {stt_config}")
+            if stt_config:
+                api_key = stt_config.get("api_key") or stt_config.get("apiKey")
+                language = stt_config.get("language", language)
+                model = stt_config.get("model", model)
+                base_url = stt_config.get("base_url") or stt_config.get("baseUrl")
+                logger.info(f"Extracted config - api_key: {'***' if api_key else None}, model: {model}, language: {language}, base_url: {base_url}")
+            else:
+                logger.warning("No stt_config provided, using default model")
+
+            logger.info(f"Starting STT streaming session (api_key provided: {bool(api_key)}, model: {model})")
+
+            if api_key:
+                ali_config = AliSTTConfig(
+                    api_key=api_key,
+                    model=model,
+                    language=language,
+                    ws_url=base_url if base_url else None,
+                    format="pcm",
+                    rate=16000,
+                    enable_vad=False,
+                    timeout=5
+                )
+                ali_stt_model = AliSTTModel(ali_config, TEST_PCM_PATH)
+                await ali_stt_model.start_streaming_session(websocket, config_received=False)
+            else:
+                await self.stt_model.start_streaming_session(websocket)
         except Exception as e:
             logger.error(f"STT streaming session failed: {str(e)}")
             raise STTConnectionException(f"STT streaming failed: {str(e)}") from e
@@ -139,9 +179,21 @@ class VoiceService:
         if websocket.client_state.name == "CONNECTED":
             await websocket.send_json({"status": "completed"})
 
-    async def check_stt_connectivity(self) -> bool:
+    async def check_stt_connectivity(
+        self,
+        api_key: Optional[str] = None,
+        language: str = "zh",
+        model: str = "qwen3-asr-flash-realtime",
+        base_url: Optional[str] = None
+    ) -> bool:
         """
-        Check STT service connectivity
+        Check STT service connectivity.
+
+        Args:
+            api_key: API key for DashScope (if provided, use Ali STT)
+            language: Language for speech recognition (default: zh)
+            model: STT model name (default: qwen3-asr-flash-realtime)
+            base_url: Custom WebSocket URL (optional)
 
         Returns:
             bool: True if STT service is connected, False otherwise
@@ -150,8 +202,26 @@ class VoiceService:
             STTConnectionException: If connectivity check fails
         """
         try:
-            logger.info(f"Checking STT connectivity with config: {self.stt_config}")
-            connected = await self.stt_model.check_connectivity()
+            if api_key:
+                logger.info(f"Checking Ali STT connectivity with model: {model}, language: {language}")
+                ali_config = AliSTTConfig(
+                    api_key=api_key,
+                    model=model,
+                    language=language,
+                    ws_url=base_url if base_url else None,
+                    format="pcm",
+                    rate=16000,
+                    enable_vad=True,
+                    vad_threshold=0.5,
+                    vad_silence_duration_ms=800,
+                    timeout=60
+                )
+                ali_stt_model = AliSTTModel(ali_config, TEST_PCM_PATH)
+                connected = await ali_stt_model.check_connectivity()
+            else:
+                logger.info(f"Checking STT connectivity with config: {self.stt_config}")
+                connected = await self.stt_model.check_connectivity()
+
             if not connected:
                 logger.error("STT service connection failed")
                 raise STTConnectionException("STT service connection failed")
@@ -185,12 +255,19 @@ class VoiceService:
             logger.error(f"TTS connectivity check failed: {str(e)}")
             raise TTSConnectionException(f"TTS connectivity check failed: {str(e)}") from e
 
-    async def check_voice_connectivity(self, model_type: str) -> bool:
+    async def check_voice_connectivity(
+        self,
+        model_type: str,
+        api_key: Optional[str] = None,
+        stt_config: Optional[Dict[str, Any]] = None
+    ) -> bool:
         """
-        Check voice service connectivity based on model type
+        Check voice service connectivity based on model type.
 
         Args:
             model_type: Type of model to check ('stt' or 'tts')
+            api_key: Optional API key for STT (DashScope)
+            stt_config: Optional STT configuration dict
 
         Returns:
             bool: True if the specified service is connected, False otherwise
@@ -202,7 +279,16 @@ class VoiceService:
         """
         try:
             if model_type == 'stt':
-                return await self.check_stt_connectivity()
+                language = stt_config.get("language", "zh") if stt_config else "zh"
+                model = stt_config.get("model", "qwen3-asr-flash-realtime") if stt_config else "qwen3-asr-flash-realtime"
+                base_url = stt_config.get("base_url") if stt_config else None
+
+                return await self.check_stt_connectivity(
+                    api_key=api_key,
+                    language=language,
+                    model=model,
+                    base_url=base_url
+                )
             elif model_type == 'tts':
                 return await self.check_tts_connectivity()
             else:

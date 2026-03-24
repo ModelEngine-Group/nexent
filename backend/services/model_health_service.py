@@ -75,7 +75,6 @@ async def _perform_connectivity_check(
 
     connectivity: bool
 
-    # Test connectivity based on different model types
     if model_type == "embedding":
         connectivity = len(await OpenAICompatibleEmbedding(
             model_name=model_name,
@@ -114,7 +113,25 @@ async def _perform_connectivity_check(
         ).check_connectivity()
     elif model_type in ["tts", "stt"]:
         voice_service = get_voice_service()
-        connectivity = await voice_service.check_voice_connectivity(model_type)
+
+        if model_type == "stt":
+            # Determine STT provider based on base_url
+            base_url_lower = (model_base_url or "").lower()
+            is_ali_stt = "aliyuncs" in base_url_lower or "dashscope" in base_url_lower
+
+            if is_ali_stt:
+                # Use Ali STT with api_key and model name
+                connectivity = await voice_service.check_voice_connectivity(
+                    model_type="stt",
+                    api_key=model_api_key,
+                    stt_config={"base_url": model_base_url, "model": model_name}
+                )
+            else:
+                # Use default Volcano STT (no api_key needed)
+                connectivity = await voice_service.check_voice_connectivity(model_type="stt")
+        else:
+            # TTS uses default service
+            connectivity = await voice_service.check_voice_connectivity(model_type="tts")
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
@@ -123,27 +140,22 @@ async def _perform_connectivity_check(
 
 async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
     try:
-        # Query the database using display_name and tenant context from app layer
         model = get_model_by_display_name(display_name, tenant_id=tenant_id)
         if not model:
             raise LookupError(f"Model configuration not found for {display_name}")
 
-        # Still use repo/name concatenation for model instantiation
         repo, name = model.get("model_repo", ""), model.get("model_name", "")
         model_name = f"{repo}/{name}" if repo else name
 
-        # Set model to "detecting" status
-        update_data = {
-            "connect_status": ModelConnectStatusEnum.DETECTING.value}
+        update_data = {"connect_status": ModelConnectStatusEnum.DETECTING.value}
         update_model_record(model["model_id"], update_data)
 
         model_type = model["model_type"]
         model_base_url = model["base_url"]
         model_api_key = model["api_key"]
-        ssl_verify = model.get("ssl_verify", True)  # Default to True if not present
+        ssl_verify = model.get("ssl_verify", True)
 
         try:
-            # Use the common connectivity check function
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify
             )
@@ -169,7 +181,6 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         if 'model' in locals() and model:
             update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
             update_model_record(model["model_id"], update_data)
-        # Propagate for app layer to translate into HTTP
         raise e
 
 
@@ -177,21 +188,16 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
 
 async def verify_model_config_connectivity(model_config: dict):
     """
-    Verify the connectivity of the model configuration, do not save to the database
-    Args:
-        model_config: Model configuration dictionary, containing necessary connection parameters
-    Returns:
-        dict: Contains the result of the connectivity test and error message if failed
+    Verify the connectivity of the model configuration, do not save to the database.
     """
     try:
         model_name = model_config.get("model_name", "")
         model_type = model_config["model_type"]
-        model_base_url = model_config["base_url"]
+        model_base_url = model_config.get("base_url", "")
         model_api_key = model_config["api_key"]
-        ssl_verify = model_config.get("ssl_verify", True)  # Default to True if not present
+        ssl_verify = model_config.get("ssl_verify", True)
 
         try:
-            # Use the common connectivity check function
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify
             )
@@ -200,10 +206,11 @@ async def verify_model_config_connectivity(model_config: dict):
                     model_name, model_type, model_base_url, model_api_key, False
                 )
             if not connectivity:
+                error_msg = f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."
                 return {
                     "connectivity": False,
                     "model_name": model_name,
-                    "error": f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."
+                    "error": error_msg
                 }
 
             return {

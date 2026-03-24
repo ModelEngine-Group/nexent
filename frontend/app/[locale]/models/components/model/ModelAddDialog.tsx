@@ -420,6 +420,10 @@ export const ModelAddDialog = ({
         isValidVectorDimension(form.vectorDimension)
       );
     }
+    if (form.type === MODEL_TYPES.STT) {
+      // STT models only require API Key
+      return form.apiKey.trim() !== "";
+    }
     return (
       form.name.trim() !== "" &&
       form.url.trim() !== "" &&
@@ -446,28 +450,15 @@ export const ModelAddDialog = ({
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
           : form.type;
 
+      let connectivity = false;
+
       // Use manage interface if tenantId is provided
       if (tenantId) {
-        // Call backend healthcheck API for tenant management
-        const result = await modelService.checkManageTenantModelConnectivity(
+        connectivity = await modelService.checkManageTenantModelConnectivity(
           tenantId,
           form.displayName || form.name
         );
-
-        // Set connectivity status
-        if (result) {
-          setConnectivityStatus({
-            status: "available",
-            message: t("model.dialog.connectivity.status.available"),
-          });
-        } else {
-          setConnectivityStatus({
-            status: "unavailable",
-            message: t("model.dialog.connectivity.status.unavailable"),
-          });
-        }
       } else {
-        // Use local config verification for non-tenant operations
         const config = {
           modelName: form.name,
           modelType: modelType,
@@ -484,32 +475,20 @@ export const ModelAddDialog = ({
         };
 
         const result = await modelService.verifyModelConfigConnectivity(config);
+        connectivity = result.connectivity;
+      }
 
-        // Set connectivity status
-        if (result.connectivity) {
-          setConnectivityStatus({
-            status: "available",
-            message: t("model.dialog.connectivity.status.available"),
-          });
-        } else {
-          // Set status to unavailable
-          setConnectivityStatus({
-            status: "unavailable",
-            message: t("model.dialog.connectivity.status.unavailable"),
-          });
-          // Show detailed error message using internationalized component (same as add failure)
-          if (result.error) {
-            const translatedError = translateError(result.error, t);
-            // Ensure translatedError is a valid string, fallback to original error if needed
-            const errorText =
-              translatedError && translatedError.length > 0
-                ? translatedError
-                : result.error || "Unknown error";
-            message.error(
-              t("model.dialog.error.connectivityFailed", { error: errorText })
-            );
-          }
-        }
+      // Set connectivity status
+      if (connectivity) {
+        setConnectivityStatus({
+          status: "available",
+          message: t("model.dialog.connectivity.status.available"),
+        });
+      } else {
+        setConnectivityStatus({
+          status: "unavailable",
+          message: t("model.dialog.connectivity.status.unavailable"),
+        });
       }
     } catch (error) {
       const errorMessage =
@@ -518,15 +497,11 @@ export const ModelAddDialog = ({
         status: "unavailable",
         message: t("model.dialog.connectivity.status.unavailable"),
       });
-      // Show error message using internationalized component (same as add failure)
-      const translatedError = translateError(
-        errorMessage || t("model.dialog.connectivity.status.unavailable"),
-        t
-      );
-      // Ensure translatedError is a valid string
-      const errorText = translatedError
-        ? translatedError
-        : errorMessage || t("model.dialog.connectivity.status.unavailable");
+      const translatedError = translateError(errorMessage, t);
+      const errorText =
+        translatedError && translatedError.length > 0
+          ? translatedError
+          : errorMessage;
       message.error(
         t("model.dialog.error.connectivityFailed", { error: errorText })
       );
@@ -778,6 +753,7 @@ export const ModelAddDialog = ({
   };
 
   const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
+  const isSTTModel = form.type === MODEL_TYPES.STT;
 
   return (
     <Modal
@@ -862,7 +838,7 @@ export const ModelAddDialog = ({
             <Option value={MODEL_TYPES.RERANK} disabled>
               {t("model.type.rerank")}
             </Option>
-            <Option value={MODEL_TYPES.STT} disabled>
+            <Option value={MODEL_TYPES.STT}>
               {t("model.type.stt")}
             </Option>
             <Option value={MODEL_TYPES.TTS} disabled>
@@ -931,7 +907,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* Model URL */}
-        {!form.isBatchImport && (
+        {!form.isBatchImport && !isSTTModel && (
           <div>
             <label
               htmlFor="url"
@@ -947,6 +923,24 @@ export const ModelAddDialog = ({
                   ? t("model.dialog.placeholder.url.embedding")
                   : t("model.dialog.placeholder.url")
               }
+              value={form.url}
+              onChange={(e) => handleFormChange("url", e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* STT URL (Optional) */}
+        {!form.isBatchImport && isSTTModel && (
+          <div>
+            <label
+              htmlFor="url"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.url")}
+            </label>
+            <Input
+              id="url"
+              placeholder="wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
               value={form.url}
               onChange={(e) => handleFormChange("url", e.target.value)}
             />
@@ -1022,7 +1016,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* Max Tokens */}
-        {!isEmbeddingModel && !form.isBatchImport && (
+        {!isEmbeddingModel && !form.isBatchImport && !isSTTModel && (
           <div>
             <label
               htmlFor="maxTokens"
