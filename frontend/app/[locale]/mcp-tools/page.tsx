@@ -1,107 +1,41 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback } from "react";
 import { App, Button, Input } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import log from "@/lib/logger";
-import { filterServiceCards } from "@/lib/mcpTools";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import type { McpTool } from "@/types/agentConfig";
-import type { McpServiceItem } from "@/types/mcpTools";
-import { listMcpTools } from "@/services/mcpToolsService";
 import AddMcpServiceModal from "./components/AddMcpServiceModal";
 import McpServiceCard from "./components/McpServiceCard";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
-import { useMcpToolsDetail } from "../../../hooks/mcpTools/useMcpToolsDetail";
-import { useMcpToolsToggle } from "../../../hooks/mcpTools/useMcpToolsToggle";
+import { useMcpToolsPage } from "../../../hooks/mcpTools/useMcpToolsPage";
 
 export default function McpToolsPage() {
   const { message, modal } = App.useApp();
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
+  const translate = useCallback((key: string) => String(t(key)), [t]);
 
-  const [searchValue, setSearchValue] = useState("");
-  const [services, setServices] = useState<McpServiceItem[]>([]);
-  const [loadingServices, setLoadingServices] = useState(false);
-  const [selectedService, setSelectedService] = useState<McpServiceItem | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-
-  const loadServerList = async () => {
-    setLoadingServices(true);
-    try {
-      const result = await listMcpTools();
-      if (!result.success) {
-        throw new Error(result.message || t("mcpTools.list.loadFailed"));
-      }
-      setServices(result.data);
-      return { success: true };
-    } catch (error) {
-      log.error("[McpToolsPage] Failed to load managed MCP service list", { error });
-      message.error(error instanceof Error ? error.message : t("mcpTools.list.loadFailed"));
-      return { success: false };
-    } finally {
-      setLoadingServices(false);
-    }
-  };
-
-  useEffect(() => {
-    loadServerList().catch(() => undefined);
-  }, []);
-
-  const filteredServices = useMemo(() => {
-    return filterServiceCards(services, searchValue);
-  }, [searchValue, services]);
-
-  const isSameToolNames = (left: string[] = [], right: string[] = []) => {
-    if (left.length !== right.length) return false;
-    return left.every((item, index) => item === right[index]);
-  };
-
-  const syncToolNamesToCards = useCallback((service: Pick<McpServiceItem, "name" | "serverUrl">, tools: McpTool[]) => {
-    const nextToolNames = tools.map((item) => item.name);
-    setSelectedService((prev) => {
-      if (!prev || prev.name !== service.name || prev.serverUrl !== service.serverUrl) {
-        return prev;
-      }
-      if (isSameToolNames(prev.tools, nextToolNames)) {
-        return prev;
-      }
-      return { ...prev, tools: nextToolNames };
-    });
-    setServices((prev) => {
-      let changed = false;
-      const next = prev.map((item) => {
-        if (item.name !== service.name || item.serverUrl !== service.serverUrl) {
-          return item;
-        }
-        if (isSameToolNames(item.tools, nextToolNames)) {
-          return item;
-        }
-        changed = true;
-        return { ...item, tools: nextToolNames };
-      });
-      return changed ? next : prev;
-    });
-  }, []);
-
-  const { toggleServiceStatus } = useMcpToolsToggle({
-    loadServerList,
-    setSelectedService,
-    t: (key: string) => String(t(key)),
-    message,
-  });
-
-  const { state: detailState, actions: detailActions } = useMcpToolsDetail({
+  const {
+    searchValue,
+    setSearchValue,
+    loadingServices,
     selectedService,
-    onSelectedServiceChange: setSelectedService,
-    onServicesReload: loadServerList,
-    onSyncToolNames: syncToolNamesToCards,
-    t: (key: string) => String(t(key)),
+    setSelectedService,
+    showAddModal,
+    setShowAddModal,
+    loadServerList,
+    filteredServices,
+    toggleServiceStatus,
+    togglingServiceId,
+    detail,
+  } = useMcpToolsPage({
+    t: translate,
     message,
   });
 
-  const handleDeleteConfirm = (serviceName: string) => {
+  const handleDeleteConfirm = (mcpId: number, serviceName: string) => {
     modal.confirm({
       title: t("mcpTools.delete.confirmTitle"),
       content: (
@@ -110,8 +44,10 @@ export default function McpToolsPage() {
           <p className="text-xs text-slate-400">{t("mcpTools.delete.confirmDesc")}</p>
         </div>
       ),
+      okText: t("mcpTools.delete.confirmOk"),
+      cancelText: t("mcpTools.delete.confirmCancel"),
       okButtonProps: { danger: true },
-      onOk: () => detailActions.onDeleteService(serviceName),
+      onOk: () => detail.onDeleteService(mcpId, serviceName),
     });
   };
 
@@ -174,16 +110,13 @@ export default function McpToolsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               {filteredServices.map((service) => {
-                const isSelected =
-                  selectedService?.name === service.name &&
-                  selectedService?.serverUrl === service.serverUrl;
-
                 return (
                   <McpServiceCard
-                    key={`${service.name}-${service.source}`}
+                    key={`${service.mcpId}`}
                     service={service}
                     t={t}
                     onSelectService={setSelectedService}
+                    toggleLoading={togglingServiceId === service.mcpId}
                     onToggleEnable={(item) => {
                       toggleServiceStatus(item).catch((error) => {
                         log.error("[McpToolsPage] Failed to toggle service status from card", {
@@ -201,10 +134,26 @@ export default function McpToolsPage() {
 
           {selectedService ? (
             <McpServiceDetailModal
-              open={Boolean(detailState.selectedService && detailState.draftService)}
-              detailState={detailState}
-              detailActions={detailActions}
-              onDeleteConfirm={handleDeleteConfirm}
+              open={Boolean(detail.selectedService && detail.draftService)}
+              selectedService={detail.selectedService}
+              draftService={detail.draftService}
+              tagDrafts={detail.tagDrafts}
+              tagInputValue={detail.tagInputValue}
+              healthCheckLoading={detail.healthCheckLoading}
+              loadingTools={detail.loadingTools}
+              toolsModalVisible={detail.toolsModalVisible}
+              currentServerTools={detail.currentServerTools}
+              setDraftService={detail.setDraftService}
+              setTagInputValue={detail.setTagInputValue}
+              addDetailTag={detail.addDetailTag}
+              removeTag={detail.removeTag}
+              handleHealthCheck={detail.handleHealthCheck}
+              handleViewTools={detail.handleViewTools}
+              handleSaveUpdates={detail.handleSaveUpdates}
+              closeToolsModal={detail.closeToolsModal}
+              handleRefreshTools={detail.handleRefreshTools}
+              onDeleteConfirm={(serviceName) => handleDeleteConfirm(detail.selectedService!.mcpId, serviceName)}
+              toggleLoading={togglingServiceId === detail.selectedService?.mcpId}
               onToggleEnable={(item) => {
                 toggleServiceStatus(item).catch((error) => {
                   log.error("[McpToolsPage] Failed to toggle service status from detail modal", {
@@ -214,7 +163,7 @@ export default function McpToolsPage() {
                   });
                 });
               }}
-              onClose={detailActions.onCloseDetail}
+              onClose={detail.closeDetail}
             />
           ) : null}
 

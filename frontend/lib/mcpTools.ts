@@ -2,7 +2,7 @@ import type { McpServer } from "@/types/agentConfig";
 import type { McpServiceItem } from "@/types/mcpTools";
 import {
   MCP_HEALTH_STATUS,
-  MCP_SERVER_TYPE,
+  MCP_TRANSPORT_TYPE,
   MCP_SERVICE_STATUS,
   MCP_TAB,
 } from "@/const/mcpTools";
@@ -16,17 +16,18 @@ export const mapServersToServiceCards = (
   return (serverList ?? []).map((server) => {
     const normalizedUrl = typeof server.mcp_url === "string" ? server.mcp_url : "";
     const inferredType = normalizedUrl.startsWith("container://")
-      ? MCP_SERVER_TYPE.CONTAINER
-      : MCP_SERVER_TYPE.HTTP;
+      ? MCP_TRANSPORT_TYPE.STDIO
+      : MCP_TRANSPORT_TYPE.HTTP;
 
     return {
+      mcpId: typeof server.mcp_id === "number" ? server.mcp_id : -1,
       name: typeof server.service_name === "string" ? server.service_name : "",
       description: t("mcpTools.service.defaultDescription"),
       source: MCP_TAB.LOCAL,
       status: server.status ? MCP_SERVICE_STATUS.ENABLED : MCP_SERVICE_STATUS.DISABLED,
       updatedAt: "",
       tags: [],
-      serverType: inferredType,
+      transportType: inferredType,
       serverUrl: normalizedUrl,
       tools: [],
       healthStatus: server.status ? MCP_HEALTH_STATUS.HEALTHY : MCP_HEALTH_STATUS.UNCHECKED,
@@ -61,4 +62,26 @@ export const formatMarketVersion = (value: string): string => {
   const version = (value || "").trim();
   if (!version) return "-";
   return /^v/i.test(version) ? version : `v${version}`;
+};
+
+export const extractRegistryLinks = (registryJson?: Record<string, unknown> | null) => {
+  if (!registryJson || typeof registryJson !== "object") {
+    return { websiteUrl: "", repositoryUrl: "" };
+  }
+
+  const websiteUrlRaw = registryJson.websiteUrl;
+  const websiteUrl = typeof websiteUrlRaw === "string" ? websiteUrlRaw : "";
+
+  const repositoryRaw = registryJson.repository;
+  let repositoryUrl = "";
+  if (repositoryRaw && typeof repositoryRaw === "object") {
+    const repositoryUrlRaw = (repositoryRaw as Record<string, unknown>).url;
+    repositoryUrl = typeof repositoryUrlRaw === "string" ? repositoryUrlRaw : "";
+  }
+
+  return { websiteUrl, repositoryUrl };
+};
+
+export const toPrettyRegistryJson = (registryJson?: Record<string, unknown> | null) => {
+  return JSON.stringify(registryJson || {}, null, 2);
 };

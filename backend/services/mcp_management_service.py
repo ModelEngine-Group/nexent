@@ -1,29 +1,32 @@
 import logging
+import asyncio
 from datetime import datetime
-from types import SimpleNamespace
 from typing import Any, Dict, List
 from urllib.parse import urlencode
 
 import aiohttp
 
-from consts.exceptions import MCPConnectionError, MCPNameIllegal
+from consts.exceptions import MCPConnectionError, MCPContainerError
 from database.mcp_manage_db import (
-    check_mcp_manage_name_exists,
-    create_mcp_manage_service,
     delete_mcp_manage_service,
     get_mcp_manage_record_by_name,
-    get_mcp_manage_records,
     update_mcp_manage_enabled,
     update_mcp_manage_service,
     update_mcp_manage_status,
 )
 from database.remote_mcp_db import (
-    check_mcp_name_exists,
+    delete_mcp_record_by_id,
     create_mcp_record,
-    delete_mcp_record_by_name_and_url,
-    update_mcp_record_by_name_and_url,
+    get_mcp_record_by_id_and_tenant,
+    get_mcp_records_by_tenant,
+    update_mcp_record_enabled_by_id,
+    update_mcp_record_manage_fields_by_id,
+    update_mcp_record_runtime_fields_by_id,
+    update_mcp_record_status_by_id,
 )
+from services.mcp_container_service import MCPContainerManager
 from services.remote_mcp_service import mcp_server_health
+from services.tool_configuration_service import get_tool_from_remote_mcp_server
 
 logger = logging.getLogger("mcp_management_service")
 
@@ -49,13 +52,44 @@ def _safe_config_dict(record: Dict[str, Any]) -> Dict[str, Any]:
     return config_json if isinstance(config_json, dict) else {}
 
 
-def _is_http_transport(record: Dict[str, Any] | None) -> bool:
-    transport_type = str((record or {}).get("transport_type") or "").strip().lower()
-    return transport_type in {"streamable-http", "sse"}
-
-
 def _extract_str(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _is_container_record(record: Dict[str, Any] | None) -> bool:
+    return str((record or {}).get("transport_type") or "").strip().lower() == "stdio"
+
+
+async def _stop_container_without_remove_if_exists(container_id: str | None) -> None:
+    if not container_id:
+        return
+    try:
+        manager = MCPContainerManager()
+        await manager.stop_mcp_container_only(container_id)
+    except Exception as exc:
+        logger.warning(f"Skip stopping container {container_id}: {exc}")
+
+
+async def _remove_container_if_exists(container_id: str | None) -> None:
+    if not container_id:
+        return
+    try:
+        manager = MCPContainerManager()
+        await manager.remove_mcp_container(container_id)
+    except Exception as exc:
+        logger.warning(f"Skip removing container {container_id}: {exc}")
+
+
+async def _start_container_by_id_for_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    container_id = _extract_str(record.get("container_id"))
+    if not container_id:
+        raise ValueError("Container ID is missing")
+
+    manager = MCPContainerManager()
+    container_info = await manager.start_existing_mcp_container(container_id)
+    if not _extract_str(container_info.get("mcp_url")):
+        raise ValueError("Container runtime URL is missing")
+    return container_info
 
 
 def _normalize_market_server(entry: Dict[str, Any]) -> Dict[str, Any] | None:
@@ -67,16 +101,11 @@ def _normalize_market_server(entry: Dict[str, Any]) -> Dict[str, Any] | None:
     if not name:
         return None
 
-    title = _extract_str(server.get("title")) or name
     version = _extract_str(server.get("version"))
-    website_url = _extract_str(server.get("websiteUrl"))
+    description = _extract_str(server.get("description"))
 
-    description = _extract_str(server.get("description")) or "MCP 服务"
-
-    tags: List[str] = []
-    server_type = "容器"
-    server_url = ""
     remotes_out: List[Dict[str, str]] = []
+    packages_out: List[Dict[str, Any]] = []
 
     remotes = server.get("remotes")
     if isinstance(remotes, list):
@@ -85,61 +114,28 @@ def _normalize_market_server(entry: Dict[str, Any]) -> Dict[str, Any] | None:
                 continue
             remote_url = _extract_str(remote.get("url"))
             remote_type = _extract_str(remote.get("type")).lower()
-            if remote_url and remote_type in {"sse", "streamable-http", "http", ""}:
-                remotes_out.append({"type": remote_type or "remote", "url": remote_url})
-                server_url = remote_url
-                server_type = "SSE" if remote_type == "sse" else "HTTP"
-                break
+            if remote_url:
+                remotes_out.append({"type": remote_type, "url": remote_url})
 
-    if not server_url:
-        packages = server.get("packages")
-        if isinstance(packages, list) and packages:
-            first_pkg = packages[0] if isinstance(packages[0], dict) else {}
-            registry_type = _extract_str(first_pkg.get("registryType"))
-            identifier = _extract_str(first_pkg.get("identifier"))
-            version = _extract_str(first_pkg.get("version"))
-            runtime_hint = _extract_str(first_pkg.get("runtimeHint"))
-            transport = first_pkg.get("transport") if isinstance(first_pkg, dict) else {}
-            transport_url = _extract_str((transport or {}).get("url")) if isinstance(transport, dict) else ""
-            transport_type = _extract_str((transport or {}).get("type")).lower() if isinstance(transport, dict) else ""
+    packages = server.get("packages")
+    if isinstance(packages, list):
+        for package in packages:
+            if not isinstance(package, dict):
+                continue
 
-            if transport_url:
-                server_url = transport_url
-                server_type = "SSE" if transport_type == "sse" else "HTTP"
-                remotes_out.append({"type": transport_type or "remote", "url": transport_url})
-            else:
-                # Non-HTTP package format (npm/pypi/oci stdio etc.) is represented as container/runtime install target.
-                pkg_base = f"{registry_type}:{identifier}" if registry_type and identifier else identifier
-                if version and pkg_base:
-                    pkg_base = f"{pkg_base}@{version}"
-                if runtime_hint and pkg_base:
-                    server_url = f"{runtime_hint}://{pkg_base}"
-                elif pkg_base:
-                    server_url = f"package://{pkg_base}"
-                else:
-                    server_url = "package://unknown"
-                server_type = "容器"
+            transport_raw = package.get("transport")
+            transport = {
+                "type": _extract_str(transport_raw.get("type")) if isinstance(transport_raw, dict) else "",
+                "url": _extract_str(transport_raw.get("url")) if isinstance(transport_raw, dict) else "",
+            }
 
-            if registry_type:
-                tags.append(registry_type)
-            if runtime_hint:
-                tags.append(runtime_hint)
-
-    version = _extract_str(server.get("version"))
-    if version:
-        tags.append(version)
-
-    dedup_tags: List[str] = []
-    seen = set()
-    for tag in tags:
-        normalized = tag.strip()
-        if not normalized:
-            continue
-        low = normalized.lower()
-        if low in seen:
-            continue
-        seen.add(low)
-        dedup_tags.append(normalized)
+            packages_out.append({
+                "registryType": _extract_str(package.get("registryType")),
+                "identifier": _extract_str(package.get("identifier")),
+                "version": _extract_str(package.get("version")),
+                "runtimeHint": _extract_str(package.get("runtimeHint")),
+                "transport": transport,
+            })
 
     official_meta = {}
     if isinstance(entry.get("_meta"), dict):
@@ -147,15 +143,11 @@ def _normalize_market_server(entry: Dict[str, Any]) -> Dict[str, Any] | None:
 
     return {
         "name": name,
-        "title": title,
         "version": version,
         "description": description,
-        "websiteUrl": website_url,
         "remotes": remotes_out,
-        "serverUrl": server_url,
-        "serverType": server_type,
-        "tags": dedup_tags,
-        "status": _extract_str(official_meta.get("status")) or "active",
+        "packages": packages_out,
+        "status": _extract_str(official_meta.get("status")),
         "isLatest": bool(official_meta.get("isLatest")),
         "publishedAt": _extract_str(official_meta.get("publishedAt")),
         "updatedAt": _extract_str(official_meta.get("updatedAt")),
@@ -244,86 +236,169 @@ async def add_mcp_service(
     name: str,
     description: str | None,
     source: str,
-    server_type: str,
+    transport_type: str,
     server_url: str,
     tags: list[str] | None,
     authorization_token: str | None,
     container_config: Dict[str, Any] | None,
+    version: str | None,
+    mcp_registry_json: Dict[str, Any] | None,
+    enabled: bool = False,
+    container_id: str | None = None,
 ) -> None:
-    if check_mcp_manage_name_exists(tenant_id=tenant_id, name=name):
-        raise MCPNameIllegal("MCP name already exists")
-
     normalized_source = (source or "local").strip().lower()
-    normalized_server_type = (server_type or "http").strip().lower()
+    normalized_source = "mcp_registry" if normalized_source in {"market", "registry"} else normalized_source
+    if normalized_source not in {"local", "mcp_registry"}:
+        raise ValueError(f"Invalid source: {source}")
+
+    normalized_transport_type = (transport_type or "http").strip().lower()
+    normalized_transport_type = "stdio" if normalized_transport_type == "container" else normalized_transport_type
 
     # mcp-tools add flow does not perform connectivity checks.
-    # All newly added services remain disabled and unchecked until manual enable/health check.
+    # Health status remains unchecked until manual health check.
     status: bool | None = None
 
-    source_type = "registry" if normalized_source == "market" else "local"
-    if normalized_server_type == "sse":
-        transport_type = "sse"
-    elif normalized_server_type == "http":
-        transport_type = "streamable-http"
-    elif normalized_server_type == "container":
-        transport_type = "stdio"
-    else:
-        raise ValueError(f"Invalid server_type: {server_type}")
+    if normalized_transport_type not in {"http", "sse", "stdio"}:
+        raise ValueError(f"Invalid transport_type: {transport_type}")
 
-    config_json: Dict[str, Any] = {}
-    if authorization_token:
-        config_json["authorization_token"] = authorization_token
-    if container_config:
-        config_json["container_config"] = container_config
+    normalized_container_id = container_id if isinstance(container_id, str) and container_id else None
+    config_json = container_config if normalized_transport_type == "stdio" and isinstance(container_config, dict) else None
 
-    try:
-        create_mcp_manage_service(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            name=name,
-            server_url=server_url,
-            source_type=source_type,
-            transport_type=transport_type,
-            tags=tags,
-            category=description,
-            config_json=config_json or None,
-            enabled=False,
-            status=status,
-        )
-    except Exception:
-        raise
+    create_mcp_record(
+        mcp_data={
+            "mcp_name": name,
+            "mcp_server": server_url,
+            "status": status,
+            "container_id": normalized_container_id,
+            "authorization_token": authorization_token,
+            "souce": normalized_source,
+            "version": version,
+            "mcp_registry_json": mcp_registry_json,
+            "transport_type": normalized_transport_type,
+            "enabled": enabled,
+            "tags": ",".join(tags or []),
+            "description": description,
+            "config_json": config_json,
+        },
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
 
 def list_mcp_services(tenant_id: str) -> List[Dict[str, Any]]:
-    records = get_mcp_manage_records(tenant_id=tenant_id)
+    records = get_mcp_records_by_tenant(tenant_id=tenant_id)
     services: List[Dict[str, Any]] = []
 
+    container_status_map: Dict[str, str] = {}
+    try:
+        manager = MCPContainerManager()
+        for container in manager.list_mcp_containers(tenant_id=tenant_id):
+            container_id = _extract_str(container.get("container_id"))
+            status = _extract_str(container.get("status")).lower()
+            if not container_id:
+                continue
+            if status == "running":
+                container_status_map[container_id] = "running"
+            elif status:
+                container_status_map[container_id] = "stopped"
+    except Exception as exc:
+        logger.warning(f"Failed to load container runtime status: {exc}")
+
     for record in records:
-        source_type = (record.get("source_type") or "").lower()
+        souce = (record.get("souce") or record.get("source_type") or "").lower()
         transport_type = (record.get("transport_type") or "").lower()
         enabled = bool(record.get("enabled"))
         status = record.get("status")
-        config_json = _safe_config_dict(record)
+        registry_json = record.get("mcp_registry_json") if isinstance(record.get("mcp_registry_json"), dict) else None
+        raw_config_json = record.get("config_json") if isinstance(record.get("config_json"), dict) else None
+
+        container_id = _extract_str(record.get("container_id"))
+        normalized_transport_type = "stdio" if transport_type in {"stdio", "container"} else "sse" if transport_type == "sse" else "http"
+        record_config_json = raw_config_json if normalized_transport_type == "stdio" else None
+        container_status = None
+        if normalized_transport_type == "stdio":
+            if container_id:
+                container_status = container_status_map.get(container_id, "stopped")
+            else:
+                container_status = "stopped"
 
         services.append({
-            "name": record.get("mcp_name") or "Unnamed MCP",
-            "description": record.get("category") or "MCP service",
-            "source": "market" if source_type == "registry" else "local",
+            "mcpId": record.get("mcp_id"),
+            "containerId": container_id or None,
+            "name": record.get("mcp_name"),
+            "description": record.get("description") or record.get("category") or "",
+            "source": souce or "local",
             "status": "enabled" if enabled else "disabled",
             "updatedAt": _format_time(record.get("update_time")),
             "tags": _split_tags(record.get("tags")),
-            "serverType": "container" if transport_type == "stdio" else "sse" if transport_type == "sse" else "http",
-            "serverUrl": record.get("mcp_server") or "-",
+            "transportType": normalized_transport_type,
+            "serverUrl": _extract_str(record.get("mcp_server")),
+            "version": _extract_str(record.get("version")),
+            "mcpRegistryJson": registry_json,
+            "configJson": record_config_json,
             "tools": record.get("tools") or [],
             "healthStatus": "healthy" if status is True else "unhealthy" if status is False else "unchecked",
-            "containerStatus": record.get("container_status") or None,
-            "authorizationToken": config_json.get("authorization_token") or "",
+            "containerStatus": container_status,
+            "authorizationToken": record.get("authorization_token") or "",
         })
 
     return services
 
 
+async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> List[Dict[str, Any]]:
+    record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not record:
+        raise ValueError("MCP record not found")
+
+    service_name = _extract_str(record.get("mcp_name"))
+    server_url = _extract_str(record.get("mcp_server"))
+    if not service_name or not server_url:
+        raise ValueError("MCP record is missing runtime connection fields")
+
+    tools_info = await get_tool_from_remote_mcp_server(
+        mcp_server_name=service_name,
+        remote_mcp_server=server_url,
+        tenant_id=tenant_id,
+    )
+    return [tool.__dict__ for tool in tools_info]
+
+
 def update_mcp_service(
+    *,
+    tenant_id: str,
+    user_id: str,
+    mcp_id: int,
+    new_name: str,
+    description: str | None,
+    server_url: str,
+    authorization_token: str | None,
+    tags: list[str] | None,
+) -> None:
+    current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not current_record:
+        raise ValueError("MCP record not found")
+
+    current_transport_type = (current_record.get("transport_type") or "").strip().lower()
+    config_json = None
+    if current_transport_type in {"stdio", "container"}:
+        config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
+
+    update_mcp_record_manage_fields_by_id(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name=new_name,
+        description=description,
+        server_url=server_url,
+        souce=(current_record.get("souce") or current_record.get("source_type") or "local"),
+        transport_type=(current_record.get("transport_type") or "streamable-http"),
+        authorization_token=authorization_token,
+        config_json=config_json,
+        tags=tags,
+    )
+
+
+def update_mcp_service_legacy(
     *,
     tenant_id: str,
     user_id: str,
@@ -335,14 +410,12 @@ def update_mcp_service(
     tags: list[str] | None,
 ) -> None:
     current_record = get_mcp_manage_record_by_name(tenant_id=tenant_id, name=current_name)
-    current_server_url = str((current_record or {}).get("mcp_server") or "").strip()
-    next_config_json = _safe_config_dict(current_record or {})
+    config_json = _safe_config_dict(current_record or {})
 
-    # Keep token in config_json as single source for mcp-tools management.
     if authorization_token:
-        next_config_json["authorization_token"] = authorization_token
+        config_json["authorization_token"] = authorization_token
     else:
-        next_config_json.pop("authorization_token", None)
+        config_json.pop("authorization_token", None)
 
     update_mcp_manage_service(
         tenant_id=tenant_id,
@@ -351,33 +424,117 @@ def update_mcp_service(
         new_name=new_name,
         description=description,
         server_url=server_url,
-        config_json=next_config_json or None,
+        config_json=config_json or None,
         tags=tags,
     )
 
-    if _is_http_transport(current_record) and current_server_url:
-        update_mcp_record_by_name_and_url(
-            update_data=SimpleNamespace(
-                current_service_name=current_name,
-                current_mcp_url=current_server_url,
-                new_service_name=new_name,
-                new_mcp_url=server_url,
-                new_authorization_token=authorization_token,
-            ),
+async def update_mcp_service_enabled(
+    *,
+    tenant_id: str,
+    user_id: str,
+    mcp_id: int,
+    enabled: bool,
+) -> None:
+    current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not current_record:
+        raise ValueError("MCP record not found")
+
+    if enabled:
+        current_name = str((current_record or {}).get("mcp_name") or "").strip()
+        if current_name:
+            records = get_mcp_records_by_tenant(tenant_id=tenant_id)
+            current_name_lower = current_name.lower()
+            for record in records:
+                if int(record.get("mcp_id") or 0) == mcp_id:
+                    continue
+
+                record_name = str(record.get("mcp_name") or "").strip().lower()
+                is_enabled = bool(record.get("enabled"))
+                if is_enabled and record_name == current_name_lower:
+                    raise ValueError("An enabled service already uses this name")
+
+    authorization_token = current_record.get("authorization_token")
+
+    if _is_container_record(current_record):
+        if enabled:
+            container_info = await _start_container_by_id_for_record(current_record)
+            next_server_url = _extract_str(container_info.get("mcp_url"))
+            next_container_id = _extract_str(container_info.get("container_id")) or _extract_str(current_record.get("container_id")) or None
+
+            health_ok = False
+            for attempt in range(10):
+                try:
+                    health_ok = await mcp_server_health(
+                        remote_mcp_server=next_server_url,
+                        authorization_token=authorization_token,
+                    )
+                except MCPConnectionError:
+                    health_ok = False
+                if health_ok:
+                    break
+                if attempt < 9:
+                    await asyncio.sleep(1)
+            if not health_ok:
+                await _stop_container_without_remove_if_exists(next_container_id)
+                update_mcp_record_runtime_fields_by_id(
+                    mcp_id=mcp_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    container_id=next_container_id,
+                    mcp_server=next_server_url,
+                    status=False,
+                )
+                raise MCPConnectionError("MCP connection failed")
+
+            update_mcp_record_runtime_fields_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                container_id=next_container_id,
+                mcp_server=next_server_url,
+                status=True,
+            )
+        else:
+            current_container_id = _extract_str(current_record.get("container_id")) or None
+            await _stop_container_without_remove_if_exists(current_container_id)
+            update_mcp_record_runtime_fields_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                container_id=current_container_id,
+                mcp_server=_extract_str(current_record.get("mcp_server")),
+                status=None,
+            )
+    elif enabled:
+        server_url = _extract_str(current_record.get("mcp_server"))
+        health_ok = await mcp_server_health(
+            remote_mcp_server=server_url,
+            authorization_token=authorization_token,
+        )
+        update_mcp_record_status_by_id(
+            mcp_id=mcp_id,
             tenant_id=tenant_id,
             user_id=user_id,
+            status=bool(health_ok),
         )
+        if not health_ok:
+            raise MCPConnectionError("MCP connection failed")
+
+    update_mcp_record_enabled_by_id(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        enabled=enabled,
+    )
 
 
-def update_mcp_service_enabled(
+def update_mcp_service_enabled_legacy(
     *,
     tenant_id: str,
     user_id: str,
     name: str,
     enabled: bool,
 ) -> None:
-    current_record = get_mcp_manage_record_by_name(tenant_id=tenant_id, name=name)
-
     update_mcp_manage_enabled(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -385,87 +542,96 @@ def update_mcp_service_enabled(
         enabled=enabled,
     )
 
-    if not _is_http_transport(current_record):
-        return
 
-    server_url = str((current_record or {}).get("mcp_server") or "").strip()
-    if not server_url:
-        return
+async def delete_mcp_service(
+    *,
+    tenant_id: str,
+    user_id: str,
+    mcp_id: int,
+) -> None:
+    current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not current_record:
+        raise ValueError("MCP record not found")
 
-    config_json = _safe_config_dict(current_record or {})
-    authorization_token = config_json.get("authorization_token") or None
-    status = current_record.get("status") if isinstance(current_record, dict) else None
+    if _is_container_record(current_record):
+        current_container_id = _extract_str(current_record.get("container_id")) or None
+        await _stop_container_without_remove_if_exists(current_container_id)
+        await _remove_container_if_exists(current_container_id)
 
-    if not enabled:
-        delete_mcp_record_by_name_and_url(
-            mcp_name=name,
-            mcp_server=server_url,
-            tenant_id=tenant_id,
-            user_id=user_id,
-        )
-        return
-
-    if check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
-        update_mcp_record_by_name_and_url(
-            update_data=SimpleNamespace(
-                current_service_name=name,
-                current_mcp_url=server_url,
-                new_service_name=name,
-                new_mcp_url=server_url,
-                new_authorization_token=authorization_token,
-            ),
-            tenant_id=tenant_id,
-            user_id=user_id,
-            status=status,
-        )
-        return
-
-    create_mcp_record(
-        mcp_data={
-            "mcp_name": name,
-            "mcp_server": server_url,
-            "status": status,
-            "container_id": None,
-            "authorization_token": authorization_token,
-        },
+    delete_mcp_record_by_id(
+        mcp_id=mcp_id,
         tenant_id=tenant_id,
         user_id=user_id,
     )
 
 
-def delete_mcp_service(
+def delete_mcp_service_legacy(
     *,
     tenant_id: str,
     user_id: str,
     name: str,
 ) -> None:
-    current_record = get_mcp_manage_record_by_name(tenant_id=tenant_id, name=name)
-
     delete_mcp_manage_service(
         tenant_id=tenant_id,
         user_id=user_id,
         name=name,
     )
 
-    current_server_url = str((current_record or {}).get("mcp_server") or "").strip()
-    if _is_http_transport(current_record) and current_server_url:
-        delete_mcp_record_by_name_and_url(
-            mcp_name=name,
-            mcp_server=current_server_url,
-            tenant_id=tenant_id,
-            user_id=user_id,
-        )
-
 
 async def check_mcp_service_health(
+    *,
+    tenant_id: str,
+    user_id: str,
+    mcp_id: int,
+) -> str:
+    record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not record:
+        raise ValueError("MCP record not found")
+
+    server_url = str((record or {}).get("mcp_server") or "").strip()
+    if not server_url:
+        raise ValueError("MCP server URL is empty")
+
+    authorization_token = record.get("authorization_token")
+
+    try:
+        status = await mcp_server_health(
+            remote_mcp_server=server_url,
+            authorization_token=authorization_token,
+        )
+    except Exception as exc:
+        logger.error(f"MCP health check failed: {exc}")
+        status = False
+
+    update_mcp_record_status_by_id(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        status=status,
+    )
+
+    if not status:
+        raise MCPConnectionError("MCP connection failed")
+
+    return "healthy"
+
+
+async def check_mcp_service_health_legacy(
     *,
     tenant_id: str,
     user_id: str,
     name: str,
     server_url: str,
 ) -> str:
-    record = get_mcp_manage_record_by_name(tenant_id=tenant_id, name=name)
-    config_json = _safe_config_dict(record or {})
+    current_record = get_mcp_manage_record_by_name(tenant_id=tenant_id, name=name)
+    if not current_record:
+        raise ValueError("MCP record not found")
+
+    target_server_url = str(current_record.get("mcp_server") or "").strip()
+    if target_server_url and target_server_url != server_url:
+        raise ValueError("MCP record and server_url mismatch")
+
+    config_json = _safe_config_dict(current_record or {})
     authorization_token = config_json.get("authorization_token")
 
     try:

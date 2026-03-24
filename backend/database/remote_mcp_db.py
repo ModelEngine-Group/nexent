@@ -96,6 +96,108 @@ def get_mcp_records_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
         return [as_dict(record) for record in mcp_records]
 
 
+def update_mcp_record_manage_fields_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    name: str,
+    server_url: str,
+    description: str | None,
+    tags: List[str] | None,
+    souce: str | None,
+    transport_type: str | None,
+    authorization_token: str | None,
+    config_json: Dict[str, Any] | None,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update(
+            {
+                "mcp_name": name,
+                "mcp_server": server_url,
+                "description": description,
+                "tags": ",".join(tags or []),
+                "souce": souce,
+                "transport_type": transport_type,
+                "authorization_token": authorization_token,
+                "config_json": config_json,
+                "updated_by": user_id,
+            }
+        )
+
+
+def update_mcp_record_enabled_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    enabled: bool,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"enabled": enabled, "updated_by": user_id})
+
+
+def update_mcp_record_status_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    status: bool,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"status": status, "updated_by": user_id})
+
+
+def update_mcp_record_runtime_fields_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    container_id: str | None,
+    mcp_server: str,
+    status: bool | None,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update(
+            {
+                "container_id": container_id,
+                "mcp_server": mcp_server,
+                "status": status,
+                "updated_by": user_id,
+            }
+        )
+
+
+def delete_mcp_record_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"delete_flag": "Y", "updated_by": user_id})
+
+
 def get_mcp_server_by_name_and_tenant(mcp_name: str, tenant_id: str) -> str:
     """
     Get MCP server address by name and tenant ID

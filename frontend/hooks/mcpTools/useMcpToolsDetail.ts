@@ -1,14 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { MessageInstance } from "antd/es/message/interface";
 import log from "@/lib/logger";
 import { MCP_HEALTH_STATUS } from "@/const/mcpTools";
 import type { McpTool } from "@/types/agentConfig";
-import {
-  type McpServiceDetailActions,
-  type McpServiceDetailState,
-  type McpServiceItem,
-} from "@/types/mcpTools";
+import { type McpServiceItem } from "@/types/mcpTools";
 import {
   deleteMcpToolService,
   healthcheckMcpToolService,
@@ -25,7 +21,7 @@ type UseMcpToolsDetailParams = {
   selectedService: McpServiceItem | null;
   onSelectedServiceChange: (service: McpServiceItem | null) => void;
   onServicesReload: () => Promise<unknown>;
-  onSyncToolNames: (service: Pick<McpServiceItem, "name" | "serverUrl">, tools: McpTool[]) => void;
+  onSyncToolNames: (service: Pick<McpServiceItem, "mcpId" | "name" | "serverUrl">, tools: McpTool[]) => void;
   t: (key: string) => string;
   message: MessageInstance;
 };
@@ -45,28 +41,53 @@ export function useMcpToolsDetail({
   const [healthCheckLoading, setHealthCheckLoading] = useState(false);
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
   const [currentServerTools, setCurrentServerTools] = useState<McpTool[]>([]);
+  const previousSelectedServiceIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (selectedService) {
-      setDraftService({ ...selectedService });
-      setTagDrafts(selectedService.tags);
-      setTagInputValue("");
-      setCurrentServerTools([]);
+      const previousId = previousSelectedServiceIdRef.current;
+      const isSameService = previousId === selectedService.mcpId;
+      previousSelectedServiceIdRef.current = selectedService.mcpId;
+
+      if (isSameService) {
+        // Keep local editing/tool modal state when only metadata updates for the same service.
+        setDraftService((prev) => {
+          if (!prev) {
+            return { ...selectedService };
+          }
+          return {
+            ...prev,
+            status: selectedService.status,
+            healthStatus: selectedService.healthStatus,
+            containerStatus: selectedService.containerStatus,
+            updatedAt: selectedService.updatedAt,
+            version: selectedService.version,
+            mcpRegistryJson: selectedService.mcpRegistryJson,
+            configJson: selectedService.configJson,
+          };
+        });
+      } else {
+        setDraftService({ ...selectedService });
+        setTagDrafts(selectedService.tags);
+        setTagInputValue("");
+        setCurrentServerTools([]);
+      }
       return;
     }
 
+    previousSelectedServiceIdRef.current = null;
     setDraftService(null);
     setTagDrafts([]);
     setTagInputValue("");
     setCurrentServerTools([]);
     setToolsModalVisible(false);
-  }, [selectedService?.name, selectedService?.serverUrl]);
+  }, [selectedService]);
 
   const updateMutation = useMutation({ mutationFn: updateMcpToolService });
   const deleteMutation = useMutation({ mutationFn: deleteMcpToolService });
   const healthcheckMutation = useMutation({ mutationFn: healthcheckMcpToolService });
 
-  const toolsQueryKey = ["mcp-tools", "runtime-tools", draftService?.name, draftService?.serverUrl];
+  const toolsQueryKey = ["mcp-tools", "runtime-tools", draftService?.mcpId];
 
   const toolsQuery = useQuery<McpTool[]>({
     queryKey: toolsQueryKey,
@@ -78,10 +99,7 @@ export function useMcpToolsDetail({
       if (!draftService) {
         throw new Error(t("mcpTools.tools.loadFailed"));
       }
-      const result = await listMcpRuntimeTools(draftService.name, draftService.serverUrl);
-      if (!result.success) {
-        throw new Error(result.message || t("mcpTools.tools.loadFailed"));
-      }
+      const result = await listMcpRuntimeTools(draftService.mcpId);
       return result.data;
     },
   });
@@ -91,17 +109,17 @@ export function useMcpToolsDetail({
     const nextToolNames = toolsQuery.data.map((item) => item.name);
     setCurrentServerTools((prev) => (isSameStringArray(prev.map((item) => item.name), nextToolNames) ? prev : toolsQuery.data));
     onSyncToolNames(
-      { name: draftService.name, serverUrl: draftService.serverUrl },
+      { mcpId: draftService.mcpId, name: draftService.name, serverUrl: draftService.serverUrl },
       toolsQuery.data
     );
     setDraftService((prev) =>
-      !prev || prev.name !== draftService.name || prev.serverUrl !== draftService.serverUrl
+      !prev || prev.mcpId !== draftService.mcpId
         ? prev
         : isSameStringArray(prev.tools, nextToolNames)
         ? prev
         : { ...prev, tools: nextToolNames }
     );
-  }, [draftService?.name, draftService?.serverUrl, toolsQuery.data, onSyncToolNames]);
+  }, [draftService?.mcpId, draftService?.name, draftService?.serverUrl, toolsQuery.data, onSyncToolNames]);
 
   const loadTools = async () => {
     if (!draftService) return;
@@ -109,11 +127,14 @@ export function useMcpToolsDetail({
     if (result.error) {
       log.error("[useMcpToolsDetail] Failed to load runtime tools", {
         error: result.error,
-        serviceName: draftService.name,
-        serverUrl: draftService.serverUrl,
+        mcpId: draftService.mcpId,
       });
-      const msg = result.error instanceof Error ? result.error.message : t("mcpTools.tools.loadFailed");
-      message.error(msg);
+      message.error(t("mcpTools.tools.loadFailed"));
+      return;
+    }
+
+    if (result.data && result.data.length === 0) {
+      message.info(t("mcpConfig.toolsList.empty"));
     }
   };
 
@@ -140,14 +161,13 @@ export function useMcpToolsDetail({
     const nextTags = tagDrafts.map((tag) => tag.trim()).filter((tag) => tag.length > 0);
     try {
       const result = await updateMutation.mutateAsync({
-        current_name: selectedService.name,
+        mcp_id: selectedService.mcpId,
         name: draftService.name,
         description: draftService.description,
         server_url: draftService.serverUrl,
         authorization_token: draftService.authorizationToken ?? "",
         tags: nextTags,
       });
-      if (!result.success) throw new Error(result.message || t("mcpTools.service.saveFailed"));
       const updatedService = { ...draftService, tags: nextTags };
       await onServicesReload();
       onSelectedServiceChange(updatedService);
@@ -155,15 +175,16 @@ export function useMcpToolsDetail({
       setTagDrafts(nextTags);
       message.success(t("mcpTools.service.saveSuccess"));
     } catch (error) {
-      const msg = error instanceof Error ? error.message : t("mcpTools.service.saveFailed");
       log.error("[useMcpToolsDetail] Failed to save service updates", {
         error,
         selectedServiceName: selectedService.name,
+        selectedServiceId: selectedService.mcpId,
         selectedServiceUrl: selectedService.serverUrl,
         draftServiceName: draftService.name,
+        draftServiceId: draftService.mcpId,
         draftServiceUrl: draftService.serverUrl,
       });
-      message.error(msg === "MCP connection failed" ? t("mcpTools.error.connectionFailed") : msg);
+      message.error(t("mcpTools.service.saveFailed"));
     }
   };
 
@@ -172,38 +193,37 @@ export function useMcpToolsDetail({
     setHealthCheckLoading(true);
     try {
       const result = await healthcheckMutation.mutateAsync({
-        name: draftService.name,
-        server_url: draftService.serverUrl,
+        mcp_id: draftService.mcpId,
       });
-      if (!result.success || !result.data) throw new Error(result.message || t("mcpTools.service.healthFailed"));
+      if (!result.data) throw new Error(t("mcpTools.service.healthFailed"));
       setDraftService({ ...draftService, healthStatus: result.data.health_status });
     } catch (error) {
       setDraftService((prev) => (prev ? { ...prev, healthStatus: MCP_HEALTH_STATUS.UNHEALTHY } : prev));
-      const msg = error instanceof Error ? error.message : t("mcpTools.service.healthFailed");
       log.error("[useMcpToolsDetail] Failed to run health check", {
         error,
+        serviceId: draftService.mcpId,
         serviceName: draftService.name,
         serverUrl: draftService.serverUrl,
       });
-      message.error(msg === "MCP connection failed" ? t("mcpTools.error.connectionFailed") : msg);
+      message.error(t("mcpTools.service.healthFailed"));
     } finally {
       setHealthCheckLoading(false);
     }
   };
 
-  const onDeleteService = async (serviceName: string) => {
+  const onDeleteService = async (mcpId: number, serviceName: string) => {
     try {
-      const result = await deleteMutation.mutateAsync(serviceName);
-      if (!result.success) throw new Error(result.message || t("mcpTools.service.deleteFailed"));
+      await deleteMutation.mutateAsync(mcpId);
       await onServicesReload();
       onSelectedServiceChange(null);
       message.success(t("mcpTools.service.deleted"));
     } catch (error) {
       log.error("[useMcpToolsDetail] Failed to delete service", {
         error,
+        serviceId: mcpId,
         serviceName,
       });
-      message.error(error instanceof Error ? error.message : t("mcpTools.service.deleteFailed"));
+      message.error(t("mcpTools.service.deleteFailed"));
     }
   };
 
@@ -214,7 +234,7 @@ export function useMcpToolsDetail({
     setTagInputValue("");
   };
 
-  const state: McpServiceDetailState = {
+  return {
     selectedService,
     draftService,
     tagDrafts,
@@ -223,27 +243,16 @@ export function useMcpToolsDetail({
     loadingTools: toolsQuery.isFetching,
     toolsModalVisible,
     currentServerTools,
-  };
-
-  const actions: McpServiceDetailActions & {
-    onDeleteService: (serviceName: string) => Promise<void>;
-    onCloseDetail: () => void;
-  } = {
-    onDraftServiceChange: setDraftService,
-    onTagInputChange: setTagInputValue,
-    onAddDetailTag: addDetailTag,
-    onRemoveTag: (index: number) => setTagDrafts((prev) => prev.filter((_, idx) => idx !== index)),
-    onHealthCheck: handleHealthCheck,
-    onViewTools: handleViewTools,
-    onSaveUpdates: handleSaveUpdates,
-    onCloseToolsModal: () => setToolsModalVisible(false),
-    onRefreshTools: handleRefreshTools,
+    setDraftService,
+    setTagInputValue,
+    addDetailTag,
+    removeTag: (index: number) => setTagDrafts((prev) => prev.filter((_, idx) => idx !== index)),
+    handleHealthCheck,
+    handleViewTools,
+    handleSaveUpdates,
+    closeToolsModal: () => setToolsModalVisible(false),
+    handleRefreshTools,
     onDeleteService,
-    onCloseDetail: () => onSelectedServiceChange(null),
-  };
-
-  return {
-    state,
-    actions,
+    closeDetail: () => onSelectedServiceChange(null),
   };
 }

@@ -1,5 +1,5 @@
 import { Button } from "antd";
-import { MCP_SERVICE_STATUS, MCP_TAB } from "@/const/mcpTools";
+import { MCP_TRANSPORT_TYPE, MCP_SERVICE_STATUS, MCP_TAB } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 
 type Translate = (key: string, options?: Record<string, unknown>) => React.ReactNode;
@@ -9,6 +9,7 @@ interface Props {
   t: Translate;
   onSelectService: (service: McpServiceItem) => void;
   onToggleEnable: (service: McpServiceItem) => void;
+  toggleLoading?: boolean;
 }
 
 export default function McpServiceCard({
@@ -16,6 +17,7 @@ export default function McpServiceCard({
   t,
   onSelectService,
   onToggleEnable,
+  toggleLoading = false,
 }: Props) {
   return (
     <div
@@ -46,7 +48,14 @@ export default function McpServiceCard({
 
       <div className="mt-4 flex flex-wrap gap-2">
         <span className="rounded-full bg-amber-100 text-amber-700 px-2.5 py-1 text-xs font-medium">
-          {service.source === MCP_TAB.LOCAL ? t("mcpTools.source.local") : t("mcpTools.source.market")}
+          {service.source === MCP_TAB.LOCAL ? t("mcpTools.source.local") : t("mcpTools.source.mcp_registry")}
+        </span>
+        <span className="rounded-full bg-green-100 text-green-700 px-2.5 py-1 text-xs font-medium">
+          {service.transportType === MCP_TRANSPORT_TYPE.HTTP
+            ? t("mcpTools.serverType.http")
+            : service.transportType === MCP_TRANSPORT_TYPE.SSE
+            ? t("mcpTools.serverType.sse")
+            : t("mcpTools.serverType.stdio")}
         </span>
         {service.tags.map((tag) => (
           <span
@@ -64,6 +73,8 @@ export default function McpServiceCard({
             size="small"
             className="rounded-full"
             autoInsertSpace={false}
+            loading={toggleLoading}
+            disabled={toggleLoading}
             onClick={(event) => {
               event.stopPropagation();
               onToggleEnable(service);
