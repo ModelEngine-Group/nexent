@@ -213,6 +213,7 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "embedding_model_name" varchar(200) COLLATE "pg_catalog"."default",
   "group_ids" varchar,
   "ingroup_permission" varchar(30),
+  "is_multimodal" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
@@ -230,6 +231,7 @@ COMMENT ON COLUMN "knowledge_record_t"."knowledge_sources" IS 'Knowledge base so
 COMMENT ON COLUMN "knowledge_record_t"."embedding_model_name" IS 'Embedding model name, used to record the embedding model used by the knowledge base';
 COMMENT ON COLUMN "knowledge_record_t"."group_ids" IS 'Knowledge base group IDs list';
 COMMENT ON COLUMN "knowledge_record_t"."ingroup_permission" IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
+COMMENT ON COLUMN "knowledge_record_t"."is_multimodal" IS 'whether it is multimodal';
 COMMENT ON COLUMN "knowledge_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';

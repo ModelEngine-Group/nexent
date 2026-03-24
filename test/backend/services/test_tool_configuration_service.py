@@ -5,11 +5,30 @@ import os
 import sys
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
 # Environment variables are now configured in conftest.py
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SDK_ROOT = REPO_ROOT / "sdk"
+if str(SDK_ROOT) not in sys.path:
+    sys.path.insert(0, str(SDK_ROOT))
+
+try:
+    import nexent.memory.memory_service as real_memory_service
+    memory_pkg = sys.modules.get("nexent.memory")
+except Exception:
+    real_memory_service = None
+    memory_pkg = types.ModuleType("nexent.memory")
+    memory_pkg.__path__ = []
+    memory_service_stub = types.ModuleType("nexent.memory.memory_service")
+    async def _clear_memory_stub(*_args, **_kwargs):
+        return None
+    memory_service_stub.clear_memory = _clear_memory_stub
+    sys.modules["nexent.memory.memory_service"] = memory_service_stub
 
 boto3_mock = MagicMock()
 minio_client_mock = MagicMock()
@@ -118,6 +137,11 @@ nexent_mock = _create_package_mock('nexent')
 sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = _create_package_mock('nexent.core')
 sys.modules['nexent.core.agents'] = _create_package_mock('nexent.core.agents')
+if memory_pkg is not None:
+    sys.modules["nexent.memory"] = memory_pkg
+    nexent_mock.memory = memory_pkg
+    if real_memory_service is not None:
+        sys.modules["nexent.memory.memory_service"] = real_memory_service
 sys.modules['nexent.core.agents.agent_model'] = MagicMock()
 sys.modules['nexent.core.models'] = _create_package_mock('nexent.core.models')
 
@@ -2370,7 +2394,46 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_tool_instance.forward.assert_called_once_with(query="test query")
 
         # Verify service calls
-        mock_get_embedding_model.assert_called_once_with(tenant_id="tenant1")
+        mock_get_embedding_model.assert_called_once_with(tenant_id="tenant1", is_multimodal=False)
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_vector_db_core')
+    def test_validate_local_tool_knowledge_base_search_multimodal(self, mock_get_vector_db_core, mock_get_embedding_model,
+                                                                  mock_signature, mock_get_class):
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "knowledge base search result"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+
+        mock_sig = Mock()
+        mock_index_names_param = Mock()
+        mock_index_names_param.default = ["default_index"]
+        mock_sig.parameters = {
+            'self': Mock(),
+            'index_names': mock_index_names_param,
+            'vdb_core': Mock(),
+            'embedding_model': Mock()
+        }
+        mock_signature.return_value = mock_sig
+
+        mock_get_embedding_model.return_value = "mock_embedding_model"
+        mock_get_vector_db_core.return_value = Mock()
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "knowledge_base_search",
+            {"query": "test query"},
+            {"param": "config", "multimodal": True},
+            "tenant1",
+            "user1"
+        )
+
+        assert result == "knowledge base search result"
+        mock_get_embedding_model.assert_called_once_with(tenant_id="tenant1", is_multimodal=True)
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.get_embedding_model')

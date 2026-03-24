@@ -133,12 +133,12 @@ export default function ToolTestPanel({
 
           // Check if this is the index_names parameter and KB selection is enabled
           const isIndexNamesParam = paramName === "index_names" && toolRequiresKbSelection;
+          if (isIndexNamesParam) {
+            // index_names is provided by KB selector config, no need to duplicate in input params.
+            return;
+          }
 
-          if (isIndexNamesParam && selectedKbIds.length > 0) {
-            // Use the selected KB IDs from configParams as default
-            parameterValues[paramName] = selectedKbIds;
-            formValues[`param_${paramName}`] = selectedKbIds;
-          } else if (
+          if (
             paramInfo &&
             typeof paramInfo === "object" &&
             paramInfo.default != null
@@ -211,25 +211,6 @@ export default function ToolTestPanel({
 
     if (!idsMatch) {
       form.setFieldValue(fieldName, selectedKbIds);
-
-      // Also update the parameter values
-      if (selectedKbIds.length > 0) {
-        setParameterValues((prev) => ({
-          ...prev,
-          index_names: selectedKbIds,
-        }));
-        // Update manual JSON input while preserving other values
-        setManualJsonInput((prev) => {
-          try {
-            const parsed = JSON.parse(prev);
-            parsed.index_names = selectedKbIds;
-            return JSON.stringify(parsed, null, 2);
-          } catch {
-            // If JSON is invalid, keep the current value
-            return prev;
-          }
-        });
-      }
     }
   }, [selectedKbIds, toolRequiresKbSelection, form]);
 

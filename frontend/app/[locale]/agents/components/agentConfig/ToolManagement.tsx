@@ -100,7 +100,8 @@ export default function ToolManagement({
   // Use tool list hook for data management
   const { availableTools } = useToolList();
 
-  const { isVlmAvailable, isEmbeddingAvailable } = useConfig();
+  const { isVlmAvailable, isEmbeddingAvailable, isMultiEmbeddingAvailable } = useConfig();
+  const isEmbeddingOrMultiAvailable = isEmbeddingAvailable || isMultiEmbeddingAvailable;
 
   // Prefetch knowledge bases for KB tools
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
@@ -363,7 +364,10 @@ export default function ToolManagement({
                             tool.id
                           );
                           const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmAvailable);
-                          const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
+                          const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(
+                            tool.name,
+                            isEmbeddingOrMultiAvailable
+                          );
                           const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                           // Tooltip priority: permission > VLM > Embedding
                           const tooltipTitle = isReadOnly
@@ -468,7 +472,10 @@ export default function ToolManagement({
               {group.tools.map((tool) => {
                 const isSelected = originalSelectedToolIdsSet.has(tool.id);
                 const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmAvailable);
-                const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
+                const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(
+                  tool.name,
+                  isEmbeddingOrMultiAvailable
+                );
                 const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                 // Tooltip priority: permission > VLM > Embedding
                 const tooltipTitle = isReadOnly

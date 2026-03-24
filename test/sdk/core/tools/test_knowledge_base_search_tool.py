@@ -305,6 +305,35 @@ class TestKnowledgeBaseSearchTool:
         # Verify title fallback
         assert len(search_results) == 1
         assert search_results[0]["title"] == "test.txt"
+        
+    def test_forward_adds_picture_web_for_images(self, knowledge_base_search_tool, monkeypatch):
+        """Forward should add picture messages when image results are present."""
+        monkeypatch.setenv("DATA_PROCESS_SERVICE", "http://data-process")
+        knowledge_base_search_tool.data_process_service = "http://data-process"
+
+        mock_results = [
+            {
+                "document": {
+                    "title": "Image Doc",
+                    "content": "Image content",
+                    "filename": "img.png",
+                    "path_or_url": "/path/img.png",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "content": json.dumps({"image_url": "s3://bucket/img.png"}),
+                "process_source": "UniversalImageExtractor",
+                "score": 0.9,
+                "index": "test_index"
+            }
+        ]
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        with patch.object(knowledge_base_search_tool, "_filter_images", return_value=["s3://bucket/img.png"]):
+            knowledge_base_search_tool.forward("find images")
+
+        calls = knowledge_base_search_tool.observer.add_message.call_args_list
+        assert any(call.args[1] == ProcessType.PICTURE_WEB for call in calls)
 
 
 class TestKnowledgeBaseSearchToolRerank:
@@ -536,3 +565,4 @@ class TestKnowledgeBaseSearchToolRerank:
             embedding_model=knowledge_base_search_tool.embedding_model,
             top_k=5
         )
+

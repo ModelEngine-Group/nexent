@@ -19,6 +19,7 @@ export interface KnowledgeBase {
   // Last update time of the knowledge base/index (may fall back to createdAt)
   updatedAt?: any;
   embeddingModel: string;
+  is_multimodal?: boolean;
   knowledge_sources?: string;
   ingroup_permission?: string;
   group_ids?: number[];
@@ -44,6 +45,7 @@ export interface KnowledgeBaseCreateParams {
   // Group permission and user groups for new knowledge bases
   ingroup_permission?: string;
   group_ids?: number[];
+  is_multimodal?: boolean;
 }
 
 // Document type
@@ -111,6 +113,7 @@ export interface KnowledgeBaseState {
   selectedIds: string[];
   activeKnowledgeBase: KnowledgeBase | null;
   currentEmbeddingModel: string | null;
+  currentMultiEmbeddingModel: string | null;
   isLoading: boolean;
   syncLoading: boolean;
   error: string | null;

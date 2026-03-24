@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import threading
@@ -397,22 +398,26 @@ class ElasticSearchCore(VectorDatabaseCore):
     ) -> int:
         """Small batch insertion: real-time"""
         try:
-            # Preprocess documents
             processed_docs = self._preprocess_documents(
                 documents, content_field)
-
-            # Get embeddings
-            inputs = [doc[content_field] for doc in processed_docs]
-            embeddings = embedding_model.get_embeddings(inputs)
+            
+            # Preprocess documents
+            processed_docs, embeddings = self._prepare_small_batch_embeddings(
+                processed_docs, content_field, embedding_model
+            )
 
             # Prepare bulk operations
-            operations = []
-            for doc, embedding in zip(processed_docs, embeddings):
-                operations.append({"index": {"_index": index_name}})
-                doc["embedding"] = embedding
-                if "embedding_model_name" not in doc:
-                    doc["embedding_model_name"] = embedding_model.embedding_model_name
-                operations.append(doc)
+            operations = self._build_bulk_operations(
+                index_name=index_name,
+                processed_docs=processed_docs,
+                embeddings=embeddings,
+                embedding_model=embedding_model,
+            )
+
+            indexed_count = len(processed_docs)
+            if indexed_count == 0:
+                logger.info("Small batch insert skipped: no documents to index.")
+                return 0
 
             # Execute bulk insertion, wait for refresh to complete
             response = self.client.bulk(
@@ -423,18 +428,69 @@ class ElasticSearchCore(VectorDatabaseCore):
 
             if progress_callback:
                 try:
-                    progress_callback(len(documents), len(documents))
+                    progress_callback(indexed_count, indexed_count)
                 except Exception as e:
                     logger.warning(
                         f"[VECTORIZE] Progress callback failed in small batch: {str(e)}")
 
             logger.info(
-                f"Small batch insert completed: {len(documents)} chunks indexed.")
-            return len(documents)
+                f"Small batch insert completed: {indexed_count} chunks indexed.")
+            return indexed_count
 
         except Exception as e:
             logger.error(f"Small batch insert failed: {e}")
             raise
+
+    def _prepare_small_batch_embeddings(
+        self,
+        processed_docs: List[Dict[str, Any]],
+        content_field: str,
+        embedding_model: BaseEmbedding,
+    ):
+        if embedding_model.model_type == "multimodal":
+            inputs = []
+            for doc in processed_docs:
+                if doc.get("process_source") == "UniversalImageExtractor":
+                    img_bytes = doc.pop("image_bytes", "")
+                    if len(img_bytes) > 0:
+                        image_base64_str = base64.b64encode(
+                            img_bytes).decode("utf-8")
+                        data = f"data:image/jpeg;base64,{image_base64_str}"
+                        inputs.append({"image": data})
+                else:
+                    inputs.append({"text": doc[content_field]})
+            embeddings = embedding_model.get_multimodal_embeddings(inputs)
+            return processed_docs, embeddings
+        else:
+            filtered_docs = [
+                doc
+                for doc in processed_docs
+                if doc.get("process_source") != "UniversalImageExtractor"
+            ]
+            inputs = [doc[content_field] for doc in filtered_docs]
+            embeddings = embedding_model.get_embeddings(inputs)
+            return filtered_docs, embeddings
+
+    @staticmethod
+    def _build_bulk_operations(
+        index_name: str,
+        processed_docs: List[Dict[str, Any]],
+        embeddings: List[Any],
+        embedding_model: BaseEmbedding,
+    ) -> List[Dict[str, Any]]:
+        operations = []
+        for doc, embedding in zip(processed_docs, embeddings):
+            operations.append({"index": {"_index": index_name}})
+            embedding_field = (
+                "multi_embedding"
+                if doc.get("process_source") == "UniversalImageExtractor"
+                else "embedding"
+            )
+            doc[embedding_field] = embedding
+            if "embedding_model_name" not in doc:
+                doc["embedding_model_name"] = embedding_model.embedding_model_name
+            operations.append(doc)
+        return operations
 
     def _large_batch_insert(
         self,
@@ -453,6 +509,11 @@ class ElasticSearchCore(VectorDatabaseCore):
         try:
             processed_docs = self._preprocess_documents(
                 documents, content_field)
+            if embedding_model.model_type != "multimodal":
+                processed_docs = [
+                    doc for doc in processed_docs
+                    if doc.get("process_source") != "UniversalImageExtractor"
+                ]
             total_indexed = 0
             total_vectorized = 0
             total_docs = len(processed_docs)
@@ -484,12 +545,30 @@ class ElasticSearchCore(VectorDatabaseCore):
 
                     for retry_attempt in range(max_retries):
                         try:
-                            inputs = [doc[content_field]
-                                      for doc in embedding_sub_batch]
-                            embeddings = embedding_model.get_embeddings(inputs)
-
-                            for doc, embedding in zip(embedding_sub_batch, embeddings):
-                                doc_embedding_pairs.append((doc, embedding))
+                            if embedding_model.model_type == "multimodal":
+                                inputs = []
+                                docs_for_embeddings = []
+                                for doc in embedding_sub_batch:
+                                    if doc.get("process_source") == "UniversalImageExtractor":
+                                        img_bytes = doc.pop("image_bytes", "")
+                                        if len(img_bytes) > 0:
+                                            image_base64_str = base64.b64encode(
+                                                img_bytes).decode('utf-8')
+                                            data = f"data:image/jpeg;base64,{image_base64_str}"
+                                            inputs.append({"image": data})
+                                            docs_for_embeddings.append(doc)
+                                    else:
+                                        inputs.append({"text": doc[content_field]})
+                                        docs_for_embeddings.append(doc)
+                                embeddings = embedding_model.get_multimodal_embeddings(inputs)
+                                for doc, embedding in zip(docs_for_embeddings, embeddings):
+                                    doc_embedding_pairs.append((doc, embedding))
+                            else:
+                                inputs = [doc[content_field]
+                                          for doc in embedding_sub_batch]
+                                embeddings = embedding_model.get_embeddings(inputs)
+                                for doc, embedding in zip(embedding_sub_batch, embeddings):
+                                    doc_embedding_pairs.append((doc, embedding))
 
                             success = True
                             total_vectorized += len(embedding_sub_batch)
@@ -528,7 +607,8 @@ class ElasticSearchCore(VectorDatabaseCore):
                 operations = []
                 for doc, embedding in doc_embedding_pairs:
                     operations.append({"index": {"_index": index_name}})
-                    doc["embedding"] = embedding
+                    doc["multi_embedding" if doc["process_source"]
+                        == "UniversalImageExtractor" else "embedding"] = embedding
                     if "embedding_model_name" not in doc:
                         doc["embedding_model_name"] = getattr(
                             embedding_model, "embedding_model_name", "unknown")
@@ -979,20 +1059,41 @@ class ElasticSearchCore(VectorDatabaseCore):
         query_embedding = embedding_model.get_embeddings(query_text)[0]
 
         # Prepare the search query
-        search_query = {
-            "knn": {
-                "field": "embedding",
-                "query_vector": query_embedding,
-                "k": top_k,
-                "num_candidates": top_k * 2,
-            },
-            "size": top_k,
-            "_source": {"excludes": ["embedding"]},
-        }
-
-        # Execute the search across multiple indices
-        raw_results = self.exec_query(index_pattern, search_query)
-
+        if embedding_model.model_type == "multimodal":
+            search_text_query = {
+                "knn": {
+                    "field": "embedding",
+                    "query_vector": query_embedding,
+                    "k": top_k,
+                    "num_candidates": top_k * 2,
+                },
+                "size": top_k,
+                "_source": {"excludes": ["embedding"]},
+            }
+            search_image_query = {
+                "knn": {
+                        "field": "multi_embedding",
+                        "query_vector": query_embedding,
+                        "k": top_k,
+                        "num_candidates": top_k * 2,
+                    },
+                "size": top_k,
+                "_source": {"excludes": ["multi_embedding"]},
+            }
+            raw_results = self.exec_query(index_pattern, search_text_query) + self.exec_query(index_pattern, search_image_query)
+        else:
+            search_query = {
+                "knn": {
+                    "field": "embedding",
+                    "query_vector": query_embedding,
+                    "k": top_k,
+                    "num_candidates": top_k * 2,
+                },
+                "size": top_k,
+                "_source": {"excludes": ["embedding"]},
+            }
+            raw_results = self.exec_query(index_pattern, search_query)
+ 
         return raw_results
 
     def hybrid_search(
@@ -1137,6 +1238,13 @@ class ElasticSearchCore(VectorDatabaseCore):
                            for r in accurate_results]) if accurate_results else 1
         max_semantic = max([r.get("score", 0)
                            for r in semantic_results]) if semantic_results else 1
+        is_multimodal = embedding_model.model_type == "multimodal"
+        image_semantic_scores = [
+            r.get("score", 0)
+            for r in semantic_results
+            if r.get("document", {}).get("process_source") == "UniversalImageExtractor"
+        ]
+        max_semantic_image = max(image_semantic_scores) if image_semantic_scores else 1
 
         # Calculate combined scores and sort
         results = []
@@ -1148,7 +1256,10 @@ class ElasticSearchCore(VectorDatabaseCore):
 
                 # Normalize scores
                 normalized_accurate = accurate_score / max_accurate if max_accurate > 0 else 0
-                normalized_semantic = semantic_score / max_semantic if max_semantic > 0 else 0
+                if is_multimodal and result.get("document", {}).get("process_source") == "UniversalImageExtractor":
+                    normalized_semantic = semantic_score / max_semantic_image if max_semantic_image > 0 else 0
+                else:
+                    normalized_semantic = semantic_score / max_semantic if max_semantic > 0 else 0
 
                 # Calculate weighted combined score
                 combined_score = weight_accurate * normalized_accurate + \
@@ -1168,9 +1279,20 @@ class ElasticSearchCore(VectorDatabaseCore):
                     f"Warning: Error processing result for doc_id {doc_id}: {e}")
                 continue
 
-        # Sort by combined score and return top k results
+        # Sort by combined score and return results
         results.sort(key=lambda x: x["score"], reverse=True)
-        final_results = results[:top_k]
+        if is_multimodal:
+            text_results = [
+                r for r in results
+                if r.get("document", {}).get("process_source") != "UniversalImageExtractor"
+            ][:top_k]
+            image_results = [
+                r for r in semantic_results
+                if r.get("document", {}).get("process_source") == "UniversalImageExtractor"
+            ]
+            final_results = text_results + image_results
+        else:
+            final_results = results[:top_k]
 
         return final_results
 

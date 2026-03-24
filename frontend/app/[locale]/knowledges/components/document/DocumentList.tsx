@@ -503,11 +503,29 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         onChange={onEmbeddingModelChange}
                         style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={t("knowledgeBase.create.embeddingModelPlaceholder") || "Select embedding model"}
-                        options={(availableEmbeddingModels || []).map((model) => ({
-                          value: model.displayName,
-                          label: model.displayName,
-                          disabled: model.connect_status === "unavailable",
-                        }))}
+                        allowClear={false}
+                        options={[
+                          {
+                            label: t("modelConfig.option.embeddingModel"),
+                            options: (availableEmbeddingModels || [])
+                              .filter((model) => model.type === "embedding")
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: model.connect_status === "unavailable",
+                              })),
+                          },
+                          {
+                            label: t("modelConfig.option.multiEmbeddingModel"),
+                            options: (availableEmbeddingModels || [])
+                              .filter((model) => model.type === "multi_embedding")
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: model.connect_status === "unavailable",
+                              })),
+                          },
+                        ].filter((group) => group.options.length > 0)}
                       />
                     )}
                     {/* User groups multi-select */}

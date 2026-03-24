@@ -73,7 +73,9 @@ with patch('backend.database.attachment_db.minio_client', minio_client_mock):
         get_file_stream,
         get_file_stream_raw,
         get_file_range,
-        get_content_type
+        get_content_type,
+        build_s3_url,
+        _normalize_object_and_bucket
     )
 
 
@@ -634,4 +636,46 @@ class TestGetFileStreamRaw:
             result = get_file_stream_raw('missing/doc.pdf')
 
             assert result is None
+class TestS3UrlHelpers:
+    """Test cases for S3 URL helpers and normalization."""
+
+    def test_normalize_object_and_bucket_s3_url(self):
+        object_name, bucket = _normalize_object_and_bucket("s3://my-bucket/path/to/file.txt")
+        assert object_name == "path/to/file.txt"
+        assert bucket == "my-bucket"
+
+    def test_normalize_object_and_bucket_slash_path(self):
+        object_name, bucket = _normalize_object_and_bucket("/my-bucket/path/to/file.txt")
+        assert object_name == "path/to/file.txt"
+        assert bucket == "my-bucket"
+
+    def test_build_s3_url_passthrough(self):
+        assert build_s3_url("s3://bucket/key") == "s3://bucket/key"
+
+    def test_build_s3_url_from_path(self):
+        assert build_s3_url("/bucket/key") == "s3://bucket/key"
+
+    def test_build_s3_url_from_object(self):
+        assert build_s3_url("attachments/file.txt") == "s3://test-bucket/attachments/file.txt"
+
+
+def test_get_file_stream_normalizes_s3_url():
+    minio_client_mock.get_file_stream.reset_mock()
+    mock_stream = BytesIO(b"test data")
+    minio_client_mock.get_file_stream.return_value = (True, mock_stream)
+
+    result = get_file_stream("s3://test-bucket/attachments/test.txt")
+
+    assert isinstance(result, BytesIO)
+    minio_client_mock.get_file_stream.assert_called_once_with("attachments/test.txt", "test-bucket")
+
+
+def test_delete_file_normalizes_s3_url():
+    minio_client_mock.delete_file.reset_mock()
+    minio_client_mock.delete_file.return_value = (True, "Deleted successfully")
+
+    result = delete_file("s3://test-bucket/attachments/test.txt")
+
+    assert result["success"] is True
+    minio_client_mock.delete_file.assert_called_once_with("attachments/test.txt", "test-bucket")
 

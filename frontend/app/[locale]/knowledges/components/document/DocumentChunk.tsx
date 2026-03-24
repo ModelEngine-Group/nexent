@@ -74,8 +74,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   knowledgeBaseId,
   documents,
   getFileIcon,
-  currentEmbeddingModel = null,
-  knowledgeBaseEmbeddingModel = "",
   onChunkCountChange,
   permission,
 }) => {
@@ -128,55 +126,10 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     setTooltipResetKey((prev) => prev + 1);
   }, []);
 
-  // Determine if embedding models mismatch (specific condition for tooltip)
-  const isEmbeddingModelMismatch = React.useMemo(() => {
-    if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
-      return false;
-    }
-    if (knowledgeBaseEmbeddingModel === "unknown") {
-      return false;
-    }
-    return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
-  }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel]);
-
-  // Determine if in read-only mode (embedding model mismatch OR user has READ_ONLY permission)
-  // Note: isReadOnlyMode is broader, includes model mismatch and other conditions
+  // Determine if in read-only mode (user permission only)
   const isReadOnlyMode = React.useMemo(() => {
-    // Check if user has READ_ONLY permission
-    if (permission === "READ_ONLY") {
-      return true;
-    }
-    if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
-      return false;
-    }
-    if (knowledgeBaseEmbeddingModel === "unknown") {
-      return false;
-    }
-    return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
-  }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel, permission]);
-
-  // Determine if search should be disabled (only when embedding model mismatch, NOT for READ_ONLY permission)
-  // This allows READ_ONLY users to still perform search
-  const isSearchDisabled = React.useMemo(() => {
-    if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
-      return false;
-    }
-    if (knowledgeBaseEmbeddingModel === "unknown") {
-      return false;
-    }
-    return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
-  }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel]);
-
-  // Disabled tooltip message when embedding model mismatch
-  const disabledTooltipMessage = React.useMemo(() => {
-    if (isEmbeddingModelMismatch && currentEmbeddingModel && knowledgeBaseEmbeddingModel && knowledgeBaseEmbeddingModel !== "unknown") {
-      return t("document.chunk.tooltip.disabledDueToModelMismatch", {
-        currentModel: currentEmbeddingModel,
-        knowledgeBaseModel: knowledgeBaseEmbeddingModel
-      });
-    }
-    return "";
-  }, [isEmbeddingModelMismatch, currentEmbeddingModel, knowledgeBaseEmbeddingModel, t]);
+    return permission === "READ_ONLY";
+  }, [permission]);
 
   // Set active document when documents change
   useEffect(() => {
@@ -321,15 +274,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       return;
     }
 
-    // Check embedding model consistency before searching
-    if (isEmbeddingModelMismatch && currentEmbeddingModel && knowledgeBaseEmbeddingModel && knowledgeBaseEmbeddingModel !== "unknown") {
-      message.error(t("document.chunk.error.searchFailed", {
-        currentModel: currentEmbeddingModel,
-        knowledgeBaseModel: knowledgeBaseEmbeddingModel
-      }));
-      return;
-    }
-
     if (!knowledgeBaseName) {
       message.error(t("document.chunk.error.searchFailed"));
       return;
@@ -380,9 +324,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     resetChunkSearch,
     searchValue,
     t,
-    isEmbeddingModelMismatch,
-    currentEmbeddingModel,
-    knowledgeBaseEmbeddingModel,
   ]);
 
   const refreshChunks = React.useCallback(async () => {
@@ -461,20 +402,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     if (!activeDocumentKey) {
       message.warning(t("document.chunk.search.noActiveDocument"));
       return;
-    }
-
-    // Check embedding model consistency before creating chunk
-    if (chunkModalMode === "create") {
-      if (knowledgeBaseEmbeddingModel &&
-        knowledgeBaseEmbeddingModel !== "unknown" &&
-        currentEmbeddingModel &&
-        currentEmbeddingModel !== knowledgeBaseEmbeddingModel) {
-        message.error(t("document.chunk.error.createFailed", {
-          currentModel: currentEmbeddingModel,
-          knowledgeBaseModel: knowledgeBaseEmbeddingModel
-        }));
-        return;
-      }
     }
 
     try {
@@ -761,11 +688,11 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                               </div>
                               <div className="text-xs text-gray-500">
                                 {chunk.source_type === "datamate"
-                                  ? t("document.chunk.source.datamate", "来源: Datamate")
+                                  ? t("document.chunk.source.datamate", "\u6765\u6e90: Datamate")
                                   : chunk.source_type === "file" ||
                                     chunk.source_type === "minio" ||
                                     chunk.source_type === "local"
-                                  ? t("document.chunk.source.nexent", "来源: Nexent")
+                                  ? t("document.chunk.source.nexent", "\u6765\u6e90: Nexent")
                                   : ""}
                               </div>
                             </div>
@@ -805,57 +732,37 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         {/* Search and Add Button Bar */}
         <div className="flex items-center justify-end gap-2 px-2 py-3 border-b border-gray-200 shrink-0">
           <div className="flex items-center gap-2">
-            {/* Wrap search input with tooltip when model mismatch */}
-            {isEmbeddingModelMismatch ? (
-              <Tooltip title={disabledTooltipMessage}>
-                <span className="inline-block">
-                  <Input
-                    placeholder={t("document.chunk.search.placeholder")}
-                    value={searchValue}
-                    onChange={(e) => setSearchValue(e.target.value)}
-                    onPressEnter={() => {
+            <Input
+              placeholder={t("document.chunk.search.placeholder")}
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
+              onPressEnter={() => {
+                void handleSearch();
+              }}
+              style={{ width: 320 }}
+              suffix={
+                <div className="flex items-center gap-1">
+                  {searchValue && (
+                    <Button
+                      type="text"
+                      icon={<X size={16} />}
+                      onClick={handleClearSearch}
+                      size="small"
+                      className="text-gray-500 hover:text-gray-700"
+                    />
+                  )}
+                  <Button
+                    type="text"
+                    icon={<Search size={16} />}
+                    onClick={() => {
                       void handleSearch();
                     }}
-                    style={{ width: 320 }}
-                    disabled={true}
+                    size="small"
+                    loading={chunkSearchLoading}
                   />
-                </span>
-              </Tooltip>
-            ) : (
-                <Input
-                  placeholder={t("document.chunk.search.placeholder")}
-                  value={searchValue}
-                  onChange={(e) => setSearchValue(e.target.value)}
-                  onPressEnter={() => {
-                    void handleSearch();
-                  }}
-                  style={{ width: 320 }}
-                  disabled={isSearchDisabled}
-                  suffix={
-                    <div className="flex items-center gap-1">
-                      {searchValue && (
-                        <Button
-                          type="text"
-                          icon={<X size={16} />}
-                          onClick={handleClearSearch}
-                          size="small"
-                          className="text-gray-500 hover:text-gray-700"
-                        />
-                      )}
-                      <Button
-                        type="text"
-                        icon={<Search size={16} />}
-                        onClick={() => {
-                          void handleSearch();
-                        }}
-                        size="small"
-                        loading={chunkSearchLoading}
-                        disabled={isSearchDisabled}
-                      />
-                    </div>
-                  }
-                />
-            )}
+                </div>
+              }
+            />
           </div>
           {/* Create Chunk button - hide when user has READ_ONLY permission */}
           {!isReadOnlyMode && (
@@ -864,7 +771,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                 type="text"
                 icon={<FilePlus2 size={16} />}
                 onClick={openCreateChunkModal}
-                disabled={isEmbeddingModelMismatch}
               ></Button>
             </Tooltip>
           )}

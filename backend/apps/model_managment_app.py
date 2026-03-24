@@ -298,6 +298,10 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
 @router.post("/healthcheck")
 async def check_model_health(
         display_name: str = Query(..., description="Display name to check"),
+        modelType: Optional[str] = Query(
+            None,
+            description="Optional model type filter (e.g., llm/embedding/multi_embedding)",
+        ),
         authorization: Optional[str] = Header(None)
 ):
     """Check and update model connectivity, returning the latest status.
@@ -308,7 +312,7 @@ async def check_model_health(
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        result = await check_model_connectivity(display_name, tenant_id)
+        result = await check_model_connectivity(display_name, tenant_id, modelType)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully checked model connectivity",
             "data": result

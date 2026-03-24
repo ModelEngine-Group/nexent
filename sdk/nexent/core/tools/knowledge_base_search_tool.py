@@ -37,12 +37,6 @@ class KnowledgeBaseSearchTool(Tool):
             "description": "The search query to perform.",
             "description_zh": "要执行的搜索查询词"
         },
-        "index_names": {
-            "type": "array",
-            "description": "The list of index names to search",
-            "description_zh": "要索引的知识库",
-            "nullable": True
-        },
     }
 
     init_param_descriptions = {

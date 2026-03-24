@@ -6,6 +6,7 @@ Tests knowledge database utility functions
 import sys
 import os
 import types
+import importlib.machinery
 from datetime import datetime
 from unittest.mock import MagicMock, patch, call
 import pytest
@@ -18,8 +19,10 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 # Patch boto3 and other dependencies before importing anything from backend
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+boto3_module.client = MagicMock()
+sys.modules["boto3"] = boto3_module
 
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
@@ -107,8 +110,10 @@ sys.modules['utils.str_utils'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+boto3_module.client = MagicMock()
+sys.modules["boto3"] = boto3_module
 
 # Mock sqlalchemy module
 sqlalchemy_mock = MagicMock()
@@ -294,6 +299,41 @@ def test_create_knowledge_record_with_group_ids_list(monkeypatch, mock_session):
     session.commit.assert_called_once()
 
 
+def test_create_knowledge_record_sets_multimodal_flag(monkeypatch, mock_session):
+    session, _ = mock_session
+    mock_record = MockKnowledgeRecord(knowledge_name="test_knowledge")
+    mock_record.knowledge_id = 123
+    mock_record.index_name = "test_knowledge"
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    test_query = {
+        "index_name": "test_knowledge",
+        "knowledge_describe": "Test knowledge description",
+        "user_id": "test_user",
+        "tenant_id": "test_tenant",
+        "embedding_model_name": "test_model",
+        "knowledge_name": "test_knowledge",
+        "is_multimodal": True,
+    }
+
+    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record) as mock_constructor:
+        _ = create_knowledge_record(test_query)
+
+    call_kwargs = mock_constructor.call_args[1]
+    assert call_kwargs["is_multimodal"] == "Y"
+
+
 def test_create_knowledge_record_exception(monkeypatch, mock_session):
     """Test exception during knowledge record creation"""
     session, _ = mock_session
@@ -457,6 +497,38 @@ def test_update_knowledge_record_updates_all_fields(monkeypatch, mock_session):
     assert mock_record.updated_by == "test_user"
     session.flush.assert_called_once()
     session.commit.assert_called_once()
+
+
+def test_update_knowledge_record_sets_multimodal(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_record = MockKnowledgeRecord()
+    mock_record.is_multimodal = "N"
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = mock_record
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    test_query = {
+        "index_name": "test_knowledge",
+        "is_multimodal": True,
+    }
+
+    result = update_knowledge_record(test_query)
+
+    assert result is True
+    assert mock_record.is_multimodal == "Y"
 
 
 def test_update_knowledge_record_partial_update(monkeypatch, mock_session):
@@ -1484,6 +1556,32 @@ def test_get_knowledge_record_by_knowledge_name_not_found(monkeypatch, mock_sess
     result = get_knowledge_record(test_query)
 
     assert result == {}
+
+
+def test_get_knowledge_record_filters_multimodal(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = MockKnowledgeRecord()
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.as_dict", lambda x: {"knowledge_id": 1})
+
+    _ = get_knowledge_record({"index_name": "test_index", "is_multimodal": "Y"})
+
+    assert query.filter.called
 
 
 def test_get_knowledge_info_by_knowledge_ids_empty_list(monkeypatch, mock_session):

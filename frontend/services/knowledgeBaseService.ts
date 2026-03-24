@@ -19,6 +19,20 @@ import log from "@/lib/logger";
 // @ts-ignore
 const fetch: typeof fetchWithAuth = fetchWithAuth;
 
+const normalizeIsMultimodal = (value: unknown): boolean => {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "y" || normalized === "true" || normalized === "yes";
+  }
+  if (typeof value === "number") return value === 1;
+  return false;
+};
+
+const resolveIsMultimodal = (indexInfo: any, stats: any): boolean =>
+  normalizeIsMultimodal(indexInfo.is_multimodal ?? stats.is_multimodal);
+
 // Knowledge base service class
 class KnowledgeBaseService {
   // Check Elasticsearch health (force refresh, no caching for setup page)
@@ -503,6 +517,7 @@ class KnowledgeBaseService {
                     tokenNum: 0,
                     source: "nexent",
                     tenant_id: indexInfo.tenant_id,
+                    is_multimodal:  resolveIsMultimodal(indexInfo, stats),
                   };
                 }
               );
@@ -570,6 +585,7 @@ class KnowledgeBaseService {
                     tokenNum: 0,
                     source: "datamate",
                     tenant_id: indexInfo.tenant_id,
+                    is_multimodal:  resolveIsMultimodal(indexInfo, stats),
                   };
                 });
               knowledgeBases.push(...datamateKnowledgeBases);
@@ -677,13 +693,15 @@ class KnowledgeBaseService {
       const requestBody: {
         name: string;
         description: string;
-        embedding_model_name?: string;
+        embeddingModel?: string;
         ingroup_permission?: string;
         group_ids?: number[];
+        is_multimodal?: boolean;
       } = {
         name: params.name,
         description: params.description || "",
-        embedding_model_name: params.embeddingModel || "",
+        embeddingModel: params.embeddingModel || "",
+        is_multimodal: params.is_multimodal || false,
       };
 
       // Include group permission and user groups if provided
@@ -718,6 +736,7 @@ class KnowledgeBaseService {
         chunkCount: 0,
         createdAt: new Date().toISOString(),
         embeddingModel: params.embeddingModel || "",
+        is_multimodal: params.is_multimodal || false,
         avatar: "",
         chunkNum: 0,
         language: "",
@@ -827,7 +846,8 @@ class KnowledgeBaseService {
   async uploadDocuments(
     kbId: string,
     files: File[],
-    chunkingStrategy?: string
+    chunkingStrategy?: string,
+    modelId?: number
   ): Promise<void> {
     try {
       // Create FormData object
@@ -889,6 +909,7 @@ class KnowledgeBaseService {
           files: filesToProcess,
           chunking_strategy: chunkingStrategy,
           destination: "minio",
+          model_id: modelId,
         }),
       });
 

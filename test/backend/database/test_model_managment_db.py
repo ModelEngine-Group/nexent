@@ -346,6 +346,34 @@ def test_get_model_id_by_display_name(monkeypatch):
     assert result == 7
 
 
+def test_get_model_by_display_name_with_model_type_filter(monkeypatch):
+    captured_filters = {}
+
+    def fake_get_model_records(filters, tenant_id):
+        captured_filters.update(filters)
+        return [{"model_id": 10, "display_name": "Embed"}]
+
+    monkeypatch.setattr(model_mgmt_db, "get_model_records", fake_get_model_records)
+
+    result = model_mgmt_db.get_model_by_display_name("Embed", "tenant10", model_type="multiEmbedding")
+
+    assert result["display_name"] == "Embed"
+    assert captured_filters["display_name"] == "Embed"
+    assert captured_filters["model_type"] == "multi_embedding"
+
+
+def test_get_model_id_by_display_name_with_model_type(monkeypatch):
+    def fake_get_model_by_display_name(display_name, tenant_id, model_type=None):
+        assert model_type == "embedding"
+        return {"model_id": 11}
+
+    monkeypatch.setattr(model_mgmt_db, "get_model_by_display_name", fake_get_model_by_display_name)
+
+    result = model_mgmt_db.get_model_id_by_display_name("Embed", "tenant11", model_type="embedding")
+
+    assert result == 11
+
+
 def test_get_model_by_model_id_with_tenant_id(monkeypatch):
     """Test get_model_by_model_id with tenant_id filter (covers lines 222->226)"""
     mock_model = SimpleNamespace(

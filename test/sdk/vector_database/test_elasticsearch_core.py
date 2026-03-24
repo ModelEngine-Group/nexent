@@ -700,6 +700,7 @@ def test_ensure_index_ready_search_exception_on_double_check(elasticsearch_core_
 def test_vectorize_documents_empty_list(elasticsearch_core_instance):
     """Test indexing an empty list of documents."""
     mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
 
     result = elasticsearch_core_instance.vectorize_documents(
         "test_index",
@@ -714,6 +715,7 @@ def test_vectorize_documents_empty_list(elasticsearch_core_instance):
 def test_vectorize_documents_small_batch(elasticsearch_core_instance):
     """Test indexing a small batch of documents (< 64)."""
     mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
     mock_embedding_model.get_embeddings.return_value = [[0.1] * 1024] * 3
     mock_embedding_model.embedding_model_name = "test-model"
 
@@ -741,6 +743,84 @@ def test_vectorize_documents_small_batch(elasticsearch_core_instance):
         assert result == 3
         mock_embedding_model.get_embeddings.assert_called_once()
         mock_bulk.assert_called_once()
+
+
+def test_vectorize_documents_multimodal_sets_multi_embedding(elasticsearch_core_instance):
+    embedding_model = MagicMock()
+    embedding_model.model_type = "multimodal"
+    embedding_model.get_multimodal_embeddings.return_value = [[0.1, 0.2], [0.3, 0.4]]
+
+    documents = [
+        {
+            "content": "text content",
+            "process_source": "Unstructured",
+            "path_or_url": "path1",
+        },
+        {
+            "content": "image content",
+            "process_source": "UniversalImageExtractor",
+            "image_bytes": b"img",
+            "path_or_url": "path2",
+        },
+    ]
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+            patch.object(elasticsearch_core_instance, "_force_refresh_with_retry", return_value=True):
+        mock_bulk.return_value = {"errors": False, "items": []}
+
+        result = elasticsearch_core_instance.vectorize_documents(
+            documents=documents,
+            index_name="test_index",
+            content_field="content",
+            embedding_model=embedding_model,
+            embedding_batch_size=2,
+        )
+
+        assert result == 2
+        operations = mock_bulk.call_args.kwargs["operations"]
+        doc_entries = [item for item in operations if "index" not in item]
+        image_doc = next(doc for doc in doc_entries if doc["process_source"] == "UniversalImageExtractor")
+        text_doc = next(doc for doc in doc_entries if doc["process_source"] != "UniversalImageExtractor")
+        assert "multi_embedding" in image_doc
+        assert "embedding" in text_doc
+
+
+def test_vectorize_documents_text_embedding_skips_images(elasticsearch_core_instance):
+    embedding_model = MagicMock()
+    embedding_model.model_type = "text"
+    embedding_model.get_embeddings.return_value = [[0.1, 0.2]]
+
+    documents = [
+        {
+            "content": "image content",
+            "process_source": "UniversalImageExtractor",
+            "image_bytes": b"img",
+            "path_or_url": "path2",
+        },
+        {
+            "content": "text content",
+            "process_source": "Unstructured",
+            "path_or_url": "path1",
+        },
+    ]
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+            patch.object(elasticsearch_core_instance, "_force_refresh_with_retry", return_value=True):
+        mock_bulk.return_value = {"errors": False, "items": []}
+
+        result = elasticsearch_core_instance.vectorize_documents(
+            documents=documents,
+            index_name="test_index",
+            content_field="content",
+            embedding_model=embedding_model,
+            embedding_batch_size=2,
+        )
+
+        assert result == 1
+        operations = mock_bulk.call_args.kwargs["operations"]
+        doc_entries = [item for item in operations if "index" not in item]
+        assert len(doc_entries) == 1
+        assert doc_entries[0]["process_source"] != "UniversalImageExtractor"
 
 def test_small_batch_progress_callback_exception(elasticsearch_core_instance, caplog):
     """Progress callback errors should be logged without failing the insert."""
@@ -787,6 +867,7 @@ def test_small_batch_error_path_logs_and_raises(elasticsearch_core_instance, cap
 def test_vectorize_documents_large_batch(elasticsearch_core_instance):
     """Test indexing a large batch of documents (>= 64)."""
     mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
     mock_embedding_model.get_embeddings.return_value = [[0.1] * 1024] * 64
     mock_embedding_model.embedding_model_name = "test-model"
 
@@ -1259,6 +1340,7 @@ def test_accurate_search_builds_multi_index_query(elasticsearch_core_instance):
 def test_semantic_search_success(elasticsearch_core_instance):
     """Test semantic search with vector similarity."""
     mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
     mock_embedding_model.get_embeddings.return_value = [[0.1] * 1024]
 
     with patch.object(elasticsearch_core_instance, 'exec_query') as mock_exec:
@@ -1284,9 +1366,32 @@ def test_semantic_search_success(elasticsearch_core_instance):
         mock_exec.assert_called_once()
 
 
+def test_semantic_search_multimodal_combines_queries(elasticsearch_core_instance):
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "multimodal"
+    mock_embedding_model.get_embeddings.return_value = [[0.1] * 8]
+
+    with patch.object(elasticsearch_core_instance, 'exec_query') as mock_exec:
+        mock_exec.side_effect = [
+            [{"score": 1.0, "document": {"content": "text"}, "index": "test_index"}],
+            [{"score": 0.9, "document": {"content": "image"}, "index": "test_index"}],
+        ]
+
+        result = elasticsearch_core_instance.semantic_search(
+            ["test_index"],
+            "test query",
+            mock_embedding_model,
+            top_k=3,
+        )
+
+        assert len(result) == 2
+        assert mock_exec.call_count == 2
+
+
 def test_semantic_search_sets_knn_parameters(elasticsearch_core_instance):
     """Ensure semantic_search sets k and num_candidates based on top_k."""
     mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
     mock_embedding_model.get_embeddings.return_value = [[0.2] * 8]
 
     with patch.object(elasticsearch_core_instance, 'exec_query') as mock_exec:

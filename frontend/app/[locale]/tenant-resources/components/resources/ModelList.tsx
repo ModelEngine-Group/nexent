@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -92,7 +92,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   };
 
   // Handle checking model connectivity
-  const handleCheckConnectivity = async (displayName: string) => {
+  const handleCheckConnectivity = async (displayName: string, modelType: string) => {
     if (!tenantId) {
       message.error(t("tenantResources.tenants.tenantIdRequired"));
       return;
@@ -100,7 +100,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
     setCheckingConnectivity((prev) => new Set(prev).add(displayName));
     try {
-      const isConnected = await modelService.verifyCustomModel(displayName);
+      const isConnected = await modelService.verifyCustomModel(displayName, modelType);
       if (isConnected) {
         message.success(t("tenantResources.models.connectivitySuccess"));
       } else {
@@ -194,7 +194,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
             <Button
               type="text"
               icon={checkingConnectivity.has(record.displayName) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              onClick={() => handleCheckConnectivity(record.displayName)}
+              onClick={() => handleCheckConnectivity(record.displayName, record.type)}
               size="small"
               loading={checkingConnectivity.has(record.displayName)}
             />

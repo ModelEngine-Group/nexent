@@ -5,6 +5,18 @@ from unittest.mock import Mock, MagicMock
 from sdk.nexent.data_process.core import DataProcessCore
 
 
+def _unpack_chunks(result):
+    if isinstance(result, tuple):
+        return result[0]
+    return result
+
+
+def _unpack_images(result):
+    if isinstance(result, tuple):
+        return result[1]
+    return []
+
+
 class TestDataProcessCore:
     """Test suite for DataProcessCore class"""
 
@@ -18,7 +30,8 @@ class TestDataProcessCore:
         assert core is not None
         assert "Unstructured" in core.processors
         assert "OpenPyxl" in core.processors
-        assert len(core.processors) == 2
+        assert "UniversalImageExtractor" in core.processors
+        assert len(core.processors) == 3
 
     def test_file_process_with_excel_file(self, core, mocker: MockFixture):
         """Test file processing with Excel file"""
@@ -29,6 +42,9 @@ class TestDataProcessCore:
                 "metadata": {"chunk_index": 0}}
         ]
         core.processors["OpenPyxl"] = mock_processor
+        core.processors["UniversalImageExtractor"] = Mock(
+            process_file=Mock(return_value=[])
+        )
 
         file_data = b"fake excel data"
         filename = "test.xlsx"
@@ -36,8 +52,9 @@ class TestDataProcessCore:
         result = core.file_process(
             file_data, filename, chunking_strategy="basic")
 
-        assert len(result) == 1
-        assert result[0]["content"] == "test content"
+        chunks = _unpack_chunks(result)
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == "test content"
         mock_processor.process_file.assert_called_once_with(
             file_data, "basic", filename=filename
         )
@@ -57,8 +74,9 @@ class TestDataProcessCore:
         result = core.file_process(
             file_data, filename, chunking_strategy="by_title")
 
-        assert len(result) == 1
-        assert result[0]["content"] == "pdf content"
+        chunks = _unpack_chunks(result)
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == "pdf content"
         mock_processor.process_file.assert_called_once_with(
             file_data, "by_title", filename=filename
         )
@@ -68,6 +86,9 @@ class TestDataProcessCore:
         mock_processor = Mock()
         mock_processor.process_file.return_value = [{"content": "test"}]
         core.processors["Unstructured"] = mock_processor
+        core.processors["UniversalImageExtractor"] = Mock(
+            process_file=Mock(return_value=[])
+        )
 
         file_data = b"data"
         filename = "test.xlsx"
@@ -77,7 +98,8 @@ class TestDataProcessCore:
             file_data, filename, chunking_strategy="basic", processor="Unstructured"
         )
 
-        assert len(result) == 1
+        chunks = _unpack_chunks(result)
+        assert len(chunks) == 1
         mock_processor.process_file.assert_called_once()
 
     def test_file_process_with_additional_params(self, core, mocker: MockFixture):
@@ -94,7 +116,8 @@ class TestDataProcessCore:
             file_data, filename, chunking_strategy="basic", **additional_params
         )
 
-        assert len(result) == 1
+        chunks = _unpack_chunks(result)
+        assert len(chunks) == 1
         mock_processor.process_file.assert_called_once_with(
             file_data, "basic", filename=filename, max_characters=2000, strategy="fast"
         )
@@ -152,7 +175,7 @@ class TestDataProcessCore:
 
     @pytest.mark.parametrize(
         "processor",
-        ["Unstructured", "OpenPyxl"]
+        ["Unstructured", "OpenPyxl", "UniversalImageExtractor"]
     )
     def test_validate_parameters_valid_processors(self, core, processor):
         """Test parameter validation with valid processors"""
@@ -170,21 +193,23 @@ class TestDataProcessCore:
             core._validate_parameters("basic", "InvalidProcessor")
 
     @pytest.mark.parametrize(
-        "filename,expected_processor",
+        "filename,expected_processor,expected_extractor",
         [
-            ("test.xlsx", "OpenPyxl"),
-            ("test.xls", "OpenPyxl"),
-            ("test.XLSX", "OpenPyxl"),
-            ("test.pdf", "Unstructured"),
-            ("test.docx", "Unstructured"),
-            ("test.txt", "Unstructured"),
-            ("test.html", "Unstructured"),
+            ("test.xlsx", "OpenPyxl", "UniversalImageExtractor"),
+            ("test.xls", "OpenPyxl", "UniversalImageExtractor"),
+            ("test.XLSX", "OpenPyxl", "UniversalImageExtractor"),
+            ("test.pdf", "Unstructured", "UniversalImageExtractor"),
+            ("test.docx", "Unstructured", "UniversalImageExtractor"),
+            ("test.pptx", "Unstructured", None),
+            ("test.txt", "Unstructured", None),
+            ("test.html", "Unstructured", None),
         ]
     )
-    def test_select_processor_by_filename(self, core, filename, expected_processor):
+    def test_select_processor_by_filename(self, core, filename, expected_processor, expected_extractor):
         """Test processor selection based on filename"""
-        result = core._select_processor_by_filename(filename)
-        assert result == expected_processor
+        processor_name, extractor = core._select_processor_by_filename(filename)
+        assert processor_name == expected_processor
+        assert extractor == expected_extractor
 
     def test_get_supported_file_types(self, core):
         """Test getting supported file types"""
@@ -240,7 +265,8 @@ class TestDataProcessCore:
 
         assert "Unstructured" in result
         assert "OpenPyxl" in result
-        assert len(result) == 2
+        assert "UniversalImageExtractor" in result
+        assert len(result) == 3
 
     @pytest.mark.parametrize(
         "filename,expected",
@@ -310,3 +336,43 @@ class TestDataProcessCore:
 
         assert result["processor_type"] == "excel"
         assert result["file_extension"] == ".xlsx"
+
+    def test_file_process_returns_images_when_extractor_available(self, core, mocker: MockFixture):
+        """Test image extraction is returned for supported file types."""
+        mock_processor = Mock()
+        mock_processor.process_file.return_value = [{"content": "test"}]
+        mock_extractor = Mock()
+        mock_extractor.process_file.return_value = [
+            {"image_bytes": b"img", "image_format": "png", "position": {"page_number": 1}}
+        ]
+        core.processors["Unstructured"] = mock_processor
+        core.processors["UniversalImageExtractor"] = Mock(
+            process_file=Mock(return_value=[])
+        )
+        core.processors["UniversalImageExtractor"] = mock_extractor
+
+        result = core.file_process(
+            b"data", "sample.pdf", chunking_strategy="basic"
+        )
+
+        chunks = _unpack_chunks(result)
+        images = _unpack_images(result)
+        assert len(chunks) == 1
+        assert len(images) == 1
+        mock_extractor.process_file.assert_called_once()
+
+    def test_file_process_with_explicit_processor_still_extracts_images(self, core):
+        """Test explicit processor still triggers image extraction."""
+        core.processors["Unstructured"] = Mock(process_file=Mock(return_value=[{"content": "ok"}]))
+        core.processors["UniversalImageExtractor"] = Mock(
+            process_file=Mock(return_value=[{"image_bytes": b"x", "image_format": "png", "position": {}}])
+        )
+
+        result = core.file_process(
+            b"data", "report.pdf", chunking_strategy="basic", processor="Unstructured"
+        )
+
+        chunks = _unpack_chunks(result)
+        images = _unpack_images(result)
+        assert len(chunks) == 1
+        assert len(images) == 1

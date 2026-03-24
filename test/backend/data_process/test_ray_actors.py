@@ -72,6 +72,11 @@ def import_module(monkeypatch):
     fake_attachment_db_mod = types.ModuleType("database.attachment_db")
     fake_attachment_db_mod.get_file_stream = lambda source: io.BytesIO(b"file-bytes")
     fake_attachment_db_mod.get_file_size_from_minio = lambda path_or_url: 0
+    fake_attachment_db_mod.upload_fileobj = lambda file_obj, file_name, prefix=None, bucket=None: {
+        "success": True,
+        "object_name": f"{prefix}/{file_name}" if prefix else file_name,
+    }
+    fake_attachment_db_mod.build_s3_url = lambda object_name: f"s3://bucket/{object_name}"
     monkeypatch.setitem(sys.modules, "database.attachment_db", fake_attachment_db_mod)
     # Ensure parent package 'database' exists and link submodule for proper resolution
     if "database" not in sys.modules:
@@ -140,6 +145,8 @@ def import_module(monkeypatch):
     # New defaults required by ray_actors import
     fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
     fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
+    fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
+    fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
     monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
     monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
 
@@ -233,6 +240,10 @@ def test_process_file_applies_chunk_sizes_from_model(monkeypatch):
     assert RecorderCore.captured_params is not None
     assert RecorderCore.captured_params.get("new_after_n_chars") == 2000
     assert RecorderCore.captured_params.get("max_characters") == 3000
+    assert RecorderCore.captured_params.get("table_transformer_model_path") == "/models/table"
+    assert RecorderCore.captured_params.get(
+        "unstructured_default_model_initialize_params_json_path"
+    ) == "/models/unstructured.json"
 
 
 def test_process_file_no_model_omits_chunk_params(monkeypatch):
@@ -268,6 +279,10 @@ def test_process_file_no_model_omits_chunk_params(monkeypatch):
     assert RecorderCore.captured_params is not None
     assert "new_after_n_chars" not in RecorderCore.captured_params
     assert "max_characters" not in RecorderCore.captured_params
+    assert RecorderCore.captured_params.get("table_transformer_model_path") == "/models/table"
+    assert RecorderCore.captured_params.get(
+        "unstructured_default_model_initialize_params_json_path"
+    ) == "/models/unstructured.json"
 
 
 def test_process_file_model_lookup_exception_uses_defaults(monkeypatch):
@@ -304,6 +319,10 @@ def test_process_file_model_lookup_exception_uses_defaults(monkeypatch):
     assert RecorderCore.captured_params is not None
     assert "new_after_n_chars" not in RecorderCore.captured_params
     assert "max_characters" not in RecorderCore.captured_params
+    assert RecorderCore.captured_params.get("table_transformer_model_path") == "/models/table"
+    assert RecorderCore.captured_params.get(
+        "unstructured_default_model_initialize_params_json_path"
+    ) == "/models/unstructured.json"
 
 
 def test_process_file_get_stream_none_raises(monkeypatch):
@@ -311,6 +330,8 @@ def test_process_file_get_stream_none_raises(monkeypatch):
     fake_attachment_db_mod = types.ModuleType("database.attachment_db")
     fake_attachment_db_mod.get_file_stream = lambda source: None
     fake_attachment_db_mod.get_file_size_from_minio = lambda path_or_url: 0
+    fake_attachment_db_mod.upload_fileobj = lambda *a, **k: {"success": True, "object_name": "o"}
+    fake_attachment_db_mod.build_s3_url = lambda object_name: f"s3://bucket/{object_name}"
     monkeypatch.setitem(sys.modules, "database.attachment_db", fake_attachment_db_mod)
     # Ensure parent 'database' exists and link attachment_db
     if "database" not in sys.modules:
@@ -378,6 +399,8 @@ def test_process_file_get_stream_none_raises(monkeypatch):
     # Provide defaults required by backend.data_process.ray_actors import
     fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
     fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
+    fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
+    fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
     monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
     monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
 
@@ -434,6 +457,8 @@ def test_process_file_core_returns_none_list_variants(monkeypatch):
         fake_attachment_db_mod = types.ModuleType("database.attachment_db")
         fake_attachment_db_mod.get_file_stream = lambda source: io.BytesIO(b"file-bytes")
         fake_attachment_db_mod.get_file_size_from_minio = lambda path_or_url: 0
+        fake_attachment_db_mod.upload_fileobj = lambda *a, **k: {"success": True, "object_name": "o"}
+        fake_attachment_db_mod.build_s3_url = lambda object_name: f"s3://bucket/{object_name}"
         monkeypatch.setitem(sys.modules, "database.attachment_db", fake_attachment_db_mod)
         # Also stub celery.result.AsyncResult and redis module
         fake_celery = types.ModuleType("celery")
@@ -487,6 +512,8 @@ def test_process_file_core_returns_none_list_variants(monkeypatch):
         # Provide defaults required by backend.data_process.ray_actors import
         fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
         fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
+        fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
+        fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
         monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
         monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
 
@@ -546,4 +573,57 @@ def test_store_chunks_in_redis_no_url_returns_false(monkeypatch):
     monkeypatch.setattr(ray_actors, "REDIS_BACKEND_URL", "")
     actor = ray_actors.DataProcessorRayActor()
     assert actor.store_chunks_in_redis("k", [{"content": "x"}]) is False
+
+
+def test_process_file_appends_image_chunks(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class CoreWithImages:
+        def file_process(self, *a, **k):
+            return (
+                [{"content": "text", "metadata": {}}],
+                [
+                    {
+                        "image_bytes": b"img",
+                        "image_format": "png",
+                        "position": {"page_number": 1},
+                    }
+                ],
+            )
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithImages)
+    monkeypatch.setattr(
+        ray_actors,
+        "upload_fileobj",
+        lambda file_obj, file_name, prefix=None: {"object_name": f"{prefix}/{file_name}"},
+    )
+    monkeypatch.setattr(
+        ray_actors,
+        "build_s3_url",
+        lambda object_name: f"s3://bucket/{object_name}",
+    )
+
+    actor = ray_actors.DataProcessorRayActor()
+    chunks = actor.process_file("/tmp/a.pdf", "basic", destination="local")
+
+    assert len(chunks) == 2
+    assert chunks[1]["metadata"]["process_source"] == "UniversalImageExtractor"
+    assert "image_url" in chunks[1]["metadata"]
+
+
+def test_process_file_skips_invalid_image_entries(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class CoreWithBadImages:
+        def file_process(self, *a, **k):
+            return (
+                [{"content": "text", "metadata": {}}],
+                [{"not": "dict"}, {"image_format": "png"}],
+            )
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithBadImages)
+    actor = ray_actors.DataProcessorRayActor()
+    chunks = actor.process_file("/tmp/a.pdf", "basic", destination="local")
+
+    assert chunks == [{"content": "text", "metadata": {}}]
 

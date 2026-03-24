@@ -170,7 +170,7 @@ def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List
         return result_list
 
 
-def get_model_by_display_name(display_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+def get_model_by_display_name(display_name: str, tenant_id: str, model_type: str = None) -> Optional[Dict[str, Any]]:
     """
     Get a model record by display name
 
@@ -179,6 +179,11 @@ def get_model_by_display_name(display_name: str, tenant_id: str) -> Optional[Dic
         tenant_id:
     """
     filters = {'display_name': display_name}
+    
+    if model_type in ["multiEmbedding", "multi_embedding"]:
+        filters['model_type'] = "multi_embedding"
+    elif model_type == "embedding":
+        filters['model_type'] = "embedding"
 
     records = get_model_records(filters, tenant_id)
     if not records:
@@ -203,7 +208,7 @@ def get_models_by_display_name(display_name: str, tenant_id: str) -> List[Dict[s
     return get_model_records(filters, tenant_id)
 
 
-def get_model_id_by_display_name(display_name: str, tenant_id: str) -> Optional[int]:
+def get_model_id_by_display_name(display_name: str, tenant_id: str, model_type: str = None) -> Optional[int]:
     """
     Get a model ID by display name
 
@@ -214,7 +219,7 @@ def get_model_id_by_display_name(display_name: str, tenant_id: str) -> Optional[
     Returns:
         Optional[int]: Model ID
     """
-    model = get_model_by_display_name(display_name, tenant_id)
+    model = get_model_by_display_name(display_name, tenant_id, model_type)
     return model["model_id"] if model else None
 
 

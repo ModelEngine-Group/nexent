@@ -7,6 +7,7 @@ import {
   useRef,
   useLayoutEffect,
   useCallback,
+  useMemo,
 } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -45,6 +46,37 @@ import {
 } from "./contexts/DocumentContext";
 import { useUIContext, UIProvider } from "./contexts/UIStateContext";
 
+const EMBEDDING_MODEL_OPTION_DELIMITER = "::";
+const normalizeEmbeddingModelType = (type: string) =>
+  (type || "").trim().toLowerCase();
+
+const toEmbeddingModelOptionValue = (displayName: string, type: string) =>
+  `${displayName}${EMBEDDING_MODEL_OPTION_DELIMITER}${type}`;
+
+const parseEmbeddingModelOptionValue = (value: string) => {
+  const normalizedValue = (value || "").trim();
+  const delimiterIndex = normalizedValue.lastIndexOf(
+    EMBEDDING_MODEL_OPTION_DELIMITER
+  );
+  if (delimiterIndex >= 0) {
+    const displayName = normalizedValue.slice(0, delimiterIndex);
+    const type = normalizedValue.slice(
+      delimiterIndex + EMBEDDING_MODEL_OPTION_DELIMITER.length
+    );
+    return {
+      displayName: displayName || "",
+      type: (type || "").trim(),
+      isMultimodal:
+        normalizeEmbeddingModelType(type || "") === "multi_embedding",
+    };
+  }
+  return {
+    displayName: normalizedValue || "",
+    type: "",
+    isMultimodal: false,
+  };
+};
+
 // EmptyState component defined directly in this file
 interface EmptyStateProps {
   icon?: React.ReactNode | string;
@@ -55,7 +87,7 @@ interface EmptyStateProps {
 }
 
 const EmptyState: React.FC<EmptyStateProps> = ({
-  icon = "📋",
+  icon = "馃搵",
   title,
   description,
   action,
@@ -129,7 +161,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const { token } = theme.useToken();
 
   // Get available embedding models for knowledge base creation
-  const { availableEmbeddingModels } = useModelList({ enabled: true });
+  const { models } = useModelList({ enabled: true });
 
   // Clear cache when component initializes
   useEffect(() => {
@@ -197,11 +229,41 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [modelFilter, setModelFilter] = useState<string[]>([]);
   const contentRef = useRef<HTMLDivElement | null>(null);
 
-  // Open warning modal when single Embedding model is not configured (ignore multi-embedding)
+  const availableEmbeddingModels = useMemo(() => {
+    return models.filter(
+      (model) =>
+        (model.type === "embedding" || model.type === "multi_embedding") &&
+        model.connect_status === "available"
+    );
+  }, [models]);
+
+  const resolveEmbeddingModelId = useCallback(
+    ({
+      displayName,
+      isMultimodal,
+    }: {
+      displayName?: string;
+      isMultimodal?: boolean;
+    }) => {
+      const normalizedDisplayName = (displayName || "").trim();
+      if (!normalizedDisplayName) return undefined;
+
+      const modelType = isMultimodal ? "multi_embedding" : "embedding";
+      return availableEmbeddingModels.find(
+        (model) =>
+          model.displayName === normalizedDisplayName && model.type === modelType
+      )?.id;
+    },
+    [availableEmbeddingModels]
+  );
+
+  // Open warning modal only when neither embedding nor multi-embedding is configured.
   useEffect(() => {
-    const singleEmbeddingModelName = modelConfig?.embedding?.modelName;
-    setShowEmbeddingWarning(!singleEmbeddingModelName);
-  }, [modelConfig?.embedding?.modelName]);
+    const singleEmbeddingModelName = modelConfig?.embedding?.modelName?.trim();
+    const multiEmbeddingModelName =
+      modelConfig?.multiEmbedding?.modelName?.trim();
+    setShowEmbeddingWarning(!singleEmbeddingModelName && !multiEmbeddingModelName);
+  }, [modelConfig?.embedding?.modelName, modelConfig?.multiEmbedding?.modelName]);
 
   // Add event listener for selecting new knowledge base
   useEffect(() => {
@@ -369,11 +431,11 @@ function DataConfig({ isActive }: DataConfigProps) {
           // Directly call fetchKnowledgeBases to update knowledge base list data
           await fetchKnowledgeBases(false, true);
         } catch (error) {
-          log.error("获取知识库最新数据失败:", error);
+          log.error("鑾峰彇鐭ヨ瘑搴撴渶鏂版暟鎹け璐?", error);
         }
       }, 100);
     } catch (error) {
-      log.error("获取文档列表失败:", error);
+      log.error("鑾峰彇鏂囨。鍒楄〃澶辫触:", error);
       message.error(t("knowledgeBase.message.getDocumentsFailed"));
       docDispatch({
         type: "ERROR",
@@ -618,11 +680,30 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbName(defaultName);
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
-    // Set default embedding model - prioritize config's default model, fall back to first available model
-    const configModel = modelConfig?.embedding?.modelName;
-    const defaultModel = configModel || (availableEmbeddingModels.length > 0
-      ? availableEmbeddingModels[0].displayName
-      : "");
+    // Set default embedding model:
+    // 1) configured embedding model, 2) configured multimodal model, 3) first available option.
+    const configEmbeddingModel = modelConfig?.embedding?.modelName?.trim() || "";
+    const configMultiEmbeddingModel =
+      modelConfig?.multiEmbedding?.modelName?.trim() || "";
+    const preferredModel = [
+      { modelName: configEmbeddingModel, type: "embedding" },
+      { modelName: configMultiEmbeddingModel, type: "multi_embedding" },
+    ].find(
+      ({ modelName, type }) =>
+        !!modelName &&
+        availableEmbeddingModels.some(
+          (model) => model.displayName === modelName && model.type === type
+        )
+    );
+    const defaultModel =
+      (preferredModel &&
+        toEmbeddingModelOptionValue(preferredModel.modelName, preferredModel.type)) ||
+      (availableEmbeddingModels[0]
+        ? toEmbeddingModelOptionValue(
+            availableEmbeddingModels[0].displayName,
+            availableEmbeddingModels[0].type
+          )
+        : "");
     setNewKbEmbeddingModel(defaultModel);
     setIsCreatingMode(true);
     setHasClickedUpload(false); // Reset upload button click state
@@ -681,13 +762,22 @@ function DataConfig({ isActive }: DataConfigProps) {
           return;
         }
 
+        const parsedSelectedModel =
+          parseEmbeddingModelOptionValue(newKbEmbeddingModel);
+        const isMultimodal = parsedSelectedModel.isMultimodal;
+        const selectedModelId = resolveEmbeddingModelId({
+          displayName: parsedSelectedModel.displayName,
+          isMultimodal: parsedSelectedModel.isMultimodal,
+        });
+
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
           t("knowledgeBase.description.default"),
           "elasticsearch",
           newKbIngroupPermission,
           newKbGroupIds,
-          newKbEmbeddingModel
+          parsedSelectedModel.displayName,
+          isMultimodal
         );
 
         if (!newKB) {
@@ -702,7 +792,7 @@ function DataConfig({ isActive }: DataConfigProps) {
         setHasClickedUpload(false);
         setNewlyCreatedKbId(newKB.id); // Mark this KB as newly created
 
-        await uploadDocuments(newKB.id, filesToUpload);
+        await uploadDocuments(newKB.id, filesToUpload, selectedModelId);
         setUploadFiles([]);
 
         knowledgeBasePollingService
@@ -738,7 +828,12 @@ function DataConfig({ isActive }: DataConfigProps) {
     }
 
     try {
-      await uploadDocuments(kbId, filesToUpload);
+      const activeKbModelId = resolveEmbeddingModelId({
+        displayName: kbState.activeKnowledgeBase?.embeddingModel,
+        isMultimodal: kbState.activeKnowledgeBase?.is_multimodal,
+      });
+
+      await uploadDocuments(kbId, filesToUpload, activeKbModelId);
       setUploadFiles([]);
 
       knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
@@ -887,7 +982,7 @@ function DataConfig({ isActive }: DataConfigProps) {
             <KnowledgeBaseList
               knowledgeBases={kbState.knowledgeBases}
               activeKnowledgeBase={kbState.activeKnowledgeBase}
-              currentEmbeddingModel={kbState.currentEmbeddingModel}
+              configuredEmbeddingModels={availableEmbeddingModels}
               isLoading={kbState.isLoading}
               syncLoading={kbState.syncLoading}
               onClick={handleKnowledgeBaseClick}
@@ -972,15 +1067,15 @@ function DataConfig({ isActive }: DataConfigProps) {
                 modelMismatch={hasKnowledgeBaseModelMismatch(
                   kbState.activeKnowledgeBase
                 )}
-                currentModel={kbState.currentEmbeddingModel || ""}
+                currentModel={
+                  kbState.activeKnowledgeBase?.is_multimodal
+                    ? modelConfig?.multiEmbedding?.modelName?.trim() || ""
+                    : modelConfig?.embedding?.modelName?.trim() || ""
+                }
                 knowledgeBaseModel={kbState.activeKnowledgeBase.embeddingModel}
                 embeddingModelInfo={
                   hasKnowledgeBaseModelMismatch(kbState.activeKnowledgeBase)
-                    ? t("document.modelMismatch.withModels", {
-                        currentModel: kbState.currentEmbeddingModel || "",
-                        knowledgeBaseModel:
-                          kbState.activeKnowledgeBase.embeddingModel,
-                      })
+                    ? `\u5f53\u524d\u6a21\u578b${kbState.activeKnowledgeBase.embeddingModel || "unknown"}\u672a\u914d\u7f6e`
                     : undefined
                 }
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}

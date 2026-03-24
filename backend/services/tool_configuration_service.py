@@ -152,6 +152,10 @@ def get_local_tools() -> List[ToolInfo]:
             else:
                 param_info["default"] = param.default.default
                 param_info["optional"] = True
+            if getattr(param.default, "json_schema_extra", None):
+                optional_override = param.default.json_schema_extra.get("optional")
+                if optional_override is not None:
+                    param_info["optional"] = optional_override
 
             init_params_list.append(param_info)
 
@@ -704,7 +708,8 @@ def _validate_local_tool(
                     instantiation_params[param_name] = param.default
 
         if tool_name == "knowledge_base_search":
-            embedding_model = get_embedding_model(tenant_id=tenant_id)
+            is_multimodal = instantiation_params.pop("multimodal", False)
+            embedding_model = get_embedding_model(tenant_id=tenant_id, is_multimodal=is_multimodal)
             vdb_core = get_vector_db_core()
 
             # Get rerank configuration

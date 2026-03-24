@@ -397,12 +397,13 @@ export const modelService = {
   // Verify custom model connection
   verifyCustomModel: async (
     displayName: string,
+    modelType: string,
     signal?: AbortSignal
   ): Promise<boolean> => {
     try {
       if (!displayName) return false;
       const response = await fetch(
-        API_ENDPOINTS.model.customModelHealthcheck(displayName),
+        API_ENDPOINTS.model.customModelHealthcheck(displayName, modelType),
         {
           method: "POST",
           headers: getAuthHeaders(),
@@ -428,6 +429,7 @@ export const modelService = {
   checkManageTenantModelConnectivity: async (
     tenantId: string,
     displayName: string,
+    modelType: string,
     signal?: AbortSignal
   ): Promise<boolean> => {
     try {
@@ -441,6 +443,7 @@ export const modelService = {
         body: JSON.stringify({
           tenant_id: tenantId,
           display_name: displayName,
+          model_type: modelType
         }),
         signal,
       });

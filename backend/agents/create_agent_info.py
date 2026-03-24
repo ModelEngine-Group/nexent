@@ -1,4 +1,4 @@
-import threading
+﻿import threading
 import logging
 from typing import List, Optional
 from urllib.parse import urljoin
@@ -450,6 +450,7 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
             rerank = param_dict.get("rerank", False)
             rerank_model_name = param_dict.get("rerank_model_name", "")
             rerank_model = None
+            is_multimodal = bool(tool_config.params.pop("multimodal", False))
             if rerank and rerank_model_name:
                 rerank_model = get_rerank_model(
                     tenant_id=tenant_id, model_name=rerank_model_name
@@ -457,7 +458,9 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
 
             tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
-                "embedding_model": get_embedding_model(tenant_id=tenant_id),
+                "embedding_model": get_embedding_model(
+                    tenant_id=tenant_id, is_multimodal=is_multimodal
+                ),
                 "rerank_model": rerank_model,
             }
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
