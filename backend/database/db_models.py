@@ -334,10 +334,9 @@ class McpRecord(TableBase):
         doc="Authorization token for MCP server authentication (e.g., Bearer token)",
         default=None,
     )
-    souce = Column(String(30), doc="Source type: local/mcp_registry")
-    market_name = Column(String(200), doc="Market identifier")
+    source = Column(String(30), doc="Source type: local/mcp_registry")
     version = Column(String(50), doc="MCP version")
-    mcp_registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
+    registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
     transport_type = Column(String(30), doc="Transport type: streamable-http/sse/stdio")
     config_json = Column(JSON, doc="MCP config data")
     enabled = Column(Boolean, default=True, doc="Enabled")

@@ -51,14 +51,14 @@ export const filterServiceCards = (services: McpServiceItem[], searchValue: stri
   });
 };
 
-export const formatMarketDate = (value: string): string => {
+export const formatRegistryDate = (value: string): string => {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 };
 
-export const formatMarketVersion = (value: string): string => {
+export const formatRegistryVersion = (value: string): string => {
   const version = (value || "").trim();
   if (!version) return "-";
   return /^v/i.test(version) ? version : `v${version}`;

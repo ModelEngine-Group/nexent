@@ -187,7 +187,7 @@ export default function McpServiceDetailModal({
             <div className="flex items-center justify-between">
               <span className="text-slate-500">{t("mcpTools.detail.source")}</span>
               <span className="font-medium text-slate-800">
-                {draftService.source === MCP_TAB.LOCAL ? t("mcpTools.source.local") : t("mcpTools.source.mcp_registry")}
+                {draftService.source === MCP_TAB.LOCAL ? t("mcpTools.source.local") : t("mcpTools.source.registry")}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -286,7 +286,7 @@ export default function McpServiceDetailModal({
                     autoInsertSpace={false}
                     onClick={() => setShowServerJsonModal(true)}
                   >
-                    {t("mcpTools.market.viewServerJson")}
+                    {t("mcpTools.registry.viewServerJson")}
                   </Button>
                 ) : null}
                 {hasConfigJson ? (
@@ -386,7 +386,7 @@ export default function McpServiceDetailModal({
           centered
           width={960}
           onCancel={() => setShowServerJsonModal(false)}
-          title={t("mcpTools.market.serverJsonTitle", { name: draftService.name })}
+          title={t("mcpTools.registry.serverJsonTitle", { name: draftService.name })}
         >
           <pre className="max-h-[65vh] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
             {registryJsonPretty}

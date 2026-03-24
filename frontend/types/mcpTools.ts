@@ -28,7 +28,7 @@ export enum McpContainerStatus {
   UNKNOWN = "unknown",
 }
 
-export interface MarketMcpCard {
+export interface RegistryMcpCard {
   name: string;
   version: string;
   description: string;
@@ -45,7 +45,7 @@ export interface MarketMcpCard {
   serverJson: Record<string, unknown>;
 }
 
-export interface MarketQuickAddOption {
+export interface RegistryQuickAddOption {
   key: string;
   sourceType: "remote" | "package";
   sourceLabel: string;
@@ -86,7 +86,7 @@ export interface AddMcpServicePayload {
   authorization_token?: string;
   container_config?: Record<string, unknown>;
   version?: string;
-  mcp_registry_json?: Record<string, unknown>;
+  registry_json?: Record<string, unknown>;
 }
 
 export interface UpdateMcpServicePayload {

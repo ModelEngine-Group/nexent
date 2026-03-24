@@ -232,7 +232,7 @@ export const API_ENDPOINTS = {
     enable: `${API_BASE_URL}/mcp-tools/enable`,
     disable: `${API_BASE_URL}/mcp-tools/disable`,
     healthcheck: `${API_BASE_URL}/mcp-tools/v2/healthcheck`,
-    marketList: `${API_BASE_URL}/mcp-tools/market/list`,
+    registryList: `${API_BASE_URL}/mcp-tools/registry/list`,
   },
   memory: {
     // ---------------- Memory configuration ----------------

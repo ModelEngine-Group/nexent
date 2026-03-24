@@ -19,4 +19,4 @@ export const MCP_CONTAINER_STATUS = {
 	STOPPED: McpContainerStatus.STOPPED,
 	UNKNOWN: McpContainerStatus.UNKNOWN,
 } as const;
-export const MARKET_SERVER_STATUS = { ACTIVE: "active", DEPRECATED: "deprecated", UNKNOWN: "unknown" } as const;
+export const MCP_REGISTRY_SERVER_STATUS = { ACTIVE: "active", DEPRECATED: "deprecated", UNKNOWN: "unknown" } as const;

@@ -48,7 +48,7 @@ export default function McpServiceCard({
 
       <div className="mt-4 flex flex-wrap gap-2">
         <span className="rounded-full bg-amber-100 text-amber-700 px-2.5 py-1 text-xs font-medium">
-          {service.source === MCP_TAB.LOCAL ? t("mcpTools.source.local") : t("mcpTools.source.mcp_registry")}
+          {service.source === MCP_TAB.LOCAL ? t("mcpTools.source.local") : t("mcpTools.source.registry")}
         </span>
         <span className="rounded-full bg-green-100 text-green-700 px-2.5 py-1 text-xs font-medium">
           {service.transportType === MCP_TRANSPORT_TYPE.HTTP

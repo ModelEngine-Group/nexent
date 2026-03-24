@@ -6,7 +6,7 @@ import type {
   AddMcpRuntimeFromConfigPayload,
   AddMcpServicePayload,
   HealthcheckMcpServicePayload,
-  MarketMcpCard,
+  RegistryMcpCard,
   McpHealthStatus,
   McpServiceItem,
   McpTransportType,
@@ -20,7 +20,7 @@ export type McpToolsApiResult<T> = {
   data: T;
 };
 
-export type { MarketMcpCard } from "@/types/mcpTools";
+export type { RegistryMcpCard as RegistryMcpCard } from "@/types/mcpTools";
 
 type ApiEnvelope<T = unknown> = {
   status: string;
@@ -56,7 +56,7 @@ type HealthcheckPayload = {
   health_status: McpHealthStatus;
 };
 
-export const fetchMarketMcpCards = async (params: {
+export const fetchRegistryMcpCards = async (params: {
   search?: string;
   cursor?: string | null;
   version?: string;
@@ -79,7 +79,7 @@ export const fetchMarketMcpCards = async (params: {
     query.set("cursor", params.cursor);
   }
 
-  const result = await listMarketMcpTools(query);
+  const result = await listRegistryMcpTools(query);
   const payload = result.data;
 
   return {
@@ -88,7 +88,7 @@ export const fetchMarketMcpCards = async (params: {
       items: payload.items,
       nextCursor: payload.nextCursor ?? null,
     },
-  } as McpToolsApiResult<{ items: MarketMcpCard[]; nextCursor: string | null }>;
+  } as McpToolsApiResult<{ items: RegistryMcpCard[]; nextCursor: string | null }>;
 };
 
 export const resolveContainerServerInfo = async (params: {
@@ -179,16 +179,16 @@ export const listMcpTools = async () => {
   }
 };
 
-export const listMarketMcpTools = async (query: URLSearchParams) => {
+export const listRegistryMcpTools = async (query: URLSearchParams) => {
   try {
-    const response = await fetchWithAuth(`${API_ENDPOINTS.mcpTools.marketList}?${query.toString()}`);
-    const data = await parseJson<ApiEnvelope<{ items: MarketMcpCard[]; nextCursor: string | null }>>(response);
+    const response = await fetchWithAuth(`${API_ENDPOINTS.mcpTools.registryList}?${query.toString()}`);
+    const data = await parseJson<ApiEnvelope<{ items: RegistryMcpCard[]; nextCursor: string | null }>>(response);
     if (data.status !== "success") {
-      throw new Error("Failed to load market list");
+      throw new Error("Failed to load registry mcp list");
     }
-    return { success: true, data: data.data } as McpToolsApiResult<{ items: MarketMcpCard[]; nextCursor: string | null }>;
+    return { success: true, data: data.data } as McpToolsApiResult<{ items: RegistryMcpCard[]; nextCursor: string | null }>;
   } catch (error) {
-    log.error("listMarketMcpTools failed", error);
+    log.error("listRegistryMcpTools failed", error);
     throw error;
   }
 };

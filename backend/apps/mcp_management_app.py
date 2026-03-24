@@ -17,7 +17,7 @@ from services.mcp_management_service import (
     check_mcp_service_health_legacy,
     delete_mcp_service,
     delete_mcp_service_legacy,
-    list_market_mcp_services,
+    list_registry_mcp_services,
     list_mcp_service_tools_by_id,
     list_mcp_services,
     update_mcp_service,
@@ -41,7 +41,7 @@ class AddMcpServiceRequest(BaseModel):
     authorization_token: Optional[str] = None
     container_config: Optional[dict[str, Any]] = None
     version: Optional[str] = None
-    mcp_registry_json: Optional[dict[str, Any]] = None
+    registry_json: Optional[dict[str, Any]] = None
 
 
 class AddContainerMcpServiceRequest(BaseModel):
@@ -114,7 +114,7 @@ async def add_mcp_service_api(
         authorization_token = (payload.authorization_token or "").strip()
         container_config = payload.container_config
         version = (payload.version or "").strip()
-        mcp_registry_json = payload.mcp_registry_json
+        registry_json = payload.registry_json
 
         await add_mcp_service(
             tenant_id=tenant_id,
@@ -128,7 +128,7 @@ async def add_mcp_service_api(
             authorization_token=authorization_token,
             container_config=container_config,
             version=version,
-            mcp_registry_json=mcp_registry_json,
+            registry_json=registry_json,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -231,7 +231,7 @@ async def add_container_mcp_service_api(
                 authorization_token=auth_token,
                 container_config=container_config,
                 version=None,
-                mcp_registry_json=None,
+                registry_json=None,
                 enabled=True,
                 container_id=container_info.get("container_id"),
             )
@@ -299,8 +299,8 @@ async def list_mcp_services_api(
         )
 
 
-@router.get("/market/list")
-async def list_market_mcp_services_api(
+@router.get("/registry/list")
+async def list_registry_mcp_services_api(
     search: Optional[str] = None,
     include_deleted: bool = False,
     updated_since: Optional[str] = None,
@@ -314,7 +314,7 @@ async def list_market_mcp_services_api(
         # Keep auth behavior consistent with other mcp-tools APIs.
         get_current_user_info(authorization, http_request)
 
-        market_data = await list_market_mcp_services(
+        data = await list_registry_mcp_services(
             search=(search or "").strip() or None,
             include_deleted=bool(include_deleted),
             updated_since=(updated_since or "").strip() or None,
@@ -325,15 +325,15 @@ async def list_market_mcp_services_api(
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"status": "success", "data": market_data},
+            content={"status": "success", "data": data},
         )
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to list market MCP services: {exc}")
+        logger.error(f"Failed to list MCP registry MCP services: {exc}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to list market MCP services",
+            detail="Failed to list MCP registry MCP services",
         )
 
 
