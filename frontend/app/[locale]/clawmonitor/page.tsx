@@ -286,9 +286,19 @@ export default function ClawMonitorPage() {
                             <span className="text-sm text-slate-500 dark:text-slate-400">
                               {t("clawmonitor.modelName")}
                             </span>
-                            <span className="text-lg font-medium text-slate-900 dark:text-slate-100">
-                              {instanceDetail?.model || "-"}
-                            </span>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              {instanceDetail?.model?.length ? (
+                                instanceDetail.model.map((m) => (
+                                  <Tag key={m} color="blue" className="px-3 py-1 text-base">
+                                    {m}
+                                  </Tag>
+                                ))
+                              ) : (
+                                <span className="text-lg font-medium text-slate-900 dark:text-slate-100">
+                                  -
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div className="flex flex-col gap-2 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                             <span className="text-sm text-slate-500 dark:text-slate-400">

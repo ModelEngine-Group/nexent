@@ -24,7 +24,7 @@ export interface MeclawInstanceDetail {
   description: string;
   status: string;
   created_at: string;
-  model: string;
+  model: string[];
   skills: string[];
   plugins: string[];
   token_usage: number;
