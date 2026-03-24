@@ -15,6 +15,7 @@ import {
 import {
   SearchOutlined,
   SyncOutlined,
+  ExclamationCircleOutlined,
 } from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
@@ -109,6 +110,15 @@ export default function KnowledgeBaseSelectorModal({
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   // Track the embedding model from selected knowledge bases for auto-filtering
   const [selectedEmbeddingModel, setSelectedEmbeddingModel] = useState<string | null>(null);
+  // Model mismatch confirmation modal state
+  const [pendingSelection, setPendingSelection] = useState<{ id: string; kb: KnowledgeBase } | null>(null);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [modelMismatchInfo, setModelMismatchInfo] = useState<{
+    existingModel: string;
+    newModel: string;
+    existingKBName: string;
+    newKBName: string;
+  } | null>(null);
 
   // Initialize selection state when modal opens
   useEffect(() => {
@@ -257,7 +267,7 @@ export default function KnowledgeBaseSelectorModal({
         return;
       }
 
-      setTempSelectedIds((prev) => {
+        setTempSelectedIds((prev) => {
         if (prev.includes(id)) {
           // When deselecting, check if we need to clear the model filter
           const newSelected = prev.filter((itemId) => itemId !== id);
@@ -265,6 +275,17 @@ export default function KnowledgeBaseSelectorModal({
           if (newSelected.length === 0) {
             setSelectedEmbeddingModel(null);
             setSelectedModels([]); // Clear the model filter dropdown as well
+          } else {
+            // Check if remaining selected nexent KBs have consistent models
+          const remainingKBs = knowledgeBases.filter((k) => newSelected.includes(k.id) && k.source === "nexent");
+            const remainingModels = [...new Set(remainingKBs.map((k) => k.embeddingModel).filter((m) => m && m !== "unknown"))];
+            if (remainingModels.length === 1) {
+              setSelectedEmbeddingModel(remainingModels[0]);
+              setSelectedModels([remainingModels[0]]);
+            } else if (remainingModels.length === 0) {
+              setSelectedEmbeddingModel(null);
+              setSelectedModels([]);
+            }
           }
           return newSelected;
         }
@@ -272,6 +293,33 @@ export default function KnowledgeBaseSelectorModal({
         // Check max select limit
         if (maxSelect && prev.length >= maxSelect) {
           return prev;
+        }
+
+        // Check model consistency when adding new selection (only for nexent source)
+        // Only apply model consistency check when adding nexent KBs
+        const isNewKBNexent = kb.source === "nexent";
+
+        if (isNewKBNexent && kb.embeddingModel && kb.embeddingModel !== "unknown") {
+          // Get existing nexent KBs from selection
+          const existingNexentKBs = knowledgeBases.filter((k) => prev.includes(k.id) && k.source === "nexent");
+          const existingNexentModels = [...new Set(existingNexentKBs.map((k) => k.embeddingModel).filter((m) => m && m !== "unknown"))];
+
+          // If there are existing nexent selections and the new KB has a different model, show confirmation
+          if (
+            existingNexentModels.length > 0 &&
+            !existingNexentModels.includes(kb.embeddingModel)
+          ) {
+            // Store the pending selection and show confirmation modal
+            setModelMismatchInfo({
+              existingModel: existingNexentModels[0],
+              newModel: kb.embeddingModel,
+              existingKBName: existingNexentKBs[0]?.name || "",
+              newKBName: kb.name,
+            });
+            setPendingSelection({ id, kb });
+            setConfirmModalOpen(true);
+            return prev;
+          }
         }
 
         // Auto-filter by the selected knowledge base's embedding model
@@ -718,6 +766,106 @@ export default function KnowledgeBaseSelectorModal({
           </div>
         )}
       </div>
+
+      {/* Model mismatch confirmation modal */}
+      <Modal
+        title={
+          <div className="flex items-center gap-2">
+            <ExclamationCircleOutlined style={{ color: "#faad14", fontSize: 20 }} />
+            <span>{t("toolConfig.knowledgeBaseSelector.modelMismatch.title", "模型不匹配")}</span>
+          </div>
+        }
+        open={confirmModalOpen}
+        onCancel={() => {
+          setConfirmModalOpen(false);
+          setPendingSelection(null);
+          setModelMismatchInfo(null);
+        }}
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => {
+              setConfirmModalOpen(false);
+              setPendingSelection(null);
+              setModelMismatchInfo(null);
+            }}
+          >
+            {t("common.cancel")}
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            danger
+            onClick={() => {
+              if (pendingSelection) {
+                setTempSelectedIds((prev) => {
+                  // Remove all KBs with the old model
+                  const existingKBs = knowledgeBases.filter((k) => prev.includes(k.id));
+                  const existingModels = [...new Set(existingKBs.map((k) => k.embeddingModel).filter((m) => m && m !== "unknown"))];
+                  const idsToRemove = existingKBs
+                    .filter((k) => existingModels.includes(k.embeddingModel))
+                    .map((k) => k.id);
+
+                  // Update model filter
+                  if (pendingSelection.kb.embeddingModel && pendingSelection.kb.embeddingModel !== "unknown") {
+                    setSelectedEmbeddingModel(pendingSelection.kb.embeddingModel);
+                    setSelectedModels([pendingSelection.kb.embeddingModel]);
+                  }
+
+                  // Return new selection (only the new KB with different model)
+                  return [pendingSelection.id];
+                });
+              }
+              setConfirmModalOpen(false);
+              setPendingSelection(null);
+              setModelMismatchInfo(null);
+            }}
+          >
+            {t("toolConfig.knowledgeBaseSelector.modelMismatch.switchModel", "切换模型")}
+          </Button>,
+        ]}
+      >
+        <div className="py-4">
+          <p className="mb-4 text-gray-600">
+            {t(
+              "toolConfig.knowledgeBaseSelector.modelMismatch.description",
+              "所选知识库的向量化模型与其他已选知识库不一致。"
+            )}
+          </p>
+          {modelMismatchInfo && (
+            <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+              <div className="flex items-start">
+                <span className="text-gray-500 w-20 flex-shrink-0">
+                  {t("toolConfig.knowledgeBaseSelector.modelMismatch.existing", "已选知识库")}:
+                </span>
+                <div className="flex-1">
+                  <div className="text-gray-800 font-medium">{modelMismatchInfo.existingKBName}</div>
+                  <div className="text-gray-500 text-sm">
+                    {t("toolConfig.knowledgeBaseSelector.modelMismatch.model", "模型")}: {modelMismatchInfo.existingModel}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-start">
+                <span className="text-gray-500 w-20 flex-shrink-0">
+                  {t("toolConfig.knowledgeBaseSelector.modelMismatch.new", "新选择")}:
+                </span>
+                <div className="flex-1">
+                  <div className="text-gray-800 font-medium">{modelMismatchInfo.newKBName}</div>
+                  <div className="text-gray-500 text-sm">
+                    {t("toolConfig.knowledgeBaseSelector.modelMismatch.model", "模型")}: {modelMismatchInfo.newModel}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <p className="mt-4 text-gray-500 text-sm">
+            {t(
+              "toolConfig.knowledgeBaseSelector.modelMismatch.hint",
+              "提示：向量化模型不一致的知识库可能无法同时用于检索，建议选择相同模型的知识库。"
+            )}
+          </p>
+        </div>
+      </Modal>
     </Modal>
   );
 }
