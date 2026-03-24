@@ -19,7 +19,9 @@ import {
 } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { modelService } from "@/services/modelService";
+import { updateAgentInfo } from "@/services/agentConfigService";
 import { ModelOption, ModelType } from "@/types/modelConfig";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import log from "@/lib/logger";
 
 import { ModelListCard } from "./model/ModelListCard";
@@ -97,6 +99,7 @@ export const ModelConfigSection = forwardRef<
   const { skipVerification = false } = props;
   const { modelConfig, updateModelConfig, appConfig, saveConfig } = useConfig();
   const modelEngineEnable = appConfig?.modelEngineEnabled ?? false;
+  const { modelEngineClawEnabled } = useDeployment();
 
   const modelData = getModelData(t);
   const { confirm } = useConfirmModal();
@@ -742,6 +745,18 @@ export const ModelConfigSection = forwardRef<
 
     // Schedule auto-save of the updated configuration to backend
     scheduleAutoSave();
+
+    // When CLAW mode is enabled and the LLM model is switched, sync agent_id=0's model
+    if (modelEngineClawEnabled && category === "llm" && option === "main" && displayName) {
+      const result = await updateAgentInfo({
+        agent_id: 0,
+        model_name: modelInfo?.name || "",
+        model_id: modelInfo?.id,
+      });
+      if (!result.success) {
+        log.error("Failed to sync LLM model change to agent 0:", result.message);
+      }
+    }
   };
 
   // Handle model changes (with confirmation for embedding changes)

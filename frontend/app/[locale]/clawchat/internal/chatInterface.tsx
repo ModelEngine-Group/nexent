@@ -112,7 +112,7 @@ export function ChatInterface() {
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
 
   // Add agent selection state - default to agent 20000 for clawchat
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>("20000");
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>("0");
 
   // Reset scroll to bottom state
   useEffect(() => {

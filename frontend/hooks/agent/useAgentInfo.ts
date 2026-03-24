@@ -8,14 +8,14 @@ export function useAgentInfo(agentId: number | null) {
 	const query = useQuery({
 		queryKey: ["agentInfo", agentId],
 		queryFn: async () => {
-			if (!agentId) return null;
+			if (agentId === null || agentId === undefined) return null;
 			const res = await searchAgentInfo(agentId);
 			if (!res || !res.success) {
 				throw new Error(res?.message || "Failed to fetch agent info");
 			}
 			return res.data;
 		},
-		enabled: !!agentId,
+		enabled: agentId !== null && agentId !== undefined,
 		staleTime: 60_000,
 	});
 
