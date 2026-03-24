@@ -17,7 +17,7 @@ class InstanceBase(BaseModel):
     description: str
     status: Optional[str] = None  # 改为可选字段
     created_at: datetime
-    model: str
+    model: List[str]
     skills: List[str]
     plugins: List[str]
     token_usage: int
