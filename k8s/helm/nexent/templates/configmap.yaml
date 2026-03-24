@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-config
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+data:
+  # Deployment version
+  DEPLOYMENT_VERSION: {{ .Values.global.deploymentVersion | quote }}
+
+  # Elasticsearch Service
+  ELASTICSEARCH_HOST: {{ .Values.config.elasticsearch.host | quote }}
+  ES_JAVA_OPTS: {{ .Values.config.elasticsearch.javaOpts | quote }}
+  ES_DISK_WATERMARK_LOW: {{ .Values.config.elasticsearch.diskWatermarkLow | quote }}
+  ES_DISK_WATERMARK_HIGH: {{ .Values.config.elasticsearch.diskWatermarkHigh | quote }}
+  ES_DISK_WATERMARK_FLOOD_STAGE: {{ .Values.config.elasticsearch.diskWatermarkFloodStage | quote }}
+
+  # Service URLs (internal)
+  CONFIG_SERVICE_URL: {{ .Values.config.services.configUrl | quote }}
+  ELASTICSEARCH_SERVICE: {{ .Values.config.services.elasticsearchService | quote }}
+  RUNTIME_SERVICE_URL: {{ .Values.config.services.runtimeUrl | quote }}
+  NEXENT_MCP_SERVER: {{ .Values.config.services.mcpServer | quote }}
+  DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}
+  NORTHBOUND_API_SERVER: {{ .Values.config.services.northboundServer | quote }}
+
+  # Postgres Config
+  POSTGRES_HOST: {{ .Values.config.postgres.host | quote }}
+  POSTGRES_USER: {{ .Values.config.postgres.user | quote }}
+  POSTGRES_DB: {{ .Values.config.postgres.db | quote }}
+  POSTGRES_PORT: {{ .Values.config.postgres.port | quote }}
+
+  # Minio Config
+  MINIO_ENDPOINT: {{ .Values.config.minio.endpoint | quote }}
+  MINIO_REGION: {{ .Values.config.minio.region | quote }}
+  MINIO_DEFAULT_BUCKET: {{ .Values.config.minio.defaultBucket | quote }}
+
+  # Redis Config
+  REDIS_URL: {{ .Values.config.redis.url | quote }}
+  REDIS_BACKEND_URL: {{ .Values.config.redis.backendUrl | quote }}
+
+  # Model Engine Config
+  MODEL_ENGINE_ENABLED: {{ .Values.config.modelEngine.enabled | quote }}
+
+  # Voice Service Config
+  APPID: {{ .Values.config.voiceService.appid | quote }}
+  TOKEN: {{ .Values.config.voiceService.token | quote }}
+  CLUSTER: {{ .Values.config.voiceService.cluster | quote }}
+  VOICE_TYPE: {{ .Values.config.voiceService.voiceType | quote }}
+  SPEED_RATIO: {{ .Values.config.voiceService.speedRatio | quote }}
+
+  # Model Path Config
+  CLIP_MODEL_PATH: {{ .Values.config.modelPath.clipModelPath | quote }}
+  NLTK_DATA: {{ .Values.config.modelPath.nltkData | quote }}
+
+  # Terminal Tool SSH Config
+  SSH_PRIVATE_KEY_PATH: {{ .Values.config.terminal.sshPrivateKeyPath | quote }}
+
+  # Supabase Config
+  DASHBOARD_USERNAME: {{ .Values.config.supabase.dashboardUsername | quote }}
+  DASHBOARD_PASSWORD: {{ .Values.config.supabase.dashboardPassword | quote }}
+  SITE_URL: {{ .Values.config.supabase.siteUrl | quote }}
+  SUPABASE_URL: {{ .Values.config.supabase.supabaseUrl | quote }}
+  API_EXTERNAL_URL: {{ .Values.config.supabase.apiExternalUrl | quote }}
+  DISABLE_SIGNUP: {{ .Values.config.supabase.disableSignup | quote }}
+  JWT_EXPIRY: {{ .Values.config.supabase.jwtExpiry | quote }}
+  DEBUG_JWT_EXPIRE_SECONDS: {{ .Values.config.supabase.debugJwtExpireSeconds | quote }}
+  ENABLE_EMAIL_SIGNUP: {{ .Values.config.supabase.enableEmailSignup | quote }}
+  ENABLE_EMAIL_AUTOCONFIRM: {{ .Values.config.supabase.enableEmailAutoconfirm | quote }}
+  ENABLE_ANONYMOUS_USERS: {{ .Values.config.supabase.enableAnonymousUsers | quote }}
+  ENABLE_PHONE_SIGNUP: {{ .Values.config.supabase.enablePhoneSignup | quote }}
+  ENABLE_PHONE_AUTOCONFIRM: {{ .Values.config.supabase.enablePhoneAutoconfirm | quote }}
+  INVITE_CODE: {{ .Values.config.supabase.inviteCode | quote }}
+  MAILER_URLPATHS_CONFIRMATION: {{ .Values.config.supabase.mailerUrlpathsConfirmation | quote }}
+  MAILER_URLPATHS_INVITE: {{ .Values.config.supabase.mailerUrlpathsInvite | quote }}
+  MAILER_URLPATHS_RECOVERY: {{ .Values.config.supabase.mailerUrlpathsRecovery | quote }}
+  MAILER_URLPATHS_EMAIL_CHANGE: {{ .Values.config.supabase.mailerUrlpathsEmailChange | quote }}
+  SUPABASE_POSTGRES_HOST: {{ .Values.config.supabase.postgresHost | quote }}
+  SUPABASE_POSTGRES_DB: {{ .Values.config.supabase.postgresDb | quote }}
+  SUPABASE_POSTGRES_PORT: {{ .Values.config.supabase.postgresPort | quote }}
+  ADDITIONAL_REDIRECT_URLS: {{ .Values.config.supabase.additionalRedirectUrls | quote }}
+
+  # Data Processing Service Configuration
+  REDIS_PORT: {{ .Values.config.redis.port | quote }}
+  FLOWER_PORT: {{ .Values.config.dataProcess.flowerPort | quote }}
+  RAY_DASHBOARD_PORT: {{ .Values.config.dataProcess.rayDashboardPort | quote }}
+  RAY_DASHBOARD_HOST: {{ .Values.config.dataProcess.rayDashboardHost | quote }}
+  RAY_ACTOR_NUM_CPUS: {{ .Values.config.dataProcess.rayActorNumCpus | quote }}
+  RAY_NUM_CPUS: {{ .Values.config.dataProcess.rayNumCpus | quote }}
+  RAY_OBJECT_STORE_MEMORY_GB: {{ .Values.config.dataProcess.rayObjectStoreMemoryGb | quote }}
+  RAY_TEMP_DIR: {{ .Values.config.dataProcess.rayTempDir | quote }}
+  RAY_LOG_LEVEL: {{ .Values.config.dataProcess.rayLogLevel | quote }}
+  DISABLE_RAY_DASHBOARD: {{ .Values.config.dataProcess.disableRayDashboard | quote }}
+  DISABLE_CELERY_FLOWER: {{ .Values.config.dataProcess.disableCeleryFlower | quote }}
+  DOCKER_ENVIRONMENT: {{ .Values.config.dataProcess.dockerEnvironment | quote }}
+  ENABLE_UPLOAD_IMAGE: {{ .Values.config.dataProcess.enableUploadImage | quote }}
+  CELERY_WORKER_PREFETCH_MULTIPLIER: {{ .Values.config.dataProcess.celeryWorkerPrefetchMultiplier | quote }}
+  CELERY_TASK_TIME_LIMIT: {{ .Values.config.dataProcess.celeryTaskTimeLimit | quote }}
+  ELASTICSEARCH_REQUEST_TIMEOUT: {{ .Values.config.dataProcess.elasticsearchRequestTimeout | quote }}
+  QUEUES: {{ .Values.config.dataProcess.queues | quote }}
+  WORKER_NAME: {{ .Values.config.dataProcess.workerName | quote }}
+  WORKER_CONCURRENCY: {{ .Values.config.dataProcess.workerConcurrency | quote }}
+
+  # Telemetry and Monitoring Configuration
+  ENABLE_TELEMETRY: {{ .Values.config.telemetry.enabled | quote }}
+  SERVICE_NAME: {{ .Values.config.telemetry.serviceName | quote }}
+  JAEGER_ENDPOINT: {{ .Values.config.telemetry.jaegerEndpoint | quote }}
+  PROMETHEUS_PORT: {{ .Values.config.telemetry.prometheusPort | quote }}
+  TELEMETRY_SAMPLE_RATE: {{ .Values.config.telemetry.telemetrySampleRate | quote }}
+  LLM_SLOW_REQUEST_THRESHOLD_SECONDS: {{ .Values.config.telemetry.slowRequestThresholdSeconds | quote }}
+  LLM_SLOW_TOKEN_RATE_THRESHOLD: {{ .Values.config.telemetry.slowTokenRateThreshold | quote }}
+
+  # Market Backend Address
+  MARKET_BACKEND: {{ .Values.config.marketBackend | quote }}
+
+  # Skip proxy
+  skip_proxy: {{ .Values.config.skipProxy | quote }}
+  UMASK: {{ .Values.config.umask | quote }}
+
+  # MCP Container Image
+  NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}

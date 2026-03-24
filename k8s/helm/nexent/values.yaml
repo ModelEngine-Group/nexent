@@ -1,0 +1,336 @@
+# Default values for nexent helm chart.
+
+global:
+  namespace: nexent
+  dataDir: "/var/lib/nexent-data"
+  # Deployment version (speed or full)
+  # speed: Lightweight deployment with essential features (no Supabase)
+  # full: Full-featured deployment with all capabilities (includes Supabase)
+  deploymentVersion: "full"
+
+# Image settings
+images:
+  backend:
+    repository: "nexent/nexent"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  web:
+    repository: "nexent/nexent-web"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  dataProcess:
+    repository: "nexent/nexent-data-process"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  mcp:
+    repository: "nexent/nexent-mcp"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  elasticsearch:
+    repository: "docker.elastic.co/elasticsearch/elasticsearch"
+    tag: "8.17.4"
+    pullPolicy: IfNotPresent
+  postgresql:
+    repository: "postgres"
+    tag: "15-alpine"
+    pullPolicy: IfNotPresent
+  redis:
+    repository: "redis"
+    tag: "alpine"
+    pullPolicy: IfNotPresent
+  minio:
+    repository: "quay.io/minio/minio"
+    tag: "RELEASE.2023-12-20T01-00-02Z"
+    pullPolicy: IfNotPresent
+  openssh:
+    repository: "nexent/nexent-ubuntu-terminal"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  supabase:
+    kong:
+      repository: "kong"
+      tag: "2.8.1"
+      pullPolicy: IfNotPresent
+    gotrue:
+      repository: "supabase/gotrue"
+      tag: "v2.170.0"
+      pullPolicy: IfNotPresent
+    postgres:
+      repository: "supabase/postgres"
+      tag: "15.8.1.060"
+      pullPolicy: IfNotPresent
+
+# Configuration data (maps to ConfigMap)
+config:
+  # Elasticsearch Service
+  elasticsearch:
+    host: "http://nexent-elasticsearch:9200"
+    javaOpts: "-Xms2g -Xmx2g"
+    diskWatermarkLow: "85%"
+    diskWatermarkHigh: "90%"
+    diskWatermarkFloodStage: "95%"
+
+  # Service URLs (internal)
+  services:
+    configUrl: "http://nexent-config:5010"
+    elasticsearchService: "http://nexent-config:5010/api"
+    runtimeUrl: "http://nexent-runtime:5014"
+    mcpServer: "http://nexent-mcp:5011"
+    dataProcessService: "http://nexent-data-process:5012/api"
+    northboundServer: "http://nexent-northbound:5013/api"
+
+  # Postgres Config
+  postgres:
+    host: "nexent-postgresql"
+    user: "root"
+    db: "nexent"
+    port: "5432"
+
+  # Minio Config
+  minio:
+    endpoint: "http://nexent-minio:9000"
+    region: "cn-north-1"
+    defaultBucket: "nexent"
+
+  # Redis Config
+  redis:
+    url: "redis://nexent-redis:6379/0"
+    backendUrl: "redis://nexent-redis:6379/1"
+    port: "6379"
+
+  # Model Engine Config
+  modelEngine:
+    enabled: false
+
+  # Voice Service Config
+  voiceService:
+    appid: "app_id"
+    token: "token"
+    cluster: "volcano_tts"
+    voiceType: "zh_male_jieshuonansheng_mars_bigtts"
+    speedRatio: "1.3"
+
+  # Model Path Config
+  modelPath:
+    clipModelPath: "/opt/models/clip-vit-base-patch32"
+    nltkData: "/opt/models/nltk_data"
+
+  # Terminal Tool SSH Config
+  terminal:
+    sshPrivateKeyPath: "/path/to/openssh-server/ssh-keys/openssh_server_key"
+
+  # Supabase Config
+  supabase:
+    dashboardUsername: "supabase"
+    dashboardPassword: "Huawei123"
+    siteUrl: "http://localhost:3011"
+    supabaseUrl: "http://nexent-supabase-kong:8000"
+    apiExternalUrl: "http://nexent-supabase-kong:8000"
+    disableSignup: false
+    jwtExpiry: "3600"
+    debugJwtExpireSeconds: "0"
+    enableEmailSignup: true
+    enableEmailAutoconfirm: true
+    enableAnonymousUsers: false
+    enablePhoneSignup: false
+    enablePhoneAutoconfirm: false
+    inviteCode: "nexent2025"
+    mailerUrlpathsConfirmation: "/auth/v1/verify"
+    mailerUrlpathsInvite: "/auth/v1/verify"
+    mailerUrlpathsRecovery: "/auth/v1/verify"
+    mailerUrlpathsEmailChange: "/auth/v1/verify"
+    postgresHost: "nexent-supabase-db"
+    postgresDb: "supabase"
+    postgresPort: "5436"
+    additionalRedirectUrls: ""
+
+  # Data Processing Service Configuration
+  dataProcess:
+    flowerPort: "5555"
+    rayDashboardPort: "8265"
+    rayDashboardHost: "0.0.0.0"
+    rayActorNumCpus: "2"
+    rayNumCpus: "4"
+    rayObjectStoreMemoryGb: "0.25"
+    rayTempDir: "/tmp/ray"
+    rayLogLevel: "INFO"
+    disableRayDashboard: true
+    disableCeleryFlower: true
+    dockerEnvironment: false
+    enableUploadImage: false
+    celeryWorkerPrefetchMultiplier: "1"
+    celeryTaskTimeLimit: "3600"
+    elasticsearchRequestTimeout: "30"
+    queues: "process_q,forward_q"
+    workerName: ""
+    workerConcurrency: "4"
+
+  # Telemetry and Monitoring Configuration
+  telemetry:
+    enabled: false
+    serviceName: "nexent-backend"
+    jaegerEndpoint: "http://localhost:14268/api/traces"
+    prometheusPort: "8000"
+    telemetrySampleRate: "1.0"
+    slowRequestThresholdSeconds: "5.0"
+    slowTokenRateThreshold: "10.0"
+
+  # Market Backend
+  marketBackend: "https://market.nexent.tech"
+
+  # General
+  skipProxy: "true"
+  umask: "0022"
+
+# Secrets - IMPORTANT: Override these in production!
+secrets:
+  elasticPassword: "nexent@2025"
+  elasticsearchApiKey: ""
+  postgresPassword: "nexent@4321"
+  minio:
+    rootUser: "nexent"
+    rootPassword: "nexent@4321"
+    accessKey: ""
+    secretKey: ""
+  ssh:
+    username: "nexent"
+    password: "nexent@2025"
+  # Supabase secrets (generated during deployment for full version)
+  supabase:
+    jwtSecret: ""
+    secretKeyBase: ""
+    vaultEncKey: ""
+    anonKey: ""
+    serviceRoleKey: ""
+    postgresPassword: "Huawei123"
+    gotrueDbUrl: "postgres://supabase_auth_admin:Huawei123@nexent-supabase-db:5436/supabase?search_path=auth&sslmode=disable"
+
+# Service configurations
+services:
+  web:
+    type: NodePort
+    nodePort: 30000
+  northbound:
+    type: NodePort
+    nodePort: 30013
+  minio:
+    type: ClusterIP
+  openssh:
+    enabled: true
+    type: NodePort
+    nodePort: 30022
+
+# Resource limits and requests
+resources:
+  # Backend services (config, runtime, mcp, northbound)
+  backend:
+    requests:
+      memory: "256Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1"
+
+  # Web service
+  web:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # Data process service
+  dataProcess:
+    requests:
+      memory: "512Mi"
+      cpu: "4"
+    limits:
+      memory: "4Gi"
+      cpu: "8"
+
+  # Infrastructure
+  elasticsearch:
+    requests:
+      memory: "512Mi"
+      cpu: "2"
+    limits:
+      memory: "4Gi"
+      cpu: "2"
+
+  postgresql:
+    requests:
+      memory: "256Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1"
+
+  redis:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+  minio:
+    requests:
+      memory: "256Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1"
+
+  # OpenSSH Server
+  openssh:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "200m"
+
+  # Supabase Kong
+  supabaseKong:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # Supabase Auth
+  supabaseAuth:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1"
+
+  # Supabase DB
+  supabaseDb:
+    requests:
+      memory: "256Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1"
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: nexent.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: nexent-tls
+  #    hosts:
+  #      - nexent.local
