@@ -1,11 +1,12 @@
-import { useMutation } from "@tanstack/react-query";
+import { useState } from "react";
 import type { MessageInstance } from "antd/es/message/interface";
-import { enableMcpToolService } from "@/services/mcpToolsService";
+import { disableMcpToolService, enableMcpToolService } from "@/services/mcpToolsService";
+import { ApiError } from "@/services/api";
 import { MCP_SERVICE_STATUS } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 
 type UseMcpToolsToggleParams = {
-  loadServerList: () => Promise<unknown>;
+  loadServerList: () => Promise<{ success: boolean; data?: McpServiceItem[] }>;
   setSelectedService: React.Dispatch<React.SetStateAction<McpServiceItem | null>>;
   t: (key: string) => string;
   message: MessageInstance;
@@ -17,34 +18,81 @@ export function useMcpToolsToggle({
   t,
   message,
 }: UseMcpToolsToggleParams) {
-  const toggleMutation = useMutation({ mutationFn: enableMcpToolService });
+  const [togglingServiceId, setTogglingServiceId] = useState<number | null>(null);
 
-  const toggleServiceStatus = async (service: McpServiceItem) => {
-    const nextEnabled = service.status !== MCP_SERVICE_STATUS.ENABLED;
-    const result = await toggleMutation.mutateAsync({
-      name: service.name,
-      enabled: nextEnabled,
-    });
-
-    if (!result.success) {
-      throw new Error(t("mcpTools.service.toggleFailed"));
+  const resolveToggleErrorMessage = (error: unknown, nextEnabled: boolean) => {
+    if (!nextEnabled) {
+      return t("mcpTools.service.toggleFailed");
     }
 
-    await loadServerList();
-    setSelectedService((prev) =>
-      prev && prev.name === service.name
-        ? {
-            ...prev,
-            status: nextEnabled ? MCP_SERVICE_STATUS.ENABLED : MCP_SERVICE_STATUS.DISABLED,
-          }
-        : prev
-    );
+    if (error instanceof ApiError) {
+      const code = String(error.code);
+      const text = String(error.message || "").toLowerCase();
 
-    message.success(nextEnabled ? t("mcpTools.service.enabled") : t("mcpTools.service.disabled"));
+      if (code === "503" || text.includes("mcp connection failed")) {
+        return t("mcpTools.error.connectionFailed");
+      }
+      if (text.includes("already uses this name") || text.includes("name already exists")) {
+        return t("mcpTools.service.enableNameConflict");
+      }
+    }
+
+    return t("mcpTools.service.toggleFailed");
+  };
+
+  const toggleServiceStatus = async (service: McpServiceItem) => {
+    if (togglingServiceId === service.mcpId) {
+      return;
+    }
+
+    const nextEnabled = service.status !== MCP_SERVICE_STATUS.ENABLED;
+    const toastKey = `mcp-tools-toggle-${service.mcpId}`;
+
+    setTogglingServiceId(service.mcpId);
+    message.open({
+      key: toastKey,
+      type: "loading",
+      content: nextEnabled ? t("mcpTools.service.enabling") : t("mcpTools.service.disabling"),
+      duration: 0,
+    });
+
+    try {
+      const mutationFn = nextEnabled ? enableMcpToolService : disableMcpToolService;
+      await mutationFn({
+        mcp_id: service.mcpId,
+        enabled: nextEnabled,
+      });
+
+      const listResult = await loadServerList();
+      const latestService = listResult.data?.find((item) => item.mcpId === service.mcpId);
+      setSelectedService((prev) =>
+        prev && prev.mcpId === service.mcpId
+          ? latestService ?? {
+              ...prev,
+              status: nextEnabled ? MCP_SERVICE_STATUS.ENABLED : MCP_SERVICE_STATUS.DISABLED,
+            }
+          : prev
+      );
+
+      message.open({
+        key: toastKey,
+        type: "success",
+        content: nextEnabled ? t("mcpTools.service.enabled") : t("mcpTools.service.disabled"),
+      });
+    } catch (error) {
+      message.open({
+        key: toastKey,
+        type: "error",
+        content: resolveToggleErrorMessage(error, nextEnabled),
+      });
+      throw error;
+    } finally {
+      setTogglingServiceId(null);
+    }
   };
 
   return {
     toggleServiceStatus,
-    toggleMutation,
+    togglingServiceId,
   };
 }

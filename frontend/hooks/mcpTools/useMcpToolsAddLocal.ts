@@ -1,16 +1,14 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import type { MessageInstance } from "antd/es/message/interface";
-import type { UploadFile } from "antd/es/upload/interface";
 import log from "@/lib/logger";
-import { MCP_SERVER_TYPE, MCP_TAB } from "@/const/mcpTools";
-import { addMcpToolService, resolveContainerServerInfo } from "@/services/mcpToolsService";
+import { MCP_TRANSPORT_TYPE, MCP_TAB } from "@/const/mcpTools";
 import {
-  type AddMcpLocalActions,
-  type AddMcpLocalState,
-  type McpServerType,
-  type McpTab,
-} from "@/types/mcpTools";
+  addContainerMcpToolService,
+  addMcpToolService,
+  resolveContainerServerInfo,
+} from "@/services/mcpToolsService";
+import { type McpTransportType, type McpTab } from "@/types/mcpTools";
 
 type UseMcpToolsAddLocalParams = {
   addModalTab: McpTab;
@@ -31,11 +29,9 @@ export function useMcpToolsAddLocal({
   const [newServiceUrl, setNewServiceUrl] = useState("");
   const [newServiceDesc, setNewServiceDesc] = useState("");
   const [newServiceAuthorizationToken, setNewServiceAuthorizationToken] = useState("");
-  const [newServerType, setNewServerType] = useState<McpServerType>(MCP_SERVER_TYPE.HTTP);
+  const [newTransportType, setNewTransportType] = useState<McpTransportType>(MCP_TRANSPORT_TYPE.HTTP);
   const [containerConfigJson, setContainerConfigJson] = useState("");
-  const [containerUploadFileList, setContainerUploadFileList] = useState<UploadFile[]>([]);
   const [containerPort, setContainerPort] = useState<number | undefined>(undefined);
-  const [containerServiceName, setContainerServiceName] = useState("");
   const [newTagDrafts, setNewTagDrafts] = useState<string[]>([]);
   const [newTagInputValue, setNewTagInputValue] = useState("");
   const [addingService, setAddingService] = useState(false);
@@ -47,39 +43,47 @@ export function useMcpToolsAddLocal({
     setNewServiceUrl("");
     setNewServiceDesc("");
     setNewServiceAuthorizationToken("");
-    setNewServerType(MCP_SERVER_TYPE.HTTP);
+    setNewTransportType(MCP_TRANSPORT_TYPE.HTTP);
     setContainerConfigJson("");
-    setContainerUploadFileList([]);
     setContainerPort(undefined);
-    setContainerServiceName("");
     setNewTagDrafts([]);
     setNewTagInputValue("");
     setAddingService(false);
   }, []);
 
-  const validateLocalAdd = () => {
-    if (!newServiceName.trim()) return t("mcpTools.add.validate.nameRequired");
-    if ((newServerType === MCP_SERVER_TYPE.HTTP || newServerType === MCP_SERVER_TYPE.SSE) && !newServiceUrl.trim()) {
+  const validateLocalAdd = useCallback(() => {
+    if (!newServiceName.trim()) {
+      return t("mcpTools.add.validate.nameRequired");
+    }
+    if ((newTransportType === MCP_TRANSPORT_TYPE.HTTP || newTransportType === MCP_TRANSPORT_TYPE.SSE) && !newServiceUrl.trim()) {
       return t("mcpTools.add.validate.httpUrlRequired");
     }
-    if (newServerType === MCP_SERVER_TYPE.CONTAINER) {
-      const hasConfig = containerConfigJson.trim().length > 0 || containerUploadFileList.length > 0;
+    if (newTransportType === MCP_TRANSPORT_TYPE.STDIO) {
+      const hasConfig = containerConfigJson.trim().length > 0;
       if (!hasConfig) return t("mcpTools.add.validate.containerConfigRequired");
-      if (!containerServiceName.trim() || !containerPort) {
+      if (!containerPort) {
         return t("mcpTools.add.validate.containerRequired");
       }
     }
     if (addModalTab !== MCP_TAB.LOCAL) return t("mcpTools.add.validate.localTabOnly");
     return null;
-  };
+  }, [
+    addModalTab,
+    containerConfigJson,
+    containerPort,
+    newTransportType,
+    newServiceName,
+    newServiceUrl,
+    t,
+  ]);
 
-  const handleAddService = async () => {
+  const handleAddService = useCallback(async () => {
     const validationError = validateLocalAdd();
     if (validationError) {
       log.error("[useMcpToolsAddLocal] Local add validation failed", {
         validationError,
         addModalTab,
-        serverType: newServerType,
+        transportType: newTransportType,
       });
       message.error(validationError);
       return;
@@ -91,112 +95,101 @@ export function useMcpToolsAddLocal({
     setAddingService(true);
     try {
       const resolvedServerInfo = await resolveContainerServerInfo({
-        serverType: newServerType,
+        transportType: newTransportType,
         serviceUrl: newServiceUrl,
-        containerServiceName,
         containerPort,
         containerConfigJson,
-        containerUploadFileList,
-        authorizationToken: normalizedToken,
-        t,
       });
-      if (!resolvedServerInfo.success || !resolvedServerInfo.data) {
-        throw new Error(resolvedServerInfo.message || t("mcpTools.add.failed"));
+
+      const resolvedServiceName = newServiceName.trim();
+
+      if (newTransportType === MCP_TRANSPORT_TYPE.STDIO && resolvedServerInfo.data.mcpConfig) {
+        await addContainerMcpToolService({
+          name: resolvedServiceName,
+          description: newServiceDesc.trim(),
+          tags,
+          authorization_token: normalizedToken,
+          port: containerPort as number,
+          mcp_config: resolvedServerInfo.data.mcpConfig,
+        });
+      } else {
+        await addMutation.mutateAsync({
+          name: resolvedServiceName,
+          description: newServiceDesc.trim(),
+          source: addModalTab,
+          transport_type: newTransportType,
+          server_url: resolvedServerInfo.data.finalServerUrl,
+          tags,
+          authorization_token: normalizedToken,
+          container_config: resolvedServerInfo.data.containerConfig,
+        });
       }
 
-      const result = await addMutation.mutateAsync({
-        name: newServiceName.trim(),
-        description: newServiceDesc.trim() || t("mcpTools.service.defaultDescription"),
-        source: addModalTab,
-        server_type: newServerType,
-        server_url: resolvedServerInfo.data.finalServerUrl,
-        tags,
-        authorization_token: normalizedToken,
-        container_config: resolvedServerInfo.data.containerConfig,
-      });
-
-      if (!result.success) throw new Error(result.message || t("mcpTools.add.failed"));
       await onServiceAdded();
       message.success(t("mcpTools.add.success"));
       onClose();
     } catch (error) {
-      const msg = error instanceof Error ? error.message : t("mcpTools.add.failed");
       log.error("[useMcpToolsAddLocal] Failed to add MCP service", {
         error,
         serviceName: newServiceName,
-        serverType: newServerType,
+        transportType: newTransportType,
         addModalTab,
       });
-      message.error(msg === "MCP connection failed" ? t("mcpTools.error.connectionFailed") : msg);
+      message.error(t("mcpTools.add.failed"));
     } finally {
       setAddingService(false);
     }
-  };
+  }, [
+    addModalTab,
+    addMutation,
+    containerConfigJson,
+    containerPort,
+    message,
+    newTransportType,
+    newServiceAuthorizationToken,
+    newServiceDesc,
+    newServiceName,
+    newServiceUrl,
+    newTagDrafts,
+    onClose,
+    onServiceAdded,
+    t,
+    validateLocalAdd,
+  ]);
 
-  const addNewTag = () => {
+  const addNewTag = useCallback(() => {
     const nextTag = newTagInputValue.trim();
     if (!nextTag) return;
     setNewTagDrafts((prev) => (prev.includes(nextTag) ? prev : [...prev, nextTag]));
     setNewTagInputValue("");
-  };
+  }, [newTagInputValue]);
 
   const removeNewTag = useCallback((index: number) => {
     setNewTagDrafts((prev) => prev.filter((_, idx) => idx !== index));
   }, []);
 
-  const state: AddMcpLocalState = useMemo(
-    () => ({
-      newServiceName,
-      newServiceDesc,
-      newServerType,
-      newServiceUrl,
-      newServiceAuthorizationToken,
-      containerUploadFileList,
-      containerConfigJson,
-      containerPort,
-      containerServiceName,
-      newTagDrafts,
-      newTagInputValue,
-      addingService,
-    }),
-    [
-      newServiceName,
-      newServiceDesc,
-      newServerType,
-      newServiceUrl,
-      newServiceAuthorizationToken,
-      containerUploadFileList,
-      containerConfigJson,
-      containerPort,
-      containerServiceName,
-      newTagDrafts,
-      newTagInputValue,
-      addingService,
-    ]
-  );
-
-  const actions: AddMcpLocalActions = useMemo(
-    () => ({
-      onNewServiceNameChange: setNewServiceName,
-      onNewServiceDescChange: setNewServiceDesc,
-      onNewServerTypeChange: setNewServerType,
-      onNewServiceUrlChange: setNewServiceUrl,
-      onNewServiceAuthorizationTokenChange: setNewServiceAuthorizationToken,
-      onContainerUploadFileListChange: setContainerUploadFileList,
-      onContainerConfigJsonChange: setContainerConfigJson,
-      onContainerPortChange: setContainerPort,
-      onContainerServiceNameChange: setContainerServiceName,
-      onAddNewTag: addNewTag,
-      onRemoveNewTag: removeNewTag,
-      onNewTagInputChange: setNewTagInputValue,
-      onSaveAndAdd: handleAddService,
-    }),
-    [removeNewTag]
-  );
-
   return {
-    state,
-    actions,
+    newServiceName,
+    newServiceDesc,
+    newTransportType,
+    newServiceUrl,
+    newServiceAuthorizationToken,
+    containerConfigJson,
+    containerPort,
+    newTagDrafts,
+    newTagInputValue,
+    addingService,
+    setNewServiceName,
+    setNewServiceDesc,
+    setNewTransportType,
+    setNewServiceUrl,
+    setNewServiceAuthorizationToken,
+    setContainerConfigJson,
+    setContainerPort,
+    addNewTag,
+    removeNewTag,
+    setNewTagInputValue,
+    handleAddService,
     reset,
   };
 }

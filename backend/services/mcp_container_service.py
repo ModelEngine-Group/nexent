@@ -207,6 +207,85 @@ class MCPContainerManager:
             logger.error(f"Failed to stop or remove container: {e}")
             raise MCPContainerError(f"Failed to stop container: {e}")
 
+    async def stop_mcp_container_only(self, container_id: str) -> bool:
+        """
+        Stop MCP container without removing it.
+
+        Args:
+            container_id: Container ID or name
+
+        Returns:
+            True if container was stopped, False if not found
+
+        Raises:
+            MCPContainerError: If container stop fails
+        """
+        try:
+            return await self.client.stop_container(container_id)
+        except ContainerError as e:
+            logger.error(f"Failed to stop container: {e}")
+            raise MCPContainerError(f"Failed to stop container: {e}")
+
+    async def remove_mcp_container(self, container_id: str) -> bool:
+        """
+        Remove MCP container without stopping logic.
+
+        Args:
+            container_id: Container ID or name
+
+        Returns:
+            True if container was removed, False if not found
+
+        Raises:
+            MCPContainerError: If container removal fails
+        """
+        try:
+            return await self.client.remove_container(container_id)
+        except ContainerError as e:
+            logger.error(f"Failed to remove container: {e}")
+            raise MCPContainerError(f"Failed to remove container: {e}")
+
+    async def start_existing_mcp_container(self, container_id: str) -> Dict[str, str]:
+        """
+        Start an existing container by container ID and return runtime access fields.
+
+        Args:
+            container_id: Existing container ID or name
+
+        Returns:
+            Dictionary with container_id, mcp_url, host_port, status, container_name
+
+        Raises:
+            MCPContainerError: If startup fails or runtime info cannot be resolved
+        """
+        try:
+            # SDK Docker client exposes the native docker client as `client`.
+            container = self.client.client.containers.get(container_id)
+            container.start()
+            container.reload()
+            if container.status != "running":
+                raise MCPContainerError(
+                    f"Container {container_id} is not running after start: {container.status}"
+                )
+
+            status = self.client.get_container_status(container_id)
+            if not status:
+                raise MCPContainerError("Container status is unavailable after start")
+
+            return {
+                "container_id": status.get("container_id") or container.id,
+                "mcp_url": status.get("service_url") or "",
+                "host_port": status.get("host_port") or "",
+                "status": status.get("status") or "running",
+                "container_name": status.get("name") or container.name,
+            }
+        except ContainerError as e:
+            logger.error(f"Failed to start existing container: {e}")
+            raise MCPContainerError(f"Failed to start existing container: {e}")
+        except Exception as e:
+            logger.error(f"Failed to start existing container: {e}")
+            raise MCPContainerError(f"Failed to start existing container: {e}")
+
     def list_mcp_containers(self, tenant_id: Optional[str] = None) -> List[Dict[str, any]]:
         """
         List all MCP containers, optionally filtered by tenant

@@ -60,9 +60,8 @@ export default function AddMcpServiceModal({
       open
       footer={null}
       closable
-      maskClosable={false}
       centered
-      width={addModalTab === MCP_TAB.MARKET ? 1200 : 900}
+      width={addModalTab === MCP_TAB.MCP_REGISTRY ? 1200 : 900}
       onCancel={onClose}
       styles={{
         mask: { background: "rgba(15,23,42,0.6)", backdropFilter: "blur(2px)" },
@@ -82,7 +81,7 @@ export default function AddMcpServiceModal({
             onChange={(value) => setAddModalTab(value as McpTab)}
             options={[
               { label: t("mcpTools.addModal.tabLocal"), value: MCP_TAB.LOCAL },
-              { label: t("mcpTools.addModal.tabMarket"), value: MCP_TAB.MARKET },
+              { label: t("mcpTools.addModal.tabMarket"), value: MCP_TAB.MCP_REGISTRY },
             ]}
             className="h-9 rounded-full border border-slate-200 bg-slate-100 p-[2px] text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-full [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:leading-[30px] [&_.ant-segmented-thumb]:rounded-full [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
           />
@@ -90,14 +89,57 @@ export default function AddMcpServiceModal({
 
         {addModalTab === MCP_TAB.LOCAL ? (
           <AddMcpServiceLocalSection
-            state={local.state}
-            actions={local.actions}
+            newServiceName={local.newServiceName}
+            newServiceDesc={local.newServiceDesc}
+            newTransportType={local.newTransportType}
+            newServiceUrl={local.newServiceUrl}
+            newServiceAuthorizationToken={local.newServiceAuthorizationToken}
+            containerConfigJson={local.containerConfigJson}
+            containerPort={local.containerPort}
+            newTagDrafts={local.newTagDrafts}
+            newTagInputValue={local.newTagInputValue}
+            addingService={local.addingService}
+            setNewServiceName={local.setNewServiceName}
+            setNewServiceDesc={local.setNewServiceDesc}
+            setNewTransportType={local.setNewTransportType}
+            setNewServiceUrl={local.setNewServiceUrl}
+            setNewServiceAuthorizationToken={local.setNewServiceAuthorizationToken}
+            setContainerConfigJson={local.setContainerConfigJson}
+            setContainerPort={local.setContainerPort}
+            addNewTag={local.addNewTag}
+            removeNewTag={local.removeNewTag}
+            setNewTagInputValue={local.setNewTagInputValue}
+            handleAddService={local.handleAddService}
             t={(key, params) => String(t(key, params))}
           />
         ) : (
           <AddMcpServiceMarketSection
-            state={market.state}
-            actions={market.actions}
+            marketSearchValue={market.marketSearchValue}
+            selectedMarketService={market.selectedMarketService}
+            filteredMarketServices={market.filteredMarketServices}
+            marketLoading={market.marketLoading}
+            marketPage={market.marketPage}
+            hasPrevMarketPage={market.hasPrevMarketPage}
+            hasNextMarketPage={market.hasNextMarketPage}
+            marketVersion={market.marketVersion}
+            marketUpdatedSince={market.marketUpdatedSince}
+            marketIncludeDeleted={market.marketIncludeDeleted}
+            quickAddPickerVisible={market.quickAddPickerVisible}
+            quickAddCandidateService={market.quickAddCandidateService}
+            quickAddOptions={market.quickAddOptions}
+            selectedQuickAddOptionKey={market.selectedQuickAddOptionKey}
+            quickAddSubmitting={market.quickAddSubmitting}
+            setMarketSearchValue={market.setMarketSearchValue}
+            setSelectedMarketService={market.setSelectedMarketService}
+            setMarketVersion={market.setMarketVersion}
+            setMarketUpdatedSince={market.setMarketUpdatedSince}
+            setMarketIncludeDeleted={market.setMarketIncludeDeleted}
+            setSelectedQuickAddOptionKey={market.setSelectedQuickAddOptionKey}
+            handleMarketPrevPage={market.handleMarketPrevPage}
+            handleMarketNextPage={market.handleMarketNextPage}
+            handleQuickAddFromMarket={market.handleQuickAddFromMarket}
+            handleCloseQuickAddPicker={market.handleCloseQuickAddPicker}
+            handleConfirmQuickAddOption={market.handleConfirmQuickAddOption}
             t={(key, params) => String(t(key, params))}
           />
         )}

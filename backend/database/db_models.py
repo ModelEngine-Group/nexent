@@ -334,6 +334,16 @@ class McpRecord(TableBase):
         doc="Authorization token for MCP server authentication (e.g., Bearer token)",
         default=None,
     )
+    souce = Column(String(30), doc="Source type: local/mcp_registry")
+    market_name = Column(String(200), doc="Market identifier")
+    version = Column(String(50), doc="MCP version")
+    mcp_registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
+    transport_type = Column(String(30), doc="Transport type: streamable-http/sse/stdio")
+    config_json = Column(JSON, doc="MCP config data")
+    enabled = Column(Boolean, default=True, doc="Enabled")
+    tags = Column(String(200), doc="Tags")
+    description = Column(String(100), doc="Description")
+    last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 
 
 class McpServiceManage(TableBase):
@@ -352,7 +362,6 @@ class McpServiceManage(TableBase):
     mcp_server = Column(String(500), doc="MCP server address")
     source_type = Column(String(30), doc="Source type: local/registry")
     market_name = Column(String(200), doc="Market identifier")
-    mcp_version = Column(String(50), doc="MCP version")
     transport_type = Column(String(30), doc="Transport type: streamable-http/sse/stdio")
     config_json = Column(JSON, doc="MCP config data")
     status = Column(Boolean, default=None, doc="Health status")

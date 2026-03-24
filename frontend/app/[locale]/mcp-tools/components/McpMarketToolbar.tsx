@@ -1,50 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, DatePicker, Input, Select, Switch } from "antd";
+import { DatePicker, Input, Select, Switch } from "antd";
 import dayjs from "dayjs";
 import { VERSION_PATTERN } from "@/lib/mcpTools";
 
 interface Props {
-  state: {
-    marketSearchValue: string;
-    marketLoading: boolean;
-    marketPage: number;
-    resultCount: number;
-    marketVersion: string;
-    marketUpdatedSince: string;
-    marketIncludeDeleted: boolean;
-  };
-  actions: {
-    onMarketSearchChange: (value: string) => void;
-    onRefreshMarket: () => void;
-    onMarketVersionChange: (value: string) => void;
-    onMarketUpdatedSinceChange: (value: string) => void;
-    onMarketIncludeDeletedChange: (value: boolean) => void;
-  };
+  marketSearchValue: string;
+  marketPage: number;
+  resultCount: number;
+  marketVersion: string;
+  marketUpdatedSince: string;
+  marketIncludeDeleted: boolean;
+  onMarketSearchChange: (value: string) => void;
+  onMarketVersionChange: (value: string) => void;
+  onMarketUpdatedSinceChange: (value: string) => void;
+  onMarketIncludeDeletedChange: (value: boolean) => void;
   t: (key: string, params?: Record<string, unknown>) => string;
 }
 
 export default function McpMarketToolbar({
-  state,
-  actions,
+  marketSearchValue,
+  marketPage,
+  resultCount,
+  marketVersion,
+  marketUpdatedSince,
+  marketIncludeDeleted,
+  onMarketSearchChange,
+  onMarketVersionChange,
+  onMarketUpdatedSinceChange,
+  onMarketIncludeDeletedChange,
   t,
 }: Props) {
-  const {
-    marketSearchValue,
-    marketLoading,
-    marketPage,
-    resultCount,
-    marketVersion,
-    marketUpdatedSince,
-    marketIncludeDeleted,
-  } = state;
-  const {
-    onMarketSearchChange,
-    onRefreshMarket,
-    onMarketVersionChange,
-    onMarketUpdatedSinceChange,
-    onMarketIncludeDeletedChange,
-  } = actions;
-
   const [marketVersionMode, setMarketVersionMode] = useState<"all" | "latest" | "custom">("latest");
   const [customVersion, setCustomVersion] = useState("");
 
@@ -110,9 +95,6 @@ export default function McpMarketToolbar({
           size="large"
           className="w-full rounded-2xl"
         />
-        <Button className="rounded-full" onClick={onRefreshMarket} loading={marketLoading}>
-          {t("common.refresh")}
-        </Button>
         <div className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
           {t("mcpTools.market.pageResult", { page: marketPage, count: resultCount })}
         </div>

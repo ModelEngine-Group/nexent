@@ -1,63 +1,83 @@
 import { Modal, Input, Button, Tag } from "antd";
 import { useTranslation } from "react-i18next";
+import { useState } from "react";
 import {
   MCP_CONTAINER_STATUS,
   MCP_HEALTH_STATUS,
-  MCP_SERVER_TYPE,
+  MCP_TRANSPORT_TYPE,
   MCP_SERVICE_STATUS,
   MCP_TAB,
 } from "@/const/mcpTools";
 import {
   type McpContainerStatus,
-  type McpServiceDetailActions,
-  type McpServiceDetailState,
   type McpHealthStatus,
   type McpServiceItem,
-  type McpServerType,
-  type McpServiceStatus,
-  type McpTab,
 } from "@/types/mcpTools";
+import { extractRegistryLinks, toPrettyRegistryJson } from "@/lib/mcpTools";
 import McpServiceDetailToolListModal from "./McpServiceDetailToolListModal";
+import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 
 interface McpServiceDetailModalProps {
   open: boolean;
-  detailState: McpServiceDetailState;
-  detailActions: McpServiceDetailActions;
+  selectedService: McpServiceItem | null;
+  draftService: McpServiceItem | null;
+  tagDrafts: string[];
+  tagInputValue: string;
+  healthCheckLoading: boolean;
+  loadingTools: boolean;
+  toolsModalVisible: boolean;
+  currentServerTools: any[];
+  setDraftService: (service: McpServiceItem) => void;
+  setTagInputValue: (value: string) => void;
+  addDetailTag: () => void;
+  removeTag: (index: number) => void;
+  handleHealthCheck: () => void;
+  handleViewTools: () => void;
+  handleSaveUpdates: () => void;
+  closeToolsModal: () => void;
+  handleRefreshTools: () => void;
   onDeleteConfirm: (serviceName: string) => void;
   onToggleEnable: (service: McpServiceItem) => void;
+  toggleLoading?: boolean;
   onClose: () => void;
 }
 
 export default function McpServiceDetailModal({
   open,
-  detailState,
-  detailActions,
+  selectedService,
+  draftService,
+  tagDrafts,
+  tagInputValue,
+  healthCheckLoading,
+  loadingTools,
+  toolsModalVisible,
+  currentServerTools,
+  setDraftService,
+  setTagInputValue,
+  addDetailTag,
+  removeTag,
+  handleHealthCheck,
+  handleViewTools,
+  handleSaveUpdates,
+  closeToolsModal,
+  handleRefreshTools,
   onDeleteConfirm,
   onToggleEnable,
+  toggleLoading = false,
   onClose,
 }: McpServiceDetailModalProps) {
-  const {
-    selectedService,
-    draftService,
-    tagDrafts,
-    tagInputValue,
-    healthCheckLoading,
-    loadingTools,
-    toolsModalVisible,
-    currentServerTools,
-  } = detailState;
-  const {
-    onDraftServiceChange,
-    onTagInputChange,
-    onAddDetailTag,
-    onRemoveTag,
-    onHealthCheck,
-    onViewTools,
-    onSaveUpdates,
-    onCloseToolsModal,
-    onRefreshTools,
-  } = detailActions;
   const { t } = useTranslation("common");
+  const [logsModalOpen, setLogsModalOpen] = useState(false);
+  const [showServerJsonModal, setShowServerJsonModal] = useState(false);
+  const hasRegistryJson = Boolean(draftService?.mcpRegistryJson);
+  const [showConfigJsonModal, setShowConfigJsonModal] = useState(false);
+  const hasConfigJson = Boolean(draftService?.configJson);
+
+  const { websiteUrl: registryWebsiteUrl, repositoryUrl: registryRepositoryUrl } = extractRegistryLinks(
+    draftService?.mcpRegistryJson
+  );
+  const registryJsonPretty = toPrettyRegistryJson(draftService?.mcpRegistryJson);
+  const configJsonPretty = toPrettyRegistryJson(draftService?.configJson);
 
   const getHealthStatusLabel = (status: McpHealthStatus) => {
     if (status === MCP_HEALTH_STATUS.HEALTHY) {
@@ -89,7 +109,6 @@ export default function McpServiceDetailModal({
         open
         footer={null}
         closable
-        maskClosable={false}
         centered
         width={900}
         onCancel={onClose}
@@ -112,7 +131,7 @@ export default function McpServiceDetailModal({
               <Input
                 value={draftService.name}
                 onChange={(event) =>
-                  onDraftServiceChange({
+                  setDraftService({
                     ...draftService,
                     name: event.target.value,
                   })
@@ -125,7 +144,7 @@ export default function McpServiceDetailModal({
               <Input
                 value={draftService.description}
                 onChange={(event) =>
-                  onDraftServiceChange({
+                  setDraftService({
                     ...draftService,
                     description: event.target.value,
                   })
@@ -138,7 +157,7 @@ export default function McpServiceDetailModal({
               <Input
                 value={draftService.serverUrl}
                 onChange={(event) =>
-                  onDraftServiceChange({
+                  setDraftService({
                     ...draftService,
                     serverUrl: event.target.value,
                   })
@@ -146,13 +165,13 @@ export default function McpServiceDetailModal({
                 className="mt-2 w-full rounded-2xl"
               />
             </label>
-            {draftService.serverType === MCP_SERVER_TYPE.HTTP || draftService.serverType === MCP_SERVER_TYPE.SSE ? (
+            {draftService.transportType === MCP_TRANSPORT_TYPE.HTTP || draftService.transportType === MCP_TRANSPORT_TYPE.SSE ? (
               <label className="text-sm text-slate-500">
                 {t("mcpTools.detail.bearerTokenOptional")}
                 <Input
                   value={draftService.authorizationToken ?? ""}
                   onChange={(event) =>
-                    onDraftServiceChange({
+                    setDraftService({
                       ...draftService,
                       authorizationToken: event.target.value,
                     })
@@ -168,19 +187,51 @@ export default function McpServiceDetailModal({
             <div className="flex items-center justify-between">
               <span className="text-slate-500">{t("mcpTools.detail.source")}</span>
               <span className="font-medium text-slate-800">
-                {draftService.source === MCP_TAB.LOCAL ? t("mcpTools.source.local") : t("mcpTools.source.market")}
+                {draftService.source === MCP_TAB.LOCAL ? t("mcpTools.source.local") : t("mcpTools.source.mcp_registry")}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-slate-500">{t("mcpTools.detail.serverType")}</span>
               <span className="font-medium text-slate-800">
-                {draftService.serverType === MCP_SERVER_TYPE.HTTP
+                {draftService.transportType === MCP_TRANSPORT_TYPE.HTTP
                   ? t("mcpTools.serverType.http")
-                  : draftService.serverType === MCP_SERVER_TYPE.SSE
+                  : draftService.transportType === MCP_TRANSPORT_TYPE.SSE
                   ? t("mcpTools.serverType.sse")
-                  : t("mcpTools.serverType.container")}
+                  : t("mcpTools.serverType.stdio")}
               </span>
             </div>
+            {draftService.version ? (
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">{t("mcpTools.detail.version")}</span>
+                <span className="font-medium text-slate-800">{draftService.version}</span>
+              </div>
+            ) : null}
+            {registryWebsiteUrl ? (
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-500">{t("mcpTools.detail.website")}</span>
+                <a
+                  href={registryWebsiteUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="max-w-[70%] truncate font-medium text-sky-700 hover:text-sky-800"
+                >
+                  {registryWebsiteUrl}
+                </a>
+              </div>
+            ) : null}
+            {registryRepositoryUrl ? (
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-500">{t("mcpTools.detail.repository")}</span>
+                <a
+                  href={registryRepositoryUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="max-w-[70%] truncate font-medium text-sky-700 hover:text-sky-800"
+                >
+                  {registryRepositoryUrl}
+                </a>
+              </div>
+            ) : null}
             <div className="flex items-center justify-between">
               <span className="text-slate-500">{t("mcpTools.detail.status")}</span>
               <span className="font-medium text-slate-800">
@@ -197,7 +248,7 @@ export default function McpServiceDetailModal({
                   size="small"
                   className="rounded-full"
                   autoInsertSpace={false}
-                  onClick={onHealthCheck}
+                  onClick={handleHealthCheck}
                   loading={healthCheckLoading}
                 >
                   {healthCheckLoading
@@ -206,7 +257,7 @@ export default function McpServiceDetailModal({
                 </Button>
               </div>
             </div>
-            {draftService.serverType === MCP_SERVER_TYPE.CONTAINER ? (
+            {draftService.transportType === MCP_TRANSPORT_TYPE.STDIO ? (
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">{t("mcpTools.detail.containerStatus")}</span>
                 <span className="font-medium text-slate-800">{getContainerStatusLabel(draftService.containerStatus)}</span>
@@ -216,16 +267,48 @@ export default function McpServiceDetailModal({
 
           <div>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("mcpTools.detail.tools")}</p>
-              <Button
-                size="small"
-                className="rounded-full"
-                autoInsertSpace={false}
-                loading={loadingTools}
-                onClick={onViewTools}
-              >
-                {t("mcpTools.detail.viewTools")}
-              </Button>
+              <span className="text-slate-500">{t("mcpTools.detail.tools")}</span>
+              <div className="flex items-center gap-2">
+                {draftService.transportType === MCP_TRANSPORT_TYPE.STDIO && draftService.containerId ? (
+                  <Button
+                    size="small"
+                    className="rounded-full"
+                    autoInsertSpace={false}
+                    onClick={() => setLogsModalOpen(true)}
+                  >
+                    {t("mcpTools.detail.viewContainerLogs")}
+                  </Button>
+                ) : null}
+                {hasRegistryJson ? (
+                  <Button
+                    size="small"
+                    className="rounded-full"
+                    autoInsertSpace={false}
+                    onClick={() => setShowServerJsonModal(true)}
+                  >
+                    {t("mcpTools.market.viewServerJson")}
+                  </Button>
+                ) : null}
+                {hasConfigJson ? (
+                  <Button
+                    size="small"
+                    className="rounded-full"
+                    autoInsertSpace={false}
+                    onClick={() => setShowConfigJsonModal(true)}
+                  >
+                    {t("mcpTools.detail.viewConfigJson")}
+                  </Button>
+                ) : null}
+                <Button
+                  size="small"
+                  className="rounded-full"
+                  autoInsertSpace={false}
+                  loading={loadingTools}
+                  onClick={handleViewTools}
+                >
+                  {t("mcpTools.detail.viewTools")}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -237,7 +320,7 @@ export default function McpServiceDetailModal({
                   <Tag className="rounded-full px-3 py-1 m-0 leading-none">{tag}</Tag>
                   <button
                     type="button"
-                    onClick={() => onRemoveTag(index)}
+                    onClick={() => removeTag(index)}
                     className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] text-slate-500 transition hover:bg-slate-300 hover:text-slate-700"
                     aria-label={t("mcpTools.detail.removeTagAria", { tag })}
                   >
@@ -248,9 +331,9 @@ export default function McpServiceDetailModal({
               <Input
                 size="small"
                 value={tagInputValue}
-                onChange={(event) => onTagInputChange(event.target.value)}
-                onPressEnter={onAddDetailTag}
-                onBlur={onAddDetailTag}
+                onChange={(event) => setTagInputValue(event.target.value)}
+                onPressEnter={addDetailTag}
+                onBlur={addDetailTag}
                     placeholder={t("mcpTools.detail.tagInputPlaceholder")}
                 className="w-40 rounded-full"
               />
@@ -267,13 +350,15 @@ export default function McpServiceDetailModal({
           >
             {t("common.delete")}
           </Button>
-          <Button className="rounded-full" onClick={onSaveUpdates}>
+          <Button className="rounded-full" onClick={handleSaveUpdates}>
             {t("mcpTools.detail.save")}
           </Button>
           <Button
             type="primary"
             className="rounded-full"
             autoInsertSpace={false}
+            loading={toggleLoading}
+            disabled={toggleLoading}
             onClick={() => onToggleEnable(selectedService)}
           >
             {draftService.status === MCP_SERVICE_STATUS.ENABLED
@@ -286,12 +371,52 @@ export default function McpServiceDetailModal({
 
       <McpServiceDetailToolListModal
         open={toolsModalVisible}
-        onCancel={onCloseToolsModal}
+        onCancel={closeToolsModal}
         loading={loadingTools}
         tools={currentServerTools}
         serverName={draftService.name || String(t("mcpTools.service.defaultName"))}
-        onRefresh={onRefreshTools}
+        onRefresh={handleRefreshTools}
       />
+
+      {showServerJsonModal && hasRegistryJson ? (
+        <Modal
+          open
+          footer={null}
+          closable
+          centered
+          width={960}
+          onCancel={() => setShowServerJsonModal(false)}
+          title={t("mcpTools.market.serverJsonTitle", { name: draftService.name })}
+        >
+          <pre className="max-h-[65vh] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+            {registryJsonPretty}
+          </pre>
+        </Modal>
+      ) : null}
+
+      {showConfigJsonModal && hasConfigJson ? (
+        <Modal
+          open
+          footer={null}
+          closable
+          centered
+          width={960}
+          onCancel={() => setShowConfigJsonModal(false)}
+          title={t("mcpTools.detail.configJsonTitle", { name: draftService.name })}
+        >
+          <pre className="max-h-[65vh] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+            {configJsonPretty}
+          </pre>
+        </Modal>
+      ) : null}
+
+      {draftService.transportType === MCP_TRANSPORT_TYPE.STDIO && draftService.containerId ? (
+        <McpContainerLogsModal
+          open={logsModalOpen}
+          onCancel={() => setLogsModalOpen(false)}
+          containerId={draftService.containerId}
+        />
+      ) : null}
     </>
   );
 }
