@@ -26,10 +26,29 @@ async def stt_websocket(websocket: WebSocket):
     logger.info("STT WebSocket connection attempt...")
     await websocket.accept()
     logger.info("STT WebSocket connection accepted")
-    
+
+    # Receive config from client
+    client_config = {}
+    try:
+        msg = await websocket.receive()
+        if msg["type"] == "websocket.receive":
+            import json
+            client_config = json.loads(msg["text"])
+            logger.info(f"Received client config: {client_config}")
+        elif msg["type"] == "bytes":
+            try:
+                import json
+                client_config = json.loads(msg["bytes"].decode('utf-8'))
+                logger.info(f"Received client config from bytes: {client_config}")
+            except Exception as e:
+                logger.warning(f"Failed to parse bytes as JSON: {e}")
+    except Exception as e:
+        logger.error(f"Error receiving config: {e}")
+        client_config = {}
+
     try:
         voice_service = get_voice_service()
-        await voice_service.start_stt_streaming_session(websocket)
+        await voice_service.start_stt_streaming_session(websocket, stt_config=client_config)
     except STTConnectionException as e:
         logger.error(f"STT WebSocket error: {str(e)}")
         await websocket.send_json({"error": str(e)})
