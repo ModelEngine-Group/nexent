@@ -6,15 +6,15 @@ import { MCP_TRANSPORT_TYPE, MCP_TAB } from "@/const/mcpTools";
 import {
   addContainerMcpToolService,
   addMcpToolService,
-  fetchMarketMcpCards,
-  type MarketMcpCard,
+  fetchRegistryMcpCards,
+  type RegistryMcpCard,
 } from "@/services/mcpToolsService";
 import {
-  type MarketQuickAddOption,
+  type RegistryQuickAddOption,
   type McpTab,
 } from "@/types/mcpTools";
 
-type UseMcpToolsAddMarketParams = {
+type UseMcpToolsAddRegistryParams = {
   open: boolean;
   addModalTab: McpTab;
   t: (key: string) => string;
@@ -66,7 +66,7 @@ const pickQuickAddPort = (): number => {
   return 5500 + seed;
 };
 
-const extractPackageEnvTemplate = (service: MarketMcpCard, pkgIdentifier?: string): Record<string, string> => {
+const extractPackageEnvTemplate = (service: RegistryMcpCard, pkgIdentifier?: string): Record<string, string> => {
   if (!pkgIdentifier) return {};
   const rawPackages = (service.serverJson as { packages?: unknown[] } | undefined)?.packages;
   if (!Array.isArray(rawPackages)) return {};
@@ -88,8 +88,8 @@ const extractPackageEnvTemplate = (service: MarketMcpCard, pkgIdentifier?: strin
   }, {});
 };
 
-const resolveQuickAddOptions = (service: MarketMcpCard): MarketQuickAddOption[] => {
-  const options: MarketQuickAddOption[] = [];
+const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOption[] => {
+  const options: RegistryQuickAddOption[] = [];
 
   (service.remotes || []).forEach((remote, index) => {
     const remoteTarget = resolveQuickAddTarget(remote.type, remote.url);
@@ -137,39 +137,39 @@ const resolveQuickAddOptions = (service: MarketMcpCard): MarketQuickAddOption[] 
   return options;
 };
 
-export function useMcpToolsAddMarket({
+export function useMcpToolsAddRegistry({
   open,
   addModalTab,
   t,
   message,
   onServiceAdded,
   onClose,
-}: UseMcpToolsAddMarketParams) {
-  const [marketSearchValue, setMarketSearchValue] = useState("");
-  const [selectedMarketService, setSelectedMarketService] = useState<MarketMcpCard | null>(null);
-  const [marketCurrentCursor, setMarketCurrentCursor] = useState<string | null>(null);
-  const [marketCursorHistory, setMarketCursorHistory] = useState<string[]>([]);
-  const [marketPage, setMarketPage] = useState(1);
-  const [marketVersion, setMarketVersion] = useState("latest");
-  const [marketUpdatedSince, setMarketUpdatedSince] = useState("");
-  const [marketIncludeDeleted, setMarketIncludeDeleted] = useState(false);
+}: UseMcpToolsAddRegistryParams) {
+  const [registrySearchValue, setRegistrySearchValue] = useState("");
+  const [selectedRegistryService, setSelectedRegistryService] = useState<RegistryMcpCard | null>(null);
+  const [registryCurrentCursor, setRegistryCurrentCursor] = useState<string | null>(null);
+  const [registryCursorHistory, setRegistryCursorHistory] = useState<string[]>([]);
+  const [registryPage, setRegistryPage] = useState(1);
+  const [registryVersion, setRegistryVersion] = useState("latest");
+  const [registryUpdatedSince, setRegistryUpdatedSince] = useState("");
+  const [registryIncludeDeleted, setRegistryIncludeDeleted] = useState(false);
   const [quickAddPickerVisible, setQuickAddPickerVisible] = useState(false);
-  const [quickAddCandidateService, setQuickAddCandidateService] = useState<MarketMcpCard | null>(null);
-  const [quickAddOptions, setQuickAddOptions] = useState<MarketQuickAddOption[]>([]);
+  const [quickAddCandidateService, setQuickAddCandidateService] = useState<RegistryMcpCard | null>(null);
+  const [quickAddOptions, setQuickAddOptions] = useState<RegistryQuickAddOption[]>([]);
   const [selectedQuickAddOptionKey, setSelectedQuickAddOptionKey] = useState("");
   const [addingService, setAddingService] = useState(false);
 
   const addMutation = useMutation({ mutationFn: addMcpToolService });
 
   const reset = useCallback(() => {
-    setMarketSearchValue("");
-    setMarketCurrentCursor(null);
-    setMarketCursorHistory([]);
-    setMarketPage(1);
-    setMarketVersion("latest");
-    setMarketUpdatedSince("");
-    setMarketIncludeDeleted(false);
-    setSelectedMarketService(null);
+    setRegistrySearchValue("");
+    setRegistryCurrentCursor(null);
+    setRegistryCursorHistory([]);
+    setRegistryPage(1);
+    setRegistryVersion("latest");
+    setRegistryUpdatedSince("");
+    setRegistryIncludeDeleted(false);
+    setSelectedRegistryService(null);
     setQuickAddPickerVisible(false);
     setQuickAddCandidateService(null);
     setQuickAddOptions([]);
@@ -177,37 +177,37 @@ export function useMcpToolsAddMarket({
     setAddingService(false);
   }, []);
 
-  const loadMarketFirstPage = useCallback(() => {
-    setMarketCurrentCursor(null);
-    setMarketCursorHistory([]);
-    setMarketPage(1);
+  const loadRegistryFirstPage = useCallback(() => {
+    setRegistryCurrentCursor(null);
+    setRegistryCursorHistory([]);
+    setRegistryPage(1);
   }, []);
 
   useEffect(() => {
     if (!(open && addModalTab === MCP_TAB.MCP_REGISTRY)) return;
     const timer = window.setTimeout(() => {
-      loadMarketFirstPage();
+      loadRegistryFirstPage();
     }, 350);
     return () => window.clearTimeout(timer);
   }, [
     open,
     addModalTab,
-    marketSearchValue,
-    marketVersion,
-    marketUpdatedSince,
-    marketIncludeDeleted,
-    loadMarketFirstPage,
+    registrySearchValue,
+    registryVersion,
+    registryUpdatedSince,
+    registryIncludeDeleted,
+    loadRegistryFirstPage,
   ]);
 
-  const marketQuery = useQuery<{ items: MarketMcpCard[]; nextCursor: string | null }>({
+  const registryQuery = useQuery<{ items: RegistryMcpCard[]; nextCursor: string | null }>({
     queryKey: [
       "mcp-tools",
       "market",
-      marketSearchValue,
-      marketCurrentCursor,
-      marketVersion,
-      marketUpdatedSince,
-      marketIncludeDeleted,
+      registrySearchValue,
+      registryCurrentCursor,
+      registryVersion,
+      registryUpdatedSince,
+      registryIncludeDeleted,
     ],
     enabled: open && addModalTab === MCP_TAB.MCP_REGISTRY,
     retry: false,
@@ -215,56 +215,56 @@ export function useMcpToolsAddMarket({
     refetchOnWindowFocus: false,
     refetchOnMount: false,
     queryFn: async () => {
-      const result = await fetchMarketMcpCards({
-        search: marketSearchValue,
-        cursor: marketCurrentCursor,
-        version: marketVersion,
-        updatedSince: marketUpdatedSince,
-        includeDeleted: marketIncludeDeleted,
+      const result = await fetchRegistryMcpCards({
+        search: registrySearchValue,
+        cursor: registryCurrentCursor,
+        version: registryVersion,
+        updatedSince: registryUpdatedSince,
+        includeDeleted: registryIncludeDeleted,
       });
       return result.data;
     },
   });
 
-  const marketServices = marketQuery.data?.items ?? [];
-  const marketNextCursor = marketQuery.data?.nextCursor ?? null;
+  const registryServices = registryQuery.data?.items ?? [];
+  const registryNextCursor = registryQuery.data?.nextCursor ?? null;
 
   useEffect(() => {
-    if (!(marketQuery.error instanceof Error)) return;
-    log.error("[useMcpToolsAddMarket] Failed to load market MCP cards", {
-      error: marketQuery.error,
-      search: marketSearchValue,
-      cursor: marketCurrentCursor,
-      version: marketVersion,
-      updatedSince: marketUpdatedSince,
-      includeDeleted: marketIncludeDeleted,
+    if (!(registryQuery.error instanceof Error)) return;
+    log.error("[useMcpToolsAddRegistry] Failed to load registry MCP cards", {
+      error: registryQuery.error,
+      search: registrySearchValue,
+      cursor: registryCurrentCursor,
+      version: registryVersion,
+      updatedSince: registryUpdatedSince,
+      includeDeleted: registryIncludeDeleted,
     });
-    message.error(t("mcpTools.market.loadFailed"));
+    message.error(t("mcpTools.registry.loadFailed"));
   }, [
-    marketQuery.error,
-    marketSearchValue,
-    marketCurrentCursor,
-    marketVersion,
-    marketUpdatedSince,
-    marketIncludeDeleted,
+    registryQuery.error,
+    registrySearchValue,
+    registryCurrentCursor,
+    registryVersion,
+    registryUpdatedSince,
+    registryIncludeDeleted,
     message,
   ]);
 
-  const handleMarketNextPage = useCallback(() => {
-    if (!marketNextCursor || marketQuery.isFetching) return;
-    const currentCursorSnapshot = marketCurrentCursor;
-    setMarketCursorHistory((prev) => [...prev, currentCursorSnapshot ?? ""]);
-    setMarketCurrentCursor(marketNextCursor);
-    setMarketPage((prev) => prev + 1);
-  }, [marketCurrentCursor, marketNextCursor, marketQuery.isFetching]);
+  const handleRegistryNextPage = useCallback(() => {
+    if (!registryNextCursor || registryQuery.isFetching) return;
+    const currentCursorSnapshot = registryCurrentCursor;
+    setRegistryCursorHistory((prev) => [...prev, currentCursorSnapshot ?? ""]);
+    setRegistryCurrentCursor(registryNextCursor);
+    setRegistryPage((prev) => prev + 1);
+  }, [registryCurrentCursor, registryNextCursor, registryQuery.isFetching]);
 
-  const handleMarketPrevPage = useCallback(() => {
-    if (marketCursorHistory.length === 0 || marketQuery.isFetching) return;
-    const previousCursor = marketCursorHistory[marketCursorHistory.length - 1] || null;
-    setMarketCursorHistory((prev) => prev.slice(0, -1));
-    setMarketCurrentCursor(previousCursor);
-    setMarketPage((prev) => Math.max(1, prev - 1));
-  }, [marketCursorHistory, marketQuery.isFetching]);
+  const handleRegistryPrevPage = useCallback(() => {
+    if (registryCursorHistory.length === 0 || registryQuery.isFetching) return;
+    const previousCursor = registryCursorHistory[registryCursorHistory.length - 1] || null;
+    setRegistryCursorHistory((prev) => prev.slice(0, -1));
+    setRegistryCurrentCursor(previousCursor);
+    setRegistryPage((prev) => Math.max(1, prev - 1));
+  }, [registryCursorHistory, registryQuery.isFetching]);
 
   const handleCloseQuickAddPicker = useCallback(() => {
     setQuickAddPickerVisible(false);
@@ -273,15 +273,15 @@ export function useMcpToolsAddMarket({
     setSelectedQuickAddOptionKey("");
   }, []);
 
-  const handleQuickAddFromMarket = useCallback((service: MarketMcpCard) => {
+  const handleQuickAddFromRegistry = useCallback((service: RegistryMcpCard) => {
     const quickAddOptionsForService = resolveQuickAddOptions(service);
     if (quickAddOptionsForService.length === 0) {
-      log.warn("[useMcpToolsAddMarket] Quick add is unsupported for selected market service", {
+      log.warn("[useMcpToolsAddRegistry] Quick add is unsupported for selected registry service", {
         serviceName: service.name,
         remotes: service.remotes,
         packages: service.packages,
       });
-      message.warning(t("mcpTools.market.quickAddUnsupported"));
+      message.warning(t("mcpTools.registry.quickAddUnsupported"));
       return;
     }
 
@@ -297,7 +297,7 @@ export function useMcpToolsAddMarket({
 
     const selectedOption = quickAddOptions.find((option) => option.key === selectedQuickAddOptionKey);
     if (!selectedOption) {
-      message.warning(t("mcpTools.market.quickAddUnsupported"));
+      message.warning(t("mcpTools.registry.quickAddUnsupported"));
       return;
     }
 
@@ -307,7 +307,7 @@ export function useMcpToolsAddMarket({
         const packageIdentifier = (selectedOption.packageIdentifier || "").trim();
         const command = inferStdioCommand(selectedOption.packageRegistryType);
         if (!packageIdentifier || !command) {
-          message.warning(t("mcpTools.market.quickAddUnsupported"));
+          message.warning(t("mcpTools.registry.quickAddUnsupported"));
           return;
         }
 
@@ -337,16 +337,16 @@ export function useMcpToolsAddMarket({
           server_url: selectedOption.serverUrl || "",
           tags: [],
           version: quickAddCandidateService.version || undefined,
-          mcp_registry_json: quickAddCandidateService.serverJson || undefined,
+          registry_json: quickAddCandidateService.serverJson || undefined,
         });
       }
 
       await onServiceAdded();
-      message.success(t("mcpTools.market.quickAddSuccess"));
+      message.success(t("mcpTools.registry.quickAddSuccess"));
       handleCloseQuickAddPicker();
       onClose();
     } catch (error) {
-      log.error("[useMcpToolsAddMarket] Failed to quick add market service", {
+      log.error("[useMcpToolsAddRegistry] Failed to quick add registry service", {
         error,
         serviceName: quickAddCandidateService.name,
         remotes: quickAddCandidateService.remotes,
@@ -370,30 +370,30 @@ export function useMcpToolsAddMarket({
   ]);
 
   return {
-    marketSearchValue,
-    selectedMarketService,
-    filteredMarketServices: marketServices,
-    marketLoading: marketQuery.isFetching,
-    marketPage,
-    hasPrevMarketPage: marketCursorHistory.length > 0,
-    hasNextMarketPage: Boolean(marketNextCursor),
-    marketVersion,
-    marketUpdatedSince,
-    marketIncludeDeleted,
+    registrySearchValue,
+    selectedRegistryService,
+    filteredRegistryServices: registryServices,
+    registryLoading: registryQuery.isFetching,
+    registryPage,
+    hasPrevRegistryPage: registryCursorHistory.length > 0,
+    hasNextRegistryPage: Boolean(registryNextCursor),
+    registryVersion,
+    registryUpdatedSince,
+    registryIncludeDeleted,
     quickAddPickerVisible,
     quickAddCandidateService,
     quickAddOptions,
     selectedQuickAddOptionKey,
     quickAddSubmitting: addingService,
-    setMarketSearchValue,
-    setSelectedMarketService,
-    setMarketVersion,
-    setMarketUpdatedSince,
-    setMarketIncludeDeleted,
+    setRegistrySearchValue,
+    setSelectedRegistryService,
+    setRegistryVersion,
+    setRegistryUpdatedSince,
+    setRegistryIncludeDeleted,
     setSelectedQuickAddOptionKey,
-    handleMarketPrevPage,
-    handleMarketNextPage,
-    handleQuickAddFromMarket,
+    handleRegistryPrevPage,
+    handleRegistryNextPage,
+    handleQuickAddFromRegistry,
     handleCloseQuickAddPicker,
     handleConfirmQuickAddOption,
     addingService,

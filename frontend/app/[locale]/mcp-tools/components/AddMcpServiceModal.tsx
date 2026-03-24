@@ -4,9 +4,9 @@ import { useTranslation } from "react-i18next";
 import { MCP_TAB } from "@/const/mcpTools";
 import type { McpTab } from "@/types/mcpTools";
 import { useMcpToolsAddLocal } from "@/hooks/mcpTools/useMcpToolsAddLocal";
-import { useMcpToolsAddMarket } from "@/hooks/mcpTools/useMcpToolsAddMarket";
+import { useMcpToolsAddRegistry } from "@/hooks/mcpTools/useMcpToolsAddRegistry";
 import AddMcpServiceLocalSection from "./AddMcpServiceLocalSection";
-import AddMcpServiceMarketSection from "./AddMcpServiceMarketSection";
+import AddMcpServiceRegistrySection from "./AddMcpServiceRegistrySection";
 
 interface AddMcpServiceModalProps {
   open: boolean;
@@ -31,7 +31,7 @@ export default function AddMcpServiceModal({
     onClose,
   });
 
-  const market = useMcpToolsAddMarket({
+  const registry = useMcpToolsAddRegistry({
     open,
     addModalTab,
     t: (key) => String(t(key)),
@@ -41,15 +41,15 @@ export default function AddMcpServiceModal({
   });
 
   const { reset: resetLocal } = local;
-  const { reset: resetMarket } = market;
+  const { reset: resetRegistry } = registry;
 
   useEffect(() => {
     if (!open) {
       setAddModalTab(MCP_TAB.LOCAL);
       resetLocal();
-      resetMarket();
+      resetRegistry();
     }
-  }, [open, resetLocal, resetMarket]);
+  }, [open, resetLocal, resetRegistry]);
 
   if (!open) {
     return null;
@@ -81,7 +81,7 @@ export default function AddMcpServiceModal({
             onChange={(value) => setAddModalTab(value as McpTab)}
             options={[
               { label: t("mcpTools.addModal.tabLocal"), value: MCP_TAB.LOCAL },
-              { label: t("mcpTools.addModal.tabMarket"), value: MCP_TAB.MCP_REGISTRY },
+              { label: t("mcpTools.addModal.tabRegistry"), value: MCP_TAB.MCP_REGISTRY },
             ]}
             className="h-9 rounded-full border border-slate-200 bg-slate-100 p-[2px] text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-full [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:leading-[30px] [&_.ant-segmented-thumb]:rounded-full [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
           />
@@ -113,33 +113,33 @@ export default function AddMcpServiceModal({
             t={(key, params) => String(t(key, params))}
           />
         ) : (
-          <AddMcpServiceMarketSection
-            marketSearchValue={market.marketSearchValue}
-            selectedMarketService={market.selectedMarketService}
-            filteredMarketServices={market.filteredMarketServices}
-            marketLoading={market.marketLoading}
-            marketPage={market.marketPage}
-            hasPrevMarketPage={market.hasPrevMarketPage}
-            hasNextMarketPage={market.hasNextMarketPage}
-            marketVersion={market.marketVersion}
-            marketUpdatedSince={market.marketUpdatedSince}
-            marketIncludeDeleted={market.marketIncludeDeleted}
-            quickAddPickerVisible={market.quickAddPickerVisible}
-            quickAddCandidateService={market.quickAddCandidateService}
-            quickAddOptions={market.quickAddOptions}
-            selectedQuickAddOptionKey={market.selectedQuickAddOptionKey}
-            quickAddSubmitting={market.quickAddSubmitting}
-            setMarketSearchValue={market.setMarketSearchValue}
-            setSelectedMarketService={market.setSelectedMarketService}
-            setMarketVersion={market.setMarketVersion}
-            setMarketUpdatedSince={market.setMarketUpdatedSince}
-            setMarketIncludeDeleted={market.setMarketIncludeDeleted}
-            setSelectedQuickAddOptionKey={market.setSelectedQuickAddOptionKey}
-            handleMarketPrevPage={market.handleMarketPrevPage}
-            handleMarketNextPage={market.handleMarketNextPage}
-            handleQuickAddFromMarket={market.handleQuickAddFromMarket}
-            handleCloseQuickAddPicker={market.handleCloseQuickAddPicker}
-            handleConfirmQuickAddOption={market.handleConfirmQuickAddOption}
+          <AddMcpServiceRegistrySection
+            registrySearchValue={registry.registrySearchValue}
+            selectedRegistryService={registry.selectedRegistryService}
+            filteredRegistryServices={registry.filteredRegistryServices}
+            registryLoading={registry.registryLoading}
+            registryPage={registry.registryPage}
+            hasPrevRegistryPage={registry.hasPrevRegistryPage}
+            hasNextRegistryPage={registry.hasNextRegistryPage}
+            registryVersion={registry.registryVersion}
+            registryUpdatedSince={registry.registryUpdatedSince}
+            registryIncludeDeleted={registry.registryIncludeDeleted}
+            quickAddPickerVisible={registry.quickAddPickerVisible}
+            quickAddCandidateService={registry.quickAddCandidateService}
+            quickAddOptions={registry.quickAddOptions}
+            selectedQuickAddOptionKey={registry.selectedQuickAddOptionKey}
+            quickAddSubmitting={registry.quickAddSubmitting}
+            setRegistrySearchValue={registry.setRegistrySearchValue}
+            setSelectedRegistryService={registry.setSelectedRegistryService}
+            setRegistryVersion={registry.setRegistryVersion}
+            setRegistryUpdatedSince={registry.setRegistryUpdatedSince}
+            setRegistryIncludeDeleted={registry.setRegistryIncludeDeleted}
+            setSelectedQuickAddOptionKey={registry.setSelectedQuickAddOptionKey}
+            handleRegistryPrevPage={registry.handleRegistryPrevPage}
+            handleRegistryNextPage={registry.handleRegistryNextPage}
+            handleQuickAddFromRegistry={registry.handleQuickAddFromRegistry}
+            handleCloseQuickAddPicker={registry.handleCloseQuickAddPicker}
+            handleConfirmQuickAddOption={registry.handleConfirmQuickAddOption}
             t={(key, params) => String(t(key, params))}
           />
         )}

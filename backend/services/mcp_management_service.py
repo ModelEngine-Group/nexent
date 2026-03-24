@@ -92,7 +92,7 @@ async def _start_container_by_id_for_record(record: Dict[str, Any]) -> Dict[str,
     return container_info
 
 
-def _normalize_market_server(entry: Dict[str, Any]) -> Dict[str, Any] | None:
+def _normalize_mcp_registry_server(entry: Dict[str, Any]) -> Dict[str, Any] | None:
     server = entry.get("server") if isinstance(entry, dict) else None
     if not isinstance(server, dict):
         return None
@@ -154,35 +154,7 @@ def _normalize_market_server(entry: Dict[str, Any]) -> Dict[str, Any] | None:
         "serverJson": server,
     }
 
-
-def _pick_latest_market_servers(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    grouped: Dict[str, Dict[str, Any]] = {}
-    for item in items:
-        key = str(item.get("name") or "").strip().lower()
-        if not key:
-            continue
-        existing = grouped.get(key)
-        if existing is None:
-            grouped[key] = item
-            continue
-
-        existing_latest = bool(existing.get("isLatest"))
-        current_latest = bool(item.get("isLatest"))
-        if current_latest and not existing_latest:
-            grouped[key] = item
-            continue
-        if current_latest == existing_latest:
-            existing_time = _extract_str(existing.get("updatedAt")) or _extract_str(existing.get("publishedAt"))
-            current_time = _extract_str(item.get("updatedAt")) or _extract_str(item.get("publishedAt"))
-            if current_time > existing_time:
-                grouped[key] = item
-
-    result = list(grouped.values())
-    result.sort(key=lambda x: (_extract_str(x.get("updatedAt")) or _extract_str(x.get("publishedAt"))), reverse=True)
-    return result
-
-
-async def list_market_mcp_services(
+async def list_registry_mcp_services(
     *,
     search: str | None = None,
     include_deleted: bool = False,
@@ -216,7 +188,7 @@ async def list_market_mcp_services(
     normalized: List[Dict[str, Any]] = []
     if isinstance(raw_servers, list):
         for entry in raw_servers:
-            normalized_item = _normalize_market_server(entry)
+            normalized_item = _normalize_mcp_registry_server(entry)
             if normalized_item:
                 normalized.append(normalized_item)
 
@@ -242,12 +214,11 @@ async def add_mcp_service(
     authorization_token: str | None,
     container_config: Dict[str, Any] | None,
     version: str | None,
-    mcp_registry_json: Dict[str, Any] | None,
+    registry_json: Dict[str, Any] | None,
     enabled: bool = False,
     container_id: str | None = None,
 ) -> None:
     normalized_source = (source or "local").strip().lower()
-    normalized_source = "mcp_registry" if normalized_source in {"market", "registry"} else normalized_source
     if normalized_source not in {"local", "mcp_registry"}:
         raise ValueError(f"Invalid source: {source}")
 
@@ -271,9 +242,9 @@ async def add_mcp_service(
             "status": status,
             "container_id": normalized_container_id,
             "authorization_token": authorization_token,
-            "souce": normalized_source,
+            "source": normalized_source,
             "version": version,
-            "mcp_registry_json": mcp_registry_json,
+            "registry_json": registry_json,
             "transport_type": normalized_transport_type,
             "enabled": enabled,
             "tags": ",".join(tags or []),
@@ -305,11 +276,11 @@ def list_mcp_services(tenant_id: str) -> List[Dict[str, Any]]:
         logger.warning(f"Failed to load container runtime status: {exc}")
 
     for record in records:
-        souce = (record.get("souce") or record.get("source_type") or "").lower()
+        source = (record.get("source") or "").lower()
         transport_type = (record.get("transport_type") or "").lower()
         enabled = bool(record.get("enabled"))
         status = record.get("status")
-        registry_json = record.get("mcp_registry_json") if isinstance(record.get("mcp_registry_json"), dict) else None
+        registry_json = record.get("registry_json") if isinstance(record.get("registry_json"), dict) else None
         raw_config_json = record.get("config_json") if isinstance(record.get("config_json"), dict) else None
 
         container_id = _extract_str(record.get("container_id"))
@@ -327,7 +298,7 @@ def list_mcp_services(tenant_id: str) -> List[Dict[str, Any]]:
             "containerId": container_id or None,
             "name": record.get("mcp_name"),
             "description": record.get("description") or record.get("category") or "",
-            "source": souce or "local",
+            "source": source or "local",
             "status": "enabled" if enabled else "disabled",
             "updatedAt": _format_time(record.get("update_time")),
             "tags": _split_tags(record.get("tags")),
@@ -390,7 +361,7 @@ def update_mcp_service(
         name=new_name,
         description=description,
         server_url=server_url,
-        souce=(current_record.get("souce") or current_record.get("source_type") or "local"),
+        source=(current_record.get("source") or "local"),
         transport_type=(current_record.get("transport_type") or "streamable-http"),
         authorization_token=authorization_token,
         config_json=config_json,
