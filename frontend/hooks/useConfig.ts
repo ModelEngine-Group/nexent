@@ -8,6 +8,7 @@ import {
   AppConfig,
   ModelConfig,
   SingleModelConfig,
+  STTModelConfig,
 } from "@/types/modelConfig";
 import { ICON_TYPES } from "@/const/modelConfig";
 import { getAvatarUrl } from "@/lib/avatar";
@@ -82,6 +83,9 @@ const defaultConfig: GlobalConfig = {
         apiKey: "",
         modelUrl: "",
       },
+      modelFactory: "",
+      modelAppid: "",
+      accessToken: "",
     },
     tts: {
       modelName: "",
@@ -106,6 +110,23 @@ function transformModelEntry(
       modelUrl: raw?.apiConfig?.modelUrl || "",
     },
     ...(withDimension ? { dimension: raw?.dimension || 0 } : {}),
+  };
+}
+
+/**
+ * Transform backend STT config format to frontend format
+ */
+function transformSTTModelEntry(raw: Record<string, any> | undefined): STTModelConfig {
+  return {
+    modelName: raw?.name || "",
+    displayName: raw?.displayName || "",
+    apiConfig: {
+      apiKey: raw?.apiConfig?.apiKey || "",
+      modelUrl: raw?.apiConfig?.modelUrl || "",
+    },
+    modelFactory: raw?.modelFactory || "",
+    modelAppid: raw?.modelAppid || "",
+    accessToken: raw?.accessToken || "",
   };
 }
 
@@ -140,7 +161,7 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
         ),
         rerank: transformModelEntry(backendConfig.models.rerank),
         vlm: transformModelEntry(backendConfig.models.vlm),
-        stt: transformModelEntry(backendConfig.models.stt),
+        stt: transformSTTModelEntry(backendConfig.models.stt),
         tts: transformModelEntry(backendConfig.models.tts),
       }
     : defaultConfig.models;

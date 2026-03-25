@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from nexent.core import MessageObserver
 from nexent.core.models import OpenAIModel, OpenAIVLModel
@@ -57,6 +58,9 @@ async def _perform_connectivity_check(
     model_base_url: str,
     model_api_key: str,
     ssl_verify: bool = True,
+    model_factory: Optional[str] = None,
+    model_appid: Optional[str] = None,
+    access_token: Optional[str] = None,
 ) -> bool:
     """
     Perform specific model connectivity check
@@ -66,6 +70,9 @@ async def _perform_connectivity_check(
         model_base_url: Model base URL
         model_api_key: API key
         ssl_verify: Whether to verify SSL certificates (default: True)
+        model_factory: Model factory/vendor (for STT models)
+        model_appid: Application ID (for Volcano STT models)
+        access_token: Access token (for Volcano STT models)
     Returns:
         bool: Connectivity check result
     """
@@ -115,20 +122,30 @@ async def _perform_connectivity_check(
         voice_service = get_voice_service()
 
         if model_type == "stt":
-            # Determine STT provider based on base_url
-            base_url_lower = (model_base_url or "").lower()
-            is_ali_stt = "aliyuncs" in base_url_lower or "dashscope" in base_url_lower
+            # Determine STT provider based on model_factory
+            use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
 
-            if is_ali_stt:
-                # Use Ali STT with api_key and model name
+            if use_volc:
+                # Use Volcano STT with appid and access_token
                 connectivity = await voice_service.check_voice_connectivity(
                     model_type="stt",
-                    api_key=model_api_key,
-                    stt_config={"base_url": model_base_url, "model": model_name}
+                    stt_config={
+                        "model_factory": model_factory,
+                        "model_appid": model_appid,
+                        "access_token": access_token,
+                        "base_url": model_base_url
+                    }
                 )
             else:
-                # Use default Volcano STT (no api_key needed)
-                connectivity = await voice_service.check_voice_connectivity(model_type="stt")
+                # Use Ali STT (default) with api_key and model name
+                connectivity = await voice_service.check_voice_connectivity(
+                    model_type="stt",
+                    stt_config={
+                        "api_key": model_api_key,
+                        "base_url": model_base_url,
+                        "model": model_name
+                    }
+                )
         else:
             # TTS uses default service
             connectivity = await voice_service.check_voice_connectivity(model_type="tts")
@@ -154,10 +171,14 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         model_base_url = model["base_url"]
         model_api_key = model["api_key"]
         ssl_verify = model.get("ssl_verify", True)
+        model_factory = model.get("model_factory")
+        model_appid = model.get("model_appid")
+        access_token = model.get("access_token")
 
         try:
             connectivity = await _perform_connectivity_check(
-                model_name, model_type, model_base_url, model_api_key, ssl_verify
+                model_name, model_type, model_base_url, model_api_key, ssl_verify,
+                model_factory, model_appid, access_token
             )
         except Exception as e:
             update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
@@ -196,14 +217,19 @@ async def verify_model_config_connectivity(model_config: dict):
         model_base_url = model_config.get("base_url", "")
         model_api_key = model_config["api_key"]
         ssl_verify = model_config.get("ssl_verify", True)
+        model_factory = model_config.get("model_factory")
+        model_appid = model_config.get("model_appid")
+        access_token = model_config.get("access_token")
 
         try:
             connectivity = await _perform_connectivity_check(
-                model_name, model_type, model_base_url, model_api_key, ssl_verify
+                model_name, model_type, model_base_url, model_api_key, ssl_verify,
+                model_factory, model_appid, access_token
             )
             if not connectivity and ssl_verify:
                 connectivity = await _perform_connectivity_check(
-                    model_name, model_type, model_base_url, model_api_key, False
+                    model_name, model_type, model_base_url, model_api_key, False,
+                    model_factory, model_appid, access_token
                 )
             if not connectivity:
                 error_msg = f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."

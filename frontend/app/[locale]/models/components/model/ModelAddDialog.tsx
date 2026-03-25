@@ -13,7 +13,7 @@ import {
 import { useConfig } from "@/hooks/useConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import { modelService } from "@/services/modelService";
-import { ModelType, SingleModelConfig } from "@/types/modelConfig";
+import { ModelType, SingleModelConfig, STTModelConfig } from "@/types/modelConfig";
 import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
 import { useDashscopeModelList } from "@/hooks/model/useDashscopeModelList";
@@ -60,6 +60,10 @@ const DEFAULT_FORM_STATE = {
     number,
   ],
   chunkingBatchSize: "10",
+  // STT specific fields
+  sttProvider: "dashscope", // dashscope or volc
+  modelAppid: "",
+  accessToken: "",
 };
 
 // Connectivity status type comes from utils
@@ -421,8 +425,17 @@ export const ModelAddDialog = ({
       );
     }
     if (form.type === MODEL_TYPES.STT) {
-      // STT models only require API Key
-      return form.apiKey.trim() !== "";
+      // For STT models, validate based on provider type
+      if (form.sttProvider === "volc") {
+        // Volcano Engine requires appid and access_token
+        return (
+          form.modelAppid.trim() !== "" &&
+          form.accessToken.trim() !== ""
+        );
+      } else {
+        // DashScope requires API Key
+        return form.apiKey.trim() !== "";
+      }
     }
     return (
       form.name.trim() !== "" &&
@@ -459,23 +472,42 @@ export const ModelAddDialog = ({
           form.displayName || form.name
         );
       } else {
-        const config = {
-          modelName: form.name,
-          modelType: modelType,
-          baseUrl: form.url,
-          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          maxTokens:
-            form.type === MODEL_TYPES.EMBEDDING
-              ? parseInt(form.vectorDimension)
-              : parseInt(form.maxTokens),
-          embeddingDim:
-            form.type === MODEL_TYPES.EMBEDDING
-              ? parseInt(form.vectorDimension)
-              : undefined,
-        };
+        // For STT models, build the appropriate config based on provider
+        if (form.type === MODEL_TYPES.STT) {
+          const sttConfig: any = {
+            modelType: modelType,
+          };
 
-        const result = await modelService.verifyModelConfigConnectivity(config);
-        connectivity = result.connectivity;
+          if (form.sttProvider === "volc") {
+            sttConfig.modelFactory = "volc";
+            sttConfig.modelAppid = form.modelAppid.trim();
+            sttConfig.accessToken = form.accessToken.trim();
+          } else {
+            sttConfig.apiKey = form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
+            sttConfig.modelFactory = "dashscope";
+          }
+
+          const result = await modelService.verifyModelConfigConnectivity(sttConfig);
+          connectivity = result.connectivity;
+        } else {
+          const config = {
+            modelName: form.name,
+            modelType: modelType,
+            baseUrl: form.url,
+            apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+            maxTokens:
+              form.type === MODEL_TYPES.EMBEDDING
+                ? parseInt(form.vectorDimension)
+                : parseInt(form.maxTokens),
+            embeddingDim:
+              form.type === MODEL_TYPES.EMBEDDING
+                ? parseInt(form.vectorDimension)
+                : undefined,
+          };
+
+          const result = await modelService.verifyModelConfigConnectivity(config);
+          connectivity = result.connectivity;
+        }
       }
 
       // Set connectivity status
@@ -642,7 +674,7 @@ export const ModelAddDialog = ({
 
       // Add to the backend service - use manage interface if tenantId is provided
       if (tenantId) {
-        await modelService.createManageTenantModel({
+        const modelParams: any = {
           tenantId,
           name: form.name,
           type: modelType,
@@ -650,37 +682,56 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
-          expectedChunkSize: isEmbeddingModel
-            ? form.chunkSizeRange[0]
-            : undefined,
-          maximumChunkSize: isEmbeddingModel
-            ? form.chunkSizeRange[1]
-            : undefined,
-          chunkingBatchSize: isEmbeddingModel
-            ? parseInt(form.chunkingBatchSize) || 10
-            : undefined,
-        });
+        };
+
+        // Add STT specific fields
+        if (form.type === MODEL_TYPES.STT) {
+          modelParams.modelFactory = form.sttProvider === "volc" ? "volc" : "dashscope";
+          if (form.sttProvider === "volc") {
+            modelParams.modelAppid = form.modelAppid;
+            modelParams.accessToken = form.accessToken;
+          }
+        }
+
+        // Add embedding specific fields
+        if (isEmbeddingModel) {
+          modelParams.expectedChunkSize = form.chunkSizeRange[0];
+          modelParams.maximumChunkSize = form.chunkSizeRange[1];
+          modelParams.chunkingBatchSize = parseInt(form.chunkingBatchSize) || 10;
+        }
+
+        await modelService.createManageTenantModel(modelParams);
       } else {
-        await modelService.addCustomModel({
+        const modelParams: any = {
           name: form.name,
           type: modelType,
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
-          // Send chunk size range for embedding models
-          ...(isEmbeddingModel
-            ? {
-                expectedChunkSize: form.chunkSizeRange[0],
-                maximumChunkSize: form.chunkSizeRange[1],
-                chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
-              }
-            : {}),
-        });
+        };
+
+        // Add STT specific fields
+        if (form.type === MODEL_TYPES.STT) {
+          modelParams.modelFactory = form.sttProvider === "volc" ? "volc" : "dashscope";
+          if (form.sttProvider === "volc") {
+            modelParams.modelAppid = form.modelAppid;
+            modelParams.accessToken = form.accessToken;
+          }
+        }
+
+        // Add embedding specific fields
+        if (isEmbeddingModel) {
+          modelParams.expectedChunkSize = form.chunkSizeRange[0];
+          modelParams.maximumChunkSize = form.chunkSizeRange[1];
+          modelParams.chunkingBatchSize = parseInt(form.chunkingBatchSize) || 10;
+        }
+
+        await modelService.addCustomModel(modelParams);
       }
 
       // Create the model configuration object
-      const modelConfig: SingleModelConfig = {
+      let modelConfig: SingleModelConfig | STTModelConfig = {
         modelName: form.name,
         displayName: form.displayName || form.name,
         apiConfig: {
@@ -688,6 +739,15 @@ export const ModelAddDialog = ({
           modelUrl: form.url,
         },
       };
+
+      // Add STT specific fields to config
+      if (form.type === MODEL_TYPES.STT) {
+        (modelConfig as STTModelConfig).modelFactory = form.sttProvider === "volc" ? "volc" : "dashscope";
+        if (form.sttProvider === "volc") {
+          (modelConfig as STTModelConfig).modelAppid = form.modelAppid;
+          (modelConfig as STTModelConfig).accessToken = form.accessToken;
+        }
+      }
 
       // Add the dimension field for embedding models
       if (form.type === MODEL_TYPES.EMBEDDING) {
@@ -947,23 +1007,101 @@ export const ModelAddDialog = ({
           </div>
         )}
 
-        {/* API Key */}
-        <div>
-          <label
-            htmlFor="apiKey"
-            className="block mb-1 text-sm font-medium text-gray-700"
-          >
-            {t("model.dialog.label.apiKey")}{" "}
-            {form.isBatchImport && <span className="text-red-500">*</span>}
-          </label>
-          <Input.Password
-            id="apiKey"
-            placeholder={t("model.dialog.placeholder.apiKey")}
-            value={form.apiKey}
-            onChange={(e) => handleFormChange("apiKey", e.target.value)}
-            autoComplete="new-password"
-          />
-        </div>
+        {/* STT Provider Selection */}
+        {!form.isBatchImport && isSTTModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.sttProvider")}
+              <span className="text-red-500">*</span>
+            </label>
+            <Select
+              style={{ width: "100%" }}
+              value={form.sttProvider}
+              onChange={(value) => handleFormChange("sttProvider", value)}
+            >
+              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
+              <Option value="volc">{t("model.provider.volc")}</Option>
+            </Select>
+          </div>
+        )}
+
+        {/* STT Fields for Volcano Engine */}
+        {!form.isBatchImport && isSTTModel && form.sttProvider === "volc" && (
+          <>
+            <div>
+              <label
+                htmlFor="modelAppid"
+                className="block mb-1 text-sm font-medium text-gray-700"
+              >
+                {t("model.dialog.label.modelAppid")}
+                <span className="text-red-500">*</span>
+              </label>
+              <Input
+                id="modelAppid"
+                placeholder={t("model.dialog.placeholder.modelAppid")}
+                value={form.modelAppid}
+                onChange={(e) => handleFormChange("modelAppid", e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="accessToken"
+                className="block mb-1 text-sm font-medium text-gray-700"
+              >
+                {t("model.dialog.label.accessToken")}
+                <span className="text-red-500">*</span>
+              </label>
+              <Input.Password
+                id="accessToken"
+                placeholder={t("model.dialog.placeholder.accessToken")}
+                value={form.accessToken}
+                onChange={(e) => handleFormChange("accessToken", e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+          </>
+        )}
+
+        {/* API Key (for DashScope STT) */}
+        {!form.isBatchImport && isSTTModel && form.sttProvider === "dashscope" && (
+          <div>
+            <label
+              htmlFor="apiKey"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.apiKey")}{" "}
+              <span className="text-red-500">*</span>
+            </label>
+            <Input.Password
+              id="apiKey"
+              placeholder={t("model.dialog.placeholder.apiKey")}
+              value={form.apiKey}
+              onChange={(e) => handleFormChange("apiKey", e.target.value)}
+              autoComplete="new-password"
+            />
+          </div>
+        )}
+
+        {/* API Key (for non-STT models) */}
+        {!form.isBatchImport && !isSTTModel && (
+          <div>
+            <label
+              htmlFor="apiKey"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.apiKey")}{" "}
+              {form.isBatchImport && <span className="text-red-500">*</span>}
+            </label>
+            <Input.Password
+              id="apiKey"
+              placeholder={t("model.dialog.placeholder.apiKey")}
+              value={form.apiKey}
+              onChange={(e) => handleFormChange("apiKey", e.target.value)}
+              autoComplete="new-password"
+            />
+          </div>
+        )}
 
         {/* Chunk Size Slider (Embedding model only) */}
         {isEmbeddingModel && (

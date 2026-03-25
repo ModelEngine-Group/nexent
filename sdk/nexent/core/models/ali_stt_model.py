@@ -11,6 +11,8 @@ import aiofiles
 import websockets
 import wave
 
+from .stt_model import BaseSTTModel
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +32,7 @@ class AliSTTConfig:
         timeout: int = 60,
         enable_vad: bool = True,
         vad_threshold: float = 0.5,
-        vad_silence_duration_ms: int = 800,
+        vad_silence_duration_ms: int = 2000,
         workspace_id: Optional[str] = None
     ):
         self.api_key = api_key
@@ -58,12 +60,12 @@ class TranscriptionResult:
         self.vad: Optional[str] = None
 
 
-class AliSTTModel:
+class AliSTTModel(BaseSTTModel):
     """Ali STT model implementation using Qwen Realtime API protocol."""
 
     def __init__(self, config: AliSTTConfig, audio_file_path: Optional[str] = None):
+        super().__init__(audio_file_path)
         self.config = config
-        self.audio_file_path = audio_file_path
         self._current_result = TranscriptionResult()
 
     def get_websocket_url(self) -> str:
@@ -410,14 +412,12 @@ class AliSTTModel:
                 await ws.send(json.dumps(session_update))
                 logger.info(f"Session.update sent: {session_update}")
 
-                await asyncio.sleep(0.5)
 
                 audio_chunks_sent = 0
                 for chunk, last in self.slice_data(audio_data, segment_size):
                     audio_event = self.construct_audio_append_event(chunk)
                     await ws.send(json.dumps(audio_event))
                     audio_chunks_sent += 1
-                    await asyncio.sleep(0.1)
 
                     if last:
                         break
@@ -518,52 +518,6 @@ class AliSTTModel:
             logger.error(f"STT connectivity test exception traceback: {traceback.format_exc()}")
             return False
 
-    def _is_stt_result_successful(self, result) -> bool:
-        """
-        Check if STT result indicates a successful recognition.
-
-        Args:
-            result: STT processing result
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        if not isinstance(result, dict) or not result:
-            return False
-
-        if 'error' in result:
-            return False
-
-        if 'code' in result and result['code'] != 1000:
-            return False
-
-        if 'payload_msg' in result and isinstance(result['payload_msg'], dict):
-            if 'error' in result['payload_msg']:
-                return False
-
-        return True
-
-    def _extract_stt_error_message(self, result) -> str:
-        """
-        Extract error message from STT result.
-
-        Args:
-            result: STT processing result
-
-        Returns:
-            str: Error message
-        """
-        if not isinstance(result, dict):
-            return f"Invalid result type: {type(result)}"
-
-        if 'error' in result:
-            return str(result['error'])
-
-        if 'code' in result and result['code'] != 1000:
-            return f"STT service error code: {result['code']}"
-
-        return f"Unknown error in result: {result}"
-
     async def start_streaming_session(self, websocket, config_received: bool = True):
         """
         Start a streaming session for real-time STT.
@@ -584,6 +538,7 @@ class AliSTTModel:
                 logger.info(f"STT server session created: {response}")
 
                 # Session update with VAD (matching official example)
+                # VAD settings: threshold 0.5 (balanced), silence 2000ms (wait longer before ending turn)
                 session_update = {
                     "event_id": "event_123",
                     "type": "session.update",
@@ -596,13 +551,13 @@ class AliSTTModel:
                         },
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.0,
-                            "silence_duration_ms": 400
+                            "threshold": self.config.vad_threshold,
+                            "silence_duration_ms": self.config.vad_silence_duration_ms
                         }
                     }
                 }
                 await ws_server.send(json.dumps(session_update))
-                logger.info(f"Session.update sent with VAD")
+                logger.info(f"Session.update sent with VAD (threshold={self.config.vad_threshold}, silence={self.config.vad_silence_duration_ms}ms)")
 
                 # Wait for session.updated event
                 try:
@@ -670,7 +625,6 @@ class AliSTTModel:
                                 "audio": audio_b64
                             }
                             await ws_server.send(json.dumps(audio_event))
-                            await asyncio.sleep(0.1)
                         except Exception as e:
                             logger.error(f"Error sending to STT service: {e}")
                             client_connected = False

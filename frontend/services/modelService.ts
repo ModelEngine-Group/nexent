@@ -68,6 +68,9 @@ export const modelService = {
           expectedChunkSize: model.expected_chunk_size,
           maximumChunkSize: model.maximum_chunk_size,
           chunkingBatchSize: model.chunk_batch,
+          // STT specific fields
+          modelAppid: model.model_appid,
+          accessToken: model.access_token,
         }));
       }
       return [];
@@ -99,23 +102,40 @@ export const modelService = {
     expectedChunkSize?: number;
     maximumChunkSize?: number;
     chunkingBatchSize?: number;
+    // STT specific fields
+    modelFactory?: string;
+    modelAppid?: string;
+    accessToken?: string;
   }): Promise<void> => {
     try {
+      const requestBody: any = {
+        model_repo: "",
+        model_name: model.name,
+        model_type: model.type,
+        base_url: model.url,
+        api_key: model.apiKey,
+        max_tokens: model.maxTokens,
+        display_name: model.displayName,
+        expected_chunk_size: model.expectedChunkSize,
+        maximum_chunk_size: model.maximumChunkSize,
+        chunk_batch: model.chunkingBatchSize,
+      };
+
+      // Add STT specific fields
+      if (model.modelFactory) {
+        requestBody.model_factory = model.modelFactory;
+      }
+      if (model.modelAppid) {
+        requestBody.model_appid = model.modelAppid;
+      }
+      if (model.accessToken) {
+        requestBody.access_token = model.accessToken;
+      }
+
       const response = await fetch(API_ENDPOINTS.model.customModelCreate, {
         method: "POST",
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          model_repo: "",
-          model_name: model.name,
-          model_type: model.type,
-          base_url: model.url,
-          api_key: model.apiKey,
-          max_tokens: model.maxTokens,
-          display_name: model.displayName,
-          expected_chunk_size: model.expectedChunkSize,
-          maximum_chunk_size: model.maximumChunkSize,
-          chunk_batch: model.chunkingBatchSize,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();
@@ -462,24 +482,39 @@ export const modelService = {
   // Verify model configuration connectivity before adding it
   verifyModelConfigConnectivity: async (
     config: {
-      modelName: string;
+      modelName?: string;
       modelType: ModelType;
       baseUrl?: string;
-      apiKey: string;
+      apiKey?: string;
       maxTokens?: number;
       embeddingDim?: number;
+      // STT specific fields
+      modelFactory?: string;
+      modelAppid?: string;
+      accessToken?: string;
     },
     signal?: AbortSignal
   ): Promise<ModelValidationResponse> => {
     try {
       const requestBody: any = {
-        model_name: config.modelName,
+        model_name: config.modelName || "",
         model_type: config.modelType,
         api_key: config.apiKey || "sk-no-api-key",
         base_url: config.baseUrl || "",
         max_tokens: config.maxTokens || 4096,
         embedding_dim: config.embeddingDim || 1024,
       };
+
+      // Add STT specific fields if provided
+      if (config.modelFactory) {
+        requestBody.model_factory = config.modelFactory;
+      }
+      if (config.modelAppid) {
+        requestBody.model_appid = config.modelAppid;
+      }
+      if (config.accessToken) {
+        requestBody.access_token = config.accessToken;
+      }
 
       const response = await fetch(API_ENDPOINTS.model.verifyModelConfig, {
         method: "POST",
@@ -634,27 +669,44 @@ export const modelService = {
     expectedChunkSize?: number;
     maximumChunkSize?: number;
     chunkingBatchSize?: number;
+    // STT specific fields
+    modelFactory?: string;
+    modelAppid?: string;
+    accessToken?: string;
   }): Promise<void> => {
     try {
+      const requestBody: any = {
+        tenant_id: params.tenantId,
+        model_repo: "",
+        model_name: params.name,
+        model_type: params.type,
+        base_url: params.url,
+        api_key: params.apiKey,
+        max_tokens: params.maxTokens || 4096,
+        display_name: params.displayName || params.name,
+        expected_chunk_size: params.expectedChunkSize,
+        maximum_chunk_size: params.maximumChunkSize,
+        chunk_batch: params.chunkingBatchSize,
+      };
+
+      // Add STT specific fields
+      if (params.modelFactory) {
+        requestBody.model_factory = params.modelFactory;
+      }
+      if (params.modelAppid) {
+        requestBody.model_appid = params.modelAppid;
+      }
+      if (params.accessToken) {
+        requestBody.access_token = params.accessToken;
+      }
+
       const response = await fetch(API_ENDPOINTS.model.manageModelCreate, {
         method: "POST",
         headers: {
           ...getAuthHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          tenant_id: params.tenantId,
-          model_repo: "",
-          model_name: params.name,
-          model_type: params.type,
-          base_url: params.url,
-          api_key: params.apiKey,
-          max_tokens: params.maxTokens || 4096,
-          display_name: params.displayName || params.name,
-          expected_chunk_size: params.expectedChunkSize,
-          maximum_chunk_size: params.maximumChunkSize,
-          chunk_batch: params.chunkingBatchSize,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();

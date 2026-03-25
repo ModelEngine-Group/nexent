@@ -61,7 +61,7 @@ class ModelResponse(BaseModel):
 
 class ModelRequest(BaseModel):
     model_factory: Optional[str] = 'OpenAI-API-Compatible'
-    model_name: str
+    model_name: Optional[str] = ""
     model_type: str
     api_key: Optional[str] = ''
     base_url: Optional[str] = ''
@@ -72,6 +72,9 @@ class ModelRequest(BaseModel):
     expected_chunk_size: Optional[int] = None
     maximum_chunk_size: Optional[int] = None
     chunk_batch: Optional[int] = None
+    # STT specific fields
+    model_appid: Optional[str] = None
+    access_token: Optional[str] = None
 
 
 class ProviderModelRequest(BaseModel):
@@ -101,13 +104,23 @@ class SingleModelConfig(BaseModel):
     dimension: Optional[int] = None
 
 
+class STTModelConfig(BaseModel):
+    """STT model specific configuration with factory, appid, and access token fields"""
+    modelName: str
+    displayName: str
+    apiConfig: Optional[ModelApiConfig] = None
+    modelFactory: Optional[str] = None
+    modelAppid: Optional[str] = None
+    accessToken: Optional[str] = None
+
+
 class ModelConfig(BaseModel):
     llm: SingleModelConfig
     embedding: SingleModelConfig
     multiEmbedding: SingleModelConfig
     rerank: SingleModelConfig
     vlm: SingleModelConfig
-    stt: SingleModelConfig
+    stt: STTModelConfig
     tts: SingleModelConfig
 
 
@@ -681,6 +694,10 @@ class ManageTenantModelCreateRequest(BaseModel):
     expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
     maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
     chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
+    # STT specific fields
+    model_factory: Optional[str] = Field(None, description="Model factory/vendor for STT models")
+    model_appid: Optional[str] = Field(None, description="Application ID for STT models (e.g., Volcano Engine)")
+    access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
 
 
 class ManageTenantModelUpdateRequest(BaseModel):

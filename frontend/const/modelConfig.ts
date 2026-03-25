@@ -18,6 +18,7 @@ export const MODEL_SOURCES = {
   CUSTOM: "custom",
   DASHSCOPE: "dashscope",
   TOKENPONY: "tokenpony",
+  VOLC: "volc",
 } as const;
 
 // Model status constants
