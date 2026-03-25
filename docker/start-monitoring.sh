@@ -28,6 +28,7 @@ fi
 if [ ! -f "$MONITORING_DIR/monitoring.env" ]; then
     echo "📋 Creating monitoring.env from example..."
     cp "$MONITORING_DIR/monitoring.env.example" "$MONITORING_DIR/monitoring.env"
+    chmod 600 "$MONITORING_DIR/monitoring.env"
     echo "⚠️  Please review and update $MONITORING_DIR/monitoring.env as needed"
 fi
 

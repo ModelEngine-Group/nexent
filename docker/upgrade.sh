@@ -203,7 +203,7 @@ run_deploy() {
   # Stop and remove any existing containers before redeployment
   docker compose -p nexent down -v
   log "INFO" "🚀 Starting deploy..."
-  (cd "$SCRIPT_DIR" && cp .env.example .env && bash "$DEPLOY_SCRIPT" "${DEPLOY_ARGS[@]}")
+  (cd "$SCRIPT_DIR" && cp .env.example .env && chmod 600 .env && bash "$DEPLOY_SCRIPT" "${DEPLOY_ARGS[@]}")
 
 }
 

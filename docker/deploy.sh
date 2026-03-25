@@ -506,6 +506,7 @@ select_deployment_mode() {
       # Add new ROOT_DIR to .env
       echo "# Root dir" >> .env
       echo "ROOT_DIR=\"$ROOT_DIR\"" >> .env
+      chmod 600 .env
     fi
   elif grep -q "^ROOT_DIR=" .env; then
   # Check if ROOT_DIR already exists in .env (second priority)
@@ -522,6 +523,7 @@ select_deployment_mode() {
 
     echo "# Root dir" >> .env
     echo "ROOT_DIR=\"$ROOT_DIR\"" >> .env
+    chmod 600 .env
   fi
   echo ""
   echo "--------------------------------"
@@ -551,6 +553,7 @@ update_env_var() {
 
   # Ensure the .env file exists
   touch "$env_file"
+  chmod 600 "$env_file"
 
   if grep -q "^${key}=" "$env_file"; then
     # Key exists, so update it. Escape \ and & for sed's replacement string.
@@ -708,6 +711,7 @@ select_deployment_version() {
 
   # Ensure the .env file exists
   touch "$env_file"
+  chmod 600 "$env_file"
 
   if grep -q "^${key}=" "$env_file"; then
     # Key exists, so update it. Escape \ and & for sed's replacement string.
