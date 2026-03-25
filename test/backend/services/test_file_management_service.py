@@ -1051,7 +1051,8 @@ class TestResolvePreviewFile:
         """PDF, images, and text files resolve to themselves without conversion."""
         from backend.services.file_management_service import resolve_preview_file
 
-        with patch('backend.services.file_management_service.get_file_size_from_minio', return_value=1024), \
+        with patch('backend.services.file_management_service.file_exists', return_value=True), \
+             patch('backend.services.file_management_service.get_file_size_from_minio', return_value=1024), \
              patch('backend.services.file_management_service.get_content_type', return_value=content_type):
 
             actual_name, actual_ct, total_size = await resolve_preview_file(object_name)
@@ -1067,7 +1068,8 @@ class TestResolvePreviewFile:
 
         docx_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
-        with patch('backend.services.file_management_service.get_file_size_from_minio', side_effect=[2048, 5000]), \
+        with patch('backend.services.file_management_service.file_exists', return_value=True), \
+             patch('backend.services.file_management_service.get_file_size_from_minio', side_effect=[2048, 5000]), \
              patch('backend.services.file_management_service.get_content_type', return_value=docx_type), \
              patch('backend.services.file_management_service._is_pdf_cache_valid', return_value=True):
 
@@ -1084,7 +1086,8 @@ class TestResolvePreviewFile:
 
         docx_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
-        with patch('backend.services.file_management_service.get_file_size_from_minio', side_effect=[2048, 6000]), \
+        with patch('backend.services.file_management_service.file_exists', return_value=True), \
+             patch('backend.services.file_management_service.get_file_size_from_minio', side_effect=[2048, 6000]), \
              patch('backend.services.file_management_service.get_content_type', return_value=docx_type), \
              patch('backend.services.file_management_service._is_pdf_cache_valid', return_value=False), \
              patch('backend.services.file_management_service._convert_office_to_cached_pdf',
@@ -1104,7 +1107,8 @@ class TestResolvePreviewFile:
         from consts.exceptions import FileTooLargeException
 
         oversized = FILE_PREVIEW_SIZE_LIMIT + 1
-        with patch('backend.services.file_management_service.get_file_size_from_minio', return_value=oversized):
+        with patch('backend.services.file_management_service.file_exists', return_value=True), \
+             patch('backend.services.file_management_service.get_file_size_from_minio', return_value=oversized):
             with pytest.raises(FileTooLargeException) as exc_info:
                 await resolve_preview_file("test/large_file.pdf")
 
@@ -1116,7 +1120,8 @@ class TestResolvePreviewFile:
         from backend.services.file_management_service import resolve_preview_file
         from consts.exceptions import UnsupportedFileTypeException
 
-        with patch('backend.services.file_management_service.get_file_size_from_minio', return_value=1024), \
+        with patch('backend.services.file_management_service.file_exists', return_value=True), \
+             patch('backend.services.file_management_service.get_file_size_from_minio', return_value=1024), \
              patch('backend.services.file_management_service.get_content_type',
                    return_value='application/octet-stream'):
 
@@ -1124,6 +1129,18 @@ class TestResolvePreviewFile:
                 await resolve_preview_file("test/unknown.bin")
 
             assert "Unsupported file type for preview" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_missing_direct_preview_file_raises_not_found(self):
+        """Missing direct-preview file should raise NotFoundException instead of resolving as empty."""
+        from backend.services.file_management_service import resolve_preview_file
+        from consts.exceptions import NotFoundException
+
+        with patch('backend.services.file_management_service.file_exists', return_value=False):
+            with pytest.raises(NotFoundException) as exc_info:
+                await resolve_preview_file("test/missing.pdf")
+
+        assert "File not found" in str(exc_info.value)
 
 
 class TestGetPreviewStream:

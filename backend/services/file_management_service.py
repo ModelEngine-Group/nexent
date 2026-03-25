@@ -227,6 +227,9 @@ async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
     Returns:
         Tuple[str, str, int]: (actual_object_name, content_type, total_size)
     """
+    if not file_exists(object_name):
+        raise NotFoundException(f"File not found: {object_name}")
+
     file_size = get_file_size_from_minio(object_name)
     if file_size > FILE_PREVIEW_SIZE_LIMIT:
         raise FileTooLargeException(
