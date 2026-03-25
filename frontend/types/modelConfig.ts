@@ -20,7 +20,8 @@ export type ModelSource =
   | "dashscope"
   | "tokenpony"
   | "OpenAI-API-Compatible"
-  | "modelengine";
+  | "modelengine"
+  | "volc";
 
 // Model type
 export type ModelType =
@@ -46,6 +47,9 @@ export interface ModelOption {
   expectedChunkSize?: number;
   maximumChunkSize?: number;
   chunkingBatchSize?: number;
+  // STT specific fields
+  modelAppid?: string;
+  accessToken?: string;
 }
 
 // Application configuration interface
@@ -66,6 +70,13 @@ export interface ModelApiConfig {
   modelUrl: string;
 }
 
+// STT model specific configuration interface
+export interface STTModelConfig extends SingleModelConfig {
+  modelFactory?: string; // Model factory (e.g., "volc", "dashscope")
+  modelAppid?: string;   // App ID for Volcano STT
+  accessToken?: string;  // Access token for Volcano STT
+}
+
 // Single model configuration interface
 export interface SingleModelConfig {
   modelName: string;
@@ -81,7 +92,7 @@ export interface ModelConfig {
   multiEmbedding: SingleModelConfig;
   rerank: SingleModelConfig;
   vlm: SingleModelConfig;
-  stt: SingleModelConfig;
+  stt: STTModelConfig;
   tts: SingleModelConfig;
 }
 

@@ -112,6 +112,21 @@ async def save_config_impl(config, tenant_id, user_id):
                 embedding_api_config = model_config.get("apiConfig", {})
                 env_config[f"{model_prefix}_API_KEY"] = safe_value(
                     embedding_api_config.get("apiKey"))
+
+        # Save STT specific fields for speech recognition models
+        if model_type == "stt":
+            if model_config.get("modelFactory"):
+                stt_factory_key = "STT_MODEL_FACTORY"
+                tenant_config_manager.set_single_config(
+                    user_id, tenant_id, stt_factory_key, model_config.get("modelFactory"))
+            if model_config.get("modelAppid"):
+                stt_appid_key = "STT_MODEL_APPID"
+                tenant_config_manager.set_single_config(
+                    user_id, tenant_id, stt_appid_key, model_config.get("modelAppid"))
+            if model_config.get("accessToken"):
+                stt_token_key = "STT_ACCESS_TOKEN"
+                tenant_config_manager.set_single_config(
+                    user_id, tenant_id, stt_token_key, model_config.get("accessToken"))
     logger.info("Configuration saved successfully")
 
 
@@ -186,5 +201,12 @@ def build_model_config(model_config: dict) -> dict:
 
     if "embedding" in model_config.get("model_type", ""):
         config["dimension"] = model_config.get("max_tokens", 0)
+
+    # Add STT specific fields for speech recognition models
+    model_type = model_config.get("model_type", "")
+    if model_type == "stt":
+        config["modelFactory"] = model_config.get("model_factory", "")
+        config["modelAppid"] = model_config.get("model_appid", "")
+        config["accessToken"] = model_config.get("access_token", "")
 
     return config
