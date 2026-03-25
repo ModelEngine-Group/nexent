@@ -219,7 +219,8 @@ class NexentAgent:
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
                 provide_run_summary=agent_config.provide_run_summary,
-                managed_agents=managed_agents_list
+                managed_agents=managed_agents_list,
+                additional_authorized_imports=["*"],
             )
             agent.stop_event = self.stop_event
 
