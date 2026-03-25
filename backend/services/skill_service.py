@@ -816,6 +816,36 @@ class SkillService:
             logger.error(f"Error getting skill file tree: {e}")
             raise SkillException(f"Failed to get skill file tree: {str(e)}") from e
 
+    def get_skill_file_content(
+        self,
+        skill_name: str,
+        file_path: str,
+        tenant_id: Optional[str] = None
+    ) -> Optional[str]:
+        """Get content of a specific file within a skill.
+
+        Args:
+            skill_name: Name of the skill
+            file_path: Relative path to the file within the skill directory
+            tenant_id: Tenant ID (reserved for future multi-tenant support)
+
+        Returns:
+            File content as string, or None if file not found
+        """
+        try:
+            local_dir = os.path.join(self.skill_manager.local_skills_dir, skill_name)
+            full_path = os.path.join(local_dir, file_path)
+
+            if not os.path.exists(full_path):
+                logger.warning(f"File not found: {full_path}")
+                return None
+
+            with open(full_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"Error reading skill file {skill_name}/{file_path}: {e}")
+            raise SkillException(f"Failed to read skill file: {str(e)}") from e
+
     # ============== Skill Instance Methods ==============
 
     def create_or_update_skill_instance(
