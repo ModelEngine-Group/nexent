@@ -1215,6 +1215,16 @@ class TestIsPdfCacheValid:
             mock_stream.close.assert_called_once()
             mock_logger.warning.assert_called()
 
+    def test_returns_true_when_close_attribute_is_not_callable(self):
+        """Non-callable close attributes should be ignored and still count as valid cache."""
+        from backend.services.file_management_service import _is_pdf_cache_valid
+
+        mock_stream = types.SimpleNamespace(close="not-callable")
+
+        with patch('backend.services.file_management_service.file_exists', return_value=True), \
+             patch('backend.services.file_management_service.get_file_range', return_value=mock_stream):
+            assert _is_pdf_cache_valid("preview/converted/doc_abc12345.pdf") is True
+
     def test_returns_false_when_file_not_exist(self):
         """Returns False immediately when the cached file does not exist."""
         from backend.services.file_management_service import _is_pdf_cache_valid

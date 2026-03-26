@@ -717,6 +717,8 @@ class TestConvertOfficeToPdf:
         captured_cmd = {}
         chmod_calls = []
         profile_dir = tmp_path / "lo-profile-test"
+        input_path = tmp_path / "document.docx"
+        output_dir = tmp_path / "output"
 
         def fake_run(cmd, **kwargs):
             captured_cmd["cmd"] = cmd
@@ -728,9 +730,9 @@ class TestConvertOfficeToPdf:
         monkeypatch.setattr(fmu.os, "chmod", lambda path, mode: chmod_calls.append((Path(path), mode)))
         monkeypatch.setattr(fmu.subprocess, "run", fake_run)
 
-        result = await fmu.convert_office_to_pdf('/tmp/document.docx', '/tmp/output')
+        result = await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
 
-        assert result == '/tmp/output/document.pdf'
+        assert result == str(output_dir / "document.pdf")
         cmd = captured_cmd.get("cmd", [])
         assert "--nolockcheck" in cmd
         assert f"-env:UserInstallation={profile_dir.resolve().as_uri()}" in cmd
@@ -738,92 +740,104 @@ class TestConvertOfficeToPdf:
         assert chmod_calls == [(profile_dir.resolve(), 0o700)]
 
     @pytest.mark.asyncio
-    async def test_convert_office_to_pdf_success(self, fmu, monkeypatch):
+    async def test_convert_office_to_pdf_success(self, fmu, monkeypatch, tmp_path):
         """Test successful Office to PDF conversion"""
         import subprocess
-        
+
         mock_result = types.SimpleNamespace(returncode=0, stderr="", stdout="")
-        
+        input_path = tmp_path / "document.docx"
+        output_dir = tmp_path / "output"
+
         monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
         monkeypatch.setattr(fmu.os.path, "basename", lambda p: "document.docx")
         monkeypatch.setattr(fmu.subprocess, "run", lambda *a, **k: mock_result)
-        
-        result = await fmu.convert_office_to_pdf('/tmp/document.docx', '/tmp/output')
-        
-        assert result == '/tmp/output/document.pdf'
+
+        result = await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
+
+        assert result == str(output_dir / "document.pdf")
 
     @pytest.mark.asyncio
-    async def test_convert_office_to_pdf_input_not_found(self, fmu, monkeypatch):
+    async def test_convert_office_to_pdf_input_not_found(self, fmu, monkeypatch, tmp_path):
         """Test conversion failure when input file does not exist"""
+        input_path = tmp_path / "nonexistent.docx"
+        output_dir = tmp_path / "output"
         monkeypatch.setattr(fmu.os.path, "exists", lambda p: False)
-        
+
         with pytest.raises(FileNotFoundError) as exc_info:
-            await fmu.convert_office_to_pdf('/tmp/nonexistent.docx', '/tmp/output')
-        
+            await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
+
         assert "Input file not found" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_convert_office_to_pdf_libreoffice_error(self, fmu, monkeypatch):
+    async def test_convert_office_to_pdf_libreoffice_error(self, fmu, monkeypatch, tmp_path):
         """Test conversion failure when LibreOffice returns error"""
         mock_result = types.SimpleNamespace(returncode=1, stderr="Error: LibreOffice crashed", stdout="")
-        
+        input_path = tmp_path / "document.docx"
+        output_dir = tmp_path / "output"
+
         monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
         monkeypatch.setattr(fmu.subprocess, "run", lambda *a, **k: mock_result)
-        
+
         with pytest.raises(RuntimeError) as exc_info:
-            await fmu.convert_office_to_pdf('/tmp/document.docx', '/tmp/output')
-        
+            await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
+
         assert "Office to PDF conversion failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_convert_office_to_pdf_timeout(self, fmu, monkeypatch):
+    async def test_convert_office_to_pdf_timeout(self, fmu, monkeypatch, tmp_path):
         """Test conversion failure due to timeout"""
         import subprocess
-        
+
+        input_path = tmp_path / "document.docx"
+        output_dir = tmp_path / "output"
         monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
-        
+
         def raise_timeout(*a, **k):
             raise subprocess.TimeoutExpired(cmd='libreoffice', timeout=30)
-        
+
         monkeypatch.setattr(fmu.subprocess, "run", raise_timeout)
-        
+
         with pytest.raises(TimeoutError) as exc_info:
-            await fmu.convert_office_to_pdf('/tmp/document.docx', '/tmp/output', timeout=30)
-        
+            await fmu.convert_office_to_pdf(str(input_path), str(output_dir), timeout=30)
+
         assert "timeout" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
-    async def test_convert_office_to_pdf_libreoffice_not_installed(self, fmu, monkeypatch):
+    async def test_convert_office_to_pdf_libreoffice_not_installed(self, fmu, monkeypatch, tmp_path):
         """Test conversion failure when LibreOffice is not installed"""
+        input_path = tmp_path / "document.docx"
+        output_dir = tmp_path / "output"
         monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
-        
+
         def raise_file_not_found(*a, **k):
             raise FileNotFoundError("[Errno 2] No such file or directory: 'libreoffice'")
-        
+
         monkeypatch.setattr(fmu.subprocess, "run", raise_file_not_found)
-        
+
         with pytest.raises(FileNotFoundError) as exc_info:
-            await fmu.convert_office_to_pdf('/tmp/document.docx', '/tmp/output')
-        
+            await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
+
         assert "LibreOffice is not installed" in str(exc_info.value)
         assert "not available in PATH" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_convert_office_to_pdf_output_not_found(self, fmu, monkeypatch):
+    async def test_convert_office_to_pdf_output_not_found(self, fmu, monkeypatch, tmp_path):
         """Test conversion failure when output PDF is not generated"""
         mock_result = types.SimpleNamespace(returncode=0, stderr="", stdout="")
-        
+        input_path = tmp_path / "document.docx"
+        output_dir = tmp_path / "output"
+
         def exists_side_effect(path):
             # Input file exists, output PDF does not
             if 'document.docx' in path:
                 return True
             return False
-        
+
         monkeypatch.setattr(fmu.os.path, "exists", exists_side_effect)
         monkeypatch.setattr(fmu.os.path, "basename", lambda p: "document.docx")
         monkeypatch.setattr(fmu.subprocess, "run", lambda *a, **k: mock_result)
-        
+
         with pytest.raises(RuntimeError) as exc_info:
-            await fmu.convert_office_to_pdf('/tmp/document.docx', '/tmp/output')
-        
+            await fmu.convert_office_to_pdf(str(input_path), str(output_dir))
+
         assert "Converted PDF not found" in str(exc_info.value)
