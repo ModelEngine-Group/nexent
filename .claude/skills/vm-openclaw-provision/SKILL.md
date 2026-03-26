@@ -31,10 +31,11 @@ FusionCompute 平台上管理虚拟机，每个功能由独立的可执行脚本
 - **创建虚拟机会自动等待完成并传输配置**，无需手动指定 `--wait` 或 `--transfer-config`
 - **单次任务中 `create.py` 只允许执行一次**。如果在本次任务中已经成功执行过 `create.py`（无论单个还是批量），禁止再次调用。需要创建多个虚拟机时，使用 `--names` 一次性批量创建
 - 不同的任务（不同的用户请求）之间可以分别执行 `create.py`
+- **必须传入 `--user-name`**：调用 `create.py` 或 `transfer_config.py` 时，必须从对话上下文中获取当前用户名称并通过 `--user-name` 传入。如果没有获取到则使用空值。该名称会写入虚拟机的 `agent_config.yaml`
 
 **用法：**
 ```bash
-python scripts/create.py --name my-vm
+python scripts/create.py --name my-vm --user-name "张三"
 ```
 
 ## 脚本结构
@@ -111,21 +112,21 @@ scripts/
 
 ```bash
 # 创建单个虚拟机（自动等待完成 + 传输配置）
-python scripts/create.py --name my-vm
+python scripts/create.py --name my-vm --user-name "张三"
 
 # 创建单个虚拟机（指定 IP）
-python scripts/create.py --name my-vm --ip 192.168.1.100
+python scripts/create.py --name my-vm --ip 192.168.1.100 --user-name "张三"
 
 # 批量创建虚拟机
-python scripts/create.py --names "vm-1,vm-2,vm-3"
+python scripts/create.py --names "vm-1,vm-2,vm-3" --user-name "张三"
 
 # 指定资源配置
-python scripts/create.py --name my-vm --cpu 8 --memory 16384
+python scripts/create.py --name my-vm --cpu 8 --memory 16384 --user-name "张三"
 ```
 
 **注意：**
 - `--wait` 和 `--transfer-config` 已内置为默认行为，无需手动指定
-- 同名虚拟机只能创建一次，重复执行会报错（通过 `.create_lock` 文件控制）
+- `--user-name` 为必传参数，从对话上下文获取用户名称
 
 **参数说明：**
 
@@ -133,6 +134,7 @@ python scripts/create.py --name my-vm --cpu 8 --memory 16384
 |------|------|
 | `--name, -n` | 虚拟机名称（单个）|
 | `--names` | 虚拟机名称列表，逗号分隔（批量）|
+| `--user-name` | **必传**：用户名称，写入 agent_config.yaml |
 | `--vm-id` | 模板虚拟机 ID |
 | `--ip` | 指定 IP 地址（不指定则自动分配）|
 | `--gateway` | 网关 |
@@ -205,10 +207,10 @@ python scripts/status.py --task-id <task-id> --wait
 
 ```bash
 # 传输完整配置（默认：Kafka + 模型配置）
-python scripts/transfer_config.py --ip 192.168.1.100
+python scripts/transfer_config.py --ip 192.168.1.100 --user-name "张三"
 
 # 只传输 Kafka 配置
-python scripts/transfer_config.py --ip 192.168.1.100 --no-include-model
+python scripts/transfer_config.py --ip 192.168.1.100 --user-name "张三" --no-include-model
 
 # 只同步模型配置
 python scripts/transfer_config.py --ip 192.168.1.100 --no-include-kafka
@@ -226,6 +228,7 @@ python scripts/transfer_config.py --ip 192.168.1.100 --model-types llm embedding
 | 参数 | 说明 |
 |------|------|
 | `--ip` | 虚拟机 IP 地址 |
+| `--user-name` | **必传**：用户名称，写入 agent_config.yaml |
 | `--ssh-username` | SSH 用户名 |
 | `--ssh-password` | SSH 密码 |
 | `--ssh-port` | SSH 端口（默认 22）|

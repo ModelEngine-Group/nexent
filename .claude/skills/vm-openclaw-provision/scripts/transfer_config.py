@@ -44,15 +44,25 @@ def run_transfer(vm_ip, cfg: Config):
     ssh_client = create_ssh_client(vm_ip, ssh_username, ssh_password, ssh_port)
 
     try:
-        if kafka_config:
+        kafka_config = cfg.kafka_config
+        user_name = cfg.user_name
+
+        if kafka_config or user_name:
             config_content = generate_vm_config_yaml(
-                vm_ip, kafka_config, {}, include_vm=False, include_ssh=False
+                vm_ip,
+                kafka_config,
+                {},
+                include_vm=False,
+                include_ssh=False,
+                user_name=user_name,
             )
             full_path = f"{remote_path}/{config_filename}"
 
-            print(f"Transferring Kafka config to {full_path}...")
+            print(f"Transferring config to {full_path}...")
+            if user_name:
+                print(f"  user_name: {user_name}")
             transfer_config_via_scp(ssh_client, config_content, full_path)
-            print("Kafka config transferred successfully!")
+            print("Config transferred successfully!")
 
         nexent_url = nexent_api_config.get("base_url")
         nexent_token = nexent_api_config.get("token")
@@ -101,6 +111,7 @@ def main():
     add_common_args(parser)
 
     parser.add_argument("--ip", required=True, help="VM IP address")
+    parser.add_argument("--user-name", help="User name to include in config")
     parser.add_argument("--ssh-username", help="SSH username (overrides config)")
     parser.add_argument("--ssh-password", help="SSH password (overrides config)")
     parser.add_argument("--ssh-port", type=int, help="SSH port (overrides config)")
@@ -126,6 +137,8 @@ def main():
 
     _, cfg = get_client_with_args(args)
 
+    if args.user_name:
+        cfg.set("user_name", args.user_name)
     if args.ssh_username:
         cfg.set_nested("ssh", "username", value=args.ssh_username)
     if args.ssh_password:

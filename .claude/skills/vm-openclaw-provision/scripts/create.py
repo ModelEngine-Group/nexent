@@ -192,6 +192,7 @@ def main():
 
     parser.add_argument("--name", "-n", help="VM name (for single VM)")
     parser.add_argument("--names", help="Comma-separated VM names (for batch creation)")
+    parser.add_argument("--user-name", help="User name to include in config")
     parser.add_argument("--vm-id", help="Template VM ID")
     parser.add_argument(
         "--ip", help="Specific IP address (auto-assigned if not specified)"
@@ -212,6 +213,8 @@ def main():
         sys.exit(1)
 
     client, cfg = get_client_with_args(args)
+    if args.user_name:
+        cfg.set("user_name", args.user_name)
     client.login()
 
     if args.names:
