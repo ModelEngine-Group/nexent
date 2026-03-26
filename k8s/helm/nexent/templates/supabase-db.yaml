@@ -16,7 +16,7 @@ spec:
   accessModes:
     - ReadWriteOnce
   hostPath:
-    path: {{ .Values.global.dataDir }}/nexent-supabase-db-test
+    path: {{ .Values.global.dataDir }}/nexent-supabase-db
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

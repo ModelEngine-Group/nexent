@@ -324,3 +324,7 @@ MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 # APP Version
 APP_VERSION = "v1.8.1"
+
+# Container Platform Configuration
+IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
+KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")

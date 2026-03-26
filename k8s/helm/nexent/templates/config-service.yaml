@@ -17,6 +17,7 @@ spec:
       labels:
         app: nexent-config
     spec:
+      serviceAccountName: nexent-config
       containers:
         - name: nexent-config
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"

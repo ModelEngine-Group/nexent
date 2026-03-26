@@ -48,3 +48,42 @@ roleRef:
   kind: Role
   name: nexent-init-jobs
   apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nexent-config
+  namespace: {{ .Values.global.namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nexent-config-pods
+  namespace: {{ .Values.global.namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nexent-config
+  namespace: {{ .Values.global.namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: nexent-config
+    namespace: {{ .Values.global.namespace }}
+roleRef:
+  kind: Role
+  name: nexent-config-pods
+  apiGroup: rbac.authorization.k8s.io

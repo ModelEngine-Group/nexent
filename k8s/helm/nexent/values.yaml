@@ -181,6 +181,7 @@ config:
   # General
   skipProxy: "true"
   umask: "0022"
+  isDeployedByKubernetes: "true"
 
 # Secrets - IMPORTANT: Override these in production!
 secrets:

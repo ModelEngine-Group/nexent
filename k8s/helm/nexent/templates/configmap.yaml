@@ -119,3 +119,7 @@ data:
 
   # MCP Container Image
   NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}
+
+  # Kubernetes Deployment Mode
+  IS_DEPLOYED_BY_KUBERNETES: {{ .Values.config.isDeployedByKubernetes | quote }}
+  KUBERNETES_NAMESPACE: {{ .Values.global.namespace | quote }}
