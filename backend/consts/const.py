@@ -86,8 +86,9 @@ DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
 # Roles that can edit all resources within a tenant (permission = EDIT).
+# Include SUPER_ADMIN: user_tenant_t stores SUPER_ADMIN (see db_models UserTenant).
 # Keep this centralized to avoid drifting role logic across modules.
-CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED"}
+CAN_EDIT_ALL_USER_ROLES = {"SU", "SUPER_ADMIN", "ADMIN", "SPEED"}
 
 # Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
 PERMISSION_READ = "READ_ONLY"

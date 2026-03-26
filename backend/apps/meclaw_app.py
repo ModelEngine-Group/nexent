@@ -78,6 +78,7 @@ _meclaw_kafka_startup_done = False
 _creator_profile_lock = threading.Lock()
 _CREATOR_PROFILE_CACHE: Dict[str, tuple[Optional[str], Optional[str]]] = {}
 
+MECLAW_KAFKA_BOOTSTRAP_SERVERS = "kafka:9093"
 KAFKA_TOPIC = "instance-monitoring"
 KAFKA_GROUP_ID = "monitor-panel-consumer"
 
