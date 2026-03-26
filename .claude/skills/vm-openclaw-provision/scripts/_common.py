@@ -288,19 +288,19 @@ class Config:
 
     @property
     def ssh_config(self) -> Dict[str, Any]:
-        return self._get("ssh", {})
+        return self._get("ssh", default={})
 
     @property
     def kafka_config(self) -> Dict[str, Any]:
-        return self._get("kafka", {})
+        return self._get("kafka", default={})
 
     @property
     def config_transfer(self) -> Dict[str, Any]:
-        return self._get("config_transfer", {})
+        return self._get("config_transfer", default={})
 
     @property
     def nexent_api(self) -> Dict[str, Any]:
-        return self._get("nexent_api", {})
+        return self._get("nexent_api", default={})
 
 
 def get_csv_path(config_path: str | None = None) -> Path:
@@ -761,6 +761,7 @@ def sync_model_config_to_vm(
         origins = existing_config["gateway"]["controlUi"]["allowedOrigins"]
         if new_origin not in origins:
             origins.append(new_origin)
+        existing_config["gateway"]["controlUi"]["dangerouslyDisableDeviceAuth"] = True
 
     write_remote_json(ssh_client, remote_path, existing_config)
 
