@@ -14,7 +14,7 @@ from pydantic import BaseModel
 class InstanceBase(BaseModel):
     id: str
     name: str
-    author: str
+    created_by_user_id: str
     description: str
     status: Optional[str] = None
     created_at: datetime
@@ -31,7 +31,7 @@ class InstanceCard(BaseModel):
     name: str
     created_at: datetime
     status: str
-    author: str
+    created_by_user_id: str
     description: str
     chat_url: str
 
@@ -299,7 +299,7 @@ async def list_instances() -> List[InstanceCard]:
             name=inst.name,
             created_at=inst.created_at,
             status=inst.status,
-            author=inst.author,
+            created_by_user_id=inst.created_by_user_id,
             description=inst.description,
             chat_url=inst.chat_url,
         )
