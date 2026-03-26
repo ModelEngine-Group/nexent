@@ -4,6 +4,7 @@
 import argparse
 import csv
 import ipaddress
+import json
 import os
 import socket
 import time
@@ -18,7 +19,7 @@ import yaml
 CSV_COLUMNS = [
     "ip",
     "status",
-    "task_urn",
+    "task_id",
     "vm_id",
     "site_id",
     "name",
@@ -78,13 +79,20 @@ class IPAllocationManager:
         return allocated
 
     def allocate_ip(
-        self, ip: str, task_id: str, site_id: str, vm_id: str, name: str, gateway: str, netmask: str
+        self,
+        ip: str,
+        task_id: str,
+        site_id: str,
+        vm_id: str,
+        name: str,
+        gateway: str,
+        netmask: str,
     ) -> None:
         now = datetime.now().isoformat()
         record = {
             "ip": ip,
             "status": "allocating",
-            "task_urn": task_id,
+            "task_id": task_id,
             "vm_id": vm_id,
             "site_id": site_id,
             "name": name,
@@ -278,6 +286,10 @@ class Config:
     @property
     def config_transfer(self) -> Dict[str, Any]:
         return self._get("config_transfer", {})
+
+    @property
+    def nexent_api(self) -> Dict[str, Any]:
+        return self._get("nexent_api", {})
 
 
 def get_csv_path(config_path: str | None = None) -> Path:
@@ -569,6 +581,179 @@ def generate_vm_config_yaml(
         ssh_copy.pop("password", None)
         config["ssh"] = ssh_copy
     return yaml.dump(config, default_flow_style=False)
+
+
+def fetch_nexent_model_config(
+    base_url: str, token: Optional[str] = None, model_types: Optional[List[str]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Fetch model configurations from Nexent Config Service API.
+
+    Args:
+        base_url: Nexent Config Service base URL (e.g., http://nexent-config:5010)
+        token: Optional JWT token for authentication
+        model_types: List of model types to filter (e.g., ["llm"]). If None, returns all.
+
+    Returns:
+        List of model configurations
+    """
+    url = f"{base_url.rstrip('/')}/model/list"
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    response = requests.get(url, headers=headers, timeout=30)
+    response.raise_for_status()
+
+    data = response.json()
+    models = data.get("data", [])
+
+    if model_types:
+        models = [m for m in models if m.get("model_type") in model_types]
+
+    return models
+
+
+def read_remote_json(
+    ssh_client: paramiko.SSHClient, remote_path: str
+) -> Optional[Dict[str, Any]]:
+    """Read a JSON file from remote host via SSH."""
+    stdin, stdout, stderr = ssh_client.exec_command(f"cat '{remote_path}' 2>/dev/null")
+    content = stdout.read().decode()
+    if not content:
+        return None
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return None
+
+
+def write_remote_json(
+    ssh_client: paramiko.SSHClient, remote_path: str, data: Dict[str, Any]
+) -> bool:
+    """Write a JSON file to remote host via SSH."""
+    remote_dir = os.path.dirname(remote_path)
+    if remote_dir:
+        ssh_client.exec_command(f"mkdir -p '{remote_dir}'")[
+            1
+        ].channel.recv_exit_status()
+
+    json_content = json.dumps(data, indent=2, ensure_ascii=False)
+    cat_cmd = f"cat > '{remote_path}' << 'EOFCONFIG'\n{json_content}\nEOFCONFIG"
+    stdin, stdout, stderr = ssh_client.exec_command(cat_cmd)
+    exit_status = stdout.channel.recv_exit_status()
+    if exit_status != 0:
+        raise Exception(f"Failed to write JSON: {stderr.read().decode()}")
+    return True
+
+
+def transform_nexent_to_openclaw(nexent_models: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Transform Nexent model config format to openclaw format.
+
+    Nexent model -> openclaw provider format:
+    {
+      "models": {
+        "mode": "merge",
+        "providers": {
+          "<provider_name>": {
+            "baseUrl": "...",
+            "apiKey": "...",
+            "api": "openai-completions",
+            "models": [{"id": "provider/model-name", ...}]
+          }
+        }
+      }
+    }
+    """
+    if not nexent_models:
+        return {}
+
+    providers: Dict[str, Dict[str, Any]] = {}
+
+    for model in nexent_models:
+        model_factory = model.get("model_factory", "openai").lower()
+        provider_name = model_factory
+
+        if provider_name not in providers:
+            providers[provider_name] = {
+                "baseUrl": model.get("base_url", ""),
+                "apiKey": model.get("api_key", ""),
+                "api": "openai-completions",
+                "models": [],
+            }
+
+        model_id = f"{provider_name}/{model.get('model_name', 'unknown')}"
+        model_entry: Dict[str, Any] = {"id": model_id}
+
+        display_name = model.get("display_name") or model.get("model_name")
+        if display_name:
+            model_entry["name"] = display_name
+
+        if model.get("max_tokens"):
+            model_entry["maxTokens"] = model["max_tokens"]
+
+        providers[provider_name]["models"].append(model_entry)
+
+    return {"models": {"mode": "merge", "providers": providers}}
+
+
+def sync_model_config_to_vm(
+    ssh_client: paramiko.SSHClient,
+    nexent_models: List[Dict[str, Any]],
+    remote_path: str,
+    vm_ip: Optional[str] = None,
+    merge: bool = True,
+) -> Dict[str, Any]:
+    """
+    Sync Nexent model config to VM's openclaw.json.
+
+    Args:
+        ssh_client: Connected SSH client
+        nexent_models: List of model configs from Nexent API
+        remote_path: Path to openclaw.json on VM
+        vm_ip: VM IP address (used for gateway.controlUi.allowedOrigins)
+        merge: If True, merge with existing config; if False, replace
+
+    Returns:
+        The final config that was written
+    """
+    if merge:
+        existing_config = read_remote_json(ssh_client, remote_path)
+        if existing_config is None:
+            existing_config = {}
+    else:
+        existing_config = {}
+
+    new_model_config = transform_nexent_to_openclaw(nexent_models)
+
+    if "models" not in existing_config:
+        existing_config["models"] = {}
+    if "providers" not in existing_config["models"]:
+        existing_config["models"]["providers"] = {}
+
+    existing_config["models"]["mode"] = new_model_config["models"].get("mode", "merge")
+
+    for provider_name, provider_config in new_model_config["models"][
+        "providers"
+    ].items():
+        existing_config["models"]["providers"][provider_name] = provider_config
+
+    if vm_ip:
+        if "gateway" not in existing_config:
+            existing_config["gateway"] = {}
+        if "controlUi" not in existing_config["gateway"]:
+            existing_config["gateway"]["controlUi"] = {}
+        if "allowedOrigins" not in existing_config["gateway"]["controlUi"]:
+            existing_config["gateway"]["controlUi"]["allowedOrigins"] = []
+        new_origin = f"http://{vm_ip}:18789"
+        origins = existing_config["gateway"]["controlUi"]["allowedOrigins"]
+        if new_origin not in origins:
+            origins.append(new_origin)
+
+    write_remote_json(ssh_client, remote_path, existing_config)
+
+    return existing_config
 
 
 def create_client_from_config(config_path: str | None = None) -> FusionComputeClient:
