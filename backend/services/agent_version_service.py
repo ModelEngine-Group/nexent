@@ -17,9 +17,11 @@ from database.agent_version_db import (
     insert_agent_snapshot,
     insert_tool_snapshot,
     insert_relation_snapshot,
+    insert_skill_snapshot,
     delete_agent_snapshot,
     delete_tool_snapshot,
     delete_relation_snapshot,
+    delete_skill_snapshot,
     get_next_version_no,
     delete_version,
     SOURCE_TYPE_NORMAL,
@@ -94,6 +96,22 @@ def publish_version_impl(
         _remove_audit_fields_for_insert(rel_snapshot)
         insert_relation_snapshot(rel_snapshot)
 
+    # Get skill instances from draft (version_no=0)
+    from database import skill_db as skill_db_module
+    skills_draft = skill_db_module.query_skill_instances_by_agent_id(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=0
+    )
+
+    # Insert skill instance snapshots
+    for skill in skills_draft:
+        skill_snapshot = skill.copy()
+        skill_snapshot.pop('version_no', None)
+        skill_snapshot['version_no'] = new_version_no
+        _remove_audit_fields_for_insert(skill_snapshot)
+        insert_skill_snapshot(skill_snapshot)
+
     # Create version metadata
     version_data = {
         'tenant_id': tenant_id,
@@ -154,7 +172,7 @@ def get_version_detail_impl(
 ) -> dict:
     """
     Get version detail including snapshot data, structured like agent info.
-    Returns agent info with tools, sub_agents, availability, etc.
+    Returns agent info with tools, sub_agents, skills, availability, etc.
     """
     result: Dict[str, Any] = {}
 
@@ -192,6 +210,16 @@ def get_version_detail_impl(
 
     # Extract sub_agent_id_list from relations
     result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_snapshot]
+
+    # Get skill instances for this version (from ag_skill_instance_t with version_no)
+    from database import skill_db as skill_db_module
+    skills_snapshot = skill_db_module.query_skill_instances_by_agent_id(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no
+    )
+    # Add enabled skills to result
+    result['skills'] = [s for s in skills_snapshot if s.get('enabled', True)]
 
     # Get model name from model_id
     if result.get('model_id') is not None and result['model_id'] != 0:
@@ -379,7 +407,7 @@ def delete_version_impl(
 ) -> dict:
     """
     Soft delete a version by setting delete_flag='Y'
-    Also soft deletes all related snapshot data (agent, tools, relations) for this version
+    Also soft deletes all related snapshot data (agent, tools, relations, skills) for this version
     """
     # Check if version exists
     version = search_version_by_version_no(agent_id, tenant_id, version_no)
@@ -425,6 +453,14 @@ def delete_version_impl(
 
     # 3. Delete relation snapshots
     delete_relation_snapshot(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        deleted_by=user_id,
+    )
+
+    # 4. Delete skill instance snapshots
+    delete_skill_snapshot(
         agent_id=agent_id,
         tenant_id=tenant_id,
         version_no=version_no,
@@ -549,6 +585,17 @@ def compare_versions_impl(
             'value_b': sub_agents_b_count,
         })
 
+    # Compare skills count
+    skills_a_count = len(version_a.get('skills', []))
+    skills_b_count = len(version_b.get('skills', []))
+    if skills_a_count != skills_b_count:
+        differences.append({
+            'field': 'skills_count',
+            'label': 'Skills Count',
+            'value_a': skills_a_count,
+            'value_b': skills_b_count,
+        })
+
     return {
         'version_a': version_a,
         'version_b': version_b,
@@ -565,6 +612,8 @@ def _get_version_detail_or_draft(
     Get version detail for published versions, or draft data for version 0.
     Returns structured agent info similar to get_version_detail_impl.
     """
+    from database import skill_db as skill_db_module
+
     result: Dict[str, Any] = {}
 
     if version_no == 0:
@@ -581,6 +630,15 @@ def _get_version_detail_or_draft(
         # Add tools (only enabled tools)
         result['tools'] = [t for t in tools_draft if t.get('enabled', True)]
         result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_draft]
+
+        # Get draft skill instances (version_no=0)
+        skills_draft = skill_db_module.query_skill_instances_by_agent_id(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=0
+        )
+        result['skills'] = [s for s in skills_draft if s.get('enabled', True)]
+
         result['version'] = {
             'version_name': 'Draft',
             'version_status': 'DRAFT',
@@ -589,7 +647,7 @@ def _get_version_detail_or_draft(
             'source_version_no': 0,
         }
     else:
-        # Get published version detail
+        # Get published version detail (already includes skills from get_version_detail_impl)
         result = get_version_detail_impl(agent_id, tenant_id, version_no)
 
     # Get model name from model_id

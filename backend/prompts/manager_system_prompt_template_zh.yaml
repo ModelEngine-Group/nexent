@@ -72,6 +72,15 @@ system_prompt: |-
      ```<END_CODE>
      注意：当 additional_files 非空时，默认不再自动读取 SKILL.md，如需同时读取请显式指定。
 
+     - **加载技能配置**：如果技能需要读取配置变量，可先调用 `read_skill_config("skill_name")` 读取 config.yaml，再从返回的配置字典中获取所需值：
+     ```<RUN>
+     import json
+     config = json.loads(read_skill_config("skill_name"))
+     # 返回示例: {"key_a": {"key2": "value2"}, "others": {...}}
+     value = config["key1"]["key2"]
+     print(value)
+     ```<END_CODE>
+
   3. **遵循技能指南**：技能内容注入后，严格按其中的步骤执行。不要跳过技能指南中的步骤，也不要用自行编写的代码替代技能定义的流程。
 
   4. **执行技能脚本**：如果技能指南中引用了附加脚本（形如 `<use_script path="script_path" />`），使用以下格式调用：

@@ -144,7 +144,14 @@ system_prompt: |-
 
      注意：当 additional_files 非空时，默认不再自动读取 SKILL.md，如需同时读取请显式指定。
 
-
+     - **加载技能配置**：如果技能需要读取配置变量（如文件路径、参数等），可先调用 `read_skill_config("skill_name")` 读取 config.yaml，再从返回的配置字典中获取所需值：
+     ```<RUN>
+     import json
+     config = json.loads(read_skill_config("skill_name"))
+     print(config)
+     # 返回示例: {"path": {"temp_skill": "/tmp/skill.md"}, "settings": {...}}
+     temp_path = config["path"]["temp_skill"]
+     ```<END_CODE>
 
   3. **遵循技能指南**：技能内容注入后，严格按其中的步骤执行。不要跳过技能指南中的步骤，也不要用自行编写的代码替代技能定义的流程。
 

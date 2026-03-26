@@ -111,6 +111,28 @@ def _get_skill_script_tools(
                 source="builtin",
                 usage="builtin",
                 metadata=skill_context,
+            ),
+            ToolConfig(
+                class_name="ReadSkillConfigTool",
+                name="read_skill_config",
+                description="Read the config.yaml file from a skill directory. Returns JSON containing configuration variables needed for skill workflows.",
+                inputs='{"skill_name": "str"}',
+                output_type="string",
+                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                source="builtin",
+                usage="builtin",
+                metadata=skill_context,
+            ),
+            ToolConfig(
+                class_name="WriteSkillFileTool",
+                name="write_skill_file",
+                description="Write content to a file within a skill directory. Creates parent directories if they do not exist.",
+                inputs='{"skill_name": "str", "file_path": "str", "content": "str"}',
+                output_type="string",
+                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                source="builtin",
+                usage="builtin",
+                metadata=skill_context,
             )
         ]
     except Exception as e:
@@ -272,7 +294,7 @@ async def create_agent_config(
         "skills": skills
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
-    
+
     _print_prompt_with_token_count(system_prompt, agent_id, "BEFORE_INJECTION")
 
     if agent_info.get("model_id") is not None:

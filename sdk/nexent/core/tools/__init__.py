@@ -19,6 +19,7 @@ from .analyze_text_file_tool import AnalyzeTextFileTool
 from .analyze_image_tool import AnalyzeImageTool
 from .run_skill_script_tool import run_skill_script
 from .read_skill_md_tool import read_skill_md
+from .read_skill_config_tool import read_skill_config
 
 __all__ = [
     "ExaSearchTool",
@@ -41,5 +42,6 @@ __all__ = [
     "AnalyzeTextFileTool",
     "AnalyzeImageTool",
     "run_skill_script",
-    "read_skill_md"
+    "read_skill_md",
+    "read_skill_config"
 ]

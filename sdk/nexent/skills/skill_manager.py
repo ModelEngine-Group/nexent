@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from .constants import SKILL_FILE_NAME
