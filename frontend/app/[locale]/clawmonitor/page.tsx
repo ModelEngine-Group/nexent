@@ -8,6 +8,7 @@ import {
   Col,
   Card,
   Button,
+  Tooltip,
   Tabs,
   Typography,
   Divider,
@@ -35,6 +36,7 @@ import {
   Clock,
   Square,
 } from "lucide-react";
+import { Can } from "@/components/permission/Can";
 
 /** Instance status */
 export type InstanceStatus = "running" | "waiting" | "stopped";
@@ -102,6 +104,17 @@ export default function ClawMonitorPage() {
     setSelectedId(null);
     setInstanceDetail(null);
   };
+
+  const openChatInNewTab = (chatUrl: string | undefined) => {
+    const url = chatUrl?.trim();
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const resolveChatUrl = (instanceId: string) =>
+    instanceDetail?.id === instanceId
+      ? instanceDetail.chat_url
+      : instances.find((i) => i.id === instanceId)?.chat_url;
 
   return (
     <div className="w-full h-full overflow-auto">
@@ -189,20 +202,42 @@ export default function ClawMonitorPage() {
                 >
                   {t("clawmonitor.backToList")}
                 </Button>
-                <div className="flex items-center gap-4 mx-4">
-                  <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/30">
-                    <Box className="h-7 w-7 text-teal-600 dark:text-teal-400" />
+                <div className="flex items-center justify-between gap-4 mx-4 flex-wrap">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 shrink-0">
+                      <Box className="h-7 w-7 text-teal-600 dark:text-teal-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <Typography.Title level={4} className="!mb-0">
+                        {instanceDetail?.name ??
+                          instances.find((i) => i.id === selectedId)?.name ??
+                          selectedId}
+                      </Typography.Title>
+                      <Typography.Text type="secondary" className="text-sm">
+                        {t("clawmonitor.detailSubtitle")}
+                      </Typography.Text>
+                    </div>
                   </div>
-                  <div>
-                    <Typography.Title level={4} className="!mb-0">
-                      {instanceDetail?.name ??
-                        instances.find((i) => i.id === selectedId)?.name ??
-                        selectedId}
-                    </Typography.Title>
-                    <Typography.Text type="secondary" className="text-sm">
-                      {t("clawmonitor.detailSubtitle")}
-                    </Typography.Text>
-                  </div>
+                  <Tooltip
+                    title={
+                      !resolveChatUrl(selectedId)?.trim()
+                        ? t("clawmonitor.chatUrlUnavailable")
+                        : undefined
+                    }
+                  >
+                    <span>
+                      <Button
+                        type="primary"
+                        icon={<MessageCircle className="h-4 w-4" />}
+                        disabled={!resolveChatUrl(selectedId)?.trim()}
+                        onClick={() =>
+                          openChatInNewTab(resolveChatUrl(selectedId))
+                        }
+                      >
+                        {t("clawmonitor.enterConversation")}
+                      </Button>
+                    </span>
+                  </Tooltip>
                 </div>
               </div>
               <Divider className="my-0" />
@@ -393,32 +428,44 @@ export default function ClawMonitorPage() {
                         styles={{ body: { padding: "20px" } }}
                         onClick={() => handleSelectInstance(inst.id)}
                         actions={[
-                          <Button
+                          <Tooltip
                             key="enter"
-                            type="link"
-                            size="small"
-                            icon={<MessageCircle className="h-4 w-4" />}
-                            className="text-slate-600 dark:text-slate-300"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // TODO: navigate to conversation
-                            }}
+                            title={
+                              !inst.chat_url?.trim()
+                                ? t("clawmonitor.chatUrlUnavailable")
+                                : undefined
+                            }
                           >
-                            {t("clawmonitor.enterConversation")}
-                          </Button>,
-                          <Button
-                            key="delete"
-                            type="link"
-                            size="small"
-                            danger
-                            icon={<Trash2 className="h-4 w-4" />}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // TODO: delete instance
-                            }}
-                          >
-                            {t("clawmonitor.delete")}
-                          </Button>,
+                            <span>
+                              <Button
+                                type="link"
+                                size="small"
+                                icon={<MessageCircle className="h-4 w-4" />}
+                                className="text-slate-600 dark:text-slate-300"
+                                disabled={!inst.chat_url?.trim()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openChatInNewTab(inst.chat_url);
+                                }}
+                              >
+                                {t("clawmonitor.enterConversation")}
+                              </Button>
+                            </span>
+                          </Tooltip>,
+                          <Can key="delete" permission="instance:delete">
+                            <Button
+                              type="link"
+                              size="small"
+                              danger
+                              icon={<Trash2 className="h-4 w-4" />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // TODO: delete instance
+                              }}
+                            >
+                              {t("clawmonitor.delete")}
+                            </Button>
+                          </Can>,
                         ]}
                       >
                         <div className="flex flex-col h-full">
@@ -435,12 +482,23 @@ export default function ClawMonitorPage() {
                           <Typography.Title level={5} className="!mt-0 !mb-1">
                             {inst.name}
                           </Typography.Title>
-                          <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">
-                            {t("clawmonitor.author")}: {inst.author}
+                          <div className="text-sm text-slate-500 dark:text-slate-400 mb-1 flex min-w-0 items-center gap-0">
+                            <span className="shrink-0">{t("clawmonitor.author")}: </span>
+                            <Tooltip
+                              title={inst.author?.trim() ? inst.author : undefined}
+                            >
+                              <span className="min-w-0 truncate">{inst.author}</span>
+                            </Tooltip>
                           </div>
-                          <p className="text-sm text-slate-600 dark:text-slate-300 flex-1 line-clamp-2">
-                            {inst.description}
-                          </p>
+                          <Tooltip
+                            title={
+                              inst.description?.trim() ? inst.description : undefined
+                            }
+                          >
+                            <p className="text-sm text-slate-600 dark:text-slate-300 flex-1 line-clamp-2 min-h-0 break-words overflow-hidden">
+                              {inst.description}
+                            </p>
+                          </Tooltip>
                         </div>
                       </Card>
                     </Col>

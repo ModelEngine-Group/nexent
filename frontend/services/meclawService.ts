@@ -15,6 +15,11 @@ export interface MeclawInstance {
   status: string;
   author: string;
   description: string;
+  chat_url: string;
+  /** Resolved from user_tenant when Kafka omits tenant_id */
+  tenant_id?: string | null;
+  /** From Kafka; same user as ``author`` after DB enrichment */
+  created_by_user_id?: string | null;
 }
 
 export interface MeclawInstanceDetail {
@@ -31,6 +36,9 @@ export interface MeclawInstanceDetail {
   report_time: string;
   chat_url: string;
   last_report_time: string;
+  /** Resolved from user_tenant when Kafka omits tenant_id */
+  tenant_id?: string | null;
+  created_by_user_id?: string | null;
 }
 
 /**

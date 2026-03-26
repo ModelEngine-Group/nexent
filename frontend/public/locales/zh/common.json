@@ -1710,6 +1710,7 @@
   "clawmonitor.newVM": "新建虚拟机",
   "clawmonitor.author": "作者",
   "clawmonitor.enterConversation": "进入对话",
+  "clawmonitor.chatUrlUnavailable": "暂无对话链接",
   "clawmonitor.delete": "删除",
   "clawmonitor.running": "运行中",
   "clawmonitor.waiting": "等待中",

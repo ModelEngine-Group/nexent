@@ -1552,6 +1552,7 @@
   "clawmonitor.newVM": "New Virtual Machine",
   "clawmonitor.author": "Author",
   "clawmonitor.enterConversation": "Enter Conversation",
+  "clawmonitor.chatUrlUnavailable": "No chat URL available",
   "clawmonitor.delete": "Delete",
   "clawmonitor.running": "Running",
   "clawmonitor.waiting": "Waiting",
