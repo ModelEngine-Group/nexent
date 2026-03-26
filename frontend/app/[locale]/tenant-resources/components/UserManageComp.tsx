@@ -39,6 +39,7 @@ import KnowledgeList from "./resources/KnowledgeList";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
+import SkillList from "./resources/SkillList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -804,6 +805,11 @@ export default function UserManageComp() {
                       children: <McpList tenantId={tenantId} />,
                     },
                   ] : []),
+                  {
+                    key: "skills",
+                    label: "Skills",
+                    children: <SkillList tenantId={tenantId} />,
+                  },
                   {
                     key: "invitations",
                     label: t("tenantResources.invitation.tab") || "Invitations",

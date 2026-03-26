@@ -1,7 +1,7 @@
 """Skill management HTTP endpoints."""
 
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Header
 from starlette.responses import JSONResponse
@@ -26,6 +26,7 @@ class SkillCreateRequest(BaseModel):
     tool_names: Optional[List[str]] = []  # Alternative: use tool name list, will be converted to tool_ids
     tags: Optional[List[str]] = []
     source: Optional[str] = "custom"   # official, custom, partner
+    params: Optional[Dict[str, Any]] = None  # Skill config (JSON object)
 
 
 class SkillUpdateRequest(BaseModel):
@@ -36,6 +37,7 @@ class SkillUpdateRequest(BaseModel):
     tool_names: Optional[List[str]] = None  # Alternative: use tool name list, will be converted to tool_ids
     tags: Optional[List[str]] = None
     source: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
 
 
 class SkillResponse(BaseModel):
@@ -47,6 +49,7 @@ class SkillResponse(BaseModel):
     tool_ids: List[int]
     tags: List[str]
     source: str
+    params: Optional[Dict[str, Any]] = None
     created_by: Optional[str] = None
     create_time: Optional[str] = None
     updated_by: Optional[str] = None
@@ -91,6 +94,7 @@ async def create_skill(
             "tool_ids": tool_ids,
             "tags": request.tags,
             "source": request.source,
+            "params": request.params,
         }
         skill = service.create_skill(skill_data, user_id=user_id)
         return JSONResponse(content=skill, status_code=201)
@@ -262,7 +266,10 @@ async def update_skill(
     request: SkillUpdateRequest,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
-    """Update an existing skill."""
+    """Update an existing skill.
+
+    Audit field updated_by is set from the authenticated user only; it is not read from the JSON body.
+    """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         service = SkillService()
@@ -284,6 +291,8 @@ async def update_skill(
             update_data["tags"] = request.tags
         if request.source is not None:
             update_data["source"] = request.source
+        if request.params is not None:
+            update_data["params"] = request.params
 
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
@@ -382,13 +391,14 @@ async def list_skill_instances(
             version_no=version_no
         )
 
-        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content)
+        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content, params)
         for instance in instances:
             skill = service.get_skill_by_id(instance.get("skill_id"))
             if skill:
                 instance["skill_name"] = skill.get("name")
                 instance["skill_description"] = skill.get("description", "")
                 instance["skill_content"] = skill.get("content", "")
+                instance["skill_params"] = skill.get("params") or {}
 
         return JSONResponse(content={"instances": instances})
     except UnauthorizedError as e:
@@ -422,13 +432,14 @@ async def get_skill_instance(
                 detail=f"Skill instance not found for agent {agent_id} and skill {skill_id}"
             )
 
-        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content)
+        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content, params)
         service = SkillService()
         skill = service.get_skill_by_id(skill_id)
         if skill:
             instance["skill_name"] = skill.get("name")
             instance["skill_description"] = skill.get("description", "")
             instance["skill_content"] = skill.get("content", "")
+            instance["skill_params"] = skill.get("params") or {}
 
         return JSONResponse(content=instance)
     except UnauthorizedError as e:

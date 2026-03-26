@@ -1,13 +1,25 @@
 """Skill repository for database operations."""
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import update as sa_update
+
 from database.client import get_db_session, as_dict
 from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
+from utils.skill_params_utils import strip_params_comments_for_db
 
 logger = logging.getLogger(__name__)
+
+
+def _params_value_for_db(raw: Any) -> Any:
+    """Strip UI/YAML comment metadata, then JSON round-trip for the DB JSON column."""
+    if raw is None:
+        return None
+    stripped = strip_params_comments_for_db(raw)
+    return json.loads(json.dumps(stripped, default=str))
 
 
 class SkillRepository:
@@ -64,6 +76,7 @@ class SkillRepository:
                 skill_description=skill_data.get("description", ""),
                 skill_tags=skill_data.get("tags", []),
                 skill_content=skill_data.get("content", ""),
+                params=_params_value_for_db(skill_data.get("params")),
                 source=skill_data.get("source", "custom"),
                 created_by=skill_data.get("created_by"),
                 create_time=datetime.now(),
@@ -92,38 +105,66 @@ class SkillRepository:
             return result
 
     @staticmethod
-    def update_skill(skill_name: str, skill_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update an existing skill."""
+    def update_skill(
+        skill_name: str,
+        skill_data: Dict[str, Any],
+        updated_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update an existing skill.
+
+        Args:
+            skill_name: Skill name (unique key).
+            skill_data: Business fields to update (description, content, tags, source, params, tool_ids).
+            updated_by: Actor user id from server-side auth; never taken from the HTTP request body.
+
+        Notes:
+            Uses a single Core UPDATE for ag_skill_info_t columns. Mixing ORM attribute assignment
+            with session.execute(update()) can let autoflush emit an UPDATE that overwrites JSON
+            params with stale in-memory values, so we avoid ORM writes for this row.
+        """
         with get_db_session() as session:
             skill = session.query(SkillInfo).filter(
-                SkillInfo.skill_name == skill_name
+                SkillInfo.skill_name == skill_name,
+                SkillInfo.delete_flag != "Y",
             ).first()
 
             if not skill:
                 raise ValueError(f"Skill not found: {skill_name}")
 
+            skill_id = skill.skill_id
+            now = datetime.now()
+            row_values: Dict[str, Any] = {"update_time": now}
+            if updated_by:
+                row_values["updated_by"] = updated_by
+
             if "description" in skill_data:
-                skill.skill_description = skill_data["description"]
+                row_values["skill_description"] = skill_data["description"]
             if "content" in skill_data:
-                skill.skill_content = skill_data["content"]
+                row_values["skill_content"] = skill_data["content"]
             if "tags" in skill_data:
-                skill.skill_tags = skill_data["tags"]
+                row_values["skill_tags"] = skill_data["tags"]
             if "source" in skill_data:
-                skill.source = skill_data["source"]
+                row_values["source"] = skill_data["source"]
+            if "params" in skill_data:
+                row_values["params"] = _params_value_for_db(skill_data["params"])
 
-            skill.update_time = datetime.now()
-
-            if skill_data["updated_by"]:
-                skill.updated_by = skill_data["updated_by"]
+            session.execute(
+                sa_update(SkillInfo)
+                .where(
+                    SkillInfo.skill_id == skill_id,
+                    SkillInfo.delete_flag != "Y",
+                )
+                .values(**row_values)
+            )
 
             if "tool_ids" in skill_data:
                 session.query(SkillToolRelation).filter(
-                    SkillToolRelation.skill_id == skill.skill_id
+                    SkillToolRelation.skill_id == skill_id
                 ).delete()
 
                 for tool_id in skill_data["tool_ids"]:
                     rel = SkillToolRelation(
-                        skill_id=skill.skill_id,
+                        skill_id=skill_id,
                         tool_id=tool_id,
                         create_time=datetime.now()
                     )
@@ -131,8 +172,18 @@ class SkillRepository:
 
             session.commit()
 
-            result = SkillRepository._to_dict(skill)
-            result["tool_ids"] = skill_data.get("tool_ids", SkillRepository._get_tool_ids(session, skill.skill_id))
+            refreshed = session.query(SkillInfo).filter(
+                SkillInfo.skill_id == skill_id,
+                SkillInfo.delete_flag != "Y",
+            ).first()
+            if not refreshed:
+                raise ValueError(f"Skill not found after update: {skill_name}")
+
+            result = SkillRepository._to_dict(refreshed)
+            result["tool_ids"] = skill_data.get(
+                "tool_ids",
+                SkillRepository._get_tool_ids(session, skill_id),
+            )
             return result
 
     @staticmethod
@@ -189,6 +240,7 @@ class SkillRepository:
             "description": skill.skill_description,
             "tags": skill.skill_tags or [],
             "content": skill.skill_content or "",
+            "params": skill.params if skill.params is not None else {},
             "source": skill.source,
             "created_by": skill.created_by,
             "create_time": skill.create_time.isoformat() if skill.create_time else None,

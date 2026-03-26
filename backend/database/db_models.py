@@ -527,6 +527,7 @@ class SkillInfo(TableBase):
     skill_description = Column(String(1000), doc="Skill description")
     skill_tags = Column(JSON, doc="Skill tags as JSON array")
     skill_content = Column(Text, doc="Skill content in markdown format")
+    params = Column(JSON, doc="Skill configuration parameters as JSON object")
     source = Column(String(30), nullable=False, default="official",
                     doc="Skill source: official, custom, etc.")
 

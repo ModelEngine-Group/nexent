@@ -1,13 +1,16 @@
 """Skill management service."""
 
 import io
+import json
 import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 
+import yaml
+
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
-from consts.const import CONTAINER_SKILLS_PATH
+from consts.const import CONTAINER_SKILLS_PATH, ROOT_DIR
 from consts.exceptions import SkillException
 from services.skill_repository import SkillRepository
 from database import skill_db
@@ -16,6 +19,378 @@ from database.db_models import SkillInfo
 logger = logging.getLogger(__name__)
 
 _skill_manager: Optional[SkillManager] = None
+
+
+def _normalize_zip_entry_path(name: str) -> str:
+    """Normalize a ZIP member path for comparison (slashes, strip ./)."""
+    norm = name.replace("\\", "/").strip()
+    while norm.startswith("./"):
+        norm = norm[2:]
+    return norm
+
+
+def _find_zip_member_config_yaml(
+    file_list: List[str],
+    preferred_skill_root: Optional[str] = None,
+) -> Optional[str]:
+    """Return the ZIP entry path for .../config/config.yaml (any depth; filename case-insensitive).
+
+    If preferred_skill_root is set (usually the folder containing SKILL.md, e.g. zip root
+    ``my_skill/SKILL.md`` -> ``my_skill``), prefer ``<root>/config/config.yaml``.
+    """
+    suffix = "/config/config.yaml"
+    root_only = "config/config.yaml"
+    candidates: List[str] = []
+    for name in file_list:
+        if name.endswith("/"):
+            continue
+        norm = _normalize_zip_entry_path(name)
+        if not norm:
+            continue
+        nlow = norm.lower()
+        if nlow == root_only or nlow.endswith(suffix):
+            candidates.append(name)
+
+    if not candidates:
+        return None
+
+    if preferred_skill_root:
+        pref = _normalize_zip_entry_path(preferred_skill_root)
+        if pref:
+            pref_low = pref.lower()
+            expected_suffix = f"{pref_low}/config/config.yaml"
+            for name in candidates:
+                if _normalize_zip_entry_path(name).lower() == expected_suffix:
+                    return name
+            for name in candidates:
+                n = _normalize_zip_entry_path(name).lower()
+                if n.startswith(pref_low + "/"):
+                    return name
+
+    return candidates[0]
+
+
+def _params_dict_to_storable(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure params are JSON-serializable for the database JSON column."""
+    try:
+        return json.loads(json.dumps(data, default=str))
+    except (TypeError, ValueError) as exc:
+        raise SkillException(
+            f"params from config/config.yaml cannot be stored: {exc}"
+        ) from exc
+
+
+def _comment_text_from_token(tok: Any) -> Optional[str]:
+    """Normalize a ruamel CommentToken (or similar) to tooltip text after ``#``."""
+    if tok is None:
+        return None
+    val = getattr(tok, "value", None)
+    if isinstance(val, str):
+        s = val.strip()
+        if s.startswith("#"):
+            return s[1:].strip()
+    return None
+
+
+def _tuple_slot2(tok_container: Any) -> Any:
+    """Return ruamel per-key tuple slot index 2 (EOL / before-next-key comment token)."""
+    if not tok_container or len(tok_container) <= 2:
+        return None
+    return tok_container[2]
+
+
+def _is_before_next_sibling_comment_token(tok: Any) -> bool:
+    """True if token is a comment line placed *above the next key* (starts with newline in ruamel)."""
+    if tok is None:
+        return False
+    val = getattr(tok, "value", None)
+    return isinstance(val, str) and val.startswith("\n")
+
+
+def _flatten_ca_comment_to_text(comment_field: Any) -> Optional[str]:
+    """Join ``#`` lines from ``ca.comment`` (block header above first key in map or first list item)."""
+    if not comment_field:
+        return None
+    parts: List[str] = []
+    if isinstance(comment_field, list):
+        for part in comment_field:
+            if part is None:
+                continue
+            if isinstance(part, list):
+                for tok in part:
+                    t = _comment_text_from_token(tok)
+                    if t:
+                        parts.append(t)
+            else:
+                t = _comment_text_from_token(part)
+                if t:
+                    parts.append(t)
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
+def _comment_from_map_block_header(cm: Any) -> Optional[str]:
+    """Lines above the first key in this ``CommentedMap`` (``ca.comment``)."""
+    ca = getattr(cm, "ca", None)
+    if not ca or not ca.comment:
+        return None
+    return _flatten_ca_comment_to_text(ca.comment)
+
+
+def _tooltip_for_commented_map_key(cm: Any, ordered_keys: List[Any], index: int, key: Any) -> Optional[str]:
+    """Collect tooltip text: block header, line-above key, and same-line EOL ``#`` for one mapping key."""
+    tips: List[str] = []
+    if index == 0:
+        h = _comment_from_map_block_header(cm)
+        if h:
+            tips.append(h)
+    if index > 0:
+        prev_k = ordered_keys[index - 1]
+        ca = getattr(cm, "ca", None)
+        if ca and ca.items:
+            prev_tup = ca.items.get(prev_k)
+            tok = _tuple_slot2(prev_tup) if prev_tup else None
+            if _is_before_next_sibling_comment_token(tok):
+                t = _comment_text_from_token(tok)
+                if t:
+                    tips.append(t)
+    ca = getattr(cm, "ca", None)
+    if ca and ca.items:
+        tup = ca.items.get(key)
+        tok = _tuple_slot2(tup) if tup else None
+        if tok is not None and not _is_before_next_sibling_comment_token(tok):
+            t = _comment_text_from_token(tok)
+            if t:
+                tips.append(t)
+    if not tips:
+        return None
+    return " ".join(tips)
+
+
+def _tooltip_for_commented_seq_index(seq: Any, index: int) -> Optional[str]:
+    """Same rules as maps: ``ca.comment`` for item 0; slot 0 on previous item for 'line above next'."""
+    tips: List[str] = []
+    if index == 0:
+        ca = getattr(seq, "ca", None)
+        if ca and ca.comment:
+            h = _flatten_ca_comment_to_text(ca.comment)
+            if h:
+                tips.append(h)
+    if index > 0:
+        ca = getattr(seq, "ca", None)
+        if ca and ca.items:
+            prev_tup = ca.items.get(index - 1)
+            if prev_tup and len(prev_tup) > 0 and prev_tup[0] is not None:
+                tok = prev_tup[0]
+                if _is_before_next_sibling_comment_token(tok):
+                    t = _comment_text_from_token(tok)
+                    if t:
+                        tips.append(t)
+    ca = getattr(seq, "ca", None)
+    if ca and ca.items:
+        tup = ca.items.get(index)
+        if tup:
+            tok = _tuple_slot2(tup)
+            if tok is not None and not _is_before_next_sibling_comment_token(tok):
+                t = _comment_text_from_token(tok)
+                if t:
+                    tips.append(t)
+    if not tips:
+        return None
+    return " ".join(tips)
+
+
+def _apply_inline_comment_to_scalar(val: Any, comment: Optional[str]) -> Any:
+    """Append `` # comment`` to scalars so the UI can show tooltips (same as frontend convention)."""
+    if not comment:
+        return val
+    if isinstance(val, str):
+        return f"{val} # {comment}"
+    if isinstance(val, (dict, list)):
+        return val
+    try:
+        encoded = json.dumps(val, ensure_ascii=False)
+    except (TypeError, ValueError):
+        encoded = str(val)
+    return f"{encoded} # {comment}"
+
+
+def _commented_tree_to_plain(node: Any) -> Any:
+    """Turn ruamel CommentedMap/Seq into plain dict/list; merge ``#`` into scalars for UI tooltips.
+
+    Supports:
+    - Same-line: ``key: value  # tip``
+    - Line above next key (ruamel stores on previous key's tuple slot 2 with leading ``\\n``)
+    - Block header above first key in a mapping: ``ca.comment``
+    """
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    if isinstance(node, CommentedMap):
+        ordered_keys = list(node.keys())
+        out: Dict[str, Any] = {}
+        for i, k in enumerate(ordered_keys):
+            v = node[k]
+            plain_v = _commented_tree_to_plain(v)
+            tip = _tooltip_for_commented_map_key(node, ordered_keys, i, k)
+            if tip is not None:
+                if isinstance(plain_v, dict):
+                    inner = dict(plain_v)
+                    prev = inner.pop("_comment", None)
+                    if isinstance(prev, str) and prev.strip():
+                        inner["_comment"] = f"{tip} {prev}".strip()
+                    else:
+                        inner = {"_comment": tip, **inner}
+                    plain_v = inner
+                elif not isinstance(plain_v, list):
+                    plain_v = _apply_inline_comment_to_scalar(plain_v, tip)
+            out[k] = plain_v
+        return out
+    if isinstance(node, CommentedSeq):
+        out_list: List[Any] = []
+        for i, v in enumerate(node):
+            plain_v = _commented_tree_to_plain(v)
+            tip = _tooltip_for_commented_seq_index(node, i)
+            if tip is not None and not isinstance(plain_v, (dict, list)):
+                plain_v = _apply_inline_comment_to_scalar(plain_v, tip)
+            out_list.append(plain_v)
+        return out_list
+    return node
+
+
+def _parse_yaml_with_ruamel_merge_eol_comments(text: str) -> Dict[str, Any]:
+    """Parse YAML with ruamel; merge ``#`` into scalar strings for API/UI tooltips.
+
+    Handles same-line ``key: v  # tip``, block headers above the first key in a map, and
+    comments on the line *above* a key (ruamel stores those on the previous key's node).
+    """
+    from ruamel.yaml import YAML
+    from ruamel.yaml.comments import CommentedMap
+
+    # Round-trip loader preserves ``CommentedMap`` and comment tokens; ``safe`` returns plain dict.
+    y = YAML(typ="rt")
+    try:
+        root = y.load(text)
+    except Exception as exc:
+        raise SkillException(
+            f"Invalid YAML in config/config.yaml: {exc}"
+        ) from exc
+    if root is None:
+        return {}
+    if isinstance(root, CommentedMap):
+        plain = _commented_tree_to_plain(root)
+    elif isinstance(root, dict):
+        plain = root
+    else:
+        raise SkillException(
+            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
+        )
+    if not isinstance(plain, dict):
+        raise SkillException(
+            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
+        )
+    return _params_dict_to_storable(plain)
+
+
+def _parse_yaml_fallback_pyyaml(text: str) -> Dict[str, Any]:
+    """Parse YAML with PyYAML (comments are dropped)."""
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise SkillException(
+            f"Invalid JSON or YAML in config/config.yaml: {exc}"
+        ) from exc
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise SkillException(
+            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
+        )
+    return _params_dict_to_storable(data)
+
+
+def _parse_skill_params_from_config_bytes(raw: bytes) -> Dict[str, Any]:
+    """Parse JSON or YAML from config/config.yaml bytes (DB upload path; comments merged when possible)."""
+    text = raw.decode("utf-8-sig").strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            return _parse_yaml_with_ruamel_merge_eol_comments(text)
+        except ImportError:
+            logger.warning("ruamel.yaml not installed; YAML comments will be dropped on parse")
+            return _parse_yaml_fallback_pyyaml(text)
+        except SkillException:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "ruamel YAML parse failed (%s); falling back to PyYAML",
+                exc,
+            )
+            return _parse_yaml_fallback_pyyaml(text)
+    else:
+        if not isinstance(data, dict):
+            raise SkillException(
+                "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
+            )
+        return _params_dict_to_storable(data)
+
+
+def _read_params_from_zip_config_yaml(
+    zip_bytes: bytes,
+    preferred_skill_root: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """If the archive contains config/config.yaml, read and parse it into params; else None."""
+    import zipfile
+
+    zip_stream = io.BytesIO(zip_bytes)
+    with zipfile.ZipFile(zip_stream, "r") as zf:
+        member = _find_zip_member_config_yaml(
+            zf.namelist(),
+            preferred_skill_root=preferred_skill_root,
+        )
+        if not member:
+            return None
+        raw = zf.read(member)
+    params = _parse_skill_params_from_config_bytes(raw)
+    logger.info("Loaded skill params from ZIP member %s", member)
+    return params
+
+
+def _local_skill_config_yaml_path(skill_name: str, local_skills_dir: str) -> str:
+    """Absolute path to <local_skills_dir>/<skill_name>/config/config.yaml."""
+    return os.path.join(local_skills_dir, skill_name, "config", "config.yaml")
+
+
+def _write_skill_params_to_local_config_yaml(
+    skill_name: str,
+    params: Dict[str, Any],
+    local_skills_dir: str,
+) -> None:
+    """Write params to config/config.yaml using ruamel so ``_comment`` and inline tips become ``#`` lines."""
+    from utils.skill_params_utils import params_dict_to_roundtrip_yaml_text
+
+    if not local_skills_dir:
+        return
+    config_dir = os.path.join(local_skills_dir, skill_name, "config")
+    os.makedirs(config_dir, exist_ok=True)
+    path = _local_skill_config_yaml_path(skill_name, local_skills_dir)
+    text = params_dict_to_roundtrip_yaml_text(params)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    logger.info("Wrote skill params to %s", path)
+
+
+def _remove_local_skill_config_yaml(skill_name: str, local_skills_dir: str) -> None:
+    """Remove config/config.yaml when params are cleared in the database."""
+    if not local_skills_dir:
+        return
+    path = _local_skill_config_yaml_path(skill_name, local_skills_dir)
+    if os.path.isfile(path):
+        os.remove(path)
+        logger.info("Removed %s (params cleared in DB)", path)
 
 
 def get_skill_manager() -> SkillManager:
@@ -38,6 +413,47 @@ class SkillService:
         self.skill_manager = skill_manager or get_skill_manager()
         self.repository = SkillRepository()
 
+    def _resolve_local_skills_dir_for_overlay(self) -> Optional[str]:
+        """Directory where skill folders live: ``SKILLS_PATH``, else ``ROOT_DIR/skills`` if present."""
+        d = self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH
+        if d:
+            return str(d).rstrip(os.sep) or None
+        if ROOT_DIR:
+            candidate = os.path.join(ROOT_DIR, "skills")
+            if os.path.isdir(candidate):
+                return candidate
+        return None
+
+    def _overlay_params_from_local_config_yaml(self, skill: Dict[str, Any]) -> Dict[str, Any]:
+        """Prefer ``<skills_dir>/<name>/config/config.yaml`` for ``params`` in API responses.
+
+        The database stores comment-free JSON (no ``_comment`` keys, no `` # `` suffixes).
+        On-disk YAML may use ``#`` lines; when the file exists, parse with ruamel (merging
+        comments into the UI representation) and use for ``params``; otherwise use DB.
+        """
+        out = dict(skill)
+        local_dir = self._resolve_local_skills_dir_for_overlay()
+        if not local_dir:
+            return out
+        name = out.get("name")
+        if not name:
+            return out
+        path = _local_skill_config_yaml_path(name, local_dir)
+        if not os.path.isfile(path):
+            return out
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+            out["params"] = _parse_skill_params_from_config_bytes(raw)
+            logger.info("Using local config.yaml params (with merged comments) for skill %s", name)
+        except Exception as exc:
+            logger.warning(
+                "Could not use local config.yaml for skill %s params (using DB): %s",
+                name,
+                exc,
+            )
+        return out
+
     def list_skills(self, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """List all skills for tenant.
 
@@ -48,7 +464,8 @@ class SkillService:
             List of skill info dicts
         """
         try:
-            return self.repository.list_skills()
+            skills = self.repository.list_skills()
+            return [self._overlay_params_from_local_config_yaml(s) for s in skills]
         except Exception as e:
             logger.error(f"Error listing skills: {e}")
             raise SkillException(f"Failed to list skills: {str(e)}") from e
@@ -64,7 +481,10 @@ class SkillService:
             Skill dict or None if not found
         """
         try:
-            return self.repository.get_skill_by_name(skill_name)
+            skill = self.repository.get_skill_by_name(skill_name)
+            if skill:
+                return self._overlay_params_from_local_config_yaml(skill)
+            return None
         except Exception as e:
             logger.error(f"Error getting skill {skill_name}: {e}")
             raise SkillException(f"Failed to get skill: {str(e)}") from e
@@ -79,7 +499,10 @@ class SkillService:
             Skill dict or None if not found
         """
         try:
-            return self.repository.get_skill_by_id(skill_id)
+            skill = self.repository.get_skill_by_id(skill_id)
+            if skill:
+                return self._overlay_params_from_local_config_yaml(skill)
+            return None
         except Exception as e:
             logger.error(f"Error getting skill by ID {skill_id}: {e}")
             raise SkillException(f"Failed to get skill: {str(e)}") from e
@@ -113,8 +536,8 @@ class SkillService:
             raise SkillException(f"Skill '{skill_name}' already exists")
 
         # Check if skill directory already exists locally
-        local_dir = os.path.join(self.skill_manager.local_skills_dir, skill_name)
-        if os.path.exists(local_dir):
+        resolved = self._resolve_local_skills_dir_for_overlay()
+        if resolved and os.path.exists(os.path.join(resolved, skill_name)):
             raise SkillException(f"Skill '{skill_name}' already exists locally")
 
         # Set created_by and updated_by if user_id is provided
@@ -129,8 +552,23 @@ class SkillService:
             # Create local skill file (SKILL.md)
             self.skill_manager.save_skill(skill_data)
 
+            # Mirror DB params to config/config.yaml when present (same layout as ZIP uploads).
+            if self.skill_manager.local_skills_dir and skill_data.get("params") is not None:
+                try:
+                    _write_skill_params_to_local_config_yaml(
+                        skill_name,
+                        _params_dict_to_storable(skill_data["params"]),
+                        self.skill_manager.local_skills_dir,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Local config/config.yaml write failed after create for %s: %s",
+                        skill_name,
+                        exc,
+                    )
+
             logger.info(f"Created skill '{skill_name}' with local files")
-            return result
+            return self._overlay_params_from_local_config_yaml(result)
         except SkillException:
             raise
         except Exception as e:
@@ -230,7 +668,7 @@ class SkillService:
         # Write SKILL.md to local storage
         self.skill_manager.save_skill(skill_dict)
 
-        return result
+        return self._overlay_params_from_local_config_yaml(result)
 
     def _create_skill_from_zip(
         self,
@@ -255,6 +693,8 @@ class SkillService:
                 file_list = zf.namelist()
         except zipfile.BadZipFile:
             raise SkillException("Invalid ZIP archive")
+
+        zip_stream.seek(0)
 
         skill_md_path: Optional[str] = None
         detected_skill_name: Optional[str] = None
@@ -325,6 +765,14 @@ class SkillService:
             "allowed-tools": allowed_tools,  # Preserve for local file sync
         }
 
+        preferred_root = detected_skill_name or name
+        params_from_zip = _read_params_from_zip_config_yaml(
+            zip_bytes,
+            preferred_skill_root=preferred_root,
+        )
+        if params_from_zip is not None:
+            skill_dict["params"] = params_from_zip
+
         # Set created_by and updated_by if user_id is provided
         if user_id:
             skill_dict["created_by"] = user_id
@@ -337,7 +785,7 @@ class SkillService:
 
         self._upload_zip_files(zip_bytes, name, detected_skill_name)
 
-        return result
+        return self._overlay_params_from_local_config_yaml(result)
 
     def _upload_zip_files(
         self,
@@ -468,18 +916,16 @@ class SkillService:
             "tool_ids": tool_ids,
         }
 
-        # Set updated_by if user_id is provided
-        if user_id:
-            skill_dict["updated_by"] = user_id
-
-        result = self.repository.update_skill(skill_name, skill_dict)
+        result = self.repository.update_skill(
+            skill_name, skill_dict, updated_by=user_id or None
+        )
 
         # Update local storage with new SKILL.md (preserve allowed-tools)
         skill_dict["name"] = skill_name
         skill_dict["allowed-tools"] = allowed_tools
         self.skill_manager.save_skill(skill_dict)
 
-        return result
+        return self._overlay_params_from_local_config_yaml(result)
 
     def _update_skill_from_zip(
         self,
@@ -516,6 +962,12 @@ class SkillService:
             if skill_md_path:
                 skill_content = zf.read(skill_md_path).decode("utf-8")
 
+        preferred_root = original_folder_name or skill_name
+        params_from_zip = _read_params_from_zip_config_yaml(
+            zip_bytes,
+            preferred_skill_root=preferred_root,
+        )
+
         skill_dict = {}
         allowed_tools = []
         if skill_content:
@@ -535,11 +987,12 @@ class SkillService:
             except ValueError as e:
                 logger.warning(f"Could not parse SKILL.md from ZIP: {e}")
 
-        # Set updated_by if user_id is provided
-        if user_id:
-            skill_dict["updated_by"] = user_id
+        if params_from_zip is not None:
+            skill_dict["params"] = params_from_zip
 
-        result = self.repository.update_skill(skill_name, skill_dict)
+        result = self.repository.update_skill(
+            skill_name, skill_dict, updated_by=user_id or None
+        )
 
         # Update SKILL.md in local storage (preserve allowed-tools)
         skill_dict["name"] = skill_name
@@ -549,7 +1002,7 @@ class SkillService:
         # Update other files in local storage
         self._upload_zip_files(zip_bytes, skill_name, original_folder_name)
 
-        return result
+        return self._overlay_params_from_local_config_yaml(result)
 
     def update_skill(
         self,
@@ -562,39 +1015,67 @@ class SkillService:
 
         Args:
             skill_name: Name of the skill to update
-            skill_data: Updated skill data
+            skill_data: Business fields from the application layer (no audit fields).
             tenant_id: Tenant ID (reserved for future multi-tenant support)
-            user_id: User ID of the updater
+            user_id: Updater id from server-side auth (JWT / session); sets DB updated_by.
 
         Returns:
             Updated skill dict
         """
-        # Set updated_by if user_id is provided
-        if user_id:
-            skill_data["updated_by"] = user_id
-
         try:
             existing = self.repository.get_skill_by_name(skill_name)
             if not existing:
                 raise SkillException(f"Skill not found: {skill_name}")
 
-            result = self.repository.update_skill(skill_name, skill_data)
+            result = self.repository.update_skill(
+                skill_name, skill_data, updated_by=user_id or None
+            )
 
-            # Get tool names for SKILL.md allowed-tools field
-            # Get tool names based on the updated skill (uses new tool_ids if provided)
-            allowed_tools = self.repository.get_tool_names_by_skill_name(skill_name)
+            # Keep config/config.yaml in sync when params are updated (matches ZIP import path).
+            if CONTAINER_SKILLS_PATH and "params" in skill_data:
+                try:
+                    raw_params = skill_data["params"]
+                    if raw_params is None:
+                        _remove_local_skill_config_yaml(skill_name, CONTAINER_SKILLS_PATH)
+                    else:
+                        _write_skill_params_to_local_config_yaml(
+                            skill_name,
+                            _params_dict_to_storable(raw_params),
+                            CONTAINER_SKILLS_PATH,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "Local config/config.yaml sync failed after params update for %s: %s",
+                        skill_name,
+                        exc,
+                    )
 
-            # Update local storage with new skill data
-            local_skill_dict = {
-                "name": skill_name,
-                "description": skill_data.get("description", existing.get("description", "")),
-                "content": skill_data.get("content", existing.get("content", "")),
-                "tags": skill_data.get("tags", existing.get("tags", [])),
-                "allowed-tools": allowed_tools,
-            }
-            self.skill_manager.save_skill(local_skill_dict)
+            # Optional: sync SKILL.md on disk when SKILLS_PATH is configured (DB is source of truth).
+            if not CONTAINER_SKILLS_PATH:
+                logger.warning(
+                    "SKILLS_PATH is not set; skipped local SKILL.md sync after DB update for %s",
+                    skill_name,
+                )
+                return self._overlay_params_from_local_config_yaml(result)
 
-            return result
+            try:
+                allowed_tools = self.repository.get_tool_names_by_skill_name(skill_name)
+                local_skill_dict = {
+                    "name": skill_name,
+                    "description": skill_data.get("description", existing.get("description", "")),
+                    "content": skill_data.get("content", existing.get("content", "")),
+                    "tags": skill_data.get("tags", existing.get("tags", [])),
+                    "allowed-tools": allowed_tools,
+                }
+                self.skill_manager.save_skill(local_skill_dict)
+            except Exception as exc:
+                logger.warning(
+                    "Local SKILL.md sync failed after DB update for %s: %s",
+                    skill_name,
+                    exc,
+                )
+
+            return self._overlay_params_from_local_config_yaml(result)
         except SkillException:
             raise
         except Exception as e:
