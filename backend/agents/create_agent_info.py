@@ -285,13 +285,14 @@ async def create_agent_config(
         "constraint": constraint_prompt,
         "few_shots": few_shots_prompt,
         "tools": {tool.name: tool for tool in tool_list},
+        "skills": skills,
         "managed_agents": {agent.name: agent for agent in managed_agents},
         "APP_NAME": app_name,
         "APP_DESCRIPTION": app_description,
         "memory_list": memory_list,
         "knowledge_base_summary": knowledge_base_summary,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "skills": skills
+        "user_id": user_id,
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 

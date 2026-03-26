@@ -9,7 +9,6 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
-import { updateToolConfig } from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 
