@@ -84,20 +84,7 @@ async function resolveOutlinePageNumbers(
 ): Promise<OutlineItem[]> {
   const result: OutlineItem[] = [];
   for (const item of items) {
-    let pageNumber: number | undefined;
-    if (item.dest) {
-      try {
-        const dest = typeof item.dest === 'string'
-          ? await pdf.getDestination(item.dest)
-          : item.dest;
-        if (dest?.[0]) {
-          const pageIndex = await pdf.getPageIndex(dest[0]);
-          pageNumber = pageIndex + 1;
-        }
-      } catch (err) {
-        log.warn('Failed to get page number for outline item:', err);
-      }
-    }
+    const pageNumber = await resolveOutlineItemPageNumber(pdf, item);
     result.push({
       title: item.title,
       dest: typeof item.dest === 'string' ? item.dest : null,
@@ -106,6 +93,47 @@ async function resolveOutlinePageNumbers(
     });
   }
   return result;
+}
+
+async function resolveOutlineItemPageNumber(
+  pdf: PDFDocumentProxy,
+  item: any,
+): Promise<number | undefined> {
+  if (!item.dest) {
+    return undefined;
+  }
+
+  try {
+    const dest = typeof item.dest === 'string'
+      ? await pdf.getDestination(item.dest)
+      : item.dest;
+    if (!dest?.[0]) {
+      return undefined;
+    }
+
+    const pageIndex = await pdf.getPageIndex(dest[0]);
+    return pageIndex + 1;
+  } catch (err) {
+    log.warn('Failed to get page number for outline item:', err);
+    return undefined;
+  }
+}
+
+function getPageWrapperStyle(
+  isRendered: boolean,
+  hasMeasuredHeight: boolean,
+  placeholderHeight: number,
+  placeholderWidth: number,
+) {
+  if (!isRendered) {
+    return { height: placeholderHeight, width: placeholderWidth };
+  }
+
+  if (hasMeasuredHeight) {
+    return undefined;
+  }
+
+  return { minHeight: placeholderHeight, width: placeholderWidth };
 }
 
 export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {
@@ -118,6 +146,7 @@ export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {
 
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
   
   const [outline, setOutline] = useState<OutlineItem[] | null>(null);
   const [showOutline, setShowOutline] = useState<boolean>(false);
@@ -356,6 +385,28 @@ export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {
     };
   }, [resetIdleTimer]);
 
+  useEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar) {
+      return;
+    }
+
+    const handlePointerEnter = () => {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+      }
+      setToolbarVisible(true);
+    };
+
+    toolbar.addEventListener('mouseenter', handlePointerEnter);
+    toolbar.addEventListener('mouseleave', resetIdleTimer);
+
+    return () => {
+      toolbar.removeEventListener('mouseenter', handlePointerEnter);
+      toolbar.removeEventListener('mouseleave', resetIdleTimer);
+    };
+  }, [resetIdleTimer]);
+
   // Keep the current viewport center stable after zoom changes.
   useEffect(() => {
     const anchor = pendingViewportAnchorRef.current;
@@ -454,9 +505,12 @@ export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {
               const isRendered = pageNum >= renderStart && pageNum <= renderEnd;
               const placeholderH = pageHeights.get(pageNum) ?? estimatedPageHeight;
               const placeholderW = Math.round(intrinsicWidth * pageScale);
-              const pageWrapperStyle = isRendered
-                ? (pageHeights.has(pageNum) ? undefined : { minHeight: placeholderH, width: placeholderW })
-                : { height: placeholderH, width: placeholderW };
+              const pageWrapperStyle = getPageWrapperStyle(
+                isRendered,
+                pageHeights.has(pageNum),
+                placeholderH,
+                placeholderW,
+              );
               return (
                 <div
                   key={pageNum}
@@ -502,15 +556,9 @@ export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {
         </div>
 
         <div
+          ref={toolbarRef}
           className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 transition-opacity duration-300"
           style={{ opacity: toolbarVisible ? 1 : 0.15 }}
-          onMouseEnter={() => {
-            if (idleTimerRef.current) {
-              clearTimeout(idleTimerRef.current);
-            }
-            setToolbarVisible(true);
-          }}
-          onMouseLeave={resetIdleTimer}
         >
           <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-full shadow-lg px-3 py-1">
             {outline && outline.length > 0 && (

@@ -164,6 +164,82 @@ function splitPreviewSafeText(
   };
 }
 
+function shouldStopFetchingChunk(
+  activeSessionId: number,
+  currentSessionId: number,
+): boolean {
+  return activeSessionId !== currentSessionId;
+}
+
+function handlePreviewChunkBoundaryResponse(
+  status: number,
+  isFirst: boolean,
+  setServerTooLarge: React.Dispatch<React.SetStateAction<boolean>>,
+  setLoading: React.Dispatch<React.SetStateAction<boolean>>,
+  setLoadingMore: React.Dispatch<React.SetStateAction<boolean>>,
+  observerRef: React.MutableRefObject<IntersectionObserver | null>,
+  isFetchingRef: React.MutableRefObject<boolean>,
+): boolean {
+  if (status === 413) {
+    setServerTooLarge(true);
+    if (isFirst) {
+      setLoading(false);
+    } else {
+      setLoadingMore(false);
+    }
+    isFetchingRef.current = false;
+    return true;
+  }
+
+  if (status === 416) {
+    observerRef.current?.disconnect();
+    if (isFirst) {
+      setLoading(false);
+    } else {
+      setLoadingMore(false);
+    }
+    isFetchingRef.current = false;
+    return true;
+  }
+
+  return false;
+}
+
+function appendTextPreviewContent(
+  detectedFileType: DetectedFileType,
+  safeText: string,
+  byteOffset: number,
+  currentChunkLength: number,
+  csvDelimiterRef: React.MutableRefObject<string>,
+  setTxtLines: React.Dispatch<React.SetStateAction<string[]>>,
+  setCsvRows: React.Dispatch<React.SetStateAction<string[][]>>,
+  setTextContent: React.Dispatch<React.SetStateAction<string>>,
+): void {
+  if (!safeText) {
+    return;
+  }
+
+  if (detectedFileType === 'text') {
+    const newLines = safeText.split('\n');
+    if (newLines.at(-1) === '') {
+      newLines.pop();
+    }
+    setTxtLines(prev => [...prev, ...newLines]);
+    return;
+  }
+
+  if (detectedFileType === 'csv') {
+    if (byteOffset === currentChunkLength) {
+      csvDelimiterRef.current = detectCsvDelimiter(safeText);
+    }
+    const newLines = safeText.split('\n').filter(line => line.trim().length > 0);
+    setCsvRows(prev => [...prev, ...newLines.map((line) => parseCsvLine(line, csvDelimiterRef.current))]);
+    return;
+  }
+
+  setTextContent(prev => prev + safeText);
+}
+
 function parseCsvLine(line: string, delimiter: string): string[] {
   const parsed = Papa.parse<string[]>(line, {
     header: false,
@@ -363,26 +439,23 @@ export function FilePreviewDrawer({
         headers: { Range: `bytes=${start}-${end}` },
         cache: 'no-store',
       });
-      if (activeSessionId !== textFetchSessionRef.current) return;
-      if (resp.status === 413) {
-        setServerTooLarge(true);
-        if (isFirst) setLoading(false);
-        else setLoadingMore(false);
-        isFetchingRef.current = false;
-        return;
-      }
-      if (resp.status === 416) {
-        observerRef.current?.disconnect();
-        if (isFirst) setLoading(false);
-        else setLoadingMore(false);
-        isFetchingRef.current = false;
+      if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) return;
+      if (handlePreviewChunkBoundaryResponse(
+        resp.status,
+        isFirst,
+        setServerTooLarge,
+        setLoading,
+        setLoadingMore,
+        observerRef,
+        isFetchingRef,
+      )) {
         return;
       }
       if (!resp.ok && resp.status !== 206) throw new Error(`HTTP ${resp.status}`);
 
       const contentRange = resp.headers.get('Content-Range');
       const buf = await resp.arrayBuffer();
-      if (activeSessionId !== textFetchSessionRef.current) return;
+      if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) return;
       const hasMore = updateChunkRangeState(contentRange, buf.byteLength, byteOffsetRef, totalBytesRef);
       ensurePreviewTextDecoder(
         resp.headers.get('Content-Type'),
@@ -404,29 +477,21 @@ export function FilePreviewDrawer({
         hasMore,
         detectedFileType,
       );
-      if (activeSessionId !== textFetchSessionRef.current) return;
+      if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) return;
       remainderRef.current = remainder;
-
-      if (detectedFileType === 'text') {
-        if (safeText) {
-          const newLines = safeText.split('\n');
-          if (newLines.at(-1) === '') newLines.pop();
-          setTxtLines(prev => [...prev, ...newLines]);
-        }
-      } else if (detectedFileType === 'csv') {
-        if (safeText) {
-          if (byteOffsetRef.current === buf.byteLength) {
-            csvDelimiterRef.current = detectCsvDelimiter(safeText);
-          }
-          const newLines = safeText.split('\n').filter(l => l.trim().length > 0);
-          setCsvRows(prev => [...prev, ...newLines.map((line) => parseCsvLine(line, csvDelimiterRef.current))]);
-        }
-      } else if (safeText) {
-        setTextContent(prev => prev + safeText);
-      }
+      appendTextPreviewContent(
+        detectedFileType,
+        safeText,
+        byteOffsetRef.current,
+        buf.byteLength,
+        csvDelimiterRef,
+        setTxtLines,
+        setCsvRows,
+        setTextContent,
+      );
       if (!hasMore) observerRef.current?.disconnect();
     } finally {
-      if (activeSessionId !== textFetchSessionRef.current) {
+      if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) {
         return;
       }
       isFetchingRef.current = false;

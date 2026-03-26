@@ -1252,13 +1252,13 @@ async def test_preview_file_not_found_from_resolve(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_not_found_from_stream(monkeypatch):
     """NotFoundException from get_preview_stream → HTTP 404."""
-    _NotFoundException = sys.modules["consts.exceptions"].NotFoundException
+    not_found_exception = sys.modules["consts.exceptions"].NotFoundException
 
     monkeypatch.setattr(file_management_app, "resolve_preview_file",
                         AsyncMock(return_value=("docs/test.pdf", "application/pdf", 1024)))
 
     def fake_stream(actual_name, start=None, end=None):
-        raise _NotFoundException("File not found during streaming")
+        raise not_found_exception("File not found during streaming")
 
     monkeypatch.setattr(file_management_app, "get_preview_stream", fake_stream)
 
@@ -1407,4 +1407,3 @@ class TestParseRangeHeader:
     def test_zero_size_file_returns_none(self):
         """Empty files do not support satisfiable ranges."""
         assert file_management_app._parse_range_header("bytes=0-10", 0) is None
-

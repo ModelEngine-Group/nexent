@@ -68,31 +68,16 @@ const flattenTextContent = (value: React.ReactNode): string => {
   return "";
 };
 
-const replaceUntilStable = (
-  value: string,
-  pattern: RegExp,
-  replacement: string,
-  maxIterations = 8
-): string => {
-  let current = value;
-  for (let i = 0; i < maxIterations; i += 1) {
-    const next = current.replaceAll(pattern, replacement);
-    if (next === current) {
-      break;
-    }
-    current = next;
-  }
-  return current;
-};
-
 const normalizeMarkdownHeadingText = (value: string): string => {
-  return replaceUntilStable(value, /!\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replaceAll(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replaceAll(/`([^`]+)`/g, "$1")
-    .replaceAll(/[<>]/g, "")
-    .replaceAll(/[*_~]/g, "")
-    .replaceAll(/\s+#+\s*$/g, "")
-    .replaceAll(/\\/g, "")
+  return value
+    .replaceAll("`", "")
+    .replaceAll("<", "")
+    .replaceAll(">", "")
+    .replaceAll("*", "")
+    .replaceAll("_", "")
+    .replaceAll("~", "")
+    .replaceAll("\\", "")
+    .replaceAll(/\s+/g, " ")
     .trim();
 };
 
@@ -133,6 +118,51 @@ const extractTextFromMarkdownNode = (node: any): string => {
   return "";
 };
 
+const extractFallbackMarkdownHeadings = (
+  content: string
+): ParsedMarkdownHeading[] => {
+  const createId = createHeadingIdGenerator();
+  const headings: ParsedMarkdownHeading[] = [];
+  const lines = content.split("\n");
+  let offset = 0;
+
+  for (const line of lines) {
+    const trimmedLine = line.trimStart();
+    const leadingSpaces = line.length - trimmedLine.length;
+
+    if (!trimmedLine.startsWith("#")) {
+      offset += line.length + 1;
+      continue;
+    }
+
+    let level = 0;
+    while (level < trimmedLine.length && trimmedLine[level] === "#") {
+      level += 1;
+    }
+
+    const hasValidLevel = level >= 1 && level <= 6;
+    const hasHeadingSpace = trimmedLine[level] === " ";
+    if (!hasValidLevel || !hasHeadingSpace) {
+      offset += line.length + 1;
+      continue;
+    }
+
+    const rawText = normalizeMarkdownHeadingText(trimmedLine.slice(level + 1));
+    if (rawText) {
+      headings.push({
+        offset: offset + leadingSpaces,
+        id: createId(rawText),
+        level,
+        text: rawText,
+      });
+    }
+
+    offset += line.length + 1;
+  }
+
+  return headings;
+};
+
 const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[] => {
   try {
     const createId = createHeadingIdGenerator();
@@ -160,25 +190,7 @@ const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[]
 
     return headings;
   } catch {
-    const createId = createHeadingIdGenerator();
-    const fallbackHeadings: ParsedMarkdownHeading[] = [];
-    const headingPattern = /^(#{1,6})\s+(.+)$/gm;
-
-    for (const match of content.matchAll(headingPattern)) {
-      const rawText = normalizeMarkdownHeadingText(match[2]);
-      if (!rawText) {
-        continue;
-      }
-
-      fallbackHeadings.push({
-        offset: typeof match.index === "number" ? match.index : fallbackHeadings.length,
-        id: createId(rawText),
-        level: match[1].length,
-        text: rawText,
-      });
-    }
-
-    return fallbackHeadings;
+    return extractFallbackMarkdownHeadings(content);
   }
 };
 
