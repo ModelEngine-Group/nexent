@@ -170,6 +170,32 @@ async def get_skill_file_tree(skill_name: str) -> JSONResponse:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/{skill_name}/files/{file_path:path}")
+async def get_skill_file_content(
+    skill_name: str,
+    file_path: str
+) -> JSONResponse:
+    """Get content of a specific file within a skill.
+
+    Args:
+        skill_name: Name of the skill
+        file_path: Relative path to the file within the skill directory
+    """
+    try:
+        service = SkillService()
+        content = service.get_skill_file_content(skill_name, file_path)
+        if content is None:
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        return JSONResponse(content={"content": content})
+    except HTTPException:
+        raise
+    except SkillException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting skill file content: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.put("/{skill_name}/upload")
 async def update_skill_from_file(
     skill_name: str,

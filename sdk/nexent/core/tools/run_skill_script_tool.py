@@ -122,7 +122,12 @@ def run_skill_script(skill_name: str, script_path: str, params: Optional[Dict[st
     Args:
         skill_name: Name of the skill containing the script (e.g., "code-reviewer")
         script_path: Path to the script relative to skill directory (e.g., "scripts/analyze.py")
-        params: Optional dictionary of parameters to pass to the script
+        params: Optional dictionary of parameters to pass to the script as command-line arguments.
+            Examples:
+            - {"--name": "test", "--wait": True} -> passes --name test --wait
+            - {"--flag": True} -> passes --flag (boolean flags)
+            - {"--names": ["vm1", "vm2"]} -> passes --names vm1 vm2
+            - {"--cpu": 4} -> passes --cpu 4
 
     Returns:
         Script execution result as string

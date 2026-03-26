@@ -166,6 +166,17 @@ class NexentAgent:
             )
             from nexent.core.tools.write_skill_file_tool import write_skill_file
             return write_skill_file
+        elif class_name == "ReadSkillConfigTool":
+            from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool
+            metadata = tool_config.metadata or {}
+            get_read_skill_config_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.read_skill_config_tool import read_skill_config
+            return read_skill_config
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 
@@ -219,7 +230,8 @@ class NexentAgent:
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
                 provide_run_summary=agent_config.provide_run_summary,
-                managed_agents=managed_agents_list
+                managed_agents=managed_agents_list,
+                additional_authorized_imports=["*"],
             )
             agent.stop_event = self.stop_event
 

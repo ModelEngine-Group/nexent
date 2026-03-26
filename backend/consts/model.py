@@ -131,7 +131,6 @@ class GlobalConfig(BaseModel):
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
-    is_set: Optional[bool] = False
     history: Optional[List[Dict]] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None

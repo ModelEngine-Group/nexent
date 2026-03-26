@@ -60,7 +60,8 @@ class SkillLoader:
         """Fix YAML frontmatter to properly handle special characters.
 
         Wraps unquoted values in double quotes to allow colons and other
-        special characters within field values.
+        special characters within field values. Preserves block scalar indicators
+        (|, |+, |-, >, >+, >-).
         """
         lines = frontmatter.split('\n')
         fixed_lines = []
@@ -77,6 +78,13 @@ class SkillLoader:
                 colon_pos = line.find(':')
                 key = line[:colon_pos].strip()
                 value_part = line[colon_pos + 1:].strip()
+
+                # Check for block scalar indicators (| |+ |- > >+ >-)
+                # These must be preserved as-is for multi-line strings
+                base_symbols = ('|', '|+', '|-', '>', '>+', '>-')
+                if value_part and value_part.rstrip().startswith(base_symbols):
+                    fixed_lines.append(line)
+                    continue
 
                 # If value exists and is not quoted, we need to handle it
                 if value_part and not value_part.startswith('"') and not value_part.startswith("'"):

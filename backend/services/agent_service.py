@@ -59,6 +59,7 @@ from database.tool_db import (
     search_tools_for_sub_agent
 )
 from database import skill_db
+from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.str_utils import convert_list_to_string, convert_string_to_list
@@ -1999,6 +2000,26 @@ async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:
     except Exception as _:
         logger.error(
             f"Failed to find agent id with '{agent_name}' in tenant {tenant_id}")
+        raise Exception("agent not found")
+
+
+def get_agent_by_name_impl(agent_name: str, tenant_id: str) -> dict:
+    """
+    Resolve agent id and latest published version by agent name.
+
+    Returns:
+        dict with agent_id and latest_version_no (may be None)
+    """
+    if not agent_name:
+        raise Exception("agent_name required")
+    try:
+        agent_id = search_agent_id_by_agent_name(agent_name, tenant_id)
+        versions = query_version_list(agent_id, tenant_id)
+        latest_version = versions[0]["version_no"] if versions else None
+        return {"agent_id": agent_id, "latest_version_no": latest_version}
+    except Exception as _:
+        logger.error(
+            f"Failed to find agent '{agent_name}' in tenant {tenant_id}")
         raise Exception("agent not found")
 
 

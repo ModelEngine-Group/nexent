@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from .constants import SKILL_FILE_NAME
@@ -477,22 +476,67 @@ class SkillManager:
         if os.path.exists(local_dir):
             for root, dirs, files in os.walk(local_dir):
                 rel_root = os.path.relpath(root, local_dir)
+
+                # Handle root directory files (including SKILL.md)
                 if rel_root == ".":
+                    for f in files:
+                        if f == SKILL_FILE_NAME:
+                            # Add SKILL.md as a special file
+                            tree.setdefault("children", []).append({
+                                "name": f,
+                                "type": "file"
+                            })
+                        else:
+                            tree.setdefault("children", []).append({
+                                "name": f,
+                                "type": "file"
+                            })
                     continue
+
                 parts = rel_root.split(os.sep)
-                self._add_to_tree(tree, parts)
+
+                # First, add the directory structure (all parent dirs)
+                current = tree
+                for i, part in enumerate(parts[:-1]):
+                    # Find or create directory
+                    found = None
+                    for child in current.get("children", []):
+                        if child.get("name") == part and child.get("type") == "directory":
+                            found = child
+                            break
+                    if not found:
+                        found = {"name": part, "type": "directory", "children": []}
+                        current.setdefault("children", []).append(found)
+                    current = found
+
+                # Get or create the leaf directory
+                leaf_dir_name = parts[-1]
+                leaf_dir = None
+                for child in current.get("children", []):
+                    if child.get("name") == leaf_dir_name and child.get("type") == "directory":
+                        leaf_dir = child
+                        break
+                if not leaf_dir:
+                    leaf_dir = {"name": leaf_dir_name, "type": "directory", "children": []}
+                    current.setdefault("children", []).append(leaf_dir)
+
+                # Add files in this directory
                 for f in files:
                     if f != SKILL_FILE_NAME:
-                        self._add_to_tree(tree, parts + [f])
+                        leaf_dir.setdefault("children", []).append({
+                            "name": f,
+                            "type": "file"
+                        })
 
         return tree
 
-    def _add_to_tree(self, node: Dict, parts: List[str]) -> None:
+    def _add_to_tree(self, node: Dict, parts: List[str], is_directory: bool = False) -> None:
         """Add a path to the tree structure.
 
         Args:
             node: Current tree node
             parts: Path parts to add
+            is_directory: Whether the path being added is a directory
         """
         if not parts:
             return
@@ -500,14 +544,21 @@ class SkillManager:
         name = parts[0]
 
         if len(parts) == 1:
+            # Leaf node - add as file or directory based on is_directory flag
+            node_type = "directory" if is_directory else "file"
+            # Skip if same name exists with different type
             for child in node.get("children", []):
-                if child.get("name") == name and child.get("type") == "file":
+                if child.get("name") == name:
+                    if child.get("type") == node_type:
+                        return
+                    # If types conflict, skip (should not happen with proper usage)
                     return
             node.setdefault("children", []).append({
                 "name": name,
-                "type": "file"
+                "type": node_type
             })
         else:
+            # Directory path - find or create the directory
             found = None
             for child in node.get("children", []):
                 if child.get("name") == name and child.get("type") == "directory":
@@ -518,7 +569,7 @@ class SkillManager:
                 found = {"name": name, "type": "directory", "children": []}
                 node.setdefault("children", []).append(found)
 
-            self._add_to_tree(found, parts[1:])
+            self._add_to_tree(found, parts[1:], is_directory)
 
     def delete_skill(self, name: str) -> bool:
         """Delete a skill from local storage.
@@ -704,27 +755,58 @@ class SkillManager:
         else:
             raise ValueError(f"Unsupported script type: {script_path}")
 
+    def _build_command_args(self, params: Dict[str, Any]) -> List[str]:
+        """Build command-line arguments from params dict.
+
+        Handles different parameter formats:
+        - "--name": value -> ["--name", "value"]
+        - "--flag": True -> ["--flag"]
+        - "--flag": False -> (not included)
+        - "key": value -> ["key", "value"]
+
+        Args:
+            params: Parameters dictionary
+
+        Returns:
+            List of command-line arguments
+        """
+        args = []
+        for key, value in params.items():
+            if value is None:
+                continue
+
+            if isinstance(value, bool):
+                if value:
+                    args.append(key)
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    args.append(key)
+                    args.append(str(item))
+            else:
+                args.append(key)
+                args.append(str(value))
+
+        return args
+
     def _run_python_script(self, script_path: str, params: Dict[str, Any]) -> str:
         """Run a Python script with parameters.
 
         Args:
             script_path: Full path to the Python script
-            params: Parameters to pass as environment variables
+            params: Parameters to pass as command-line arguments
 
         Returns:
             Script output as string
         """
-        env = os.environ.copy()
-        for key, value in params.items():
-            env[key.upper()] = str(value)
+        cmd_args = self._build_command_args(params)
 
         try:
             result = subprocess.run(
-                ["python", script_path],
+                ["python", script_path] + cmd_args,
                 capture_output=True,
                 text=True,
                 timeout=300,
-                env=env
+                env=os.environ.copy()
             )
             if result.returncode != 0:
                 logger.error(f"Script error: {result.stderr}")
@@ -741,22 +823,20 @@ class SkillManager:
 
         Args:
             script_path: Full path to the shell script
-            params: Parameters to pass as environment variables
+            params: Parameters to pass as command-line arguments
 
         Returns:
             Script output as string
         """
-        env = os.environ.copy()
-        for key, value in params.items():
-            env[key.upper()] = str(value)
+        cmd_args = self._build_command_args(params)
 
         try:
             result = subprocess.run(
-                ["bash", script_path],
+                ["bash", script_path] + cmd_args,
                 capture_output=True,
                 text=True,
                 timeout=300,
-                env=env
+                env=os.environ.copy()
             )
             if result.returncode != 0:
                 logger.error(f"Script error: {result.stderr}")

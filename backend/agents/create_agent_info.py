@@ -5,7 +5,6 @@ from urllib.parse import urljoin
 from datetime import datetime
 
 from jinja2 import Template, StrictUndefined
-from smolagents.utils import BASE_BUILTIN_MODULES
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig
 from nexent.memory.memory_service import search_memory_in_levels
@@ -107,6 +106,28 @@ def _get_skill_script_tools(
                 name="read_skill_md",
                 description="Read skill execution guide and optional additional files. Always reads SKILL.md first, then optionally reads additional files.",
                 inputs='{"skill_name": "str", "additional_files": "list[str]"}',
+                output_type="string",
+                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                source="builtin",
+                usage="builtin",
+                metadata=skill_context,
+            ),
+            ToolConfig(
+                class_name="ReadSkillConfigTool",
+                name="read_skill_config",
+                description="Read the config.yaml file from a skill directory. Returns JSON containing configuration variables needed for skill workflows.",
+                inputs='{"skill_name": "str"}',
+                output_type="string",
+                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                source="builtin",
+                usage="builtin",
+                metadata=skill_context,
+            ),
+            ToolConfig(
+                class_name="WriteSkillFileTool",
+                name="write_skill_file",
+                description="Write content to a file within a skill directory. Creates parent directories if they do not exist.",
+                inputs='{"skill_name": "str", "file_path": "str", "content": "str"}',
                 output_type="string",
                 params={"local_skills_dir": CONTAINER_SKILLS_PATH},
                 source="builtin",
@@ -259,23 +280,20 @@ async def create_agent_config(
     # Get skills list for prompt template
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
-    if duty_prompt or constraint_prompt or few_shots_prompt:
-        system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render({
-            "duty": duty_prompt,
-            "constraint": constraint_prompt,
-            "few_shots": few_shots_prompt,
-            "tools": {tool.name: tool for tool in tool_list},
-            "managed_agents": {agent.name: agent for agent in managed_agents},
-            "authorized_imports": str(BASE_BUILTIN_MODULES),
-            "APP_NAME": app_name,
-            "APP_DESCRIPTION": app_description,
-            "memory_list": memory_list,
-            "knowledge_base_summary": knowledge_base_summary,
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "skills": skills
-        })
-    else:
-        system_prompt = agent_info.get("prompt", "")
+    render_kwargs = {
+        "duty": duty_prompt,
+        "constraint": constraint_prompt,
+        "few_shots": few_shots_prompt,
+        "tools": {tool.name: tool for tool in tool_list},
+        "managed_agents": {agent.name: agent for agent in managed_agents},
+        "APP_NAME": app_name,
+        "APP_DESCRIPTION": app_description,
+        "memory_list": memory_list,
+        "knowledge_base_summary": knowledge_base_summary,
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "skills": skills
+    }
+    system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
     _print_prompt_with_token_count(system_prompt, agent_id, "BEFORE_INJECTION")
 
