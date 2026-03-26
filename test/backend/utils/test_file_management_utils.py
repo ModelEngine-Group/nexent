@@ -1,5 +1,6 @@
 import sys
 import types
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pytest
@@ -18,7 +19,7 @@ def stub_project_modules(monkeypatch):
     # consts.const
     const_mod = types.ModuleType("consts.const")
     setattr(const_mod, "DATA_PROCESS_SERVICE", "http://data-process")
-    setattr(const_mod, "LIBREOFFICE_PROFILE_DIR", "/tmp/nexent-lo-profile")
+    setattr(const_mod, "LIBREOFFICE_PROFILE_DIR", str(Path.cwd() / ".test-lo-profile"))
     sys.modules["consts.const"] = const_mod
 
     # consts.model
@@ -710,11 +711,12 @@ class TestConvertOfficeToPdf:
     """Test cases for convert_office_to_pdf function"""
 
     @pytest.mark.asyncio
-    async def test_convert_office_to_pdf_uses_reused_profile_directory(self, fmu, monkeypatch):
+    async def test_convert_office_to_pdf_uses_reused_profile_directory(self, fmu, monkeypatch, tmp_path):
         """Ensure command includes LO profile URI and uses a reusable profile directory."""
         mock_result = types.SimpleNamespace(returncode=0, stderr="", stdout="")
         captured_cmd = {}
-        created_dirs = []
+        chmod_calls = []
+        profile_dir = tmp_path / "lo-profile-test"
 
         def fake_run(cmd, **kwargs):
             captured_cmd["cmd"] = cmd
@@ -722,12 +724,8 @@ class TestConvertOfficeToPdf:
 
         monkeypatch.setattr(fmu.os.path, "exists", lambda p: True)
         monkeypatch.setattr(fmu.os.path, "basename", lambda p: "document.docx")
-        monkeypatch.setattr(fmu, "LIBREOFFICE_PROFILE_DIR", "/tmp/lo-profile-test")
-        monkeypatch.setattr(
-            fmu.os,
-            "makedirs",
-            lambda path, exist_ok=False: created_dirs.append((path, exist_ok))
-        )
+        monkeypatch.setattr(fmu, "LIBREOFFICE_PROFILE_DIR", str(profile_dir))
+        monkeypatch.setattr(fmu.os, "chmod", lambda path, mode: chmod_calls.append((Path(path), mode)))
         monkeypatch.setattr(fmu.subprocess, "run", fake_run)
 
         result = await fmu.convert_office_to_pdf('/tmp/document.docx', '/tmp/output')
@@ -735,8 +733,9 @@ class TestConvertOfficeToPdf:
         assert result == '/tmp/output/document.pdf'
         cmd = captured_cmd.get("cmd", [])
         assert "--nolockcheck" in cmd
-        assert "-env:UserInstallation=file:///tmp/lo-profile-test" in cmd
-        assert created_dirs == [("/tmp/lo-profile-test", True)]
+        assert f"-env:UserInstallation={profile_dir.resolve().as_uri()}" in cmd
+        assert profile_dir.is_dir()
+        assert chmod_calls == [(profile_dir.resolve(), 0o700)]
 
     @pytest.mark.asyncio
     async def test_convert_office_to_pdf_success(self, fmu, monkeypatch):
@@ -828,4 +827,3 @@ class TestConvertOfficeToPdf:
             await fmu.convert_office_to_pdf('/tmp/document.docx', '/tmp/output')
         
         assert "Converted PDF not found" in str(exc_info.value)
-

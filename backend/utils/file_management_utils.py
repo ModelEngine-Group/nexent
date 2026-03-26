@@ -20,6 +20,14 @@ from utils.config_utils import tenant_config_manager
 logger = logging.getLogger("file_management_utils")
 
 
+def ensure_secure_libreoffice_profile_dir(profile_dir: str) -> Path:
+    """Create the shared LibreOffice profile directory with owner-only permissions."""
+    profile_path = Path(profile_dir).expanduser().resolve()
+    profile_path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(profile_path, 0o700)
+    return profile_path
+
+
 async def save_upload_file(file: UploadFile, upload_path: Path) -> bool:
     try:
         async with aiofiles.open(upload_path, 'wb') as out_file:
@@ -357,8 +365,9 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
 
     def _run_libreoffice_conversion():
         """Synchronous LibreOffice conversion to run in thread executor."""
-        os.makedirs(LIBREOFFICE_PROFILE_DIR, exist_ok=True)
-        profile_uri = Path(LIBREOFFICE_PROFILE_DIR).resolve().as_uri()
+        profile_uri = ensure_secure_libreoffice_profile_dir(
+            LIBREOFFICE_PROFILE_DIR
+        ).as_uri()
         cmd = [
             "soffice",
             "--headless",
@@ -409,5 +418,4 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
         raise FileNotFoundError(
             "LibreOffice is not installed or not available in PATH. "
         ) from e
-
 

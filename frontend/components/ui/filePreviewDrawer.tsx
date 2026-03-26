@@ -206,15 +206,28 @@ function handlePreviewChunkBoundaryResponse(
 }
 
 function appendTextPreviewContent(
-  detectedFileType: DetectedFileType,
-  safeText: string,
-  byteOffset: number,
-  currentChunkLength: number,
-  csvDelimiterRef: React.MutableRefObject<string>,
-  setTxtLines: React.Dispatch<React.SetStateAction<string[]>>,
-  setCsvRows: React.Dispatch<React.SetStateAction<string[][]>>,
-  setTextContent: React.Dispatch<React.SetStateAction<string>>,
+  params: {
+    detectedFileType: DetectedFileType;
+    safeText: string;
+    byteOffset: number;
+    currentChunkLength: number;
+    csvDelimiterRef: React.MutableRefObject<string>;
+    setTxtLines: React.Dispatch<React.SetStateAction<string[]>>;
+    setCsvRows: React.Dispatch<React.SetStateAction<string[][]>>;
+    setTextContent: React.Dispatch<React.SetStateAction<string>>;
+  },
 ): void {
+  const {
+    detectedFileType,
+    safeText,
+    byteOffset,
+    currentChunkLength,
+    csvDelimiterRef,
+    setTxtLines,
+    setCsvRows,
+    setTextContent,
+  } = params;
+
   if (!safeText) {
     return;
   }
@@ -479,16 +492,16 @@ export function FilePreviewDrawer({
       );
       if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) return;
       remainderRef.current = remainder;
-      appendTextPreviewContent(
+      appendTextPreviewContent({
         detectedFileType,
         safeText,
-        byteOffsetRef.current,
-        buf.byteLength,
+        byteOffset: byteOffsetRef.current,
+        currentChunkLength: buf.byteLength,
         csvDelimiterRef,
         setTxtLines,
         setCsvRows,
         setTextContent,
-      );
+      });
       if (!hasMore) observerRef.current?.disconnect();
     } finally {
       if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) {
