@@ -10,6 +10,7 @@ description: |
   - 操作 FusionCompute API 接口
   - 通过 CSV 状态文件自动分配可用 IP，防止并发冲突
   - 自动传输配置文件到虚拟机（SCP）
+  - 从 Nexent 同步模型配置到 VM 的 openclaw.json
   
   核心功能:
   - 自动 Token 管理(每次会话前自动登录获取)
@@ -18,33 +19,23 @@ description: |
   - 基于 CSV 状态文件的 IP 自动分配,防止并发冲突
   - 支持批量创建虚拟机，自动确保 IP 不冲突
   - SSH/SCP 配置传输,等待虚拟机 SSH 就绪后自动传输配置文件
-  - 自动清理超时 15 分钟的 allocating 记录
+  - 模型配置同步,从 Nexent API 获取模型配置并更新到 VM
 ---
 
 # 虚拟机发放技能
 
 FusionCompute 平台上管理虚拟机，每个功能由独立的可执行脚本实现。
 
-## ⚠️ 重要提醒：创建虚拟机后必须传输配置
+## ⚠️ 重要约束
 
-**创建虚拟机完成后，必须执行配置传输操作！**
+- **创建虚拟机会自动等待完成并传输配置**，无需手动指定 `--wait` 或 `--transfer-config`
+- **单次任务中 `create.py` 只允许执行一次**。如果在本次任务中已经成功执行过 `create.py`（无论单个还是批量），禁止再次调用。需要创建多个虚拟机时，使用 `--names` 一次性批量创建
+- 不同的任务（不同的用户请求）之间可以分别执行 `create.py`
 
-新创建的虚拟机需要接收以下配置才能正常工作：
-- 虚拟机自身的 IP 地址
-- 环境服务器 IP 地址
-- Kafka 连接凭证
-
-**正确用法：**
+**用法：**
 ```bash
-# 方式一：创建时自动传输配置（推荐）
-python scripts/create.py --name my-vm --wait --transfer-config
-
-# 方式二：创建后手动传输配置
-python scripts/create.py --name my-vm --wait
-python scripts/transfer_config.py --ip 192.168.1.100
+python scripts/create.py --name my-vm
 ```
-
-**如果跳过配置传输，环境将无法监管虚拟机！**
 
 ## 脚本结构
 
@@ -68,7 +59,7 @@ scripts/
 
 ### site-id 获取方式
 
-1. **从配置文件读取**（推荐）：
+**从配置文件读取**：
    ```bash
    # 优先级：/mnt/nexent/vm-config.yaml > config/config.yaml
    cat /mnt/nexent/vm-config.yaml | grep site_id
@@ -76,17 +67,12 @@ scripts/
    cat config/config.yaml | grep site_id
    ```
 
-2. **查询所有站点**：
-   ```bash
-   python scripts/list.py sites
-   ```
-
 ### vm-id 获取方式
 
-1. **从 IP 分配记录查询**（推荐）：
+**从 IP 分配记录查询**：
    ```bash
    # CSV 文件位置：/mnt/nexent/.ip_allocations.csv 或 config/.ip_allocations.csv
-   # CSV 字段：ip, status, task_urn, vm_id, site_id, name, gateway, netmask, created_at, updated_at
+   # CSV 字段：ip, status, task_id, vm_id, site_id, name, gateway, netmask, created_at, updated_at
    
    # 通过虚拟机名称查询 vm-id
    grep "<vm-name>" /mnt/nexent/.ip_allocations.csv
@@ -94,9 +80,17 @@ scripts/
    grep "<vm-name>" config/.ip_allocations.csv
    ```
 
-2. **查询所有虚拟机并筛选**：
+### task-id 获取方式
+
+**从 IP 分配记录查询**：
    ```bash
-   python scripts/list.py vms --site-id <site-id>
+   # CSV 文件位置：/mnt/nexent/.ip_allocations.csv 或 config/.ip_allocations.csv
+   # CSV 字段：ip, status, task_id, vm_id, site_id, name, gateway, netmask, created_at, updated_at
+   
+   # 通过虚拟机名称查询 task_id
+   grep "<vm-name>" /mnt/nexent/.ip_allocations.csv
+   # 或
+   grep "<vm-name>" config/.ip_allocations.csv
    ```
 
 ## 通用参数
@@ -116,23 +110,25 @@ scripts/
 ### create.py - 创建虚拟机
 
 ```bash
-# 创建单个虚拟机（自动分配 IP）
-python scripts/create.py --name my-vm --wait
+# 创建单个虚拟机（自动等待完成 + 传输配置）
+python scripts/create.py --name my-vm
 
 # 创建单个虚拟机（指定 IP）
-python scripts/create.py --name my-vm --ip 192.168.1.100 --wait
+python scripts/create.py --name my-vm --ip 192.168.1.100
 
 # 批量创建虚拟机
-python scripts/create.py --names "vm-1,vm-2,vm-3" --wait
-
-# 创建后传输配置
-python scripts/create.py --name my-vm --wait --transfer-config
+python scripts/create.py --names "vm-1,vm-2,vm-3"
 
 # 指定资源配置
-python scripts/create.py --name my-vm --cpu 8 --memory 16384 --wait
+python scripts/create.py --name my-vm --cpu 8 --memory 16384
 ```
 
+**注意：**
+- `--wait` 和 `--transfer-config` 已内置为默认行为，无需手动指定
+- 同名虚拟机只能创建一次，重复执行会报错（通过 `.create_lock` 文件控制）
+
 **参数说明：**
+
 | 参数 | 说明 |
 |------|------|
 | `--name, -n` | 虚拟机名称（单个）|
@@ -145,9 +141,6 @@ python scripts/create.py --name my-vm --cpu 8 --memory 16384 --wait
 | `--memory` | 内存（MB）|
 | `--hostname` | 主机名|
 | `--description, -d` | 描述 |
-| `--wait, -w` | 等待任务完成 |
-| `--transfer-config` | **必须**：创建后传输配置（推荐）|
-| `--skip-config-warning` | 跳过配置传输警告（不推荐）|
 | `--json` | JSON 格式输出 |
 
 ### delete.py - 删除虚拟机
@@ -159,17 +152,11 @@ python scripts/delete.py --vm-id <vm-id> --wait
 ### list.py - 列出资源
 
 ```bash
-# 列出站点
-python scripts/list.py sites
-
 # 列出虚拟机
-python scripts/list.py vms --site-id <site-id>
+python scripts/list.py vms
 
-# 列出 IP 分配
-python scripts/list.py ips
-
-# 按状态过滤
-python scripts/list.py ips --status allocated
+# 列出指定虚拟机
+python scripts/list.py vm --vm-id <vm-id>
 ```
 
 ### start.py - 启动虚拟机
@@ -217,21 +204,25 @@ python scripts/status.py --task-id <task-id> --wait
 ### transfer_config.py - 传输配置
 
 ```bash
-# 1234: 传输完整配置（默认：VM + Kafka + SSH）
+# 传输完整配置（默认：Kafka + 模型配置）
 python scripts/transfer_config.py --ip 192.168.1.100
 
 # 只传输 Kafka 配置
-python scripts/transfer_config.py --ip 192.168.1.100 --no-include-vm --no-include-ssh
+python scripts/transfer_config.py --ip 192.168.1.100 --no-include-model
 
-# 只传输 VM 配置
-python scripts/transfer_config.py --ip 192.168.1.100 --no-include-kafka --no-include-ssh
+# 只同步模型配置
+python scripts/transfer_config.py --ip 192.168.1.100 --no-include-kafka
 
-# 只传输 SSH 配置
-python scripts/transfer_config.py --ip 192.168.1.100 --no-include-vm --no-include-kafka
+# 指定 Nexent API 地址
+python scripts/transfer_config.py --ip 192.168.1.100 --nexent-api-url http://nexent-config:5010
+
+# 指定要同步的模型类型
+python scripts/transfer_config.py --ip 192.168.1.100 --model-types llm embedding
 
 ```
 
 **参数说明：**
+
 | 参数 | 说明 |
 |------|------|
 | `--ip` | 虚拟机 IP 地址 |
@@ -241,13 +232,71 @@ python scripts/transfer_config.py --ip 192.168.1.100 --no-include-vm --no-includ
 | `--remote-path` | 远程目录（默认 /opt/nexent/config）|
 | `--filename` | 配置文件名（默认 agent_config.yaml）|
 | `--timeout` | SSH 就绪超时（秒，默认 300）|
-| `--include-vm` | 包含 VM 配置（默认 True）|
-| `--no-include-vm` | 不包含 VM 配置 |
 | `--include-kafka` | 包含 Kafka 配置（默认 True）|
 | `--no-include-kafka` | 不包含 Kafka 配置 |
-| `--include-ssh` | 包含 SSH 配置（默认 True）|
-| `--no-include-ssh` | 不包含 SSH 配置 |
+| `--include-model` | 从 Nexent 同步模型配置到 openclaw.json（默认 True）|
+| `--no-include-model` | 不同步模型配置 |
+| `--openclaw-config-path` | VM 上 openclaw.json 路径（默认 /root/.openclaw/openclaw.json）|
+| `--nexent-api-url` | Nexent API 地址（覆盖配置文件）|
+| `--nexent-api-token` | Nexent API Token（覆盖配置文件）|
+| `--model-types` | 要同步的模型类型（默认 llm），如 `llm embedding vlm` |
 | `--json` | JSON 格式输出 |
+
+
+## 模型配置同步
+
+`transfer_config.py` 支持从 Nexent Config Service 获取模型配置并同步到 VM 的 openclaw.json。
+
+### 配置 Nexent API
+
+在 `vm-config.yaml` 中添加：
+
+```yaml
+nexent_api:
+  base_url: "http://nexent-config:5010"
+  token: ""  # 可选，某些环境需要 JWT Token
+  model_sync:
+    enabled: true
+    openclaw_config_path: "/root/.openclaw/openclaw.json"
+    model_types:
+      - "llm"
+```
+
+### 同步流程
+
+1. 从 Nexent API (`/model/list`) 获取模型配置
+2. 转换为 openclaw 格式（`models.providers` 结构）
+3. 与 VM 上现有 openclaw.json 合并（保留其他配置）
+4. 写入 VM
+
+### openclaw.json 结构示例
+
+同步后的 `openclaw.json` 结构：
+
+```json
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "openai": {
+        "baseUrl": "https://api.openai.com/v1",
+        "apiKey": "sk-xxx",
+        "api": "openai-completions",
+        "models": [
+          {"id": "openai/gpt-4o", "name": "GPT-4o", "maxTokens": 128000}
+        ]
+      }
+    }
+  },
+  "gateway": {
+    "controlUi": {
+      "allowedOrigins": ["http://192.168.1.100:18789"]
+    }
+  }
+}
+```
+
+**注意**：`gateway.controlUi.allowedOrigins` 会自动设置为 `http://<VM_IP>:18789`
 ## IP 自动分配
 
 IP 分配通过 CSV 状态文件实现并发安全：

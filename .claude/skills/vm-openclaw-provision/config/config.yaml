@@ -37,3 +37,19 @@ config_transfer:
   remote_path: "/opt/nexent/config"
   # 配置文件名
   config_filename: "agent_config.yaml"
+
+# Nexent API 配置（用于获取模型配置并同步到 VM）
+nexent_api:
+  # Nexent Config Service 地址
+  base_url: "http://nexent-config:5010"
+  # JWT Token（可选，某些环境需要认证）
+  token: ""
+  # 模型同步配置
+  model_sync:
+    # 是否启用模型配置同步
+    enabled: true
+    # VM 上的 openclaw.json 路径
+    openclaw_config_path: "/root/.openclaw/openclaw.json"
+    # 要同步的模型类型
+    model_types:
+      - "llm"
