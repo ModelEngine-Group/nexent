@@ -38,6 +38,11 @@ interface PdfViewerProps {
 
 type ScaleMode = 'fit-width' | 'fit-page' | 'actual-size' | 'custom';
 
+interface ViewportAnchor {
+  page: number;
+  pageOffsetRatio: number;
+}
+
 const PDF_DOCUMENT_OPTIONS = { rangeChunkSize: 65536 };
 
 const OVERSCAN = 3;
@@ -94,6 +99,7 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
   const [renderStart, setRenderStart] = useState<number>(1);
   const [renderEnd, setRenderEnd] = useState<number>(5);
   const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingViewportAnchorRef = useRef<ViewportAnchor | null>(null);
 
   const pageScale = useMemo(() => {
     if (scaleMode === 'custom') return customScale;
@@ -120,6 +126,29 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
     }
     return result;
   }, [numPages, pageHeights, estimatedPageHeight]);
+
+  const captureViewportCenterAnchor = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !numPages) {
+      pendingViewportAnchorRef.current = null;
+      return;
+    }
+
+    const viewportCenterOffset =
+      Math.max(0, container.scrollTop - CONTAINER_TOP_PADDING) + container.clientHeight / 2;
+    const currentPage = binarySearchPageAtOffset(cumulativeHeights, viewportCenterOffset);
+    const pageContentHeight = pageHeights.get(currentPage) ?? estimatedPageHeight;
+    const pageStartOffset = cumulativeHeights[currentPage - 1];
+    const offsetInsidePage = Math.min(
+      Math.max(viewportCenterOffset - pageStartOffset, 0),
+      pageContentHeight,
+    );
+
+    pendingViewportAnchorRef.current = {
+      page: currentPage,
+      pageOffsetRatio: pageContentHeight > 0 ? offsetInsidePage / pageContentHeight : 0,
+    };
+  }, [cumulativeHeights, estimatedPageHeight, numPages, pageHeights]);
 
   const onDocumentLoadSuccess = useCallback(async (pdf: PDFDocumentProxy) => {
     setNumPages(pdf.numPages);
@@ -246,12 +275,13 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
   }, [pageNumber, goToPage]);
 
   const adjustCustomScale = useCallback((delta: number) => {
+    captureViewportCenterAnchor();
     setCustomScale(prev => {
       const baseScale = scaleMode === 'custom' ? prev : pageScale;
       return Math.min(Math.max(baseScale + delta, 0.5), 3.0);
     });
     setScaleMode('custom');
-  }, [scaleMode, pageScale]);
+  }, [captureViewportCenterAnchor, scaleMode, pageScale]);
 
   const zoomIn = useCallback(() => {
     adjustCustomScale(0.25);
@@ -311,21 +341,26 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
     return () => { if (idleTimerRef.current) clearTimeout(idleTimerRef.current); };
   }, [resetIdleTimer]);
 
-  // Keep current page position stable after zoom changes.
+  // Keep the current viewport center stable after zoom changes.
   useEffect(() => {
+    const anchor = pendingViewportAnchorRef.current;
+    if (!anchor) {
+      return;
+    }
     if (shrinkTimerRef.current) clearTimeout(shrinkTimerRef.current);
     const container = scrollContainerRef.current;
-    const currentPage = pageNumber; // capture before async RAF
     setPageHeights(new Map());
     requestAnimationFrame(() => {
       if (container) {
-        const estimate = Math.round(intrinsicHeight * pageScale) + PAGE_MARGIN_BOTTOM;
-        container.scrollTop = CONTAINER_TOP_PADDING + (currentPage - 1) * estimate;
+        const clampedPage = Math.min(Math.max(anchor.page, 1), Math.max(numPages, 1));
+        const pageStartOffset = (clampedPage - 1) * (estimatedPageHeight + PAGE_MARGIN_BOTTOM);
+        const targetCenterOffset = pageStartOffset + anchor.pageOffsetRatio * estimatedPageHeight;
+        const nextScrollTop = CONTAINER_TOP_PADDING + targetCenterOffset - container.clientHeight / 2;
+        container.scrollTop = Math.max(nextScrollTop, 0);
       }
+      pendingViewportAnchorRef.current = null;
     });
-  // pageNumber intentionally omitted — we only want the page at the moment the scale changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageScale]);
+  }, [estimatedPageHeight, numPages, pageScale]);
 
   const renderOutlineItem = (item: OutlineItem, level: number = 0) => (
     <div key={`${item.title}-${level}`} className="outline-item">
@@ -518,7 +553,10 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
             </button>
 
             <button
-              onClick={() => setScaleMode(prev => prev === 'fit-page' ? 'fit-width' : 'fit-page')}
+              onClick={() => {
+                captureViewportCenterAnchor();
+                setScaleMode(prev => prev === 'fit-page' ? 'fit-width' : 'fit-page');
+              }}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
               title={scaleMode === 'fit-page' ? t('filePreview.pdf.fitWidth') : t('filePreview.pdf.fitPage')}
             >
