@@ -303,6 +303,12 @@ export const API_ENDPOINTS = {
     check: (invitationCode: string) =>
       `${API_BASE_URL}/invitations/${invitationCode}/check`,
   },
+  /** Skills API (config service, e.g. HTTP_BACKEND port 5010). */
+  skills: {
+    list: `${API_BASE_URL}/skills`,
+    update: (skillName: string) =>
+      `${API_BASE_URL}/skills/${encodeURIComponent(skillName)}`,
+  },
 };
 
 // Common error handling

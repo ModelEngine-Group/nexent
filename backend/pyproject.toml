@@ -12,6 +12,7 @@ dependencies = [
     "supabase>=2.18.1",
     "websocket-client>=1.8.0",
     "pyyaml>=6.0.2",
+    "ruamel.yaml>=0.18.0",
     "redis>=5.0.0",
     "fastmcp==2.12.0",
     "langchain>=0.3.26",
