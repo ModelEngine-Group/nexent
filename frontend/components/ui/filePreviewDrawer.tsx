@@ -27,6 +27,7 @@ const TXT_LINE_HEIGHT = 24;
 const TXT_VIRTUAL_OVERSCAN = 10;
 
 const CSV_ROW_HEIGHT = 40;
+const CSV_DELIMITER_CANDIDATES = [',', ';', '\t', '|'] as const;
 
 function normalizeCharsetLabel(value: string): string {
   const normalized = value.trim().toLowerCase();
@@ -43,12 +44,12 @@ function extractCharsetFromContentType(contentType: string | null): string | nul
   return normalizeCharsetLabel(match[1].replace(/^"|"$/g, ''));
 }
 
-function parseCsvLine(line: string): string[] {
+function parseCsvLine(line: string, delimiter: string): string[] {
   const parsed = Papa.parse<string[]>(line, {
     header: false,
     skipEmptyLines: false,
     dynamicTyping: false,
-    delimiter: ',',
+    delimiter,
     quoteChar: '"',
     escapeChar: '"',
   });
@@ -58,7 +59,57 @@ function parseCsvLine(line: string): string[] {
     return row.map((cell) => (typeof cell === 'string' ? cell.trim() : String(cell ?? '').trim()));
   }
 
-  return line.split(',').map((cell) => cell.trim());
+  return line.split(delimiter).map((cell) => cell.trim());
+}
+
+function detectCsvDelimiter(sampleText: string): string {
+  const lines = sampleText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(0, 5);
+
+  if (lines.length === 0) {
+    return ',';
+  }
+
+  let bestDelimiter = ',';
+  let bestScore = -1;
+
+  for (const delimiter of CSV_DELIMITER_CANDIDATES) {
+    const columnCounts = lines.map((line) => {
+      const parsed = Papa.parse<string[]>(line, {
+        header: false,
+        skipEmptyLines: false,
+        dynamicTyping: false,
+        delimiter,
+        quoteChar: '"',
+        escapeChar: '"',
+      });
+
+      const row = parsed.data[0];
+      return Array.isArray(row) ? row.length : 1;
+    });
+
+    const minColumns = Math.min(...columnCounts);
+    const maxColumns = Math.max(...columnCounts);
+    const averageColumns =
+      columnCounts.reduce((sum, count) => sum + count, 0) / columnCounts.length;
+
+    if (averageColumns <= 1) {
+      continue;
+    }
+
+    const consistencyBonus = maxColumns === minColumns ? 100 : 0;
+    const score = consistencyBonus + averageColumns;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestDelimiter = delimiter;
+    }
+  }
+
+  return bestDelimiter;
 }
 
 type DetectedFileType = 'pdf' | 'image' | 'markdown' | 'csv' | 'text' | 'unknown';
@@ -108,6 +159,7 @@ export function FilePreviewDrawer({
   const observerRef = useRef<IntersectionObserver | null>(null);
   const markdownContainerRef = useRef<HTMLDivElement | null>(null);
   const textFetchSessionRef = useRef(0);
+  const csvDelimiterRef = useRef<string>(',');
 
   const resetTextPreviewState = useCallback(() => {
     setTextContent('');
@@ -124,6 +176,7 @@ export function FilePreviewDrawer({
     decoderEncodingRef.current = null;
     decoderHasExplicitCharsetRef.current = false;
     decoderAllowGbFallbackRef.current = false;
+    csvDelimiterRef.current = ',';
 
     observerRef.current?.disconnect();
     observerRef.current = null;
@@ -297,8 +350,11 @@ export function FilePreviewDrawer({
         }
       } else if (detectedFileType === 'csv') {
         if (safeText) {
+          if (byteOffsetRef.current === buf.byteLength) {
+            csvDelimiterRef.current = detectCsvDelimiter(safeText);
+          }
           const newLines = safeText.split('\n').filter(l => l.trim().length > 0);
-          setCsvRows(prev => [...prev, ...newLines.map(parseCsvLine)]);
+          setCsvRows(prev => [...prev, ...newLines.map((line) => parseCsvLine(line, csvDelimiterRef.current))]);
         }
       } else {
         if (safeText) setTextContent(prev => prev + safeText);
