@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import json
 import logging
 import threading
@@ -33,7 +33,7 @@ class InstanceCard(BaseModel):
     status: str
     author: str
     description: str
-
+    chat_url: str
 
 class OverviewResponse(BaseModel):
     running_count: int
@@ -91,8 +91,8 @@ def kafka_consumer_loop():
                         # 如果没有 status 字段，默认设置为 "running"
                         if "status" not in data or data["status"] is None:
                             data["status"] = "running"
-                        data["created_at"] = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00")).astimezone(timezone.utc)
-                        data["report_time"] = datetime.fromisoformat(data["report_time"].replace("Z", "+00:00")).astimezone(timezone.utc)
+                        data["created_at"] = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+                        data["report_time"] = datetime.fromisoformat(data["report_time"].replace("Z", "+00:00")).replace(tzinfo=None)
 
                         instance = InstanceBase(**data)
                         instances[instance.id] = instance
@@ -162,8 +162,8 @@ def load_historical_instances_from_kafka(max_wait_time: int = 60) -> int:
             try:
                 payload = msg.value().decode("utf-8")
                 data = json.loads(payload)
-                data["created_at"] = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00")).astimezone(timezone.utc)
-                data["report_time"] = datetime.fromisoformat(data["report_time"].replace("Z", "+00:00")).astimezone(timezone.utc)
+                data["created_at"] = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+                data["report_time"] = datetime.fromisoformat(data["report_time"].replace("Z", "+00:00")).replace(tzinfo=None)
                 # 以 Kafka key 作为唯一标识；若无则使用实例 id
                 key = None
                 if msg.key() is not None:
@@ -188,7 +188,7 @@ def load_historical_instances_from_kafka(max_wait_time: int = 60) -> int:
     finally:
         consumer_history.close()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     for inst in instances_by_key.values():
         if inst.report_time and (now - inst.report_time) > timedelta(seconds=120):
             inst.status = "stopped"
@@ -205,7 +205,7 @@ def cleanup_expired_instances() -> None:
     """定期清理过期实例，将超过120秒未上报的实例状态置为 'stopped'。"""
     while True:
         try:
-            current_time = datetime.now(timezone.utc)
+            current_time = datetime.now()
             expired_instances = []
 
             for instance_id, instance in instances.items():
@@ -301,6 +301,7 @@ async def list_instances() -> List[InstanceCard]:
             status=inst.status,
             author=inst.author,
             description=inst.description,
+            chat_url=inst.chat_url,
         )
         for inst in instances.values()
     ]
