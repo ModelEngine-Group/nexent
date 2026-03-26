@@ -306,6 +306,10 @@ class Config:
     def user_name(self) -> Optional[str]:
         return self._get("user_name")
 
+    @property
+    def vm_description(self) -> Optional[str]:
+        return self._get("vm_description")
+
 
 def get_csv_path(config_path: str | None = None) -> Path:
     primary_config_path = "/mnt/nexent/vm-config.yaml"
@@ -586,6 +590,7 @@ def generate_vm_config_yaml(
     include_vm: bool = True,
     include_ssh: bool = True,
     user_name: Optional[str] = None,
+    description: Optional[str] = None,
 ) -> str:
     config = {}
     if include_vm:
@@ -598,6 +603,8 @@ def generate_vm_config_yaml(
         config["ssh"] = ssh_copy
     if user_name:
         config["user_name"] = user_name
+    if description:
+        config["description"] = description
     return yaml.dump(config, default_flow_style=False)
 
 

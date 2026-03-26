@@ -215,6 +215,8 @@ def main():
     client, cfg = get_client_with_args(args)
     if args.user_name:
         cfg.set("user_name", args.user_name)
+    if args.description:
+        cfg.set("vm_description", args.description)
     client.login()
 
     if args.names:

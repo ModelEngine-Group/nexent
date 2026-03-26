@@ -32,10 +32,11 @@ FusionCompute 平台上管理虚拟机，每个功能由独立的可执行脚本
 - **单次任务中 `create.py` 只允许执行一次**。如果在本次任务中已经成功执行过 `create.py`（无论单个还是批量），禁止再次调用。需要创建多个虚拟机时，使用 `--names` 一次性批量创建
 - 不同的任务（不同的用户请求）之间可以分别执行 `create.py`
 - **必须传入 `--user-name`**：调用 `create.py` 或 `transfer_config.py` 时，必须从对话上下文中获取当前用户名称并通过 `--user-name` 传入。如果没有获取到则使用空值。该名称会写入虚拟机的 `agent_config.yaml`
+- **支持传入 `--description`**：调用 `create.py` 或 `transfer_config.py` 时，可从对话上下文获取描述信息并通过 `--description` 传入。该描述会传给 FusionCompute 创建 VM 时使用，并同步写入虚拟机的 `agent_config.yaml`
 
 **用法：**
 ```bash
-python scripts/create.py --name my-vm --user-name "张三"
+python scripts/create.py --name my-vm --user-name "张三" --description "用于测试环境"
 ```
 
 ## 脚本结构
@@ -135,6 +136,7 @@ python scripts/create.py --name my-vm --cpu 8 --memory 16384 --user-name "张三
 | `--name, -n` | 虚拟机名称（单个）|
 | `--names` | 虚拟机名称列表，逗号分隔（批量）|
 | `--user-name` | **必传**：用户名称，写入 agent_config.yaml |
+| `--description, -d` | 虚拟机描述，既传给 FusionCompute 也写入 agent_config.yaml |
 | `--vm-id` | 模板虚拟机 ID |
 | `--ip` | 指定 IP 地址（不指定则自动分配）|
 | `--gateway` | 网关 |
@@ -142,7 +144,6 @@ python scripts/create.py --name my-vm --cpu 8 --memory 16384 --user-name "张三
 | `--cpu` | CPU 核数 |
 | `--memory` | 内存（MB）|
 | `--hostname` | 主机名|
-| `--description, -d` | 描述 |
 | `--json` | JSON 格式输出 |
 
 ### delete.py - 删除虚拟机
@@ -229,6 +230,7 @@ python scripts/transfer_config.py --ip 192.168.1.100 --model-types llm embedding
 |------|------|
 | `--ip` | 虚拟机 IP 地址 |
 | `--user-name` | **必传**：用户名称，写入 agent_config.yaml |
+| `--description, -d` | 虚拟机描述，写入 agent_config.yaml |
 | `--ssh-username` | SSH 用户名 |
 | `--ssh-password` | SSH 密码 |
 | `--ssh-port` | SSH 端口（默认 22）|
