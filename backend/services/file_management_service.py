@@ -4,7 +4,7 @@ import logging
 import os
 from io import BytesIO
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import httpx
 from fastapi import UploadFile
@@ -290,23 +290,24 @@ def _is_pdf_cache_valid(pdf_object_name: str) -> bool:
     """
     Check whether a cached PDF exists and is readable.
     """
-    if file_exists(pdf_object_name):
-        # Verify the cached file is readable by fetching a small range
-        stream = get_file_range(pdf_object_name, 0, 0)
-        if stream is None:
-            logger.warning(f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
-            delete_file(pdf_object_name)
-            return False
+    if not file_exists(pdf_object_name):
+        return False
+
+    # Verify the cached file is readable by fetching a small range
+    stream = get_file_range(pdf_object_name, 0, 0)
+    if stream is None:
+        logger.warning(f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
+        delete_file(pdf_object_name)
+        return False
+
+    close_fn = getattr(stream, "close", None)
+    if callable(close_fn):
         try:
-            return True
-        finally:
-            close_fn = getattr(stream, "close", None)
-            if callable(close_fn):
-                try:
-                    close_fn()
-                except Exception as e:
-                    logger.warning(f"Failed to close cache probe stream for {pdf_object_name}: {str(e)}")
-    return False
+            close_fn()
+        except Exception as e:
+            logger.warning(f"Failed to close cache probe stream for {pdf_object_name}: {str(e)}")
+
+    return True
 
 
 async def _convert_office_to_cached_pdf(
@@ -352,7 +353,9 @@ async def _convert_office_to_cached_pdf(
                         response.status_code,
                         response.text,
                     )
-                    raise OfficeConversionException("Office file conversion failed")
+                    raise RuntimeError(
+                        f"Conversion service returned status {response.status_code}"
+                    )
 
                 # Atomic move from temp to final location, then clean up temp
                 copy_result = copy_file(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
@@ -364,7 +367,7 @@ async def _convert_office_to_cached_pdf(
                         pdf_object_name,
                         copy_result.get('error', 'Unknown error'),
                     )
-                    raise OfficeConversionException("Office file conversion failed")
+                    raise RuntimeError("Failed to finalize converted PDF cache")
                 delete_file(temp_pdf_object_name)
 
             except Exception as e:

@@ -2,7 +2,7 @@ import logging
 import re
 import base64
 from http import HTTPStatus
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from urllib.parse import urlparse, urlunparse, unquote, quote
 
 import httpx
@@ -579,8 +579,8 @@ async def get_storage_file_batch_urls(
 @file_management_config_router.get("/preview/{object_name:path}")
 async def preview_file(
     object_name: str = PathParam(..., description="File object name to preview"),
-    filename: Optional[str] = Query(None, description="Original filename for display (optional)"),
-    range_header: Optional[str] = Header(None, alias="range"),
+    filename: Annotated[Optional[str], Query(description="Original filename for display (optional)")] = None,
+    range_header: Annotated[Optional[str], Header(alias="range")] = None,
 ):
     """
     Preview file inline in browser

@@ -76,7 +76,7 @@ const replaceUntilStable = (
 ): string => {
   let current = value;
   for (let i = 0; i < maxIterations; i += 1) {
-    const next = current.replace(pattern, replacement);
+    const next = current.replaceAll(pattern, replacement);
     if (next === current) {
       break;
     }
@@ -87,21 +87,21 @@ const replaceUntilStable = (
 
 const normalizeMarkdownHeadingText = (value: string): string => {
   return replaceUntilStable(value, /!\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/[<>]/g, "")
-    .replace(/[*_~]/g, "")
-    .replace(/\s+#+\s*$/, "")
-    .replace(/\\/g, "")
+    .replaceAll(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replaceAll(/`([^`]+)`/g, "$1")
+    .replaceAll(/[<>]/g, "")
+    .replaceAll(/[*_~]/g, "")
+    .replaceAll(/\s+#+\s*$/g, "")
+    .replaceAll(/\\/g, "")
     .trim();
 };
 
 const slugifyHeadingText = (value: string): string => {
   const normalized = normalizeMarkdownHeadingText(value)
     .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fa5\s-]/g, "")
+    .replaceAll(/[^a-z0-9\u4e00-\u9fa5\s-]/g, "")
     .trim()
-    .replace(/\s+/g, "-");
+    .replaceAll(/\s+/g, "-");
 
   return normalized || "section";
 };

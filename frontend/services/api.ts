@@ -96,7 +96,8 @@ export const API_ENDPOINTS = {
       const queryParams = new URLSearchParams();
       if (filename) queryParams.append("filename", filename);
       const queryString = queryParams.toString();
-      return `${API_BASE_URL}/file/preview/${objectName}${queryString ? `?${queryString}` : ''}`;
+      const suffix = queryString ? `?${queryString}` : "";
+      return `${API_BASE_URL}/file/preview/${objectName}${suffix}`;
     },
     datamateDownload: (params: {
       url?: string;

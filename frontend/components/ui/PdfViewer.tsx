@@ -70,7 +70,45 @@ function ignoreAbortError(error: unknown): boolean {
   return errorName === 'AbortException' || errorMessage.includes('TextLayer task cancelled');
 }
 
-export function PdfViewer({ url, fileName }: PdfViewerProps) {
+function buildRawOutline(items: any[]): OutlineItem[] {
+  return items.map(item => ({
+    title: item.title,
+    dest: typeof item.dest === 'string' ? item.dest : null,
+    items: item.items ? buildRawOutline(item.items) : undefined,
+  }));
+}
+
+async function resolveOutlinePageNumbers(
+  pdf: PDFDocumentProxy,
+  items: any[],
+): Promise<OutlineItem[]> {
+  const result: OutlineItem[] = [];
+  for (const item of items) {
+    let pageNumber: number | undefined;
+    if (item.dest) {
+      try {
+        const dest = typeof item.dest === 'string'
+          ? await pdf.getDestination(item.dest)
+          : item.dest;
+        if (dest?.[0]) {
+          const pageIndex = await pdf.getPageIndex(dest[0]);
+          pageNumber = pageIndex + 1;
+        }
+      } catch (err) {
+        log.warn('Failed to get page number for outline item:', err);
+      }
+    }
+    result.push({
+      title: item.title,
+      dest: typeof item.dest === 'string' ? item.dest : null,
+      pageNumber,
+      items: item.items ? await resolveOutlinePageNumbers(pdf, item.items) : undefined,
+    });
+  }
+  return result;
+}
+
+export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {
   const { t } = useTranslation('common');
 
   const [numPages, setNumPages] = useState<number>(0);
@@ -85,7 +123,7 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
   const [showOutline, setShowOutline] = useState<boolean>(false);
   
   const [scaleMode, setScaleMode] = useState<ScaleMode>('fit-page');
-  const [customScale, setCustomScale] = useState<number>(1.0);
+  const [customScale, setCustomScale] = useState<number>(1);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [containerHeight, setContainerHeight] = useState<number>(0);
   // Defaults to portrait A4; updated after first page loads.
@@ -93,8 +131,6 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
   const [intrinsicHeight, setIntrinsicHeight] = useState<number>(792);
 
   const [pageHeights, setPageHeights] = useState<Map<number, number>>(new Map());
-  const [visibleStart, setVisibleStart] = useState<number>(1);
-  const [visibleEnd, setVisibleEnd] = useState<number>(5);
   // Expand immediately, shrink with debounce to avoid TextLayer abort noise.
   const [renderStart, setRenderStart] = useState<number>(1);
   const [renderEnd, setRenderEnd] = useState<number>(5);
@@ -103,17 +139,17 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
 
   const pageScale = useMemo(() => {
     if (scaleMode === 'custom') return customScale;
-    if (scaleMode === 'actual-size') return 1.0;
+    if (scaleMode === 'actual-size') return 1;
     if (scaleMode === 'fit-width') {
-      if (!containerWidth) return 1.0;
+      if (!containerWidth) return 1;
       return Math.max(containerWidth / intrinsicWidth, 0.5);
     }
     if (scaleMode === 'fit-page') {
-      const scaleByWidth = containerWidth ? containerWidth / intrinsicWidth : 1.0;
-      const scaleByHeight = containerHeight ? containerHeight / intrinsicHeight : 1.0;
+      const scaleByWidth = containerWidth ? containerWidth / intrinsicWidth : 1;
+      const scaleByHeight = containerHeight ? containerHeight / intrinsicHeight : 1;
       return Math.max(Math.min(scaleByWidth, scaleByHeight), 0.3);
     }
-    return 1.0;
+    return 1;
   }, [scaleMode, customScale, containerWidth, containerHeight, intrinsicWidth, intrinsicHeight]);
 
   const estimatedPageHeight = useMemo(() => Math.round(intrinsicHeight * pageScale), [intrinsicHeight, pageScale]);
@@ -157,7 +193,7 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
 
     try {
       const firstPage = await pdf.getPage(1);
-      const viewport = firstPage.getViewport({ scale: 1.0 });
+      const viewport = firstPage.getViewport({ scale: 1 });
       setIntrinsicWidth(viewport.width);
       setIntrinsicHeight(viewport.height);
     } catch (err) {
@@ -168,45 +204,11 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
       const pdfOutline = await pdf.getOutline();
 
       if (pdfOutline && pdfOutline.length > 0) {
-        const buildRawOutline = (items: any[]): OutlineItem[] =>
-          items.map(item => ({
-            title: item.title,
-            dest: typeof item.dest === 'string' ? item.dest : null,
-            items: item.items ? buildRawOutline(item.items) : undefined,
-          }));
-
         const rawOutline = buildRawOutline(pdfOutline);
         setOutline(rawOutline);
-        if (window.innerWidth >= 768) setShowOutline(true);
+        if (globalThis.innerWidth >= 768) setShowOutline(true);
 
-        const resolvePageNumbers = async (items: any[]): Promise<OutlineItem[]> => {
-          const result: OutlineItem[] = [];
-          for (const item of items) {
-            let pageNumber: number | undefined;
-            if (item.dest) {
-              try {
-                const dest = typeof item.dest === 'string'
-                  ? await pdf.getDestination(item.dest)
-                  : item.dest;
-                if (dest && dest[0]) {
-                  const pageIndex = await pdf.getPageIndex(dest[0]);
-                  pageNumber = pageIndex + 1;
-                }
-              } catch (err) {
-                log.warn('Failed to get page number for outline item:', err);
-              }
-            }
-            result.push({
-              title: item.title,
-              dest: typeof item.dest === 'string' ? item.dest : null,
-              pageNumber,
-              items: item.items ? await resolvePageNumbers(item.items) : undefined,
-            });
-          }
-          return result;
-        };
-
-        resolvePageNumbers(pdfOutline).then(resolved => {
+        resolveOutlinePageNumbers(pdf, pdfOutline).then(resolved => {
           setOutline(resolved);
         }).catch(err => {
           log.warn('Failed to resolve outline page numbers:', err);
@@ -254,8 +256,6 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
     const lastPage  = binarySearchPageAtOffset(cumulativeHeights, effectiveTop + container.clientHeight);
     const newStart = Math.max(1, firstPage - OVERSCAN);
     const newEnd   = Math.min(numPages, lastPage + OVERSCAN);
-    setVisibleStart(newStart);
-    setVisibleEnd(newEnd);
     setPageNumber(firstPage);
     setRenderStart(prev => Math.min(prev, newStart));
     setRenderEnd(prev => Math.max(prev, newEnd));
@@ -278,7 +278,7 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
     captureViewportCenterAnchor();
     setCustomScale(prev => {
       const baseScale = scaleMode === 'custom' ? prev : pageScale;
-      return Math.min(Math.max(baseScale + delta, 0.5), 3.0);
+      return Math.min(Math.max(baseScale + delta, 0.5), 3);
     });
     setScaleMode('custom');
   }, [captureViewportCenterAnchor, scaleMode, pageScale]);
@@ -307,10 +307,10 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
     };
 
     const timer = setTimeout(updateSize, 50);
-    window.addEventListener('resize', updateSize);
+    globalThis.addEventListener('resize', updateSize);
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('resize', updateSize);
+      globalThis.removeEventListener('resize', updateSize);
     };
   }, [showOutline]);
 
@@ -339,6 +339,21 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
   useEffect(() => {
     resetIdleTimer();
     return () => { if (idleTimerRef.current) clearTimeout(idleTimerRef.current); };
+  }, [resetIdleTimer]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    container.addEventListener('mousemove', resetIdleTimer, { passive: true });
+    container.addEventListener('pointerdown', resetIdleTimer, { passive: true });
+
+    return () => {
+      container.removeEventListener('mousemove', resetIdleTimer);
+      container.removeEventListener('pointerdown', resetIdleTimer);
+    };
   }, [resetIdleTimer]);
 
   // Keep the current viewport center stable after zoom changes.
@@ -426,8 +441,6 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
           ref={scrollContainerRef}
           id="pdf-page-container"
           className="flex-1 overflow-auto py-6 flex flex-col items-center"
-          onMouseMove={resetIdleTimer}
-          onPointerDown={resetIdleTimer}
         >
           <Document
             file={url}
@@ -441,16 +454,15 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
               const isRendered = pageNum >= renderStart && pageNum <= renderEnd;
               const placeholderH = pageHeights.get(pageNum) ?? estimatedPageHeight;
               const placeholderW = Math.round(intrinsicWidth * pageScale);
+              const pageWrapperStyle = isRendered
+                ? (pageHeights.has(pageNum) ? undefined : { minHeight: placeholderH, width: placeholderW })
+                : { height: placeholderH, width: placeholderW };
               return (
                 <div
                   key={pageNum}
                   ref={el => { pageRefs.current[pageNum - 1] = el; }}
                   className="bg-white shadow-lg mb-4"
-                  style={
-                    isRendered
-                      ? (pageHeights.has(pageNum) ? undefined : { minHeight: placeholderH, width: placeholderW })
-                      : { height: placeholderH, width: placeholderW }
-                  }
+                  style={pageWrapperStyle}
                 >
                   {isRendered && (
                     <Page
@@ -492,7 +504,12 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
         <div
           className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 transition-opacity duration-300"
           style={{ opacity: toolbarVisible ? 1 : 0.15 }}
-          onMouseEnter={() => { if (idleTimerRef.current) clearTimeout(idleTimerRef.current); setToolbarVisible(true); }}
+          onMouseEnter={() => {
+            if (idleTimerRef.current) {
+              clearTimeout(idleTimerRef.current);
+            }
+            setToolbarVisible(true);
+          }}
           onMouseLeave={resetIdleTimer}
         >
           <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-full shadow-lg px-3 py-1">
@@ -524,7 +541,11 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
                 min={1}
                 max={numPages}
                 value={pageNumber}
-                onChange={(value) => value && goToPage(value)}
+                onChange={(value) => {
+                  if (value) {
+                    goToPage(value);
+                  }
+                }}
                 className="w-12"
                 controls={false}
                 title={t('filePreview.pdf.goToPage')}
@@ -565,7 +586,7 @@ export function PdfViewer({ url, fileName }: PdfViewerProps) {
 
             <button
               onClick={zoomIn}
-              disabled={scaleMode === 'custom' && customScale >= 3.0}
+              disabled={scaleMode === 'custom' && customScale >= 3}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
               title={t('filePreview.zoomIn')}
             >

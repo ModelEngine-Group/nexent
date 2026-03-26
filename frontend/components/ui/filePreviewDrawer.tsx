@@ -28,6 +28,8 @@ const TXT_VIRTUAL_OVERSCAN = 10;
 
 const CSV_ROW_HEIGHT = 40;
 const CSV_DELIMITER_CANDIDATES = [',', ';', '\t', '|'] as const;
+const CHARSET_PATTERN = /charset\s*=\s*([^;\s]+)/i;
+const CONTENT_RANGE_PATTERN = /bytes (\d+)-(\d+)\/(\d+)/;
 
 function normalizeCharsetLabel(value: string): string {
   const normalized = value.trim().toLowerCase();
@@ -39,9 +41,127 @@ function normalizeCharsetLabel(value: string): string {
 
 function extractCharsetFromContentType(contentType: string | null): string | null {
   if (!contentType) return null;
-  const match = contentType.match(/charset\s*=\s*([^;\s]+)/i);
+  const match = CHARSET_PATTERN.exec(contentType);
   if (!match?.[1]) return null;
-  return normalizeCharsetLabel(match[1].replace(/^"|"$/g, ''));
+  return normalizeCharsetLabel(match[1].replaceAll(/^"|"$/g, ''));
+}
+
+function updateChunkRangeState(
+  contentRange: string | null,
+  byteLength: number,
+  byteOffsetRef: React.MutableRefObject<number>,
+  totalBytesRef: React.MutableRefObject<number | null>,
+): boolean {
+  if (!contentRange) {
+    byteOffsetRef.current += byteLength;
+    return false;
+  }
+
+  const match = CONTENT_RANGE_PATTERN.exec(contentRange);
+  if (!match) {
+    byteOffsetRef.current += byteLength;
+    return false;
+  }
+
+  const fetchedEnd = Number(match[2]);
+  const total = Number(match[3]);
+  byteOffsetRef.current = fetchedEnd + 1;
+  totalBytesRef.current = total;
+  return fetchedEnd + 1 < total;
+}
+
+function ensurePreviewTextDecoder(
+  contentType: string | null,
+  textDecoderRef: React.MutableRefObject<TextDecoder | null>,
+  decoderEncodingRef: React.MutableRefObject<string | null>,
+  decoderHasExplicitCharsetRef: React.MutableRefObject<boolean>,
+  decoderAllowGbFallbackRef: React.MutableRefObject<boolean>,
+): void {
+  if (textDecoderRef.current) {
+    return;
+  }
+
+  const headerCharset = extractCharsetFromContentType(contentType);
+  if (headerCharset) {
+    const normalized = normalizeCharsetLabel(headerCharset);
+    const isUtf8 = normalized === 'utf-8' || normalized === 'utf8';
+
+    textDecoderRef.current = isUtf8
+      ? new TextDecoder('utf-8', { fatal: true })
+      : new TextDecoder(normalized);
+    decoderEncodingRef.current = isUtf8 ? 'utf-8' : normalized;
+    decoderHasExplicitCharsetRef.current = true;
+    decoderAllowGbFallbackRef.current = isUtf8;
+    return;
+  }
+
+  // Start with strict UTF-8; if invalid bytes appear in later chunks, fallback to GB18030.
+  textDecoderRef.current = new TextDecoder('utf-8', { fatal: true });
+  decoderEncodingRef.current = 'utf-8';
+  decoderHasExplicitCharsetRef.current = false;
+  decoderAllowGbFallbackRef.current = true;
+}
+
+function decodePreviewChunk(
+  buf: ArrayBuffer,
+  hasMore: boolean,
+  textDecoderRef: React.MutableRefObject<TextDecoder | null>,
+  decoderEncodingRef: React.MutableRefObject<string | null>,
+  decoderAllowGbFallbackRef: React.MutableRefObject<boolean>,
+): string {
+  if (!textDecoderRef.current) {
+    throw new Error('Text decoder is not initialized');
+  }
+
+  try {
+    let raw = textDecoderRef.current.decode(buf, { stream: hasMore });
+    if (!hasMore) {
+      raw += textDecoderRef.current.decode();
+    }
+    return raw;
+  } catch (decodeErr) {
+    const canFallbackToGb18030 =
+      decoderAllowGbFallbackRef.current &&
+      decoderEncodingRef.current === 'utf-8';
+
+    if (!canFallbackToGb18030) {
+      throw decodeErr;
+    }
+
+    log.warn('UTF-8 decode failed for preview stream, fallback to GB18030:', decodeErr);
+    textDecoderRef.current = new TextDecoder('gb18030');
+    decoderEncodingRef.current = 'gb18030';
+    decoderAllowGbFallbackRef.current = false;
+
+    let raw = textDecoderRef.current.decode(buf, { stream: hasMore });
+    if (!hasMore) {
+      raw += textDecoderRef.current.decode();
+    }
+    return raw;
+  }
+}
+
+function splitPreviewSafeText(
+  raw: string,
+  remainder: string,
+  hasMore: boolean,
+  detectedFileType: DetectedFileType,
+): { remainder: string; safeText: string } {
+  const mergedText = remainder + raw;
+  const shouldKeepTrailingLine = hasMore && detectedFileType !== 'markdown';
+  if (!shouldKeepTrailingLine) {
+    return { remainder: '', safeText: mergedText };
+  }
+
+  const lastNl = mergedText.lastIndexOf('\n');
+  if (lastNl === -1) {
+    return { remainder: mergedText, safeText: '' };
+  }
+
+  return {
+    remainder: mergedText.slice(lastNl + 1),
+    safeText: mergedText.slice(0, lastNl + 1),
+  };
 }
 
 function parseCsvLine(line: string, delimiter: string): string[] {
@@ -121,7 +241,7 @@ export function FilePreviewDrawer({
   fileType: providedFileType,
   fileSize,
   onClose,
-}: FilePreviewProps) {
+}: Readonly<FilePreviewProps>) {
   const { t } = useTranslation('common');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -261,91 +381,36 @@ export function FilePreviewDrawer({
       if (!resp.ok && resp.status !== 206) throw new Error(`HTTP ${resp.status}`);
 
       const contentRange = resp.headers.get('Content-Range');
-      let hasMore = false;
       const buf = await resp.arrayBuffer();
       if (activeSessionId !== textFetchSessionRef.current) return;
-      if (contentRange) {
-        const m = contentRange.match(/bytes (\d+)-(\d+)\/(\d+)/);
-        if (m) {
-          const fetchedEnd = +m[2];
-          const total      = +m[3];
-          byteOffsetRef.current = fetchedEnd + 1;
-          totalBytesRef.current = total;
-          hasMore = fetchedEnd + 1 < total;
-        }
-      } else {
-        byteOffsetRef.current += buf.byteLength;
-        hasMore = false;
-      }
-
-      if (!textDecoderRef.current) {
-        const headerCharset = extractCharsetFromContentType(resp.headers.get('Content-Type'));
-        if (headerCharset) {
-          const normalized = normalizeCharsetLabel(headerCharset);
-          const isUtf8 = normalized === 'utf-8' || normalized === 'utf8';
-
-          textDecoderRef.current = isUtf8
-            ? new TextDecoder('utf-8', { fatal: true })
-            : new TextDecoder(normalized);
-          decoderEncodingRef.current = isUtf8 ? 'utf-8' : normalized;
-          decoderHasExplicitCharsetRef.current = true;
-          decoderAllowGbFallbackRef.current = isUtf8;
-        } else {
-          // Start with strict UTF-8; if invalid bytes appear in later chunks, fallback to GB18030.
-          textDecoderRef.current = new TextDecoder('utf-8', { fatal: true });
-          decoderEncodingRef.current = 'utf-8';
-          decoderHasExplicitCharsetRef.current = false;
-          decoderAllowGbFallbackRef.current = true;
-        }
-      }
-
-      let raw = '';
-      try {
-        raw = textDecoderRef.current.decode(buf, { stream: hasMore });
-        if (!hasMore) {
-          // Flush pending bytes in decoder state for the final chunk.
-          raw += textDecoderRef.current.decode();
-        }
-      } catch (decodeErr) {
-        const canFallbackToGb18030 =
-          decoderAllowGbFallbackRef.current &&
-          decoderEncodingRef.current === 'utf-8';
-
-        if (!canFallbackToGb18030) {
-          throw decodeErr;
-        }
-
-        log.warn('UTF-8 decode failed for preview stream, fallback to GB18030:', decodeErr);
-        textDecoderRef.current = new TextDecoder('gb18030');
-        decoderEncodingRef.current = 'gb18030';
-        decoderAllowGbFallbackRef.current = false;
-
-        raw = textDecoderRef.current.decode(buf, { stream: hasMore });
-        if (!hasMore) {
-          raw += textDecoderRef.current.decode();
-        }
-      }
-
-      // Keep incomplete trailing line for next chunk to avoid broken rows.
-      let safeText = remainderRef.current + raw;
+      const hasMore = updateChunkRangeState(contentRange, buf.byteLength, byteOffsetRef, totalBytesRef);
+      ensurePreviewTextDecoder(
+        resp.headers.get('Content-Type'),
+        textDecoderRef,
+        decoderEncodingRef,
+        decoderHasExplicitCharsetRef,
+        decoderAllowGbFallbackRef,
+      );
+      const raw = decodePreviewChunk(
+        buf,
+        hasMore,
+        textDecoderRef,
+        decoderEncodingRef,
+        decoderAllowGbFallbackRef,
+      );
+      const { remainder, safeText } = splitPreviewSafeText(
+        raw,
+        remainderRef.current,
+        hasMore,
+        detectedFileType,
+      );
       if (activeSessionId !== textFetchSessionRef.current) return;
-      if (hasMore && detectedFileType !== 'markdown') {
-        const lastNl = safeText.lastIndexOf('\n');
-        if (lastNl !== -1) {
-          remainderRef.current = safeText.slice(lastNl + 1);
-          safeText = safeText.slice(0, lastNl + 1);
-        } else {
-          remainderRef.current = safeText;
-          safeText = '';
-        }
-      } else {
-        remainderRef.current = '';
-      }
+      remainderRef.current = remainder;
 
       if (detectedFileType === 'text') {
         if (safeText) {
           const newLines = safeText.split('\n');
-          if (newLines[newLines.length - 1] === '') newLines.pop();
+          if (newLines.at(-1) === '') newLines.pop();
           setTxtLines(prev => [...prev, ...newLines]);
         }
       } else if (detectedFileType === 'csv') {
@@ -356,8 +421,8 @@ export function FilePreviewDrawer({
           const newLines = safeText.split('\n').filter(l => l.trim().length > 0);
           setCsvRows(prev => [...prev, ...newLines.map((line) => parseCsvLine(line, csvDelimiterRef.current))]);
         }
-      } else {
-        if (safeText) setTextContent(prev => prev + safeText);
+      } else if (safeText) {
+        setTextContent(prev => prev + safeText);
       }
       if (!hasMore) observerRef.current?.disconnect();
     } finally {
@@ -468,8 +533,8 @@ export function FilePreviewDrawer({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    globalThis.addEventListener('keydown', handleKeyDown);
+    return () => globalThis.removeEventListener('keydown', handleKeyDown);
   }, [open, onClose]);
 
   useEffect(() => {
@@ -500,7 +565,7 @@ export function FilePreviewDrawer({
 
     container.scrollTo({ top: Math.max(nextScrollTop, 0), behavior: 'smooth' });
 
-    if (window.innerWidth < 768) {
+    if (globalThis.innerWidth < 768) {
       setShowMarkdownToc(false);
     }
   }, []);

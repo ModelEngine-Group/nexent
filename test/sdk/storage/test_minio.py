@@ -1019,7 +1019,7 @@ class TestMinIOStorageClientGetFileRange:
             default_bucket="test-bucket"
         )
 
-        success, result = client.get_file_range('test.pdf', 100, 199)
+        success, _ = client.get_file_range('test.pdf', 100, 199)
 
         assert success is True
         mock_client.get_object.assert_called_once_with(
