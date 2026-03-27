@@ -35,6 +35,10 @@ class KnowledgeBaseSearchTool(Tool):
             "description": "The search query to perform.",
             "description_zh": "要执行的搜索查询词"
         },
+        "index_names": {
+            "description": "The list of index names to search",
+            "description_zh": "要索引的知识库"
+        },
     }
 
     init_param_descriptions = {
@@ -42,10 +46,7 @@ class KnowledgeBaseSearchTool(Tool):
             "description": "Maximum number of search results",
             "description_zh": "返回搜索结果的最大数量"
         },
-        "index_names": {
-            "description": "The list of index names to search",
-            "description_zh": "要索引的知识库"
-        },
+
         "search_mode": {
             "description": "The search mode, optional values: hybrid, accurate, semantic",
             "description_zh": "搜索模式，可选值：hybrid（混合）、accurate（精确）、semantic（语义）"
@@ -96,7 +97,13 @@ class KnowledgeBaseSearchTool(Tool):
         self.running_prompt_en = "Searching the knowledge base..."
 
 
-    def forward(self, query: str) -> str:
+    def forward(self, query: str, index_names: str) -> str:
+        # Parse index_names from string (always required)
+        search_index_names = [name.strip() for name in index_names.split(",") if name.strip()]
+
+        # Use the instance search_mode
+        search_mode = self.search_mode
+
         # Send tool run message
         if self.observer:
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
@@ -104,10 +111,6 @@ class KnowledgeBaseSearchTool(Tool):
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(
                 card_content, ensure_ascii=False))
-
-        # Use the instance index_names and search_mode
-        search_index_names = self.index_names
-        search_mode = self.search_mode
 
         # Log the index_names being used for this search
         logger.info(
