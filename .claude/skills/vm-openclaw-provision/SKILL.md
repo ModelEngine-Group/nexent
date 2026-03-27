@@ -19,7 +19,8 @@ description: |
   - 基于 CSV 状态文件的 IP 自动分配,防止并发冲突
   - 支持批量创建虚拟机，自动确保 IP 不冲突
   - SSH/SCP 配置传输,等待虚拟机 SSH 就绪后自动传输配置文件
-  - 模型配置同步,从 Nexent API 获取模型配置并更新到 VM
+   - 模型配置同步,从 Nexent API 获取模型配置并更新到 VM
+   - 实例监控脚本部署,传输 report_info.py 并配置 crontab 定时上报
 ---
 
 # 虚拟机发放技能
@@ -302,6 +303,17 @@ nexent_api:
 ```
 
 **注意**：`gateway.controlUi.allowedOrigins` 会自动设置为 `http://<VM_IP>:18789`
+
+## 实例监控脚本
+
+传输 Kafka 配置时，会自动完成以下操作：
+
+1. 将 `scripts/report_info.py` 传输到 VM 的 `/opt/nexent/report_info.py`
+2. 在 VM 上添加 crontab 定时任务：`* * * * * /usr/bin/python3 /opt/nexent/report_info.py >> /var/log/kafka_status.log 2>&1`
+
+该脚本每分钟执行一次，从 `openclaw.json` 读取模型、技能、插件等信息，通过 Kafka 上报实例状态。
+
+**幂等性**：如果 crontab 中已存在该条目（通过脚本路径匹配），不会重复添加。
 ## IP 自动分配
 
 IP 分配通过 CSV 状态文件实现并发安全：

@@ -566,6 +566,43 @@ def create_ssh_client(
     return client
 
 
+def transfer_file_via_sftp(
+    ssh_client: paramiko.SSHClient, local_path: str, remote_path: str
+) -> bool:
+    """Transfer a local file to remote host via SFTP."""
+    remote_dir = os.path.dirname(remote_path)
+    if remote_dir:
+        ssh_client.exec_command(f"mkdir -p '{remote_dir}'")[
+            1
+        ].channel.recv_exit_status()
+
+    sftp = ssh_client.open_sftp()
+    try:
+        sftp.put(local_path, remote_path)
+        return True
+    finally:
+        sftp.close()
+
+
+def setup_crontab(
+    ssh_client: paramiko.SSHClient, script_path: str, cron_entry: str
+) -> bool:
+    """Add a crontab entry if it doesn't already exist. Idempotent."""
+    check_cmd = f"crontab -l 2>/dev/null | grep -qF '{script_path}'"
+    stdin, stdout, stderr = ssh_client.exec_command(check_cmd)
+    exit_status = stdout.channel.recv_exit_status()
+    if exit_status == 0:
+        print(f"Crontab entry already exists, skipping")
+        return True
+
+    add_cmd = f"(crontab -l 2>/dev/null; printf '\\n{cron_entry}\\n') | crontab -"
+    stdin, stdout, stderr = ssh_client.exec_command(add_cmd)
+    exit_status = stdout.channel.recv_exit_status()
+    if exit_status != 0:
+        raise Exception(f"Failed to setup crontab: {stderr.read().decode()}")
+    return True
+
+
 def transfer_config_via_scp(
     ssh_client: paramiko.SSHClient, config_content: str, remote_path: str
 ) -> bool:

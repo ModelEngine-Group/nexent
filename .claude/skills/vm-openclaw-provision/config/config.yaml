@@ -1,9 +1,9 @@
 # FusionCompute 配置
-fc_ip: 100.199.5.10
+fc_ip: 192.168.1.100
 cpu: 4
 memory: 8192  # 单位：MB
-X-Auth-User: test
-X-Auth-Key: Huawei@4321
+X-Auth-User: gmsysman
+X-Auth-Key: PASSWORD
 site_id: ABCDE
 vm_id: i00001
 gateway: "192.168.1.1"
@@ -14,8 +14,8 @@ task_timeout: 600
 # Kafka 配置（将传输到虚拟机）
 kafka:
   bootstrap_servers: "192.168.1.100:9092"
-  sasl_username: "kafka_user"
-  sasl_password: "kafka_password"
+  sasl_username: "producer"
+  sasl_password: "producerPwd"
   security_protocol: "SASL_PLAINTEXT"
   sasl_mechanism: "PLAIN"
 

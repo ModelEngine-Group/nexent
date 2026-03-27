@@ -2,6 +2,7 @@
 """Transfer Kafka and model config to VM via SSH."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -13,8 +14,10 @@ from _common import (
     fetch_nexent_model_config,
     generate_vm_config_yaml,
     get_client_with_args,
+    setup_crontab,
     sync_model_config_to_vm,
     transfer_config_via_scp,
+    transfer_file_via_sftp,
     wait_for_ssh_ready,
     Config,
 )
@@ -67,6 +70,26 @@ def run_transfer(vm_ip, cfg: Config):
                 print(f"  description: {description}")
             transfer_config_via_scp(ssh_client, config_content, full_path)
             print("Config transferred successfully!")
+
+        local_report_script = os.path.join(os.path.dirname(__file__), "report_info.py")
+        remote_report_path = "/opt/nexent/report_info.py"
+        cron_entry = (
+            f"* * * * * /usr/bin/python3 {remote_report_path} "
+            f">> /var/log/kafka_status.log 2>&1"
+        )
+
+        if os.path.exists(local_report_script):
+            print(f"Transferring report_info.py to {remote_report_path}...")
+            transfer_file_via_sftp(ssh_client, local_report_script, remote_report_path)
+            print("report_info.py transferred successfully!")
+
+            print("Setting up crontab for report_info.py...")
+            setup_crontab(ssh_client, remote_report_path, cron_entry)
+            print("Crontab entry added successfully!")
+        else:
+            print(
+                f"Warning: report_info.py not found at {local_report_script}, skipping"
+            )
 
         nexent_url = nexent_api_config.get("base_url")
         nexent_token = nexent_api_config.get("token")
