@@ -114,17 +114,17 @@ secrets:
   minio:
     rootUser: "nexent"
     rootPassword: "nexent@4321"
-    accessKey: "nexent-ru7ks1q"
-    secretKey: "NZ7wTO5M5W08oBTtzGqsi2vw"
+    accessKey: ""
+    secretKey: ""
   ssh:
     username: "nexent"
     password: "nexent@2025"
   supabase:
-    jwtSecret: "sWvUfP3N3CiD+VFPbAUGEzjyRvTwMFdRN4LYr+9+srI="
-    secretKeyBase: "RX/Lk1+m7PqKkDPpIBQyoMM2qUIv/apcTAvfGOrsklgnut6wvna++zK9xiVixBb165ReQzhQhygYmr9UapII0A=="
-    vaultEncKey: "Wf0XdVmicUVNABIAkAN/QWAi+pmr9wzRFIZLIOzpPYk="
-    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzc0NjAwNjk2LCJleHAiOjE5MzIyODA2OTZ9._TRsr_VzYNYNLiLH9B-R65drHdc6BCpm0j3HIC6jBW0"
-    serviceRoleKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3NzQ2MDA2OTcsImV4cCI6MTkzMjI4MDY5N30.aeV4XBToQ58grlObvk-YGVM8n_7PvI4MoBu6wwZl3qc"
+    jwtSecret: ""
+    secretKeyBase: ""
+    vaultEncKey: ""
+    anonKey: ""
+    serviceRoleKey: ""
     postgresPassword: "Huawei123"
     gotrueDbUrl: "postgres://supabase_auth_admin:Huawei123@nexent-supabase-db:5436/supabase?search_path=auth&sslmode=disable"
 
