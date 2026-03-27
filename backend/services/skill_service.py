@@ -12,7 +12,6 @@ from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
 from consts.const import CONTAINER_SKILLS_PATH, ROOT_DIR
 from consts.exceptions import SkillException
-from services.skill_repository import SkillRepository
 from database import skill_db
 from database.db_models import SkillInfo
 
@@ -411,7 +410,6 @@ class SkillService:
             skill_manager: Optional SkillManager instance, uses global if not provided
         """
         self.skill_manager = skill_manager or get_skill_manager()
-        self.repository = SkillRepository()
 
     def _resolve_local_skills_dir_for_overlay(self) -> Optional[str]:
         """Directory where skill folders live: ``SKILLS_PATH``, else ``ROOT_DIR/skills`` if present."""
@@ -464,7 +462,7 @@ class SkillService:
             List of skill info dicts
         """
         try:
-            skills = self.repository.list_skills()
+            skills = skill_db.list_skills()
             return [self._overlay_params_from_local_config_yaml(s) for s in skills]
         except Exception as e:
             logger.error(f"Error listing skills: {e}")
@@ -481,7 +479,7 @@ class SkillService:
             Skill dict or None if not found
         """
         try:
-            skill = self.repository.get_skill_by_name(skill_name)
+            skill = skill_db.get_skill_by_name(skill_name)
             if skill:
                 return self._overlay_params_from_local_config_yaml(skill)
             return None
@@ -499,7 +497,7 @@ class SkillService:
             Skill dict or None if not found
         """
         try:
-            skill = self.repository.get_skill_by_id(skill_id)
+            skill = skill_db.get_skill_by_id(skill_id)
             if skill:
                 return self._overlay_params_from_local_config_yaml(skill)
             return None
@@ -531,7 +529,7 @@ class SkillService:
             raise SkillException("Skill name is required")
 
         # Check if skill already exists in database
-        existing = self.repository.get_skill_by_name(skill_name)
+        existing = skill_db.get_skill_by_name(skill_name)
         if existing:
             raise SkillException(f"Skill '{skill_name}' already exists")
 
@@ -547,7 +545,7 @@ class SkillService:
 
         try:
             # Create database record first
-            result = self.repository.create_skill(skill_data)
+            result = skill_db.create_skill(skill_data)
 
             # Create local skill file (SKILL.md)
             self.skill_manager.save_skill(skill_data)
@@ -638,7 +636,7 @@ class SkillService:
             raise SkillException("Skill name is required")
 
         # Check if skill already exists in database
-        existing = self.repository.get_skill_by_name(name)
+        existing = skill_db.get_skill_by_name(name)
         if existing:
             raise SkillException(f"Skill '{name}' already exists")
 
@@ -646,7 +644,7 @@ class SkillService:
         allowed_tools = skill_data.get("allowed_tools", [])
         tool_ids = []
         if allowed_tools:
-            tool_ids = self.repository.get_tool_ids_by_names(allowed_tools, tenant_id)
+            tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
 
         skill_dict = {
             "name": name,
@@ -663,7 +661,7 @@ class SkillService:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
 
-        result = self.repository.create_skill(skill_dict)
+        result = skill_db.create_skill(skill_dict)
 
         # Write SKILL.md to local storage
         self.skill_manager.save_skill(skill_dict)
@@ -730,7 +728,7 @@ class SkillService:
             raise SkillException("Skill name is required")
 
         # Check if skill already exists in database
-        existing = self.repository.get_skill_by_name(name)
+        existing = skill_db.get_skill_by_name(name)
         if existing:
             raise SkillException(f"Skill '{name}' already exists")
 
@@ -753,7 +751,7 @@ class SkillService:
         allowed_tools = skill_data.get("allowed_tools", [])
         tool_ids = []
         if allowed_tools:
-            tool_ids = self.repository.get_tool_ids_by_names(allowed_tools, tenant_id)
+            tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
 
         skill_dict = {
             "name": name,
@@ -778,7 +776,7 @@ class SkillService:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
 
-        result = self.repository.create_skill(skill_dict)
+        result = skill_db.create_skill(skill_dict)
 
         # Save SKILL.md to local storage
         self.skill_manager.save_skill(skill_dict)
@@ -865,7 +863,7 @@ class SkillService:
         Returns:
             Updated skill dict
         """
-        existing = self.repository.get_skill_by_name(skill_name)
+        existing = skill_db.get_skill_by_name(skill_name)
         if not existing:
             raise SkillException(f"Skill not found: {skill_name}")
 
@@ -907,7 +905,7 @@ class SkillService:
         allowed_tools = skill_data.get("allowed_tools", [])
         tool_ids = []
         if allowed_tools:
-            tool_ids = self.repository.get_tool_ids_by_names(allowed_tools, tenant_id)
+            tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
 
         skill_dict = {
             "description": skill_data.get("description", ""),
@@ -916,7 +914,7 @@ class SkillService:
             "tool_ids": tool_ids,
         }
 
-        result = self.repository.update_skill(
+        result = skill_db.update_skill(
             skill_name, skill_dict, updated_by=user_id or None
         )
 
@@ -935,7 +933,7 @@ class SkillService:
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Update skill from ZIP archive."""
-        existing = self.repository.get_skill_by_name(skill_name)
+        existing = skill_db.get_skill_by_name(skill_name)
         if not existing:
             raise SkillException(f"Skill not found: {skill_name}")
 
@@ -977,7 +975,7 @@ class SkillService:
                 # Try to map allowed_tools to tool_ids for database
                 tool_ids = []
                 if allowed_tools:
-                    tool_ids = self.repository.get_tool_ids_by_names(allowed_tools, tenant_id)
+                    tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
                 skill_dict = {
                     "description": skill_data.get("description", ""),
                     "content": skill_data.get("content", ""),
@@ -990,7 +988,7 @@ class SkillService:
         if params_from_zip is not None:
             skill_dict["params"] = params_from_zip
 
-        result = self.repository.update_skill(
+        result = skill_db.update_skill(
             skill_name, skill_dict, updated_by=user_id or None
         )
 
@@ -1023,11 +1021,11 @@ class SkillService:
             Updated skill dict
         """
         try:
-            existing = self.repository.get_skill_by_name(skill_name)
+            existing = skill_db.get_skill_by_name(skill_name)
             if not existing:
                 raise SkillException(f"Skill not found: {skill_name}")
 
-            result = self.repository.update_skill(
+            result = skill_db.update_skill(
                 skill_name, skill_data, updated_by=user_id or None
             )
 
@@ -1059,7 +1057,7 @@ class SkillService:
                 return self._overlay_params_from_local_config_yaml(result)
 
             try:
-                allowed_tools = self.repository.get_tool_names_by_skill_name(skill_name)
+                allowed_tools = skill_db.get_tool_names_by_skill_name(skill_name)
                 local_skill_dict = {
                     "name": skill_name,
                     "description": skill_data.get("description", existing.get("description", "")),
@@ -1106,7 +1104,7 @@ class SkillService:
                 logger.info(f"Deleted skill directory: {skill_dir}")
 
             # Delete from database (soft delete with updated_by)
-            return self.repository.delete_skill(skill_name, updated_by=user_id)
+            return skill_db.delete_skill(skill_name, updated_by=user_id)
         except Exception as e:
             logger.error(f"Error deleting skill {skill_name}: {e}")
             raise SkillException(f"Failed to delete skill: {str(e)}") from e
@@ -1138,7 +1136,7 @@ class SkillService:
             result = []
             for skill_instance in enabled_skills:
                 skill_id = skill_instance.get("skill_id")
-                skill = self.repository.get_skill_by_id(skill_id)
+                skill = skill_db.get_skill_by_id(skill_id)
                 if skill:
                     # Get skill info from ag_skill_info_t (repository returns keys: name, description, content)
                     merged = {
@@ -1218,7 +1216,7 @@ class SkillService:
 
                 for skill_instance in agent_skills:
                     skill_id = skill_instance.get("skill_id")
-                    skill = self.repository.get_skill_by_id(skill_id)
+                    skill = skill_db.get_skill_by_id(skill_id)
                     if skill:
                         if available_skills is not None and skill.get("name") not in available_skills:
                             continue
@@ -1229,7 +1227,7 @@ class SkillService:
                         })
             else:
                 # Fallback: use all skills
-                all_skills = self.repository.list_skills()
+                all_skills = skill_db.list_skills()
                 skills_to_include = all_skills
                 if available_skills is not None:
                     available_set = set(available_skills)
@@ -1271,7 +1269,7 @@ class SkillService:
             Skill content in markdown format
         """
         try:
-            skill = self.repository.get_skill_by_name(skill_name)
+            skill = skill_db.get_skill_by_name(skill_name)
             return skill.get("content", "") if skill else ""
         except Exception as e:
             logger.error(f"Error getting skill content {skill_name}: {e}")
