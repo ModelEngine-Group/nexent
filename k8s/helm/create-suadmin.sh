@@ -7,6 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHART_DIR="$SCRIPT_DIR/nexent"
+COMMON_VALUES="$CHART_DIR/charts/nexent-common/values.yaml"
 NAMESPACE="nexent"
 RELEASE_NAME="nexent"
 
@@ -81,7 +82,7 @@ create_supabase_super_admin_user() {
   echo "   🔧 Creating super admin user..."
 
   # Get API keys from values.yaml
-  local anon_key=$(grep "anonKey:" "$CHART_DIR/values.yaml" | sed 's/.*anonKey: *//' | tr -d '"' | tr -d "'" | xargs)
+  local anon_key=$(grep "anonKey:" "$COMMON_VALUES" | sed 's/.*anonKey: *//' | tr -d '"' | tr -d "'" | xargs)
   local postgres_pod="nexent-postgresql"
 
   # Try to create user via Kong API

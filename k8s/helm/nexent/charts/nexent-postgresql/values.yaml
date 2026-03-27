@@ -1,0 +1,24 @@
+replicaCount: 1
+
+image:
+  repository: postgres
+  tag: 15-alpine
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 500m
+  limits:
+    memory: 2Gi
+    cpu: 1
+
+storage:
+  size: 10Gi
+  hostPath: "/var/lib/nexent-data/nexent-postgresql"
+
+config:
+  host: "nexent-postgresql"
+  user: "root"
+  db: "nexent"
+  port: "5432"

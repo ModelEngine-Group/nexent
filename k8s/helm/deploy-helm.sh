@@ -13,6 +13,7 @@ set -e
 # Use absolute path relative to the script location
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHART_DIR="$SCRIPT_DIR/nexent"
+COMMON_VALUES="$CHART_DIR/charts/nexent-common/values.yaml"
 NAMESPACE="nexent"
 RELEASE_NAME="nexent"
 
@@ -145,70 +146,76 @@ update_values_yaml() {
   echo "Using APP_VERSION: $APP_VERSION"
   echo ""
 
-  # Update backend image
-  sed -i "/^  backend:/,/^  [a-z]/{s|    repository:.*|    repository: \"${NEXENT_IMAGE%%:*}\"|}" "$CHART_DIR/values.yaml"
-  sed -i "/^  backend:/,/^  [a-z]/{s|    tag:.*|    tag: \"$APP_VERSION\"|}" "$CHART_DIR/values.yaml"
+  # Define paths to each chart's values.yaml
+  VAL_CONFIG="$CHART_DIR/charts/nexent-config/values.yaml"
+  VAL_RUNTIME="$CHART_DIR/charts/nexent-runtime/values.yaml"
+  VAL_MCP="$CHART_DIR/charts/nexent-mcp/values.yaml"
+  VAL_NORTHBOUND="$CHART_DIR/charts/nexent-northbound/values.yaml"
+  VAL_WEB="$CHART_DIR/charts/nexent-web/values.yaml"
+  VAL_DATA_PROCESS="$CHART_DIR/charts/nexent-data-process/values.yaml"
+  VAL_ELASTICSEARCH="$CHART_DIR/charts/nexent-elasticsearch/values.yaml"
+  VAL_POSTGRESQL="$CHART_DIR/charts/nexent-postgresql/values.yaml"
+  VAL_REDIS="$CHART_DIR/charts/nexent-redis/values.yaml"
+  VAL_MINIO="$CHART_DIR/charts/nexent-minio/values.yaml"
+  VAL_SUPABASE_KONG="$CHART_DIR/charts/nexent-supabase-kong/values.yaml"
+  VAL_SUPABASE_AUTH="$CHART_DIR/charts/nexent-supabase-auth/values.yaml"
+  VAL_SUPABASE_DB="$CHART_DIR/charts/nexent-supabase-db/values.yaml"
+  VAL_OPENSSH="$CHART_DIR/charts/nexent-openssh/values.yaml"
 
-  # Update web image
-  sed -i "/^  web:/,/^  [a-z]/{s|    repository:.*|    repository: \"${NEXENT_WEB_IMAGE%%:*}\"|}" "$CHART_DIR/values.yaml"
-  sed -i "/^  web:/,/^  [a-z]/{s|    tag:.*|    tag: \"$APP_VERSION\"|}" "$CHART_DIR/values.yaml"
 
-  # Update dataProcess image
-  sed -i "/^  dataProcess:/,/^  [a-z]/{s|    repository:.*|    repository: \"${NEXENT_DATA_PROCESS_IMAGE%%:*}\"|}" "$CHART_DIR/values.yaml"
-  sed -i "/^  dataProcess:/,/^  [a-z]/{s|    tag:.*|    tag: \"$APP_VERSION\"|}" "$CHART_DIR/values.yaml"
+  # Update backend image (nexent/nexent) for: config, runtime, mcp, northbound
+  # Pattern: match from "images:" section to next top-level key
+  for VAL_FILE in "$VAL_CONFIG" "$VAL_RUNTIME" "$VAL_MCP" "$VAL_NORTHBOUND"; do
+    sed -i "s|repository:.*|repository: ${NEXENT_IMAGE%%:*}|" "$VAL_FILE"
+  sed -i "s|tag:.*|tag: ${APP_VERSION}|" "$VAL_FILE"
+  done
+
+  # Update web image (nexent-web)
+  sed -i "s|repository:.*|repository: ${NEXENT_WEB_IMAGE%%:*}|" "$VAL_WEB"
+  sed -i "s|tag:.*|tag: ${APP_VERSION}|" "$VAL_WEB"
+
+  # Update dataProcess image (nexent-data-process)
+  sed -i "s|repository:.*|repository: ${NEXENT_DATA_PROCESS_IMAGE%%:*}|" "$VAL_DATA_PROCESS"
+  sed -i "s|tag:.*|tag: ${APP_VERSION}|" "$VAL_DATA_PROCESS"
 
   # Update mcp container image
-  sed -i "/^  mcp:/,/^  [a-z]/{s|    repository:.*|    repository: \"${NEXENT_MCP_DOCKER_IMAGE%%:*}\"|}" "$CHART_DIR/values.yaml"
-  sed -i "/^  mcp:/,/^  [a-z]/{s|    tag:.*|    tag: \"$APP_VERSION\"|}" "$CHART_DIR/values.yaml"
+  sed -i "/^  mcp:/,/^  [a-z]/{s|    repository:.*|    repository: \"${NEXENT_MCP_DOCKER_IMAGE%%:*}\"|}" "$COMMON_VALUES"
+  sed -i "/^  mcp:/,/^  [a-z]/{s|    tag:.*|    tag: \"$APP_VERSION\"|}" "$COMMON_VALUES"
 
   # Update elasticsearch image
-  sed -i "/^  elasticsearch:/,/^  [a-z]/{s|    repository:.*|    repository: \"${ELASTICSEARCH_IMAGE%%:*}\"|}" "$CHART_DIR/values.yaml"
-  sed -i "/^  elasticsearch:/,/^  [a-z]/{s|    tag:.*|    tag: \"${ELASTICSEARCH_IMAGE##*:}\"|}" "$CHART_DIR/values.yaml"
+  sed -i "s|repository:.*|repository: ${ELASTICSEARCH_IMAGE%%:*}|" "$VAL_ELASTICSEARCH"
+  sed -i "s|tag:.*|tag: ${ELASTICSEARCH_IMAGE##*:}|" "$VAL_ELASTICSEARCH"
 
   # Update postgresql image
-  sed -i "/^  postgresql:/,/^  [a-z]/{s|    repository:.*|    repository: \"${POSTGRESQL_IMAGE%%:*}\"|}" "$CHART_DIR/values.yaml"
-  sed -i "/^  postgresql:/,/^  [a-z]/{s|    tag:.*|    tag: \"${POSTGRESQL_IMAGE##*:}\"|}" "$CHART_DIR/values.yaml"
+  sed -i "s|repository:.*|repository: ${POSTGRESQL_IMAGE%%:*}|" "$VAL_POSTGRESQL"
+  sed -i "s|tag:.*|tag: ${POSTGRESQL_IMAGE##*:}|" "$VAL_POSTGRESQL"
 
   # Update redis image
-  sed -i "/^  redis:/,/^  [a-z]/{s|    repository:.*|    repository: \"${REDIS_IMAGE%%:*}\"|}" "$CHART_DIR/values.yaml"
-  sed -i "/^  redis:/,/^  [a-z]/{s|    tag:.*|    tag: \"${REDIS_IMAGE##*:}\"|}" "$CHART_DIR/values.yaml"
+  sed -i "s|repository:.*|repository: ${REDIS_IMAGE%%:*}|" "$VAL_REDIS"
+  sed -i "s|tag:.*|tag: ${REDIS_IMAGE##*:}|" "$VAL_REDIS"
 
   # Update minio image
-  sed -i "/^  minio:/,/^  [a-z]/{s|    repository:.*|    repository: \"${MINIO_IMAGE%%:*}\"|}" "$CHART_DIR/values.yaml"
-  sed -i "/^  minio:/,/^  [a-z]/{s|    tag:.*|    tag: \"${MINIO_IMAGE##*:}\"|}" "$CHART_DIR/values.yaml"
+  sed -i "s|repository:.*|repository: ${MINIO_IMAGE%%:*}|" "$VAL_MINIO"
+  sed -i "s|tag:.*|tag: ${MINIO_IMAGE##*:}|" "$VAL_MINIO"
 
-  # Update Supabase images using grep to find exact line numbers
-  # Only for full version
-  if [ "$DEPLOYMENT_VERSION" = "full" ] && grep -q "^  supabase:" "$CHART_DIR/values.yaml"; then
-    # Find line numbers for each field dynamically
-    KONG_REPO_LINE=$(grep -n '    kong:' "$CHART_DIR/values.yaml" | head -1 | cut -d: -f1)
-    KONG_REPO_LINE=$((KONG_REPO_LINE + 1))
-    KONG_TAG_LINE=$((KONG_REPO_LINE + 1))
+  # Update Supabase images (only for full version)
+  if [ "$DEPLOYMENT_VERSION" = "full" ]; then
+    # Update supabase-kong image
+    sed -i "s|repository:.*|repository: ${SUPABASE_KONG%%:*}|" "$VAL_SUPABASE_KONG"
+    sed -i "s|tag:.*|tag: ${SUPABASE_KONG##*:}|" "$VAL_SUPABASE_KONG"
 
-    GOTRUE_REPO_LINE=$(grep -n '    gotrue:' "$CHART_DIR/values.yaml" | head -1 | cut -d: -f1)
-    GOTRUE_REPO_LINE=$((GOTRUE_REPO_LINE + 1))
-    GOTRUE_TAG_LINE=$((GOTRUE_REPO_LINE + 1))
+    # Update supabase-auth (gotrue) image
+    sed -i "s|repository:.*|repository: ${SUPABASE_GOTRUE%%:*}|" "$VAL_SUPABASE_AUTH"
+    sed -i "s|tag:.*|tag: ${SUPABASE_GOTRUE##*:}|" "$VAL_SUPABASE_AUTH"
 
-    POSTGRES_REPO_LINE=$(grep -n '    postgres:' "$CHART_DIR/values.yaml" | head -1 | cut -d: -f1)
-    POSTGRES_REPO_LINE=$((POSTGRES_REPO_LINE + 1))
-    POSTGRES_TAG_LINE=$((POSTGRES_REPO_LINE + 1))
-
-    # Update supabase.kong
-    sed -i "${KONG_REPO_LINE}s|.*|      repository: \"${SUPABASE_KONG%%:*}\"|" "$CHART_DIR/values.yaml"
-    sed -i "${KONG_TAG_LINE}s|.*|      tag: \"${SUPABASE_KONG##*:}\"|" "$CHART_DIR/values.yaml"
-
-    # Update supabase.gotrue
-    sed -i "${GOTRUE_REPO_LINE}s|.*|      repository: \"${SUPABASE_GOTRUE%%:*}\"|" "$CHART_DIR/values.yaml"
-    sed -i "${GOTRUE_TAG_LINE}s|.*|      tag: \"${SUPABASE_GOTRUE##*:}\"|" "$CHART_DIR/values.yaml"
-
-    # Update supabase.postgres
-    sed -i "${POSTGRES_REPO_LINE}s|.*|      repository: \"${SUPABASE_DB%%:*}\"|" "$CHART_DIR/values.yaml"
-    sed -i "${POSTGRES_TAG_LINE}s|.*|      tag: \"${SUPABASE_DB##*:}\"|" "$CHART_DIR/values.yaml"
+    # Update supabase-db image
+    sed -i "s|repository:.*|repository: ${SUPABASE_DB%%:*}|" "$VAL_SUPABASE_DB"
+    sed -i "s|tag:.*|tag: ${SUPABASE_DB##*:}|" "$VAL_SUPABASE_DB"
   fi
 
   # Update openssh image
-  sed -i "/^  openssh:/{s|    repository:.*|    repository: \"${OPENSSH_SERVER_IMAGE%%:*}\"|}" "$CHART_DIR/values.yaml"
-  sed -i "/^  openssh:/{s|    tag:.*|    tag: \"$APP_VERSION\"|}" "$CHART_DIR/values.yaml"
+  sed -i "s|repository:.*|repository: ${OPENSSH_SERVER_IMAGE%%:*}|" "$VAL_OPENSSH"
+  sed -i "s|tag:.*|tag: ${APP_VERSION}|" "$VAL_OPENSSH"
 
   echo "Image tags updated in values.yaml"
   echo ""
@@ -312,28 +319,28 @@ generate_supabase_secrets() {
     echo "Updating Supabase secrets in values.yaml..."
 
     # Update secrets.supabase.jwtSecret
-    if grep -q "jwtSecret:" "$CHART_DIR/values.yaml"; then
-        sed -i "s|jwtSecret:.*|jwtSecret: \"$JWT_SECRET\"|" "$CHART_DIR/values.yaml"
+    if grep -q "jwtSecret:" "$COMMON_VALUES"; then
+        sed -i "s|jwtSecret:.*|jwtSecret: \"$JWT_SECRET\"|" "$COMMON_VALUES"
     fi
 
     # Update secrets.supabase.secretKeyBase
-    if grep -q "secretKeyBase:" "$CHART_DIR/values.yaml"; then
-        sed -i "s|secretKeyBase:.*|secretKeyBase: \"$SECRET_KEY_BASE\"|" "$CHART_DIR/values.yaml"
+    if grep -q "secretKeyBase:" "$COMMON_VALUES"; then
+        sed -i "s|secretKeyBase:.*|secretKeyBase: \"$SECRET_KEY_BASE\"|" "$COMMON_VALUES"
     fi
 
     # Update secrets.supabase.vaultEncKey
-    if grep -q "vaultEncKey:" "$CHART_DIR/values.yaml"; then
-        sed -i "s|vaultEncKey:.*|vaultEncKey: \"$VAULT_ENC_KEY\"|" "$CHART_DIR/values.yaml"
+    if grep -q "vaultEncKey:" "$COMMON_VALUES"; then
+        sed -i "s|vaultEncKey:.*|vaultEncKey: \"$VAULT_ENC_KEY\"|" "$COMMON_VALUES"
     fi
 
     # Update secrets.supabase.anonKey
-    if grep -q "anonKey:" "$CHART_DIR/values.yaml"; then
-        sed -i "s|anonKey:.*|anonKey: \"$anon_key\"|" "$CHART_DIR/values.yaml"
+    if grep -q "anonKey:" "$COMMON_VALUES"; then
+        sed -i "s|anonKey:.*|anonKey: \"$anon_key\"|" "$COMMON_VALUES"
     fi
 
     # Update secrets.supabase.serviceRoleKey
-    if grep -q "serviceRoleKey:" "$CHART_DIR/values.yaml"; then
-        sed -i "s|serviceRoleKey:.*|serviceRoleKey: \"$service_role_key\"|" "$CHART_DIR/values.yaml"
+    if grep -q "serviceRoleKey:" "$COMMON_VALUES"; then
+        sed -i "s|serviceRoleKey:.*|serviceRoleKey: \"$service_role_key\"|" "$COMMON_VALUES"
     fi
 
     echo "Supabase secrets generated and saved to values.yaml"
@@ -395,9 +402,9 @@ apply() {
     echo "=========================================="
     echo "  MinIO Access Key/Secret Key Setup"
     echo "=========================================="
-    if grep -q "minio:" "$CHART_DIR/values.yaml" && grep -q "accessKey:" "$CHART_DIR/values.yaml"; then
-        MINIO_ACCESS_KEY=$(grep "accessKey:" "$CHART_DIR/values.yaml" | head -1 | sed 's/.*accessKey: *//' | tr -d '"' | tr -d "'" | xargs)
-        MINIO_SECRET_KEY=$(grep "secretKey:" "$CHART_DIR/values.yaml" | head -1 | sed 's/.*secretKey: *//' | tr -d '"' | tr -d "'" | xargs)
+    if grep -q "minio:" "$COMMON_VALUES" && grep -q "accessKey:" "$COMMON_VALUES"; then
+        MINIO_ACCESS_KEY=$(grep "accessKey:" "$COMMON_VALUES" | head -1 | sed 's/.*accessKey: *//' | tr -d '"' | tr -d "'" | xargs)
+        MINIO_SECRET_KEY=$(grep "secretKey:" "$COMMON_VALUES" | head -1 | sed 's/.*secretKey: *//' | tr -d '"' | tr -d "'" | xargs)
     fi
 
     if [ -z "$MINIO_ACCESS_KEY" ] || [ "$MINIO_ACCESS_KEY" = "" ]; then
@@ -406,16 +413,16 @@ apply() {
         MINIO_SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)
 
         # Write to values.yaml
-        if grep -q "accessKey:" "$CHART_DIR/values.yaml"; then
-            sed -i "s|accessKey:.*|accessKey: \"$MINIO_ACCESS_KEY\"|" "$CHART_DIR/values.yaml"
+        if grep -q "accessKey:" "$COMMON_VALUES"; then
+            sed -i "s|accessKey:.*|accessKey: \"$MINIO_ACCESS_KEY\"|" "$COMMON_VALUES"
         else
-            sed -i "/minio:/a\\    accessKey: \"$MINIO_ACCESS_KEY\"" "$CHART_DIR/values.yaml"
+            sed -i "/minio:/a\\    accessKey: \"$MINIO_ACCESS_KEY\"" "$COMMON_VALUES"
         fi
 
-        if grep -q "secretKey:" "$CHART_DIR/values.yaml"; then
-            sed -i "s|secretKey:.*|secretKey: \"$MINIO_SECRET_KEY\"|" "$CHART_DIR/values.yaml"
+        if grep -q "secretKey:" "$COMMON_VALUES"; then
+            sed -i "s|secretKey:.*|secretKey: \"$MINIO_SECRET_KEY\"|" "$COMMON_VALUES"
         else
-            sed -i "/minio:/a\\    secretKey: \"$MINIO_SECRET_KEY\"" "$CHART_DIR/values.yaml"
+            sed -i "/minio:/a\\    secretKey: \"$MINIO_SECRET_KEY\"" "$COMMON_VALUES"
         fi
         echo "MinIO credentials generated and saved to values.yaml"
         echo "Access Key: $MINIO_ACCESS_KEY"
@@ -482,9 +489,9 @@ apply() {
     helm upgrade --install nexent "$CHART_DIR" \
         --namespace "$NAMESPACE" \
         --create-namespace \
-        --set services.openssh.enabled="$ENABLE_OPENSSH" \
-        --set secrets.ssh.username="$SSH_USERNAME" \
-        --set secrets.ssh.password="$SSH_PASSWORD"
+        --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
+        --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
+        --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
 
     # Step 9: Wait for Elasticsearch to be ready and initialize API key
     echo ""

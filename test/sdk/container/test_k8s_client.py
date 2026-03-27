@@ -238,7 +238,7 @@ class TestGetLabels:
     def test_get_labels_basic(self, k8s_container_client):
         """Test basic label generation"""
         labels = k8s_container_client._get_labels("test-service", "tenant123", "user12345")
-        assert labels["app"] == "nexent-mcp"
+        assert labels["app"] == "nexent-mcp-container"
         assert labels["component"] == "test-service"
         assert labels["tenant"] == "tenant12"  # First 8 chars
         assert labels["user"] == "user1234"  # First 8 chars
@@ -246,7 +246,7 @@ class TestGetLabels:
     def test_get_labels_empty_ids(self, k8s_container_client):
         """Test label generation with empty IDs"""
         labels = k8s_container_client._get_labels("test-service", "", "")
-        assert labels["app"] == "nexent-mcp"
+        assert labels["app"] == "nexent-mcp-container"
         assert labels["component"] == "test-service"
         assert labels["tenant"] == ""
         assert labels["user"] == ""

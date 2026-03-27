@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-mcp
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-mcp
+  annotations:
+    "helm.sh/hook-weight": "20"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nexent-mcp
+  template:
+    metadata:
+      labels:
+        app: nexent-mcp
+    spec:
+      containers:
+        - name: nexent-mcp
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          ports:
+            - containerPort: 5011
+              name: http
+          command:
+            - /bin/bash
+            - -c
+            - python backend/mcp_service.py
+          envFrom:
+            - configMapRef:
+                name: nexent-config
+            - secretRef:
+                name: nexent-secrets
+          env:
+            - name: skip_proxy
+              value: {{ .Values.config.skipProxy | quote }}
+            - name: UMASK
+              value: {{ .Values.config.umask | quote }}
+          resources:
+            requests:
+              memory: {{ .Values.resources.backend.requests.memory }}
+              cpu: {{ .Values.resources.backend.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.backend.limits.memory }}
+              cpu: {{ .Values.resources.backend.limits.cpu }}
+          readinessProbe:
+            tcpSocket:
+              port: 5011
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          livenessProbe:
+            tcpSocket:
+              port: 5011
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
