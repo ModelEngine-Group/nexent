@@ -423,22 +423,11 @@ export default function ToolConfigModal({
   // Check if a knowledge base can be selected
   const canSelectKnowledgeBase = useCallback(
     (kb: KnowledgeBase): boolean => {
-      // Empty knowledge bases cannot be selected
+      // Only empty knowledge bases (0 documents AND 0 chunks) cannot be selected
       const isEmpty =
         (kb.documentCount || 0) === 0 && (kb.chunkCount || 0) === 0;
       if (isEmpty) {
         return false;
-      }
-
-      // For nexent source, check model matching
-      if (kb.source === "nexent" && currentEmbeddingModel) {
-        if (
-          kb.embeddingModel &&
-          kb.embeddingModel !== "unknown" &&
-          kb.embeddingModel !== currentEmbeddingModel
-        ) {
-          return false;
-        }
       }
 
       return true;

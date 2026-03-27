@@ -395,6 +395,7 @@ class ElasticSearchService:
             tenant_id: Optional[str],
             ingroup_permission: Optional[str] = None,
             group_ids: Optional[List[int]] = None,
+            embedding_model_name: Optional[str] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -404,11 +405,29 @@ class ElasticSearchService:
         - Generate index_name as ``knowledge_id + '-' + uuid`` (digits and lowercase letters only).
         - Use generated index_name as the Elasticsearch index name.
 
+        Args:
+            knowledge_name: User-facing knowledge base name
+            embedding_dim: Dimension of the embedding vectors (optional)
+            vdb_core: VectorDatabaseCore instance
+            user_id: User ID who creates the knowledge base
+            tenant_id: Tenant ID
+            ingroup_permission: Permission level (optional)
+            group_ids: List of group IDs (optional)
+            embedding_model_name: Specific embedding model name to use (optional).
+                                   If provided, will use this model instead of tenant default.
+
         For backward compatibility, legacy callers can still use create_index() directly
         with an explicit index_name.
         """
         try:
-            embedding_model = get_embedding_model(tenant_id)
+            # Get embedding model - use user-selected model if provided, otherwise use tenant default
+            embedding_model = get_embedding_model(tenant_id, embedding_model_name)
+
+            # Determine the embedding model name to save: use user-provided name if available,
+            # otherwise use the model's display name
+            saved_embedding_model_name = embedding_model_name
+            if not saved_embedding_model_name and embedding_model:
+                saved_embedding_model_name = embedding_model.model
 
             # Create knowledge record first to obtain knowledge_id and generated index_name
             knowledge_data = {
@@ -416,7 +435,7 @@ class ElasticSearchService:
                 "knowledge_describe": "",
                 "user_id": user_id,
                 "tenant_id": tenant_id,
-                "embedding_model_name": embedding_model.model if embedding_model else None,
+                "embedding_model_name": saved_embedding_model_name,
             }
 
             # Add group permission and group IDs if provided

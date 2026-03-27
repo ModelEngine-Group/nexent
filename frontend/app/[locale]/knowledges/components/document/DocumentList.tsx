@@ -73,6 +73,10 @@ interface DocumentListProps {
   onIngroupPermissionChange?: (value: string) => void;
   selectedGroupIds?: number[];
   onSelectedGroupIdsChange?: (values: number[]) => void;
+  // Embedding model for create mode
+  availableEmbeddingModels?: ModelOption[];
+  selectedEmbeddingModel?: string;
+  onEmbeddingModelChange?: (value: string) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
 
   // Upload related props
@@ -112,6 +116,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onIngroupPermissionChange,
       selectedGroupIds,
       onSelectedGroupIdsChange,
+      // Embedding model for create mode
+      availableEmbeddingModels,
+      selectedEmbeddingModel,
+      onEmbeddingModelChange,
       permission,
 
       // Upload related props
@@ -478,7 +486,21 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                   />
                   {/* Right-aligned container for dropdowns */}
                   <div className="flex items-center ml-auto justify-end" style={{ gap: "12px", justifyContent: "flex-end", alignItems: "flex-end", width: "100%" }}>
-                    {/* User groups multi-select - first position */}
+                    {/* Embedding model selection - first position in create mode */}
+                    {isCreatingMode && onEmbeddingModelChange && (
+                      <Select
+                        value={selectedEmbeddingModel}
+                        onChange={onEmbeddingModelChange}
+                        style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
+                        placeholder={t("knowledgeBase.create.embeddingModelPlaceholder") || "Select embedding model"}
+                        options={(availableEmbeddingModels || []).map((model) => ({
+                          value: model.displayName,
+                          label: model.displayName,
+                          disabled: model.connect_status === "unavailable",
+                        }))}
+                      />
+                    )}
+                    {/* User groups multi-select */}
                     <Can permission="kb.groups:update">
                       <Select
                         mode="multiple"
@@ -492,7 +514,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         disabled={isGroupSelectDisabled}
                       />
                     </Can>
-                    {/* Group permission dropdown - second position */}
+                    {/* Group permission dropdown */}
                     <Can permission="kb.groups:update">
                       <Select
                         value={ingroupPermission}
