@@ -220,6 +220,7 @@ export default function AgentGenerateDetail({
       dutyPrompt: editedAgent.duty_prompt || "",
       constraintPrompt: editedAgent.constraint_prompt || "",
       fewShotsPrompt: editedAgent.few_shots_prompt || "",
+      provideRunSummary: editedAgent.provide_run_summary || false,
     };
 
     if (isCreatingMode) {
@@ -254,7 +255,7 @@ export default function AgentGenerateDetail({
       });
     }
 
-  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode, editedAgent.ingroup_permission]);
+  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode, editedAgent.ingroup_permission, editedAgent.provide_run_summary]);
 
   // Default to selecting all groups when creating a new agent.
   // Only applies when groups are loaded and no group is selected yet.
@@ -573,6 +574,7 @@ export default function AgentGenerateDetail({
             constraint_prompt: generatedContent.constraintPrompt || formValues.constraintPrompt,
             few_shots_prompt: generatedContent.fewShotsPrompt || formValues.fewShotsPrompt,
             ingroup_permission: formValues.ingroup_permission || "READ_ONLY",
+            provide_run_summary: formValues.provideRunSummary || false,
           };
 
           // Update profile info in global agent config store
@@ -798,6 +800,28 @@ export default function AgentGenerateDetail({
                     onBlur={() => {
                       const value = form.getFieldValue("mainAgentMaxStep");
                       updateProfileInfo({ max_step: value || 1 });
+                    }}
+                  />
+                </Form.Item>
+
+                <Form.Item
+                  name="provideRunSummary"
+                  label={t("agent.provideRunSummary")}
+                  rules={[
+                    {
+                      required: true,
+                      message: t("agent.provideRunSummary.error"),
+                    },
+                  ]}
+                  className="mb-3"
+                >
+                  <Select
+                    options={[
+                      { value: true, label: t("common.yes") },
+                      { value: false, label: t("common.no") },
+                    ]}
+                    onChange={(value) => {
+                      updateProfileInfo({ provide_run_summary: value });
                     }}
                   />
                 </Form.Item>

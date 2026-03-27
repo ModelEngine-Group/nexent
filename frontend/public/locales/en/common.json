@@ -294,6 +294,8 @@
   "agent.author": "Author",
   "agent.authorPlaceholder": "Please enter author name",
   "agent.author.hint": "Default: {{email}}",
+  "agent.provideRunSummary": "Provide Run Summary",
+  "agent.provideRunSummary.error": "Please select whether to provide run summary",
   "agent.description": "Agent Description",
   "agent.descriptionPlaceholder": "Please enter agent description",
   "agent.userGroup": "User Group",
