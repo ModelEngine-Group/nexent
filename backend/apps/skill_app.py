@@ -332,6 +332,56 @@ async def delete_skill(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.delete("/{skill_name}/files/{file_path:path}")
+async def delete_skill_file(
+    skill_name: str,
+    file_path: str,
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """Delete a specific file within a skill directory.
+
+    Args:
+        skill_name: Name of the skill
+        file_path: Relative path to the file within the skill directory
+    """
+    import os
+    try:
+        _, _ = get_current_user_id(authorization)
+        service = SkillService()
+
+        # Read config to get temp_filename for validation
+        config_content = service.get_skill_file_content(skill_name, "config.yaml")
+        if config_content is None:
+            raise HTTPException(status_code=404, detail="Skill config.yaml not found")
+
+        import yaml
+        config = yaml.safe_load(config_content)
+        temp_filename = config.get("temp_filename", "")
+
+        # Validate that the file_path matches the temp_filename from config
+        if not temp_filename or file_path != temp_filename:
+            raise HTTPException(status_code=400, detail="Can only delete temp_filename files")
+
+        # Get the full path
+        local_dir = os.path.join(service.skill_manager.local_skills_dir, skill_name)
+        full_path = os.path.join(local_dir, file_path)
+
+        if not os.path.exists(full_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+
+        os.remove(full_path)
+        logger.info(f"Deleted skill file: {full_path}")
+
+        return JSONResponse(content={"message": f"File {file_path} deleted successfully"})
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting skill file {skill_name}/{file_path}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============== Skill Instance APIs ==============
 
 @router.post("/instance/update")

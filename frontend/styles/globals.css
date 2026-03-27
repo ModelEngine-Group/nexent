@@ -189,6 +189,61 @@
   max-height: 100%;
 }
 
+/* Skill Pool Tabs scroll fix - same as tool pool tabs */
+.skill-pool-tabs .ant-tabs-content-holder {
+  overflow: hidden;
+  height: 100%;
+}
+
+.skill-pool-tabs .ant-tabs-content {
+  height: 100%;
+}
+
+.skill-pool-tabs .ant-tabs-tabpane {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Ensure skill pool tabs content area can scroll */
+.skill-pool-tabs .ant-tabs-content-holder .ant-tabs-content .ant-tabs-tabpane>div {
+  height: 100%;
+  max-height: 100%;
+}
+
+/* Adjust tabs content area left and right padding - use stronger selector */
+.skill-pool-tabs.ant-tabs.ant-tabs-left>.ant-tabs-content-holder {
+  padding-left: 12px !important;
+  padding-right: 9px !important;
+  margin-left: 0 !important;
+}
+
+.skill-pool-tabs.ant-tabs.ant-tabs-left>.ant-tabs-content-holder>.ant-tabs-content {
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+}
+
+.skill-pool-tabs.ant-tabs.ant-tabs-left .ant-tabs-tabpane {
+  padding-left: 0 !important;
+}
+
+/* Reduce tab inner and outer margins to make tabs more compact */
+.skill-pool-tabs .ant-tabs-tab {
+  padding: 12px 6px !important;
+  margin: 4px 2px !important;
+  min-height: auto !important;
+  width: auto !important;
+  max-width: 100px !important;
+}
+
+.skill-pool-tabs .ant-tabs-nav-list {
+  padding: 4px 0 !important;
+  width: auto !important;
+}
+
+.skill-pool-tabs .ant-tabs-tab-btn {
+  padding: 0 !important;
+  line-height: 1.2 !important;
+}
 /* Adjust tabs content area left and right padding - use stronger selector */
 .tool-pool-tabs.ant-tabs.ant-tabs-left > .ant-tabs-content-holder {
   padding-left: 12px !important;

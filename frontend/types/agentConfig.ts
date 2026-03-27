@@ -107,6 +107,25 @@ export interface ToolSubGroup {
   tools: Tool[];
 }
 
+// Skill interface for skill management
+export interface Skill {
+  skill_id: string;
+  name: string;
+  description: string;
+  source: string;
+  tags?: string[];
+  content?: string;
+  update_time?: string;
+  create_time?: string;
+}
+
+// Skill group interface for tab organization
+export interface SkillGroup {
+  key: string;
+  label: string;
+  skills: Skill[];
+}
+
 // Tree structure node type
 export interface TreeNodeDatum {
   name: string;
