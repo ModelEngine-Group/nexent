@@ -242,6 +242,125 @@ async def update_skill_from_file(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# ============== Skill Instance APIs ==============
+
+@router.get("/instance")
+async def get_skill_instance(
+    agent_id: int = Query(..., description="Agent ID"),
+    skill_id: int = Query(..., description="Skill ID"),
+    version_no: int = Query(0, description="Version number (0 for draft)"),
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """Get a specific skill instance for an agent."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+
+        service = SkillService()
+        instance = service.get_skill_instance(
+            agent_id=agent_id,
+            skill_id=skill_id,
+            tenant_id=tenant_id,
+            version_no=version_no
+        )
+
+        if not instance:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Skill instance not found for agent {agent_id} and skill {skill_id}"
+            )
+
+        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content, params)
+        skill = service.get_skill_by_id(skill_id)
+        if skill:
+            instance["skill_name"] = skill.get("name")
+            instance["skill_description"] = skill.get("description", "")
+            instance["skill_content"] = skill.get("content", "")
+            instance["skill_params"] = skill.get("params") or {}
+
+        return JSONResponse(content=instance)
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting skill instance: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/instance/update")
+async def update_skill_instance(
+    request: SkillInstanceInfoRequest,
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """Create or update a skill instance for a specific agent.
+
+    This allows customizing skill content for a specific agent without
+    modifying the global skill definition.
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        # Validate skill exists
+        service = SkillService()
+        skill = service.get_skill_by_id(request.skill_id)
+        if not skill:
+            raise HTTPException(status_code=404, detail=f"Skill with ID {request.skill_id} not found")
+
+        # Create or update skill instance
+        instance = service.create_or_update_skill_instance(
+            skill_info=request,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=request.version_no
+        )
+
+        return JSONResponse(content={"message": "Skill instance updated", "instance": instance})
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except SkillException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating skill instance: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/instance/list")
+async def list_skill_instances(
+    agent_id: int = Query(..., description="Agent ID to query skill instances"),
+    version_no: int = Query(0, description="Version number (0 for draft)"),
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """List all skill instances for a specific agent."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+
+        service = SkillService()
+
+        instances = service.list_skill_instances(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no
+        )
+
+        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content, params)
+        for instance in instances:
+            skill = service.get_skill_by_id(instance.get("skill_id"))
+            if skill:
+                instance["skill_name"] = skill.get("name")
+                instance["skill_description"] = skill.get("description", "")
+                instance["skill_content"] = skill.get("content", "")
+                instance["skill_params"] = skill.get("params") or {}
+
+        return JSONResponse(content={"instances": instances})
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error listing skill instances: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/{skill_name}")
 async def get_skill(skill_name: str) -> JSONResponse:
     """Get a specific skill by name."""
@@ -469,6 +588,7 @@ async def get_skill_instance(
     try:
         _, tenant_id = get_current_user_id(authorization)
 
+        service = SkillService()
         instance = service.get_skill_instance(
             agent_id=agent_id,
             skill_id=skill_id,
@@ -483,7 +603,6 @@ async def get_skill_instance(
             )
 
         # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content, params)
-        service = SkillService()
         skill = service.get_skill_by_id(skill_id)
         if skill:
             instance["skill_name"] = skill.get("name")

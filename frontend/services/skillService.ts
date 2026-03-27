@@ -1,5 +1,4 @@
-import { API_ENDPOINTS } from "./api";
-import { fetchWithAuth } from "@/lib/auth";
+import { message } from "antd";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
 import {
@@ -9,7 +8,6 @@ import {
   searchSkillsByName as searchSkillsByNameApi,
   fetchSkillConfig,
   deleteSkillTempFile,
-  getAgentByName,
 } from "@/services/agentConfigService";
 import {
   extractSkillInfoFromContent,
@@ -38,7 +36,7 @@ export interface SkillData {
  * Skill item from list
  */
 export interface SkillListItem {
-  skill_id: number;
+  skill_id: string;
   name: string;
   description?: string;
   tags: string[];

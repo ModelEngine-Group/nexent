@@ -44,6 +44,7 @@ import {
   deleteSkillCreatorTempFile,
   findSkillByName,
   searchSkillsByName as searchSkillsByNameUtil,
+  type SkillListItem,
 } from "@/services/skillService";
 import log from "@/lib/logger";
 
@@ -64,12 +65,8 @@ export default function SkillBuildModal({
   const [form] = Form.useForm<SkillFormData>();
   const [activeTab, setActiveTab] = useState<string>("interactive");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [allSkills, setAllSkills] = useState<
-    { skill_id: string; name: string; description?: string; source?: string; update_time?: string; content?: string }[]
-  >([]);
-  const [searchResults, setSearchResults] = useState<
-    { skill_id: string; name: string; description?: string; source?: string }[]
-  >([]);
+  const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
+  const [searchResults, setSearchResults] = useState<SkillListItem[]>([]);
   const [selectedSkillName, setSelectedSkillName] = useState<string>("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadExtractedSkillName, setUploadExtractedSkillName] = useState<string>("");
