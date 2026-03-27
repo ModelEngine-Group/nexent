@@ -325,11 +325,6 @@ export const API_ENDPOINTS = {
     instanceDetail: (instanceId: string) =>
       `${API_BASE_URL}/meclaw/instances/${instanceId}`,
   },
-  skills: {
-    list: `${API_BASE_URL}/skills`,
-    update: (skillName: string) =>
-      `${API_BASE_URL}/skills/${encodeURIComponent(skillName)}`,
-  },
 };
 
 // Common error handling

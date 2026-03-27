@@ -25,10 +25,7 @@ import {
   MessagesSquare,
   HardDriveUpload,
 } from "lucide-react";
-import {
-  fetchSkills,
-  getAgentByName,
-} from "@/services/agentConfigService";
+import { getAgentByName } from "@/services/agentConfigService";
 import { conversationService } from "@/services/conversationService";
 import { extractSkillInfo } from "@/lib/skillFileUtils";
 import {
@@ -38,12 +35,14 @@ import {
   type ChatMessage,
 } from "@/types/skill";
 import {
+  fetchSkillsList,
   submitSkillForm,
   submitSkillFromFile,
   processSkillStream,
   deleteSkillCreatorTempFile,
   findSkillByName,
   searchSkillsByName as searchSkillsByNameUtil,
+  type SkillListItem,
 } from "@/services/skillService";
 import log from "@/lib/logger";
 
@@ -64,12 +63,8 @@ export default function SkillBuildModal({
   const [form] = Form.useForm<SkillFormData>();
   const [activeTab, setActiveTab] = useState<string>("interactive");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [allSkills, setAllSkills] = useState<
-    { skill_id: string; name: string; description?: string; source?: string; update_time?: string; content?: string }[]
-  >([]);
-  const [searchResults, setSearchResults] = useState<
-    { skill_id: string; name: string; description?: string; source?: string }[]
-  >([]);
+  const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
+  const [searchResults, setSearchResults] = useState<SkillListItem[]>([]);
   const [selectedSkillName, setSelectedSkillName] = useState<string>("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadExtractedSkillName, setUploadExtractedSkillName] = useState<string>("");
@@ -112,13 +107,18 @@ export default function SkillBuildModal({
   }, [allSkills]);
 
   useEffect(() => {
-    if (isOpen) {
-      fetchSkills().then((res) => {
-        if (res.success) {
-          setAllSkills(res.data || []);
-        }
+    if (!isOpen) return;
+    let cancelled = false;
+    fetchSkillsList()
+      .then((list) => {
+        if (!cancelled) setAllSkills(list);
+      })
+      .catch((err) => {
+        log.error("Failed to load skills for SkillBuildModal", err);
       });
-    }
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen]);
 
   useEffect(() => {

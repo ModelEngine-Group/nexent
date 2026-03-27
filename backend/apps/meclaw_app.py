@@ -13,7 +13,7 @@ from confluent_kafka.admin import AdminClient, NewTopic
 from confluent_kafka import Consumer
 from pydantic import BaseModel
 
-from consts.const import CAN_EDIT_ALL_USER_ROLES, IS_SPEED_MODE, MECLAW_KAFKA_BOOTSTRAP_SERVERS
+from consts.const import CAN_EDIT_ALL_USER_ROLES, IS_SPEED_MODE
 from consts.exceptions import UnauthorizedError
 from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.auth_utils import get_current_user_id

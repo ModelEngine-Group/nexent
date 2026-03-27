@@ -944,6 +944,8 @@ export const fetchSkills = async () => {
       source: skill.source || "custom",
       tags: skill.tags || [],
       content: skill.content || "",
+      params: skill.params ?? null,
+      tool_ids: Array.isArray(skill.tool_ids) ? skill.tool_ids.map(Number) : [],
       update_time: skill.update_time,
       create_time: skill.create_time,
     }));
@@ -1124,6 +1126,7 @@ export const updateSkill = async (
     source?: string;
     tags?: string[];
     content?: string;
+    params?: Record<string, unknown>;
   }
 ) => {
   try {
@@ -1132,6 +1135,7 @@ export const updateSkill = async (
     if (skillData.source !== undefined) requestBody.source = skillData.source;
     if (skillData.tags !== undefined) requestBody.tags = skillData.tags;
     if (skillData.content !== undefined) requestBody.content = skillData.content;
+    if (skillData.params !== undefined) requestBody.params = skillData.params;
 
     const response = await fetch(API_ENDPOINTS.skills.update(skillName), {
       method: "PUT",
@@ -1239,10 +1243,10 @@ export const createSkillFromFile = async (
  * @param allSkills all available skills
  * @returns filtered skills matching the prefix
  */
-export const searchSkillsByName = (
+export const searchSkillsByName = <T extends { name: string }>(
   prefix: string,
-  allSkills: { skill_id: string; name: string; description?: string; source?: string }[]
-): { skill_id: string; name: string; description?: string; source?: string }[] => {
+  allSkills: T[]
+): T[] => {
   if (!prefix || prefix.trim() === "") {
     return [];
   }

@@ -1,3 +1,4 @@
+import { message } from "antd";
 import { API_ENDPOINTS } from "./api";
 import { fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
@@ -10,6 +11,7 @@ import {
   fetchSkillConfig,
   deleteSkillTempFile,
   getAgentByName,
+  fetchSkills,
 } from "@/services/agentConfigService";
 import {
   extractSkillInfoFromContent,
@@ -166,6 +168,52 @@ export const deleteSkillCreatorTempFile = async (): Promise<void> => {
 };
 
 // ========== Skill Operation Functions ==========
+
+/**
+ * Load skills for lists (tenant-resources table, etc.).
+ * Maps API payload to {@link SkillListItem} including params for config editing.
+ */
+export async function fetchSkillsList(): Promise<SkillListItem[]> {
+  const res = await fetchSkills();
+  if (!res.success) {
+    throw new Error(res.message || "Failed to fetch skills");
+  }
+  const rows = res.data || [];
+  return rows.map((s: Record<string, unknown>) => {
+    const rawId = s.skill_id;
+    const skillId =
+      typeof rawId === "number"
+        ? rawId
+        : typeof rawId === "string"
+          ? Number.parseInt(rawId, 10)
+          : Number.NaN;
+    const rawParams = s.params;
+    let params: Record<string, unknown> | null = null;
+    if (rawParams !== undefined && rawParams !== null) {
+      if (typeof rawParams === "object" && !Array.isArray(rawParams)) {
+        params = { ...(rawParams as Record<string, unknown>) };
+      }
+    }
+    const rawToolIds = s.tool_ids;
+    const toolIds = Array.isArray(rawToolIds)
+      ? rawToolIds.map((id) => Number(id)).filter((n) => !Number.isNaN(n))
+      : [];
+    return {
+      skill_id: Number.isNaN(skillId) ? 0 : skillId,
+      name: String(s.name ?? ""),
+      description: s.description !== undefined ? String(s.description) : undefined,
+      tags: Array.isArray(s.tags) ? (s.tags as string[]) : [],
+      content: s.content !== undefined ? String(s.content) : undefined,
+      params,
+      source: String(s.source ?? "custom"),
+      tool_ids: toolIds,
+      created_by: s.created_by !== undefined ? (s.created_by as string | null) : undefined,
+      create_time: s.create_time !== undefined ? (s.create_time as string | null) : undefined,
+      updated_by: s.updated_by !== undefined ? (s.updated_by as string | null) : undefined,
+      update_time: s.update_time !== undefined ? (s.update_time as string | null) : undefined,
+    };
+  });
+}
 
 /**
  * Submit skill form data (create or update)
@@ -397,3 +445,5 @@ export const skillNameExists = (
 ): boolean => {
   return allSkills.some((s) => s.name.toLowerCase() === name.toLowerCase());
 };
+
+export { updateSkill };
