@@ -6,6 +6,7 @@ import { MCP_HEALTH_STATUS } from "@/const/mcpTools";
 import type { McpTool } from "@/types/agentConfig";
 import { type McpServiceItem } from "@/types/mcpTools";
 import {
+  publishCommunityMcpTool,
   deleteMcpToolService,
   healthcheckMcpToolService,
   listMcpRuntimeTools,
@@ -86,6 +87,7 @@ export function useMcpToolsDetail({
   const updateMutation = useMutation({ mutationFn: updateMcpToolService });
   const deleteMutation = useMutation({ mutationFn: deleteMcpToolService });
   const healthcheckMutation = useMutation({ mutationFn: healthcheckMcpToolService });
+  const publishMutation = useMutation({ mutationFn: publishCommunityMcpTool });
 
   const toolsQueryKey = ["mcp-tools", "runtime-tools", draftService?.mcpId];
 
@@ -227,6 +229,21 @@ export function useMcpToolsDetail({
     }
   };
 
+  const handlePublishToCommunity = async () => {
+    if (!selectedService) return;
+    try {
+      await publishMutation.mutateAsync(selectedService.mcpId);
+      message.success(t("mcpTools.community.publishSuccess"));
+    } catch (error) {
+      log.error("[useMcpToolsDetail] Failed to publish service to community", {
+        error,
+        serviceId: selectedService.mcpId,
+        serviceName: selectedService.name,
+      });
+      message.error(t("mcpTools.community.publishFailed"));
+    }
+  };
+
   const addDetailTag = () => {
     const nextTag = tagInputValue.trim();
     if (!nextTag) return;
@@ -253,6 +270,8 @@ export function useMcpToolsDetail({
     closeToolsModal: () => setToolsModalVisible(false),
     handleRefreshTools,
     onDeleteService,
+    handlePublishToCommunity,
+    publishLoading: publishMutation.isPending,
     closeDetail: () => onSelectedServiceChange(null),
   };
 }

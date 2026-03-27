@@ -5,8 +5,10 @@ import { MCP_TAB } from "@/const/mcpTools";
 import type { McpTab } from "@/types/mcpTools";
 import { useMcpToolsAddLocal } from "@/hooks/mcpTools/useMcpToolsAddLocal";
 import { useMcpToolsAddRegistry } from "@/hooks/mcpTools/useMcpToolsAddRegistry";
+import { useMcpToolsAddCommunity } from "@/hooks/mcpTools/useMcpToolsAddCommunity";
 import AddMcpServiceLocalSection from "./AddMcpServiceLocalSection";
 import AddMcpServiceRegistrySection from "./AddMcpServiceRegistrySection";
+import AddMcpServiceCommunitySection from "./AddMcpServiceCommunitySection";
 
 interface AddMcpServiceModalProps {
   open: boolean;
@@ -40,16 +42,27 @@ export default function AddMcpServiceModal({
     onClose,
   });
 
+  const community = useMcpToolsAddCommunity({
+    open,
+    addModalTab,
+    t: (key) => String(t(key)),
+    message,
+    onServiceAdded,
+    onClose,
+  });
+
   const { reset: resetLocal } = local;
   const { reset: resetRegistry } = registry;
+  const { reset: resetCommunity } = community;
 
   useEffect(() => {
     if (!open) {
       setAddModalTab(MCP_TAB.LOCAL);
       resetLocal();
       resetRegistry();
+      resetCommunity();
     }
-  }, [open, resetLocal, resetRegistry]);
+  }, [open, resetLocal, resetRegistry, resetCommunity]);
 
   if (!open) {
     return null;
@@ -61,7 +74,7 @@ export default function AddMcpServiceModal({
       footer={null}
       closable
       centered
-      width={addModalTab === MCP_TAB.MCP_REGISTRY ? 1200 : 900}
+      width={addModalTab === MCP_TAB.LOCAL ? 900 : 1200}
       onCancel={onClose}
       styles={{
         mask: { background: "rgba(15,23,42,0.6)", backdropFilter: "blur(2px)" },
@@ -82,6 +95,7 @@ export default function AddMcpServiceModal({
             options={[
               { label: t("mcpTools.addModal.tabLocal"), value: MCP_TAB.LOCAL },
               { label: t("mcpTools.addModal.tabRegistry"), value: MCP_TAB.MCP_REGISTRY },
+              { label: t("mcpTools.addModal.tabCommunity"), value: MCP_TAB.COMMUNITY },
             ]}
             className="h-9 rounded-full border border-slate-200 bg-slate-100 p-[2px] text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-full [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:leading-[30px] [&_.ant-segmented-thumb]:rounded-full [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
           />
@@ -112,7 +126,7 @@ export default function AddMcpServiceModal({
             handleAddService={local.handleAddService}
             t={(key, params) => String(t(key, params))}
           />
-        ) : (
+        ) : addModalTab === MCP_TAB.MCP_REGISTRY ? (
           <AddMcpServiceRegistrySection
             registrySearchValue={registry.registrySearchValue}
             selectedRegistryService={registry.selectedRegistryService}
@@ -140,6 +154,31 @@ export default function AddMcpServiceModal({
             handleQuickAddFromRegistry={registry.handleQuickAddFromRegistry}
             handleCloseQuickAddPicker={registry.handleCloseQuickAddPicker}
             handleConfirmQuickAddOption={registry.handleConfirmQuickAddOption}
+            t={(key, params) => String(t(key, params))}
+          />
+        ) : (
+          <AddMcpServiceCommunitySection
+            communitySearchValue={community.communitySearchValue}
+            selectedCommunityService={community.selectedCommunityService}
+            filteredCommunityServices={community.filteredCommunityServices}
+            communityLoading={community.communityLoading}
+            communityPage={community.communityPage}
+            hasPrevCommunityPage={community.hasPrevCommunityPage}
+            hasNextCommunityPage={community.hasNextCommunityPage}
+            quickAddConfirmVisible={community.quickAddConfirmVisible}
+            quickAddSourceService={community.quickAddSourceService}
+            quickAddDraft={community.quickAddDraft}
+            setCommunitySearchValue={community.setCommunitySearchValue}
+            setSelectedCommunityService={community.setSelectedCommunityService}
+            updateQuickAddDraft={community.updateQuickAddDraft}
+            addQuickAddTag={community.addQuickAddTag}
+            removeQuickAddTag={community.removeQuickAddTag}
+            handleCommunityPrevPage={community.handleCommunityPrevPage}
+            handleCommunityNextPage={community.handleCommunityNextPage}
+            handleQuickAddFromCommunity={community.handleQuickAddFromCommunity}
+            handleCloseQuickAddConfirm={community.handleCloseQuickAddConfirm}
+            handleConfirmQuickAddFromCommunity={community.handleConfirmQuickAddFromCommunity}
+            quickAddSubmitting={community.quickAddSubmitting}
             t={(key, params) => String(t(key, params))}
           />
         )}

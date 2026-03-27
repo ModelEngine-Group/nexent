@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from consts.const import NEXENT_MCP_DOCKER_IMAGE
 from consts.exceptions import MCPConnectionError, MCPContainerError
 from consts.model import MCPConfigRequest
-from database.remote_mcp_db import check_mcp_name_exists
+from database.remote_mcp_db import check_enabled_mcp_name_exists
 from services.mcp_container_service import MCPContainerManager
 from services.mcp_management_service import (
     add_mcp_service,
@@ -17,11 +17,16 @@ from services.mcp_management_service import (
     check_mcp_service_health_legacy,
     delete_mcp_service,
     delete_mcp_service_legacy,
+    delete_community_mcp_service,
+    list_community_mcp_services,
+    list_my_community_mcp_services,
     list_registry_mcp_services,
     list_mcp_service_tools_by_id,
     list_mcp_services,
+    publish_community_mcp_service,
     update_mcp_service,
     update_mcp_service_legacy,
+    update_community_mcp_service,
     update_mcp_service_enabled,
     update_mcp_service_enabled_legacy,
 )
@@ -35,7 +40,7 @@ class AddMcpServiceRequest(BaseModel):
     name: str = Field(min_length=1)
     server_url: str = Field(min_length=1)
     description: Optional[str] = None
-    source: Literal["local", "mcp_registry", "market"] = "local"
+    source: Literal["local", "mcp_registry", "community", "market"] = "local"
     transport_type: Literal["http", "sse", "stdio", "container"] = "http"
     tags: Optional[list[str]] = None
     authorization_token: Optional[str] = None
@@ -47,8 +52,10 @@ class AddMcpServiceRequest(BaseModel):
 class AddContainerMcpServiceRequest(BaseModel):
     name: str = Field(min_length=1)
     description: Optional[str] = None
+    source: Literal["local", "community", "market"] = "local"
     tags: Optional[list[str]] = None
     authorization_token: Optional[str] = None
+    registry_json: Optional[dict[str, Any]] = None
     port: int = Field(..., ge=1, le=65535)
     mcp_config: MCPConfigRequest
 
@@ -95,6 +102,26 @@ class HealthcheckMcpServiceByIdRequest(BaseModel):
 
 class ListMcpToolsByIdRequest(BaseModel):
     mcp_id: int
+
+
+class CommunityListRequest(BaseModel):
+    search: Optional[str] = None
+    transport_type: Optional[Literal["http", "sse", "stdio"]] = None
+    cursor: Optional[str] = None
+    limit: int = Field(default=30, ge=1, le=100)
+
+
+class CommunityPublishRequest(BaseModel):
+    mcp_id: int = Field(gt=0)
+
+
+class CommunityUpdateRequest(BaseModel):
+    community_id: int = Field(gt=0)
+    name: Optional[str] = Field(default=None, min_length=1)
+    description: Optional[str] = None
+    tags: Optional[list[str]] = None
+    version: Optional[str] = None
+    registry_json: Optional[dict[str, Any]] = None
 
 
 @router.post("/add")
@@ -160,10 +187,10 @@ async def add_container_mcp_service_api(
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         service_name = payload.name.strip()
-        if check_mcp_name_exists(mcp_name=service_name, tenant_id=tenant_id):
+        if check_enabled_mcp_name_exists(mcp_name=service_name, tenant_id=tenant_id):
             raise HTTPException(
                 status_code=HTTPStatus.CONFLICT,
-                detail="MCP name already exists",
+                detail="Enabled MCP name already exists",
             )
 
         servers = payload.mcp_config.mcpServers
@@ -224,14 +251,14 @@ async def add_container_mcp_service_api(
                 user_id=user_id,
                 name=service_name,
                 description=payload.description,
-                source="local",
+                source=payload.source,
                 transport_type="stdio",
                 server_url=container_info["mcp_url"],
                 tags=payload.tags,
                 authorization_token=auth_token,
                 container_config=container_config,
                 version=None,
-                registry_json=None,
+                registry_json=payload.registry_json,
                 enabled=True,
                 container_id=container_info.get("container_id"),
             )
@@ -334,6 +361,148 @@ async def list_registry_mcp_services_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to list MCP registry MCP services",
+        )
+
+
+@router.post("/community/list")
+async def list_community_mcp_services_api(
+    payload: CommunityListRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    try:
+        get_current_user_info(authorization, http_request)
+        data = await list_community_mcp_services(
+            search=(payload.search or "").strip() or None,
+            transport_type=(payload.transport_type or "").strip() or None,
+            cursor=(payload.cursor or "").strip() or None,
+            limit=payload.limit,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": data},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to list MCP community services: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list MCP community services",
+        )
+
+
+@router.post("/community/publish")
+async def publish_community_mcp_service_api(
+    payload: CommunityPublishRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        community_id = await publish_community_mcp_service(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            mcp_id=payload.mcp_id,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": {"community_id": community_id}},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to publish MCP community service: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to publish MCP community service",
+        )
+
+
+@router.put("/community/update")
+async def update_community_mcp_service_api(
+    payload: CommunityUpdateRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        await update_community_mcp_service(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            community_id=payload.community_id,
+            name=(payload.name or "").strip() or None,
+            description=payload.description,
+            tags=payload.tags,
+            version=(payload.version or "").strip() or None,
+            registry_json=payload.registry_json,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success"},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to update MCP community service: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to update MCP community service",
+        )
+
+
+@router.delete("/community/delete")
+async def delete_community_mcp_service_api(
+    community_id: int = Query(gt=0),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        await delete_community_mcp_service(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            community_id=community_id,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success"},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to delete MCP community service: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to delete MCP community service",
+        )
+
+
+@router.get("/community/mine")
+async def list_my_community_mcp_services_api(
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    try:
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        data = await list_my_community_mcp_services(tenant_id=tenant_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": data},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to list my MCP community services: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list my MCP community services",
         )
 
 

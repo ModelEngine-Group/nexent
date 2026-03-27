@@ -37,6 +37,8 @@ interface McpServiceDetailModalProps {
   closeToolsModal: () => void;
   handleRefreshTools: () => void;
   onDeleteConfirm: (serviceName: string) => void;
+  onPublishToCommunity: () => void;
+  publishLoading?: boolean;
   onToggleEnable: (service: McpServiceItem) => void;
   toggleLoading?: boolean;
   onClose: () => void;
@@ -62,6 +64,8 @@ export default function McpServiceDetailModal({
   closeToolsModal,
   handleRefreshTools,
   onDeleteConfirm,
+  onPublishToCommunity,
+  publishLoading = false,
   onToggleEnable,
   toggleLoading = false,
   onClose,
@@ -352,6 +356,9 @@ export default function McpServiceDetailModal({
           </Button>
           <Button className="rounded-full" onClick={handleSaveUpdates}>
             {t("mcpTools.detail.save")}
+          </Button>
+          <Button className="rounded-full" loading={publishLoading} onClick={onPublishToCommunity}>
+            {t("mcpTools.community.publish")}
           </Button>
           <Button
             type="primary"

@@ -233,6 +233,11 @@ export const API_ENDPOINTS = {
     disable: `${API_BASE_URL}/mcp-tools/disable`,
     healthcheck: `${API_BASE_URL}/mcp-tools/v2/healthcheck`,
     registryList: `${API_BASE_URL}/mcp-tools/registry/list`,
+    communityList: `${API_BASE_URL}/mcp-tools/community/list`,
+    communityPublish: `${API_BASE_URL}/mcp-tools/community/publish`,
+    communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
+    communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
+    communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
   },
   memory: {
     // ---------------- Memory configuration ----------------

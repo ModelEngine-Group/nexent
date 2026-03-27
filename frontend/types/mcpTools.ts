@@ -3,6 +3,7 @@ import type { McpTool } from "@/types/agentConfig";
 export enum McpTab {
   LOCAL = "local",
   MCP_REGISTRY = "mcp_registry",
+  COMMUNITY = "community",
 }
 
 export enum McpTransportType {
@@ -54,6 +55,16 @@ export interface RegistryQuickAddOption {
   packageIdentifier?: string;
   packageRegistryType?: string;
   packageEnvTemplate?: Record<string, string>;
+}
+
+export interface CommunityMcpCard extends RegistryMcpCard {
+  communityId?: number;
+  source?: "community";
+  transportType: "http" | "sse" | "stdio";
+  serverUrl: string;
+  configJson?: Record<string, unknown> | null;
+  mcpRegistryJson?: Record<string, unknown> | null;
+  tags?: string[];
 }
 
 export interface McpServiceItem {
