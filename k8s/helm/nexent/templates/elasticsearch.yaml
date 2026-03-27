@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-elasticsearch
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-elasticsearch
+  annotations:
+    "helm.sh/hook-weight": "-1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-elasticsearch
+  template:
+    metadata:
+      labels:
+        app: nexent-elasticsearch
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+        - name: init-permissions
+          image: "{{ .Values.images.elasticsearch.repository }}:{{ .Values.images.elasticsearch.tag }}"
+          imagePullPolicy: {{ .Values.images.elasticsearch.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              # Wait for volume to be mounted
+              while [ ! -d /usr/share/elasticsearch/data ]; do
+                sleep 2
+              done
+              # Set ownership
+              chown -R 1000:1000 /usr/share/elasticsearch/data
+              chmod -R 777 /usr/share/elasticsearch/data
+              # Create lock file manually to verify write access
+              touch /usr/share/elasticsearch/data/.init_complete
+          volumeMounts:
+            - name: elasticsearch-data
+              mountPath: /usr/share/elasticsearch/data
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            privileged: true
+      containers:
+        - name: elasticsearch
+          image: "{{ .Values.images.elasticsearch.repository }}:{{ .Values.images.elasticsearch.tag }}"
+          imagePullPolicy: {{ .Values.images.elasticsearch.pullPolicy }}
+          ports:
+            - containerPort: 9200
+              name: http
+            - containerPort: 9300
+              name: transport
+          env:
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: ELASTIC_PASSWORD
+            - name: ELASTIC_USERNAME
+              value: "elastic"
+            - name: discovery.type
+              value: "single-node"
+            - name: xpack.security.enabled
+              value: "true"
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: xpack.security.transport.ssl.enabled
+              value: "false"
+            - name: ES_JAVA_OPTS
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: ES_JAVA_OPTS
+            - name: node.name
+              value: "es01"
+            - name: bootstrap.memory_lock
+              value: "false"
+            - name: cluster.routing.allocation.disk.watermark.low
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: ES_DISK_WATERMARK_LOW
+            - name: cluster.routing.allocation.disk.watermark.high
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: ES_DISK_WATERMARK_HIGH
+            - name: cluster.routing.allocation.disk.watermark.flood_stage
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: ES_DISK_WATERMARK_FLOOD_STAGE
+          volumeMounts:
+            - name: elasticsearch-data
+              mountPath: /usr/share/elasticsearch/data
+          resources:
+            requests:
+              memory: {{ .Values.resources.elasticsearch.requests.memory }}
+              cpu: {{ .Values.resources.elasticsearch.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.elasticsearch.limits.memory }}
+              cpu: {{ .Values.resources.elasticsearch.limits.cpu }}
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "curl -s -f -u elastic:${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health"
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "curl -s -f -u elastic:${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health"
+            initialDelaySeconds: 30
+            periodSeconds: 5
+      volumes:
+        - name: elasticsearch-data
+          persistentVolumeClaim:
+            claimName: nexent-elasticsearch
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-elasticsearch
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-elasticsearch
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9200
+      targetPort: 9200
+      name: http
+    - port: 9300
+      targetPort: 9300
+      name: transport
+  selector:
+    app: nexent-elasticsearch
