@@ -9,7 +9,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-import { Button, Dropdown, Layout, Typography, Tooltip } from "antd";
+import { Button, Dropdown, Input, Layout, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { conversationService } from "@/services/conversationService";
@@ -92,6 +92,8 @@ export interface ChatSidebarProps {
   onConversationSelect: (conversation: ConversationListItem) => void | Promise<void>;
 }
 
+const CONVERSATION_TITLE_MAX_LENGTH = 100;
+
 export function ChatSidebar({
   streamingConversations,
   completedConversations,
@@ -102,26 +104,71 @@ export function ChatSidebar({
   const { confirm } = useConfirmModal();
   const { today, week, older } = categorizeConversations(conversationManagement.conversationList);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
 
   const onToggleSidebar = () => setCollapsed((prev) => !prev);
 
-  const handleRenameClick = (conversationId: number) => {
+  const handleRenameClick = (conversationId: number, currentTitle: string) => {
     setEditingId(conversationId);
+    setRenameValue(currentTitle);
+    setRenameError(null);
+    setOpenDropdownId(null);
+  };
+
+  const validateRenameTitle = (title: string): string | null => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      return t("chatLeftSidebar.renameErrorEmpty");
+    }
+    if (trimmedTitle.length > CONVERSATION_TITLE_MAX_LENGTH) {
+      return t("chatLeftSidebar.renameErrorTooLong", {
+        max: CONVERSATION_TITLE_MAX_LENGTH,
+      });
+    }
+    return null;
   };
 
   const handleRename = async (conversationId: number, newTitle: string) => {
-    if (!newTitle.trim()) return;
+    const trimmedTitle = newTitle.trim();
+    if (!trimmedTitle) return false;
     try {
-      await conversationService.rename(conversationId, newTitle.trim());
+      await conversationService.rename(conversationId, trimmedTitle);
       await conversationManagement.fetchConversationList();
       if (conversationManagement.selectedConversationId === conversationId) {
-        conversationManagement.setConversationTitle(newTitle.trim());
+        conversationManagement.setConversationTitle(trimmedTitle);
       }
       setEditingId(null);
+      setRenameError(null);
+      return true;
     } catch (error) {
       log.error(t("chatInterface.renameFailed"), error);
+      setRenameError(t("chatLeftSidebar.renameErrorSubmitFailed"));
+      message.error(t("chatLeftSidebar.renameErrorSubmitFailed"));
+      return false;
     }
+  };
+
+  const handleRenameSubmit = async (conversationId: number) => {
+    const validationError = validateRenameTitle(renameValue);
+    if (validationError) {
+      setRenameError(validationError);
+      message.warning(validationError);
+      return;
+    }
+
+    const success = await handleRename(conversationId, renameValue);
+    if (success) {
+      setRenameValue("");
+    }
+  };
+
+  const handleRenameCancel = () => {
+    setEditingId(null);
+    setRenameValue("");
+    setRenameError(null);
   };
 
   // Handle delete
@@ -159,28 +206,34 @@ export function ChatSidebar({
         >
           {title}
         </p>
-        {conversation.map((conversation) => (
-          <div
-            key={conversation.conversation_id}
-            className={`flex items-center group rounded-md ${
-              conversationManagement.selectedConversationId ===
-              conversation.conversation_id
-                ? "bg-blue-100"
-                : "hover:bg-slate-100"
-            }`}
-          >
+        {conversation.map((conversation) => {
+          const isEditing = editingId === conversation.conversation_id;
+          return (
+            <div
+              key={conversation.conversation_id}
+              className={`flex items-center group rounded-md ${
+                conversationManagement.selectedConversationId ===
+                conversation.conversation_id
+                  ? "bg-blue-100"
+                  : "hover:bg-slate-100"
+              }`}
+            >
             <div className="flex-1 min-w-0 overflow-hidden">
               <Tooltip
-                title={
+                title={!isEditing ? (
                   <span className="break-words max-w-[300px] block">
                     {conversation.conversation_title}
                   </span>
-                }
+                ) : null}
                 placement="bottom"
               >
                 <div
-                  className="flex items-center min-h-10 min-w-0 w-full px-3 py-2 cursor-pointer"
-                  onClick={() => onConversationSelect(conversation)}
+                  className="flex items-center min-h-10 min-w-0 w-full px-3 py-1 cursor-pointer"
+                  onClick={() => {
+                    if (!isEditing) {
+                      onConversationSelect(conversation);
+                    }
+                  }}
                 >
                   <ConversationStatusIndicator
                     isStreaming={streamingConversations.has(
@@ -191,25 +244,47 @@ export function ChatSidebar({
                     )}
                   />
                   <div className="chat-sidebar-editable-title flex items-center self-stretch flex-1 min-w-0 overflow-hidden">
-                  <Typography.Text
-                    ellipsis={{ tooltip: false }}
-                    editable={{
-                      icon: null,
-                      editing: editingId === conversation.conversation_id,
-                      onChange: (value) => handleRename(conversation.conversation_id, value),
-                      // onCancel: () => setEditingId(null),
-                    }}
-                    className="block text-base font-normal text-gray-800 tracking-wide font-sans ml-0.5 flex-1 min-w-0"
-                  >
-                    {conversation.conversation_title}
-                  </Typography.Text>
+                    {isEditing ? (
+                      <Input
+                        autoFocus
+                        size="small"
+                        value={renameValue}
+                        status={renameError ? "error" : ""}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setRenameValue(nextValue);
+                          setRenameError(validateRenameTitle(nextValue));
+                        }}
+                        onPressEnter={() => handleRenameSubmit(conversation.conversation_id)}
+                        onBlur={() => handleRenameSubmit(conversation.conversation_id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            handleRenameCancel();
+                          }
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        className="ml-0.5 flex-1 min-w-0 !h-8 !leading-8 !py-0 !text-base whitespace-nowrap"
+                      />
+                    ) : (
+                      <span className="chat-sidebar-title-fade block whitespace-nowrap text-base font-normal text-gray-800 tracking-wide font-sans ml-0.5 flex-1 min-w-0 overflow-hidden [text-overflow:clip]">
+                        {conversation.conversation_title}
+                      </span>
+                    )}
                 </div>
               </div>
             </Tooltip>
             </div>
 
-            <div className="shrink-0 w-9 flex items-center justify-center">
+            <div
+              className={`shrink-0 overflow-hidden flex items-center justify-center transition-opacity duration-150 ${
+                openDropdownId === conversation.conversation_id
+                  ? "w-9 opacity-100"
+                  : "w-0 opacity-0 group-hover:w-9 group-hover:opacity-100"
+              }`}
+            >
               <Dropdown
+              onOpenChange={(open) => setOpenDropdownId(open ? conversation.conversation_id : null)}
               menu={{
                 items: [
                   {
@@ -233,7 +308,10 @@ export function ChatSidebar({
                 ],
                 onClick: ({ key }) => {
                   if (key === "rename") {
-                    handleRenameClick(conversation.conversation_id);
+                    handleRenameClick(
+                      conversation.conversation_id,
+                      conversation.conversation_title
+                    );
                   } else if (key === "delete") {
                     handleDelete(conversation.conversation_id);
                   }
@@ -251,8 +329,9 @@ export function ChatSidebar({
               </Button>
             </Dropdown>
             </div>
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -301,14 +380,14 @@ export function ChatSidebar({
       collapsed={collapsed}
       onCollapse={setCollapsed}
       breakpoint="lg"
-      width={240}
+      width={260}
       collapsedWidth={40}
       trigger={null}
       theme="light"
-      className="border-r border-transparent bg-primary/5 w-full"
+      className="border-r border-transparent !bg-[rgb(242,248,255)] w-full"
     >
       {!collapsed ? (
-        <div className="flex flex-col h-full w-full overflow-hidden">
+        <div className="flex flex-col h-full w-full overflow-hidden space-between">
             <div className="m-4 mt-3">
               <div className="flex items-center gap-2">
                 <Button
@@ -338,7 +417,7 @@ export function ChatSidebar({
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 p-2 w-full flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-0 p-3 pt-0 w-full flex flex-col overflow-hidden">
               <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
                 <div className="flex flex-col gap-4 pb-4">
                   {conversationManagement.conversationList.length > 0 ? 
@@ -371,55 +450,34 @@ export function ChatSidebar({
           renderCollapsedSidebar()
         )}
       <style jsx global>{`
-        /* Hide editable icon and prevent tooltip on hover */
-        .chat-sidebar-editable-title .ant-typography-edit {
-          display: none !important;
+        .chat-sidebar-title-fade {
+          -webkit-mask-image: linear-gradient(
+            to right,
+            #000 0%,
+            #000 88%,
+            transparent 100%
+          );
+          mask-image: linear-gradient(
+            to right,
+            #000 0%,
+            #000 88%,
+            transparent 100%
+          );
         }
-        /* Typography root: flex container for vertical center in edit mode */
-        .chat-sidebar-editable-title .ant-typography {
-          display: flex !important;
-          align-items: center !important;
-          align-self: center !important;
-          flex: 1 !important;
-          min-width: 0 !important;
-        }
-        /* Edit content wrapper: flex and center the textarea */
-        .chat-sidebar-editable-title .ant-typography-edit-content {
-          display: flex !important;
-          align-items: center !important;
-          align-self: center !important;
-          flex: 1 !important;
-          min-width: 0 !important;
-          margin-left: 0.125rem !important;
-          margin-top: 0 !important;
-          margin-bottom: 0 !important;
-          min-height: unset !important;
-          position: static !important;
-        }
-        /* Input/textarea: match text style, no border, single line */
-        .chat-sidebar-editable-title .ant-typography-edit-content .ant-input,
-        .chat-sidebar-editable-title .ant-typography-edit-content textarea.ant-input {
-          font-size: 1rem !important;
-          line-height: 1.5rem !important;
-          font-weight: 400 !important;
-          color: rgb(31 41 55) !important;
-          letter-spacing: 0.025em !important;
-          font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji" !important;
-          min-width: 0 !important;
-          flex: 1 !important;
-          padding: 0 !important;
-          margin: 0 !important;
-          border: none !important;
-          border-radius: 0 !important;
-          box-shadow: none !important;
-          background: transparent !important;
-          min-height: 1.5rem !important;
-          height: 1.5rem !important;
-          resize: none !important;
-        }
-        .chat-sidebar-editable-title .ant-typography-edit-content .ant-input:focus,
-        .chat-sidebar-editable-title .ant-typography-edit-content textarea.ant-input:focus {
-          box-shadow: none !important;
+
+        .group:hover .chat-sidebar-title-fade {
+          -webkit-mask-image: linear-gradient(
+            to right,
+            #000 0%,
+            #000 76%,
+            transparent 100%
+          );
+          mask-image: linear-gradient(
+            to right,
+            #000 0%,
+            #000 76%,
+            transparent 100%
+          );
         }
       `}</style>
     </Layout.Sider>

@@ -41,7 +41,6 @@ export function AuthDialogs() {
         centered
         closable
         width={480}
-        maskClosable={false}
       >
         <div className="relative bg-white p-4 rounded-2xl">
           {/* Logo */}
