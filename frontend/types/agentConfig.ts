@@ -19,6 +19,7 @@ export type AgentProfileInfo = Partial<
     | "model"
     | "model_id"
     | "max_step"
+    | "provide_run_summary"
     | "description"
     | "duty_prompt"
     | "constraint_prompt"

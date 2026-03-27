@@ -297,6 +297,8 @@
   "agent.author": "作者",
   "agent.authorPlaceholder": "请输入作者名称",
   "agent.author.hint": "默认：{{email}}",
+  "agent.provideRunSummary": "提供运行摘要",
+  "agent.provideRunSummary.error": "请选择是否提供运行摘要",
   "agent.description": "智能体描述",
   "agent.userGroup": "用户组",
   "agent.userGroup.empty": "暂无用户组",
