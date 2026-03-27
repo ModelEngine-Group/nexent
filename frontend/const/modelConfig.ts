@@ -84,7 +84,9 @@ export const PROVIDER_LINKS: Record<string, string> = {
   deepseek: "https://platform.deepseek.com/",
   qwen: "https://bailian.console.aliyun.com/",
   jina: "https://jina.ai/",
-  baai: "https://www.baai.ac.cn/"
+  baai: "https://www.baai.ac.cn/",
+  dashscope: "https://dashscope.aliyun.com/",
+  tokenpony: "https://www.tokenpony.cn/"
 };
 
 // User role constants

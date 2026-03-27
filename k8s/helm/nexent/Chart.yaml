@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nexent
+description: A Helm chart for Nexent AI platform
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - nexent
+  - ai
+  - agent
+maintainers:
+  - name: Nexent Team

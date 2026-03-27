@@ -396,7 +396,7 @@ class TestGetLocalToolsClasses:
     """ test the function of get_local_tools_classes"""
 
     @patch('backend.services.tool_configuration_service.importlib.import_module')
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
     def test_get_local_tools_classes_success(self, mock_get_local_tools_classes, mock_import):
         """ test the success of get_local_tools_classes"""
         # create the mock tool class
@@ -420,7 +420,7 @@ class TestGetLocalToolsClasses:
         mock_get_local_tools_classes.return_value = [
             mock_tool_class1, mock_tool_class2]
 
-        from backend.services.tool_configuration_service import get_local_tools_classes
+        from backend.utils.tool_utils import get_local_tools_classes
         result = get_local_tools_classes()
 
         # Assertions
@@ -430,14 +430,14 @@ class TestGetLocalToolsClasses:
         assert mock_non_class not in result
 
     @patch('backend.services.tool_configuration_service.importlib.import_module')
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
     def test_get_local_tools_classes_import_error(self, mock_get_local_tools_classes, mock_import):
         """ test the import error of get_local_tools_classes"""
         mock_import.side_effect = ImportError("Module not found")
         mock_get_local_tools_classes.side_effect = ImportError(
             "Module not found")
 
-        from backend.services.tool_configuration_service import get_local_tools_classes
+        from backend.utils.tool_utils import get_local_tools_classes
         with pytest.raises(ImportError):
             get_local_tools_classes()
 
@@ -445,7 +445,7 @@ class TestGetLocalToolsClasses:
 class TestGetLocalTools:
     """ test the function of get_local_tools"""
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_local_tools')
     def test_get_local_tools_success(self, mock_get_local_tools, mock_signature, mock_get_classes):
@@ -495,7 +495,7 @@ class TestGetLocalTools:
         assert tool_info.source == ToolSourceEnum.LOCAL.value
         assert tool_info.class_name == "TestTool"
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
     @patch('backend.services.tool_configuration_service.get_local_tools')
     def test_get_local_tools_no_classes(self, mock_get_local_tools, mock_get_classes):
         """ test the no tool class of get_local_tools"""
@@ -506,7 +506,7 @@ class TestGetLocalTools:
         result = get_local_tools()
         assert result == []
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
     @patch('backend.services.tool_configuration_service.get_local_tools')
     def test_get_local_tools_with_exception(self, mock_get_local_tools, mock_get_classes):
         """ test the exception of get_local_tools"""
@@ -3107,3 +3107,443 @@ class TestUpdateToolList:
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestGetLocalToolsDescriptionZh:
+    """Tests for get_local_tools_description_zh function - tests description_zh i18n support."""
+
+    def setup_method(self):
+        """Import the function to test."""
+        from backend.utils.tool_utils import get_local_tools_description_zh
+        self.get_local_tools_description_zh = get_local_tools_description_zh
+
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
+    def test_returns_correct_structure_with_description_zh(self, mock_get_classes):
+        """Test that function returns correct structure with description_zh for tools."""
+        from pydantic import Field
+        
+        # Create a mock tool class with description_zh
+        class MockToolWithDescriptionZh:
+            name = "test_search_tool"
+            description = "A test search tool"
+            description_zh = "测试搜索工具"
+            inputs = {
+                "query": {
+                    "type": "string",
+                    "description": "Search query",
+                    "description_zh": "搜索查询词"
+                }
+            }
+            init_param_descriptions = {
+                "api_key": {
+                    "description": "API key for the service",
+                    "description_zh": "服务的API密钥"
+                }
+            }
+
+            def __init__(self, api_key: str = Field(description="API key", default="default")):
+                self.api_key = api_key
+
+        mock_get_classes.return_value = [MockToolWithDescriptionZh]
+
+        result = self.get_local_tools_description_zh()
+
+        # Verify structure
+        assert "test_search_tool" in result
+        tool_info = result["test_search_tool"]
+        assert "description_zh" in tool_info
+        assert tool_info["description_zh"] == "测试搜索工具"
+        assert "params" in tool_info
+        assert "inputs" in tool_info
+
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
+    def test_extracts_param_description_zh(self, mock_get_classes):
+        """Test that function extracts description_zh from init params."""
+        from pydantic import Field
+        
+        class MockToolWithParamDescriptions:
+            name = "test_tool"
+            description = "Test tool"
+            description_zh = "测试工具"
+            inputs = {}
+            init_param_descriptions = {
+                "param1": {
+                    "description": "First parameter",
+                    "description_zh": "第一个参数"
+                },
+                "param2": {
+                    "description": "Second parameter",
+                    "description_zh": "第二个参数"
+                }
+            }
+
+            def __init__(self, param1: str = Field(description="param1", default=""), param2: int = Field(description="param2", default=0)):
+                self.param1 = param1
+                self.param2 = param2
+
+        mock_get_classes.return_value = [MockToolWithParamDescriptions]
+
+        result = self.get_local_tools_description_zh()
+
+        tool_info = result["test_tool"]
+        params = tool_info["params"]
+
+        # Find params with description_zh
+        param1_info = next((p for p in params if p["name"] == "param1"), None)
+        param2_info = next((p for p in params if p["name"] == "param2"), None)
+
+        assert param1_info is not None
+        assert param1_info["description_zh"] == "第一个参数"
+        assert param2_info is not None
+        assert param2_info["description_zh"] == "第二个参数"
+
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
+    def test_extracts_inputs_description_zh(self, mock_get_classes):
+        """Test that function extracts description_zh from inputs."""
+        class MockToolWithInputDescriptions:
+            name = "search_tool"
+            description = "Search tool"
+            description_zh = "搜索工具"
+            inputs = {
+                "query": {
+                    "type": "string",
+                    "description": "Search query string",
+                    "description_zh": "搜索查询字符串"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results",
+                    "description_zh": "最大结果数"
+                }
+            }
+            init_param_descriptions = {}
+
+            def __init__(self):
+                pass
+
+        mock_get_classes.return_value = [MockToolWithInputDescriptions]
+
+        result = self.get_local_tools_description_zh()
+
+        tool_info = result["search_tool"]
+        inputs = tool_info["inputs"]
+
+        assert "query" in inputs
+        assert inputs["query"]["description_zh"] == "搜索查询字符串"
+        assert "limit" in inputs
+        assert inputs["limit"]["description_zh"] == "最大结果数"
+
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
+    def test_returns_empty_dict_when_no_tools(self, mock_get_classes):
+        """Test that function returns empty dict when no tools available."""
+        mock_get_classes.return_value = []
+
+        result = self.get_local_tools_description_zh()
+
+        assert result == {}
+
+    @patch('backend.utils.tool_utils.get_local_tools_classes')
+    def test_handles_tool_without_description_zh(self, mock_get_classes):
+        """Test that function handles tools without description_zh gracefully."""
+        class MockToolWithoutDescriptionZh:
+            name = "legacy_tool"
+            description = "Legacy tool without Chinese description"
+            # No description_zh attribute
+            inputs = {}
+            init_param_descriptions = {}
+
+            def __init__(self):
+                pass
+
+        mock_get_classes.return_value = [MockToolWithoutDescriptionZh]
+
+        result = self.get_local_tools_description_zh()
+
+        # Should still return the tool, but with None for description_zh
+        assert "legacy_tool" in result
+        tool_info = result["legacy_tool"]
+        assert "description_zh" in tool_info
+        assert tool_info["description_zh"] is None
+
+
+class TestGetLocalToolsDescriptionZhCoverage:
+    """Additional tests for description_zh coverage in get_local_tools and list_all_tools."""
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_get_local_tools_with_description_zh(self, mock_get_classes):
+        """Test get_local_tools extracts description_zh from tool class."""
+        from pydantic import Field
+        
+        class MockToolWithZh:
+            name = "test_tool_zh"
+            description = "Test tool"
+            description_zh = "测试工具"
+            output_type = "string"
+            category = "test"
+            inputs = {
+                "query": {
+                    "type": "string",
+                    "description": "Query",
+                    "description_zh": "查询"
+                }
+            }
+            # Use init_param_descriptions for param description_zh (Pydantic V2 doesn't support Field(description_zh=...))
+            init_param_descriptions = {
+                "param1": {
+                    "description": "Param1",
+                    "description_zh": "参数1"
+                }
+            }
+
+            def __init__(self, param1: str = Field(description="Param1", default="")):
+                pass
+
+        mock_get_classes.return_value = [MockToolWithZh]
+
+        from backend.services.tool_configuration_service import get_local_tools
+        result = get_local_tools()
+
+        assert len(result) == 1
+        tool_info = result[0]
+        assert tool_info.description_zh == "测试工具"
+        
+        # Check params have description_zh from init_param_descriptions
+        params = tool_info.params
+        param1 = next((p for p in params if p["name"] == "param1"), None)
+        assert param1 is not None
+        assert param1["description_zh"] == "参数1"
+        
+        # Check inputs have description_zh
+        import json
+        inputs = json.loads(tool_info.inputs)
+        assert "query" in inputs
+        assert inputs["query"]["description_zh"] == "查询"
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_get_local_tools_param_without_description_zh(self, mock_get_classes):
+        """Test get_local_tools handles param without description_zh."""
+        from pydantic import Field
+        
+        class MockToolNoParamZh:
+            name = "test_tool_no_param_zh"
+            description = "Test tool"
+            description_zh = "测试工具"
+            output_type = "string"
+            category = "test"
+            inputs = {}
+
+            def __init__(self, param1: str = Field(description="Param1", default="")):
+                pass
+
+        mock_get_classes.return_value = [MockToolNoParamZh]
+
+        from backend.services.tool_configuration_service import get_local_tools
+        result = get_local_tools()
+
+        assert len(result) == 1
+        params = result[0].params
+        param1 = next((p for p in params if p["name"] == "param1"), None)
+        assert param1 is not None
+        assert param1["description_zh"] is None
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_get_local_tools_inputs_non_dict_value(self, mock_get_classes):
+        """Test get_local_tools handles inputs with non-dict values."""
+        from pydantic import Field
+        
+        class MockToolNonDictInputs:
+            name = "test_tool_non_dict"
+            description = "Test tool"
+            description_zh = "测试工具"
+            output_type = "string"
+            category = "test"
+            inputs = {"query": "string"}  # Non-dict value
+
+            def __init__(self):
+                pass
+
+        mock_get_classes.return_value = [MockToolNonDictInputs]
+
+        from backend.services.tool_configuration_service import get_local_tools
+        result = get_local_tools()
+
+        assert len(result) == 1
+        import json
+        inputs = json.loads(result[0].inputs)
+        assert inputs == {"query": "string"}
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @pytest.mark.asyncio
+    async def test_list_all_tools_merges_description_zh_for_local_tools(self, mock_query, mock_get_desc):
+        """Test list_all_tools merges description_zh from SDK for local tools."""
+        mock_query.return_value = [
+            {
+                "tool_id": 1,
+                "name": "local_tool",
+                "origin_name": None,
+                "description": "Local tool",
+                "source": "local",
+                "is_available": True,
+                "create_time": "2024-01-01",
+                "usage": None,
+                "params": [{"name": "param1", "description": "Param1"}],
+                "inputs": "{}",
+                "category": "test"
+            }
+        ]
+        
+        mock_get_desc.return_value = {
+            "local_tool": {
+                "description_zh": "本地工具",
+                "params": [{"name": "param1", "description_zh": "参数1"}],
+                "inputs": {"query": {"description_zh": "查询"}}
+            }
+        }
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1")
+
+        assert len(result) == 1
+        assert result[0]["description_zh"] == "本地工具"
+        assert result[0]["params"][0]["description_zh"] == "参数1"
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @pytest.mark.asyncio
+    async def test_list_all_tools_merges_inputs_description_zh(self, mock_query, mock_get_desc):
+        """Test list_all_tools merges inputs description_zh from SDK."""
+        mock_query.return_value = [
+            {
+                "tool_id": 1,
+                "name": "local_tool",
+                "origin_name": None,
+                "description": "Local tool",
+                "source": "local",
+                "is_available": True,
+                "create_time": "2024-01-01",
+                "usage": None,
+                "params": [],
+                "inputs": '{"query": {"type": "string", "description": "Query"}}',
+                "category": "test"
+            }
+        ]
+        
+        mock_get_desc.return_value = {
+            "local_tool": {
+                "description_zh": "本地工具",
+                "params": [],
+                "inputs": {"query": {"description_zh": "查询词"}}
+            }
+        }
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1")
+
+        import json
+        inputs = json.loads(result[0]["inputs"])
+        assert inputs["query"]["description_zh"] == "查询词"
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @pytest.mark.asyncio
+    async def test_list_all_tools_non_local_tool(self, mock_query, mock_get_desc):
+        """Test list_all_tools handles non-local tools."""
+        mock_query.return_value = [
+            {
+                "tool_id": 1,
+                "name": "mcp_tool",
+                "origin_name": None,
+                "description": "MCP tool",
+                "source": "mcp",
+                "is_available": True,
+                "create_time": "2024-01-01",
+                "usage": "mcp_server",
+                "params": [],
+                "inputs": "{}",
+                "category": "test",
+                "description_zh": "MCP工具"
+            }
+        ]
+        
+        mock_get_desc.return_value = {}
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1")
+
+        assert len(result) == 1
+        assert result[0]["description_zh"] == "MCP工具"
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @pytest.mark.asyncio
+    async def test_list_all_tools_inputs_json_decode_error(self, mock_query, mock_get_desc):
+        """Test list_all_tools handles JSON decode error for inputs."""
+        mock_query.return_value = [
+            {
+                "tool_id": 1,
+                "name": "local_tool",
+                "origin_name": None,
+                "description": "Local tool",
+                "source": "local",
+                "is_available": True,
+                "create_time": "2024-01-01",
+                "usage": None,
+                "params": [],
+                "inputs": "invalid json{",
+                "category": "test"
+            }
+        ]
+        
+        mock_get_desc.return_value = {
+            "local_tool": {
+                "description_zh": "本地工具",
+                "params": [],
+                "inputs": {}
+            }
+        }
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1")
+
+        assert len(result) == 1
+        # Should not crash, inputs should remain as original string
+        assert result[0]["inputs"] == "invalid json{"
+
+
+class TestGetLocalToolsClassesDirect:
+    """Tests for get_local_tools_classes function directly."""
+
+    @patch('backend.utils.tool_utils.importlib.import_module')
+    def test_get_local_tools_classes_returns_classes(self, mock_import):
+        """Test that get_local_tools_classes returns a list of classes."""
+        # Create mock tool classes
+        mock_tool_class1 = type('TestTool1', (), {})
+        mock_tool_class2 = type('TestTool2', (), {})
+        
+        # Create a mock package with tool classes
+        class MockPackage:
+            def __init__(self):
+                self.TestTool1 = mock_tool_class1
+                self.TestTool2 = mock_tool_class2
+                self.not_a_class = "string_value"
+                self.__name__ = 'nexent.core.tools'
+
+            def __dir__(self):
+                return ['TestTool1', 'TestTool2', 'not_a_class', '__name__']
+
+        mock_package = MockPackage()
+        mock_import.return_value = mock_package
+
+        from backend.utils.tool_utils import get_local_tools_classes
+        result = get_local_tools_classes()
+        
+        assert isinstance(result, list)
+        assert mock_tool_class1 in result
+        assert mock_tool_class2 in result
+        # String should not be included
+        assert "string_value" not in result
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

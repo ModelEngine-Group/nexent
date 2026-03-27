@@ -117,7 +117,34 @@ class TestUserSignup:
             mock_signup.assert_called_once_with(
                 email="test@example.com",
                 password="password123",
-                invite_code=None
+                invite_code=None,
+                auto_login=True
+            )
+
+    def test_signup_success_regular_user_with_auto_login_false(self):
+        """Test successful regular user registration with auto_login=false"""
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+            mock_signup.return_value = {"user_id": "123", "email": "test@example.com"}
+
+            response = client.post(
+                "/user/signup",
+                json={
+                    "email": "test@example.com",
+                    "password": "password123",
+                    "invite_code": None,
+                    "auto_login": False
+                }
+            )
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert "registered successfully" in data["message"]
+            assert "data" in data
+            mock_signup.assert_called_once_with(
+                email="test@example.com",
+                password="password123",
+                invite_code=None,
+                auto_login=False
             )
 
     def test_signup_success_admin_user(self):
@@ -141,7 +168,33 @@ class TestUserSignup:
             mock_signup.assert_called_once_with(
                 email="admin@example.com",
                 password="password123",
-                invite_code="admin_code"
+                invite_code="admin_code",
+                auto_login=True
+            )
+
+    def test_signup_success_admin_user_with_auto_login_false(self):
+        """Test successful admin user registration with auto_login=false (tenant management scenario)"""
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+            mock_signup.return_value = {"user_id": "123", "email": "admin@example.com"}
+
+            response = client.post(
+                "/user/signup",
+                json={
+                    "email": "admin@example.com",
+                    "password": "password123",
+                    "invite_code": "admin_code",
+                    "auto_login": False
+                }
+            )
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert "registered successfully" in data["message"]
+            mock_signup.assert_called_once_with(
+                email="admin@example.com",
+                password="password123",
+                invite_code="admin_code",
+                auto_login=False
             )
 
     def test_signup_no_invite_code_exception(self):

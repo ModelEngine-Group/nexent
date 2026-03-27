@@ -5,6 +5,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfig } from "@/hooks/useConfig";
 import { ChatInterface } from "./internal/chatInterface";
+import "@/styles/chat.css";
 
 /**
  * ChatContent component - Main chat page content
