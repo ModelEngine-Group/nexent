@@ -25,7 +25,7 @@ ssh:
   password: "VM_PASSWORD"
   port: 22
   # SSH 连接超时（秒）
-  connect_timeout: 30
+  connect_timeout: 300
   # 等待 VM SSH 就绪的最大时间（秒）
   ready_timeout: 300
 
@@ -38,18 +38,21 @@ config_transfer:
   # 配置文件名
   config_filename: "agent_config.yaml"
 
-# Nexent API 配置（用于获取模型配置并同步到 VM）
-nexent_api:
-  # Nexent Config Service 地址
-  base_url: "http://nexent-config:5010"
-  # JWT Token（可选，某些环境需要认证）
-  token: ""
-  # 模型同步配置
-  model_sync:
-    # 是否启用模型配置同步
-    enabled: true
-    # VM 上的 openclaw.json 路径
-    openclaw_config_path: "/root/.openclaw/openclaw.json"
-    # 要同步的模型类型
-    model_types:
-      - "llm"
+# PostgreSQL 配置（用于从数据库获取模型配置）
+postgres:
+  _host: "nexent-postgresql"
+  _port: 5432
+  _user: "root"
+  # password 优先从环境变量 NEXENT_POSTGRES_PASSWORD 获取，也可在此配置
+  # password: ""
+  _database: "nexent"
+
+# 模型同步配置
+model_sync:
+  # 是否启用模型配置同步
+  enabled: true
+  # VM 上的 openclaw.json 路径
+  openclaw_config_path: "/root/.openclaw/openclaw.json"
+  # 要同步的模型类型
+  model_types:
+    - "llm"

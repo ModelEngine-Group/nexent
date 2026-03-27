@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import paramiko
+import psycopg2
 import requests
 import yaml
 
@@ -299,8 +300,12 @@ class Config:
         return self._get("config_transfer", default={})
 
     @property
-    def nexent_api(self) -> Dict[str, Any]:
-        return self._get("nexent_api", default={})
+    def model_sync(self) -> Dict[str, Any]:
+        return self._get("model_sync", default={})
+
+    @property
+    def postgres_config(self) -> Dict[str, Any]:
+        return self._get("postgres", default={})
 
     @property
     def user_name(self) -> Optional[str]:
@@ -674,6 +679,50 @@ def fetch_nexent_model_config(
         models = [m for m in models if m.get("model_type") in model_types]
 
     return models
+
+
+def fetch_models_from_db(
+    host: str,
+    password: str,
+    model_types: Optional[List[str]] = None,
+    database: str = "nexent",
+    user: str = "root",
+    port: int = 5432,
+) -> List[Dict[str, Any]]:
+    try:
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            dbname=database,
+            user=user,
+            password=password,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to connect to database at {host}:{port}: {e}")
+
+    try:
+        with conn.cursor() as cur:
+            query = (
+                "SELECT model_name, model_factory, model_type, api_key, "
+                "base_url, max_tokens, display_name "
+                "FROM nexent.model_record_t "
+                "WHERE delete_flag = 'N'"
+            )
+            params: List[Any] = []
+            if model_types:
+                placeholders = ",".join(["%s"] * len(model_types))
+                query += f" AND model_type IN ({placeholders})"
+                params = list(model_types)
+
+            cur.execute(query, params)
+            desc = cur.description
+            if not desc:
+                return []
+            columns = [d[0] for d in desc]
+            rows = cur.fetchall()
+            return [dict(zip(columns, row)) for row in rows]
+    finally:
+        conn.close()
 
 
 def read_remote_json(

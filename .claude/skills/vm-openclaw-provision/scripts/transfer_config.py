@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _common import (
     add_common_args,
     create_ssh_client,
-    fetch_nexent_model_config,
+    fetch_models_from_db,
     generate_vm_config_yaml,
     get_client_with_args,
     setup_crontab,
@@ -34,7 +34,6 @@ def run_transfer(vm_ip, cfg: Config):
     ssh_port = ssh_config.get("port", 22)
     timeout = ssh_config.get("ready_timeout", 300)
     kafka_config = cfg.kafka_config
-    nexent_api_config = cfg.nexent_api
     config_transfer = cfg.config_transfer
     remote_path = config_transfer.get("remote_path", "/opt/nexent/config")
     config_filename = config_transfer.get("config_filename", "agent_config.yaml")
@@ -91,41 +90,56 @@ def run_transfer(vm_ip, cfg: Config):
                 f"Warning: report_info.py not found at {local_report_script}, skipping"
             )
 
-        nexent_url = nexent_api_config.get("base_url")
-        nexent_token = nexent_api_config.get("token")
-        model_sync_config = nexent_api_config.get("model_sync", {})
+        postgres_config = cfg.postgres_config
+        pg_host = postgres_config.get("host", "nexent-postgresql")
+        pg_port = postgres_config.get("port", 5432)
+        pg_user = postgres_config.get("user", "root")
+        pg_password = postgres_config.get("password") or os.getenv(
+            "NEXENT_POSTGRES_PASSWORD", ""
+        )
+        pg_database = postgres_config.get("database", "nexent")
+
+        model_sync_config = cfg.model_sync
         openclaw_path = model_sync_config.get(
             "openclaw_config_path", "/root/.openclaw/openclaw.json"
         )
         model_types = model_sync_config.get("model_types", ["llm"])
 
-        if not nexent_url:
-            print("Warning: Nexent API URL not configured, skipping model sync")
+        models = []
+        if not pg_password:
+            print("Warning: Postgres password not configured, skipping model sync")
         else:
-            print(f"Fetching model config from {nexent_url}...")
+            print(f"Fetching model config from database {pg_host}:{pg_port}...")
             try:
-                models = fetch_nexent_model_config(
-                    base_url=nexent_url,
-                    token=nexent_token,
+                models = fetch_models_from_db(
+                    host=pg_host,
+                    password=pg_password,
                     model_types=model_types,
+                    database=pg_database,
+                    user=pg_user,
+                    port=pg_port,
                 )
                 print(f"Found {len(models)} model(s) to sync")
-
-                if models:
-                    print(f"Syncing model config to {openclaw_path}...")
-                    sync_model_config_to_vm(
-                        ssh_client,
-                        models,
-                        openclaw_path,
-                        vm_ip=vm_ip,
-                        merge=True,
-                    )
-                    print("Model config synced successfully!")
-                    print(
-                        f"Set gateway.controlUi.allowedOrigins = http://{vm_ip}:18789"
-                    )
             except Exception as e:
-                print(f"Warning: Failed to sync model config: {e}")
+                print(f"Warning: Failed to fetch model config: {e}")
+
+        try:
+            if models:
+                print(f"Syncing model config to {openclaw_path}...")
+            else:
+                print(f"Updating gateway config to {openclaw_path}...")
+            sync_model_config_to_vm(
+                ssh_client,
+                models,
+                openclaw_path,
+                vm_ip=vm_ip,
+                merge=True,
+            )
+            if models:
+                print("Model config synced successfully!")
+            print(f"Set gateway.controlUi.allowedOrigins = http://{vm_ip}:18789")
+        except Exception as e:
+            print(f"Warning: Failed to sync config to VM: {e}")
 
     finally:
         ssh_client.close()
@@ -148,10 +162,6 @@ def main():
     )
     parser.add_argument(
         "--no-include-model", action="store_true", help="Skip model config sync"
-    )
-    parser.add_argument("--nexent-api-url", help="Nexent API URL (overrides config)")
-    parser.add_argument(
-        "--nexent-api-token", help="Nexent API token (overrides config)"
     )
     parser.add_argument(
         "--model-types", nargs="+", help="Model types to sync (overrides config)"
@@ -177,23 +187,16 @@ def main():
         cfg.set_nested("ssh", "port", value=args.ssh_port)
     if args.no_include_kafka:
         cfg.set("kafka", {})
-    if args.nexent_api_url:
-        cfg.set_nested("nexent_api", "base_url", value=args.nexent_api_url)
-    if args.nexent_api_token:
-        cfg.set_nested("nexent_api", "token", value=args.nexent_api_token)
     if args.model_types:
-        cfg.set_nested(
-            "nexent_api", "model_sync", "model_types", value=args.model_types
-        )
+        cfg.set_nested("model_sync", "model_types", value=args.model_types)
     if args.openclaw_config_path:
         cfg.set_nested(
-            "nexent_api",
             "model_sync",
             "openclaw_config_path",
             value=args.openclaw_config_path,
         )
     if args.no_include_model:
-        cfg.set("nexent_api", {})
+        cfg.set("model_sync", {})
 
     run_transfer(args.ip, cfg)
 

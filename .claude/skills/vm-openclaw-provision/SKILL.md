@@ -19,7 +19,7 @@ description: |
   - 基于 CSV 状态文件的 IP 自动分配,防止并发冲突
   - 支持批量创建虚拟机，自动确保 IP 不冲突
   - SSH/SCP 配置传输,等待虚拟机 SSH 就绪后自动传输配置文件
-   - 模型配置同步,从 Nexent API 获取模型配置并更新到 VM
+   - 模型配置同步,从 PostgreSQL 数据库获取模型配置并更新到 VM
    - 实例监控脚本部署,传输 report_info.py 并配置 crontab 定时上报
 ---
 
@@ -240,40 +240,44 @@ python scripts/transfer_config.py --ip 192.168.1.100 --model-types llm embedding
 | `--timeout` | SSH 就绪超时（秒，默认 300）|
 | `--include-kafka` | 包含 Kafka 配置（默认 True）|
 | `--no-include-kafka` | 不包含 Kafka 配置 |
-| `--include-model` | 从 Nexent 同步模型配置到 openclaw.json（默认 True）|
+| `--include-model` | 从数据库同步模型配置到 openclaw.json（默认 True）|
 | `--no-include-model` | 不同步模型配置 |
 | `--openclaw-config-path` | VM 上 openclaw.json 路径（默认 /root/.openclaw/openclaw.json）|
-| `--nexent-api-url` | Nexent API 地址（覆盖配置文件）|
-| `--nexent-api-token` | Nexent API Token（覆盖配置文件）|
 | `--model-types` | 要同步的模型类型（默认 llm），如 `llm embedding vlm` |
 | `--json` | JSON 格式输出 |
 
 
 ## 模型配置同步
 
-`transfer_config.py` 支持从 Nexent Config Service 获取模型配置并同步到 VM 的 openclaw.json。
+`transfer_config.py` 支持从 PostgreSQL 数据库直接获取模型配置并同步到 VM 的 openclaw.json。
 
-### 配置 Nexent API
+### 配置数据库连接
 
 在 `vm-config.yaml` 中添加：
 
 ```yaml
-nexent_api:
-  base_url: "http://nexent-config:5010"
-  token: ""  # 可选，某些环境需要 JWT Token
-  model_sync:
-    enabled: true
-    openclaw_config_path: "/root/.openclaw/openclaw.json"
-    model_types:
-      - "llm"
+postgres:
+  host: "nexent-postgresql"
+  port: 5432
+  user: "root"
+  database: "nexent"
+
+model_sync:
+  enabled: true
+  openclaw_config_path: "/root/.openclaw/openclaw.json"
+  model_types:
+    - "llm"
 ```
+
+数据库密码优先从环境变量 `NEXENT_POSTGRES_PASSWORD` 获取，也可在 `postgres.password` 中直接配置。
 
 ### 同步流程
 
-1. 从 Nexent API (`/model/list`) 获取模型配置
-2. 转换为 openclaw 格式（`models.providers` 结构）
-3. 与 VM 上现有 openclaw.json 合并（保留其他配置）
-4. 写入 VM
+1. 从 `nexent.model_record_t` 表查询未删除的模型（`delete_flag = 'N'`）
+2. 按 `model_types` 过滤（默认只同步 `llm` 类型）
+3. 转换为 openclaw 格式（`models.providers` 结构）
+4. 与 VM 上现有 openclaw.json 合并（保留其他配置）
+5. 写入 VM
 
 ### openclaw.json 结构示例
 
