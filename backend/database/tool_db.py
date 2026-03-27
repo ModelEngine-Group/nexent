@@ -1,10 +1,11 @@
 import re
+import json
 from typing import List
-
 from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
 from consts.model import ToolSourceEnum
+from utils.tool_utils import get_local_tools_description_zh
 
 
 def create_tool(tool_info, version_no: int = 0):
@@ -225,15 +226,15 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
             is_available = True if re.match(
                 r'^[a-zA-Z_][a-zA-Z0-9_]*$', tool.name) is not None else False
 
-            # Use same key generation logic as above
+            # Build key for lookup - same logic as existing_tool_dict
             if tool.source == ToolSourceEnum.MCP.value:
-                tool_key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
+                key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
             else:
-                tool_key = f"{tool.name}&{tool.source}"
+                key = f"{tool.name}&{tool.source}"
 
-            if tool_key in existing_tool_dict:
-                # by tool name, source, and usage (for MCP) to update the existing tool
-                existing_tool = existing_tool_dict[tool_key]
+            if key in existing_tool_dict:
+                # by tool name and source to update the existing tool
+                existing_tool = existing_tool_dict[key]
                 for key, value in filtered_tool_data.items():
                     setattr(existing_tool, key, value)
                 existing_tool.updated_by = user_id
@@ -253,16 +254,44 @@ def add_tool_field(tool_info):
         query = session.query(ToolInfo).filter(
             ToolInfo.tool_id == tool_info["tool_id"])
         tool = query.first()
-
         # add tool params
         tool_params = tool.params
         for ele in tool_params:
             param_name = ele["name"]
             ele["default"] = tool_info["params"].get(param_name)
-
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
-
+        
+        # Merge description_zh from SDK for local tools
+        tool_name = tool_dict.get("name")
+        if tool_dict.get("source") == "local":
+            local_tool_descriptions = get_local_tools_description_zh()
+            if tool_name in local_tool_descriptions:
+                sdk_info = local_tool_descriptions[tool_name]
+                tool_dict["description_zh"] = sdk_info.get("description_zh")
+                
+                # Merge params description_zh from SDK
+                for param in tool_params:
+                    if not param.get("description_zh"):
+                        for sdk_param in sdk_info.get("params", []):
+                            if sdk_param.get("name") == param.get("name"):
+                                param["description_zh"] = sdk_param.get("description_zh")
+                                break
+                
+                # Merge inputs description_zh from SDK
+                inputs_str = tool_dict.get("inputs", "{}")
+                try:
+                    inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+                    if isinstance(inputs, dict):
+                        for key, value in inputs.items():
+                            if isinstance(value, dict) and not value.get("description_zh"):
+                                sdk_inputs = sdk_info.get("inputs", {})
+                                if key in sdk_inputs:
+                                    value["description_zh"] = sdk_inputs[key].get("description_zh")
+                        tool_dict["inputs"] = json.dumps(inputs, ensure_ascii=False)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        
         # combine tool_info and tool_dict
         tool_info.update(tool_dict)
         return tool_info
@@ -330,7 +359,6 @@ def delete_tools_by_agent_id(agent_id, tenant_id, user_id, version_no: int = 0):
         ).update({
             ToolInstance.delete_flag: 'Y', 'updated_by': user_id
         })
-
 
 def search_last_tool_instance_by_tool_id(tool_id: int, tenant_id: str, user_id: str, version_no: int = 0):
     """

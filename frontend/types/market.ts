@@ -42,12 +42,13 @@ export interface MarketAgentTool {
   class_name: string;
   name: string;
   description: string;
-  inputs: string;
+  description_zh?: string;
   output_type: string;
   params: Record<string, any>;
   source: string;
   usage: string | null;
   tool_metadata: Record<string, any> | null;
+  inputs?: Record<string, any>;
 }
 
 export interface MarketMcpServer {
