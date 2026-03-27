@@ -1,20 +1,21 @@
-# Nexent Open Source License
+MIT License
 
-Nexent is licensed under the MIT License, with the following additional conditions:
+Copyright (c) 2025 Huawei Technologies Co., Ltd. All rights reserved.
 
-Nexent is permitted to be used commercially, including as a backend service for other applications or as an application development platform for enterprises. However, when the following conditions are met, you must contact the producer to obtain a commercial license:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-a. Multi-tenant SaaS service: Unless explicitly authorized by Nexent in writing, you may not use the Nexent source code to operate a multi-tenant SaaS service.
-b. LOGO and copyright information: In the process of using Nexent's frontend, you may not remove or modify the LOGO or copyright information in the Nexent console or applications. This restriction is inapplicable to uses of Nexent that do not involve its frontend.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-Please contact zhenggaoqi@huawei.com by email to inquire about licensing matters.
-
-As a contributor, you should agree that:
-
-a. The producer can adjust the open-source agreement to be more strict or relaxed as deemed necessary.
-b. Your contributed code may be used for commercial purposes, such as Nexent's cloud business.
-
-Apart from the specific conditions mentioned above, all other rights and restrictions follow the MIT License.
-Detailed information about the MIT License can be found at: https://opensource.org/licenses/MIT
-
-Copyright © 2025 Huawei Technologies Co., Ltd.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
