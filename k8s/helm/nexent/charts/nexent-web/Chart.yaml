@@ -1,0 +1,16 @@
+apiVersion: v2
+name: nexent-web
+description: Nexent Web Service - Frontend web application
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - nexent
+  - web
+  - frontend
+maintainers:
+  - name: Nexent Team
+dependencies:
+  - name: nexent-common
+    version: 0.1.0
+    repository: "file://../nexent-common"

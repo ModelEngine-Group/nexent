@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-minio
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-minio
+  annotations:
+    "helm.sh/hook-weight": "-1"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nexent-minio
+  template:
+    metadata:
+      labels:
+        app: nexent-minio
+    spec:
+      containers:
+        - name: minio
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Start MinIO server in background
+              minio server /data --address ':9000' --console-address ':9001' &
+              MINIO_PID=$!
+
+              # Wait for MinIO to be ready
+              echo "Waiting for MinIO to be ready..."
+              for i in $(seq 1 30); do
+                if mc alias set myminio http://localhost:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD 2>/dev/null; then
+                  break
+                fi
+                sleep 2
+              done
+
+              # Create client user with access key and secret key
+              echo "Creating MinIO user..."
+              mc admin user add myminio $MINIO_ACCESS_KEY $MINIO_SECRET_KEY || true
+              mc admin policy attach myminio readwrite --user=$MINIO_ACCESS_KEY || true
+
+              # Create bucket if not exists
+              echo "Creating bucket..."
+              mc mb myminio/$MINIO_DEFAULT_BUCKET || true
+              mc anonymous set download myminio/$MINIO_DEFAULT_BUCKET || true
+
+              echo "MinIO initialization complete, keeping server running..."
+              wait $MINIO_PID
+
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: MINIO_ROOT_PASSWORD
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: MINIO_SECRET_KEY
+            - name: MINIO_REGION
+              value: {{ .Values.config.region | quote }}
+            - name: MINIO_DEFAULT_BUCKET
+              value: {{ .Values.config.defaultBucket | quote }}
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          resources:
+            requests:
+              memory: {{ .Values.resources.requests.memory }}
+              cpu: {{ .Values.resources.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.limits.memory }}
+              cpu: {{ .Values.resources.limits.cpu }}
+          livenessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: nexent-minio

@@ -1,0 +1,20 @@
+replicaCount: 1
+
+images:
+  backend:
+    repository: nexent/nexent
+    tag: latest
+    pullPolicy: IfNotPresent
+
+resources:
+  backend:
+    requests:
+      memory: 256Mi
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: 1
+
+config:
+  skipProxy: "true"
+  umask: "0022"

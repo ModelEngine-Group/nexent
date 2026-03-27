@@ -83,7 +83,8 @@ class KubernetesContainerClient(ContainerClient):
     def _get_labels(self, service_name: str, tenant_id: str, user_id: str) -> Dict[str, str]:
         """Generate labels for pod and service."""
         return {
-            self.LABEL_APP: "nexent-mcp",
+            # Use a distinct app label to avoid conflicts with the native nexent-mcp deployment
+            self.LABEL_APP: "nexent-mcp-container",
             self.LABEL_COMPONENT: service_name,
             self.LABEL_TENANT: tenant_id[:8] if tenant_id else "",
             self.LABEL_USER: user_id[:8] if user_id else "",
@@ -379,7 +380,7 @@ class KubernetesContainerClient(ContainerClient):
                     # Try to find by UID
                     pods = self.core_v1.list_namespaced_pod(
                         namespace=namespace,
-                        label_selector=f"{self.LABEL_APP}=nexent-mcp",
+                        label_selector=f"{self.LABEL_APP}=nexent-mcp-container",
                     )
                     for p in pods.items:
                         if p.metadata.uid == container_id:
@@ -467,7 +468,7 @@ class KubernetesContainerClient(ContainerClient):
         try:
             pods = self.core_v1.list_namespaced_pod(
                 namespace=namespace,
-                label_selector=f"{self.LABEL_APP}=nexent-mcp",
+                label_selector=f"{self.LABEL_APP}=nexent-mcp-container",
             )
             logger.info(f"Found {len(pods.items)} pods in namespace {namespace}")
 
@@ -530,7 +531,7 @@ class KubernetesContainerClient(ContainerClient):
         try:
             pods = self.core_v1.list_namespaced_pod(
                 namespace=namespace,
-                label_selector=f"{self.LABEL_APP}=nexent-mcp",
+                label_selector=f"{self.LABEL_APP}=nexent-mcp-container",
             )
             for p in pods.items:
                 if p.metadata.uid == container_id:
@@ -598,7 +599,7 @@ class KubernetesContainerClient(ContainerClient):
                     # Pod not found by name, try to find by UID
                     pods = self.core_v1.list_namespaced_pod(
                         namespace=namespace,
-                        label_selector=f"{self.LABEL_APP}=nexent-mcp",
+                        label_selector=f"{self.LABEL_APP}=nexent-mcp-container",
                     )
                     for p in pods.items:
                         if p.metadata.uid == container_id:

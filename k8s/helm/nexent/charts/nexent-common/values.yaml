@@ -1,0 +1,151 @@
+# Nexent Common Chart - Shared resources configuration
+# This chart provides shared resources (ConfigMap, Secret, RBAC, Namespace, init.sql)
+# that are required by other Nexent charts.
+
+# Images used by common templates
+images:
+  mcp:
+    repository: "nexent/nexent-mcp"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+# ConfigMap data - this will be used by nexent-config ConfigMap
+config:
+  # Service URLs (internal)
+  services:
+    configUrl: "http://nexent-config:5010"
+    elasticsearchService: "http://nexent-config:5010/api"
+    runtimeUrl: "http://nexent-runtime:5014"
+    mcpServer: "http://nexent-mcp:5011"
+    dataProcessService: "http://nexent-data-process:5012/api"
+    northboundServer: "http://nexent-northbound:5013/api"
+  postgres:
+    host: "nexent-postgresql"
+    user: "root"
+    db: "nexent"
+    port: "5432"
+  redis:
+    url: "redis://nexent-redis:6379/0"
+    backendUrl: "redis://nexent-redis:6379/1"
+    port: "6379"
+  minio:
+    endpoint: "http://nexent-minio:9000"
+    region: "cn-north-1"
+    defaultBucket: "nexent"
+  elasticsearch:
+    host: "http://nexent-elasticsearch:9200"
+    javaOpts: "-Xms2g -Xmx2g"
+    diskWatermarkLow: "85%"
+    diskWatermarkHigh: "90%"
+    diskWatermarkFloodStage: "95%"
+  skipProxy: "true"
+  umask: "0022"
+  isDeployedByKubernetes: "true"
+  marketBackend: "https://market.nexent.tech"
+  modelEngine:
+    enabled: "false"
+  voiceService:
+    appid: "app_id"
+    token: "token"
+    cluster: "volcano_tts"
+    voiceType: "zh_male_jieshuonansheng_mars_bigtts"
+    speedRatio: "1.3"
+  modelPath:
+    clipModelPath: "/opt/models/clip-vit-base-patch32"
+    nltkData: "/opt/models/nltk_data"
+  terminal:
+    sshPrivateKeyPath: "/path/to/openssh-server/ssh-keys/openssh_server_key"
+  supabase:
+    dashboardUsername: "supabase"
+    dashboardPassword: "Huawei123"
+    siteUrl: "http://localhost:3011"
+    supabaseUrl: "http://nexent-supabase-kong:8000"
+    apiExternalUrl: "http://nexent-supabase-kong:8000"
+    disableSignup: "false"
+    jwtExpiry: "3600"
+    debugJwtExpireSeconds: "0"
+    enableEmailSignup: "true"
+    enableEmailAutoconfirm: "true"
+    enableAnonymousUsers: "false"
+    enablePhoneSignup: "false"
+    enablePhoneAutoconfirm: "false"
+    inviteCode: "nexent2025"
+    mailerUrlpathsConfirmation: "/auth/v1/verify"
+    mailerUrlpathsInvite: "/auth/v1/verify"
+    mailerUrlpathsRecovery: "/auth/v1/verify"
+    mailerUrlpathsEmailChange: "/auth/v1/verify"
+    postgresHost: "nexent-supabase-db"
+    postgresDb: "supabase"
+    postgresPort: "5436"
+    additionalRedirectUrls: ""
+  dataProcess:
+    flowerPort: "5555"
+    rayDashboardPort: "8265"
+    rayDashboardHost: "0.0.0.0"
+    rayActorNumCpus: "2"
+    rayNumCpus: "4"
+    rayObjectStoreMemoryGb: "0.25"
+    rayTempDir: "/tmp/ray"
+    rayLogLevel: "INFO"
+    disableRayDashboard: "true"
+    disableCeleryFlower: "true"
+    dockerEnvironment: "false"
+    enableUploadImage: "false"
+    celeryWorkerPrefetchMultiplier: "1"
+    celeryTaskTimeLimit: "3600"
+    elasticsearchRequestTimeout: "30"
+    queues: "process_q,forward_q"
+    workerName: ""
+    workerConcurrency: "4"
+  telemetry:
+    enabled: "false"
+    serviceName: "nexent-backend"
+    jaegerEndpoint: "http://localhost:14268/api/traces"
+    prometheusPort: "8000"
+    telemetrySampleRate: "1.0"
+    slowRequestThresholdSeconds: "5.0"
+    slowTokenRateThreshold: "10.0"
+
+# Secrets used by common templates
+secrets:
+  elasticPassword: "nexent@2025"
+  elasticsearchApiKey: ""
+  postgresPassword: "nexent@4321"
+  minio:
+    rootUser: "nexent"
+    rootPassword: "nexent@4321"
+    accessKey: "nexent-ru7ks1q"
+    secretKey: "NZ7wTO5M5W08oBTtzGqsi2vw"
+  ssh:
+    username: "nexent"
+    password: "nexent@2025"
+  supabase:
+    jwtSecret: "sWvUfP3N3CiD+VFPbAUGEzjyRvTwMFdRN4LYr+9+srI="
+    secretKeyBase: "RX/Lk1+m7PqKkDPpIBQyoMM2qUIv/apcTAvfGOrsklgnut6wvna++zK9xiVixBb165ReQzhQhygYmr9UapII0A=="
+    vaultEncKey: "Wf0XdVmicUVNABIAkAN/QWAi+pmr9wzRFIZLIOzpPYk="
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzc0NjAwNjk2LCJleHAiOjE5MzIyODA2OTZ9._TRsr_VzYNYNLiLH9B-R65drHdc6BCpm0j3HIC6jBW0"
+    serviceRoleKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3NzQ2MDA2OTcsImV4cCI6MTkzMjI4MDY5N30.aeV4XBToQ58grlObvk-YGVM8n_7PvI4MoBu6wwZl3qc"
+    postgresPassword: "Huawei123"
+    gotrueDbUrl: "postgres://supabase_auth_admin:Huawei123@nexent-supabase-db:5436/supabase?search_path=auth&sslmode=disable"
+
+# Storage configuration (can be referenced by other charts)
+storage:
+  elasticsearch:
+    size: "20Gi"
+    hostPath: "/var/lib/nexent-data/nexent-elasticsearch"
+  postgresql:
+    size: "10Gi"
+    hostPath: "/var/lib/nexent-data/nexent-postgresql"
+  redis:
+    size: "5Gi"
+    hostPath: "/var/lib/nexent-data/nexent-redis"
+  minio:
+    size: "20Gi"
+    hostPath: "/var/lib/nexent-data/nexent-minio"
+  supabaseDb:
+    size: "10Gi"
+    hostPath: "/var/lib/nexent-data/nexent-supabase-db"
+
+# Service account configuration
+serviceAccount:
+  name: "nexent-config"

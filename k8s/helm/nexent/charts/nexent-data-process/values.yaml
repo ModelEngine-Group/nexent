@@ -1,0 +1,21 @@
+replicaCount: 1
+
+images:
+  dataProcess:
+    repository: nexent/nexent-data-process
+    tag: latest
+    pullPolicy: IfNotPresent
+
+resources:
+  dataProcess:
+    requests:
+      memory: 512Mi
+      cpu: 4
+    limits:
+      memory: 4Gi
+      cpu: 8
+
+config:
+  skipProxy: "true"
+  pythonPath: "/opt/backend"
+  dockerEnvironment: "true"
