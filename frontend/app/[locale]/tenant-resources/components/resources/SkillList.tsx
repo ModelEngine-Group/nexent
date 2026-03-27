@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   Button,
   Table,
@@ -45,14 +45,14 @@ function isLockedKeyPath(namePath: (string | number)[]): boolean {
   return true;
 }
 
-/** Editable keys first, then `_` keys, alphabetical within each group. */
-function sortParamObjectEntries(entries: [string, unknown][]): [string, unknown][] {
-  return [...entries].sort(([a], [b]) => {
-    const au = a.startsWith("_");
-    const bu = b.startsWith("_");
-    if (au !== bu) return au ? 1 : -1;
-    return a.localeCompare(b);
-  });
+/**
+ * Drop YAML doc-only keys from mapping entries.
+ * Preserves insertion order so the form matches config.yaml / API JSON key order.
+ */
+function filterYamlDocKeysFromEntries(
+  entries: [string, unknown][]
+): [string, unknown][] {
+  return entries.filter(([k]) => !YAML_DOC_KEYS_HIDDEN_FROM_FORM.has(k));
 }
 
 /** Arrays of only strings, numbers, booleans, or null — shown as one comma/newline input. */
@@ -429,10 +429,8 @@ function ParamsDynamicFields({
   }
 
   if (typeof sample === "object" && !Array.isArray(sample)) {
-    const entries = sortParamObjectEntries(
-      Object.entries(sample as Record<string, unknown>).filter(
-        ([k]) => !YAML_DOC_KEYS_HIDDEN_FROM_FORM.has(k)
-      )
+    const entries = filterYamlDocKeysFromEntries(
+      Object.entries(sample as Record<string, unknown>)
     );
     if (entries.length === 0) {
       if (namePath.length === 0) {
@@ -501,7 +499,6 @@ export default function SkillList({
 }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const queryClient = useQueryClient();
   const [form] = Form.useForm();
 
   const [paramsModalOpen, setParamsModalOpen] = useState(false);
@@ -529,7 +526,6 @@ export default function SkillList({
     data: skills = [],
     isLoading,
     refetch,
-    isFetching,
   } = useQuery({
     queryKey: ["skills", "list", tenantId],
     queryFn: async () => {
@@ -583,9 +579,8 @@ export default function SkillList({
 
       await updateSkill(editingSkill.name, { params: merged });
       message.success(t("tenantResources.skills.updateSuccess"));
-      await queryClient.invalidateQueries({
-        queryKey: ["skills", "list", tenantId],
-      });
+      // Wait for list refetch so the next "edit config" opens with server params, not stale row data.
+      await refetch();
       closeParamsModal();
     } catch (e) {
       if (e && typeof e === "object" && "errorFields" in e) {
