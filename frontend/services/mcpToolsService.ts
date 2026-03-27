@@ -7,6 +7,7 @@ import type {
   AddMcpServicePayload,
   HealthcheckMcpServicePayload,
   RegistryMcpCard,
+  CommunityMcpCard,
   McpHealthStatus,
   McpServiceItem,
   McpTransportType,
@@ -43,7 +44,9 @@ type AddContainerMcpToolPayload = {
   name: string;
   description: string;
   tags: string[];
+  source?: "local" | "community" | "market";
   authorization_token?: string;
+  registry_json?: Record<string, unknown>;
   port: number;
   mcp_config: AddMcpRuntimeFromConfigPayload;
 };
@@ -89,6 +92,28 @@ export const fetchRegistryMcpCards = async (params: {
       nextCursor: payload.nextCursor ?? null,
     },
   } as McpToolsApiResult<{ items: RegistryMcpCard[]; nextCursor: string | null }>;
+};
+
+export const fetchCommunityMcpCards = async (params: {
+  search?: string;
+  cursor?: string | null;
+  transportType?: "http" | "sse" | "stdio";
+  limit?: number;
+}) => {
+  const result = await listCommunityMcpTools({
+    search: params.search?.trim() || undefined,
+    cursor: params.cursor || undefined,
+    transport_type: params.transportType,
+    limit: params.limit ?? 30,
+  });
+
+  return {
+    success: true,
+    data: {
+      items: result.data.items,
+      nextCursor: result.data.nextCursor ?? null,
+    },
+  } as McpToolsApiResult<{ items: CommunityMcpCard[]; nextCursor: string | null }>;
 };
 
 export const resolveContainerServerInfo = async (params: {
@@ -189,6 +214,102 @@ export const listRegistryMcpTools = async (query: URLSearchParams) => {
     return { success: true, data: data.data } as McpToolsApiResult<{ items: RegistryMcpCard[]; nextCursor: string | null }>;
   } catch (error) {
     log.error("listRegistryMcpTools failed", error);
+    throw error;
+  }
+};
+
+export const listCommunityMcpTools = async (payload: {
+  search?: string;
+  transport_type?: "http" | "sse" | "stdio";
+  cursor?: string;
+  limit?: number;
+}) => {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.communityList, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJson<ApiEnvelope<{ items: CommunityMcpCard[]; nextCursor: string | null }>>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to load community mcp list");
+    }
+    return { success: true, data: data.data } as McpToolsApiResult<{ items: CommunityMcpCard[]; nextCursor: string | null }>;
+  } catch (error) {
+    log.error("listCommunityMcpTools failed", error);
+    throw error;
+  }
+};
+
+export const publishCommunityMcpTool = async (mcpId: number) => {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.communityPublish, {
+      method: "POST",
+      body: JSON.stringify({ mcp_id: mcpId }),
+    });
+    const data = await parseJson<ApiEnvelope<{ community_id: number }>>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to publish community mcp");
+    }
+    return { success: true, data: data.data } as McpToolsApiResult<{ community_id: number }>;
+  } catch (error) {
+    log.error("publishCommunityMcpTool failed", error);
+    throw error;
+  }
+};
+
+export const listMyCommunityMcpTools = async () => {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.communityMine);
+    const data = await parseJson<ApiEnvelope<{ count: number; items: CommunityMcpCard[] }>>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to load my community mcp list");
+    }
+    return { success: true, data: data.data } as McpToolsApiResult<{ count: number; items: CommunityMcpCard[] }>;
+  } catch (error) {
+    log.error("listMyCommunityMcpTools failed", error);
+    throw error;
+  }
+};
+
+export const updateCommunityMcpTool = async (payload: {
+  community_id: number;
+  name?: string;
+  description?: string;
+  tags?: string[];
+  version?: string;
+  registry_json?: Record<string, unknown>;
+}) => {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.communityUpdate, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJson<ApiEnvelope>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to update community mcp");
+    }
+    return { success: true, data: null } as McpToolsApiResult<null>;
+  } catch (error) {
+    log.error("updateCommunityMcpTool failed", error);
+    throw error;
+  }
+};
+
+export const deleteCommunityMcpTool = async (communityId: number) => {
+  try {
+    const response = await fetchWithAuth(
+      `${API_ENDPOINTS.mcpTools.communityDelete}?community_id=${encodeURIComponent(String(communityId))}`,
+      {
+        method: "DELETE",
+      }
+    );
+    const data = await parseJson<ApiEnvelope>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to delete community mcp");
+    }
+    return { success: true, data: null } as McpToolsApiResult<null>;
+  } catch (error) {
+    log.error("deleteCommunityMcpTool failed", error);
     throw error;
   }
 };

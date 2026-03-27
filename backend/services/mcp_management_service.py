@@ -24,6 +24,14 @@ from database.remote_mcp_db import (
     update_mcp_record_runtime_fields_by_id,
     update_mcp_record_status_by_id,
 )
+from database.community_mcp_db import (
+    create_mcp_community_record,
+    delete_mcp_community_record_by_id,
+    get_mcp_community_record_by_id_and_tenant,
+    get_mcp_community_records,
+    list_mcp_community_records_by_tenant,
+    update_mcp_community_record_by_id,
+)
 from services.mcp_container_service import MCPContainerManager
 from services.remote_mcp_service import mcp_server_health
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
@@ -154,6 +162,169 @@ def _normalize_mcp_registry_server(entry: Dict[str, Any]) -> Dict[str, Any] | No
         "serverJson": server,
     }
 
+
+def _normalize_community_remotes(record: Dict[str, Any], registry_json: Dict[str, Any]) -> List[Dict[str, str]]:
+    remotes_out: List[Dict[str, str]] = []
+    remotes = registry_json.get("remotes") if isinstance(registry_json, dict) else None
+    if isinstance(remotes, list):
+        for remote in remotes:
+            if not isinstance(remote, dict):
+                continue
+            remote_url = _extract_str(remote.get("url"))
+            remote_type = _extract_str(remote.get("type")).lower()
+            if remote_url:
+                remotes_out.append({"type": remote_type, "url": remote_url})
+
+    if remotes_out:
+        return remotes_out
+
+    server_url = _extract_str(record.get("mcp_server"))
+    if not server_url:
+        return []
+
+    transport_type = _extract_str(record.get("transport_type")).lower()
+    default_type = "streamable-http" if transport_type == "http" else transport_type or "streamable-http"
+    return [{"type": default_type, "url": server_url}]
+
+
+def _normalize_community_card(record: Dict[str, Any]) -> Dict[str, Any]:
+    registry_json = record.get("registry_json") if isinstance(record.get("registry_json"), dict) else {}
+    remotes_out = _normalize_community_remotes(record, registry_json)
+    packages = registry_json.get("packages") if isinstance(registry_json.get("packages"), list) else []
+    published_at = record.get("create_time")
+    updated_at = record.get("update_time")
+
+    raw_transport_type = _extract_str(record.get("transport_type")).lower()
+    normalized_transport_type = "stdio" if raw_transport_type in {"stdio", "container"} else "sse" if raw_transport_type == "sse" else "http"
+    config_json = record.get("config_json") if isinstance(record.get("config_json"), dict) else None
+
+    return {
+        "communityId": record.get("community_id"),
+        "name": _extract_str(record.get("mcp_name")),
+        "version": _extract_str(record.get("version")),
+        "description": _extract_str(record.get("description")),
+        "source": "community",
+        "transportType": normalized_transport_type,
+        "serverUrl": _extract_str(record.get("mcp_server")),
+        "configJson": config_json,
+        "mcpRegistryJson": registry_json if registry_json else None,
+        "tags": _split_tags(record.get("tags")),
+        "remotes": remotes_out,
+        "packages": packages,
+        "status": "active",
+        "isLatest": True,
+        "publishedAt": published_at.isoformat() if isinstance(published_at, datetime) else _extract_str(published_at),
+        "updatedAt": updated_at.isoformat() if isinstance(updated_at, datetime) else _extract_str(updated_at),
+        "serverJson": registry_json if registry_json else {},
+    }
+
+
+async def list_community_mcp_services(
+    *,
+    search: str | None = None,
+    transport_type: str | None = None,
+    cursor: str | None = None,
+    limit: int = 30,
+) -> Dict[str, Any]:
+    db_result = get_mcp_community_records(
+        search=(search or "").strip() or None,
+        transport_type=(transport_type or "").strip().lower() or None,
+        cursor=(cursor or "").strip() or None,
+        limit=max(1, min(limit, 100)),
+    )
+
+    items = [_normalize_community_card(record) for record in db_result.get("items", [])]
+    return {
+        "count": len(items),
+        "nextCursor": db_result.get("nextCursor"),
+        "items": items,
+    }
+
+
+def _normalize_transport_type(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+    if raw in {"stdio", "container"}:
+        return "stdio"
+    if raw == "sse":
+        return "sse"
+    return "http"
+
+
+async def publish_community_mcp_service(*, tenant_id: str, user_id: str, mcp_id: int) -> int:
+    source_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not source_record:
+        raise ValueError("MCP record not found")
+
+    source_registry_json = source_record.get("registry_json") if isinstance(source_record.get("registry_json"), dict) else None
+    source_config_json = source_record.get("config_json") if isinstance(source_record.get("config_json"), dict) else None
+
+    community_id = create_mcp_community_record(
+        mcp_data={
+            "mcp_name": _extract_str(source_record.get("mcp_name")),
+            "mcp_server": _extract_str(source_record.get("mcp_server")),
+            "version": _extract_str(source_record.get("version")),
+            "registry_json": source_registry_json,
+            "transport_type": _normalize_transport_type(source_record.get("transport_type")),
+            "config_json": source_config_json,
+            "tags": source_record.get("tags") or "",
+            "description": _extract_str(source_record.get("description")),
+            "last_sync_time": datetime.now(),
+        },
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    return community_id
+
+
+async def update_community_mcp_service(
+    *,
+    tenant_id: str,
+    user_id: str,
+    community_id: int,
+    name: str | None,
+    description: str | None,
+    tags: List[str] | None,
+    version: str | None,
+    registry_json: Dict[str, Any] | None,
+) -> None:
+    current = get_mcp_community_record_by_id_and_tenant(community_id=community_id, tenant_id=tenant_id)
+    if not current:
+        raise ValueError("Community MCP record not found")
+
+    existing_config_json = current.get("config_json") if isinstance(current.get("config_json"), dict) else None
+    next_registry_json = registry_json if isinstance(registry_json, dict) else current.get("registry_json")
+    next_config_json = existing_config_json
+    if isinstance(next_registry_json, dict) and isinstance(next_registry_json.get("configJson"), dict):
+        next_config_json = next_registry_json.get("configJson")
+
+    update_mcp_community_record_by_id(
+        community_id=community_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name=name,
+        description=description,
+        tags=tags,
+        version=version,
+        registry_json=registry_json,
+        config_json=next_config_json,
+    )
+
+
+async def delete_community_mcp_service(*, tenant_id: str, user_id: str, community_id: int) -> None:
+    current = get_mcp_community_record_by_id_and_tenant(community_id=community_id, tenant_id=tenant_id)
+    if not current:
+        raise ValueError("Community MCP record not found")
+    delete_mcp_community_record_by_id(community_id=community_id, tenant_id=tenant_id, user_id=user_id)
+
+
+async def list_my_community_mcp_services(*, tenant_id: str) -> Dict[str, Any]:
+    rows = list_mcp_community_records_by_tenant(tenant_id=tenant_id)
+    items = [_normalize_community_card(row) for row in rows]
+    return {
+        "count": len(items),
+        "items": items,
+    }
+
 async def list_registry_mcp_services(
     *,
     search: str | None = None,
@@ -219,7 +390,7 @@ async def add_mcp_service(
     container_id: str | None = None,
 ) -> None:
     normalized_source = (source or "local").strip().lower()
-    if normalized_source not in {"local", "mcp_registry"}:
+    if normalized_source not in {"local", "mcp_registry", "community"}:
         raise ValueError(f"Invalid source: {source}")
 
     normalized_transport_type = (transport_type or "http").strip().lower()

@@ -289,6 +289,26 @@ def check_mcp_name_exists(mcp_name: str, tenant_id: str) -> bool:
         return mcp_record is not None
 
 
+def check_enabled_mcp_name_exists(mcp_name: str, tenant_id: str) -> bool:
+    """
+    Check if enabled MCP name already exists for a tenant.
+
+    Only enabled records participate in conflict checks for runtime container startup.
+
+    :param mcp_name: MCP name
+    :param tenant_id: Tenant ID
+    :return: True if enabled name exists, False otherwise
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y',
+            McpRecord.enabled.is_(True),
+        ).first()
+        return mcp_record is not None
+
+
 def get_mcp_record_by_id_and_tenant(mcp_id: int, tenant_id: str) -> Dict[str, Any] | None:
     """
     Get MCP record by ID and tenant ID

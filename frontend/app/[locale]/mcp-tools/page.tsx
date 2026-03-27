@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import log from "@/lib/logger";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import AddMcpServiceModal from "./components/AddMcpServiceModal";
+import MyCommunityMcpModal from "./components/MyCommunityMcpModal";
 import McpServiceCard from "./components/McpServiceCard";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
 import { useMcpToolsPage } from "../../../hooks/mcpTools/useMcpToolsPage";
@@ -16,6 +17,7 @@ export default function McpToolsPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
   const translate = useCallback((key: string) => String(t(key)), [t]);
+  const [showMyPublishedModal, setShowMyPublishedModal] = React.useState(false);
 
   const {
     searchValue,
@@ -87,15 +89,25 @@ export default function McpToolsPage() {
               </div>
             </div>
             <div className="md:basis-1/3">
-              <Button
-                type="primary"
-                size="large"
-                block
-                onClick={() => setShowAddModal(true)}
-                className="w-full h-10 rounded-full bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 px-6 text-white font-semibold shadow-lg shadow-emerald-200/50 transition hover:translate-y-[-1px] hover:shadow-emerald-300/70"
-              >
-                {t("mcpTools.page.addService")}
-              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="primary"
+                  size="large"
+                  block
+                  onClick={() => setShowAddModal(true)}
+                  className="w-full h-10 rounded-full bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 px-4 text-white font-semibold shadow-lg shadow-emerald-200/50 transition hover:translate-y-[-1px] hover:shadow-emerald-300/70"
+                >
+                  {t("mcpTools.page.addService")}
+                </Button>
+                <Button
+                  size="large"
+                  block
+                  onClick={() => setShowMyPublishedModal(true)}
+                  className="w-full h-10 rounded-full border-slate-300 px-4 font-semibold text-slate-700"
+                >
+                  {t("mcpTools.page.myPublished")}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -153,6 +165,8 @@ export default function McpToolsPage() {
               closeToolsModal={detail.closeToolsModal}
               handleRefreshTools={detail.handleRefreshTools}
               onDeleteConfirm={(serviceName) => handleDeleteConfirm(detail.selectedService!.mcpId, serviceName)}
+              onPublishToCommunity={detail.handlePublishToCommunity}
+              publishLoading={detail.publishLoading}
               toggleLoading={togglingServiceId === detail.selectedService?.mcpId}
               onToggleEnable={(item) => {
                 toggleServiceStatus(item).catch((error) => {
@@ -171,6 +185,12 @@ export default function McpToolsPage() {
             open={showAddModal}
             onServiceAdded={loadServerList}
             onClose={() => setShowAddModal(false)}
+          />
+
+          <MyCommunityMcpModal
+            open={showMyPublishedModal}
+            onClose={() => setShowMyPublishedModal(false)}
+            t={(key, params) => String(t(key, params))}
           />
         </div>
       </motion.div>
