@@ -25,10 +25,7 @@ import {
   MessagesSquare,
   HardDriveUpload,
 } from "lucide-react";
-import {
-  fetchSkills,
-  getAgentByName,
-} from "@/services/agentConfigService";
+import { getAgentByName } from "@/services/agentConfigService";
 import { conversationService } from "@/services/conversationService";
 import { extractSkillInfo } from "@/lib/skillFileUtils";
 import {
@@ -38,6 +35,7 @@ import {
   type ChatMessage,
 } from "@/types/skill";
 import {
+  fetchSkillsList,
   submitSkillForm,
   submitSkillFromFile,
   processSkillStream,
@@ -109,13 +107,18 @@ export default function SkillBuildModal({
   }, [allSkills]);
 
   useEffect(() => {
-    if (isOpen) {
-      fetchSkills().then((res) => {
-        if (res.success) {
-          setAllSkills(res.data || []);
-        }
+    if (!isOpen) return;
+    let cancelled = false;
+    fetchSkillsList()
+      .then((list) => {
+        if (!cancelled) setAllSkills(list);
+      })
+      .catch((err) => {
+        log.error("Failed to load skills for SkillBuildModal", err);
       });
-    }
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen]);
 
   useEffect(() => {

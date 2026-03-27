@@ -20,7 +20,7 @@ def split_string_inline_comment(s: str) -> Tuple[str, Optional[str]]:
 
 
 def strip_params_comments_for_db(obj: Any) -> Any:
-    """Remove ``_comment`` keys and trailing `` # `` suffixes from strings for JSON/DB storage."""
+    """Remove legacy ``_comment`` keys and trailing `` # `` suffixes from strings for JSON/DB storage."""
     if isinstance(obj, str):
         display, _tip = split_string_inline_comment(obj)
         return display
@@ -64,7 +64,7 @@ def _scalar_to_node_and_tip(v: Any) -> Tuple[Any, Optional[str]]:
 
 
 def _dict_to_commented_map(d: Dict[str, Any]) -> Any:
-    """Build ruamel ``CommentedMap`` with block comments above keys (nested ``_comment`` and inline tips)."""
+    """Build ruamel ``CommentedMap``; only scalar ``value # tip`` strings become YAML block comments above keys."""
     from ruamel.yaml.comments import CommentedMap
 
     cm = CommentedMap()
@@ -72,14 +72,8 @@ def _dict_to_commented_map(d: Dict[str, Any]) -> Any:
         if k == "_comment":
             continue
         if isinstance(v, dict):
-            section: Optional[str] = None
-            if isinstance(v.get("_comment"), str):
-                section = v["_comment"].strip() or None
             inner_clean = {kk: vv for kk, vv in v.items() if kk != "_comment"}
-            child = _dict_to_commented_map(inner_clean)
-            cm[k] = child
-            if section:
-                cm.yaml_set_comment_before_after_key(k, before=section + "\n")
+            cm[k] = _dict_to_commented_map(inner_clean)
         elif isinstance(v, list):
             cm[k] = _list_to_commented_seq(v)
         else:

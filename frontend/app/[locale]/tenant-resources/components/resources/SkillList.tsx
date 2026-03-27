@@ -29,6 +29,136 @@ function pathToKey(path: (string | number)[]): string {
   return path.map(String).join(".");
 }
 
+/**
+ * YAML documentation keys (e.g. `_comment`) are not shown in the form.
+ * Tooltips for human-readable notes use only the inline `value # comment` string pattern.
+ * These keys are still preserved on save via `deepMergePreserveUnderscore` (underscore merge).
+ */
+const YAML_DOC_KEYS_HIDDEN_FROM_FORM = new Set<string>(["_comment"]);
+
+/** True when the field key (last path segment) is internal, e.g. `_schema_version`. */
+function isLockedKeyPath(namePath: (string | number)[]): boolean {
+  if (namePath.length === 0) return false;
+  const last = namePath[namePath.length - 1];
+  if (typeof last !== "string" || !last.startsWith("_")) return false;
+  if (YAML_DOC_KEYS_HIDDEN_FROM_FORM.has(last)) return false;
+  return true;
+}
+
+/** Editable keys first, then `_` keys, alphabetical within each group. */
+function sortParamObjectEntries(entries: [string, unknown][]): [string, unknown][] {
+  return [...entries].sort(([a], [b]) => {
+    const au = a.startsWith("_");
+    const bu = b.startsWith("_");
+    if (au !== bu) return au ? 1 : -1;
+    return a.localeCompare(b);
+  });
+}
+
+/** Arrays of only strings, numbers, booleans, or null — shown as one comma/newline input. */
+function isPrimitiveArray(arr: unknown[]): boolean {
+  if (arr.length === 0) return true;
+  return arr.every(
+    (x) =>
+      x === null ||
+      typeof x === "string" ||
+      typeof x === "number" ||
+      typeof x === "boolean"
+  );
+}
+
+function primitiveArrayToListInput(arr: unknown[]): string {
+  return arr
+    .map((v) => {
+      if (v === null) return "null";
+      return String(v);
+    })
+    .join(", ");
+}
+
+function coercePrimitiveToken(token: string, hint?: unknown): unknown {
+  if (hint !== undefined) {
+    if (hint === null && token === "null") return null;
+    if (typeof hint === "number") {
+      const n = Number(token);
+      return Number.isNaN(n) ? token : n;
+    }
+    if (typeof hint === "boolean") {
+      if (/^true$/i.test(token)) return true;
+      if (/^false$/i.test(token)) return false;
+      return token;
+    }
+    if (typeof hint === "string") return token;
+  }
+  if (token === "null") return null;
+  if (/^true$/i.test(token)) return true;
+  if (/^false$/i.test(token)) return false;
+  if (/^-?\d+(?:\.\d+)?$/.test(token)) {
+    const n = Number(token);
+    if (!Number.isNaN(n)) return n;
+  }
+  return token;
+}
+
+/** Parse one input string back to a primitive JSON array (for save). */
+function parseListInputToPrimitiveArray(input: string, hint?: unknown[]): unknown[] {
+  const s = input.trim();
+  if (!s) return [];
+  if (s.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(s) as unknown;
+      if (Array.isArray(parsed) && isPrimitiveArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      /* fall through to split */
+    }
+  }
+  const tokens = s
+    .split(/[,\n]/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  return tokens.map((t, i) => coercePrimitiveToken(t, hint?.[i]));
+}
+
+/**
+ * Form stores primitive arrays as a single string; merge back to real arrays before save.
+ */
+function restorePrimitiveArraysFromForm(edited: unknown, snapshot: unknown): unknown {
+  if (edited === null || edited === undefined) return edited;
+  if (snapshot === null || snapshot === undefined) return edited;
+
+  if (Array.isArray(snapshot) && isPrimitiveArray(snapshot)) {
+    if (typeof edited === "string") {
+      return parseListInputToPrimitiveArray(edited, snapshot);
+    }
+    return edited;
+  }
+
+  if (
+    typeof snapshot === "object" &&
+    !Array.isArray(snapshot) &&
+    typeof edited === "object" &&
+    edited !== null &&
+    !Array.isArray(edited)
+  ) {
+    const snap = snapshot as Record<string, unknown>;
+    const out = { ...(edited as Record<string, unknown>) };
+    for (const k of Object.keys(out)) {
+      if (Object.prototype.hasOwnProperty.call(snap, k)) {
+        out[k] = restorePrimitiveArraysFromForm(out[k], snap[k]);
+      }
+    }
+    return out;
+  }
+
+  if (Array.isArray(snapshot) && Array.isArray(edited) && !isPrimitiveArray(snapshot)) {
+    return edited.map((e, i) => restorePrimitiveArraysFromForm(e, snapshot[i]));
+  }
+
+  return edited;
+}
+
 /** Split "value # comment" for tooltip (first ` # ` only). */
 function parseStringWithComment(s: string): { display: string; comment?: string } {
   const idx = s.indexOf(" # ");
@@ -42,7 +172,8 @@ function joinStringWithComment(display: string, comment?: string): string {
 }
 
 /**
- * Build form initial values (omit keys starting with `_`) and collect string comment tooltips.
+ * Build form initial values (includes `_` prefixed keys for read-only display, except YAML doc keys)
+ * and collect inline string comment tooltips via ` # ` (see `parseStringWithComment`).
  */
 function buildFormStateFromParams(
   obj: unknown,
@@ -63,6 +194,9 @@ function buildFormStateFromParams(
     return { initialValues: obj };
   }
   if (Array.isArray(obj)) {
+    if (isPrimitiveArray(obj)) {
+      return { initialValues: primitiveArrayToListInput(obj) };
+    }
     return {
       initialValues: obj.map((item, i) => buildFormStateFromParams(item, [...path, i], meta).initialValues),
     };
@@ -70,7 +204,7 @@ function buildFormStateFromParams(
   if (typeof obj === "object" && !Array.isArray(obj)) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      if (k.startsWith("_")) continue;
+      if (YAML_DOC_KEYS_HIDDEN_FROM_FORM.has(k)) continue;
       out[k] = buildFormStateFromParams(v, [...path, k], meta).initialValues;
     }
     return { initialValues: out };
@@ -103,6 +237,7 @@ function applyStringComments(
 
 /**
  * Merge edited form values back into the original snapshot, preserving `_` keys and nested `_` keys.
+ * When `edited` omits a nested object, still merges from snapshot so internal `_` keys are kept.
  */
 function deepMergePreserveUnderscore(snapshot: unknown, edited: unknown): unknown {
   if (Array.isArray(snapshot) && Array.isArray(edited)) {
@@ -143,18 +278,14 @@ function deepMergePreserveUnderscore(snapshot: unknown, edited: unknown): unknow
     }
     for (const [k, v] of Object.entries(snap)) {
       if (k.startsWith("_")) continue;
-      if (
-        v !== null &&
-        typeof v === "object" &&
-        !Array.isArray(v) &&
-        out[k] !== undefined &&
-        typeof out[k] === "object" &&
-        out[k] !== null &&
-        !Array.isArray(out[k])
-      ) {
-        out[k] = deepMergePreserveUnderscore(v, out[k]);
-      }
-      if (Array.isArray(v) && Array.isArray(out[k])) {
+      if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+        const existing = out[k];
+        if (existing !== undefined && typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
+          out[k] = deepMergePreserveUnderscore(v, existing);
+        } else {
+          out[k] = deepMergePreserveUnderscore(v, {});
+        }
+      } else if (Array.isArray(v) && Array.isArray(out[k])) {
         out[k] = deepMergePreserveUnderscore(v, out[k]);
       }
     }
@@ -187,44 +318,82 @@ function normalizeSkillParams(raw: unknown): Record<string, unknown> {
 
 function ParamsDynamicFields({
   sample,
+  shapeSample,
   namePath,
   meta,
+  lockedFieldTooltip,
 }: {
   sample: unknown;
+  /** Original value from `params` (before list fields were flattened to strings). */
+  shapeSample?: unknown;
   namePath: (string | number)[];
   meta: Map<string, string>;
+  lockedFieldTooltip?: string;
 }) {
+  const { t } = useTranslation("common");
   const label = namePath.length ? String(namePath[namePath.length - 1]) : "";
+  const locked = isLockedKeyPath(namePath);
+  const lockTip = locked && lockedFieldTooltip ? { title: lockedFieldTooltip } : undefined;
+
+  if (shapeSample !== undefined && Array.isArray(shapeSample) && isPrimitiveArray(shapeSample)) {
+    const inlineCommentTip = typeof sample === "string" ? meta.get(pathToKey(namePath)) : undefined;
+    const listTooltip = locked
+      ? lockTip
+      : inlineCommentTip
+        ? { title: inlineCommentTip }
+        : { title: t("tenantResources.skills.configModal.listFieldTooltip") };
+    return (
+      <Form.Item name={namePath} label={label} tooltip={listTooltip}>
+        <Input
+          placeholder={t("tenantResources.skills.configModal.listFieldPlaceholder")}
+          readOnly={locked}
+          className={`font-mono text-sm${locked ? " bg-neutral-100 dark:bg-neutral-800" : ""}`}
+        />
+      </Form.Item>
+    );
+  }
 
   if (sample === null || sample === undefined) {
     return (
-      <Form.Item name={namePath} label={label}>
-        <Input placeholder="null" />
+      <Form.Item name={namePath} label={label} tooltip={lockTip}>
+        <Input
+          placeholder="null"
+          readOnly={locked}
+          className={locked ? "bg-neutral-100 dark:bg-neutral-800" : undefined}
+        />
       </Form.Item>
     );
   }
 
   if (typeof sample === "string") {
-    const tip = meta.get(pathToKey(namePath));
+    const inlineCommentTip = meta.get(pathToKey(namePath));
+    const tooltip =
+      locked ? lockTip : inlineCommentTip ? { title: inlineCommentTip } : undefined;
     return (
-      <Form.Item name={namePath} label={label} tooltip={tip ? { title: tip } : undefined}>
-        <Input />
+      <Form.Item name={namePath} label={label} tooltip={tooltip}>
+        <Input
+          readOnly={locked}
+          className={locked ? "bg-neutral-100 dark:bg-neutral-800" : undefined}
+        />
       </Form.Item>
     );
   }
 
   if (typeof sample === "number") {
     return (
-      <Form.Item name={namePath} label={label}>
-        <InputNumber className="w-full" />
+      <Form.Item name={namePath} label={label} tooltip={lockTip}>
+        <InputNumber
+          className={`w-full${locked ? " bg-neutral-100 dark:bg-neutral-800" : ""}`}
+          readOnly={locked}
+        />
       </Form.Item>
     );
   }
 
   if (typeof sample === "boolean") {
     return (
-      <Form.Item name={namePath} label={label} valuePropName="checked">
-        <Switch />
+      <Form.Item name={namePath} label={label} valuePropName="checked" tooltip={lockTip}>
+        <Switch disabled={locked} />
       </Form.Item>
     );
   }
@@ -235,7 +404,7 @@ function ParamsDynamicFields({
         return null;
       }
       return (
-        <Form.Item name={namePath} label={label}>
+        <Form.Item name={namePath} label={label} tooltip={lockTip}>
           <Input className="font-mono text-sm" readOnly placeholder="[]" />
         </Form.Item>
       );
@@ -246,14 +415,25 @@ function ParamsDynamicFields({
           <div className="mb-2 text-sm font-medium text-neutral-600 dark:text-neutral-400">{label}</div>
         )}
         {sample.map((item, i) => (
-          <ParamsDynamicFields key={pathToKey([...namePath, i])} sample={item} namePath={[...namePath, i]} meta={meta} />
+          <ParamsDynamicFields
+            key={pathToKey([...namePath, i])}
+            sample={item}
+            shapeSample={Array.isArray(shapeSample) ? shapeSample[i] : undefined}
+            namePath={[...namePath, i]}
+            meta={meta}
+            lockedFieldTooltip={lockedFieldTooltip}
+          />
         ))}
       </div>
     );
   }
 
   if (typeof sample === "object" && !Array.isArray(sample)) {
-    const entries = Object.entries(sample as Record<string, unknown>).filter(([k]) => !k.startsWith("_"));
+    const entries = sortParamObjectEntries(
+      Object.entries(sample as Record<string, unknown>).filter(
+        ([k]) => !YAML_DOC_KEYS_HIDDEN_FROM_FORM.has(k)
+      )
+    );
     if (entries.length === 0) {
       if (namePath.length === 0) {
         return null;
@@ -277,7 +457,21 @@ function ParamsDynamicFields({
           }
         >
           {entries.map(([k, v]) => (
-            <ParamsDynamicFields key={k} sample={v} namePath={[...namePath, k]} meta={meta} />
+            <ParamsDynamicFields
+              key={k}
+              sample={v}
+              shapeSample={
+                shapeSample !== undefined &&
+                typeof shapeSample === "object" &&
+                shapeSample !== null &&
+                !Array.isArray(shapeSample)
+                  ? (shapeSample as Record<string, unknown>)[k]
+                  : undefined
+              }
+              namePath={[...namePath, k]}
+              meta={meta}
+              lockedFieldTooltip={lockedFieldTooltip}
+            />
           ))}
         </div>
       </div>
@@ -376,8 +570,10 @@ export default function SkillList({
 
     setSavingParams(true);
     try {
-      const values = (await form.validateFields()) as Record<string, unknown>;
-      const withComments = applyStringComments(values, metaRef.current) as Record<string, unknown>;
+      await form.validateFields();
+      const values = form.getFieldsValue(true) as Record<string, unknown>;
+      const restored = restorePrimitiveArraysFromForm(values, snapshotRef.current) as Record<string, unknown>;
+      const withComments = applyStringComments(restored, metaRef.current) as Record<string, unknown>;
       const merged = deepMergePreserveUnderscore(snapshotRef.current, withComments) as Record<string, unknown>;
 
       if (merged === null || typeof merged !== "object" || Array.isArray(merged)) {
@@ -496,7 +692,7 @@ export default function SkillList({
         confirmLoading={savingParams}
         okText={t("common.save")}
         cancelText={t("common.cancel")}
-        width={640}
+        width={660}
         centered
         destroyOnClose
         styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
@@ -529,8 +725,10 @@ export default function SkillList({
           {paramsEditorState && (
             <ParamsDynamicFields
               sample={paramsEditorState.initialValues}
+              shapeSample={paramsEditorState.parsed}
               namePath={[]}
               meta={paramsEditorState.meta}
+              lockedFieldTooltip={t("tenantResources.skills.configModal.lockedField")}
             />
           )}
         </Form>

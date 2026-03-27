@@ -216,12 +216,10 @@ def _apply_inline_comment_to_scalar(val: Any, comment: Optional[str]) -> Any:
 
 
 def _commented_tree_to_plain(node: Any) -> Any:
-    """Turn ruamel CommentedMap/Seq into plain dict/list; merge ``#`` into scalars for UI tooltips.
+    """Turn ruamel CommentedMap/Seq into plain dict/list.
 
-    Supports:
-    - Same-line: ``key: value  # tip``
-    - Line above next key (ruamel stores on previous key's tuple slot 2 with leading ``\\n``)
-    - Block header above first key in a mapping: ``ca.comment``
+    YAML ``#`` comments are merged only into **scalar** values as ``value # tip`` (same as the UI).
+    Block / line-above-key comments attached to **mapping or list values** are not persisted (no ``_comment`` keys).
     """
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
@@ -232,17 +230,8 @@ def _commented_tree_to_plain(node: Any) -> Any:
             v = node[k]
             plain_v = _commented_tree_to_plain(v)
             tip = _tooltip_for_commented_map_key(node, ordered_keys, i, k)
-            if tip is not None:
-                if isinstance(plain_v, dict):
-                    inner = dict(plain_v)
-                    prev = inner.pop("_comment", None)
-                    if isinstance(prev, str) and prev.strip():
-                        inner["_comment"] = f"{tip} {prev}".strip()
-                    else:
-                        inner = {"_comment": tip, **inner}
-                    plain_v = inner
-                elif not isinstance(plain_v, list):
-                    plain_v = _apply_inline_comment_to_scalar(plain_v, tip)
+            if tip is not None and not isinstance(plain_v, (dict, list)):
+                plain_v = _apply_inline_comment_to_scalar(plain_v, tip)
             out[k] = plain_v
         return out
     if isinstance(node, CommentedSeq):
@@ -258,10 +247,9 @@ def _commented_tree_to_plain(node: Any) -> Any:
 
 
 def _parse_yaml_with_ruamel_merge_eol_comments(text: str) -> Dict[str, Any]:
-    """Parse YAML with ruamel; merge ``#`` into scalar strings for API/UI tooltips.
+    """Parse YAML with ruamel; merge ``#`` into scalar values only (``value # tip`` for the UI).
 
-    Handles same-line ``key: v  # tip``, block headers above the first key in a map, and
-    comments on the line *above* a key (ruamel stores those on the previous key's node).
+    Does not inject ``_comment`` into nested objects; non-scalar-adjacent YAML comments are dropped.
     """
     from ruamel.yaml import YAML
     from ruamel.yaml.comments import CommentedMap
@@ -309,7 +297,7 @@ def _parse_yaml_fallback_pyyaml(text: str) -> Dict[str, Any]:
 
 
 def _parse_skill_params_from_config_bytes(raw: bytes) -> Dict[str, Any]:
-    """Parse JSON or YAML from config/config.yaml bytes (DB upload path; comments merged when possible)."""
+    """Parse JSON or YAML from config/config.yaml bytes (DB upload path; scalar ``#`` tips merged when possible)."""
     text = raw.decode("utf-8-sig").strip()
     if not text:
         return {}
@@ -368,7 +356,7 @@ def _write_skill_params_to_local_config_yaml(
     params: Dict[str, Any],
     local_skills_dir: str,
 ) -> None:
-    """Write params to config/config.yaml using ruamel so ``_comment`` and inline tips become ``#`` lines."""
+    """Write params to config/config.yaml; scalar ``value # tip`` strings round-trip as YAML comments above keys."""
     from utils.skill_params_utils import params_dict_to_roundtrip_yaml_text
 
     if not local_skills_dir:
@@ -425,9 +413,9 @@ class SkillService:
     def _overlay_params_from_local_config_yaml(self, skill: Dict[str, Any]) -> Dict[str, Any]:
         """Prefer ``<skills_dir>/<name>/config/config.yaml`` for ``params`` in API responses.
 
-        The database stores comment-free JSON (no ``_comment`` keys, no `` # `` suffixes).
-        On-disk YAML may use ``#`` lines; when the file exists, parse with ruamel (merging
-        comments into the UI representation) and use for ``params``; otherwise use DB.
+        The database stores comment-free JSON (no legacy ``_comment`` keys, no `` # `` suffixes).
+        On-disk YAML may use ``#`` lines; when the file exists, parse with ruamel (inline tips
+        on scalars only) and use for ``params``; otherwise use DB.
         """
         out = dict(skill)
         local_dir = self._resolve_local_skills_dir_for_overlay()
@@ -443,7 +431,7 @@ class SkillService:
             with open(path, "rb") as f:
                 raw = f.read()
             out["params"] = _parse_skill_params_from_config_bytes(raw)
-            logger.info("Using local config.yaml params (with merged comments) for skill %s", name)
+            logger.info("Using local config.yaml params (scalar inline comment tooltips) for skill %s", name)
         except Exception as exc:
             logger.warning(
                 "Could not use local config.yaml for skill %s params (using DB): %s",
