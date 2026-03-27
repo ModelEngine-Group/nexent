@@ -1,3 +1,4 @@
+import type { SkillListItem } from "@/services/skillService";
 import { API_ENDPOINTS } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
@@ -1245,8 +1246,8 @@ export const createSkillFromFile = async (
  */
 export const searchSkillsByName = <T extends { name: string }>(
   prefix: string,
-  allSkills: T[]
-): T[] => {
+  allSkills: SkillListItem[]
+): SkillListItem[] => {
   if (!prefix || prefix.trim() === "") {
     return [];
   }

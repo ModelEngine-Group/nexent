@@ -40,7 +40,7 @@ export interface SkillData {
  * Skill item from list
  */
 export interface SkillListItem {
-  skill_id: number;
+  skill_id: string;
   name: string;
   description?: string;
   tags: string[];
