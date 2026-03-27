@@ -31,7 +31,7 @@ from services.file_management_service import get_llm_model
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
 from database.client import minio_client
 from services.image_service import get_vlm_model
-from services.tool_local_service import get_local_tools_classes, get_local_tools_description_zh
+from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
 
@@ -111,8 +111,13 @@ def get_local_tools() -> List[ToolInfo]:
         init_params_list = []
         sig = inspect.signature(tool_class.__init__)
         for param_name, param in sig.parameters.items():
-            if param_name == "self" or param.default.exclude:
+            if param_name == "self":
                 continue
+            
+            # Check if parameter has a default value and if it should be excluded
+            if param.default != inspect.Parameter.empty:
+                if hasattr(param.default, 'exclude') and param.default.exclude:
+                    continue
 
             # Get description in both languages
             param_description = param.default.description if hasattr(param.default, 'description') else ""
