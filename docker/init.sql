@@ -1075,6 +1075,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
     skill_description VARCHAR(1000),
     skill_tags JSON,
     skill_content TEXT,
+    params JSON,
     source VARCHAR(30) DEFAULT 'official',
     created_by VARCHAR(100),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -1094,6 +1095,7 @@ COMMENT ON COLUMN nexent.ag_skill_info_t.skill_name IS 'Skill name, globally uni
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_description IS 'Skill description text';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_tags IS 'Skill tags stored as JSON array';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_content IS 'Skill content or prompt text';
+COMMENT ON COLUMN nexent.ag_skill_info_t.params IS 'Skill configuration parameters stored as JSON object';
 COMMENT ON COLUMN nexent.ag_skill_info_t.source IS 'Skill source: official, custom, or partner';
 COMMENT ON COLUMN nexent.ag_skill_info_t.created_by IS 'Creator ID';
 COMMENT ON COLUMN nexent.ag_skill_info_t.create_time IS 'Creation timestamp';
