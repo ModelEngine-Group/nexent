@@ -1122,6 +1122,19 @@ main_deploy() {
   # Pull MCP image for later use
   pull_mcp_image
 
+  # Check if MODEL_ENGINE_CLAW_ENABLED is true and start Kafka if needed
+  if grep -q "^MODEL_ENGINE_CLAW_ENABLED=true$" .env; then
+      echo "🔄 Starting Kafka services for MODEL_ENGINE_CLAW..."
+      if ${docker_compose_command} -p nexent -f docker-compose-kafka.yml up -d; then
+          echo "✅ Kafka services started successfully"
+      else
+          echo "❌ Failed to start Kafka services"
+      fi
+      echo ""
+      echo "--------------------------------"
+      echo ""
+  fi
+
   echo "🎉  Deployment completed successfully!"
   echo "🌐  You can now access the application at http://localhost:3000"
 }
