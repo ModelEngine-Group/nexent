@@ -478,39 +478,59 @@ async def delete_skill_file(
         # Read config to get temp_filename for validation
         config_content = service.get_skill_file_content(skill_name, "config.yaml")
         if config_content is None:
-        # Normalize and validate the requested file path against temp_filename
-        # Use basename to strip any directory components from file_path
-        safe_file_path = os.path.basename(os.path.normpath(file_path))
-        if not temp_filename or safe_file_path != temp_filename:
+            raise HTTPException(status_code=404, detail="Config file not found")
+
+        # Parse config to get temp_filename
         import yaml
         config = yaml.safe_load(config_content)
-        # Validate skill_name to avoid directory traversal or unexpected characters
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", skill_name):
-            raise HTTPException(status_code=400, detail="Invalid skill name")
-
         temp_filename = config.get("temp_filename", "")
 
-        full_path = os.path.normpath(os.path.join(local_dir, safe_file_path))
-        if not temp_filename or file_path != temp_filename:
-            raise HTTPException(status_code=400, detail="Can only delete temp_filename files")
-
-        # Get the full path and validate it stays within local_dir (path traversal protection)
+        # Get the base directory for the skill
         local_dir = os.path.join(service.skill_manager.local_skills_dir, skill_name)
-        full_path = os.path.normpath(os.path.join(local_dir, file_path))
 
-        # Verify the normalized path is still within local_dir
-            raise HTTPException(status_code=404, detail=f"File not found: {safe_file_path}")
+        # Check for path traversal patterns in the raw file_path BEFORE any normalization
+        # This catches attempts like ../../etc/passwd or /etc/passwd
+        normalized_for_check = os.path.normpath(file_path)
+        if ".." in file_path or file_path.startswith("/") or (os.sep in file_path and file_path.startswith(os.sep)):
+            # Additional check: ensure the normalized path doesn't escape local_dir
+            abs_local_dir = os.path.abspath(local_dir)
+            abs_full_path = os.path.abspath(os.path.join(local_dir, normalized_for_check))
+            try:
+                common = os.path.commonpath([abs_local_dir, abs_full_path])
+                if common != abs_local_dir:
+                    raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
+
+        # Normalize the requested file path - use basename to strip directory components
+        safe_file_path = os.path.basename(os.path.normpath(file_path))
+
+        # Build full path and validate it stays within local_dir
+        full_path = os.path.normpath(os.path.join(local_dir, safe_file_path))
+        abs_local_dir = os.path.abspath(local_dir)
         abs_full_path = os.path.abspath(full_path)
-        if os.path.commonpath([abs_local_dir, abs_full_path]) != abs_local_dir:
+
+        # Check for path traversal: abs_full_path should be within abs_local_dir
+        try:
+            common = os.path.commonpath([abs_local_dir, abs_full_path])
+            if common != abs_local_dir:
+                raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
+        except ValueError:
+            # Different drives on Windows
             raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
 
-        return JSONResponse(content={"message": f"File {safe_file_path} deleted successfully"})
-            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        # Validate the filename matches temp_filename
+        if not temp_filename or safe_file_path != temp_filename:
+            raise HTTPException(status_code=400, detail="Can only delete temp_filename files")
+
+        # Check if file exists
+        if not os.path.exists(full_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {safe_file_path}")
 
         os.remove(full_path)
         logger.info(f"Deleted skill file: {full_path}")
 
-        return JSONResponse(content={"message": f"File {file_path} deleted successfully"})
+        return JSONResponse(content={"message": f"File {safe_file_path} deleted successfully"})
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except HTTPException:

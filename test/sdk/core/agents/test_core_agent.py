@@ -179,7 +179,11 @@ for name, module in _module_mocks.items():
 
 def _load_core_agent_module():
     """Load core_agent module directly without going through __init__.py."""
-    core_agent_path = r"C:\Project\nexent\sdk\nexent\core\agents\core_agent.py"
+    # Use cross-platform path construction
+    # __file__ is C:\Project\nexent\test\sdk\core\agents\test_core_agent.py
+    # We need to go up 5 levels to get to C:\Project\nexent
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+    core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "core_agent.py")
 
     # Create full package hierarchy
     sys.modules["sdk"] = ModuleType("sdk")
