@@ -32,34 +32,6 @@ COMMENT ON COLUMN nexent.user_token_info_t.created_by IS 'Creator ID, audit fiel
 COMMENT ON COLUMN nexent.user_token_info_t.updated_by IS 'Last updater ID, audit field';
 COMMENT ON COLUMN nexent.user_token_info_t.delete_flag IS 'Soft delete flag, Y means deleted';
 
--- Create unique index on access_key to ensure uniqueness
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_info_access_key ON nexent.user_token_info_t(access_key) WHERE delete_flag = 'N';
-
--- Create index on user_id for query performance
-CREATE INDEX IF NOT EXISTS idx_user_token_info_user_id ON nexent.user_token_info_t(user_id) WHERE delete_flag = 'N';
-
--- Create a function to update the update_time column
-CREATE OR REPLACE FUNCTION update_user_token_info_update_time()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.update_time = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Add comment to the function
-COMMENT ON FUNCTION update_user_token_info_update_time() IS 'Function to update the update_time column when a record in user_token_info_t is updated';
-
--- Create a trigger to call the function before each update
-DROP TRIGGER IF EXISTS update_user_token_info_update_time_trigger ON nexent.user_token_info_t;
-CREATE TRIGGER update_user_token_info_update_time_trigger
-BEFORE UPDATE ON nexent.user_token_info_t
-FOR EACH ROW
-EXECUTE FUNCTION update_user_token_info_update_time();
-
--- Add comment to the trigger
-COMMENT ON TRIGGER update_user_token_info_update_time_trigger ON nexent.user_token_info_t IS 'Trigger to call update_user_token_info_update_time function before each update on user_token_info_t table';
-
 
 -- Create the user_token_usage_log_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.user_token_usage_log_t (
@@ -91,20 +63,6 @@ COMMENT ON COLUMN nexent.user_token_usage_log_t.update_time IS 'Update time, aud
 COMMENT ON COLUMN nexent.user_token_usage_log_t.created_by IS 'Creator ID, audit field';
 COMMENT ON COLUMN nexent.user_token_usage_log_t.updated_by IS 'Last updater ID, audit field';
 COMMENT ON COLUMN nexent.user_token_usage_log_t.delete_flag IS 'Soft delete flag, Y means deleted';
-
--- Create index on token_id for query performance
-CREATE INDEX IF NOT EXISTS idx_user_token_usage_log_token_id ON nexent.user_token_usage_log_t(token_id);
-
--- Create index on call_function_name for query performance
-CREATE INDEX IF NOT EXISTS idx_user_token_usage_log_function_name ON nexent.user_token_usage_log_t(call_function_name);
-
--- Add foreign key constraint
-ALTER TABLE nexent.user_token_usage_log_t
-ADD CONSTRAINT fk_user_token_usage_log_token_id
-FOREIGN KEY (token_id)
-REFERENCES nexent.user_token_info_t(token_id)
-ON DELETE CASCADE;
-
 
 -- Migration: Remove partner_mapping_id_t table for northbound conversation ID mapping
 -- Date: 2026-03-10

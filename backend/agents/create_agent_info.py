@@ -1,10 +1,10 @@
 import threading
 import logging
+from typing import List
 from urllib.parse import urljoin
 from datetime import datetime
 
 from jinja2 import Template, StrictUndefined
-from smolagents.utils import BASE_BUILTIN_MODULES
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig
 from nexent.memory.memory_service import search_memory_in_levels
@@ -27,9 +27,117 @@ from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE
+import re
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
+
+
+def _get_skills_for_template(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int = 0
+) -> List[dict]:
+    """Get skills list for prompt template injection.
+
+    Args:
+        agent_id: Agent ID
+        tenant_id: Tenant ID
+        version_no: Version number
+
+    Returns:
+        List of skill dicts with name and description
+    """
+    try:
+        from services.skill_service import SkillService
+        skill_service = SkillService()
+        enabled_skills = skill_service.get_enabled_skills_for_agent(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no
+        )
+        return [
+            {"name": s.get("name", ""), "description": s.get("description", "")}
+            for s in enabled_skills
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to get skills for template: {e}")
+        return []
+
+
+def _get_skill_script_tools(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int = 0
+) -> List[ToolConfig]:
+    """Get tool config for skill script execution and skill reading.
+
+    Args:
+        agent_id: Agent ID for filtering available skills in error messages.
+        tenant_id: Tenant ID for filtering available skills in error messages.
+        version_no: Version number for filtering available skills.
+
+    Returns:
+        List of ToolConfig for skill execution and reading tools
+    """
+    from consts.const import CONTAINER_SKILLS_PATH
+
+    skill_context = {
+        "agent_id": agent_id,
+        "tenant_id": tenant_id,
+        "version_no": version_no,
+    }
+
+    try:
+        return [
+            ToolConfig(
+                class_name="RunSkillScriptTool",
+                name="run_skill_script",
+                description="Execute a skill script with given parameters. Use this to run Python or shell scripts that are part of a skill.",
+                inputs='{"skill_name": "str", "script_path": "str", "params": "dict"}',
+                output_type="string",
+                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                source="builtin",
+                usage="builtin",
+                metadata=skill_context,
+            ),
+            ToolConfig(
+                class_name="ReadSkillMdTool",
+                name="read_skill_md",
+                description="Read skill execution guide and optional additional files. Always reads SKILL.md first, then optionally reads additional files.",
+                inputs='{"skill_name": "str", "additional_files": "list[str]"}',
+                output_type="string",
+                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                source="builtin",
+                usage="builtin",
+                metadata=skill_context,
+            ),
+            ToolConfig(
+                class_name="ReadSkillConfigTool",
+                name="read_skill_config",
+                description="Read the config.yaml file from a skill directory. Returns JSON containing configuration variables needed for skill workflows.",
+                inputs='{"skill_name": "str"}',
+                output_type="string",
+                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                source="builtin",
+                usage="builtin",
+                metadata=skill_context,
+            ),
+            ToolConfig(
+                class_name="WriteSkillFileTool",
+                name="write_skill_file",
+                description="Write content to a file within a skill directory. Creates parent directories if they do not exist.",
+                inputs='{"skill_name": "str", "file_path": "str", "content": "str"}',
+                output_type="string",
+                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                source="builtin",
+                usage="builtin",
+                metadata=skill_context,
+            )
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to load skill script tool: {e}")
+        return []
 
 
 async def create_model_config_list(tenant_id):
@@ -169,22 +277,26 @@ async def create_agent_config(
         logger.error(f"Failed to build knowledge base summary: {e}")
 
     # Assemble system_prompt
-    if duty_prompt or constraint_prompt or few_shots_prompt:
-        system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render({
-            "duty": duty_prompt,
-            "constraint": constraint_prompt,
-            "few_shots": few_shots_prompt,
-            "tools": {tool.name: tool for tool in tool_list},
-            "managed_agents": {agent.name: agent for agent in managed_agents},
-            "authorized_imports": str(BASE_BUILTIN_MODULES),
-            "APP_NAME": app_name,
-            "APP_DESCRIPTION": app_description,
-            "memory_list": memory_list,
-            "knowledge_base_summary": knowledge_base_summary,
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-    else:
-        system_prompt = agent_info.get("prompt", "")
+    # Get skills list for prompt template
+    skills = _get_skills_for_template(agent_id, tenant_id, version_no)
+
+    render_kwargs = {
+        "duty": duty_prompt,
+        "constraint": constraint_prompt,
+        "few_shots": few_shots_prompt,
+        "tools": {tool.name: tool for tool in tool_list},
+        "skills": skills,
+        "managed_agents": {agent.name: agent for agent in managed_agents},
+        "APP_NAME": app_name,
+        "APP_DESCRIPTION": app_description,
+        "memory_list": memory_list,
+        "knowledge_base_summary": knowledge_base_summary,
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "user_id": user_id,
+    }
+    system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
+
+    _print_prompt_with_token_count(system_prompt, agent_id, "BEFORE_INJECTION")
 
     if agent_info.get("model_id") is not None:
         model_info = get_model_by_model_id(agent_info.get("model_id"))
@@ -197,9 +309,10 @@ async def create_agent_config(
         prompt_templates=await prepare_prompt_templates(
             is_manager=len(managed_agents) > 0,
             system_prompt=system_prompt,
-            language=language
+            language=language,
+            agent_id=agent_id
         ),
-        tools=tool_list,
+        tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
         max_steps=agent_info.get("max_steps", 10),
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
@@ -296,7 +409,12 @@ async def discover_langchain_tools():
     return langchain_tools
 
 
-async def prepare_prompt_templates(is_manager: bool, system_prompt: str, language: str = 'zh'):
+async def prepare_prompt_templates(
+    is_manager: bool,
+    system_prompt: str,
+    language: str = 'zh',
+    agent_id: int = None,
+):
     """
     Prepare prompt templates, support multiple languages
 
@@ -304,13 +422,31 @@ async def prepare_prompt_templates(is_manager: bool, system_prompt: str, languag
         is_manager: Whether it is a manager mode
         system_prompt: System prompt content
         language: Language code ('zh' or 'en')
+        agent_id: Agent ID for fetching skill instances
 
     Returns:
         dict: Prompt template configuration
     """
     prompt_templates = get_agent_prompt_template(is_manager, language)
     prompt_templates["system_prompt"] = system_prompt
+
+    # Print final prompt with all injections
+    _print_prompt_with_token_count(prompt_templates["system_prompt"], agent_id, "FINAL_PROMPT")
+
     return prompt_templates
+
+
+def _print_prompt_with_token_count(prompt: str, agent_id: int = None, stage: str = "PROMPT"):
+    """Print prompt content and estimate token count using tiktoken."""
+    try:
+        import tiktoken
+        encoding = tiktoken.get_encoding("cl100k_base")
+        token_count = len(encoding.encode(prompt))
+        logger.info(f"[Skill Debug][{stage}] Agent {agent_id} token count: {token_count}")
+        logger.info(f"[Skill Debug][{stage}] Agent {agent_id} prompt:\n{prompt}")
+    except Exception as e:
+        logger.warning(f"[Skill Debug][{stage}] Failed to count tokens: {e}")
+        logger.info(f"[Skill Debug][{stage}] Agent {agent_id} prompt:\n{prompt}")
 
 
 async def join_minio_file_description_to_query(minio_files, query):
