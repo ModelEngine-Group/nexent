@@ -1,0 +1,108 @@
+{{- if eq .Values.global.deploymentVersion "full" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-supabase-kong
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-supabase-kong
+  annotations:
+    "helm.sh/hook-weight": "0"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nexent-supabase-kong
+  template:
+    metadata:
+      labels:
+        app: nexent-supabase-kong
+    spec:
+      containers:
+        - name: kong
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args: ["/scripts/wrapper.sh"]
+          ports:
+            - containerPort: 8000
+              name: proxy
+            - containerPort: 8443
+              name: proxy-ssl
+          env:
+            - name: KONG_NGINX_WORKER_PROCESSES
+              value: "3"
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /usr/local/kong/kong.yml
+            - name: KONG_DNS_ORDER
+              value: LAST,A,CNAME
+            - name: KONG_PLUGINS
+              value: request-transformer,cors,key-auth,acl,basic-auth
+            - name: KONG_NGINX_PROXY_PROXY_BUFFER_SIZE
+              value: "160k"
+            - name: KONG_NGINX_PROXY_PROXY_BUFFERS
+              value: "64 160k"
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: SUPABASE_KEY
+            - name: SUPABASE_SERVICE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: SERVICE_ROLE_KEY
+            - name: DASHBOARD_USERNAME
+              value: {{ .Values.config.dashboardUsername | quote }}
+            - name: DASHBOARD_PASSWORD
+              value: {{ .Values.config.dashboardPassword | quote }}
+          volumeMounts:
+            - mountPath: /usr/local/kong/template.yml
+              name: config
+              subPath: template.yml
+            - mountPath: /scripts
+              name: wrapper
+          lifecycle:
+            preStop:
+              exec:
+                command: ["kong", "quit"]
+          livenessProbe:
+            exec:
+              command: ["kong", "health"]
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command: ["kong", "health"]
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: {{ .Values.resources.requests.memory }}
+              cpu: {{ .Values.resources.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.limits.memory }}
+              cpu: {{ .Values.resources.limits.cpu }}
+      volumes:
+        - name: config
+          configMap:
+            name: nexent-supabase-kong-config
+            defaultMode: 0777
+            items:
+            - key: template.yml
+              path: template.yml
+        - name: wrapper
+          configMap:
+            name: nexent-supabase-kong-config
+            defaultMode: 0777
+            items:
+            - key: wrapper.sh
+              path: wrapper.sh
+{{- end }}

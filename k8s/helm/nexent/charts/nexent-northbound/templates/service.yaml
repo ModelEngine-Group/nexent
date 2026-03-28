@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-northbound
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: {{ .Values.services.northbound.type }}
+  ports:
+    - port: 5013
+      targetPort: 5013
+      name: http
+      {{- if eq .Values.services.northbound.type "NodePort" }}
+      nodePort: {{ .Values.services.northbound.nodePort }}
+      {{- end }}
+  selector:
+    app: nexent-northbound
