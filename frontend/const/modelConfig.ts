@@ -18,6 +18,7 @@ export const MODEL_SOURCES = {
   CUSTOM: "custom",
   DASHSCOPE: "dashscope",
   TOKENPONY: "tokenpony",
+  MINIMAX: "minimax",
 } as const;
 
 // Model status constants
@@ -44,6 +45,7 @@ export const MODEL_PROVIDER_KEYS = [
   "aliyuncs",
   "tokenpony",
   "dashscope",
+  "minimax",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -58,6 +60,7 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   aliyuncs: "aliyuncs",
   tokenpony: "tokenpony",
   dashscope: "dashscope",
+  minimax: "minimax",
 };
 
 // Icon filenames for providers
@@ -70,6 +73,7 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   aliyuncs: "/aliyuncs.png",
   dashscope:"/aliyuncs.png",
   tokenpony: "/tokenpony.png",
+  minimax: "/minimax.png",
 };
 
 export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";
@@ -84,7 +88,8 @@ export const PROVIDER_LINKS: Record<string, string> = {
   deepseek: "https://platform.deepseek.com/",
   qwen: "https://bailian.console.aliyun.com/",
   jina: "https://jina.ai/",
-  baai: "https://www.baai.ac.cn/"
+  baai: "https://www.baai.ac.cn/",
+  minimax: "https://www.minimaxi.com/",
 };
 
 // User role constants

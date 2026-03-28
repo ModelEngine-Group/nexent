@@ -18,6 +18,7 @@ import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
 import { useDashscopeModelList } from "@/hooks/model/useDashscopeModelList";
 import { useTokenPonyModelList } from "@/hooks/model/useTokenponyModelList";
+import { useMinimaxModelList } from "@/hooks/model/useMinimaxModelList";
 import log from "@/lib/logger";
 import {
   ModelChunkSizeSlider,
@@ -274,6 +275,14 @@ export const ModelAddDialog = ({
     setLoadingModelList,
     tenantId,
   });
+  const minimaxHook = useMinimaxModelList({
+    form,
+    setModelList,
+    setSelectedModelIds,
+    setShowModelList,
+    setLoadingModelList,
+    tenantId,
+  });
   let getModelList;
   let getProviderSelectedModalList;
 
@@ -284,6 +293,8 @@ export const ModelAddDialog = ({
     ({ getModelList, getProviderSelectedModalList } = dashscopeHook);
   } else if (form.provider === "tokenpony") {
     ({ getModelList, getProviderSelectedModalList } = tokenponyHook);
+  } else if (form.provider === "minimax") {
+    ({ getModelList, getProviderSelectedModalList } = minimaxHook);
   }
   // Reset form to default state
   const resetForm = useCallback(() => {
@@ -824,6 +835,7 @@ export const ModelAddDialog = ({
               <Option value="silicon">{t("model.provider.silicon")}</Option>
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
               <Option value="tokenpony">{t("model.provider.tokenpony")}</Option>
+              <Option value="minimax">{t("model.provider.minimax")}</Option>
             </Select>
             {/* ModelEngine URL input (only when provider is ModelEngine) */}
             {form.provider === "modelengine" && (
