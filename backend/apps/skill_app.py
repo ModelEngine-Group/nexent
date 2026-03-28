@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Header
@@ -477,13 +478,19 @@ async def delete_skill_file(
         # Read config to get temp_filename for validation
         config_content = service.get_skill_file_content(skill_name, "config.yaml")
         if config_content is None:
-            raise HTTPException(status_code=404, detail="Skill config.yaml not found")
-
+        # Normalize and validate the requested file path against temp_filename
+        # Use basename to strip any directory components from file_path
+        safe_file_path = os.path.basename(os.path.normpath(file_path))
+        if not temp_filename or safe_file_path != temp_filename:
         import yaml
         config = yaml.safe_load(config_content)
+        # Validate skill_name to avoid directory traversal or unexpected characters
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", skill_name):
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+
         temp_filename = config.get("temp_filename", "")
 
-        # Validate that the file_path matches the temp_filename from config
+        full_path = os.path.normpath(os.path.join(local_dir, safe_file_path))
         if not temp_filename or file_path != temp_filename:
             raise HTTPException(status_code=400, detail="Can only delete temp_filename files")
 
@@ -492,12 +499,12 @@ async def delete_skill_file(
         full_path = os.path.normpath(os.path.join(local_dir, file_path))
 
         # Verify the normalized path is still within local_dir
-        abs_local_dir = os.path.abspath(local_dir)
+            raise HTTPException(status_code=404, detail=f"File not found: {safe_file_path}")
         abs_full_path = os.path.abspath(full_path)
         if os.path.commonpath([abs_local_dir, abs_full_path]) != abs_local_dir:
             raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
 
-        if not os.path.exists(full_path):
+        return JSONResponse(content={"message": f"File {safe_file_path} deleted successfully"})
             raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
 
         os.remove(full_path)
