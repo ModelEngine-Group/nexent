@@ -7,12 +7,12 @@ import socket
 import yaml
 from confluent_kafka import Producer
 
-
 CONFIG_PATH = "/root/.openclaw/openclaw.json"
 KAFKA_TOPIC = "instance-monitoring"
 KAFKA_CONFIG_PATH = "/opt/nexent/config/agent_config.yaml"
 
 INSTANCE_ID_FILE = os.path.join(os.path.dirname(__file__), "instance_id.txt")
+
 
 def get_instance_id():
     if os.path.exists(INSTANCE_ID_FILE):
@@ -40,7 +40,7 @@ def get_file_creation_time(file_path):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     except Exception:
         return "1970-01-01T00:00:00Z"
-    
+
 
 def load_kafka_config():
     """从 YAML 文件读取 Kafka 配置。不存在或解析失败时返回 None。"""
@@ -69,6 +69,35 @@ def load_kafka_config():
 AUTHOR = ""
 DESCRIPTION = ""
 STATUS = "running"
+
+
+def load_agent_config():
+    """从 agent_config.yaml 读取全量配置，优先返回 dict"""
+    if not os.path.exists(KAFKA_CONFIG_PATH):
+        print(f"Agent config file not found: {KAFKA_CONFIG_PATH}")
+        return {}
+
+    if yaml is None:
+        print("PyYAML not installed, cannot parse agent config")
+        return {}
+
+    try:
+        with open(KAFKA_CONFIG_PATH, 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f)
+            if isinstance(cfg, dict):
+                return cfg
+            print(f"Agent config ({KAFKA_CONFIG_PATH}) is not a dict")
+            return {}
+    except Exception as e:
+        print(f"Failed to load agent config: {e}")
+        return {}
+
+
+def get_created_by_user_id():
+    """从 agent_config.yaml 获取 user_name，失败时返回空字符串"""
+    cfg = load_agent_config()
+    return cfg.get('user_name') or cfg.get('username') or cfg.get('userName') or cfg.get('user_id') or AUTHOR
+
 
 def extract_token_usage(config):
     """遍历 /root/.openclaw/agents/*/sessions/sessions.json 统计所有 totalTokens"""
@@ -112,6 +141,7 @@ def load_openclaw_config():
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+
 def extract_model(config):
     """从 config 中提取所有 models 的 name"""
     names = []
@@ -126,6 +156,7 @@ def extract_model(config):
         pass
     return names
 
+
 def extract_skills(config):
     """从 config 中提取所有技能 key"""
     try:
@@ -133,6 +164,7 @@ def extract_skills(config):
         return list(entries.keys()) if entries else []
     except Exception:
         return []
+
 
 def extract_plugins(config):
     """从 config 中提取所有启用的插件 key"""
@@ -146,27 +178,59 @@ def extract_plugins(config):
     except Exception:
         return []
 
-def extract_chat_url(config):
-    """从 config 中提取 gateway 的 allowedOrigins，取第一个非 localhost 的 URL，并追加 #token={token}"""
-    default_url = "http://localhost:30789"
-    try:
-        origins = config.get("gateway", {}).get("controlUi", {}).get("allowedOrigins", [])
-        selected = None
-        for origin in origins:
-            if origin and "localhost" not in origin and "127.0.0.1" not in origin:
-                selected = origin
-                break
-        if not selected:
-            selected = origins[0] if origins else default_url
 
+def extract_chat_url(config):
+    """从 openclaw gateway status 输出中提取 Dashboard URL，优先取命令结果；若失败再用 config.allowedOrigins，最后返回默认值。"""
+    default_url = "http://localhost:18789"
+
+    selected = None
+
+    # 优先通过 openclaw gateway status 获取 Dashboard 地址
+    try:
+        import subprocess
+        output = subprocess.check_output(
+            ["openclaw", "gateway", "status"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=15,
+        )
+        for line in output.splitlines():
+            if line.strip().startswith("Dashboard:"):
+                candidate = line.split("Dashboard:", 1)[1].strip()
+                if candidate:
+                    # 允许带/或不带/，后面 token 追加逻辑统一处理
+                    selected = candidate.rstrip("/")
+                    break
+    except Exception:
+        selected = None
+
+    # 回退到原来的 allowedOrigins 逻辑
+    if not selected:
+        try:
+            origins = config.get("gateway", {}).get("controlUi", {}).get("allowedOrigins", [])
+            for origin in origins:
+                if origin and "localhost" not in origin and "127.0.0.1" not in origin:
+                    selected = origin.rstrip("/")
+                    break
+            if not selected:
+                selected = origins[0].rstrip("/") if origins else None
+        except Exception:
+            selected = None
+
+    if not selected:
+        selected = default_url
+
+    # 追加 token
+    try:
         auth = config.get("gateway", {}).get("auth", {})
         token = auth.get("token") if auth.get("mode") == "token" else None
         if token:
             return f"{selected}/#token={token}"
-
-        return selected
     except Exception:
-        return default_url
+        pass
+
+    return selected
+
 
 def build_report_message(config):
     now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -174,7 +238,7 @@ def build_report_message(config):
     report = {
         "id": get_instance_id(),
         "name": socket.gethostname(),
-        "created_by_user_id": AUTHOR,
+        "created_by_user_id": get_created_by_user_id(),
         "description": DESCRIPTION,
         "status": STATUS,
         "created_at": get_file_creation_time(KAFKA_CONFIG_PATH),
@@ -186,6 +250,7 @@ def build_report_message(config):
         "chat_url": extract_chat_url(config)
     }
     return report
+
 
 def kafka_producer():
     kafka_cfg = load_kafka_config()
@@ -214,11 +279,13 @@ def kafka_producer():
         print(f"Failed to create Kafka producer: {e}")
         return None
 
+
 def delivery_report(err, msg):
     if err:
         print(f"Kafka delivery failed: {err}")
     else:
         print(f"Message delivered to {msg.topic()}[{msg.partition()}]")
+
 
 def main():
     try:
