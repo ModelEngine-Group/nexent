@@ -28,7 +28,7 @@ class KnowledgeBaseSearchTool(Tool):
     )
     inputs = {
         "query": {"type": "string", "description": "The search query to perform."},
-        "index_names": {"type": "string", "description": "The list of index names to search, comma-separated. Required - must specify at least one index name."},
+        "index_names": {"type": "array", "description": "The list of index names to search, comma-separated. Required - must specify at least one index name."},
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value
@@ -75,9 +75,9 @@ class KnowledgeBaseSearchTool(Tool):
         self.running_prompt_en = "Searching the knowledge base..."
 
 
-    def forward(self, query: str, index_names: str) -> str:
+    def forward(self, query: str, index_names: List[str]) -> str:
         # Parse index_names from string (always required)
-        search_index_names = [name.strip() for name in index_names.split(",") if name.strip()]
+        search_index_names = index_names
 
         # Use the instance search_mode
         search_mode = self.search_mode
