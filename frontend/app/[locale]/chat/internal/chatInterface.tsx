@@ -41,6 +41,9 @@ import {
 import { Layout } from "antd";
 import log from "@/lib/logger";
 
+/** Idle timeout: abort if no SSE data for this long (35 minutes). Resets on each chunk. */
+const STREAM_IDLE_TIMEOUT_MS = 35 * 60 * 1000;
+
 const stepIdCounter = { current: 0 };
 
 // Get internationalization key based on message type
@@ -536,7 +539,7 @@ export function ChatInterface() {
             }
           }
           conversationTimeoutsRef.current.delete(id);
-        }, 120000);
+        }, STREAM_IDLE_TIMEOUT_MS);
         conversationTimeoutsRef.current.set(id, newTimeout);
       };
 
@@ -745,7 +748,7 @@ export function ChatInterface() {
           // Create new AbortController for current request
           const controller = new AbortController();
 
-          // Set timeout timer - 120 seconds
+          // Set timeout timer (35 minutes)
           timeoutRef.current = setTimeout(() => {
             if (controller && !controller.signal.aborted) {
               try {
@@ -755,7 +758,7 @@ export function ChatInterface() {
               }
             }
             timeoutRef.current = null;
-          }, 120000);
+          }, STREAM_IDLE_TIMEOUT_MS);
 
           // Save current controller reference
           abortControllerRef.current = controller;
@@ -872,7 +875,7 @@ export function ChatInterface() {
         // Create new AbortController for current request
         const controller = new AbortController();
 
-        // Set timeout timer - 120 seconds
+        // Set timeout timer (35 minutes)
         timeoutRef.current = setTimeout(() => {
           if (controller && !controller.signal.aborted) {
             try {
@@ -882,7 +885,7 @@ export function ChatInterface() {
             }
           }
           timeoutRef.current = null;
-        }, 120000);
+        }, STREAM_IDLE_TIMEOUT_MS);
 
         // Save current controller reference
         abortControllerRef.current = controller;
