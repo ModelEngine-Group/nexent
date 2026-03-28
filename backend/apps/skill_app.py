@@ -468,6 +468,12 @@ async def delete_skill_file(
         _, _ = get_current_user_id(authorization)
         service = SkillService()
 
+        # Validate skill_name so it cannot be used for path traversal
+        if not skill_name:
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+        if os.sep in skill_name or "/" in skill_name or ".." in skill_name:
+            raise HTTPException(status_code=400, detail="Invalid skill name")
+
         # Read config to get temp_filename for validation
         config_content = service.get_skill_file_content(skill_name, "config.yaml")
         if config_content is None:
@@ -488,7 +494,7 @@ async def delete_skill_file(
         # Verify the normalized path is still within local_dir
         abs_local_dir = os.path.abspath(local_dir)
         abs_full_path = os.path.abspath(full_path)
-        if not abs_full_path.startswith(abs_local_dir + os.sep) and abs_full_path != abs_local_dir:
+        if os.path.commonpath([abs_local_dir, abs_full_path]) != abs_local_dir:
             raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
 
         if not os.path.exists(full_path):
