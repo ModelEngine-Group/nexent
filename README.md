@@ -7,7 +7,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/nexent/nexent?logo=docker&label=DockerPull)](https://hub.docker.com/repositories/nexent)
 [![Codecov (with branch)](https://img.shields.io/codecov/c/github/ModelEngine-Group/nexent/develop?logo=codecov&color=green)](https://codecov.io/gh/ModelEngine-Group/nexent)
 
-Nexent is a zero-code platform for auto-generating agents — no orchestration, no complex drag-and-drop required, using pure language to develop any agent you want. Built on the MCP ecosystem with rich tool integration, Nexent also provides various built-in agents to meet your intelligent service needs in different scenarios such as work, travel, and daily life. Nexent offers powerful capabilities for agent running control, multi-agent collaboration, data processing and knowledge tracing, multimodal dialogue, and batch scaling.
+Nexent is a zero-code platform for auto-generating production-grade AI agents, built on **Harness Engineering** principles. It provides unified tools, skills, memory, and orchestration with built-in constraints, feedback loops, and control planes — no orchestration, no complex drag-and-drop required, using pure language to develop any agent you want.
 
 > One prompt. Endless reach.
 
@@ -58,7 +58,7 @@ Most of all, we need visibility. Star ⭐ and watch the repo, share it with frie
 
 ## 💬 Community & contact
 
-- Browse the [Documentation](https://modelengine-group.github.io/nexent) for more information.  
+- Browse the [Documentation](https://modelengine-group.github.io/nexent) for more information.
 - Join our [Discord community](https://discord.gg/tb5H3S3wyv) to chat with other developers and get help!
 - Conntact us by Wechat, find our QR Code in our [website](https://nexent.tech/en/contact)
 
@@ -119,5 +119,4 @@ Prefer to run Nexent from source code? Follow our [Developer Guide](https://mode
 
 # 📄 License
 
-Nexent is licensed under the [MIT](LICENSE) with additional conditions. Please read the [LICENSE](LICENSE) file for details.
-
+Nexent is licensed under the [MIT License](LICENSE).

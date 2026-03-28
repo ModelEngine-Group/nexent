@@ -7,7 +7,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/nexent/nexent?logo=docker&label=DockerPull)](https://hub.docker.com/repositories/nexent)
 [![Codecov (with branch)](https://img.shields.io/codecov/c/github/ModelEngine-Group/nexent/develop?logo=codecov&color=green)](https://codecov.io/gh/ModelEngine-Group/nexent)
 
-Nexent 是一个零代码智能体自动生成平台 —— 无需编排，无需复杂的拖拉拽操作，使用纯语言开发你想要的任何智能体。基于MCP生态，具备丰富的工具集成，同时提供多种自带智能体，满足你的工作、旅行、生活等不同场景的智能服务需要。Nexent 还提供强大的智能体运行控制、多智能体协作、数据处理和知识溯源、多模态对话、批量扩展能力。
+Nexent 是一个基于 **Harness Engineering** 原则打造的零代码智能体自动生成平台。集统一工具、技能、记忆和编排能力于一体，内置约束机制、反馈循环和控制平面。无需编排，无需复杂的拖拉拽操作，使用纯语言开发你想要的任何智能体。
 
 > 一个提示词，无限种可能。
 
@@ -58,7 +58,7 @@ bash deploy.sh
 
 ## 💬 社区与联系方式
 
-- 浏览 [文档](https://modelengine-group.github.io/nexent) 了解更多信息。  
+- 浏览 [文档](https://modelengine-group.github.io/nexent) 了解更多信息。
 - 加入我们的 [Discord 社区](https://discord.gg/tb5H3S3wyv) 与其他开发者交流并获取帮助！
 - 通过微信联系我们，在我们的[网站](https://nexent.tech/zh/contact)找到二维码
 
@@ -119,4 +119,4 @@ bash deploy.sh
 
 # 📄 许可证
 
-Nexent 采用 [MIT](LICENSE) 许可证，并附有额外条件。请阅读 [LICENSE](LICENSE) 文件了解详情。
+Nexent 采用 [MIT 许可证](LICENSE)。

@@ -1,6 +1,6 @@
 # Nexent
 
-Nexent is a zero-code platform for auto-generating agents — no orchestration, no complex drag-and-drop required, using pure language to develop any agent you want. Built on the MCP ecosystem with rich tool integration, Nexent also provides various built-in agents to meet your intelligent service needs in different scenarios such as work, travel, and daily life. Nexent offers powerful capabilities for agent running control, multi-agent collaboration, data processing and knowledge tracing, multimodal dialogue, and batch scaling.
+Nexent is a zero-code platform for auto-generating production-grade AI agents, built on **Harness Engineering** principles. It provides unified tools, skills, memory, and orchestration with built-in constraints, feedback loops, and control planes — no orchestration, no complex drag-and-drop required, using pure language to develop any agent you want.
 
 > One prompt. Endless reach.
 
@@ -80,5 +80,4 @@ Join our [Discord community](https://discord.gg/tb5H3S3wyv) to chat with other d
 
 ## 📄 License
 
-Nexent is licensed under the [MIT](../license) with additional conditions. Please read the [LICENSE](../license) file for details.
-
+Nexent is licensed under the [MIT License](../license).
