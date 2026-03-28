@@ -368,7 +368,7 @@ class TestListKnowledgeBasesEdgeCases:
 
         client._http_client.post.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/list",
-            json={"page": 0, "size": 20},
+            json={"page": 1, "size": 20},
             headers={},
             timeout=client.timeout,
         )

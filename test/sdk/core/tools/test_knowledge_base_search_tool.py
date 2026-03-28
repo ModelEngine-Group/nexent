@@ -248,10 +248,10 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        # Pass index_names as parameter (comma-separated string)
-        result = knowledge_base_search_tool.forward("test query", index_names="custom_index1,custom_index2")
+        # Pass index_names as a list parameter (forward expects List[str])
+        knowledge_base_search_tool.forward("test query", index_names=["custom_index1", "custom_index2"])
 
-        # Verify vdb_core was called with parsed index names
+        # Verify vdb_core was called with the index names as-is
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
             index_names=["custom_index1", "custom_index2"],
             query_text="test query",
@@ -329,7 +329,8 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(1)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query", index_names="single_index")
+        # Pass index_names as a list parameter (forward expects List[str])
+        knowledge_base_search_tool.forward("test query", index_names=["single_index"])
 
         # Verify vdb_core was called with single index
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
@@ -345,12 +346,12 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(1)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        # Pass index_names with extra whitespace
-        result = knowledge_base_search_tool.forward("test query", index_names="  index1  ,  index2  ")
+        # Pass index_names as a list parameter (forward expects List[str])
+        knowledge_base_search_tool.forward("test query", index_names=["  index1  ", "  index2  "])
 
-        # Verify whitespace is stripped
+        # Verify vdb_core was called with the index names as-is (no stripping performed)
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
-            index_names=["index1", "index2"],
+            index_names=["  index1  ", "  index2  "],
             query_text="test query",
             embedding_model=knowledge_base_search_tool.embedding_model,
             top_k=5

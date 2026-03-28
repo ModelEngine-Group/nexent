@@ -6,7 +6,7 @@ export default defineConfig({
   base: (globalThis as any).process?.env?.GITHUB_PAGES ? "/nexent/" : "/",
   title: "Nexent Doc",
   description:
-    "A zero-code platform for auto-generating agents  no orchestration, no complex drag-and-drop required.",
+    "A zero-code platform for auto-generating production-grade AI agents using Harness Engineering principles.",
 
   // Add favicon to head
   head: [
