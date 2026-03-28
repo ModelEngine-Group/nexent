@@ -1740,6 +1740,7 @@
   "profile.deleteWarning1": "Your account will be permanently deleted",
   "profile.deleteWarning2": "All your conversations and data will be removed",
   "profile.deleteWarning3": "This action cannot be reversed",
+  "profile.adminRestrictionTitle": "Administrator Restriction"
   "profile.adminRestrictionTitle": "Administrator Restriction",
   "profile.generateAkSk": "Generate API Key",
   "profile.generateAkSkDesc": "Create or regenerate your API key",

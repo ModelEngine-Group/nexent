@@ -258,6 +258,23 @@ class GenerateTitleRequest(BaseModel):
     question: str
 
 
+class PromptTemplateCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    prompt_text: str
+
+
+class PromptTemplateUpdateRequest(BaseModel):
+    template_id: int
+    name: Optional[str] = None
+    description: Optional[str] = None
+    prompt_text: Optional[str] = None
+
+
+class PromptTemplateDeleteRequest(BaseModel):
+    template_id: int
+
+
 # used in agent/search agent/update for save agent info
 class AgentInfoRequest(BaseModel):
     agent_id: Optional[int] = None

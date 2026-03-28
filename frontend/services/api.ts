@@ -73,6 +73,17 @@ export const API_ENDPOINTS = {
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
   },
+  promptTemplate: {
+    list: (keyword?: string) => {
+      const queryParams = new URLSearchParams();
+      if (keyword) queryParams.append("keyword", keyword);
+      const suffix = queryParams.toString();
+      return `${API_BASE_URL}/prompt_template/list${suffix ? `?${suffix}` : ""}`;
+    },
+    create: `${API_BASE_URL}/prompt_template/create`,
+    update: `${API_BASE_URL}/prompt_template/update`,
+    delete: `${API_BASE_URL}/prompt_template/delete`,
+  },
   stt: {
     ws: `/api/voice/stt/ws`,
   },
