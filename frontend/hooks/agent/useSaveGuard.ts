@@ -151,24 +151,11 @@ export const useSaveGuard = () => {
           throw new Error("Failed to get agent ID after save operation");
         }
 
-        // Batch process tool configurations for both create and update modes
-        const baselineTools = useAgentConfigStore.getState().baselineAgent?.tools || [];
-        await batchUpdateToolConfigs(finalAgentId, currentEditedAgent.tools || [], baselineTools);
-
-        // Common logic for both creation and update: refresh cache and update store
-        await queryClient.invalidateQueries({
-          queryKey: ["agentInfo", finalAgentId]
-        });
-        await queryClient.refetchQueries({
-          queryKey: ["agentInfo", finalAgentId]
-        });
-        // Get the updated agent data from the refreshed cache
-        let updatedAgent = queryClient.getQueryData(["agentInfo", finalAgentId]) as Agent;
-
-        // For new agents, the cache might not be populated yet
-        // Construct a minimal Agent object from the edited data
-        if (!updatedAgent && finalAgentId) {
-          updatedAgent = {
+        // For newly created agents, we need to exit create mode and set the current agent
+        const isNewlyCreated = !currentAgentId && result.data?.agent_id;
+        if (isNewlyCreated) {
+          // Create a minimal agent object for the store
+          const newAgent: Agent = {
             id: String(finalAgentId),
             name: currentEditedAgent.name,
             display_name: currentEditedAgent.display_name,
@@ -188,10 +175,28 @@ export const useSaveGuard = () => {
             sub_agent_id_list: currentEditedAgent.sub_agent_id_list,
             group_ids: currentEditedAgent.group_ids || [],
           };
+          // Exit create mode and select the newly created agent
+          useAgentConfigStore.getState().setCurrentAgent(newAgent);
         }
 
-        if (updatedAgent) {
-          useAgentConfigStore.getState().setCurrentAgent(updatedAgent);
+        // Batch process tool configurations for both create and update modes
+        const baselineTools = useAgentConfigStore.getState().baselineAgent?.tools || [];
+        await batchUpdateToolConfigs(finalAgentId, currentEditedAgent.tools || [], baselineTools);
+
+        // Common logic for both creation and update: refresh cache and update store
+        await queryClient.invalidateQueries({
+          queryKey: ["agentInfo", finalAgentId]
+        });
+        await queryClient.refetchQueries({
+          queryKey: ["agentInfo", finalAgentId]
+        });
+        
+        // For existing agents (update mode), get the updated agent data from the refreshed cache
+        if (!isNewlyCreated) {
+          const updatedAgent = queryClient.getQueryData(["agentInfo", finalAgentId]) as Agent;
+          if (updatedAgent) {
+            useAgentConfigStore.getState().setCurrentAgent(updatedAgent);
+          }
         }
 
         // Also invalidate the agents list cache to ensure the list reflects any changes
