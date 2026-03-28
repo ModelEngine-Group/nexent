@@ -323,4 +323,4 @@ DEFAULT_EN_TITLE = "New Conversation"
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 # APP Version
-APP_VERSION = "v1.8.1"
+APP_VERSION = "v2.0.0"
