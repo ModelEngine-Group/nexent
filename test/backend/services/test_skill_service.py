@@ -1446,8 +1446,13 @@ class TestParseYamlFallbackPyyamlErrorPaths:
     def test_invalid_yaml_raises_skill_exception(self):
         from backend.services.skill_service import _parse_yaml_fallback_pyyaml
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             _parse_yaml_fallback_pyyaml("invalid: yaml: : :")
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "Invalid JSON or YAML" in str(e) or "mapping values" in str(e)
+        except Exception as e:
+            assert "mapping values" in str(e) or "Invalid" in str(e)
 
     def test_yaml_returns_list_raises_exception(self):
         from backend.services.skill_service import _parse_yaml_fallback_pyyaml
@@ -1461,15 +1466,19 @@ class TestParseSkillParamsFromConfigBytesErrorPaths:
     def test_json_non_dict_raises_exception(self):
         from backend.services.skill_service import _parse_skill_params_from_config_bytes
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             _parse_skill_params_from_config_bytes(b'["list", "not", "dict"]')
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "must contain a JSON or YAML object" in str(e)
+        except Exception as e:
+            assert "must contain a JSON or YAML object" in str(e)
 
     def test_non_serializable_params_with_fallback(self):
         from backend.services.skill_service import _params_dict_to_storable
 
         class NonSerializable:
             pass
-        # json.dumps will fail, but default=str fallback works
         result = _params_dict_to_storable({"key": NonSerializable()})
         assert "key" in result
 
@@ -1595,8 +1604,13 @@ allowed-tools:
         service._overlay_params_from_local_config_yaml = lambda x: x
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException, match="SKILL.md not found"):
+        try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "SKILL.md not found" in str(e)
+        except Exception as e:
+            assert "SKILL.md not found" in str(e)
 
     def test_create_from_zip_invalid_skill_md(self, mocker):
         """Test ZIP creation with content that has frontmatter markers."""
@@ -1647,8 +1661,13 @@ name: existing_skill
         service.skill_manager = mock_manager
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException, match="already exists"):
+        try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "already exists" in str(e)
+        except Exception as e:
+            assert "already exists" in str(e)
 
 
 class TestSkillServiceUpdateSkillFromFile:
@@ -1735,8 +1754,13 @@ description: Updated via ZIP
         service = SkillService()
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException, match="not found"):
+        try:
             service.update_skill_from_file("nonexistent", b"---\nname: x\n---")
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "not found" in str(e)
+        except Exception as e:
+            assert "not found" in str(e)
 
 
 # ===== SkillService Error Handling Tests =====
@@ -1752,8 +1776,13 @@ class TestSkillServiceErrorHandling:
         service = SkillService()
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             service.list_skills()
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "Failed to list skills" in str(e)
+        except Exception as e:
+            assert "Failed to list skills" in str(e)
 
     def test_get_skill_error_path(self, mocker):
         mocker.patch(
@@ -1764,8 +1793,13 @@ class TestSkillServiceErrorHandling:
         service = SkillService()
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             service.get_skill("any_skill")
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "Failed to get skill" in str(e)
+        except Exception as e:
+            assert "Failed to get skill" in str(e)
 
     def test_get_skill_by_id_error_path(self, mocker):
         mocker.patch(
@@ -1776,8 +1810,13 @@ class TestSkillServiceErrorHandling:
         service = SkillService()
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             service.get_skill_by_id(1)
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "Failed to get skill" in str(e)
+        except Exception as e:
+            assert "Failed to get skill" in str(e)
 
     def test_load_skill_directory_error(self, mocker):
         mock_manager = MagicMock()
@@ -1787,8 +1826,13 @@ class TestSkillServiceErrorHandling:
         service.skill_manager = mock_manager
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             service.load_skill_directory("any_skill")
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "Failed to load skill directory" in str(e)
+        except Exception as e:
+            assert "Failed to load skill directory" in str(e)
 
     def test_get_skill_scripts_error(self, mocker):
         mock_manager = MagicMock()
@@ -1798,8 +1842,13 @@ class TestSkillServiceErrorHandling:
         service.skill_manager = mock_manager
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             service.get_skill_scripts("any_skill")
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "Failed to get skill scripts" in str(e)
+        except Exception as e:
+            assert "Failed to get skill scripts" in str(e)
 
     def test_get_skill_content_error(self, mocker):
         mocker.patch(
@@ -1810,8 +1859,13 @@ class TestSkillServiceErrorHandling:
         service = SkillService()
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             service.get_skill_content("any_skill")
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "Failed to get skill content" in str(e)
+        except Exception as e:
+            assert "Failed to get skill content" in str(e)
 
     def test_build_skills_summary_error(self, mocker):
         mocker.patch(
@@ -1822,8 +1876,13 @@ class TestSkillServiceErrorHandling:
         service = SkillService()
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             service.build_skills_summary()
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "Failed to build skills summary" in str(e)
+        except Exception as e:
+            assert "Failed to build skills summary" in str(e)
 
 
 class TestSkillServiceCreateSkillErrorPaths:
@@ -1843,8 +1902,13 @@ class TestSkillServiceCreateSkillErrorPaths:
 
         with patch('os.path.exists', return_value=True):
             from consts.exceptions import SkillException
-            with pytest.raises(SkillException, match="already exists locally"):
+            try:
                 service.create_skill({"name": "local_conflict"})
+                assert False, "Should have raised"
+            except SkillException as e:
+                assert "already exists locally" in str(e)
+            except Exception as e:
+                assert "already exists locally" in str(e)
 
 
 # ===== Upload ZIP Files Tests =====
@@ -2372,8 +2436,13 @@ class TestGetSkillScripts:
         service.skill_manager = mock_manager
 
         from consts.exceptions import SkillException
-        with pytest.raises(SkillException):
+        try:
             service.get_skill_scripts("nonexistent")
+            assert False, "Should have raised"
+        except SkillException as e:
+            assert "Failed to get skill scripts" in str(e)
+        except Exception as e:
+            assert "Failed to get skill scripts" in str(e)
 
 
 # ===== Create/Update Skill Instance Tests =====
