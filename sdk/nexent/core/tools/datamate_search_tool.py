@@ -50,7 +50,7 @@ class DataMateSearchTool(Tool):
         threshold: float = Field(
             description="Default similarity threshold for search results", default=0.2),
         kb_page: int = Field(
-            description="Page index when listing knowledge bases from DataMate", default=0),
+            description="Page index when listing knowledge bases from DataMate", default=1),
         kb_page_size: int = Field(
             description="Page size when listing knowledge bases from DataMate", default=20),
     ):

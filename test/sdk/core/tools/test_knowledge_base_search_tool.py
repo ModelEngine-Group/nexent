@@ -249,7 +249,7 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
         # Pass index_names as parameter (comma-separated string)
-        knowledge_base_search_tool.forward("test query", index_names="custom_index1,custom_index2")
+        knowledge_base_search_tool.forward("test query", index_names=["custom_index1", "custom_index2"])
 
         # Verify vdb_core was called with parsed index names
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
@@ -330,7 +330,7 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
         # Pass single index name
-        knowledge_base_search_tool.forward("test query", index_names="single_index")
+        knowledge_base_search_tool.forward("test query", index_names=["single_index"])
 
         # Verify vdb_core was called with single index
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
@@ -347,7 +347,7 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
         # Pass index_names with extra whitespace
-        knowledge_base_search_tool.forward("test query", index_names="  index1  ,  index2  ")
+        knowledge_base_search_tool.forward("test query", index_names=["index1", "index2"])
 
         # Verify whitespace is stripped
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
