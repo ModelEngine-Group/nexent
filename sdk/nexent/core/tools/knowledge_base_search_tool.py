@@ -36,6 +36,7 @@ class KnowledgeBaseSearchTool(Tool):
             "description_zh": "要执行的搜索查询词"
         },
         "index_names": {
+            "type": "array",
             "description": "The list of index names to search",
             "description_zh": "要索引的知识库"
         },
@@ -97,9 +98,9 @@ class KnowledgeBaseSearchTool(Tool):
         self.running_prompt_en = "Searching the knowledge base..."
 
 
-    def forward(self, query: str, index_names: str) -> str:
+    def forward(self, query: str, index_names: List[str]) -> str:
         # Parse index_names from string (always required)
-        search_index_names = [name.strip() for name in index_names.split(",") if name.strip()]
+        search_index_names = index_names
 
         # Use the instance search_mode
         search_mode = self.search_mode
