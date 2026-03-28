@@ -1,6 +1,7 @@
 """Skill management HTTP endpoints."""
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Header
@@ -463,7 +464,6 @@ async def delete_skill_file(
         skill_name: Name of the skill
         file_path: Relative path to the file within the skill directory
     """
-    import os
     try:
         _, _ = get_current_user_id(authorization)
         service = SkillService()
@@ -481,9 +481,15 @@ async def delete_skill_file(
         if not temp_filename or file_path != temp_filename:
             raise HTTPException(status_code=400, detail="Can only delete temp_filename files")
 
-        # Get the full path
+        # Get the full path and validate it stays within local_dir (path traversal protection)
         local_dir = os.path.join(service.skill_manager.local_skills_dir, skill_name)
-        full_path = os.path.join(local_dir, file_path)
+        full_path = os.path.normpath(os.path.join(local_dir, file_path))
+
+        # Verify the normalized path is still within local_dir
+        abs_local_dir = os.path.abspath(local_dir)
+        abs_full_path = os.path.abspath(full_path)
+        if not abs_full_path.startswith(abs_local_dir + os.sep) and abs_full_path != abs_local_dir:
+            raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
 
         if not os.path.exists(full_path):
             raise HTTPException(status_code=404, detail=f"File not found: {file_path}")

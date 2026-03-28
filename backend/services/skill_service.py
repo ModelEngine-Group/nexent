@@ -773,6 +773,38 @@ class SkillService:
 
         return self._overlay_params_from_local_config_yaml(result)
 
+    def _delete_local_skill_files(self, skill_name: str) -> None:
+        """Delete all files within a skill's local directory, preserving the directory itself.
+
+        Args:
+            skill_name: Name of the skill whose local files should be deleted.
+        """
+        import shutil
+
+        local_dir = os.path.join(self.skill_manager.local_skills_dir, skill_name)
+        logger.info("Starting deletion of local files for skill '%s' from '%s'", skill_name, local_dir)
+        
+        if not os.path.isdir(local_dir):
+            logger.info("Local skill directory does not exist, nothing to delete: %s", local_dir)
+            return
+        try:
+            items = os.listdir(local_dir)
+            logger.info("Found %d items to delete in '%s'", len(items), local_dir)
+            
+            for item in items:
+                item_path = os.path.join(local_dir, item)
+                if item_path.endswith("/"):
+                    continue
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                    logger.debug("Deleted directory: %s", item_path)
+                else:
+                    os.remove(item_path)
+                    logger.debug("Deleted file: %s", item_path)
+            logger.info("Successfully deleted all local files for skill '%s'", skill_name)
+        except Exception as e:
+            logger.error("Failed to delete local files for skill '%s': %s", skill_name, e)
+
     def _upload_zip_files(
         self,
         zip_bytes: bytes,
@@ -796,10 +828,17 @@ class SkillService:
             and original_folder_name != skill_name
         )
 
+        logger.info(
+            "Starting ZIP extraction for skill '%s': needs_rename=%s, original_folder='%s'",
+            skill_name, needs_rename, original_folder_name
+        )
+
         try:
             with zipfile.ZipFile(zip_stream, "r") as zf:
                 file_list = zf.namelist()
+                logger.info("ZIP contains %d entries for skill '%s'", len(file_list), skill_name)
 
+                extracted_count = 0
                 for file_path in file_list:
                     if file_path.endswith("/"):
                         continue
@@ -826,10 +865,16 @@ class SkillService:
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
                     with open(local_path, "wb") as f:
                         f.write(file_data)
+                    extracted_count += 1
+                    logger.debug("Extracted file '%s' -> '%s'", file_path, local_path)
 
-            logger.info(f"Extracted skill files '{skill_name}' to local storage")
+            logger.info(
+                "Completed ZIP extraction for skill '%s': %d files extracted to '%s'",
+                skill_name, extracted_count, self.skill_manager.local_skills_dir
+            )
         except Exception as e:
-            logger.warning(f"Failed to extract ZIP files: {e}")
+            logger.error("Failed to extract ZIP files for skill '%s': %s", skill_name, e)
+            raise
 
     def update_skill_from_file(
         self,
@@ -906,6 +951,9 @@ class SkillService:
             skill_name, skill_dict, updated_by=user_id or None
         )
 
+        # Clean up existing local files before writing new ones
+        self._delete_local_skill_files(skill_name)
+
         # Update local storage with new SKILL.md (preserve allowed-tools)
         skill_dict["name"] = skill_name
         skill_dict["allowed-tools"] = allowed_tools
@@ -948,6 +996,9 @@ class SkillService:
             if skill_md_path:
                 skill_content = zf.read(skill_md_path).decode("utf-8")
 
+        # Reset stream position before _upload_zip_files reads it
+        zip_stream.seek(0)
+
         preferred_root = original_folder_name or skill_name
         params_from_zip = _read_params_from_zip_config_yaml(
             zip_bytes,
@@ -979,6 +1030,9 @@ class SkillService:
         result = skill_db.update_skill(
             skill_name, skill_dict, updated_by=user_id or None
         )
+
+        # Clean up existing local files before writing new ones
+        self._delete_local_skill_files(skill_name)
 
         # Update SKILL.md in local storage (preserve allowed-tools)
         skill_dict["name"] = skill_name
