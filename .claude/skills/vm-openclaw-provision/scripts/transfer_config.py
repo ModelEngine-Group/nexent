@@ -47,24 +47,24 @@ def run_transfer(vm_ip, cfg: Config):
 
     try:
         kafka_config = cfg.kafka_config
-        user_name = cfg.user_name
+        user_id = cfg.user_id
         description = cfg.vm_description
 
-        if kafka_config or user_name or description:
+        if kafka_config or user_id or description:
             config_content = generate_vm_config_yaml(
                 vm_ip,
                 kafka_config,
                 {},
                 include_vm=False,
                 include_ssh=False,
-                user_name=user_name,
+                user_id=user_id,
                 description=description,
             )
             full_path = f"{remote_path}/{config_filename}"
 
             print(f"Transferring config to {full_path}...")
-            if user_name:
-                print(f"  user_name: {user_name}")
+            if user_id:
+                print(f"  user_id: {user_id}")
             if description:
                 print(f"  description: {description}")
             transfer_config_via_scp(ssh_client, config_content, full_path)
@@ -152,7 +152,7 @@ def main():
     add_common_args(parser)
 
     parser.add_argument("--ip", required=True, help="VM IP address")
-    parser.add_argument("--user-name", help="User name to include in config")
+    parser.add_argument("--user-id", required=True, help="User ID to include in config")
     parser.add_argument("--description", "-d", help="Description to include in config")
     parser.add_argument("--ssh-username", help="SSH username (overrides config)")
     parser.add_argument("--ssh-password", help="SSH password (overrides config)")
@@ -175,8 +175,8 @@ def main():
 
     _, cfg = get_client_with_args(args)
 
-    if args.user_name:
-        cfg.set("user_name", args.user_name)
+    if args.user_id:
+        cfg.set("user_id", args.user_id)
     if args.description:
         cfg.set("vm_description", args.description)
     if args.ssh_username:

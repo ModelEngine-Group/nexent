@@ -308,8 +308,8 @@ class Config:
         return self._get("postgres", default={})
 
     @property
-    def user_name(self) -> Optional[str]:
-        return self._get("user_name")
+    def user_id(self) -> Optional[str]:
+        return self._get("user_id")
 
     @property
     def vm_description(self) -> Optional[str]:
@@ -631,7 +631,7 @@ def generate_vm_config_yaml(
     ssh_config: Dict[str, Any],
     include_vm: bool = True,
     include_ssh: bool = True,
-    user_name: Optional[str] = None,
+    user_id: Optional[str] = None,
     description: Optional[str] = None,
 ) -> str:
     config = {}
@@ -643,8 +643,8 @@ def generate_vm_config_yaml(
         ssh_copy = ssh_config.copy()
         ssh_copy.pop("password", None)
         config["ssh"] = ssh_copy
-    if user_name:
-        config["user_name"] = user_name
+    if user_id:
+        config["user_id"] = user_id
     if description:
         config["description"] = description
     return yaml.dump(config, default_flow_style=False)

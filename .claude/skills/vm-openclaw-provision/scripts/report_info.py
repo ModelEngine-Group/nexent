@@ -94,9 +94,9 @@ def load_agent_config():
 
 
 def get_created_by_user_id():
-    """从 agent_config.yaml 获取 user_name，失败时返回空字符串"""
+    """从 agent_config.yaml 获取 user_id，失败时返回空字符串"""
     cfg = load_agent_config()
-    return cfg.get('user_name') or cfg.get('username') or cfg.get('userName') or cfg.get('user_id') or AUTHOR
+    return cfg.get('user_id') or AUTHOR
 
 
 def extract_token_usage(config):
@@ -180,56 +180,27 @@ def extract_plugins(config):
 
 
 def extract_chat_url(config):
-    """从 openclaw gateway status 输出中提取 Dashboard URL，优先取命令结果；若失败再用 config.allowedOrigins，最后返回默认值。"""
-    default_url = "http://localhost:18789"
+    """从 /opt/nexent/config/agent_config.yaml 读取 ip，并用默认端口 18789 拼接 URL。"""
+    default_ip = "localhost"
+    default_port = 18789
 
-    selected = None
+    agent_cfg = load_agent_config()
+    ip = agent_cfg.get("ip") or default_ip
+    ip = str(ip).strip() or default_ip
 
-    # 优先通过 openclaw gateway status 获取 Dashboard 地址
-    try:
-        import subprocess
-        output = subprocess.check_output(
-            ["openclaw", "gateway", "status"],
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=15,
-        )
-        for line in output.splitlines():
-            if line.strip().startswith("Dashboard:"):
-                candidate = line.split("Dashboard:", 1)[1].strip()
-                if candidate:
-                    # 允许带/或不带/，后面 token 追加逻辑统一处理
-                    selected = candidate.rstrip("/")
-                    break
-    except Exception:
-        selected = None
+    url = f"http://{ip}:{default_port}"
 
-    # 回退到原来的 allowedOrigins 逻辑
-    if not selected:
-        try:
-            origins = config.get("gateway", {}).get("controlUi", {}).get("allowedOrigins", [])
-            for origin in origins:
-                if origin and "localhost" not in origin and "127.0.0.1" not in origin:
-                    selected = origin.rstrip("/")
-                    break
-            if not selected:
-                selected = origins[0].rstrip("/") if origins else None
-        except Exception:
-            selected = None
+    # 兼容传 token 逻辑
+    token = None
+    if isinstance(agent_cfg, dict):
+        token = agent_cfg.get("token") or agent_cfg.get("gateway", {}).get("auth", {}).get("token")
+    if not token and isinstance(config, dict):
+        token = config.get("gateway", {}).get("auth", {}).get("token")
 
-    if not selected:
-        selected = default_url
+    if token:
+        return f"{url}/#token={token}"
 
-    # 追加 token
-    try:
-        auth = config.get("gateway", {}).get("auth", {})
-        token = auth.get("token") if auth.get("mode") == "token" else None
-        if token:
-            return f"{selected}/#token={token}"
-    except Exception:
-        pass
-
-    return selected
+    return url
 
 
 def build_report_message(config):
