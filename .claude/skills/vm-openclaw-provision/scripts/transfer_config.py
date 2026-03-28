@@ -55,7 +55,6 @@ def run_transfer(vm_ip, cfg: Config):
                 vm_ip,
                 kafka_config,
                 {},
-                include_vm=False,
                 include_ssh=False,
                 user_id=user_id,
                 description=description,

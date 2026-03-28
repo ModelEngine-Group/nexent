@@ -629,14 +629,13 @@ def generate_vm_config_yaml(
     vm_ip: str,
     kafka_config: Dict[str, Any],
     ssh_config: Dict[str, Any],
-    include_vm: bool = True,
     include_ssh: bool = True,
     user_id: Optional[str] = None,
     description: Optional[str] = None,
 ) -> str:
     config = {}
-    if include_vm:
-        config["vm"] = {"ip": vm_ip}
+    if vm_ip:
+        config["ip"] = vm_ip
     if kafka_config:
         config["kafka"] = kafka_config.copy()
     if include_ssh and ssh_config:
