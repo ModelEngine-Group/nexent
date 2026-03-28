@@ -9,6 +9,13 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+_ALLOWED_SKILL_META_KEYS = frozenset([
+    "name",
+    "description",
+    "allowed-tools",
+    "tags",
+])
+
 
 class SkillLoader:
     """Load and parse SKILL.md files."""
@@ -46,11 +53,14 @@ class SkillLoader:
         if "description" not in meta:
             raise ValueError("Skill must have 'description' field")
 
+        # Filter to only known keys to tolerate extra fields like 'author'
+        filtered_meta = {k: v for k, v in meta.items() if k in _ALLOWED_SKILL_META_KEYS}
+
         return {
-            "name": meta["name"],
-            "description": meta["description"],
-            "allowed_tools": meta.get("allowed-tools", []),
-            "tags": meta.get("tags", []),
+            "name": filtered_meta.get("name"),
+            "description": filtered_meta.get("description", ""),
+            "allowed_tools": filtered_meta.get("allowed-tools", []),
+            "tags": filtered_meta.get("tags", []),
             "content": body.strip(),
             "source_path": source_path
         }
