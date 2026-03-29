@@ -1,0 +1,34 @@
+replicaCount: 1
+
+image:
+  repository: supabase/gotrue
+  tag: v2.170.0
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 500m
+  limits:
+    memory: 1Gi
+    cpu: 1
+
+config:
+  siteUrl: "http://localhost:3011"
+  apiExternalUrl: "http://nexent-supabase-kong:8000"
+  disableSignup: false
+  jwtExpiry: "3600"
+  debugJwtExpireSeconds: "0"
+  enableEmailSignup: true
+  enableEmailAutoconfirm: true
+  enableAnonymousUsers: false
+  enablePhoneSignup: false
+  enablePhoneAutoconfirm: false
+  inviteCode: "nexent2025"
+  mailerUrlpathsConfirmation: "/auth/v1/verify"
+  mailerUrlpathsInvite: "/auth/v1/verify"
+  mailerUrlpathsRecovery: "/auth/v1/verify"
+  mailerUrlpathsEmailChange: "/auth/v1/verify"
+  postgresHost: "nexent-supabase-db"
+  postgresPort: "5436"
+  additionalRedirectUrls: ""

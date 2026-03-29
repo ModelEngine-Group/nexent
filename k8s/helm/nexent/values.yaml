@@ -1,0 +1,22 @@
+# Default values for nexent helm chart.
+global:
+  namespace: nexent
+  dataDir: "/var/lib/nexent-data"
+  deploymentVersion: "full"
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: nexent.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: nexent-tls
+  #    hosts:
+  #      - nexent.local

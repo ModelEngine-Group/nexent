@@ -109,7 +109,8 @@ export const KnowledgeBaseContext = createContext<{
     description: string,
     source?: string,
     ingroup_permission?: string,
-    group_ids?: number[]
+    group_ids?: number[],
+    embeddingModel?: string
   ) => Promise<KnowledgeBase | null>;
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
@@ -196,18 +197,12 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   );
 
   // Check if knowledge base has model mismatch (for display purposes)
+  // Note: Always return false to remove model mismatch restrictions
   const hasKnowledgeBaseModelMismatch = useCallback(
     (kb: KnowledgeBase): boolean => {
-      if (!state.currentEmbeddingModel || kb.embeddingModel === "unknown") {
-        return false;
-      }
-      // DataMate knowledge bases don't report model mismatch (they are always selectable)
-      if (kb.source === "datamate") {
-        return false;
-      }
-      return kb.embeddingModel !== state.currentEmbeddingModel;
+      return false;
     },
-    [state.currentEmbeddingModel]
+    []
   );
 
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
@@ -315,15 +310,16 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       description: string,
       source: string = "elasticsearch",
       ingroup_permission?: string,
-      group_ids?: number[]
+      group_ids?: number[],
+      embeddingModel?: string
     ) => {
       try {
         const newKB = await knowledgeBaseService.createKnowledgeBase({
           name,
           description,
           source,
-          embeddingModel:
-            state.currentEmbeddingModel || "text-embedding-3-small",
+          // Use provided embeddingModel if available, otherwise fall back to current model or default
+          embeddingModel: embeddingModel || state.currentEmbeddingModel || "",
           ingroup_permission,
           group_ids,
         });

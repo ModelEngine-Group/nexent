@@ -1,0 +1,16 @@
+{{- if eq .Values.global.deploymentVersion "full" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-supabase-auth
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9999
+      targetPort: 9999
+      name: auth
+  selector:
+    app: nexent-supabase-auth
+{{- end }}

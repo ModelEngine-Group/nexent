@@ -1,0 +1,16 @@
+{{- if eq .Values.global.deploymentVersion "full" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-supabase-db
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.config.postgresPort | int }}
+      targetPort: {{ .Values.config.postgresPort | int }}
+      name: postgres
+  selector:
+    app: nexent-supabase-db
+{{- end }}

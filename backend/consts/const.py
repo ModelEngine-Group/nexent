@@ -35,6 +35,9 @@ MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
+# Container-internal skills storage path
+CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
+
 
 # Preview Configuration
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
@@ -321,6 +324,12 @@ DEFAULT_EN_TITLE = "New Conversation"
 
 # Model Engine Configuration
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
+
+
+# Container Platform Configuration
+IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
+KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
+
 
 # APP Version
 APP_VERSION = "v2.0.0"

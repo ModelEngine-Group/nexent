@@ -1,0 +1,66 @@
+apiVersion: v2
+name: nexent
+description: A Helm chart for Nexent AI platform
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - nexent
+  - ai
+  - agent
+maintainers:
+  - name: Nexent Team
+
+dependencies:
+  # Common resources (ConfigMap, Secret, RBAC, Namespace)
+  - name: nexent-common
+    version: 0.1.0
+    repository: "file://./charts/nexent-common"
+
+  # Infrastructure services
+  - name: nexent-elasticsearch
+    version: 0.1.0
+    repository: "file://./charts/nexent-elasticsearch"
+  - name: nexent-postgresql
+    version: 0.1.0
+    repository: "file://./charts/nexent-postgresql"
+  - name: nexent-redis
+    version: 0.1.0
+    repository: "file://./charts/nexent-redis"
+  - name: nexent-minio
+    version: 0.1.0
+    repository: "file://./charts/nexent-minio"
+
+  # Supabase services (only deployed when global.deploymentVersion == "full")
+  - name: nexent-supabase-kong
+    version: 0.1.0
+    repository: "file://./charts/nexent-supabase-kong"
+  - name: nexent-supabase-auth
+    version: 0.1.0
+    repository: "file://./charts/nexent-supabase-auth"
+  - name: nexent-supabase-db
+    version: 0.1.0
+    repository: "file://./charts/nexent-supabase-db"
+
+  # Application services
+  - name: nexent-config
+    version: 0.1.0
+    repository: "file://./charts/nexent-config"
+  - name: nexent-mcp
+    version: 0.1.0
+    repository: "file://./charts/nexent-mcp"
+  - name: nexent-runtime
+    version: 0.1.0
+    repository: "file://./charts/nexent-runtime"
+  - name: nexent-data-process
+    version: 0.1.0
+    repository: "file://./charts/nexent-data-process"
+  - name: nexent-northbound
+    version: 0.1.0
+    repository: "file://./charts/nexent-northbound"
+  - name: nexent-web
+    version: 0.1.0
+    repository: "file://./charts/nexent-web"
+  - name: nexent-openssh
+    version: 0.1.0
+    repository: "file://./charts/nexent-openssh"

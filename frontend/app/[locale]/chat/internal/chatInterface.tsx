@@ -29,14 +29,14 @@ import {
   uploadAttachments,
   createMessageAttachments,
   cleanupAttachmentUrls,
-} from "@/app/chat/internal/chatPreprocess";
+} from "@/lib/chat/chatAttachmentUtils";
 import { ConversationListItem, ApiConversationDetail } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import {
   extractUserMsgFromResponse,
   extractAssistantMsgFromResponse,
-} from "./extractMsgFromHistoryResponse";
+} from "@/lib/chatMessageExtractor";
 
 import { Layout } from "antd";
 import log from "@/lib/logger";
@@ -432,7 +432,6 @@ export function ChatInterface() {
       const runAgentParams: any = {
         query: finalQuery, // Use preprocessed query or original query
         conversation_id: id,
-        is_set: isSwitchedConversation || currentMessages.length <= 1,
         history: currentMessages
           .filter((msg) => msg.id !== userMessage.id)
           .map((msg) => ({

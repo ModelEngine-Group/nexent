@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-postgresql
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-postgresql
+  annotations:
+    "helm.sh/hook-weight": "-1"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nexent-postgresql
+  template:
+    metadata:
+      labels:
+        app: nexent-postgresql
+    spec:
+
+      containers:
+        - name: postgresql
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.config.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: NEXENT_POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: {{ .Values.config.db | quote }}
+          volumeMounts:
+            - name: postgresql-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d/init.sql
+              subPath: init.sql
+          resources:
+            requests:
+              memory: {{ .Values.resources.requests.memory }}
+              cpu: {{ .Values.resources.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.limits.memory }}
+              cpu: {{ .Values.resources.limits.cpu }}
+          securityContext:
+            allowPrivilegeEscalation: true
+      volumes:
+        - name: postgresql-data
+          persistentVolumeClaim:
+            claimName: nexent-postgresql
+        - name: init-sql
+          configMap:
+            name: nexent-init-sql
