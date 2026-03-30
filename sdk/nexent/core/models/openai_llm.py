@@ -13,6 +13,7 @@ from ..utils.observer import MessageObserver, ProcessType
 from .message_utils import prepare_messages_for_completion
 
 logger = logging.getLogger("openai_llm")
+DEFAULT_MODEL_TIMEOUT_SECONDS = 30 * 60
 
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
@@ -36,14 +37,17 @@ class OpenAIModel(OpenAIServerModel):
         self.stop_event = threading.Event()
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
+        client_kwargs = kwargs.get("client_kwargs", {})
+        client_kwargs.setdefault("timeout", DEFAULT_MODEL_TIMEOUT_SECONDS)
+        kwargs["client_kwargs"] = client_kwargs
 
         # Create http_client based on ssl_verify parameter
         if not ssl_verify:
             from openai import DefaultHttpxClient
-            http_client = DefaultHttpxClient(verify=False)
-            client_kwargs = kwargs.get('client_kwargs', {})
-            client_kwargs['http_client'] = http_client
-            kwargs['client_kwargs'] = client_kwargs
+            http_client = DefaultHttpxClient(
+                verify=False, timeout=DEFAULT_MODEL_TIMEOUT_SECONDS
+            )
+            client_kwargs["http_client"] = http_client
 
         super().__init__(*args, **kwargs)
 
