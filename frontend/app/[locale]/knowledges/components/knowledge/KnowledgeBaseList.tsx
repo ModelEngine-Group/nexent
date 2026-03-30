@@ -579,15 +579,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 })}
                               </span>
                             )}
-                            {kb.embeddingModel !== "unknown" &&
-                              kb.embeddingModel !== currentEmbeddingModel &&
-                              kb.source !== "datamate" && (
-                                <span
-                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.warning} mr-1`}
-                                >
-                                  {t("knowledgeBase.tag.modelMismatch")}
-                                </span>
-                              )}
 
                             {/* User group tags - only show when not PRIVATE */}
                             <Can permission="group:read">

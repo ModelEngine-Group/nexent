@@ -20,7 +20,7 @@ import { copyToClipboard } from "@/lib/clipboard";
 import log from "@/lib/logger";
 import { AttachmentItem } from "@/types/chat";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
-import { ChatAttachment } from "../internal/chatAttachment";
+import { ChatAttachment } from "../components/chatAttachment";
 
 interface FinalMessageProps {
   message: ChatMessageType;

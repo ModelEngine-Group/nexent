@@ -21,6 +21,7 @@ docker/volumes/db/data
 docker/.env
 docker/.run
 docker/deploy.options
+k8s/helm/.deploy.options
 
 frontend_standalone/
 .pnpm-store/

@@ -26,8 +26,32 @@ class KnowledgeBaseSearchTool(Tool):
         "domain expertise, personal notes, or any information that has been indexed in the knowledge base. "
         "Suitable for queries requiring access to stored knowledge that may not be publicly available."
     )
+
+    description_zh = "基于你的查询词在本地知识库中进行搜索，返回最相关的搜索结果。适用于检索本地知识库中存储的领域专业知识、文档和信息。当用户询问与专业知识、技术文档、领域专长、个人笔记或任何已在知识库中建立索引的信息相关的问题时，请使用此工具。适合需要访问非公开存储知识的查询。"
+
     inputs = {
-        "query": {"type": "string", "description": "The search query to perform."},
+        "query": {
+            "type": "string",
+            "description": "The search query to perform.",
+            "description_zh": "要执行的搜索查询词"
+        },
+        "index_names": {
+            "type": "array",
+            "description": "The list of index names to search",
+            "description_zh": "要索引的知识库"
+        },
+    }
+
+    init_param_descriptions = {
+        "top_k": {
+            "description": "Maximum number of search results",
+            "description_zh": "返回搜索结果的最大数量"
+        },
+
+        "search_mode": {
+            "description": "The search mode, optional values: hybrid, accurate, semantic",
+            "description_zh": "搜索模式，可选值：hybrid（混合）、accurate（精确）、semantic（语义）"
+        }
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value
@@ -74,7 +98,13 @@ class KnowledgeBaseSearchTool(Tool):
         self.running_prompt_en = "Searching the knowledge base..."
 
 
-    def forward(self, query: str) -> str:
+    def forward(self, query: str, index_names: List[str]) -> str:
+        # Parse index_names from string (always required)
+        search_index_names = index_names
+
+        # Use the instance search_mode
+        search_mode = self.search_mode
+
         # Send tool run message
         if self.observer:
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
@@ -82,10 +112,6 @@ class KnowledgeBaseSearchTool(Tool):
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(
                 card_content, ensure_ascii=False))
-
-        # Use the instance index_names and search_mode
-        search_index_names = self.index_names
-        search_mode = self.search_mode
 
         # Log the index_names being used for this search
         logger.info(

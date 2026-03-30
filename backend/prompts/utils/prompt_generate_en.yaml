@@ -68,14 +68,13 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   4. Use tool/assistant input parameters correctly, use keyword arguments, not dictionary format;
   5. Avoid making too many tool calls in one round of conversation, as this will make the output format unpredictable;
   6. Only call tools/assistants when needed, do not repeat calls with the same parameters;
-  7. Only import from the following modules: {{authorized_imports}};
-  8. Use variable names to save function call results. In each intermediate step, you can use "print()" to save any important information you need. Saved information persists between code executions;
-  9. Avoid **if**, **for** and other logic in example code, only call tools/assistants. Each action in examples should be a determined event. If there are different conditions, you should provide examples for different conditions;
-  10. Tool calls use keyword arguments, such as: tool_name(param1="value1", param2="value2");
-  11. Assistant calls must use "task" as the parameter name, such as: assistant_name(task="task description").
+  7. Use variable names to save function call results. In each intermediate step, you can use "print()" to save any important information you need. Saved information persists between code executions;
+  8. Avoid **if**, **for** and other logic in example code, only call tools/assistants. Each action in examples should be a determined event. If there are different conditions, you should provide examples for different conditions;
+  9. Tool calls use keyword arguments, such as: tool_name(param1="value1", param2="value2");
+  10. Assistant calls must use "task" as the parameter name, such as: assistant_name(task="task description").
 
   ### Compliant Examples:
-  Task 1: "Introduce the Oriental Pearl Tower"
+  Task 1: "Introduce the Oriental Pearl Tower"+
   
   Think: I will first use the knowledge_base_search tool to find if there is relevant information in the local knowledge base.
   Code:

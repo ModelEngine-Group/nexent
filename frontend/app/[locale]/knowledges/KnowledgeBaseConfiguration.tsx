@@ -26,6 +26,7 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
+import { useModelList } from "@/hooks/model/useModelList";
 import {
   SETUP_PAGE_CONTAINER,
   TWO_COLUMN_LAYOUT,
@@ -127,6 +128,9 @@ function DataConfig({ isActive }: DataConfigProps) {
   const { modelConfig, data: configData, invalidateConfig, config, updateConfig, saveConfig } = useConfig();
   const { token } = theme.useToken();
 
+  // Get available embedding models for knowledge base creation
+  const { availableEmbeddingModels } = useModelList({ enabled: true });
+
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
@@ -180,6 +184,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [newKbName, setNewKbName] = useState("");
   const [newKbIngroupPermission, setNewKbIngroupPermission] = useState<string>("READ_ONLY");
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
+  const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
@@ -613,6 +618,12 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbName(defaultName);
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
+    // Set default embedding model - prioritize config's default model, fall back to first available model
+    const configModel = modelConfig?.embedding?.modelName;
+    const defaultModel = configModel || (availableEmbeddingModels.length > 0
+      ? availableEmbeddingModels[0].displayName
+      : "");
+    setNewKbEmbeddingModel(defaultModel);
     setIsCreatingMode(true);
     setHasClickedUpload(false); // Reset upload button click state
     setUploadFiles([]); // Reset upload files array, clear all pending upload files
@@ -675,7 +686,8 @@ function DataConfig({ isActive }: DataConfigProps) {
           t("knowledgeBase.description.default"),
           "elasticsearch",
           newKbIngroupPermission,
-          newKbGroupIds
+          newKbGroupIds,
+          newKbEmbeddingModel
         );
 
         if (!newKB) {
@@ -936,6 +948,10 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onIngroupPermissionChange={setNewKbIngroupPermission}
                 selectedGroupIds={newKbGroupIds}
                 onSelectedGroupIdsChange={setNewKbGroupIds}
+                // Embedding model for create mode
+                availableEmbeddingModels={availableEmbeddingModels}
+                selectedEmbeddingModel={newKbEmbeddingModel}
+                onEmbeddingModelChange={setNewKbEmbeddingModel}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}

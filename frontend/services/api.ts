@@ -48,6 +48,7 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
+    byName: (agentName: string) => `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
     versions: {
@@ -238,6 +239,21 @@ export const API_ENDPOINTS = {
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
     communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
     communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
+  },
+  skills: {
+    list: `${API_BASE_URL}/skills`,
+    create: `${API_BASE_URL}/skills`,
+    upload: `${API_BASE_URL}/skills/upload`,
+    get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    updateUpload: (skillName: string) => `${API_BASE_URL}/skills/${skillName}/upload`,
+    delete: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    deleteFile: (skillName: string, filePath: string) => `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
+    files: (skillName: string) => `${API_BASE_URL}/skills/${skillName}/files`,
+    fileContent: (skillName: string, filePath: string) =>
+      `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
+    instanceList: `${API_BASE_URL}/skills/instance/list`,
+    instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
   },
   memory: {
     // ---------------- Memory configuration ----------------

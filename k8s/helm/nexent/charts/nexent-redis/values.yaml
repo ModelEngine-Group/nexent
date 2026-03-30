@@ -1,0 +1,18 @@
+replicaCount: 1
+
+image:
+  repository: redis
+  tag: alpine
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 250m
+  limits:
+    memory: 1Gi
+    cpu: 500m
+
+storage:
+  size: 5Gi
+  hostPath: "/var/lib/nexent-data/nexent-redis"
