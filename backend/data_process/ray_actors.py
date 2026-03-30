@@ -197,7 +197,6 @@ class DataProcessorRayActor:
     def _validate_chunks(
         self, chunks: Any, source: str
     ) -> List[Dict[str, Any]]:
-
         if chunks is None:
             logger.warning(
                 f"[RayActor] file_process returned None for source='{source}'")
@@ -210,7 +209,6 @@ class DataProcessorRayActor:
             logger.warning(
                 f"[RayActor] file_process returned empty list for source='{source}'")
             return []
-
         return chunks
 
     def store_chunks_in_redis(self, redis_key: str, chunks: List[Dict[str, Any]]) -> bool:

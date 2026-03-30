@@ -55,7 +55,7 @@ class DataProcessCore:
         chunking_strategy: str = "basic",
         processor: Optional[str] = None,
         **params,
-    ) -> List[Dict]:
+    ) -> Tuple[List[Dict], List[Dict]]:
         """
         Facade pattern that automatically detects file type and processes files
 
@@ -68,11 +68,13 @@ class DataProcessCore:
             **params: Additional processing parameters
 
         Returns:
-            List of processed chunks, each dictionary contains the following fields:
+            Tuple[List[Dict], List[Dict]]: (chunks, images_info)
+            chunks: List of processed chunks, each dictionary contains the following fields:
             - content: Text content
             - filename: Filename
             - metadata: Metadata (optional, includes chunk_index, source_type, etc.)
             - language: Language identifier (optional)
+            images_info: List of extracted image metadata dicts (may be empty)
 
         Raises:
             ValueError: Invalid parameters

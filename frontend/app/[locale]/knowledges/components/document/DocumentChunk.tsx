@@ -74,6 +74,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   knowledgeBaseId,
   documents,
   getFileIcon,
+  currentEmbeddingModel,
+  knowledgeBaseEmbeddingModel,
   onChunkCountChange,
   permission,
 }) => {
@@ -126,10 +128,31 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     setTooltipResetKey((prev) => prev + 1);
   }, []);
 
-  // Determine if in read-only mode (user permission only)
+  const effectiveIndexName = knowledgeBaseId || knowledgeBaseName;
+
+  const hasKnowledgeBaseModel =
+    Boolean(knowledgeBaseEmbeddingModel) &&
+    knowledgeBaseEmbeddingModel !== "unknown";
+  const hasCurrentModel = Boolean(currentEmbeddingModel);
+
+  // Determine if embedding models mismatch (specific condition for tooltip)
+  const isEmbeddingModelMismatch = React.useMemo(() => {
+    if (!hasKnowledgeBaseModel) {
+      return false;
+    }
+    return !hasCurrentModel || currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
+  }, [
+    currentEmbeddingModel,
+    hasCurrentModel,
+    hasKnowledgeBaseModel,
+    knowledgeBaseEmbeddingModel,
+  ]);
+
+  // Determine if in read-only mode (embedding model mismatch OR user has READ_ONLY permission)
+  // Note: isReadOnlyMode is broader, includes model mismatch and other conditions
   const isReadOnlyMode = React.useMemo(() => {
-    return permission === "READ_ONLY";
-  }, [permission]);
+    return permission === "READ_ONLY" || isEmbeddingModelMismatch;
+  }, [permission, isEmbeddingModelMismatch]);
 
   // Set active document when documents change
   useEffect(() => {
@@ -154,14 +177,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
   // Load chunks for active document with server-side pagination
   const loadChunks = React.useCallback(async () => {
-    if (!knowledgeBaseName || !activeDocumentKey) {
+    if (!effectiveIndexName || !activeDocumentKey) {
       return;
     }
 
     setLoading(true);
     try {
       const result = await knowledgeBaseService.previewChunksPaginated(
-        knowledgeBaseName,
+        effectiveIndexName,
         pagination.page,
         pagination.pageSize,
         activeDocumentKey
@@ -193,7 +216,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       setLoading(false);
     }
   }, [
-    knowledgeBaseName,
+    effectiveIndexName,
     activeDocumentKey,
     pagination.page,
     pagination.pageSize,
@@ -274,7 +297,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       return;
     }
 
-    if (!knowledgeBaseName) {
+    if (!effectiveIndexName) {
       message.error(t("document.chunk.error.searchFailed"));
       return;
     }
@@ -284,7 +307,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
     try {
       const response = await knowledgeBaseService.hybridSearch(
-        knowledgeBaseId,
+        effectiveIndexName,
         trimmedValue,
         {
           topK: pagination.pageSize,
@@ -296,11 +319,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         return {
           id: item.id || "",
           content: item.content || "",
-          path_or_url: item.path_or_url,
+          path_or_url: item.path_or_url || item.url || item.pathOrUrl,
           filename: item.filename,
           create_time: item.create_time,
           score: item.score, // Preserve search score for display
-          source_type: item.source_type, // Preserve source type for display
+          source_type:
+            item.source_type === "local" || item.source_type === "minio"
+              ? "file"
+              : item.source_type, // Preserve source type for display
         };
       });
 
@@ -317,8 +343,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       setChunkSearchLoading(false);
     }
   }, [
-    knowledgeBaseName,
-    knowledgeBaseId,
+    effectiveIndexName,
     message,
     pagination.pageSize,
     resetChunkSearch,
@@ -395,7 +420,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   };
 
   const handleChunkSubmit = async () => {
-    if (!knowledgeBaseName) {
+    if (!effectiveIndexName) {
       message.error(t("document.chunk.error.loadFailed"));
       return;
     }
@@ -409,7 +434,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       setChunkSubmitting(true);
       if (chunkModalMode === "create") {
         const filenamePayload = values.filename?.trim() || undefined;
-        await knowledgeBaseService.createChunk(knowledgeBaseName, {
+        await knowledgeBaseService.createChunk(effectiveIndexName, {
           content: values.content,
           filename: filenamePayload,
           path_or_url: activeDocumentKey,
@@ -430,7 +455,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           return;
         }
         await knowledgeBaseService.updateChunk(
-          knowledgeBaseName,
+          effectiveIndexName,
           editingChunk.id,
           {
             content: values.content,
@@ -468,7 +493,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       message.error(t("document.chunk.error.missingChunkId"));
       return;
     }
-    if (!knowledgeBaseName) {
+    if (!effectiveIndexName) {
       message.error(t("document.chunk.error.deleteFailed"));
       return;
     }
@@ -483,7 +508,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       danger: true,
       onOk: async () => {
         try {
-          await knowledgeBaseService.deleteChunk(knowledgeBaseName, chunk.id);
+          await knowledgeBaseService.deleteChunk(effectiveIndexName, chunk.id);
           message.success(t("document.chunk.success.delete"));
           forceCloseTooltips();
           // Update chunk count immediately for better UX

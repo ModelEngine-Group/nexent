@@ -119,6 +119,7 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 MINIO_REGION = os.getenv("MINIO_REGION")
 MINIO_DEFAULT_BUCKET = os.getenv("MINIO_DEFAULT_BUCKET")
+S3_URL_PREFIX = "s3://"
 
 
 # Postgres Configuration

@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
 from .client import minio_client
+from consts.const import S3_URL_PREFIX
 
 
 def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None) -> Tuple[str, Optional[str]]:
@@ -19,8 +20,8 @@ def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None)
     if not object_name:
         return object_name, bucket
 
-    if object_name.startswith("s3://"):
-        s3_path = object_name[len("s3://") :]
+    if object_name.startswith(S3_URL_PREFIX):
+        s3_path = object_name[len(S3_URL_PREFIX) :]
         parts = s3_path.split("/", 1)
         parsed_bucket = parts[0] if parts[0] else None
         parsed_key = parts[1] if len(parts) > 1 else ""
@@ -43,20 +44,20 @@ def build_s3_url(object_name: str, bucket: Optional[str] = None) -> str:
     if not object_name:
         return ""
 
-    if object_name.startswith("s3://"):
+    if object_name.startswith(S3_URL_PREFIX):
         return object_name
 
     if object_name.startswith("/"):
         path = object_name.lstrip("/")
         parts = path.split("/", 1)
         if len(parts) == 2:
-            return f"s3://{parts[0]}/{parts[1]}"
-        return f"s3://{parts[0]}/"
+            return f"{S3_URL_PREFIX}{parts[0]}/{parts[1]}"
+        return f"{S3_URL_PREFIX}{parts[0]}/"
 
     resolved_bucket = bucket or minio_client.default_bucket
     if resolved_bucket:
-        return f"s3://{resolved_bucket}/{object_name}"
-    return f"s3://{object_name}"
+        return f"{S3_URL_PREFIX}{resolved_bucket}/{object_name}"
+    return f"{S3_URL_PREFIX}{object_name}"
 
 
 def generate_object_name(file_name: str, prefix: str = "attachments") -> str:

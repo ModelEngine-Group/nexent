@@ -198,7 +198,7 @@ class UniversalImageExtractor(FileProcessor):
                 if drawing is None:
                     continue
 
-                rId = drawing.get(
+                rel_id = drawing.get(
                     "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
                 rel_path = sheet_file.replace(
                     "worksheets", "worksheets/_rels") + ".rels"
@@ -210,7 +210,7 @@ class UniversalImageExtractor(FileProcessor):
                 drawing_file = None
 
                 for r in rel_xml:
-                    if r.get("Id") == rId:
+                    if r.get("Id") == rel_id:
                         drawing_file = "xl/" + \
                             r.get("Target").replace("../", "")
                         break
@@ -254,12 +254,12 @@ class UniversalImageExtractor(FileProcessor):
                     if blip is None:
                         continue
 
-                    rId = blip.get(
+                    embed_rel_id = blip.get(
                         "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
-                    if rId not in rel_map:
+                    if embed_rel_id not in rel_map:
                         continue
 
-                    img_bytes = z.read(rel_map[rId])
+                    img_bytes = z.read(rel_map[embed_rel_id])
                     h = self._hash(img_bytes)
 
                     if h in seen:
@@ -340,24 +340,24 @@ class UniversalImageExtractor(FileProcessor):
         converted_path = None
 
         try:
-            if suffix == ".xlsx":
-                return self._extract_excel(temp_path)
-            if suffix == ".xls":
-                converted_path = self._convert_file(temp_path, "xlsx")
-                return self._extract_excel(converted_path)
+            direct_extractors = {
+                ".xlsx": lambda: self._extract_excel(temp_path),
+                ".pptx": lambda: self._extract_pptx(temp_path, **params),
+                ".pdf": lambda: self._extract_pdf(temp_path, **params),
+            }
+            if suffix in direct_extractors:
+                return direct_extractors[suffix]()
 
-            if suffix == ".pptx":
-                return self._extract_pptx(temp_path, **params)
-            if suffix == ".ppt":
-                converted_path = self._convert_file(temp_path, "pptx")
-                return self._extract_pptx(converted_path, **params)
-
-            if suffix in [".docx", ".doc"]:
-                converted_path = self._convert_file(temp_path, "pdf")
-                return self._extract_pdf(converted_path, **params)
-
-            if suffix == ".pdf":
-                return self._extract_pdf(temp_path, **params)
+            conversions = {
+                ".xls": ("xlsx", lambda path: self._extract_excel(path)),
+                ".ppt": ("pptx", lambda path: self._extract_pptx(path, **params)),
+                ".docx": ("pdf", lambda path: self._extract_pdf(path, **params)),
+                ".doc": ("pdf", lambda path: self._extract_pdf(path, **params)),
+            }
+            if suffix in conversions:
+                target_format, extractor = conversions[suffix]
+                converted_path = self._convert_file(temp_path, target_format)
+                return extractor(converted_path)
 
             return []
 
@@ -378,36 +378,3 @@ class UniversalImageExtractor(FileProcessor):
                         os.remove(f_path)
                     except Exception:
                         pass
-
-
-if __name__ == "__main__":
-    extractor = UniversalImageExtractor()
-
-    input_path = r"C:\Users\pc\Desktop\files\docx.docx"
-
-    output_dir = "output_images"
-    os.makedirs(output_dir, exist_ok=True)
-
-    if not os.path.exists(input_path):
-        print(f"Error: Input file not found: {input_path}")
-    else:
-        with open(input_path, "rb") as f:
-            file_bytes = f.read()
-
-        images = extractor.process_file(
-            file_bytes, os.path.basename(input_path))
-        if not images:
-            print("No images found.")
-        else:
-            for i, img_info in enumerate(images, start=1):
-                img_data = img_info["image_bytes"]
-                img_fmt = img_info.get("image_format", "png")
-                img_filename = f"image_{i}.{img_fmt}"
-                img_path = os.path.join(output_dir, img_filename)
-
-                with open(img_path, "wb") as f:
-                    f.write(img_data)
-
-                print(f"Saved: {img_path} (Format: {img_fmt})")
-
-            print(f"\nFinished. Total {len(images)} images extracted.")

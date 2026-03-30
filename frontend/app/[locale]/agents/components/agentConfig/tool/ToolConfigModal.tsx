@@ -472,6 +472,19 @@ export default function ToolConfigModal({
     }
   }, [configData]);
 
+  const hasEmbeddingModel = Boolean(currentEmbeddingModel);
+  const hasMultiEmbeddingModel = Boolean(currentMultiEmbeddingModel);
+  const canToggleMultimodalParam = hasEmbeddingModel && hasMultiEmbeddingModel;
+  const forcedMultimodalValue = useMemo(() => {
+    if (!hasEmbeddingModel && hasMultiEmbeddingModel) {
+      return true;
+    }
+    if (hasEmbeddingModel && !hasMultiEmbeddingModel) {
+      return false;
+    }
+    return null;
+  }, [hasEmbeddingModel, hasMultiEmbeddingModel]);
+
   const toolMultimodal = useMemo(() => {
     const multimodalParam = currentParams.find(
       (param) => param.name === "multimodal"
@@ -488,6 +501,70 @@ export default function ToolConfigModal({
     return null;
   }, [currentParams]);
 
+  useEffect(() => {
+    if (tool?.name !== "knowledge_base_search") return;
+    if (forcedMultimodalValue === null) return;
+
+    const index = currentParams.findIndex(
+      (param) => param.name === "multimodal"
+    );
+    if (index < 0) return;
+
+    const param = currentParams[index];
+    if (param.value === forcedMultimodalValue) return;
+
+    const updatedParams = [...currentParams];
+    updatedParams[index] = { ...param, value: forcedMultimodalValue };
+    setCurrentParams(updatedParams);
+
+    const fieldName = `param_${index}`;
+    form.setFieldValue(fieldName, forcedMultimodalValue);
+  }, [tool?.name, forcedMultimodalValue, currentParams, form]);
+
+  const isMultimodalConstraintMismatch = useCallback(
+    (kb: KnowledgeBase) => {
+      return (
+        toolMultimodal !== null &&
+        ((toolMultimodal && !kb.is_multimodal) ||
+          (!toolMultimodal && kb.is_multimodal))
+      );
+    },
+    [toolMultimodal]
+  );
+
+  const isEmbeddingModelCompatible = useCallback(
+    (kb: KnowledgeBase) => {
+      if (kb.is_multimodal) {
+        if (!currentMultiEmbeddingModel) {
+          return false;
+        }
+        if (
+          kb.embeddingModel &&
+          kb.embeddingModel !== "unknown" &&
+          kb.embeddingModel !== currentMultiEmbeddingModel
+        ) {
+          return false;
+        }
+        return true;
+      }
+
+      if (!currentEmbeddingModel) {
+        return true;
+      }
+
+      if (
+        kb.embeddingModel &&
+        kb.embeddingModel !== "unknown" &&
+        kb.embeddingModel !== currentEmbeddingModel
+      ) {
+        return false;
+      }
+
+      return true;
+    },
+    [currentEmbeddingModel, currentMultiEmbeddingModel]
+  );
+
   // Check if a knowledge base can be selected
   const canSelectKnowledgeBase = useCallback(
     (kb: KnowledgeBase): boolean => {
@@ -499,42 +576,15 @@ export default function ToolConfigModal({
       }
 
       if (kb.source === "nexent") {
-        const hasMultimodalConstraintMismatch =
-          toolMultimodal !== null &&
-          ((toolMultimodal && !kb.is_multimodal) ||
-            (!toolMultimodal && kb.is_multimodal));
-        if (hasMultimodalConstraintMismatch) {
+        if (isMultimodalConstraintMismatch(kb)) {
           return false;
         }
-
-        if (kb.is_multimodal) {
-          if (!currentMultiEmbeddingModel) {
-            return false;
-          }
-          if (
-            kb.embeddingModel &&
-            kb.embeddingModel !== "unknown" &&
-            kb.embeddingModel !== currentMultiEmbeddingModel
-          ) {
-            return false;
-          }
-        } else {
-          if (!currentEmbeddingModel) {
-            return false;
-          }
-          if (
-            kb.embeddingModel &&
-            kb.embeddingModel !== "unknown" &&
-            kb.embeddingModel !== currentEmbeddingModel
-          ) {
-            return false;
-          }
-        }
+        return isEmbeddingModelCompatible(kb);
       }
 
       return true;
     },
-    [currentEmbeddingModel, currentMultiEmbeddingModel, toolMultimodal]
+    [isEmbeddingModelCompatible, isMultimodalConstraintMismatch]
   );
 
   // Track whether this is the first time opening the modal (reset when modal closes)

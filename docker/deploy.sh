@@ -98,6 +98,7 @@ detect_os_type() {
       echo "unknown"
       ;;
   esac
+  return 0
 }
 
 format_path_for_env() {
@@ -106,7 +107,7 @@ format_path_for_env() {
   local os_type
   os_type=$(detect_os_type)
 
-  if [ "$os_type" = "windows" ]; then
+  if [[ "$os_type" = "windows" ]]; then
     if command -v cygpath >/dev/null 2>&1; then
       cygpath -w "$input_path"
       return 0
@@ -128,6 +129,7 @@ escape_backslashes() {
   # Escape backslashes for safe writing into .env or JSON
   local input_path="$1"
   printf "%s" "$input_path" | sed 's/\\/\\\\/g'
+  return 0
 }
 
 is_port_in_use() {
@@ -598,21 +600,22 @@ select_model_download() {
   fi
   echo "----------------------------------------"
   echo ""
+  return 0
 }
 
 # kerry
 
 download_and_config_models() {
-  if [ "$DOWNLOAD_MODELS" != "Y" ]; then
+  if [[ "$DOWNLOAD_MODELS" != "Y" ]]; then
     echo "INFO: Model download skipped by user choice."
     return 0
   fi
 
   echo "INFO: Downloading AI model files (this may take a while)..."
 
-  local ENV_FILE_DIR="$SCRIPT_DIR"
-  local ENV_FILE_PATH="$ENV_FILE_DIR/.env"
-  local ORIGINAL_DIR="$(pwd)"
+  local env_file_dir="$SCRIPT_DIR"
+  local env_file_path="$env_file_dir/.env"
+  local original_dir="$(pwd)"
 
   MODEL_ROOT="$ROOT_DIR/model"
   mkdir -p "$MODEL_ROOT"
@@ -620,7 +623,7 @@ download_and_config_models() {
 
   export HF_ENDPOINT="https://hf-mirror.com"
 
-  command -v git >/dev/null || { echo "ERROR: git is required but not found."; return 1; }
+  command -v git >/dev/null || { echo "ERROR: git is required but not found." >&2; return 1; }
 
   # ==========================================
   # 1. Table Transformer (table-structure recognition)
@@ -632,9 +635,9 @@ download_and_config_models() {
 
   cd "$MODEL_ROOT" || return 1
 
-  if [ -d "$TT_MODEL_DIR_PATH" ] && [ -f "$TT_MODEL_FILE_CHECK" ]; then
+  if [[ -d "$TT_MODEL_DIR_PATH" ]] && [[ -f "$TT_MODEL_FILE_CHECK" ]]; then
       FILE_SIZE=$(stat -c%s "$TT_MODEL_FILE_CHECK" 2>/dev/null || stat -f%z "$TT_MODEL_FILE_CHECK" 2>/dev/null)
-      if [ "$FILE_SIZE" -gt 1000000 ]; then
+      if [[ "$FILE_SIZE" -gt 1000000 ]]; then
           echo "INFO: Table Transformer already exists."
       else
           echo "WARN: Existing model file looks incomplete, re-downloading..."
@@ -642,16 +645,16 @@ download_and_config_models() {
       fi
   fi
 
-  if [ ! -f "$TT_MODEL_FILE_CHECK" ]; then
-      if [ -d "$TT_MODEL_DIR_NAME" ]; then
+  if [[ ! -f "$TT_MODEL_FILE_CHECK" ]]; then
+      if [[ -d "$TT_MODEL_DIR_NAME" ]]; then
           echo "WARN: Removing existing directory before re-download..."
           rm -rf "$TT_MODEL_DIR_NAME"
       fi
 
       echo "INFO: Step 1/2: Clone repo (skip LFS files)..."
       if ! GIT_LFS_SKIP_SMUDGE=1 git clone "$HF_ENDPOINT/microsoft/$TT_MODEL_DIR_NAME" "$TT_MODEL_DIR_NAME"; then
-          echo "ERROR: Failed to clone repository."
-          cd "$ORIGINAL_DIR"
+          echo "ERROR: Failed to clone repository." >&2
+          cd "$original_dir"
           return 1
       fi
 
@@ -665,19 +668,19 @@ download_and_config_models() {
       elif command -v wget &> /dev/null; then
           wget "$LARGE_FILE_URL" -O "model.safetensors"
       else
-          echo "ERROR: curl or wget is required to download model files."
-          cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$ORIGINAL_DIR"; return 1
+          echo "ERROR: curl or wget is required to download model files." >&2
+          cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$original_dir"; return 1
       fi
 
-      if [ ! -f "model.safetensors" ]; then
-          echo "ERROR: model.safetensors download failed."
-          cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$ORIGINAL_DIR"; return 1
+      if [[ ! -f "model.safetensors" ]]; then
+          echo "ERROR: model.safetensors download failed." >&2
+          cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$original_dir"; return 1
       fi
 
       FILE_SIZE=$(stat -c%s "model.safetensors" 2>/dev/null || stat -f%z "model.safetensors" 2>/dev/null)
-      if [ "$FILE_SIZE" -lt 1000000 ]; then
-          echo "ERROR: model.safetensors seems too small (size: $FILE_SIZE bytes)."
-          cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$ORIGINAL_DIR"; return 1
+      if [[ "$FILE_SIZE" -lt 1000000 ]]; then
+          echo "ERROR: model.safetensors seems too small (size: $FILE_SIZE bytes)." >&2
+          cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$original_dir"; return 1
       fi
 
       echo "INFO: model.safetensors downloaded (size: $(du -h model.safetensors | cut -f1))"
@@ -695,9 +698,9 @@ download_and_config_models() {
 
   NEED_DOWNLOAD=false
 
-  if [ -f "$YOLOX_MODEL_FILE" ]; then
+  if [[ -f "$YOLOX_MODEL_FILE" ]]; then
       CURRENT_SIZE=$(stat -c%s "$YOLOX_MODEL_FILE" 2>/dev/null || stat -f%z "$YOLOX_MODEL_FILE" 2>/dev/null)
-      if [ "$CURRENT_SIZE" -lt "$MIN_YOLOX_SIZE" ]; then
+      if [[ "$CURRENT_SIZE" -lt "$MIN_YOLOX_SIZE" ]]; then
           echo "WARN: Existing YOLOX file looks incomplete (size: $(numfmt --to=iec-i --suffix=B $CURRENT_SIZE 2>/dev/null || echo $CURRENT_SIZE)). Re-downloading..."
           NEED_DOWNLOAD=true
       else
@@ -707,7 +710,7 @@ download_and_config_models() {
       NEED_DOWNLOAD=true
   fi
 
-  if [ "$NEED_DOWNLOAD" = true ]; then
+  if [[ "$NEED_DOWNLOAD" = true ]]; then
       ONNX_URL="$HF_ENDPOINT/unstructuredio/yolo_x_layout/resolve/main/yolox_l0.05.onnx"
 
       if command -v curl &> /dev/null; then
@@ -715,31 +718,31 @@ download_and_config_models() {
           if curl -L -C - -o "$YOLOX_MODEL_FILE" "$ONNX_URL" --progress-bar; then
               echo "INFO: curl download completed"
           else
-              echo "ERROR: curl download failed."
-              cd "$ORIGINAL_DIR"
+              echo "ERROR: curl download failed." >&2
+              cd "$original_dir"
               return 1
           fi
       elif command -v wget &> /dev/null; then
           echo "INFO: Downloading with wget (supports resume -c)..."
           wget -c "$ONNX_URL" -O "$YOLOX_MODEL_FILE"
       else
-          echo "ERROR: curl or wget is required to download model files."
-          cd "$ORIGINAL_DIR"
+          echo "ERROR: curl or wget is required to download model files." >&2
+          cd "$original_dir"
           return 1
       fi
 
-      if [ -f "$YOLOX_MODEL_FILE" ]; then
+      if [[ -f "$YOLOX_MODEL_FILE" ]]; then
           FINAL_SIZE=$(stat -c%s "$YOLOX_MODEL_FILE" 2>/dev/null || stat -f%z "$YOLOX_MODEL_FILE" 2>/dev/null)
-          if [ "$FINAL_SIZE" -lt "$MIN_YOLOX_SIZE" ]; then
-              echo "ERROR: YOLOX file seems too small (size: $FINAL_SIZE bytes)."
-              cd "$ORIGINAL_DIR"
+          if [[ "$FINAL_SIZE" -lt "$MIN_YOLOX_SIZE" ]]; then
+              echo "ERROR: YOLOX file seems too small (size: $FINAL_SIZE bytes)." >&2
+              cd "$original_dir"
               return 1
           else
               echo "INFO: YOLOX downloaded (size: $(numfmt --to=iec-i --suffix=B $FINAL_SIZE 2>/dev/null || echo $FINAL_SIZE))"
           fi
       else
-          echo "ERROR: YOLOX download failed: file not found."
-          cd "$ORIGINAL_DIR"
+          echo "ERROR: YOLOX download failed: file not found." >&2
+          cd "$original_dir"
           return 1
       fi
   fi
@@ -775,8 +778,8 @@ EOF
 
   # ==========================================
   # 4. Update .env
-  cd "$ENV_FILE_DIR" || return 1
-  touch "$ENV_FILE_PATH"
+  cd "$env_file_dir" || return 1
+  touch "$env_file_path"
 
   TT_MODEL_DIR_ABS_PATH=$(cd "$TT_MODEL_DIR_PATH" && pwd)
   CONFIG_FILE_ABS_PATH=$(cd "$(dirname "$CONFIG_FILE")" && pwd)/$(basename "$CONFIG_FILE")
@@ -789,16 +792,16 @@ EOF
       update_env_var "TABLE_TRANSFORMER_MODEL_PATH" "$TT_MODEL_DIR_ENV_PATH"
       update_env_var "UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH" "$CONFIG_FILE_ENV_PATH"
   else
-      sed -i.bak "/^TABLE_TRANSFORMER_MODEL_PATH=/d" "$ENV_FILE_PATH" 2>/dev/null || true
-      echo "TABLE_TRANSFORMER_MODEL_PATH="$TT_MODEL_DIR_ENV_PATH"" >> "$ENV_FILE_PATH"
+      sed -i.bak "/^TABLE_TRANSFORMER_MODEL_PATH=/d" "$env_file_path" 2>/dev/null || true
+      echo "TABLE_TRANSFORMER_MODEL_PATH="$TT_MODEL_DIR_ENV_PATH"" >> "$env_file_path"
 
-      sed -i.bak "/^UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH=/d" "$ENV_FILE_PATH" 2>/dev/null || true
-      echo "UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH="$CONFIG_FILE_ENV_PATH"" >> "$ENV_FILE_PATH"
-      rm -f "$ENV_FILE_PATH.bak" 2>/dev/null
+      sed -i.bak "/^UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH=/d" "$env_file_path" 2>/dev/null || true
+      echo "UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH="$CONFIG_FILE_ENV_PATH"" >> "$env_file_path"
+      rm -f "$env_file_path.bak" 2>/dev/null
   fi
 
   echo "INFO: Environment file updated"
-  cd "$ORIGINAL_DIR"
+  cd "$original_dir"
 }
 
 clean() {

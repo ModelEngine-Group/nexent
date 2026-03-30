@@ -186,6 +186,50 @@ export default function KnowledgeBaseSelectorModal({
     }
   }, []);
 
+  const isMultimodalConstraintMismatch = useCallback(
+    (kb: KnowledgeBase) => {
+      return (
+        toolMultimodal !== null &&
+        ((toolMultimodal && !kb.is_multimodal) ||
+          (!toolMultimodal && kb.is_multimodal))
+      );
+    },
+    [toolMultimodal]
+  );
+
+  const isEmbeddingModelCompatible = useCallback(
+    (kb: KnowledgeBase) => {
+      if (kb.is_multimodal) {
+        if (!currentMultiEmbeddingModel) {
+          return false;
+        }
+        if (
+          kb.embeddingModel &&
+          kb.embeddingModel !== "unknown" &&
+          kb.embeddingModel !== currentMultiEmbeddingModel
+        ) {
+          return false;
+        }
+        return true;
+      }
+
+      if (!currentEmbeddingModel) {
+        return true;
+      }
+
+      if (
+        kb.embeddingModel &&
+        kb.embeddingModel !== "unknown" &&
+        kb.embeddingModel !== currentEmbeddingModel
+      ) {
+        return false;
+      }
+
+      return true;
+    },
+    [currentEmbeddingModel, currentMultiEmbeddingModel]
+  );
+
   // Check if a knowledge base can be selected
   const checkCanSelect = useCallback(
     (kb: KnowledgeBase): boolean => {
@@ -204,83 +248,52 @@ export default function KnowledgeBaseSelectorModal({
 
       // For nexent source, check model matching against current tenant config and tool multimodal constraint.
       if (kb.source === "nexent") {
-        const hasMultimodalConstraintMismatch =
-          toolMultimodal !== null &&
-          ((toolMultimodal && !kb.is_multimodal) ||
-            (!toolMultimodal && kb.is_multimodal));
-        if (hasMultimodalConstraintMismatch) {
+        if (isMultimodalConstraintMismatch(kb)) {
           return false;
         }
-
-        if (kb.is_multimodal) {
-          if (!currentMultiEmbeddingModel) {
-            return false;
-          }
-          if (
-            kb.embeddingModel &&
-            kb.embeddingModel !== "unknown" &&
-            kb.embeddingModel !== currentMultiEmbeddingModel
-          ) {
-            return false;
-          }
-        } else {
-          if (!currentEmbeddingModel) {
-            return false;
-          }
-          if (
-            kb.embeddingModel &&
-            kb.embeddingModel !== "unknown" &&
-            kb.embeddingModel !== currentEmbeddingModel
-          ) {
-            return false;
-          }
-        }
+        return isEmbeddingModelCompatible(kb);
       }
 
       return true;
     },
     [
       isSelectable,
-      currentEmbeddingModel,
-      currentMultiEmbeddingModel,
-      toolMultimodal,
+      isEmbeddingModelCompatible,
+      isMultimodalConstraintMismatch,
     ]
   );
 
-  // Check if a knowledge base has model mismatch (for display tags).
-  const checkModelMismatch = useCallback(
-    (kb: KnowledgeBase): boolean => {
-      if (kb.source !== "nexent") {
-        return false;
-      }
+  // Check if a knowledge base has model mismatch (for display purposes)
+  const checkModelMismatch = (kb: KnowledgeBase): boolean => {
+    if (kb.source !== "nexent") {
+      return false;
+    }
 
-      const hasMultimodalConstraintMismatch =
-        toolMultimodal !== null &&
-        ((toolMultimodal && !kb.is_multimodal) ||
-          (!toolMultimodal && kb.is_multimodal));
-      if (hasMultimodalConstraintMismatch) {
+    const hasMultimodalConstraintMismatch =
+      toolMultimodal !== null &&
+      ((toolMultimodal && !kb.is_multimodal) ||
+        (!toolMultimodal && kb.is_multimodal));
+    if (hasMultimodalConstraintMismatch) {
+      return true;
+    }
+
+    const embeddingModel = kb.embeddingModel;
+    if (!embeddingModel || embeddingModel === "unknown") {
+      return false;
+    }
+
+    if (kb.is_multimodal) {
+      if (!currentMultiEmbeddingModel) {
         return true;
       }
+      return embeddingModel !== currentMultiEmbeddingModel;
+    }
 
-      const embeddingModel = kb.embeddingModel;
-      if (!embeddingModel || embeddingModel === "unknown") {
-        return false;
-      }
-
-      if (kb.is_multimodal) {
-        if (!currentMultiEmbeddingModel) {
-          return true;
-        }
-        return embeddingModel !== currentMultiEmbeddingModel;
-      }
-
-      if (!currentEmbeddingModel) {
-        return true;
-      }
-      return embeddingModel !== currentEmbeddingModel;
-    },
-    [currentEmbeddingModel, currentMultiEmbeddingModel, toolMultimodal]
-  );
+    if (!currentEmbeddingModel) {
+      return false;
+    }
+    return embeddingModel !== currentEmbeddingModel;
+  };
 
   // Filter knowledge bases based on tool type, search, and filters
   const filteredKnowledgeBases = useMemo(() => {

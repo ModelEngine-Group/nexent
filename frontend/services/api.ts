@@ -144,7 +144,7 @@ export const API_ENDPOINTS = {
     customModelHealthcheck: (displayName: string, modelType: string) =>
       `${API_BASE_URL}/model/healthcheck?display_name=${encodeURIComponent(
         displayName
-      )}&modelType=${encodeURIComponent(modelType)}`,
+      )}&model_type=${encodeURIComponent(modelType)}`,
     verifyModelConfig: `${API_BASE_URL}/model/temporary_healthcheck`,
     updateSingleModel: (displayName: string) =>
       `${API_BASE_URL}/model/update?display_name=${encodeURIComponent(displayName)}`,
