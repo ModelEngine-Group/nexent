@@ -21,6 +21,8 @@ function isSameToolNames(left: string[] = [], right: string[] = []) {
 
 export function useMcpToolsPage({ t, message }: UseMcpToolsPageParams) {
   const [searchValue, setSearchValue] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [transportTypeFilter, setTransportTypeFilter] = useState<string>("all");
   const [services, setServices] = useState<McpServiceItem[]>([]);
   const [selectedService, setSelectedService] = useState<McpServiceItem | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -61,8 +63,13 @@ export function useMcpToolsPage({ t, message }: UseMcpToolsPageParams) {
   }, [listQuery, message, t]);
 
   const filteredServices = useMemo(() => {
-    return filterServiceCards(services, searchValue);
-  }, [searchValue, services]);
+    const searched = filterServiceCards(services, searchValue);
+    return searched.filter((item) => {
+      const sourceMatched = sourceFilter === "all" || item.source === sourceFilter;
+      const transportMatched = transportTypeFilter === "all" || item.transportType === transportTypeFilter;
+      return sourceMatched && transportMatched;
+    });
+  }, [searchValue, services, sourceFilter, transportTypeFilter]);
 
   const syncToolNamesToCards = useCallback((service: Pick<McpServiceItem, "mcpId" | "name" | "serverUrl">, tools: McpTool[]) => {
     const nextToolNames = tools.map((item) => item.name);
@@ -111,6 +118,10 @@ export function useMcpToolsPage({ t, message }: UseMcpToolsPageParams) {
   return {
     searchValue,
     setSearchValue,
+    sourceFilter,
+    setSourceFilter,
+    transportTypeFilter,
+    setTransportTypeFilter,
     services,
     loadingServices: listQuery.isFetching && services.length === 0,
     selectedService,
