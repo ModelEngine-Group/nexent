@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback } from "react";
-import { App, Button, Input } from "antd";
+import { App, Button, Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import log from "@/lib/logger";
@@ -22,6 +22,10 @@ export default function McpToolsPage() {
   const {
     searchValue,
     setSearchValue,
+    sourceFilter,
+    setSourceFilter,
+    transportTypeFilter,
+    setTransportTypeFilter,
     loadingServices,
     selectedService,
     setSelectedService,
@@ -74,7 +78,7 @@ export default function McpToolsPage() {
               <label className="sr-only" htmlFor="mcp-search">
                 {t("mcpTools.page.searchLabel")}
               </label>
-              <div className="relative">
+              <div className="relative mb-2">
                 <Input
                   id="mcp-search"
                   value={searchValue}
@@ -86,6 +90,32 @@ export default function McpToolsPage() {
                 <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-amber-700">
                   {t("mcpTools.page.resultCount", { count: filteredServices.length })}
                 </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <Select
+                  size="large"
+                  value={sourceFilter}
+                  onChange={setSourceFilter}
+                  className="w-full"
+                  options={[
+                    { value: "all", label: t("mcpTools.page.sourceFilter.all") },
+                    { value: "local", label: t("mcpTools.source.local") },
+                    { value: "mcp_registry", label: t("mcpTools.source.registry") },
+                    { value: "community", label: t("mcpTools.source.community") },
+                  ]}
+                />
+                <Select
+                  size="large"
+                  value={transportTypeFilter}
+                  onChange={setTransportTypeFilter}
+                  className="w-full"
+                  options={[
+                    { value: "all", label: t("mcpTools.page.transportFilter.all") },
+                    { value: "http", label: t("mcpTools.serverType.http") },
+                    { value: "sse", label: t("mcpTools.serverType.sse") },
+                    { value: "stdio", label: t("mcpTools.serverType.stdio") },
+                  ]}
+                />
               </div>
             </div>
             <div className="md:basis-1/3">
