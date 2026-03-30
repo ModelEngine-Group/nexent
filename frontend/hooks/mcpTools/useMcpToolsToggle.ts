@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { MessageInstance } from "antd/es/message/interface";
 import { disableMcpToolService, enableMcpToolService } from "@/services/mcpToolsService";
+import { updateToolList } from "@/services/mcpService";
 import { ApiError } from "@/services/api";
 import { MCP_SERVICE_STATUS } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
@@ -73,6 +74,9 @@ export function useMcpToolsToggle({
             }
           : prev
       );
+
+      // Keep tool pool in sync after MCP service status changes.
+      await updateToolList().catch(() => undefined);
 
       message.open({
         key: toastKey,

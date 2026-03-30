@@ -14,9 +14,7 @@ from services.mcp_container_service import MCPContainerManager
 from services.mcp_management_service import (
     add_mcp_service,
     check_mcp_service_health,
-    check_mcp_service_health_legacy,
     delete_mcp_service,
-    delete_mcp_service_legacy,
     delete_community_mcp_service,
     list_community_mcp_services,
     list_my_community_mcp_services,
@@ -25,10 +23,8 @@ from services.mcp_management_service import (
     list_mcp_services,
     publish_community_mcp_service,
     update_mcp_service,
-    update_mcp_service_legacy,
     update_community_mcp_service,
     update_mcp_service_enabled,
-    update_mcp_service_enabled_legacy,
 )
 from utils.auth_utils import get_current_user_info
 
@@ -60,15 +56,6 @@ class AddContainerMcpServiceRequest(BaseModel):
     mcp_config: MCPConfigRequest
 
 
-class UpdateMcpServiceRequest(BaseModel):
-    current_name: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    description: Optional[str] = None
-    server_url: str = Field(min_length=1)
-    tags: Optional[list[str]] = None
-    authorization_token: Optional[str] = None
-
-
 class UpdateMcpServiceByIdRequest(BaseModel):
     mcp_id: int
     name: str = Field(min_length=1)
@@ -78,22 +65,12 @@ class UpdateMcpServiceByIdRequest(BaseModel):
     authorization_token: Optional[str] = None
 
 
-class EnableMcpServiceRequest(BaseModel):
-    name: str = Field(min_length=1)
-    enabled: bool
-
-
 class EnableMcpServiceByIdRequest(BaseModel):
     mcp_id: int
 
 
 class DisableMcpServiceByIdRequest(BaseModel):
     mcp_id: int
-
-
-class HealthcheckMcpServiceRequest(BaseModel):
-    name: str = Field(min_length=1)
-    server_url: str = Field(min_length=1)
 
 
 class HealthcheckMcpServiceByIdRequest(BaseModel):
@@ -243,7 +220,7 @@ async def add_container_mcp_service_api(
         started_container_id: Optional[str] = None
         started_container_id = container_info.get("container_id")
 
-        container_config = payload.mcp_config.model_dump()
+        container_config = payload.mcp_config.model_dump(exclude_none=True)
 
         try:
             await add_mcp_service(
@@ -352,7 +329,7 @@ async def list_registry_mcp_services_api(
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"status": "success", "data": data},
+            content=data,
         )
     except HTTPException:
         raise
@@ -544,45 +521,6 @@ async def list_mcp_tools_api(
 
 
 @router.put("/update")
-async def update_mcp_service_api(
-    payload: UpdateMcpServiceRequest,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None,
-):
-    try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        current_name = payload.current_name
-        new_name = payload.name
-        description = payload.description
-        server_url = payload.server_url
-        tags = payload.tags
-        authorization_token = (payload.authorization_token or "").strip()
-
-        update_mcp_service_legacy(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            current_name=current_name,
-            new_name=new_name,
-            description=description,
-            server_url=server_url,
-            authorization_token=authorization_token,
-            tags=tags,
-        )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"status": "success"},
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Failed to update MCP service: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to update MCP service",
-        )
-
-
-@router.put("/v2/update")
 async def update_mcp_service_by_id_api(
     payload: UpdateMcpServiceByIdRequest,
     authorization: Optional[str] = Header(None),
@@ -611,77 +549,6 @@ async def update_mcp_service_by_id_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to update MCP service",
-        )
-
-
-@router.post("/manage/enable")
-async def update_mcp_service_enable_api(
-    payload: EnableMcpServiceRequest,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None,
-):
-    try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        name = payload.name
-        enabled = payload.enabled
-
-        update_mcp_service_enabled_legacy(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            name=name,
-            enabled=enabled,
-        )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"status": "success"},
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Failed to update MCP service status: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to update MCP service status",
-        )
-
-
-@router.post("/v2/manage/enable")
-async def update_mcp_service_enable_by_id_api(
-    payload: EnableMcpServiceByIdRequest,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None,
-):
-    # Backward-compatible route. Prefer /enable or /disable.
-    try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        await update_mcp_service_enabled(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            mcp_id=payload.mcp_id,
-            enabled=True,
-        )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"status": "success"},
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=str(exc),
-        )
-    except MCPConnectionError as exc:
-        logger.error(f"MCP connection failed while enabling service by id: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="MCP connection failed",
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Failed to enable MCP service by id: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to update MCP service status",
         )
 
 
@@ -758,40 +625,6 @@ async def disable_mcp_service_by_id_api(
 
 
 @router.post("/healthcheck")
-async def check_mcp_health_api(
-    payload: HealthcheckMcpServiceRequest,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None,
-):
-    try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        health_status = await check_mcp_service_health_legacy(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            name=payload.name,
-            server_url=payload.server_url,
-        )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"status": "success", "data": {"health_status": health_status}},
-        )
-    except MCPConnectionError as exc:
-        logger.error(f"MCP connection failed: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="MCP connection failed",
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Failed to check MCP health: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to check MCP health",
-        )
-
-
-@router.post("/v2/healthcheck")
 async def check_mcp_health_by_id_api(
     payload: HealthcheckMcpServiceByIdRequest,
     authorization: Optional[str] = Header(None),
@@ -812,7 +645,7 @@ async def check_mcp_health_by_id_api(
         logger.error(f"MCP connection failed: {exc}")
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="MCP connection failed",
+            detail=str(exc) or "MCP connection failed",
         )
     except HTTPException:
         raise
@@ -825,33 +658,6 @@ async def check_mcp_health_by_id_api(
 
 
 @router.delete("/delete")
-async def delete_mcp_service_api(
-    name: str = Query(min_length=1),
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None,
-):
-    try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        delete_mcp_service_legacy(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            name=name,
-        )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"status": "success"},
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Failed to delete MCP service: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to delete MCP service",
-        )
-
-
-@router.delete("/v2/delete")
 async def delete_mcp_service_by_id_api(
     mcp_id: int = Query(gt=0),
     authorization: Optional[str] = Header(None),

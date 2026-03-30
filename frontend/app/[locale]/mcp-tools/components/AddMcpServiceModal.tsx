@@ -36,7 +36,7 @@ export default function AddMcpServiceModal({
   const registry = useMcpToolsAddRegistry({
     open,
     addModalTab,
-    t: (key) => String(t(key)),
+    t: (key, params) => String(t(key, params)),
     message,
     onServiceAdded,
     onClose,
@@ -142,6 +142,7 @@ export default function AddMcpServiceModal({
             quickAddCandidateService={registry.quickAddCandidateService}
             quickAddOptions={registry.quickAddOptions}
             selectedQuickAddOptionKey={registry.selectedQuickAddOptionKey}
+            quickAddVariableValues={registry.quickAddVariableValues}
             quickAddSubmitting={registry.quickAddSubmitting}
             setRegistrySearchValue={registry.setRegistrySearchValue}
             setSelectedRegistryService={registry.setSelectedRegistryService}
@@ -149,6 +150,7 @@ export default function AddMcpServiceModal({
             setRegistryUpdatedSince={registry.setRegistryUpdatedSince}
             setRegistryIncludeDeleted={registry.setRegistryIncludeDeleted}
             setSelectedQuickAddOptionKey={registry.setSelectedQuickAddOptionKey}
+            handleQuickAddVariableValueChange={registry.handleQuickAddVariableValueChange}
             handleRegistryPrevPage={registry.handleRegistryPrevPage}
             handleRegistryNextPage={registry.handleRegistryNextPage}
             handleQuickAddFromRegistry={registry.handleQuickAddFromRegistry}

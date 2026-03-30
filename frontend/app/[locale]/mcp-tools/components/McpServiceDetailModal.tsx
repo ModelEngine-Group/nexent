@@ -24,6 +24,9 @@ interface McpServiceDetailModalProps {
   tagDrafts: string[];
   tagInputValue: string;
   healthCheckLoading: boolean;
+  healthErrorModalVisible: boolean;
+  healthErrorModalTitle: string;
+  healthErrorModalDetail: string;
   loadingTools: boolean;
   toolsModalVisible: boolean;
   currentServerTools: any[];
@@ -36,6 +39,7 @@ interface McpServiceDetailModalProps {
   handleSaveUpdates: () => void;
   closeToolsModal: () => void;
   handleRefreshTools: () => void;
+  closeHealthErrorModal: () => void;
   onDeleteConfirm: (serviceName: string) => void;
   onPublishToCommunity: () => void;
   publishLoading?: boolean;
@@ -51,6 +55,9 @@ export default function McpServiceDetailModal({
   tagDrafts,
   tagInputValue,
   healthCheckLoading,
+  healthErrorModalVisible,
+  healthErrorModalTitle,
+  healthErrorModalDetail,
   loadingTools,
   toolsModalVisible,
   currentServerTools,
@@ -63,6 +70,7 @@ export default function McpServiceDetailModal({
   handleSaveUpdates,
   closeToolsModal,
   handleRefreshTools,
+  closeHealthErrorModal,
   onDeleteConfirm,
   onPublishToCommunity,
   publishLoading = false,
@@ -384,6 +392,19 @@ export default function McpServiceDetailModal({
         serverName={draftService.name || String(t("mcpTools.service.defaultName"))}
         onRefresh={handleRefreshTools}
       />
+
+      <Modal
+        open={healthErrorModalVisible}
+        title={healthErrorModalTitle}
+        onCancel={closeHealthErrorModal}
+        onOk={closeHealthErrorModal}
+        okText={t("common.confirm")}
+        cancelButtonProps={{ style: { display: "none" } }}
+      >
+        <pre className="max-h-[40vh] overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-50 p-3 text-xs text-slate-700">
+          {healthErrorModalDetail}
+        </pre>
+      </Modal>
 
       {showServerJsonModal && hasRegistryJson ? (
         <Modal

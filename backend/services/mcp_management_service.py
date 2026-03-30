@@ -109,58 +109,14 @@ def _normalize_mcp_registry_server(entry: Dict[str, Any]) -> Dict[str, Any] | No
     if not name:
         return None
 
-    version = _extract_str(server.get("version"))
-    description = _extract_str(server.get("description"))
-
-    remotes_out: List[Dict[str, str]] = []
-    packages_out: List[Dict[str, Any]] = []
-
-    remotes = server.get("remotes")
-    if isinstance(remotes, list):
-        for remote in remotes:
-            if not isinstance(remote, dict):
-                continue
-            remote_url = _extract_str(remote.get("url"))
-            remote_type = _extract_str(remote.get("type")).lower()
-            if remote_url:
-                remotes_out.append({"type": remote_type, "url": remote_url})
-
-    packages = server.get("packages")
-    if isinstance(packages, list):
-        for package in packages:
-            if not isinstance(package, dict):
-                continue
-
-            transport_raw = package.get("transport")
-            transport = {
-                "type": _extract_str(transport_raw.get("type")) if isinstance(transport_raw, dict) else "",
-                "url": _extract_str(transport_raw.get("url")) if isinstance(transport_raw, dict) else "",
-            }
-
-            packages_out.append({
-                "registryType": _extract_str(package.get("registryType")),
-                "identifier": _extract_str(package.get("identifier")),
-                "version": _extract_str(package.get("version")),
-                "runtimeHint": _extract_str(package.get("runtimeHint")),
-                "transport": transport,
-            })
-
-    official_meta = {}
-    if isinstance(entry.get("_meta"), dict):
-        official_meta = entry.get("_meta", {}).get("io.modelcontextprotocol.registry/official", {}) or {}
-
-    return {
-        "name": name,
-        "version": version,
-        "description": description,
-        "remotes": remotes_out,
-        "packages": packages_out,
-        "status": _extract_str(official_meta.get("status")),
-        "isLatest": bool(official_meta.get("isLatest")),
-        "publishedAt": _extract_str(official_meta.get("publishedAt")),
-        "updatedAt": _extract_str(official_meta.get("updatedAt")),
-        "serverJson": server,
-    }
+    normalized_entry = dict(entry)
+    normalized_server = dict(server)
+    if not isinstance(normalized_server.get("remotes"), list):
+        normalized_server["remotes"] = []
+    if not isinstance(normalized_server.get("packages"), list):
+        normalized_server["packages"] = []
+    normalized_entry["server"] = normalized_server
+    return normalized_entry
 
 
 def _normalize_community_remotes(record: Dict[str, Any], registry_json: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -365,10 +321,10 @@ async def list_registry_mcp_services(
 
     metadata = payload.get("metadata") if isinstance(payload, dict) and isinstance(payload.get("metadata"), dict) else {}
 
+    # Keep response shape aligned with official MCP registry API.
     return {
-        "count": len(normalized),
-        "nextCursor": _extract_str(metadata.get("nextCursor")),
-        "items": normalized,
+        "servers": normalized,
+        "metadata": metadata,
     }
 
 
@@ -741,9 +697,23 @@ async def check_mcp_service_health(
             remote_mcp_server=server_url,
             authorization_token=authorization_token,
         )
+    except MCPConnectionError:
+        update_mcp_record_status_by_id(
+            mcp_id=mcp_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            status=False,
+        )
+        raise
     except Exception as exc:
         logger.error(f"MCP health check failed: {exc}")
-        status = False
+        update_mcp_record_status_by_id(
+            mcp_id=mcp_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            status=False,
+        )
+        raise MCPConnectionError(str(exc) or "MCP connection failed")
 
     update_mcp_record_status_by_id(
         mcp_id=mcp_id,

@@ -152,6 +152,9 @@ export default function McpToolsPage() {
               tagDrafts={detail.tagDrafts}
               tagInputValue={detail.tagInputValue}
               healthCheckLoading={detail.healthCheckLoading}
+              healthErrorModalVisible={detail.healthErrorModalVisible}
+              healthErrorModalTitle={detail.healthErrorModalTitle}
+              healthErrorModalDetail={detail.healthErrorModalDetail}
               loadingTools={detail.loadingTools}
               toolsModalVisible={detail.toolsModalVisible}
               currentServerTools={detail.currentServerTools}
@@ -164,6 +167,7 @@ export default function McpToolsPage() {
               handleSaveUpdates={detail.handleSaveUpdates}
               closeToolsModal={detail.closeToolsModal}
               handleRefreshTools={detail.handleRefreshTools}
+              closeHealthErrorModal={detail.closeHealthErrorModal}
               onDeleteConfirm={(serviceName) => handleDeleteConfirm(detail.selectedService!.mcpId, serviceName)}
               onPublishToCommunity={detail.handlePublishToCommunity}
               publishLoading={detail.publishLoading}
