@@ -161,7 +161,7 @@ export function useMcpToolsAddCommunity({
       tags: service.tags || [],
       tagInputValue: "",
       version: service.version || undefined,
-      registryJson: service.mcpRegistryJson || service.serverJson || undefined,
+      registryJson: service.mcpRegistryJson || (service.serverJson as Record<string, unknown>) || undefined,
     });
     setQuickAddConfirmVisible(true);
   }, []);

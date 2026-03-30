@@ -29,21 +29,90 @@ export enum McpContainerStatus {
   UNKNOWN = "unknown",
 }
 
-export interface RegistryMcpCard {
+export interface RegistryServerPayload {
   name: string;
-  version: string;
-  description: string;
-  publishedAt: string;
-  status: string;
-  remotes: Array<{ type: string; url: string }>;
-  packages: Array<{
-    registryType: string;
-    identifier: string;
-    version: string;
-    runtimeHint: string;
-    transport: { type: string; url: string };
+  version?: string;
+  description?: string;
+  websiteUrl?: string;
+  repository?: {
+    url?: string;
+    source?: string;
+    id?: string;
+  };
+  remotes: Array<{
+    type: string;
+    url: string;
+    variables?: Record<string, unknown>;
+    headers?: Array<{
+      name?: string;
+      description?: string;
+      isRequired?: boolean;
+      isSecret?: boolean;
+      format?: string;
+      value?: string;
+      default?: string;
+      placeholder?: string;
+      choices?: string[];
+      variables?: Record<string, unknown>;
+      [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
   }>;
-  serverJson: Record<string, unknown>;
+  packages: Array<{
+    registryType?: string;
+    identifier?: string;
+    version?: string;
+    runtimeHint?: string;
+    transport?: {
+      type?: string;
+      url?: string;
+      headers?: unknown;
+      variables?: unknown;
+      [key: string]: unknown;
+    };
+    environmentVariables?: unknown;
+    runtimeArguments?: unknown;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+}
+
+export interface RegistryMcpCard {
+  server: RegistryServerPayload;
+  _meta?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface RegistryRemoteVariable {
+  key: string;
+  formKey?: string;
+  label?: string;
+  description?: string;
+  format?: string;
+  default?: string;
+  placeholder?: string;
+  value?: string;
+  isRequired?: boolean;
+  isSecret?: boolean;
+  choices?: string[];
+  variables?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface RegistryRuntimeArgumentInput {
+  key: string;
+  formKey: string;
+  label: string;
+  type: "named" | "positional";
+  name?: string;
+  valueHint?: string;
+  description?: string;
+  format?: string;
+  default?: string;
+  value?: string;
+  isRequired?: boolean;
+  isSecret?: boolean;
+  isRepeated?: boolean;
 }
 
 export interface RegistryQuickAddOption {
@@ -52,13 +121,30 @@ export interface RegistryQuickAddOption {
   sourceLabel: string;
   transportType: "http" | "sse" | "stdio";
   serverUrl?: string;
+  serverUrlTemplate?: string;
+  remoteVariables?: RegistryRemoteVariable[];
+  packageIndex?: number;
+  packageRuntimeHint?: string;
+  packageEnvironmentVariables?: RegistryRemoteVariable[];
+  packageTransportHeaders?: RegistryRemoteVariable[];
+  packageTransportVariables?: RegistryRemoteVariable[];
+  packageRuntimeArguments?: RegistryRuntimeArgumentInput[];
   packageIdentifier?: string;
   packageRegistryType?: string;
   packageEnvTemplate?: Record<string, string>;
 }
 
-export interface CommunityMcpCard extends RegistryMcpCard {
+export interface CommunityMcpCard {
   communityId?: number;
+  name: string;
+  version?: string;
+  description: string;
+  status: string;
+  publishedAt: string;
+  updatedAt?: string;
+  remotes: Array<{ type: string; url: string }>;
+  packages: Array<Record<string, unknown>>;
+  serverJson: Record<string, unknown>;
   source?: "community";
   transportType: "http" | "sse" | "stdio";
   serverUrl: string;

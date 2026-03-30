@@ -126,7 +126,7 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h3 className="break-all text-base font-semibold text-slate-900">{item.name}</h3>
-                      <p className="mt-1 text-xs text-slate-500">{formatRegistryVersion(item.version)}</p>
+                      <p className="mt-1 text-xs text-slate-500">{formatRegistryVersion(item.version || "")}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <Button size="small" className="rounded-full" onClick={() => openEdit(item)}>

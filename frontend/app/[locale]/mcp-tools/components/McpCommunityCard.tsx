@@ -43,9 +43,9 @@ export default function McpCommunityCard({
 
       <div className="mt-2 flex items-center gap-2">
         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-          {formatRegistryVersion(service.version)}
+          {formatRegistryVersion(service.version || "")}
         </span>
-        <span className="text-xs text-slate-400">{formatRegistryDate(service.publishedAt)}</span>
+        <span className="text-xs text-slate-400">{formatRegistryDate(service.publishedAt || "")}</span>
       </div>
 
       <p className="mt-3 line-clamp-2 min-h-[40px] text-sm text-slate-600">{service.description}</p>

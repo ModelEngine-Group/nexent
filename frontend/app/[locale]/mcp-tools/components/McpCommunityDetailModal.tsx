@@ -24,9 +24,9 @@ export default function McpCommunityDetailModal({
 }: Props) {
   const [showServerJsonModal, setShowServerJsonModal] = useState(false);
   const [showConfigJsonModal, setShowConfigJsonModal] = useState(false);
-  const { websiteUrl, repositoryUrl } = extractRegistryLinks(service.serverJson);
-  const serverJsonPretty = toPrettyRegistryJson(service.serverJson);
-  const configJsonPretty = toPrettyRegistryJson(service.configJson);
+  const { websiteUrl, repositoryUrl } = extractRegistryLinks(service.serverJson as Record<string, unknown>);
+  const serverJsonPretty = toPrettyRegistryJson(service.serverJson as Record<string, unknown>);
+  const configJsonPretty = toPrettyRegistryJson((service.configJson || undefined) as Record<string, unknown> | undefined);
   const hasServerJson = Boolean(service.serverJson && Object.keys(service.serverJson).length > 0);
   const hasConfigJson = Boolean(service.configJson && Object.keys(service.configJson).length > 0);
   const serverTypeText =
@@ -114,7 +114,7 @@ export default function McpCommunityDetailModal({
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">{t("mcpTools.community.publishedAt")}</span>
-                <span className="font-medium text-slate-800">{formatRegistryDate(service.publishedAt)}</span>
+                <span className="font-medium text-slate-800">{formatRegistryDate(service.publishedAt || "")}</span>
               </div>
               {websiteUrl ? (
                 <div className="flex items-center justify-between gap-4">

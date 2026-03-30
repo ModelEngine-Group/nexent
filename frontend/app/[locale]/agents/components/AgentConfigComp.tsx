@@ -26,6 +26,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
 
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const showLegacyMcpConfig = false;
 
   // Use tool list hook for data management
   const { groupedTools, invalidate } = useToolList();
@@ -118,16 +119,18 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
               >
                 {t("toolManagement.refresh.button.refresh")}
               </Button>
-              <Button
-                type="text"
-                size="small"
-                icon={<Plug size={16} />}
-                onClick={() => setIsMcpModalOpen(true)}
-                className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
-                title={t("toolManagement.mcp.title")}
-              >
-                {t("toolManagement.mcp.button")}
-              </Button>
+              {showLegacyMcpConfig ? (
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<Plug size={16} />}
+                  onClick={() => setIsMcpModalOpen(true)}
+                  className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
+                  title={t("toolManagement.mcp.title")}
+                >
+                  {t("toolManagement.mcp.button")}
+                </Button>
+              ) : null}
             </Flex>
           </Col>
         </Row>

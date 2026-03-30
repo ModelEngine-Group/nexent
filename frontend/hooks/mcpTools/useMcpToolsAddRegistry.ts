@@ -11,13 +11,15 @@ import {
 } from "@/services/mcpToolsService";
 import {
   type RegistryQuickAddOption,
+  type RegistryRemoteVariable,
+  type RegistryRuntimeArgumentInput,
   type McpTab,
 } from "@/types/mcpTools";
 
 type UseMcpToolsAddRegistryParams = {
   open: boolean;
   addModalTab: McpTab;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, unknown>) => string;
   message: MessageInstance;
   onServiceAdded: () => Promise<unknown>;
   onClose: () => void;
@@ -68,7 +70,7 @@ const pickQuickAddPort = (): number => {
 
 const extractPackageEnvTemplate = (service: RegistryMcpCard, pkgIdentifier?: string): Record<string, string> => {
   if (!pkgIdentifier) return {};
-  const rawPackages = (service.serverJson as { packages?: unknown[] } | undefined)?.packages;
+  const rawPackages = service.server?.packages;
   if (!Array.isArray(rawPackages)) return {};
 
   const targetPackage = rawPackages.find((entry) => {
@@ -88,12 +90,206 @@ const extractPackageEnvTemplate = (service: RegistryMcpCard, pkgIdentifier?: str
   }, {});
 };
 
+const toStringOrUndefined = (value: unknown): string | undefined => {
+  if (value === null || value === undefined) return undefined;
+  return String(value);
+};
+
+const extractKeyValueInputs = (
+  inputs: unknown,
+  formPrefix: string,
+  fallbackLabel: string
+): RegistryRemoteVariable[] => {
+  if (!Array.isArray(inputs)) return [];
+
+  return inputs
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item, index) => {
+      const name = toStringOrUndefined(item.name)?.trim() || `${fallbackLabel}_${index + 1}`;
+      return {
+        key: name,
+        formKey: `${formPrefix}:${name}`,
+        label: name,
+        description: toStringOrUndefined(item.description),
+        format: toStringOrUndefined(item.format),
+        default: toStringOrUndefined(item.default),
+        value: toStringOrUndefined(item.value),
+        placeholder: toStringOrUndefined(item.placeholder),
+        isRequired: typeof item.isRequired === "boolean" ? item.isRequired : undefined,
+        isSecret: typeof item.isSecret === "boolean" ? item.isSecret : undefined,
+        choices: Array.isArray(item.choices)
+          ? item.choices.filter((choice): choice is string => typeof choice === "string")
+          : undefined,
+        variables: item.variables && typeof item.variables === "object"
+          ? (item.variables as Record<string, unknown>)
+          : undefined,
+      };
+    });
+};
+
+const extractVariableMapInputs = (
+  variables: unknown,
+  formPrefix: string
+): RegistryRemoteVariable[] => {
+  if (!variables || typeof variables !== "object") return [];
+
+  return Object.entries(variables as Record<string, unknown>)
+    .filter(([, value]) => Boolean(value) && typeof value === "object")
+    .map(([key, value]) => {
+      const item = value as Record<string, unknown>;
+      return {
+        key,
+        formKey: `${formPrefix}:${key}`,
+        label: key,
+        description: toStringOrUndefined(item.description),
+        format: toStringOrUndefined(item.format),
+        default: toStringOrUndefined(item.default),
+        value: toStringOrUndefined(item.value),
+        placeholder: toStringOrUndefined(item.placeholder),
+        isRequired: typeof item.isRequired === "boolean" ? item.isRequired : undefined,
+        isSecret: typeof item.isSecret === "boolean" ? item.isSecret : undefined,
+        choices: Array.isArray(item.choices)
+          ? item.choices.filter((choice): choice is string => typeof choice === "string")
+          : undefined,
+        variables: item.variables && typeof item.variables === "object"
+          ? (item.variables as Record<string, unknown>)
+          : undefined,
+      };
+    });
+};
+
+const extractRuntimeArguments = (runtimeArguments: unknown, formPrefix: string): RegistryRuntimeArgumentInput[] => {
+  if (!Array.isArray(runtimeArguments)) return [];
+
+  return runtimeArguments
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item, index) => {
+      const argType = String(item.type || "").toLowerCase() === "named" ? "named" : "positional";
+      const name = toStringOrUndefined(item.name)?.trim();
+      const valueHint = toStringOrUndefined(item.valueHint)?.trim();
+      const keyBase = argType === "named" ? name || `named_${index + 1}` : valueHint || `arg_${index + 1}`;
+      return {
+        key: keyBase,
+        formKey: `${formPrefix}:${keyBase}:${index}`,
+        label: argType === "named" ? name || `--arg-${index + 1}` : valueHint || `arg-${index + 1}`,
+        type: argType,
+        name,
+        valueHint,
+        description: toStringOrUndefined(item.description),
+        format: toStringOrUndefined(item.format),
+        default: toStringOrUndefined(item.default),
+        value: toStringOrUndefined(item.value),
+        isRequired: typeof item.isRequired === "boolean" ? item.isRequired : undefined,
+        isSecret: typeof item.isSecret === "boolean" ? item.isSecret : undefined,
+        isRepeated: typeof item.isRepeated === "boolean" ? item.isRepeated : undefined,
+      };
+    });
+};
+
+const extractRemoteVariables = (service: RegistryMcpCard, remoteType?: string, remoteUrl?: string): RegistryRemoteVariable[] => {
+  const rawRemotes = service.server?.remotes;
+  if (!Array.isArray(rawRemotes)) return [];
+
+  const matchedRemote = rawRemotes.find((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    const candidate = entry as { type?: unknown; url?: unknown };
+    const candidateType = typeof candidate.type === "string" ? candidate.type.toLowerCase() : "";
+    const candidateUrl = typeof candidate.url === "string" ? candidate.url : "";
+    return candidateType === String(remoteType || "").toLowerCase() && candidateUrl === String(remoteUrl || "");
+  }) as { variables?: Record<string, unknown> } | undefined;
+
+  if (!matchedRemote || !matchedRemote.variables || typeof matchedRemote.variables !== "object") {
+    return [];
+  }
+
+  return extractVariableMapInputs(matchedRemote.variables, "remote-var");
+};
+
+const buildInitialVariableValues = (option: RegistryQuickAddOption | null): Record<string, string> => {
+  if (!option) {
+    return {};
+  }
+
+  const fields: RegistryRemoteVariable[] = [
+    ...(option.remoteVariables || []),
+    ...(option.packageEnvironmentVariables || []),
+    ...(option.packageTransportHeaders || []),
+    ...(option.packageTransportVariables || []),
+  ];
+
+  const values = fields.reduce<Record<string, string>>((acc, field) => {
+    if (!field.formKey) return acc;
+    const initial = typeof field.value === "string" ? field.value : typeof field.default === "string" ? field.default : "";
+    acc[field.formKey] = initial;
+    return acc;
+  }, {});
+
+  (option.packageRuntimeArguments || []).forEach((arg) => {
+    const initial = typeof arg.value === "string" ? arg.value : typeof arg.default === "string" ? arg.default : "";
+    values[arg.formKey] = initial;
+  });
+
+  return values;
+};
+
+const applyUrlTemplateVariables = (template: string, values: Record<string, string>): string => {
+  return template.replace(/\{([^{}]+)\}/g, (_match, variableName) => {
+    const key = String(variableName || "").trim();
+    return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : _match;
+  });
+};
+
+const getFieldValueByFormKey = (values: Record<string, string>, formKey?: string): string => {
+  if (!formKey) return "";
+  return String(values[formKey] || "").trim();
+};
+
+const isFieldRequired = (field: { isRequired?: boolean }) => Boolean(field.isRequired);
+
+const buildResolvedRuntimeArgs = (option: RegistryQuickAddOption, values: Record<string, string>): string[] => {
+  const runtimeArgs = option.packageRuntimeArguments || [];
+  if (runtimeArgs.length === 0) {
+    return inferStdioArgs(option.packageRegistryType, option.packageIdentifier);
+  }
+
+  const args: string[] = [];
+  runtimeArgs.forEach((arg) => {
+    const finalValue = getFieldValueByFormKey(values, arg.formKey);
+    if (!finalValue) return;
+
+    if (arg.type === "named") {
+      const flag = (arg.name || "").trim();
+      if (!flag) return;
+      args.push(`${flag}=${finalValue}`);
+      return;
+    }
+    args.push(finalValue);
+  });
+  return args;
+};
+
+const resolveAuthorizationFromHeaders = (
+  headers: RegistryRemoteVariable[] | undefined,
+  values: Record<string, string>
+): string | undefined => {
+  const authorizationHeader = (headers || []).find((header) => header.key.toLowerCase() === "authorization");
+  if (!authorizationHeader?.formKey) return undefined;
+  const value = getFieldValueByFormKey(values, authorizationHeader.formKey);
+  return value || undefined;
+};
+
 const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOption[] => {
   const options: RegistryQuickAddOption[] = [];
+  const rawPackages = service.server?.packages;
+  const packageCandidates = Array.isArray(rawPackages)
+    ? rawPackages.filter((pkg): pkg is Record<string, unknown> => Boolean(pkg) && typeof pkg === "object")
+    : [];
 
-  (service.remotes || []).forEach((remote, index) => {
+  (service.server?.remotes || []).forEach((remote, index) => {
     const remoteTarget = resolveQuickAddTarget(remote.type, remote.url);
     if (!remoteTarget) return;
+
+    const remoteVariables = extractRemoteVariables(service, remote.type, remote.url);
 
     options.push({
       key: `remote-${index}`,
@@ -101,35 +297,60 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
       sourceLabel: `${remote.type || "remote"} - ${remote.url}`,
       transportType: remoteTarget.transportType,
       serverUrl: remoteTarget.serverUrl,
+      serverUrlTemplate: remote.url,
+      remoteVariables,
     });
   });
 
-  (service.packages || []).forEach((pkg, index) => {
-    const packageId = pkg.identifier || "package";
-    const transportType = pkg.transport?.type || "remote";
-    const transportUrl = pkg.transport?.url || "";
+  packageCandidates.forEach((rawPackage, index) => {
+    const packageIdentifier = toStringOrUndefined(rawPackage.identifier)?.trim() || "package";
+    const packageRegistryType = toStringOrUndefined(rawPackage.registryType)?.trim() || "";
+    const packageTransport = rawPackage.transport && typeof rawPackage.transport === "object"
+      ? (rawPackage.transport as Record<string, unknown>)
+      : undefined;
+    const transportType = toStringOrUndefined(packageTransport?.type) || "remote";
+    const transportUrl = toStringOrUndefined(packageTransport?.url) || "";
 
-    const packageTarget = resolveQuickAddTarget(pkg.transport?.type, pkg.transport?.url);
+    const packageTarget = resolveQuickAddTarget(transportType, transportUrl);
+    const packageTransportHeaders = extractKeyValueInputs(packageTransport?.headers, `pkg-transport-header:${index}`, "header");
+    const packageTransportVariables = extractVariableMapInputs(packageTransport?.variables, `pkg-transport-var:${index}`);
+    const packageEnvironmentVariables = extractKeyValueInputs(rawPackage?.environmentVariables, `pkg-env:${index}`, "env");
+    const packageRuntimeArguments = extractRuntimeArguments(rawPackage?.runtimeArguments, `pkg-runtime-arg:${index}`);
+    const packageRuntimeHint = toStringOrUndefined(rawPackage?.runtimeHint) || undefined;
+
     if (packageTarget) {
       options.push({
         key: `package-${index}`,
         sourceType: "package",
-        sourceLabel: `${packageId} - ${transportType} - ${transportUrl}`,
+        sourceLabel: `${packageIdentifier} - ${transportType} - ${transportUrl}`,
         transportType: packageTarget.transportType,
         serverUrl: packageTarget.serverUrl,
+        serverUrlTemplate: transportUrl || undefined,
+        packageIndex: index,
+        packageRuntimeHint,
+        packageEnvironmentVariables,
+        packageTransportHeaders,
+        packageTransportVariables,
+        packageRuntimeArguments,
       });
       return;
     }
 
-    if ((pkg.transport?.type || "").trim().toLowerCase() === "stdio") {
+    if (transportType.trim().toLowerCase() === "stdio") {
       options.push({
         key: `package-${index}`,
         sourceType: "package",
-        sourceLabel: `${packageId} - stdio`,
+        sourceLabel: `${packageIdentifier} - stdio`,
         transportType: "stdio",
-        packageIdentifier: pkg.identifier,
-        packageRegistryType: pkg.registryType,
-        packageEnvTemplate: extractPackageEnvTemplate(service, pkg.identifier),
+        packageIndex: index,
+        packageRuntimeHint,
+        packageEnvironmentVariables,
+        packageTransportHeaders,
+        packageTransportVariables,
+        packageRuntimeArguments,
+        packageIdentifier,
+        packageRegistryType,
+        packageEnvTemplate: extractPackageEnvTemplate(service, packageIdentifier),
       });
     }
   });
@@ -146,6 +367,7 @@ export function useMcpToolsAddRegistry({
   onClose,
 }: UseMcpToolsAddRegistryParams) {
   const [registrySearchValue, setRegistrySearchValue] = useState("");
+  const [debouncedRegistrySearchValue, setDebouncedRegistrySearchValue] = useState("");
   const [selectedRegistryService, setSelectedRegistryService] = useState<RegistryMcpCard | null>(null);
   const [registryCurrentCursor, setRegistryCurrentCursor] = useState<string | null>(null);
   const [registryCursorHistory, setRegistryCursorHistory] = useState<string[]>([]);
@@ -157,6 +379,7 @@ export function useMcpToolsAddRegistry({
   const [quickAddCandidateService, setQuickAddCandidateService] = useState<RegistryMcpCard | null>(null);
   const [quickAddOptions, setQuickAddOptions] = useState<RegistryQuickAddOption[]>([]);
   const [selectedQuickAddOptionKey, setSelectedQuickAddOptionKey] = useState("");
+  const [quickAddVariableValues, setQuickAddVariableValues] = useState<Record<string, string>>({});
   const [addingService, setAddingService] = useState(false);
 
   const addMutation = useMutation({ mutationFn: addMcpToolService });
@@ -174,6 +397,7 @@ export function useMcpToolsAddRegistry({
     setQuickAddCandidateService(null);
     setQuickAddOptions([]);
     setSelectedQuickAddOptionKey("");
+    setQuickAddVariableValues({});
     setAddingService(false);
   }, []);
 
@@ -184,15 +408,19 @@ export function useMcpToolsAddRegistry({
   }, []);
 
   useEffect(() => {
-    if (!(open && addModalTab === MCP_TAB.MCP_REGISTRY)) return;
     const timer = window.setTimeout(() => {
-      loadRegistryFirstPage();
+      setDebouncedRegistrySearchValue(registrySearchValue);
     }, 350);
     return () => window.clearTimeout(timer);
+  }, [registrySearchValue]);
+
+  useEffect(() => {
+    if (!(open && addModalTab === MCP_TAB.MCP_REGISTRY)) return;
+    loadRegistryFirstPage();
   }, [
     open,
     addModalTab,
-    registrySearchValue,
+    debouncedRegistrySearchValue,
     registryVersion,
     registryUpdatedSince,
     registryIncludeDeleted,
@@ -203,7 +431,7 @@ export function useMcpToolsAddRegistry({
     queryKey: [
       "mcp-tools",
       "market",
-      registrySearchValue,
+      debouncedRegistrySearchValue,
       registryCurrentCursor,
       registryVersion,
       registryUpdatedSince,
@@ -216,7 +444,7 @@ export function useMcpToolsAddRegistry({
     refetchOnMount: false,
     queryFn: async () => {
       const result = await fetchRegistryMcpCards({
-        search: registrySearchValue,
+        search: debouncedRegistrySearchValue,
         cursor: registryCurrentCursor,
         version: registryVersion,
         updatedSince: registryUpdatedSince,
@@ -233,7 +461,7 @@ export function useMcpToolsAddRegistry({
     if (!(registryQuery.error instanceof Error)) return;
     log.error("[useMcpToolsAddRegistry] Failed to load registry MCP cards", {
       error: registryQuery.error,
-      search: registrySearchValue,
+      search: debouncedRegistrySearchValue,
       cursor: registryCurrentCursor,
       version: registryVersion,
       updatedSince: registryUpdatedSince,
@@ -242,7 +470,7 @@ export function useMcpToolsAddRegistry({
     message.error(t("mcpTools.registry.loadFailed"));
   }, [
     registryQuery.error,
-    registrySearchValue,
+    debouncedRegistrySearchValue,
     registryCurrentCursor,
     registryVersion,
     registryUpdatedSince,
@@ -271,15 +499,25 @@ export function useMcpToolsAddRegistry({
     setQuickAddCandidateService(null);
     setQuickAddOptions([]);
     setSelectedQuickAddOptionKey("");
+    setQuickAddVariableValues({});
+  }, []);
+
+  useEffect(() => {
+    const selectedOption = quickAddOptions.find((option) => option.key === selectedQuickAddOptionKey) || null;
+    setQuickAddVariableValues(buildInitialVariableValues(selectedOption));
+  }, [quickAddOptions, selectedQuickAddOptionKey]);
+
+  const handleQuickAddVariableValueChange = useCallback((key: string, value: string) => {
+    setQuickAddVariableValues((prev) => ({ ...prev, [key]: value }));
   }, []);
 
   const handleQuickAddFromRegistry = useCallback((service: RegistryMcpCard) => {
     const quickAddOptionsForService = resolveQuickAddOptions(service);
     if (quickAddOptionsForService.length === 0) {
       log.warn("[useMcpToolsAddRegistry] Quick add is unsupported for selected registry service", {
-        serviceName: service.name,
-        remotes: service.remotes,
-        packages: service.packages,
+        serviceName: service.server?.name,
+        remotes: service.server?.remotes,
+        packages: service.server?.packages,
       });
       message.warning(t("mcpTools.registry.quickAddUnsupported"));
       return;
@@ -305,39 +543,102 @@ export function useMcpToolsAddRegistry({
     try {
       if (selectedOption.transportType === "stdio") {
         const packageIdentifier = (selectedOption.packageIdentifier || "").trim();
-        const command = inferStdioCommand(selectedOption.packageRegistryType);
+        const command = (selectedOption.packageRuntimeHint || "").trim() || inferStdioCommand(selectedOption.packageRegistryType);
         if (!packageIdentifier || !command) {
           message.warning(t("mcpTools.registry.quickAddUnsupported"));
           return;
         }
 
+        const requiredFields = [
+          ...(selectedOption.packageEnvironmentVariables || []),
+          ...(selectedOption.packageTransportHeaders || []),
+          ...(selectedOption.packageTransportVariables || []),
+          ...(selectedOption.packageRuntimeArguments || []),
+        ];
+        for (const field of requiredFields) {
+          const value = getFieldValueByFormKey(quickAddVariableValues, "formKey" in field ? field.formKey : undefined);
+          if (isFieldRequired(field) && !value) {
+            const key = typeof field.label === "string" && field.label.trim() ? field.label : field.key;
+            message.warning(t("mcpTools.registry.quickAddPicker.variableRequiredMissing", { key }));
+            return;
+          }
+        }
+
         const serverKey = normalizeServerKey(packageIdentifier);
         const containerPort = pickQuickAddPort();
+
+        const envFromPackage = (selectedOption.packageEnvironmentVariables || []).reduce<Record<string, string>>((acc, envVar) => {
+          const value = getFieldValueByFormKey(quickAddVariableValues, envVar.formKey);
+          if (!value) return acc;
+          acc[envVar.key] = value;
+          return acc;
+        }, {});
+
         await addContainerMcpToolService({
-          name: quickAddCandidateService.name,
-          description: quickAddCandidateService.description,
+          name: quickAddCandidateService.server?.name || "",
+          description: quickAddCandidateService.server?.description || "",
           tags: [],
+          authorization_token: resolveAuthorizationFromHeaders(selectedOption.packageTransportHeaders, quickAddVariableValues),
           port: containerPort,
           mcp_config: {
             mcpServers: {
               [serverKey]: {
                 command,
-                args: inferStdioArgs(selectedOption.packageRegistryType, packageIdentifier),
-                env: selectedOption.packageEnvTemplate || {},
+                args: buildResolvedRuntimeArgs(selectedOption, quickAddVariableValues),
+                env: {
+                  ...(selectedOption.packageEnvTemplate || {}),
+                  ...envFromPackage,
+                },
               },
             },
           },
         });
       } else {
+        const requiredFields = [
+          ...(selectedOption.remoteVariables || []),
+          ...(selectedOption.packageTransportVariables || []),
+          ...(selectedOption.packageTransportHeaders || []),
+        ];
+        for (const field of requiredFields) {
+          const value = getFieldValueByFormKey(quickAddVariableValues, field.formKey);
+          if (isFieldRequired(field) && !value) {
+            message.warning(t("mcpTools.registry.quickAddPicker.variableRequiredMissing", { key: field.label || field.key }));
+            return;
+          }
+        }
+
+        const mergedTemplateValues = {
+          ...(selectedOption.remoteVariables || []).reduce<Record<string, string>>((acc, variable) => {
+            if (!variable.formKey) return acc;
+            const value = getFieldValueByFormKey(quickAddVariableValues, variable.formKey);
+            if (value) acc[variable.key] = value;
+            return acc;
+          }, {}),
+          ...(selectedOption.packageTransportVariables || []).reduce<Record<string, string>>((acc, variable) => {
+            if (!variable.formKey) return acc;
+            const value = getFieldValueByFormKey(quickAddVariableValues, variable.formKey);
+            if (value) acc[variable.key] = value;
+            return acc;
+          }, {}),
+        };
+
+        const templateUrl = selectedOption.serverUrlTemplate || selectedOption.serverUrl || "";
+        const resolvedUrl = applyUrlTemplateVariables(templateUrl, mergedTemplateValues);
+        if (/\{[^{}]+\}/.test(resolvedUrl)) {
+          message.warning(t("mcpTools.registry.quickAddPicker.variableUnresolved"));
+          return;
+        }
+
         await addMutation.mutateAsync({
-          name: quickAddCandidateService.name,
-          description: quickAddCandidateService.description,
+          name: quickAddCandidateService.server?.name || "",
+          description: quickAddCandidateService.server?.description || "",
           source: MCP_TAB.MCP_REGISTRY,
           transport_type: selectedOption.transportType === "sse" ? MCP_TRANSPORT_TYPE.SSE : MCP_TRANSPORT_TYPE.HTTP,
-          server_url: selectedOption.serverUrl || "",
+          server_url: resolvedUrl,
           tags: [],
-          version: quickAddCandidateService.version || undefined,
-          registry_json: quickAddCandidateService.serverJson || undefined,
+          authorization_token: resolveAuthorizationFromHeaders(selectedOption.packageTransportHeaders, quickAddVariableValues),
+          version: quickAddCandidateService.server?.version || undefined,
+          registry_json: quickAddCandidateService.server,
         });
       }
 
@@ -348,9 +649,9 @@ export function useMcpToolsAddRegistry({
     } catch (error) {
       log.error("[useMcpToolsAddRegistry] Failed to quick add registry service", {
         error,
-        serviceName: quickAddCandidateService.name,
-        remotes: quickAddCandidateService.remotes,
-        packages: quickAddCandidateService.packages,
+        serviceName: quickAddCandidateService.server?.name,
+        remotes: quickAddCandidateService.server?.remotes,
+        packages: quickAddCandidateService.server?.packages,
         quickAddOption: selectedOption,
       });
       message.error(t("mcpTools.add.failed"));
@@ -365,6 +666,7 @@ export function useMcpToolsAddRegistry({
     onServiceAdded,
     quickAddCandidateService,
     quickAddOptions,
+    quickAddVariableValues,
     selectedQuickAddOptionKey,
     t,
   ]);
@@ -384,6 +686,7 @@ export function useMcpToolsAddRegistry({
     quickAddCandidateService,
     quickAddOptions,
     selectedQuickAddOptionKey,
+    quickAddVariableValues,
     quickAddSubmitting: addingService,
     setRegistrySearchValue,
     setSelectedRegistryService,
@@ -391,6 +694,7 @@ export function useMcpToolsAddRegistry({
     setRegistryUpdatedSince,
     setRegistryIncludeDeleted,
     setSelectedQuickAddOptionKey,
+    handleQuickAddVariableValueChange,
     handleRegistryPrevPage,
     handleRegistryNextPage,
     handleQuickAddFromRegistry,

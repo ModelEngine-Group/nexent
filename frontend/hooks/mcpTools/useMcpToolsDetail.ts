@@ -18,6 +18,44 @@ function isSameStringArray(left: string[] = [], right: string[] = []) {
   return left.every((item, index) => item === right[index]);
 }
 
+function extractBackendDetail(errorMessage: string): string {
+  const raw = String(errorMessage || "");
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    if (parsed && typeof parsed.detail === "string") {
+      return parsed.detail;
+    }
+  } catch {
+    // Keep original text when it's not JSON.
+  }
+  return raw;
+}
+
+function extractHealthErrorMessage(detailText: string): string {
+  const raw = String(detailText || "");
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw) as { message?: unknown };
+    if (parsed && typeof parsed.message === "string") {
+      return parsed.message;
+    }
+  } catch {
+    // Keep original text when it's not JSON.
+  }
+  return raw;
+}
+
+function mapFixedHealthErrorMessage(rawMessage: string, t: (key: string) => string): string {
+  if (rawMessage.includes("401")) {
+    return t("mcpTools.service.health.http401");
+  }
+  if (rawMessage.includes("503")) {
+    return t("mcpTools.service.health.http503");
+  }
+  return rawMessage;
+}
+
 type UseMcpToolsDetailParams = {
   selectedService: McpServiceItem | null;
   onSelectedServiceChange: (service: McpServiceItem | null) => void;
@@ -40,6 +78,9 @@ export function useMcpToolsDetail({
   const [tagDrafts, setTagDrafts] = useState<string[]>([]);
   const [tagInputValue, setTagInputValue] = useState("");
   const [healthCheckLoading, setHealthCheckLoading] = useState(false);
+  const [healthErrorModalVisible, setHealthErrorModalVisible] = useState(false);
+  const [healthErrorModalTitle, setHealthErrorModalTitle] = useState("");
+  const [healthErrorModalDetail, setHealthErrorModalDetail] = useState("");
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
   const [currentServerTools, setCurrentServerTools] = useState<McpTool[]>([]);
   const previousSelectedServiceIdRef = useRef<number | null>(null);
@@ -199,6 +240,9 @@ export function useMcpToolsDetail({
       });
       if (!result.data) throw new Error(t("mcpTools.service.healthFailed"));
       setDraftService({ ...draftService, healthStatus: result.data.health_status });
+      setHealthErrorModalVisible(false);
+      setHealthErrorModalTitle("");
+      setHealthErrorModalDetail("");
     } catch (error) {
       setDraftService((prev) => (prev ? { ...prev, healthStatus: MCP_HEALTH_STATUS.UNHEALTHY } : prev));
       log.error("[useMcpToolsDetail] Failed to run health check", {
@@ -207,7 +251,21 @@ export function useMcpToolsDetail({
         serviceName: draftService.name,
         serverUrl: draftService.serverUrl,
       });
-      message.error(t("mcpTools.service.healthFailed"));
+      const rawErrorText = error instanceof Error ? String(error.message || "") : "";
+      const backendDetail = extractBackendDetail(rawErrorText);
+      const extractedMessage = extractHealthErrorMessage(backendDetail);
+      const normalizedErrorText = mapFixedHealthErrorMessage(
+        extractedMessage || t("mcpTools.service.healthFailed"),
+        t
+      );
+      const isTimeout = normalizedErrorText === "MCP_HEALTH_TIMEOUT";
+      setHealthErrorModalTitle(
+        isTimeout ? t("mcpTools.service.healthTimeoutTitle") : t("mcpTools.service.healthErrorTitle")
+      );
+      setHealthErrorModalDetail(
+        isTimeout ? t("mcpTools.service.healthTimeoutMessage") : normalizedErrorText
+      );
+      setHealthErrorModalVisible(true);
     } finally {
       setHealthCheckLoading(false);
     }
@@ -257,6 +315,9 @@ export function useMcpToolsDetail({
     tagDrafts,
     tagInputValue,
     healthCheckLoading,
+    healthErrorModalVisible,
+    healthErrorModalTitle,
+    healthErrorModalDetail,
     loadingTools: toolsQuery.isFetching,
     toolsModalVisible,
     currentServerTools,
@@ -269,6 +330,7 @@ export function useMcpToolsDetail({
     handleSaveUpdates,
     closeToolsModal: () => setToolsModalVisible(false),
     handleRefreshTools,
+    closeHealthErrorModal: () => setHealthErrorModalVisible(false),
     onDeleteService,
     handlePublishToCommunity,
     publishLoading: publishMutation.isPending,

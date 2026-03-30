@@ -207,11 +207,17 @@ export const listMcpTools = async () => {
 export const listRegistryMcpTools = async (query: URLSearchParams) => {
   try {
     const response = await fetchWithAuth(`${API_ENDPOINTS.mcpTools.registryList}?${query.toString()}`);
-    const data = await parseJson<ApiEnvelope<{ items: RegistryMcpCard[]; nextCursor: string | null }>>(response);
-    if (data.status !== "success") {
+    const data = await parseJson<{ servers?: RegistryMcpCard[]; metadata?: { nextCursor?: string | null } }>(response);
+    if (!data || !Array.isArray(data.servers)) {
       throw new Error("Failed to load registry mcp list");
     }
-    return { success: true, data: data.data } as McpToolsApiResult<{ items: RegistryMcpCard[]; nextCursor: string | null }>;
+    return {
+      success: true,
+      data: {
+        items: data.servers,
+        nextCursor: data.metadata?.nextCursor ?? null,
+      },
+    } as McpToolsApiResult<{ items: RegistryMcpCard[]; nextCursor: string | null }>;
   } catch (error) {
     log.error("listRegistryMcpTools failed", error);
     throw error;
