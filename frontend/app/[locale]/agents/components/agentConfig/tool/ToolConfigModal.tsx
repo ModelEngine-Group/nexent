@@ -30,6 +30,10 @@ import { API_ENDPOINTS } from "@/services/api";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
 import { isZhLocale, getLocalizedDescription } from "@/lib/utils";
+import {
+  isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
+  isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
+} from "@/lib/knowledgeBaseCompatibility";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -523,44 +527,18 @@ export default function ToolConfigModal({
 
   const isMultimodalConstraintMismatch = useCallback(
     (kb: KnowledgeBase) => {
-      return (
-        toolMultimodal !== null &&
-        ((toolMultimodal && !kb.is_multimodal) ||
-          (!toolMultimodal && kb.is_multimodal))
-      );
+      return isMultimodalConstraintMismatchBase(kb, toolMultimodal);
     },
     [toolMultimodal]
   );
 
   const isEmbeddingModelCompatible = useCallback(
     (kb: KnowledgeBase) => {
-      if (kb.is_multimodal) {
-        if (!currentMultiEmbeddingModel) {
-          return false;
-        }
-        if (
-          kb.embeddingModel &&
-          kb.embeddingModel !== "unknown" &&
-          kb.embeddingModel !== currentMultiEmbeddingModel
-        ) {
-          return false;
-        }
-        return true;
-      }
-
-      if (!currentEmbeddingModel) {
-        return true;
-      }
-
-      if (
-        kb.embeddingModel &&
-        kb.embeddingModel !== "unknown" &&
-        kb.embeddingModel !== currentEmbeddingModel
-      ) {
-        return false;
-      }
-
-      return true;
+      return isEmbeddingModelCompatibleBase(
+        kb,
+        currentEmbeddingModel,
+        currentMultiEmbeddingModel
+      );
     },
     [currentEmbeddingModel, currentMultiEmbeddingModel]
   );

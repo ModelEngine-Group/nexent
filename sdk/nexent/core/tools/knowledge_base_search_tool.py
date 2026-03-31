@@ -109,8 +109,16 @@ class KnowledgeBaseSearchTool(Tool):
             return value.default if value.default is not None else default
         return default if value is None else value
 
-    def forward(self, query: str, index_names: Optional[List[str]] = None) -> str:
-        search_index_names = index_names if index_names is not None else self.index_names
+    def forward(self, query: str, index_names: List[str] | str | None = None) -> str:
+        # Parse index_names from string (optional)
+        if index_names is None:
+            search_index_names = self.index_names
+        elif isinstance(index_names, str):
+            search_index_names = [name.strip() for name in index_names.split(",") if name.strip()]
+        else:
+            search_index_names = index_names
+
+        # Use the instance search_mode
         search_mode = self.search_mode
 
         self._notify_search_start(query)

@@ -43,7 +43,24 @@ class UniversalImageExtractor(FileProcessor):
 
     @staticmethod
     def _hash(data: bytes) -> str:
-        return hashlib.md5(data).hexdigest()
+        # Use a modern hash for safe, collision-resistant de-duplication.
+        return hashlib.sha256(data).hexdigest()
+
+    @staticmethod
+    def _openxml_namespace_maps() -> List[Dict[str, str]]:
+        # Prefer https URIs, but retain http for compatibility with existing files.
+        return [
+            {
+                "xdr": "https://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+                "a": "https://schemas.openxmlformats.org/drawingml/2006/main",
+                "r": "https://schemas.openxmlformats.org/officeDocument/2006/relationships",
+            },
+            {
+                "xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+                "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+                "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+            },
+        ]
 
 
     def _write_temp_file(self, data: bytes, suffix: str) -> str:
@@ -178,12 +195,18 @@ class UniversalImageExtractor(FileProcessor):
     def _excel_drawing_file(self, z: zipfile.ZipFile, sheet_file: str) -> Optional[str]:
         sheet_xml = ElementTree.fromstring(z.read(sheet_file))
         drawing = sheet_xml.find(
-            ".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}drawing")
+            ".//{https://schemas.openxmlformats.org/spreadsheetml/2006/main}drawing")
+        if drawing is None:
+            drawing = sheet_xml.find(
+                ".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}drawing")
         if drawing is None:
             return None
 
         rel_id = drawing.get(
-            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+            "{https://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+        if rel_id is None:
+            rel_id = drawing.get(
+                "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
         rel_path = sheet_file.replace("worksheets", "worksheets/_rels") + ".rels"
         if rel_path not in z.namelist():
             return None
@@ -237,8 +260,12 @@ class UniversalImageExtractor(FileProcessor):
         if blip is None:
             return None
 
-        return blip.get(
-            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+        embed_id = blip.get(
+            "{https://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+        if embed_id is None:
+            embed_id = blip.get(
+                "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+        return embed_id
 
 
     def _extract_excel_anchors(
@@ -313,18 +340,15 @@ class UniversalImageExtractor(FileProcessor):
         seen = set()
 
         with zipfile.ZipFile(xlsx_path) as z:
-            ns = {
-                "xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
-                "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
-                "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-            }
-
             sheet_files = self._excel_sheet_files(z)
 
             for sheet_file in sheet_files:
-                results.extend(
-                    self._extract_excel_sheet(z, sheet_file, ns, seen)
-                )
+                extracted = []
+                for ns in self._openxml_namespace_maps():
+                    extracted = self._extract_excel_sheet(z, sheet_file, ns, seen)
+                    if extracted:
+                        break
+                results.extend(extracted)
 
         return results
 

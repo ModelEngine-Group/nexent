@@ -20,6 +20,10 @@ import {
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
+import {
+  isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
+  isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
+} from "@/lib/knowledgeBaseCompatibility";
 
 interface KnowledgeBaseSelectorProps {
   isOpen: boolean;
@@ -188,44 +192,18 @@ export default function KnowledgeBaseSelectorModal({
 
   const isMultimodalConstraintMismatch = useCallback(
     (kb: KnowledgeBase) => {
-      return (
-        toolMultimodal !== null &&
-        ((toolMultimodal && !kb.is_multimodal) ||
-          (!toolMultimodal && kb.is_multimodal))
-      );
+      return isMultimodalConstraintMismatchBase(kb, toolMultimodal);
     },
     [toolMultimodal]
   );
 
   const isEmbeddingModelCompatible = useCallback(
     (kb: KnowledgeBase) => {
-      if (kb.is_multimodal) {
-        if (!currentMultiEmbeddingModel) {
-          return false;
-        }
-        if (
-          kb.embeddingModel &&
-          kb.embeddingModel !== "unknown" &&
-          kb.embeddingModel !== currentMultiEmbeddingModel
-        ) {
-          return false;
-        }
-        return true;
-      }
-
-      if (!currentEmbeddingModel) {
-        return true;
-      }
-
-      if (
-        kb.embeddingModel &&
-        kb.embeddingModel !== "unknown" &&
-        kb.embeddingModel !== currentEmbeddingModel
-      ) {
-        return false;
-      }
-
-      return true;
+      return isEmbeddingModelCompatibleBase(
+        kb,
+        currentEmbeddingModel,
+        currentMultiEmbeddingModel
+      );
     },
     [currentEmbeddingModel, currentMultiEmbeddingModel]
   );
@@ -270,9 +248,7 @@ export default function KnowledgeBaseSelectorModal({
       }
 
       const hasMultimodalConstraintMismatch =
-        toolMultimodal !== null &&
-        ((toolMultimodal && !kb.is_multimodal) ||
-          (!toolMultimodal && kb.is_multimodal));
+        isMultimodalConstraintMismatchBase(kb, toolMultimodal);
       if (hasMultimodalConstraintMismatch) {
         return true;
       }

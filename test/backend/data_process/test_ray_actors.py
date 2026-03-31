@@ -53,6 +53,27 @@ class FakeRedisClient:
         self.expirations[key] = seconds
 
 
+def make_temp_file(tmp_path, name: str, content: bytes = b"file-bytes") -> str:
+    path = tmp_path / name
+    path.write_bytes(content)
+    return str(path)
+
+
+def stub_consts(monkeypatch):
+    fake_consts_pkg = types.ModuleType("consts")
+    fake_consts_const = types.ModuleType("consts.const")
+    fake_consts_const.RAY_ACTOR_NUM_CPUS = 1
+    fake_consts_const.REDIS_BACKEND_URL = ""
+    # New defaults required by ray_actors import
+    fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
+    fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
+    fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
+    fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
+    monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
+    monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
+    return fake_consts_const
+
+
 @pytest.fixture(autouse=True)
 def stub_ray_before_import(monkeypatch):
     # Ensure that when module under test imports ray, it gets our stub
@@ -138,17 +159,7 @@ def import_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "backend.data_process.tasks", fake_dp_tasks)
 
     # Stub consts.const needed by ray_actors imports
-    fake_consts_pkg = types.ModuleType("consts")
-    fake_consts_const = types.ModuleType("consts.const")
-    fake_consts_const.RAY_ACTOR_NUM_CPUS = 1
-    fake_consts_const.REDIS_BACKEND_URL = ""
-    # New defaults required by ray_actors import
-    fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
-    fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
-    fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
-    fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
-    monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
-    monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
+    stub_consts(monkeypatch)
 
     # Ensure model_management_db is stubbed to avoid importing real DB layer
     if "database.model_management_db" not in sys.modules:
@@ -184,12 +195,13 @@ def import_module(monkeypatch):
     return ray_actors
 
 
-def test_process_file_happy_path(monkeypatch):
+def test_process_file_happy_path(monkeypatch, tmp_path):
     ray_actors = import_module(monkeypatch)
     actor = ray_actors.DataProcessorRayActor()
 
+    source_path = make_temp_file(tmp_path, "a.txt")
     chunks = actor.process_file(
-        source="/tmp/a.txt",
+        source=source_path,
         chunking_strategy="basic",
         destination="local",
         task_id="tid-1",
@@ -201,7 +213,7 @@ def test_process_file_happy_path(monkeypatch):
     assert chunks[0]["content"] == "hello world"
 
 
-def test_process_file_applies_chunk_sizes_from_model(monkeypatch):
+def test_process_file_applies_chunk_sizes_from_model(monkeypatch, tmp_path):
     ray_actors = import_module(monkeypatch)
 
     # Recorder core to capture params
@@ -229,8 +241,9 @@ def test_process_file_applies_chunk_sizes_from_model(monkeypatch):
     )
 
     actor = ray_actors.DataProcessorRayActor()
+    source_path = make_temp_file(tmp_path, "a.txt")
     actor.process_file(
-        source="/tmp/a.txt",
+        source=source_path,
         chunking_strategy="basic",
         destination="local",
         model_id=9,
@@ -246,7 +259,7 @@ def test_process_file_applies_chunk_sizes_from_model(monkeypatch):
     ) == "/models/unstructured.json"
 
 
-def test_process_file_no_model_omits_chunk_params(monkeypatch):
+def test_process_file_no_model_omits_chunk_params(monkeypatch, tmp_path):
     ray_actors = import_module(monkeypatch)
 
     class RecorderCore:
@@ -268,8 +281,9 @@ def test_process_file_no_model_omits_chunk_params(monkeypatch):
     )
 
     actor = ray_actors.DataProcessorRayActor()
+    source_path = make_temp_file(tmp_path, "b.txt")
     actor.process_file(
-        source="/tmp/b.txt",
+        source=source_path,
         chunking_strategy="basic",
         destination="local",
         model_id=10,
@@ -285,7 +299,7 @@ def test_process_file_no_model_omits_chunk_params(monkeypatch):
     ) == "/models/unstructured.json"
 
 
-def test_process_file_model_lookup_exception_uses_defaults(monkeypatch):
+def test_process_file_model_lookup_exception_uses_defaults(monkeypatch, tmp_path):
     ray_actors = import_module(monkeypatch)
 
     class RecorderCore:
@@ -308,8 +322,9 @@ def test_process_file_model_lookup_exception_uses_defaults(monkeypatch):
     )
 
     actor = ray_actors.DataProcessorRayActor()
+    source_path = make_temp_file(tmp_path, "c.txt")
     actor.process_file(
-        source="/tmp/c.txt",
+        source=source_path,
         chunking_strategy="basic",
         destination="local",
         model_id=11,
@@ -392,17 +407,7 @@ def test_process_file_get_stream_none_raises(monkeypatch):
     fake_dp_tasks.process_sync = lambda *a, **k: None
     monkeypatch.setitem(sys.modules, "backend.data_process.tasks", fake_dp_tasks)
     # Stub consts.const again for reload path
-    fake_consts_pkg = types.ModuleType("consts")
-    fake_consts_const = types.ModuleType("consts.const")
-    fake_consts_const.RAY_ACTOR_NUM_CPUS = 1
-    fake_consts_const.REDIS_BACKEND_URL = ""
-    # Provide defaults required by backend.data_process.ray_actors import
-    fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
-    fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
-    fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
-    fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
-    monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
-    monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
+    stub_consts(monkeypatch)
 
     # Stub database.model_management_db and link to parent to avoid real DB import
     if "database.model_management_db" not in sys.modules:
@@ -433,7 +438,7 @@ def test_process_file_get_stream_none_raises(monkeypatch):
         actor.process_file("url://missing", "basic", destination="minio")
 
 
-def test_process_file_core_returns_none_list_variants(monkeypatch):
+def test_process_file_core_returns_none_list_variants(monkeypatch, tmp_path):
     class CoreNone(FakeDataProcessCore):
         def file_process(self, *a, **k):
             return None
@@ -505,17 +510,7 @@ def test_process_file_core_returns_none_list_variants(monkeypatch):
         fake_dp_tasks.process_sync = lambda *a, **k: None
         monkeypatch.setitem(sys.modules, "backend.data_process.tasks", fake_dp_tasks)
         # Stub consts.const for ray_actors imports
-        fake_consts_pkg = types.ModuleType("consts")
-        fake_consts_const = types.ModuleType("consts.const")
-        fake_consts_const.RAY_ACTOR_NUM_CPUS = 1
-        fake_consts_const.REDIS_BACKEND_URL = ""
-        # Provide defaults required by backend.data_process.ray_actors import
-        fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
-        fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
-        fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
-        fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
-        monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
-        monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
+        stub_consts(monkeypatch)
 
         # Ensure model_management_db is stubbed to avoid importing real DB layer
         if "database.model_management_db" not in sys.modules:
@@ -530,7 +525,8 @@ def test_process_file_core_returns_none_list_variants(monkeypatch):
         import backend.data_process.ray_actors as ray_actors
         reload(ray_actors)
         actor = ray_actors.DataProcessorRayActor()
-        chunks = actor.process_file("/tmp/a.txt", "basic", destination="local")
+        source_path = make_temp_file(tmp_path, f"a_{core_cls.__name__}.txt")
+        chunks = actor.process_file(source_path, "basic", destination="local")
         assert chunks == []
 
 
@@ -575,7 +571,7 @@ def test_store_chunks_in_redis_no_url_returns_false(monkeypatch):
     assert actor.store_chunks_in_redis("k", [{"content": "x"}]) is False
 
 
-def test_process_file_appends_image_chunks(monkeypatch):
+def test_process_file_appends_image_chunks(monkeypatch, tmp_path):
     ray_actors = import_module(monkeypatch)
 
     class CoreWithImages:
@@ -604,14 +600,15 @@ def test_process_file_appends_image_chunks(monkeypatch):
     )
 
     actor = ray_actors.DataProcessorRayActor()
-    chunks = actor.process_file("/tmp/a.pdf", "basic", destination="local")
+    source_path = make_temp_file(tmp_path, "a.pdf", content=b"%PDF-1.4")
+    chunks = actor.process_file(source_path, "basic", destination="local")
 
     assert len(chunks) == 2
     assert chunks[1]["metadata"]["process_source"] == "UniversalImageExtractor"
     assert "image_url" in chunks[1]["metadata"]
 
 
-def test_process_file_skips_invalid_image_entries(monkeypatch):
+def test_process_file_skips_invalid_image_entries(monkeypatch, tmp_path):
     ray_actors = import_module(monkeypatch)
 
     class CoreWithBadImages:
@@ -623,7 +620,8 @@ def test_process_file_skips_invalid_image_entries(monkeypatch):
 
     monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithBadImages)
     actor = ray_actors.DataProcessorRayActor()
-    chunks = actor.process_file("/tmp/a.pdf", "basic", destination="local")
+    source_path = make_temp_file(tmp_path, "a.pdf", content=b"%PDF-1.4")
+    chunks = actor.process_file(source_path, "basic", destination="local")
 
     assert chunks == [{"content": "text", "metadata": {}}]
 

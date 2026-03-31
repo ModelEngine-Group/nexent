@@ -188,7 +188,7 @@ class TestKnowledgeBaseSearchTool:
         with pytest.raises(Exception) as excinfo:
             knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
 
-        assert "Error during semantic search" in str(excinfo.value)
+        assert "Error during hybrid search" in str(excinfo.value)
 
     def test_forward_accurate_mode_success(self, knowledge_base_search_tool):
         """Test forward method with accurate search mode"""
@@ -308,8 +308,8 @@ class TestKnowledgeBaseSearchTool:
         
     def test_forward_adds_picture_web_for_images(self, knowledge_base_search_tool, monkeypatch):
         """Forward should add picture messages when image results are present."""
-        monkeypatch.setenv("DATA_PROCESS_SERVICE", "http://data-process")
-        knowledge_base_search_tool.data_process_service = "http://data-process"
+        monkeypatch.setenv("DATA_PROCESS_SERVICE", "https://data-process")
+        knowledge_base_search_tool.data_process_service = "https://data-process"
 
         mock_results = [
             {

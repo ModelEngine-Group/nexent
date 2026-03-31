@@ -502,6 +502,7 @@ class KnowledgeBaseService {
                       stats.creation_date ||
                       null,
                     embeddingModel: stats.embedding_model || "unknown",
+                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
                     knowledge_sources:
                       indexInfo.knowledge_sources || "elasticsearch",
                     ingroup_permission: indexInfo.ingroup_permission || "",
@@ -517,7 +518,6 @@ class KnowledgeBaseService {
                     tokenNum: 0,
                     source: "nexent",
                     tenant_id: indexInfo.tenant_id,
-                    is_multimodal:  resolveIsMultimodal(indexInfo, stats),
                   };
                 }
               );
@@ -570,6 +570,7 @@ class KnowledgeBaseService {
                     createdAt: stats.creation_date || null,
                     updatedAt: stats.update_date || stats.creation_date || null,
                     embeddingModel: stats.embedding_model || "unknown",
+                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
                     knowledge_sources:
                       indexInfo.knowledge_sources || "datamate",
                     ingroup_permission: indexInfo.ingroup_permission || "",
@@ -585,7 +586,6 @@ class KnowledgeBaseService {
                     tokenNum: 0,
                     source: "datamate",
                     tenant_id: indexInfo.tenant_id,
-                    is_multimodal:  resolveIsMultimodal(indexInfo, stats),
                   };
                 });
               knowledgeBases.push(...datamateKnowledgeBases);
