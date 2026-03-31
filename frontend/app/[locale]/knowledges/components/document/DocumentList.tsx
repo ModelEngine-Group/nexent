@@ -558,48 +558,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         options={permissionOptions}
                       />
                     </Can>
-                    {onMultimodalChange && (
-                      <Can permission="kb.groups:update">
-                        <span
-                          onClick={() => {
-                            if (canToggleMultimodal) {
-                              onMultimodalChange?.(!isMultimodal);
-                            }
-                          }}
-                          onKeyDown={(event) => {
-                            if (!canToggleMultimodal) {
-                              return;
-                            }
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              onMultimodalChange?.(!isMultimodal);
-                            }
-                          }}
-                          role="button"
-                          tabIndex={canToggleMultimodal ? 0 : -1}
-                          aria-pressed={isMultimodal}
-                          aria-disabled={!canToggleMultimodal}
-                          style={{
-                            width: 80,
-                            display: "inline-block",
-                            textAlign: "center",
-                            cursor: canToggleMultimodal ? "pointer" : "default",
-                            color: isMultimodal ? "#52c41a" : "#000000",
-                            fontWeight: isMultimodal ? 500 : 400,
-                            userSelect: "none",
-                            lineHeight: "32px",
-                            outline: "none",
-                          }}
-                          title={
-                            isMultimodal
-                              ? "Multimodal: Enabled"
-                              : "Multimodal: Disabled"
-                          }
-                        >
-                          Multimodal
-                        </span>
-                      </Can>
-                    )}
                   </div>
                 </div>
               ) : (

@@ -261,10 +261,10 @@ def get_embedding_model(
     Returns:
         Embedding model instance or None
     """
-    # If model_name is provided, try to find it in the tenant's models.
     if model_name is None and (isinstance(is_multimodal, str) or is_multimodal is None):
         model_name = is_multimodal
         is_multimodal = False
+    # If model_name is provided, try to find it in the tenant's models
     if model_name:
         try:
             model_record = _find_model_record(

@@ -263,37 +263,39 @@ export default function KnowledgeBaseSelectorModal({
     ]
   );
 
-  // Check if a knowledge base has model mismatch (for display purposes)
-  const checkModelMismatch = (kb: KnowledgeBase): boolean => {
-    if (kb.source !== "nexent") {
-      return false;
-    }
+  const getModelMismatch = useCallback(
+    (kb: KnowledgeBase): boolean => {
+      if (kb.source !== "nexent") {
+        return false;
+      }
 
-    const hasMultimodalConstraintMismatch =
-      toolMultimodal !== null &&
-      ((toolMultimodal && !kb.is_multimodal) ||
-        (!toolMultimodal && kb.is_multimodal));
-    if (hasMultimodalConstraintMismatch) {
-      return true;
-    }
-
-    const embeddingModel = kb.embeddingModel;
-    if (!embeddingModel || embeddingModel === "unknown") {
-      return false;
-    }
-
-    if (kb.is_multimodal) {
-      if (!currentMultiEmbeddingModel) {
+      const hasMultimodalConstraintMismatch =
+        toolMultimodal !== null &&
+        ((toolMultimodal && !kb.is_multimodal) ||
+          (!toolMultimodal && kb.is_multimodal));
+      if (hasMultimodalConstraintMismatch) {
         return true;
       }
-      return embeddingModel !== currentMultiEmbeddingModel;
-    }
 
-    if (!currentEmbeddingModel) {
-      return false;
-    }
-    return embeddingModel !== currentEmbeddingModel;
-  };
+      const embeddingModel = kb.embeddingModel;
+      if (!embeddingModel || embeddingModel === "unknown") {
+        return false;
+      }
+
+      if (kb.is_multimodal) {
+        if (!currentMultiEmbeddingModel) {
+          return true;
+        }
+        return embeddingModel !== currentMultiEmbeddingModel;
+      }
+
+      if (!currentEmbeddingModel) {
+        return false;
+      }
+      return embeddingModel !== currentEmbeddingModel;
+    },
+    [currentEmbeddingModel, currentMultiEmbeddingModel, toolMultimodal]
+  );
 
   // Filter knowledge bases based on tool type, search, and filters
   const filteredKnowledgeBases = useMemo(() => {
@@ -714,7 +716,7 @@ export default function KnowledgeBaseSelectorModal({
                   String(selectedId).trim() === String(kb.id).trim()
               );
               const canSelect = checkCanSelect(kb);
-              const hasModelMismatch = checkModelMismatch(kb);
+              const hasModelMismatch = getModelMismatch(kb);
 
               return (
                 <div

@@ -4,7 +4,7 @@ import base64
 import hashlib
 import tempfile
 import subprocess
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import zipfile
 from xml.etree import ElementTree
 
@@ -171,6 +171,76 @@ class UniversalImageExtractor(FileProcessor):
         return results
 
 
+    def _excel_sheet_files(self, z: zipfile.ZipFile) -> List[str]:
+        return [f for f in z.namelist() if f.startswith("xl/worksheets/sheet")]
+
+
+    def _excel_drawing_file(self, z: zipfile.ZipFile, sheet_file: str) -> Optional[str]:
+        sheet_xml = ElementTree.fromstring(z.read(sheet_file))
+        drawing = sheet_xml.find(
+            ".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}drawing")
+        if drawing is None:
+            return None
+
+        rel_id = drawing.get(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+        rel_path = sheet_file.replace("worksheets", "worksheets/_rels") + ".rels"
+        if rel_path not in z.namelist():
+            return None
+
+        rel_xml = ElementTree.fromstring(z.read(rel_path))
+        for rel in rel_xml:
+            if rel.get("Id") == rel_id:
+                return "xl/" + rel.get("Target").replace("../", "")
+
+        return None
+
+
+    def _excel_rel_map(self, z: zipfile.ZipFile, drawing_file: str) -> Optional[Dict[str, str]]:
+        rel_file = drawing_file.replace("drawings/", "drawings/_rels/") + ".rels"
+        if rel_file not in z.namelist():
+            return None
+
+        rel_root = ElementTree.fromstring(z.read(rel_file))
+        return {
+            rel.get("Id"): "xl/" + rel.get("Target").replace("../", "")
+            for rel in rel_root
+        }
+
+
+    def _excel_anchors(self, z: zipfile.ZipFile, drawing_file: str, ns: Dict[str, str]) -> List[Any]:
+        drawing_root = ElementTree.fromstring(z.read(drawing_file))
+        return drawing_root.findall(".//xdr:twoCellAnchor", ns) + \
+            drawing_root.findall(".//xdr:oneCellAnchor", ns)
+
+
+    def _excel_anchor_coords(self, anchor: Any, ns: Dict[str, str]) -> Optional[Dict[str, int]]:
+        from_node = anchor.find("xdr:from", ns)
+        if from_node is None:
+            return None
+
+        row1 = int(from_node.find("xdr:row", ns).text) + 1
+        col1 = int(from_node.find("xdr:col", ns).text) + 1
+
+        to_node = anchor.find("xdr:to", ns)
+        if to_node is not None:
+            row2 = int(to_node.find("xdr:row", ns).text) + 1
+            col2 = int(to_node.find("xdr:col", ns).text) + 1
+        else:
+            row2, col2 = row1, col1
+
+        return {"row1": row1, "col1": col1, "row2": row2, "col2": col2}
+
+
+    def _excel_anchor_embed_id(self, anchor: Any, ns: Dict[str, str]) -> Optional[str]:
+        blip = anchor.find(".//a:blip", ns)
+        if blip is None:
+            return None
+
+        return blip.get(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+
+
     def _extract_excel(self, xlsx_path):
         results = []
         seen = set()
@@ -182,86 +252,35 @@ class UniversalImageExtractor(FileProcessor):
                 "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
             }
 
-            workbook = ElementTree.fromstring(z.read("xl/workbook.xml"))
-            sheets = {}
-            for s in workbook.findall(".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}sheet"):
-                sheets[s.get("r:id")] = s.get("name")
-
-            sheet_files = [f for f in z.namelist(
-            ) if f.startswith("xl/worksheets/sheet")]
+            sheet_files = self._excel_sheet_files(z)
 
             for sheet_file in sheet_files:
-                sheet_xml = ElementTree.fromstring(z.read(sheet_file))
-                drawing = sheet_xml.find(
-                    ".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}drawing")
-
-                if drawing is None:
-                    continue
-
-                rel_id = drawing.get(
-                    "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
-                rel_path = sheet_file.replace(
-                    "worksheets", "worksheets/_rels") + ".rels"
-
-                if rel_path not in z.namelist():
-                    continue
-
-                rel_xml = ElementTree.fromstring(z.read(rel_path))
-                drawing_file = None
-
-                for r in rel_xml:
-                    if r.get("Id") == rel_id:
-                        drawing_file = "xl/" + \
-                            r.get("Target").replace("../", "")
-                        break
-
+                drawing_file = self._excel_drawing_file(z, sheet_file)
                 if drawing_file is None:
                     continue
 
-                sheet_name = os.path.basename(sheet_file)
-                drawing_root = ElementTree.fromstring(z.read(drawing_file))
-
-                rel_file = drawing_file.replace(
-                    "drawings/", "drawings/_rels/") + ".rels"
-                if rel_file not in z.namelist():
+                rel_map = self._excel_rel_map(z, drawing_file)
+                if not rel_map:
                     continue
 
-                rel_root = ElementTree.fromstring(z.read(rel_file))
-                rel_map = {
-                    r.get("Id"): "xl/" + r.get("Target").replace("../", "")
-                    for r in rel_root
-                }
-
-                anchors = drawing_root.findall(".//xdr:twoCellAnchor", ns) + \
-                    drawing_root.findall(".//xdr:oneCellAnchor", ns)
+                anchors = self._excel_anchors(z, drawing_file, ns)
+                sheet_name = os.path.basename(sheet_file)
 
                 for anchor in anchors:
-                    from_node = anchor.find("xdr:from", ns)
-                    if from_node is None:
+                    coords = self._excel_anchor_coords(anchor, ns)
+                    if coords is None:
                         continue
 
-                    row1 = int(from_node.find("xdr:row", ns).text) + 1
-                    col1 = int(from_node.find("xdr:col", ns).text) + 1
-
-                    to_node = anchor.find("xdr:to", ns)
-                    if to_node is not None:
-                        row2 = int(to_node.find("xdr:row", ns).text) + 1
-                        col2 = int(to_node.find("xdr:col", ns).text) + 1
-                    else:
-                        row2, col2 = row1, col1
-
-                    blip = anchor.find(".//a:blip", ns)
-                    if blip is None:
+                    embed_rel_id = self._excel_anchor_embed_id(anchor, ns)
+                    if not embed_rel_id:
                         continue
 
-                    embed_rel_id = blip.get(
-                        "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
-                    if embed_rel_id not in rel_map:
+                    target = rel_map.get(embed_rel_id)
+                    if not target:
                         continue
 
-                    img_bytes = z.read(rel_map[embed_rel_id])
+                    img_bytes = z.read(target)
                     h = self._hash(img_bytes)
-
                     if h in seen:
                         continue
                     seen.add(h)
@@ -270,10 +289,10 @@ class UniversalImageExtractor(FileProcessor):
                         "position": {
                             "sheet_name": sheet_name,
                             "coordinates": {
-                                "x1": col1,
-                                "x2": col2,
-                                "y1": row1,
-                                "y2": row2
+                                "x1": coords["col1"],
+                                "x2": coords["col2"],
+                                "y1": coords["row1"],
+                                "y2": coords["row2"]
                             }
                         },
                         "image_format": self.detect_image_format(img_bytes),

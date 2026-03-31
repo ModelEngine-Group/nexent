@@ -346,9 +346,6 @@ class TestDataProcessCore:
             {"image_bytes": b"img", "image_format": "png", "position": {"page_number": 1}}
         ]
         core.processors["Unstructured"] = mock_processor
-        core.processors["UniversalImageExtractor"] = Mock(
-            process_file=Mock(return_value=[])
-        )
         core.processors["UniversalImageExtractor"] = mock_extractor
 
         result = core.file_process(

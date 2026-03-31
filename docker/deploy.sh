@@ -631,7 +631,8 @@ download_and_config_models() {
 
   TT_MODEL_DIR_NAME="table-transformer-structure-recognition"
   TT_MODEL_DIR_PATH="$MODEL_ROOT/$TT_MODEL_DIR_NAME"
-  TT_MODEL_FILE_CHECK="$TT_MODEL_DIR_PATH/model.safetensors"
+  MODEL_SAFETENSORS_FILE="model.safetensors"
+  TT_MODEL_FILE_CHECK="$TT_MODEL_DIR_PATH/$MODEL_SAFETENSORS_FILE"
 
   cd "$MODEL_ROOT" || return 1
 
@@ -661,29 +662,29 @@ download_and_config_models() {
       cd "$TT_MODEL_DIR_NAME" || return 1
 
       echo "INFO: Step 2/2: Download model.safetensors..."
-      LARGE_FILE_URL="$HF_ENDPOINT/microsoft/$TT_MODEL_DIR_NAME/resolve/main/model.safetensors"
+      LARGE_FILE_URL="$HF_ENDPOINT/microsoft/$TT_MODEL_DIR_NAME/resolve/main/$MODEL_SAFETENSORS_FILE"
 
       if command -v curl &> /dev/null; then
-          curl -L -o "model.safetensors" "$LARGE_FILE_URL" --progress-bar
+          curl -L -o "$MODEL_SAFETENSORS_FILE" "$LARGE_FILE_URL" --progress-bar
       elif command -v wget &> /dev/null; then
-          wget "$LARGE_FILE_URL" -O "model.safetensors"
+          wget "$LARGE_FILE_URL" -O "$MODEL_SAFETENSORS_FILE"
       else
           echo "ERROR: curl or wget is required to download model files." >&2
           cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$original_dir"; return 1
       fi
 
-      if [[ ! -f "model.safetensors" ]]; then
-          echo "ERROR: model.safetensors download failed." >&2
+      if [[ ! -f "$MODEL_SAFETENSORS_FILE" ]]; then
+          echo "ERROR: $MODEL_SAFETENSORS_FILE download failed." >&2
           cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$original_dir"; return 1
       fi
 
-      FILE_SIZE=$(stat -c%s "model.safetensors" 2>/dev/null || stat -f%z "model.safetensors" 2>/dev/null)
+      FILE_SIZE=$(stat -c%s "$MODEL_SAFETENSORS_FILE" 2>/dev/null || stat -f%z "$MODEL_SAFETENSORS_FILE" 2>/dev/null)
       if [[ "$FILE_SIZE" -lt 1000000 ]]; then
-          echo "ERROR: model.safetensors seems too small (size: $FILE_SIZE bytes)." >&2
+          echo "ERROR: $MODEL_SAFETENSORS_FILE seems too small (size: $FILE_SIZE bytes)." >&2
           cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$original_dir"; return 1
       fi
 
-      echo "INFO: model.safetensors downloaded (size: $(du -h model.safetensors | cut -f1))"
+      echo "INFO: $MODEL_SAFETENSORS_FILE downloaded (size: $(du -h "$MODEL_SAFETENSORS_FILE" | cut -f1))"
       cd "$MODEL_ROOT"
   fi
 

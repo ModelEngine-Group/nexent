@@ -29,6 +29,7 @@ except Exception:
     memory_pkg.__path__ = []
     memory_service_stub = ModuleType("nexent.memory.memory_service")
     async def _clear_memory_stub(*_args, **_kwargs):
+        await asyncio.sleep(0)
         return None
     memory_service_stub.clear_memory = _clear_memory_stub
     sys.modules["nexent.memory.memory_service"] = memory_service_stub
