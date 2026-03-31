@@ -125,6 +125,68 @@ class NexentAgent:
             raise ValueError(f"{class_name} not found in MCP server")
         return tool_obj
 
+    def create_builtin_tool(self, tool_config: ToolConfig):
+        """Create a builtin tool instance.
+
+        Args:
+            tool_config: Tool configuration with class_name, params, and optional metadata.
+
+        Returns:
+            Tool instance
+
+        Raises:
+            ValueError: If builtin tool is not found
+        """
+        class_name = tool_config.class_name
+        params = tool_config.params or {}
+
+        if class_name == "RunSkillScriptTool":
+            from nexent.core.tools.run_skill_script_tool import get_run_skill_script_tool
+            metadata = tool_config.metadata or {}
+            get_run_skill_script_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.run_skill_script_tool import run_skill_script
+            return run_skill_script
+        elif class_name == "ReadSkillMdTool":
+            from nexent.core.tools.read_skill_md_tool import get_read_skill_md_tool
+            metadata = tool_config.metadata or {}
+            get_read_skill_md_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.read_skill_md_tool import read_skill_md
+            return read_skill_md
+        elif class_name == "WriteSkillFileTool":
+            from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool
+            metadata = tool_config.metadata or {}
+            get_write_skill_file_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.write_skill_file_tool import write_skill_file
+            return write_skill_file
+        elif class_name == "ReadSkillConfigTool":
+            from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool
+            metadata = tool_config.metadata or {}
+            get_read_skill_config_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.read_skill_config_tool import read_skill_config
+            return read_skill_config
+        else:
+            raise ValueError(f"Unknown builtin tool: {class_name}")
+
     def create_tool(self, tool_config: ToolConfig):
         """create a tool instance according to the tool config"""
         if not isinstance(tool_config, ToolConfig):
@@ -139,6 +201,8 @@ class NexentAgent:
                 tool_obj = self.create_mcp_tool(class_name)
             elif source == "langchain":
                 tool_obj = self.create_langchain_tool(tool_config)
+            elif source == "builtin":
+                tool_obj = self.create_builtin_tool(tool_config)
             else:
                 raise ValueError(f"unsupported tool source: {source}")
             return tool_obj
@@ -173,7 +237,8 @@ class NexentAgent:
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
                 provide_run_summary=agent_config.provide_run_summary,
-                managed_agents=managed_agents_list
+                managed_agents=managed_agents_list,
+                additional_authorized_imports=["*"],
             )
             agent.stop_event = self.stop_event
 
