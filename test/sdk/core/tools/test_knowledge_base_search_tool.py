@@ -478,13 +478,18 @@ class TestKnowledgeBaseSearchToolRerank:
         result = tool.forward("test query")
         assert result is not None
 
-    def test_forward_requires_index_names(self, knowledge_base_search_tool):
-        """Test forward method requires index_names parameter"""
-        # Test that TypeError is raised when index_names is not provided
-        with pytest.raises(TypeError) as excinfo:
-            knowledge_base_search_tool.forward("test query")
+    def test_forward_uses_instance_index_names(self, knowledge_base_search_tool):
+        """Test forward method uses instance index_names when not provided"""
+        # Mock search results
+        mock_results = create_mock_search_result(2)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        assert "index_names" in str(excinfo.value)
+        # Call forward without index_names - should use instance's index_names
+        result = knowledge_base_search_tool.forward("test query")
+
+        # Verify it used instance index_names
+        assert result is not None
+        knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once()
 
     def test_forward_empty_index_names_string(self, knowledge_base_search_tool):
         """Test forward method with empty index_names string returns no results"""
