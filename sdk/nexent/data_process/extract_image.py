@@ -47,20 +47,12 @@ class UniversalImageExtractor(FileProcessor):
         return hashlib.sha256(data).hexdigest()
 
     @staticmethod
-    def _openxml_namespace_maps() -> List[Dict[str, str]]:
-        # Prefer https URIs, but retain http for compatibility with existing files.
-        return [
-            {
-                "xdr": "https://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
-                "a": "https://schemas.openxmlformats.org/drawingml/2006/main",
-                "r": "https://schemas.openxmlformats.org/officeDocument/2006/relationships",
-            },
-            {
-                "xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
-                "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
-                "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-            },
-        ]
+    def _openxml_namespace_maps() -> Dict[str, str]:
+        return {
+            "xdr": "https://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+            "a": "https://schemas.openxmlformats.org/drawingml/2006/main",
+            "r": "https://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        }
 
 
     def _write_temp_file(self, data: bytes, suffix: str) -> str:
@@ -342,13 +334,9 @@ class UniversalImageExtractor(FileProcessor):
         with zipfile.ZipFile(xlsx_path) as z:
             sheet_files = self._excel_sheet_files(z)
 
+            ns = self._openxml_namespace_maps()
             for sheet_file in sheet_files:
-                extracted = []
-                for ns in self._openxml_namespace_maps():
-                    extracted = self._extract_excel_sheet(z, sheet_file, ns, seen)
-                    if extracted:
-                        break
-                results.extend(extracted)
+                results.extend(self._extract_excel_sheet(z, sheet_file, ns, seen))
 
         return results
 
