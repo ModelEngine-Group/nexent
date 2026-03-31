@@ -6,7 +6,15 @@ from urllib.parse import urlencode
 
 import aiohttp
 
-from consts.exceptions import MCPConnectionError, MCPContainerError
+from consts.const import NEXENT_MCP_DOCKER_IMAGE
+from consts.exceptions import (
+    MCPConnectionError,
+    MCPContainerError,
+    McpNotFoundError,
+    McpValidationError,
+    McpNameConflictError,
+)
+from consts.model import MCPConfigRequest
 from database.mcp_manage_db import (
     delete_mcp_manage_service,
     get_mcp_manage_record_by_name,
@@ -15,6 +23,7 @@ from database.mcp_manage_db import (
     update_mcp_manage_status,
 )
 from database.remote_mcp_db import (
+    check_enabled_mcp_name_exists,
     delete_mcp_record_by_id,
     create_mcp_record,
     get_mcp_record_by_id_and_tenant,
@@ -91,12 +100,12 @@ async def _remove_container_if_exists(container_id: str | None) -> None:
 async def _start_container_by_id_for_record(record: Dict[str, Any]) -> Dict[str, Any]:
     container_id = _extract_str(record.get("container_id"))
     if not container_id:
-        raise ValueError("Container ID is missing")
+        raise McpValidationError("Container ID is missing")
 
     manager = MCPContainerManager()
     container_info = await manager.start_existing_mcp_container(container_id)
     if not _extract_str(container_info.get("mcp_url")):
-        raise ValueError("Container runtime URL is missing")
+        raise McpValidationError("Container runtime URL is missing")
     return container_info
 
 
@@ -209,7 +218,7 @@ def _normalize_transport_type(value: str | None) -> str:
 async def publish_community_mcp_service(*, tenant_id: str, user_id: str, mcp_id: int) -> int:
     source_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not source_record:
-        raise ValueError("MCP record not found")
+        raise McpNotFoundError("MCP record not found")
 
     source_registry_json = source_record.get("registry_json") if isinstance(source_record.get("registry_json"), dict) else None
     source_config_json = source_record.get("config_json") if isinstance(source_record.get("config_json"), dict) else None
@@ -245,7 +254,7 @@ async def update_community_mcp_service(
 ) -> None:
     current = get_mcp_community_record_by_id_and_tenant(community_id=community_id, tenant_id=tenant_id)
     if not current:
-        raise ValueError("Community MCP record not found")
+        raise McpNotFoundError("Community MCP record not found")
 
     existing_config_json = current.get("config_json") if isinstance(current.get("config_json"), dict) else None
     next_registry_json = registry_json if isinstance(registry_json, dict) else current.get("registry_json")
@@ -269,7 +278,7 @@ async def update_community_mcp_service(
 async def delete_community_mcp_service(*, tenant_id: str, user_id: str, community_id: int) -> None:
     current = get_mcp_community_record_by_id_and_tenant(community_id=community_id, tenant_id=tenant_id)
     if not current:
-        raise ValueError("Community MCP record not found")
+        raise McpNotFoundError("Community MCP record not found")
     delete_mcp_community_record_by_id(community_id=community_id, tenant_id=tenant_id, user_id=user_id)
 
 
@@ -328,6 +337,101 @@ async def list_registry_mcp_services(
     }
 
 
+async def add_container_mcp_service(
+    *,
+    tenant_id: str,
+    user_id: str,
+    name: str,
+    description: str | None,
+    source: str,
+    tags: list[str] | None,
+    authorization_token: str | None,
+    registry_json: Dict[str, Any] | None,
+    port: int,
+    mcp_config: MCPConfigRequest,
+) -> Dict[str, Any]:
+    service_name = (name or "").strip()
+    if check_enabled_mcp_name_exists(mcp_name=service_name, tenant_id=tenant_id):
+        raise McpNameConflictError("Enabled MCP name already exists")
+
+    servers = mcp_config.mcpServers
+    if len(servers) != 1:
+        raise McpValidationError("Exactly one mcpServers entry is required")
+
+    _, config = next(iter(servers.items()))
+    command = (config.command or "").strip()
+    if not command:
+        raise McpValidationError("command is required")
+
+    env_vars = dict(config.env or {})
+    auth_token = (authorization_token or "").strip()
+    if auth_token:
+        env_vars["authorization_token"] = auth_token
+
+    full_command = [
+        "python",
+        "-m",
+        "mcp_proxy",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(port),
+        "--transport",
+        "streamablehttp",
+        "--",
+        command,
+        *(config.args or []),
+    ]
+
+    container_manager = MCPContainerManager()
+    container_info = await container_manager.start_mcp_container(
+        service_name=service_name,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        env_vars=env_vars,
+        host_port=port,
+        image=config.image or NEXENT_MCP_DOCKER_IMAGE,
+        full_command=full_command,
+    )
+    started_container_id: str | None = container_info.get("container_id")
+
+    container_config = mcp_config.model_dump(exclude_none=True)
+
+    try:
+        await add_mcp_service(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=service_name,
+            description=description,
+            source=source,
+            transport_type="stdio",
+            server_url=container_info["mcp_url"],
+            tags=tags,
+            authorization_token=auth_token,
+            container_config=container_config,
+            version=None,
+            registry_json=registry_json,
+            enabled=True,
+            container_id=container_info.get("container_id"),
+        )
+    except MCPConnectionError:
+        if started_container_id:
+            try:
+                cleanup_manager = MCPContainerManager()
+                await cleanup_manager.stop_mcp_container(started_container_id)
+            except Exception as cleanup_exc:
+                logger.warning(f"Failed to cleanup container {started_container_id}: {cleanup_exc}")
+        raise
+
+    return {
+        "service_name": service_name,
+        "mcp_url": container_info.get("mcp_url"),
+        "container_id": container_info.get("container_id"),
+        "container_name": container_info.get("container_name"),
+        "host_port": container_info.get("host_port"),
+    }
+
+
 async def add_mcp_service(
     *,
     tenant_id: str,
@@ -347,7 +451,7 @@ async def add_mcp_service(
 ) -> None:
     normalized_source = (source or "local").strip().lower()
     if normalized_source not in {"local", "mcp_registry", "community"}:
-        raise ValueError(f"Invalid source: {source}")
+        raise McpValidationError(f"Invalid source: {source}")
 
     normalized_transport_type = (transport_type or "http").strip().lower()
     normalized_transport_type = "stdio" if normalized_transport_type == "container" else normalized_transport_type
@@ -357,7 +461,7 @@ async def add_mcp_service(
     status: bool | None = None
 
     if normalized_transport_type not in {"http", "sse", "stdio"}:
-        raise ValueError(f"Invalid transport_type: {transport_type}")
+        raise McpValidationError(f"Invalid transport_type: {transport_type}")
 
     normalized_container_id = container_id if isinstance(container_id, str) and container_id else None
     config_json = container_config if normalized_transport_type == "stdio" and isinstance(container_config, dict) else None
@@ -446,12 +550,12 @@ def list_mcp_services(tenant_id: str) -> List[Dict[str, Any]]:
 async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> List[Dict[str, Any]]:
     record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not record:
-        raise ValueError("MCP record not found")
+        raise McpNotFoundError("MCP record not found")
 
     service_name = _extract_str(record.get("mcp_name"))
     server_url = _extract_str(record.get("mcp_server"))
     if not service_name or not server_url:
-        raise ValueError("MCP record is missing runtime connection fields")
+        raise McpValidationError("MCP record is missing runtime connection fields")
 
     tools_info = await get_tool_from_remote_mcp_server(
         mcp_server_name=service_name,
@@ -474,7 +578,7 @@ def update_mcp_service(
 ) -> None:
     current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not current_record:
-        raise ValueError("MCP record not found")
+        raise McpNotFoundError("MCP record not found")
 
     current_transport_type = (current_record.get("transport_type") or "").strip().lower()
     config_json = None
@@ -535,7 +639,7 @@ async def update_mcp_service_enabled(
 ) -> None:
     current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not current_record:
-        raise ValueError("MCP record not found")
+        raise McpNotFoundError("MCP record not found")
 
     if enabled:
         current_name = str((current_record or {}).get("mcp_name") or "").strip()
@@ -549,7 +653,7 @@ async def update_mcp_service_enabled(
                 record_name = str(record.get("mcp_name") or "").strip().lower()
                 is_enabled = bool(record.get("enabled"))
                 if is_enabled and record_name == current_name_lower:
-                    raise ValueError("An enabled service already uses this name")
+                    raise McpNameConflictError("An enabled service already uses this name")
 
     authorization_token = current_record.get("authorization_token")
 
@@ -649,7 +753,7 @@ async def delete_mcp_service(
 ) -> None:
     current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not current_record:
-        raise ValueError("MCP record not found")
+        raise McpNotFoundError("MCP record not found")
 
     if _is_container_record(current_record):
         current_container_id = _extract_str(current_record.get("container_id")) or None
@@ -684,11 +788,11 @@ async def check_mcp_service_health(
 ) -> str:
     record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not record:
-        raise ValueError("MCP record not found")
+        raise McpNotFoundError("MCP record not found")
 
     server_url = str((record or {}).get("mcp_server") or "").strip()
     if not server_url:
-        raise ValueError("MCP server URL is empty")
+        raise McpValidationError("MCP server URL is empty")
 
     authorization_token = record.get("authorization_token")
 
@@ -737,11 +841,11 @@ async def check_mcp_service_health_legacy(
 ) -> str:
     current_record = get_mcp_manage_record_by_name(tenant_id=tenant_id, name=name)
     if not current_record:
-        raise ValueError("MCP record not found")
+        raise McpNotFoundError("MCP record not found")
 
     target_server_url = str(current_record.get("mcp_server") or "").strip()
     if target_server_url and target_server_url != server_url:
-        raise ValueError("MCP record and server_url mismatch")
+        raise McpValidationError("MCP record and server_url mismatch")
 
     config_json = _safe_config_dict(current_record or {})
     authorization_token = config_json.get("authorization_token")

@@ -188,6 +188,8 @@ export default function McpToolsPage() {
               loadingTools={detail.loadingTools}
               toolsModalVisible={detail.toolsModalVisible}
               currentServerTools={detail.currentServerTools}
+              publishLoading={detail.publishLoading}
+              toggleLoading={togglingServiceId === detail.selectedService?.mcpId}
               setDraftService={detail.setDraftService}
               setTagInputValue={detail.setTagInputValue}
               addDetailTag={detail.addDetailTag}
@@ -200,8 +202,6 @@ export default function McpToolsPage() {
               closeHealthErrorModal={detail.closeHealthErrorModal}
               onDeleteConfirm={(serviceName) => handleDeleteConfirm(detail.selectedService!.mcpId, serviceName)}
               onPublishToCommunity={detail.handlePublishToCommunity}
-              publishLoading={detail.publishLoading}
-              toggleLoading={togglingServiceId === detail.selectedService?.mcpId}
               onToggleEnable={(item) => {
                 toggleServiceStatus(item).catch((error) => {
                   log.error("[McpToolsPage] Failed to toggle service status from detail modal", {

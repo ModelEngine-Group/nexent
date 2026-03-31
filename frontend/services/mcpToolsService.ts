@@ -33,13 +33,6 @@ type ApiEnvelope<T = unknown> = {
   mcp_url?: string;
 };
 
-type AddFromConfigApiResult = {
-  status: string;
-  message?: string;
-  results?: Array<{ service_name?: string; mcp_url?: string }>;
-  errors?: string[] | null;
-};
-
 type AddContainerMcpToolPayload = {
   name: string;
   description: string;
