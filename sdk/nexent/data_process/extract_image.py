@@ -49,9 +49,9 @@ class UniversalImageExtractor(FileProcessor):
     @staticmethod
     def _openxml_namespace_maps() -> Dict[str, str]:
         return {
-            "xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
-            "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
-            "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+            "xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",  # NOSONAR
+            "a": "http://schemas.openxmlformats.org/drawingml/2006/main",  # NOSONAR
+            "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",  # NOSONAR
         }
 
 
