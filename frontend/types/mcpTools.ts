@@ -173,6 +173,11 @@ export interface McpServiceItem {
   authorizationToken?: string;
 }
 
+export interface McpTagStat {
+  tag: string;
+  count: number;
+}
+
 export interface AddMcpServicePayload {
   name: string;
   description: string;

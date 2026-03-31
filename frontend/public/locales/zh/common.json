@@ -1739,6 +1739,7 @@
   "mcpTools.page.resultCount": "{{count}} 个结果",
   "mcpTools.page.sourceFilter.all": "全部来源",
   "mcpTools.page.transportFilter.all": "全部协议",
+  "mcpTools.page.tagFilter.all": "全部标签",
   "mcpTools.page.addService": "添加 MCP 服务",
   "mcpTools.page.myPublished": "我的发布",
   "mcpTools.page.loading": "正在加载 MCP 服务列表...",

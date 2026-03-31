@@ -225,6 +225,7 @@ export const API_ENDPOINTS = {
   },
   mcpTools: {
     list: `${API_BASE_URL}/mcp-tools/list`,
+    tagsStats: `${API_BASE_URL}/mcp-tools/tags/stats`,
     tools: `${API_BASE_URL}/mcp-tools/tools`,
     add: `${API_BASE_URL}/mcp-tools/add`,
     addContainer: `${API_BASE_URL}/mcp-tools/container/add`,

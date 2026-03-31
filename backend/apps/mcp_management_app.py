@@ -25,6 +25,7 @@ from services.mcp_management_service import (
     list_registry_mcp_services,
     list_mcp_service_tools_by_id,
     list_mcp_services,
+    list_mcp_tag_stats,
     publish_community_mcp_service,
     update_mcp_service,
     update_community_mcp_service,
@@ -87,6 +88,7 @@ class ListMcpToolsByIdRequest(BaseModel):
 
 class CommunityListRequest(BaseModel):
     search: Optional[str] = None
+    tag: Optional[str] = None
     transport_type: Optional[Literal["http", "sse", "stdio"]] = None
     cursor: Optional[str] = None
     limit: int = Field(default=30, ge=1, le=100)
@@ -229,12 +231,13 @@ async def add_container_mcp_service_api(
 
 @router.get("/list")
 async def list_mcp_services_api(
+    tag: Optional[str] = None,
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
     try:
         _, tenant_id, _ = get_current_user_info(authorization, http_request)
-        services = list_mcp_services(tenant_id=tenant_id)
+        services = list_mcp_services(tenant_id=tenant_id, tag=(tag or "").strip() or None)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": services},
@@ -244,6 +247,26 @@ async def list_mcp_services_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to list MCP services",
+        )
+
+
+@router.get("/tags/stats")
+async def list_mcp_tag_stats_api(
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    try:
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        stats = list_mcp_tag_stats(tenant_id=tenant_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": stats},
+        )
+    except Exception as exc:
+        logger.error(f"Failed to list MCP tag stats: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list MCP tag stats",
         )
 
 
@@ -295,6 +318,7 @@ async def list_community_mcp_services_api(
         get_current_user_info(authorization, http_request)
         data = await list_community_mcp_services(
             search=(payload.search or "").strip() or None,
+            tag=(payload.tag or "").strip() or None,
             transport_type=(payload.transport_type or "").strip() or None,
             cursor=(payload.cursor or "").strip() or None,
             limit=payload.limit,

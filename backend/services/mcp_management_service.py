@@ -27,6 +27,7 @@ from database.remote_mcp_db import (
     delete_mcp_record_by_id,
     create_mcp_record,
     get_mcp_record_by_id_and_tenant,
+    get_mcp_tag_stats_by_tenant,
     get_mcp_records_by_tenant,
     update_mcp_record_enabled_by_id,
     update_mcp_record_manage_fields_by_id,
@@ -58,10 +59,22 @@ def _format_time(value: Any) -> str:
     return str(value)
 
 
-def _split_tags(value: str | None) -> List[str]:
-    if not value:
-        return []
-    return [item.strip() for item in value.split(",") if item.strip()]
+def _normalize_tags(value: Any) -> List[str]:
+    if isinstance(value, list):
+        normalized: List[str] = []
+        for item in value:
+            text = _extract_str(item)
+            if text and text not in normalized:
+                normalized.append(text)
+        return normalized
+    if isinstance(value, str):
+        normalized = []
+        for item in value.split(","):
+            text = item.strip()
+            if text and text not in normalized:
+                normalized.append(text)
+        return normalized
+    return []
 
 
 def _safe_config_dict(record: Dict[str, Any]) -> Dict[str, Any]:
@@ -173,7 +186,7 @@ def _normalize_community_card(record: Dict[str, Any]) -> Dict[str, Any]:
         "serverUrl": _extract_str(record.get("mcp_server")),
         "configJson": config_json,
         "mcpRegistryJson": registry_json if registry_json else None,
-        "tags": _split_tags(record.get("tags")),
+        "tags": _normalize_tags(record.get("tags")),
         "remotes": remotes_out,
         "packages": packages,
         "status": "active",
@@ -187,12 +200,14 @@ def _normalize_community_card(record: Dict[str, Any]) -> Dict[str, Any]:
 async def list_community_mcp_services(
     *,
     search: str | None = None,
+    tag: str | None = None,
     transport_type: str | None = None,
     cursor: str | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
     db_result = get_mcp_community_records(
         search=(search or "").strip() or None,
+        tag=(tag or "").strip() or None,
         transport_type=(transport_type or "").strip().lower() or None,
         cursor=(cursor or "").strip() or None,
         limit=max(1, min(limit, 100)),
@@ -231,7 +246,7 @@ async def publish_community_mcp_service(*, tenant_id: str, user_id: str, mcp_id:
             "registry_json": source_registry_json,
             "transport_type": _normalize_transport_type(source_record.get("transport_type")),
             "config_json": source_config_json,
-            "tags": source_record.get("tags") or "",
+            "tags": _normalize_tags(source_record.get("tags")),
             "description": _extract_str(source_record.get("description")),
             "last_sync_time": datetime.now(),
         },
@@ -478,7 +493,7 @@ async def add_mcp_service(
             "registry_json": registry_json,
             "transport_type": normalized_transport_type,
             "enabled": enabled,
-            "tags": ",".join(tags or []),
+            "tags": _normalize_tags(tags),
             "description": description,
             "config_json": config_json,
         },
@@ -487,8 +502,8 @@ async def add_mcp_service(
     )
 
 
-def list_mcp_services(tenant_id: str) -> List[Dict[str, Any]]:
-    records = get_mcp_records_by_tenant(tenant_id=tenant_id)
+def list_mcp_services(tenant_id: str, tag: str | None = None) -> List[Dict[str, Any]]:
+    records = get_mcp_records_by_tenant(tenant_id=tenant_id, tag=tag)
     services: List[Dict[str, Any]] = []
 
     container_status_map: Dict[str, str] = {}
@@ -532,7 +547,7 @@ def list_mcp_services(tenant_id: str) -> List[Dict[str, Any]]:
             "source": source or "local",
             "status": "enabled" if enabled else "disabled",
             "updatedAt": _format_time(record.get("update_time")),
-            "tags": _split_tags(record.get("tags")),
+            "tags": _normalize_tags(record.get("tags")),
             "transportType": normalized_transport_type,
             "serverUrl": _extract_str(record.get("mcp_server")),
             "version": _extract_str(record.get("version")),
@@ -545,6 +560,10 @@ def list_mcp_services(tenant_id: str) -> List[Dict[str, Any]]:
         })
 
     return services
+
+
+def list_mcp_tag_stats(tenant_id: str) -> List[Dict[str, Any]]:
+    return get_mcp_tag_stats_by_tenant(tenant_id=tenant_id)
 
 
 async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> List[Dict[str, Any]]:

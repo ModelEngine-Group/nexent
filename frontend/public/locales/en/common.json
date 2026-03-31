@@ -1581,6 +1581,7 @@
   "mcpTools.page.resultCount": "{{count}} results",
   "mcpTools.page.sourceFilter.all": "All Sources",
   "mcpTools.page.transportFilter.all": "All Transports",
+  "mcpTools.page.tagFilter.all": "All Tags",
   "mcpTools.page.addService": "Add MCP Service",
   "mcpTools.page.myPublished": "My Published",
   "mcpTools.page.loading": "Loading MCP services...",

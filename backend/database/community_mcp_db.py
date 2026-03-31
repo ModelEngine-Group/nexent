@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import McpCommunityRecord
@@ -12,6 +12,7 @@ logger = logging.getLogger("community_mcp_db")
 def get_mcp_community_records(
     *,
     search: str | None = None,
+    tag: str | None = None,
     transport_type: str | None = None,
     cursor: str | None = None,
     limit: int = 30,
@@ -24,13 +25,16 @@ def get_mcp_community_records(
         if transport_type:
             query = query.filter(McpCommunityRecord.transport_type == transport_type)
 
+        if tag:
+            query = query.filter(McpCommunityRecord.tags.any(tag))
+
         if search:
             keyword = f"%{search}%"
             query = query.filter(
                 or_(
                     McpCommunityRecord.mcp_name.ilike(keyword),
                     McpCommunityRecord.description.ilike(keyword),
-                    McpCommunityRecord.tags.ilike(keyword),
+                    func.array_to_string(McpCommunityRecord.tags, ",").ilike(keyword),
                 )
             )
 
@@ -109,7 +113,7 @@ def update_mcp_community_record_by_id(
     if description is not None:
         update_fields["description"] = description
     if tags is not None:
-        update_fields["tags"] = ",".join(tags)
+        update_fields["tags"] = tags
     if version is not None:
         update_fields["version"] = version
     if registry_json is not None:

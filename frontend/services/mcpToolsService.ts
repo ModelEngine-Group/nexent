@@ -8,6 +8,7 @@ import type {
   HealthcheckMcpServicePayload,
   RegistryMcpCard,
   CommunityMcpCard,
+  McpTagStat,
   McpHealthStatus,
   McpServiceItem,
   McpTransportType,
@@ -183,9 +184,14 @@ export const addContainerMcpToolService = async (payload: AddContainerMcpToolPay
   }
 };
 
-export const listMcpTools = async () => {
+export const listMcpTools = async (params?: { tag?: string }) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.list);
+    const query = new URLSearchParams();
+    if (params?.tag?.trim()) {
+      query.set("tag", params.tag.trim());
+    }
+    const url = query.size > 0 ? `${API_ENDPOINTS.mcpTools.list}?${query.toString()}` : API_ENDPOINTS.mcpTools.list;
+    const response = await fetchWithAuth(url);
     const data = await parseJson<ApiEnvelope<McpServiceItem[]>>(response);
     if (data.status !== "success") {
       throw new Error("Failed to load MCP services");
@@ -193,6 +199,20 @@ export const listMcpTools = async () => {
     return { success: true, data: data.data } as McpToolsApiResult<McpServiceItem[]>;
   } catch (error) {
     log.error("listMcpTools failed", error);
+    throw error;
+  }
+};
+
+export const fetchMcpTagStats = async () => {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.tagsStats);
+    const data = await parseJson<ApiEnvelope<McpTagStat[]>>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to load MCP tag stats");
+    }
+    return { success: true, data: data.data } as McpToolsApiResult<McpTagStat[]>;
+  } catch (error) {
+    log.error("fetchMcpTagStats failed", error);
     throw error;
   }
 };
@@ -219,6 +239,7 @@ export const listRegistryMcpTools = async (query: URLSearchParams) => {
 
 export const listCommunityMcpTools = async (payload: {
   search?: string;
+  tag?: string;
   transport_type?: "http" | "sse" | "stdio";
   cursor?: string;
   limit?: number;

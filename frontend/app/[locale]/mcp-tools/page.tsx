@@ -26,6 +26,9 @@ export default function McpToolsPage() {
     setSourceFilter,
     transportTypeFilter,
     setTransportTypeFilter,
+    tagFilter,
+    setTagFilter,
+    tagStats,
     loadingServices,
     selectedService,
     setSelectedService,
@@ -91,7 +94,7 @@ export default function McpToolsPage() {
                   {t("mcpTools.page.resultCount", { count: filteredServices.length })}
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                 <Select
                   size="large"
                   value={sourceFilter}
@@ -114,6 +117,19 @@ export default function McpToolsPage() {
                     { value: "http", label: t("mcpTools.serverType.http") },
                     { value: "sse", label: t("mcpTools.serverType.sse") },
                     { value: "stdio", label: t("mcpTools.serverType.stdio") },
+                  ]}
+                />
+                <Select
+                  size="large"
+                  value={tagFilter}
+                  onChange={setTagFilter}
+                  className="w-full"
+                  options={[
+                    { value: "all", label: t("mcpTools.page.tagFilter.all") },
+                    ...tagStats.map((item) => ({
+                      value: item.tag,
+                      label: `${item.tag} (${item.count})`,
+                    })),
                   ]}
                 />
               </div>

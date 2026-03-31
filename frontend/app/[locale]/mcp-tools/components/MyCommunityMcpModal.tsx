@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Empty, Input, Modal, Popconfirm, Spin } from "antd";
+import { Button, Empty, Input, Modal, Popconfirm, Spin, Tag } from "antd";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import {
   deleteCommunityMcpTool,
@@ -19,7 +19,8 @@ type Draft = {
   name: string;
   description: string;
   version: string;
-  tagsText: string;
+  tags: string[];
+  tagInputValue: string;
 };
 
 export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
@@ -67,7 +68,31 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
       name: item.name || "",
       description: item.description || "",
       version: item.version || "",
-      tagsText: (item.tags || []).join(","),
+      tags: item.tags || [],
+      tagInputValue: "",
+    });
+  };
+
+  const addDraftTag = () => {
+    if (!editDraft) return;
+    const nextTag = editDraft.tagInputValue.trim();
+    if (!nextTag) return;
+    if (editDraft.tags.includes(nextTag)) {
+      setEditDraft({ ...editDraft, tagInputValue: "" });
+      return;
+    }
+    setEditDraft({
+      ...editDraft,
+      tags: [...editDraft.tags, nextTag],
+      tagInputValue: "",
+    });
+  };
+
+  const removeDraftTag = (index: number) => {
+    if (!editDraft) return;
+    setEditDraft({
+      ...editDraft,
+      tags: editDraft.tags.filter((_, idx) => idx !== index),
     });
   };
 
@@ -80,10 +105,7 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
         name: editDraft.name.trim(),
         description: editDraft.description.trim(),
         version: editDraft.version.trim(),
-        tags: editDraft.tagsText
-          .split(",")
-          .map((item) => item.trim())
-          .filter((item) => item.length > 0),
+        tags: editDraft.tags,
       });
       setEditDraft(null);
       await loadMine();
@@ -214,12 +236,30 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
             </label>
             <label className="block text-xs text-slate-500">
               {t("mcpTools.detail.tags")}
-              <Input
-                value={editDraft.tagsText}
-                onChange={(event) => setEditDraft({ ...editDraft, tagsText: event.target.value })}
-                placeholder={t("mcpTools.community.mine.tagsPlaceholder")}
-                className="mt-1 rounded-xl"
-              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                {editDraft.tags.map((tag, index) => (
+                  <span key={`${tag}-${index}`} className="relative inline-flex">
+                    <Tag className="rounded-full px-3 py-1 m-0 leading-none">{tag}</Tag>
+                    <button
+                      type="button"
+                      onClick={() => removeDraftTag(index)}
+                      className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] text-slate-500 transition hover:bg-slate-300 hover:text-slate-700"
+                      aria-label={t("mcpTools.detail.removeTagAria", { tag })}
+                    >
+                      x
+                    </button>
+                  </span>
+                ))}
+                <Input
+                  size="small"
+                  value={editDraft.tagInputValue}
+                  onChange={(event) => setEditDraft({ ...editDraft, tagInputValue: event.target.value })}
+                  onPressEnter={addDraftTag}
+                  onBlur={addDraftTag}
+                  placeholder={t("mcpTools.addModal.tagInputPlaceholder")}
+                  className="w-40 rounded-full"
+                />
+              </div>
             </label>
           </div>
         ) : null}
