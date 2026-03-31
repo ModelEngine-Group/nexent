@@ -241,6 +241,73 @@ class UniversalImageExtractor(FileProcessor):
             "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
 
 
+    def _extract_excel_anchors(
+        self,
+        z: zipfile.ZipFile,
+        anchors: List[Any],
+        rel_map: Dict[str, str],
+        sheet_name: str,
+        ns: Dict[str, str],
+        seen: set,
+    ) -> List[Dict[str, Any]]:
+        results = []
+        for anchor in anchors:
+            coords = self._excel_anchor_coords(anchor, ns)
+            if coords is None:
+                continue
+
+            embed_rel_id = self._excel_anchor_embed_id(anchor, ns)
+            if not embed_rel_id:
+                continue
+
+            target = rel_map.get(embed_rel_id)
+            if not target:
+                continue
+
+            img_bytes = z.read(target)
+            h = self._hash(img_bytes)
+            if h in seen:
+                continue
+            seen.add(h)
+
+            results.append({
+                "position": {
+                    "sheet_name": sheet_name,
+                    "coordinates": {
+                        "x1": coords["col1"],
+                        "x2": coords["col2"],
+                        "y1": coords["row1"],
+                        "y2": coords["row2"]
+                    }
+                },
+                "image_format": self.detect_image_format(img_bytes),
+                "image_bytes": img_bytes
+            })
+
+        return results
+
+
+    def _extract_excel_sheet(
+        self,
+        z: zipfile.ZipFile,
+        sheet_file: str,
+        ns: Dict[str, str],
+        seen: set,
+    ) -> List[Dict[str, Any]]:
+        drawing_file = self._excel_drawing_file(z, sheet_file)
+        if drawing_file is None:
+            return []
+
+        rel_map = self._excel_rel_map(z, drawing_file)
+        if not rel_map:
+            return []
+
+        anchors = self._excel_anchors(z, drawing_file, ns)
+        sheet_name = os.path.basename(sheet_file)
+
+        return self._extract_excel_anchors(z, anchors, rel_map, sheet_name, ns, seen)
+
+
     def _extract_excel(self, xlsx_path):
         results = []
         seen = set()
@@ -255,49 +322,9 @@ class UniversalImageExtractor(FileProcessor):
             sheet_files = self._excel_sheet_files(z)
 
             for sheet_file in sheet_files:
-                drawing_file = self._excel_drawing_file(z, sheet_file)
-                if drawing_file is None:
-                    continue
-
-                rel_map = self._excel_rel_map(z, drawing_file)
-                if not rel_map:
-                    continue
-
-                anchors = self._excel_anchors(z, drawing_file, ns)
-                sheet_name = os.path.basename(sheet_file)
-
-                for anchor in anchors:
-                    coords = self._excel_anchor_coords(anchor, ns)
-                    if coords is None:
-                        continue
-
-                    embed_rel_id = self._excel_anchor_embed_id(anchor, ns)
-                    if not embed_rel_id:
-                        continue
-
-                    target = rel_map.get(embed_rel_id)
-                    if not target:
-                        continue
-
-                    img_bytes = z.read(target)
-                    h = self._hash(img_bytes)
-                    if h in seen:
-                        continue
-                    seen.add(h)
-
-                    results.append({
-                        "position": {
-                            "sheet_name": sheet_name,
-                            "coordinates": {
-                                "x1": coords["col1"],
-                                "x2": coords["col2"],
-                                "y1": coords["row1"],
-                                "y2": coords["row2"]
-                            }
-                        },
-                        "image_format": self.detect_image_format(img_bytes),
-                        "image_bytes": img_bytes
-                    })
+                results.extend(
+                    self._extract_excel_sheet(z, sheet_file, ns, seen)
+                )
 
         return results
 
