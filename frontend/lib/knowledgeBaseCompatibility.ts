@@ -4,10 +4,11 @@ export const isMultimodalConstraintMismatch = (
   kb: KnowledgeBase,
   toolMultimodal: boolean | null
 ): boolean => {
+  const kbIsMultimodal = Boolean(kb.is_multimodal);
   return (
     toolMultimodal !== null &&
-    ((toolMultimodal && !kb.is_multimodal) ||
-      (!toolMultimodal && kb.is_multimodal))
+    ((toolMultimodal && !kbIsMultimodal) ||
+      (!toolMultimodal && kbIsMultimodal))
   );
 };
 

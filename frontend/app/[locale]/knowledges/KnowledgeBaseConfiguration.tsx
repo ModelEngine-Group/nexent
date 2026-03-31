@@ -162,7 +162,6 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Get available embedding models for knowledge base creation
   const { models } = useModelList({ enabled: true });
-
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
