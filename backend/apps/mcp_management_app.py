@@ -6,13 +6,17 @@ from fastapi.responses import JSONResponse
 from http import HTTPStatus
 from pydantic import BaseModel, Field
 
-from consts.const import NEXENT_MCP_DOCKER_IMAGE
-from consts.exceptions import MCPConnectionError, MCPContainerError
+from consts.exceptions import (
+    MCPConnectionError,
+    MCPContainerError,
+    McpNameConflictError,
+    McpNotFoundError,
+    McpValidationError,
+)
 from consts.model import MCPConfigRequest
-from database.remote_mcp_db import check_enabled_mcp_name_exists
-from services.mcp_container_service import MCPContainerManager
 from services.mcp_management_service import (
     add_mcp_service,
+    add_container_mcp_service,
     check_mcp_service_health,
     delete_mcp_service,
     delete_community_mcp_service,
@@ -144,6 +148,11 @@ async def add_mcp_service_api(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail="MCP connection failed",
         )
+    except McpValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -162,98 +171,25 @@ async def add_container_mcp_service_api(
 ):
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-
-        service_name = payload.name.strip()
-        if check_enabled_mcp_name_exists(mcp_name=service_name, tenant_id=tenant_id):
-            raise HTTPException(
-                status_code=HTTPStatus.CONFLICT,
-                detail="Enabled MCP name already exists",
-            )
-
-        servers = payload.mcp_config.mcpServers
-        if len(servers) != 1:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Exactly one mcpServers entry is required",
-            )
-
-        _, config = next(iter(servers.items()))
-        command = (config.command or "").strip()
-        if not command:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="command is required",
-            )
-
-        port = payload.port
-
-        env_vars = dict(config.env or {})
-        auth_token = (payload.authorization_token or "").strip()
-        if auth_token:
-            env_vars["authorization_token"] = auth_token
-
-        full_command = [
-            "python",
-            "-m",
-            "mcp_proxy",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            str(port),
-            "--transport",
-            "streamablehttp",
-            "--",
-            command,
-            *(config.args or []),
-        ]
-
-        container_manager = MCPContainerManager()
-        container_info = await container_manager.start_mcp_container(
-            service_name=service_name,
+        container_info = await add_container_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
-            env_vars=env_vars,
-            host_port=port,
-            image=config.image or NEXENT_MCP_DOCKER_IMAGE,
-            full_command=full_command,
+            name=payload.name,
+            description=payload.description,
+            source=payload.source,
+            tags=payload.tags,
+            authorization_token=payload.authorization_token,
+            registry_json=payload.registry_json,
+            port=payload.port,
+            mcp_config=payload.mcp_config,
         )
-        started_container_id: Optional[str] = None
-        started_container_id = container_info.get("container_id")
-
-        container_config = payload.mcp_config.model_dump(exclude_none=True)
-
-        try:
-            await add_mcp_service(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                name=service_name,
-                description=payload.description,
-                source=payload.source,
-                transport_type="stdio",
-                server_url=container_info["mcp_url"],
-                tags=payload.tags,
-                authorization_token=auth_token,
-                container_config=container_config,
-                version=None,
-                registry_json=payload.registry_json,
-                enabled=True,
-                container_id=container_info.get("container_id"),
-            )
-        except MCPConnectionError:
-            if started_container_id:
-                try:
-                    cleanup_manager = MCPContainerManager()
-                    await cleanup_manager.stop_mcp_container(started_container_id)
-                except Exception as cleanup_exc:
-                    logger.warning(f"Failed to cleanup container {started_container_id}: {cleanup_exc}")
-            raise
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
                 "status": "success",
                 "data": {
-                    "service_name": service_name,
+                    "service_name": container_info.get("service_name"),
                     "mcp_url": container_info.get("mcp_url"),
                     "container_id": container_info.get("container_id"),
                     "container_name": container_info.get("container_name"),
@@ -261,8 +197,16 @@ async def add_container_mcp_service_api(
                 },
             },
         )
-    except HTTPException:
-        raise
+    except McpNameConflictError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=str(exc),
+        )
+    except McpValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc),
+        )
     except MCPContainerError as exc:
         logger.error(f"Failed to start MCP container service: {exc}")
         raise HTTPException(
@@ -386,7 +330,9 @@ async def publish_community_mcp_service_api(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": {"community_id": community_id}},
         )
-    except ValueError as exc:
+    except McpNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except McpValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except HTTPException:
         raise
@@ -420,7 +366,9 @@ async def update_community_mcp_service_api(
             status_code=HTTPStatus.OK,
             content={"status": "success"},
         )
-    except ValueError as exc:
+    except McpNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except McpValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except HTTPException:
         raise
@@ -449,8 +397,8 @@ async def delete_community_mcp_service_api(
             status_code=HTTPStatus.OK,
             content={"status": "success"},
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except McpNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
     except HTTPException:
         raise
     except Exception as exc:
@@ -499,7 +447,12 @@ async def list_mcp_tools_api(
             status_code=HTTPStatus.OK,
             content={"status": "success", "tools": tools},
         )
-    except ValueError as exc:
+    except McpNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc),
+        )
+    except McpValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc),
@@ -542,6 +495,16 @@ async def update_mcp_service_by_id_api(
             status_code=HTTPStatus.OK,
             content={"status": "success"},
         )
+    except McpNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc),
+        )
+    except McpValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -570,7 +533,17 @@ async def enable_mcp_service_by_id_api(
             status_code=HTTPStatus.OK,
             content={"status": "success"},
         )
-    except ValueError as exc:
+    except McpNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc),
+        )
+    except McpNameConflictError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=str(exc),
+        )
+    except McpValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc),
@@ -609,7 +582,12 @@ async def disable_mcp_service_by_id_api(
             status_code=HTTPStatus.OK,
             content={"status": "success"},
         )
-    except ValueError as exc:
+    except McpNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc),
+        )
+    except McpValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc),
@@ -640,6 +618,16 @@ async def check_mcp_health_by_id_api(
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": {"health_status": health_status}},
+        )
+    except McpNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc),
+        )
+    except McpValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc),
         )
     except MCPConnectionError as exc:
         logger.error(f"MCP connection failed: {exc}")
@@ -673,6 +661,11 @@ async def delete_mcp_service_by_id_api(
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success"},
+        )
+    except McpNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc),
         )
     except HTTPException:
         raise

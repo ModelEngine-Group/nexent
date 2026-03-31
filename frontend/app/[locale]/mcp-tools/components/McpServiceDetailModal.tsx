@@ -30,6 +30,8 @@ interface McpServiceDetailModalProps {
   loadingTools: boolean;
   toolsModalVisible: boolean;
   currentServerTools: any[];
+  publishLoading?: boolean;
+  toggleLoading?: boolean;
   setDraftService: (service: McpServiceItem) => void;
   setTagInputValue: (value: string) => void;
   addDetailTag: () => void;
@@ -42,9 +44,7 @@ interface McpServiceDetailModalProps {
   closeHealthErrorModal: () => void;
   onDeleteConfirm: (serviceName: string) => void;
   onPublishToCommunity: () => void;
-  publishLoading?: boolean;
   onToggleEnable: (service: McpServiceItem) => void;
-  toggleLoading?: boolean;
   onClose: () => void;
 }
 
@@ -61,6 +61,8 @@ export default function McpServiceDetailModal({
   loadingTools,
   toolsModalVisible,
   currentServerTools,
+  publishLoading = false,
+  toggleLoading = false,
   setDraftService,
   setTagInputValue,
   addDetailTag,
@@ -73,11 +75,10 @@ export default function McpServiceDetailModal({
   closeHealthErrorModal,
   onDeleteConfirm,
   onPublishToCommunity,
-  publishLoading = false,
   onToggleEnable,
-  toggleLoading = false,
   onClose,
 }: McpServiceDetailModalProps) {
+
   const { t } = useTranslation("common");
   const [logsModalOpen, setLogsModalOpen] = useState(false);
   const [showServerJsonModal, setShowServerJsonModal] = useState(false);
@@ -199,7 +200,11 @@ export default function McpServiceDetailModal({
             <div className="flex items-center justify-between">
               <span className="text-slate-500">{t("mcpTools.detail.source")}</span>
               <span className="font-medium text-slate-800">
-                {draftService.source === MCP_TAB.LOCAL ? t("mcpTools.source.local") : t("mcpTools.source.registry")}
+                {draftService.source === MCP_TAB.LOCAL
+                  ? t("mcpTools.source.local")
+                  : draftService.source === MCP_TAB.COMMUNITY
+                  ? t("mcpTools.source.community")
+                  : t("mcpTools.source.registry")}
               </span>
             </div>
             <div className="flex items-center justify-between">

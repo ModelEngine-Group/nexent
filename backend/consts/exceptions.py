@@ -105,6 +105,21 @@ class MCPNameIllegal(Exception):
     pass
 
 
+class McpNotFoundError(Exception):
+    """Raised when MCP resource is not found."""
+    pass
+
+
+class McpValidationError(Exception):
+    """Raised when MCP payload or runtime data is invalid."""
+    pass
+
+
+class McpNameConflictError(Exception):
+    """Raised when MCP name conflicts with an existing enabled service."""
+    pass
+
+
 class NoInviteCodeException(Exception):
     """Raised when invite code is not found."""
     pass
