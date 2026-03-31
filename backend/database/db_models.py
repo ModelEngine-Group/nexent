@@ -1,5 +1,5 @@
 from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -437,7 +437,7 @@ class McpRecord(TableBase):
     transport_type = Column(String(30), doc="Transport type: streamable-http/sse/stdio")
     config_json = Column(JSON, doc="MCP config data")
     enabled = Column(Boolean, default=True, doc="Enabled")
-    tags = Column(String(200), doc="Tags")
+    tags = Column(ARRAY(Text), doc="Tags")
     description = Column(String(100), doc="Description")
     last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 
@@ -464,7 +464,7 @@ class McpCommunityRecord(TableBase):
     registry_json = Column(JSONB, doc="Full MCP metadata JSON")
     transport_type = Column(String(30), doc="Transport type: http/sse/stdio")
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
-    tags = Column(String(200), doc="Tags")
+    tags = Column(ARRAY(Text), doc="Tags")
     description = Column(String(100), doc="Description")
     last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 

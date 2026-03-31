@@ -1,6 +1,8 @@
 import logging
 from typing import Any, Dict, List
 
+from sqlalchemy import func
+
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import McpRecord
 
@@ -80,7 +82,7 @@ def update_mcp_status_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id:
         ).update({"status": status, "updated_by": user_id})
 
 
-def get_mcp_records_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+def get_mcp_records_by_tenant(tenant_id: str, tag: str | None = None) -> List[Dict[str, Any]]:
     """
     Get all MCP records for a tenant
 
@@ -88,12 +90,35 @@ def get_mcp_records_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
     :return: List of MCP records
     """
     with get_db_session() as session:
-        mcp_records = session.query(McpRecord).filter(
+        query = session.query(McpRecord).filter(
             McpRecord.tenant_id == tenant_id,
             McpRecord.delete_flag != 'Y'
-        ).order_by(McpRecord.create_time.desc()).all()
+        )
+
+        if tag:
+            query = query.filter(McpRecord.tags.any(tag))
+
+        mcp_records = query.order_by(McpRecord.create_time.desc()).all()
 
         return [as_dict(record) for record in mcp_records]
+
+
+def get_mcp_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                func.unnest(McpRecord.tags).label("tag"),
+                func.count(McpRecord.mcp_id).label("count"),
+            )
+            .filter(
+                McpRecord.tenant_id == tenant_id,
+                McpRecord.delete_flag != 'Y',
+            )
+            .group_by("tag")
+            .order_by(func.count(McpRecord.mcp_id).desc(), "tag")
+            .all()
+        )
+        return [{"tag": str(row.tag), "count": int(row.count)} for row in rows if row.tag]
 
 
 def update_mcp_record_manage_fields_by_id(
@@ -120,7 +145,7 @@ def update_mcp_record_manage_fields_by_id(
                 "mcp_name": name,
                 "mcp_server": server_url,
                 "description": description,
-                "tags": ",".join(tags or []),
+                "tags": tags or [],
                 "source": source,
                 "transport_type": transport_type,
                 "authorization_token": authorization_token,

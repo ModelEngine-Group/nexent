@@ -5,7 +5,7 @@ import log from "@/lib/logger";
 import { filterServiceCards } from "@/lib/mcpTools";
 import type { McpTool } from "@/types/agentConfig";
 import type { McpServiceItem } from "@/types/mcpTools";
-import { listMcpTools } from "@/services/mcpToolsService";
+import { fetchMcpTagStats, listMcpTools } from "@/services/mcpToolsService";
 import { useMcpToolsDetail } from "./useMcpToolsDetail";
 import { useMcpToolsToggle } from "./useMcpToolsToggle";
 
@@ -23,18 +23,31 @@ export function useMcpToolsPage({ t, message }: UseMcpToolsPageParams) {
   const [searchValue, setSearchValue] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [transportTypeFilter, setTransportTypeFilter] = useState<string>("all");
+  const [tagFilter, setTagFilter] = useState<string>("all");
   const [services, setServices] = useState<McpServiceItem[]>([]);
   const [selectedService, setSelectedService] = useState<McpServiceItem | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
 
   const listQuery = useQuery<McpServiceItem[]>({
-    queryKey: ["mcp-tools", "list"],
+    queryKey: ["mcp-tools", "list", tagFilter],
     retry: false,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     refetchOnMount: false,
     queryFn: async () => {
-      const result = await listMcpTools();
+      const result = await listMcpTools({ tag: tagFilter === "all" ? undefined : tagFilter });
+      return result.data;
+    },
+  });
+
+  const tagStatsQuery = useQuery({
+    queryKey: ["mcp-tools", "tag-stats"],
+    retry: false,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    queryFn: async () => {
+      const result = await fetchMcpTagStats();
       return result.data;
     },
   });
@@ -49,6 +62,11 @@ export function useMcpToolsPage({ t, message }: UseMcpToolsPageParams) {
     log.error("[useMcpToolsPage] Failed to load managed MCP service list", { error: listQuery.error });
     message.error(t("mcpTools.list.loadFailed"));
   }, [listQuery.error, message, t]);
+
+  useEffect(() => {
+    if (!(tagStatsQuery.error instanceof Error)) return;
+    log.error("[useMcpToolsPage] Failed to load MCP tag stats", { error: tagStatsQuery.error });
+  }, [tagStatsQuery.error]);
 
   const loadServerList = useCallback(async () => {
     const result = await listQuery.refetch();
@@ -122,6 +140,9 @@ export function useMcpToolsPage({ t, message }: UseMcpToolsPageParams) {
     setSourceFilter,
     transportTypeFilter,
     setTransportTypeFilter,
+    tagFilter,
+    setTagFilter,
+    tagStats: tagStatsQuery.data || [],
     services,
     loadingServices: listQuery.isFetching && services.length === 0,
     selectedService,

@@ -14,7 +14,7 @@ ALTER TABLE IF EXISTS nexent.mcp_record_t
     ADD COLUMN IF NOT EXISTS transport_type VARCHAR(30),
     ADD COLUMN IF NOT EXISTS config_json JSON,
     ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE,
-    ADD COLUMN IF NOT EXISTS tags VARCHAR(200),
+    ADD COLUMN IF NOT EXISTS tags TEXT[],
     ADD COLUMN IF NOT EXISTS description VARCHAR(100),
     ADD COLUMN IF NOT EXISTS last_sync_time TIMESTAMP WITHOUT TIME ZONE;
 
@@ -38,5 +38,8 @@ CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_name
 
 CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_server
     ON nexent.mcp_record_t (tenant_id, mcp_server, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tags_gin
+    ON nexent.mcp_record_t USING GIN (tags);
 
 COMMIT;

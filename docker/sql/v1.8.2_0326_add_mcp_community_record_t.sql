@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_community_record_t (
     registry_json JSONB,
     transport_type VARCHAR(30),
     config_json JSON,
-    tags VARCHAR(200),
+    tags TEXT[],
     description VARCHAR(100),
     last_sync_time TIMESTAMP WITHOUT TIME ZONE,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -60,6 +60,9 @@ CREATE INDEX IF NOT EXISTS idx_mcp_community_transport_delete
 
 CREATE INDEX IF NOT EXISTS idx_mcp_community_user_delete
     ON nexent.mcp_community_record_t (user_id, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_tags_gin
+    ON nexent.mcp_community_record_t USING GIN (tags);
 
 CREATE OR REPLACE FUNCTION update_mcp_community_record_update_time()
 RETURNS TRIGGER AS $$
