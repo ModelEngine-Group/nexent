@@ -12,7 +12,7 @@ class JSONChunkProcessor:
 
     Responsible for splitting JSON or plain-text content into chunks
     without breaking top-level key-value semantics when possible,
-    and without splitting escape sequences like \\", \\n, etc.
+    and without splitting escape sequences like \" , \n, etc.
     """
 
     def __init__(self, max_characters: int):
@@ -40,18 +40,10 @@ class JSONChunkProcessor:
         try:
             data = orjson.loads(file_data)
         except orjson.JSONDecodeError:
-            return self._split_plain(
-                file_data.decode("utf-8", errors="ignore")
-            )
+            return self._split_plain(self._to_text(file_data))
         except TypeError:
             try:
-                if isinstance(file_data, (bytes, bytearray)):
-                    text_content = file_data.decode("utf-8", errors="ignore")
-                elif isinstance(file_data, str):
-                    text_content = file_data
-                else:
-                    text_content = str(file_data)
-                return self._split_plain(text_content)
+                return self._split_plain(self._to_text(file_data))
 
             except Exception as inner_e:
                 logger.error(
@@ -61,8 +53,7 @@ class JSONChunkProcessor:
         except Exception as e:
             logger.error(f"Unexpected error while parsing JSON: {e}")
             return self._split_plain(
-                file_data.decode(
-                    "utf-8", errors="ignore") if isinstance(file_data, bytes) else str(file_data)
+                self._to_text(file_data)
             )
 
         def dump(v): return orjson.dumps(v).decode("utf-8")
@@ -91,7 +82,7 @@ class JSONChunkProcessor:
         """
         out: List[str] = []
         all_punct = set(string.punctuation)
-        opening_punct = set("([{<'\"‘“")
+        opening_punct = set("([{<'\"")
         SAFE_BREAKS = (all_punct - opening_punct) | {" "}
 
         while len(text) > self._max:
@@ -136,7 +127,7 @@ class JSONChunkProcessor:
         while len(cur) > self._max:
             cut = self._find_last_top_kv(cur, self._max)
             if cut is None:
-                # No safe top-level cut → use plain splitter (with escape safety)
+                # No safe top-level cut -> use plain splitter (with escape safety)
                 return out + self._split_plain(cur)
 
             chunk = cur[:cut]
@@ -186,7 +177,7 @@ class JSONChunkProcessor:
             # Process structural characters only outside strings
             if c in "{[":
                 depth += 1
-            elif c in "}]":
+            elif c in "]}":
                 depth -= 1
             elif c == ',' and depth == 1:
                 candidate = i + 1
@@ -197,11 +188,26 @@ class JSONChunkProcessor:
         return last_safe_cut
 
     @staticmethod
+    def _to_text(file_data) -> str:
+        if isinstance(file_data, (bytes, bytearray)):
+            return file_data.decode("utf-8", errors="ignore")
+        if isinstance(file_data, str):
+            return file_data
+        return str(file_data)
+
+    @staticmethod
     def _ends_with_unescaped_backslash(s: str) -> bool:
         """
         Check if the string ends with an odd number of consecutive backslashes.
         If so, the last backslash is escaping the next character (which isn't in s),
         so cutting here would break an escape sequence.
+
+        Args:
+            s: The string to check.
+
+        Returns:
+            True if the string ends with an unescaped backslash (odd count),
+            False otherwise.
         """
         count = 0
         for char in reversed(s):
