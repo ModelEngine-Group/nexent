@@ -174,18 +174,31 @@ class JSONChunkProcessor:
             if in_str:
                 continue
 
-            # Process structural characters only outside strings
-            if c in "{[":
-                depth += 1
-            elif c in "]}":
-                depth -= 1
-            elif c == ',' and depth == 1:
-                candidate = i + 1
-                # Only accept if prefix doesn't end with unescaped backslash
-                if not self._ends_with_unescaped_backslash(text[:candidate]):
-                    last_safe_cut = candidate
+            depth, last_safe_cut = self._process_structural_char(
+                text, i, c, depth, last_safe_cut
+            )
 
         return last_safe_cut
+
+    def _process_structural_char(
+        self,
+        text: str,
+        i: int,
+        c: str,
+        depth: int,
+        last_safe_cut: int | None,
+    ) -> tuple[int, int | None]:
+        # Process structural characters only outside strings
+        if c in "{[":
+            return depth + 1, last_safe_cut
+        if c in "]}":
+            return depth - 1, last_safe_cut
+        if c == "," and depth == 1:
+            candidate = i + 1
+            # Only accept if prefix doesn't end with unescaped backslash
+            if not self._ends_with_unescaped_backslash(text[:candidate]):
+                return depth, candidate
+        return depth, last_safe_cut
 
     @staticmethod
     def _to_text(file_data) -> str:
