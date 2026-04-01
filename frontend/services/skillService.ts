@@ -1,23 +1,16 @@
 import { message } from "antd";
 import log from "@/lib/logger";
-import { conversationService } from "@/services/conversationService";
 import {
   createSkill,
   updateSkill,
   createSkillFromFile,
   searchSkillsByName as searchSkillsByNameApi,
-  fetchSkillConfig,
-  deleteSkillTempFile,
   fetchSkills,
 } from "@/services/agentConfigService";
 import {
-  extractSkillInfoFromContent,
-  parseSkillDraft,
-} from "@/lib/skillFileUtils";
-import {
   THINKING_STEPS_ZH,
-  THINKING_STEPS_EN,
-  type SkillDraftResult,
+  SKILL_CREATOR_TEMP_FILE,
+  type CreateSimpleSkillRequest,
 } from "@/types/skill";
 
 // ========== Type Definitions ==========
@@ -78,7 +71,7 @@ export interface ThinkingStep {
  * Get thinking steps based on language
  */
 export const getThinkingSteps = (lang: string): ThinkingStep[] => {
-  return lang === "zh" ? THINKING_STEPS_ZH : THINKING_STEPS_EN;
+  return lang === "zh" ? THINKING_STEPS_ZH : THINKING_STEPS_ZH;
 };
 
 
@@ -155,10 +148,10 @@ export const processSkillStream = async (
  */
 export const deleteSkillCreatorTempFile = async (): Promise<void> => {
   try {
-    const config = await fetchSkillConfig("simple-skill-creator");
-    if (config && typeof config === "object" && config.temp_filename) {
-      await deleteSkillTempFile("simple-skill-creator", config.temp_filename as string);
-    }
+    await fetch(API_ENDPOINTS.skills.creatorCache, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (error) {
     log.warn("Failed to delete temp file:", error);
   }
@@ -304,112 +297,36 @@ export const submitSkillFromFile = async (
 };
 
 /**
- * Interactive skill creation via chat with agent
- */
-export const runInteractiveSkillCreation = async (
-  input: string,
-  history: { role: "user" | "assistant"; content: string }[],
-  skillCreatorAgentId: number,
-  onThinkingUpdate: (step: number, description: string) => void,
-  onThinkingVisible: (visible: boolean) => void,
-  onMessageUpdate: (messages: { id: string; role: "user" | "assistant"; content: string; timestamp: Date }[]) => void,
-  onLoadingChange: (loading: boolean) => void,
-  allSkills: SkillListItem[],
-  form: { setFieldValue: (name: string, value: unknown) => void },
-  t: (key: string) => string,
-  isMountedRef: React.MutableRefObject<boolean>
-): Promise<{ success: boolean; skillDraft: SkillDraftResult | null }> => {
-  try {
-    const reader = await conversationService.runAgent(
-      {
-        query: input,
-        conversation_id: 0,
-        history,
-        agent_id: skillCreatorAgentId,
-        is_debug: true,
-      },
-      undefined as unknown as AbortSignal
-    );
-
-    let finalAnswer = "";
-
-    await processSkillStream(
-      reader,
-      onThinkingUpdate,
-      onThinkingVisible,
-      (answer) => {
-        finalAnswer = answer;
-      },
-      "zh"
-    );
-
-    if (!isMountedRef.current) {
-      return { success: false, skillDraft: null };
-    }
-
-    const skillDraft = parseSkillDraft(finalAnswer);
-    if (skillDraft) {
-      form.setFieldValue("name", skillDraft.name);
-      form.setFieldValue("description", skillDraft.description);
-      form.setFieldValue("tags", skillDraft.tags);
-      form.setFieldValue("content", skillDraft.content);
-
-      message.success(t("skillManagement.message.skillReadyForSave"));
-      return { success: true, skillDraft };
-    } else {
-      // Fallback: read temp file if no skill draft parsed
-      if (!isMountedRef.current) {
-        return { success: false, skillDraft: null };
-      }
-
-      try {
-        const config = await fetchSkillConfig("simple-skill-creator");
-        if (config && config.temp_filename && isMountedRef.current) {
-          const { fetchSkillFileContent } = await import("@/services/agentConfigService");
-          const tempFilename = config.temp_filename as string;
-          const tempContent = await fetchSkillFileContent("simple-skill-creator", tempFilename);
-
-          if (tempContent && isMountedRef.current) {
-            const skillInfo = extractSkillInfoFromContent(tempContent);
-
-            if (skillInfo && skillInfo.name) {
-              form.setFieldValue("name", skillInfo.name);
-            }
-            if (skillInfo && skillInfo.description) {
-              form.setFieldValue("description", skillInfo.description);
-            }
-            if (skillInfo && skillInfo.tags && skillInfo.tags.length > 0) {
-              form.setFieldValue("tags", skillInfo.tags);
-            }
-            if (skillInfo.contentWithoutFrontmatter) {
-              form.setFieldValue("content", skillInfo.contentWithoutFrontmatter);
-            }
-          }
-        }
-      } catch (error) {
-        log.warn("Failed to load temp file content:", error);
-      }
-
-      return { success: false, skillDraft: null };
-    }
-  } catch (error) {
-    log.error("Interactive skill creation error:", error);
-    message.error(t("skillManagement.message.chatError"));
-    return { success: false, skillDraft: null };
-  }
-};
-
-/**
  * Clear chat and delete temp file
  */
 export const clearChatAndTempFile = async (): Promise<void> => {
   try {
-    const config = await fetchSkillConfig("simple-skill-creator");
-    if (config && typeof config === "object" && config.temp_filename) {
-      await deleteSkillTempFile("simple-skill-creator", config.temp_filename as string);
-    }
+    await fetch(API_ENDPOINTS.skills.creatorCache, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (error) {
     log.warn("Failed to delete temp file on clear:", error);
+  }
+};
+
+/**
+ * Fetch skill creator temp file content
+ */
+export const fetchSkillCreatorTempFile = async (): Promise<string | null> => {
+  try {
+    const response = await fetch(API_ENDPOINTS.skills.creatorCache, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json();
+    return data.content || null;
+  } catch (error) {
+    log.warn("Failed to fetch skill creator temp file:", error);
+    return null;
   }
 };
 
@@ -444,3 +361,136 @@ export const skillNameExists = (
 };
 
 export { updateSkill };
+
+/**
+ * Call the /skills/create-simple backend API to generate a skill.
+ */
+import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
+
+export interface CreateSimpleSkillResponse {
+  skill_name: string;
+  skill_description: string;
+  tags: string[];
+  skill_content: string;
+}
+
+/**
+ * Interactive skill creation via backend API (SDK-backed).
+ */
+export const createSimpleSkill = async (
+  request: CreateSimpleSkillRequest
+): Promise<CreateSimpleSkillResponse> => {
+  const response = await fetchWithErrorHandling(API_ENDPOINTS.skills.createSimple, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return response.json();
+};
+
+/**
+ * SSE event types for streaming skill creation
+ */
+export interface SkillCreationStreamEvent {
+  type: "step_count" | "final_answer" | "skill_result" | "done" | "error";
+  content?: string;
+  skill_name?: string;
+  skill_description?: string;
+  tags?: string[];
+  message?: string;
+}
+
+/**
+ * Interactive skill creation via SSE stream with progress updates.
+ */
+export const createSimpleSkillStream = async (
+  request: CreateSimpleSkillRequest,
+  callbacks: {
+    onStepCount: (step: number, description: string) => void;
+    onThinkingVisible: (visible: boolean) => void;
+    onThinkingUpdate: (step: number, description: string) => void;
+    onFinalAnswer: (content: string) => void;
+    onSkillResult?: (result: { skill_name: string; skill_description: string; tags: string[] }) => void;
+    onDone: () => void;
+    onError: (message: string) => void;
+  }
+): Promise<void> => {
+  const response = await fetch(API_ENDPOINTS.skills.createSimple, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    callbacks.onError(`HTTP error: ${response.status}`);
+    return;
+  }
+
+  if (!response.body) {
+    callbacks.onError("No response body");
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  callbacks.onThinkingVisible(true);
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const jsonStr = line.substring(5).trim();
+        if (!jsonStr) continue;
+
+        try {
+          const event: SkillCreationStreamEvent = JSON.parse(jsonStr);
+
+          switch (event.type) {
+            case "step_count": {
+              const stepMatch = String(event.content).match(/\d+/);
+              const stepNum = stepMatch ? parseInt(stepMatch[0], 10) : NaN;
+              if (!isNaN(stepNum)) {
+                callbacks.onThinkingUpdate(stepNum, "");
+                callbacks.onStepCount(stepNum, "");
+              }
+              break;
+            }
+            case "final_answer":
+              callbacks.onFinalAnswer(event.content || "");
+              break;
+            case "skill_result":
+              if (callbacks.onSkillResult) {
+                callbacks.onSkillResult({
+                  skill_name: event.skill_name || "",
+                  skill_description: event.skill_description || "",
+                  tags: event.tags || [],
+                });
+              }
+              break;
+            case "done":
+              callbacks.onThinkingVisible(false);
+              callbacks.onDone();
+              break;
+            case "error":
+              callbacks.onThinkingVisible(false);
+              callbacks.onError(event.message || "Unknown error");
+              break;
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+  } finally {
+    callbacks.onThinkingVisible(false);
+  }
+};

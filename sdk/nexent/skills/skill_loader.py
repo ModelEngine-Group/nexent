@@ -40,13 +40,18 @@ class SkillLoader:
         if not frontmatter:
             raise ValueError("SKILL.md must have YAML frontmatter")
 
-        # Fix YAML parsing to handle special characters in values
-        # Wrap unquoted values that may contain colons
-        frontmatter = cls._fix_yaml_frontmatter(frontmatter)
+        # Try to parse with yaml.safe_load first
+        meta = None
+        try:
+            # Fix YAML parsing to handle special characters in values
+            frontmatter = cls._fix_yaml_frontmatter(frontmatter)
+            meta = yaml.safe_load(frontmatter)
+        except yaml.YamlError as e:
+            logger.warning(f"YAML parse error, falling back to regex extraction: {e}")
 
-        meta = yaml.safe_load(frontmatter)
+        # If yaml.safe_load failed or returned invalid result, use regex fallback
         if not isinstance(meta, dict):
-            raise ValueError("Invalid YAML frontmatter")
+            meta = cls._extract_frontmatter_by_regex(frontmatter)
 
         if "name" not in meta:
             raise ValueError("Skill must have 'name' field")
@@ -107,6 +112,39 @@ class SkillLoader:
             fixed_lines.append(line)
 
         return '\n'.join(fixed_lines)
+
+    @classmethod
+    def _extract_frontmatter_by_regex(cls, frontmatter: str) -> Dict[str, Any]:
+        """Extract frontmatter fields using regex when YAML parsing fails.
+
+        This handles cases where YAML contains unexpected metadata or
+        formatting issues that break the parser.
+        """
+        result: Dict[str, Any] = {}
+
+        # Extract name field
+        name_match = re.search(r"^name:\s*(.+?)\s*$", frontmatter, re.MULTILINE)
+        if name_match:
+            result["name"] = name_match.group(1).strip().strip('"').strip("'")
+
+        # Extract description field
+        desc_match = re.search(r"^description:\s*(.+?)\s*$", frontmatter, re.MULTILINE)
+        if desc_match:
+            result["description"] = desc_match.group(1).strip().strip('"').strip("'")
+
+        # Extract tags field (YAML list format)
+        tags_match = re.search(r"^tags:\s*\[(.*?)\]\s*$", frontmatter, re.MULTILINE | re.DOTALL)
+        if tags_match:
+            tags_str = tags_match.group(1)
+            result["tags"] = [t.strip().strip('"').strip("'") for t in tags_str.split(",") if t.strip()]
+
+        # Extract allowed-tools field (YAML list format)
+        tools_match = re.search(r"^allowed-tools:\s*\[(.*?)\]\s*$", frontmatter, re.MULTILINE | re.DOTALL)
+        if tools_match:
+            tools_str = tools_match.group(1)
+            result["allowed-tools"] = [t.strip().strip('"').strip("'") for t in tools_str.split(",") if t.strip()]
+
+        return result
 
     @classmethod
     def _split_frontmatter(cls, content: str) -> Tuple[Optional[str], str]:
