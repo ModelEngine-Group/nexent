@@ -1537,6 +1537,43 @@ export default function ToolConfigModal({
                 tool={tool}
                 onClose={handleCloseTestPanel}
                 configParams={currentParams}
+                toolRequiresKbSelection={toolRequiresKbSelection}
+                knowledgeBases={knowledgeBases}
+                kbLoading={kbLoading}
+                selectedKbIds={selectedKbIds}
+                selectedKbDisplayNames={selectedKbDisplayNames}
+                onOpenKbSelector={(paramIndex) => openKbSelector(paramIndex === -1 ? 0 : paramIndex)}
+                onKbSelectionChange={(ids, displayNames) => {
+                  setSelectedKbIds(ids);
+                  setSelectedKbDisplayNames(displayNames);
+                  // Also update the form value for index_names if paramIndex is not -1
+                  if (paramIndex !== -1) {
+                    const param = currentParams[paramIndex];
+                    if (param && (param.name === "index_names" || param.name === "dataset_ids")) {
+                      const formFieldName = `param_${paramIndex}`;
+                      form.setFieldValue(formFieldName, ids);
+                      // Update currentParams
+                      const updatedParams = [...currentParams];
+                      updatedParams[paramIndex] = {
+                        ...updatedParams[paramIndex],
+                        value: ids,
+                      };
+                      setCurrentParams(updatedParams);
+                    }
+                  }
+                }}
+                onRemoveKb={(index, paramIndex) => {
+                  if (paramIndex === -1) {
+                    // Called from test panel - remove from selectedKbIds
+                    const newIds = selectedKbIds.filter((_, i) => i !== index);
+                    const newDisplayNames = selectedKbDisplayNames.filter((_, i) => i !== index);
+                    setSelectedKbIds(newIds);
+                    setSelectedKbDisplayNames(newDisplayNames);
+                  } else {
+                    // Called from config panel
+                    removeKbFromSelection(index, paramIndex);
+                  }
+                }}
               />
             )}
           </div>
