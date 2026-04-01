@@ -1546,21 +1546,6 @@ export default function ToolConfigModal({
                 onKbSelectionChange={(ids, displayNames) => {
                   setSelectedKbIds(ids);
                   setSelectedKbDisplayNames(displayNames);
-                  // Also update the form value for index_names if paramIndex is not -1
-                  if (paramIndex !== -1) {
-                    const param = currentParams[paramIndex];
-                    if (param && (param.name === "index_names" || param.name === "dataset_ids")) {
-                      const formFieldName = `param_${paramIndex}`;
-                      form.setFieldValue(formFieldName, ids);
-                      // Update currentParams
-                      const updatedParams = [...currentParams];
-                      updatedParams[paramIndex] = {
-                        ...updatedParams[paramIndex],
-                        value: ids,
-                      };
-                      setCurrentParams(updatedParams);
-                    }
-                  }
                 }}
                 onRemoveKb={(index, paramIndex) => {
                   if (paramIndex === -1) {
