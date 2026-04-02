@@ -18,7 +18,7 @@ export function FooterLayout() {
       <div className="flex items-center gap-8">
         <span className="text-sm text-slate-900 dark:text-white">
           
-          <span className="ml-1"> MeClaw 2026 - v1.0.0</span>
+          <span className="ml-1"> OpenClaw 2026 - v1.0.0</span>
         </span>
       </div>
       <div className="flex items-center gap-6">

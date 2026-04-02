@@ -989,7 +989,7 @@ export function ChatInput({
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t("chatInput.sendMessageTo", {
-            appName: "Me Claw",
+            appName: "OpenClaw",
           })}
           className="px-5 pb-3 pt-0 text-xl resize-none bg-slate-100 border-0 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 w-full"
           rows={1}
@@ -1208,7 +1208,7 @@ export function ChatInput({
                   })(),
                 }}
               >
-                {t("chatInput.helloIm", { appName: "Me Claw"})}
+                {t("chatInput.helloIm", { appName: "OpenClaw"})}
               </h1>
             </div>
             <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
