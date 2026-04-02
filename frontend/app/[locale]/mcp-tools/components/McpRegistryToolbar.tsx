@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { DatePicker, Input, Select, Switch } from "antd";
+import { LinkOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { VERSION_PATTERN } from "@/lib/mcpTools";
 
@@ -98,6 +99,15 @@ export default function McpRegistryToolbar({
         <div className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
           {t("mcpTools.registry.pageResult", { page: registryPage, count: resultCount })}
         </div>
+        <a
+          href="https://www.modelscope.cn/mcp"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-800"
+        >
+          <LinkOutlined className="text-[12px]" />
+          <span>魔搭 MCP 广场</span>
+        </a>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
