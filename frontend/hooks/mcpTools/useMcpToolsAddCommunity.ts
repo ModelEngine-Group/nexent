@@ -6,11 +6,13 @@ import { MCP_TRANSPORT_TYPE, MCP_TAB } from "@/const/mcpTools";
 import {
   addContainerMcpToolService,
   addMcpToolService,
+  fetchCommunityMcpTagStats,
   fetchCommunityMcpCards,
 } from "@/services/mcpToolsService";
 import {
   type AddMcpRuntimeFromConfigPayload,
   type CommunityMcpCard,
+  type McpTagStat,
   type McpTransportType,
   type McpTab,
 } from "@/types/mcpTools";
@@ -61,6 +63,8 @@ export function useMcpToolsAddCommunity({
   onClose,
 }: UseMcpToolsAddCommunityParams) {
   const [communitySearchValue, setCommunitySearchValue] = useState("");
+  const [communityTransportTypeFilter, setCommunityTransportTypeFilter] = useState<"all" | "http" | "sse" | "stdio">("all");
+  const [communityTagFilter, setCommunityTagFilter] = useState<string>("all");
   const [selectedCommunityService, setSelectedCommunityService] = useState<CommunityMcpCard | null>(null);
   const [communityCurrentCursor, setCommunityCurrentCursor] = useState<string | null>(null);
   const [communityCursorHistory, setCommunityCursorHistory] = useState<string[]>([]);
@@ -69,11 +73,14 @@ export function useMcpToolsAddCommunity({
   const [quickAddSourceService, setQuickAddSourceService] = useState<CommunityMcpCard | null>(null);
   const [quickAddDraft, setQuickAddDraft] = useState<CommunityQuickAddDraft>(INITIAL_DRAFT);
   const [addingService, setAddingService] = useState(false);
+  const communityPageSize = 30;
 
   const addMutation = useMutation({ mutationFn: addMcpToolService });
 
   const reset = useCallback(() => {
     setCommunitySearchValue("");
+    setCommunityTransportTypeFilter("all");
+    setCommunityTagFilter("all");
     setCommunityCurrentCursor(null);
     setCommunityCursorHistory([]);
     setCommunityPage(1);
@@ -96,10 +103,10 @@ export function useMcpToolsAddCommunity({
       loadCommunityFirstPage();
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [open, addModalTab, communitySearchValue, loadCommunityFirstPage]);
+  }, [open, addModalTab, communitySearchValue, communityTransportTypeFilter, communityTagFilter, loadCommunityFirstPage]);
 
   const communityQuery = useQuery<{ items: CommunityMcpCard[]; nextCursor: string | null }>({
-    queryKey: ["mcp-tools", "community", communitySearchValue, communityCurrentCursor],
+    queryKey: ["mcp-tools", "community", communitySearchValue, communityTransportTypeFilter, communityTagFilter, communityCurrentCursor],
     enabled: open && addModalTab === MCP_TAB.COMMUNITY,
     retry: false,
     staleTime: 30_000,
@@ -109,13 +116,30 @@ export function useMcpToolsAddCommunity({
       const result = await fetchCommunityMcpCards({
         search: communitySearchValue,
         cursor: communityCurrentCursor,
+        transportType: communityTransportTypeFilter === "all" ? undefined : communityTransportTypeFilter,
+        tag: communityTagFilter === "all" ? undefined : communityTagFilter,
+        limit: communityPageSize,
       });
+      return result.data;
+    },
+  });
+
+  const communityTagStatsQuery = useQuery<McpTagStat[]>({
+    queryKey: ["mcp-tools", "community-tag-stats"],
+    enabled: open && addModalTab === MCP_TAB.COMMUNITY,
+    retry: false,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    queryFn: async () => {
+      const result = await fetchCommunityMcpTagStats();
       return result.data;
     },
   });
 
   const communityServices = communityQuery.data?.items ?? [];
   const communityNextCursor = communityQuery.data?.nextCursor ?? null;
+  const communityTagStats = communityTagStatsQuery.data || [];
 
   useEffect(() => {
     if (!(communityQuery.error instanceof Error)) return;
@@ -126,6 +150,13 @@ export function useMcpToolsAddCommunity({
     });
     message.error(t("mcpTools.community.loadFailed"));
   }, [communityQuery.error, communitySearchValue, communityCurrentCursor, message, t]);
+
+  useEffect(() => {
+    if (!(communityTagStatsQuery.error instanceof Error)) return;
+    log.error("[useMcpToolsAddCommunity] Failed to load community MCP tag stats", {
+      error: communityTagStatsQuery.error,
+    });
+  }, [communityTagStatsQuery.error]);
 
   const handleCommunityNextPage = useCallback(() => {
     if (!communityNextCursor || communityQuery.isFetching) return;
@@ -279,6 +310,9 @@ export function useMcpToolsAddCommunity({
 
   return {
     communitySearchValue,
+    communityTransportTypeFilter,
+    communityTagFilter,
+    communityTagStats,
     selectedCommunityService,
     filteredCommunityServices: communityServices,
     communityLoading: communityQuery.isFetching,
@@ -290,6 +324,8 @@ export function useMcpToolsAddCommunity({
     quickAddSourceService,
     quickAddDraft,
     setCommunitySearchValue,
+    setCommunityTransportTypeFilter,
+    setCommunityTagFilter,
     setSelectedCommunityService,
     updateQuickAddDraft,
     addQuickAddTag,

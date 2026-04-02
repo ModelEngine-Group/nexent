@@ -21,6 +21,7 @@ from services.mcp_management_service import (
     delete_mcp_service,
     delete_community_mcp_service,
     list_community_mcp_services,
+    list_community_mcp_tag_stats,
     list_my_community_mcp_services,
     list_registry_mcp_services,
     list_mcp_service_tools_by_id,
@@ -334,6 +335,28 @@ async def list_community_mcp_services_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to list MCP community services",
+        )
+
+
+@router.get("/community/tags/stats")
+async def list_community_mcp_tag_stats_api(
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    try:
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        stats = list_community_mcp_tag_stats(tenant_id=tenant_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": stats},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to list community MCP tag stats: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list community MCP tag stats",
         )
 
 

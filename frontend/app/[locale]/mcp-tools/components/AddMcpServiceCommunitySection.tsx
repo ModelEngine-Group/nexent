@@ -7,6 +7,9 @@ import type { CommunityMcpCard, McpTransportType } from "@/types/mcpTools";
 
 interface Props {
   communitySearchValue: string;
+  communityTransportTypeFilter: "all" | "http" | "sse" | "stdio";
+  communityTagFilter: string;
+  communityTagStats: Array<{ tag: string; count: number }>;
   selectedCommunityService: CommunityMcpCard | null;
   filteredCommunityServices: CommunityMcpCard[];
   communityLoading: boolean;
@@ -27,6 +30,8 @@ interface Props {
     tagInputValue: string;
   };
   setCommunitySearchValue: (value: string) => void;
+  setCommunityTransportTypeFilter: (value: "all" | "http" | "sse" | "stdio") => void;
+  setCommunityTagFilter: (value: string) => void;
   setSelectedCommunityService: (service: CommunityMcpCard | null) => void;
   updateQuickAddDraft: (next: {
     name?: string;
@@ -51,6 +56,9 @@ interface Props {
 
 export default function AddMcpServiceCommunitySection({
   communitySearchValue,
+  communityTransportTypeFilter,
+  communityTagFilter,
+  communityTagStats,
   selectedCommunityService,
   filteredCommunityServices,
   communityLoading,
@@ -61,6 +69,8 @@ export default function AddMcpServiceCommunitySection({
   quickAddSourceService,
   quickAddDraft,
   setCommunitySearchValue,
+  setCommunityTransportTypeFilter,
+  setCommunityTagFilter,
   setSelectedCommunityService,
   updateQuickAddDraft,
   addQuickAddTag,
@@ -78,9 +88,14 @@ export default function AddMcpServiceCommunitySection({
       <div className="px-6 py-5 space-y-5">
         <McpCommunityToolbar
           communitySearchValue={communitySearchValue}
+          communityTransportTypeFilter={communityTransportTypeFilter}
+          communityTagFilter={communityTagFilter}
+          communityTagStats={communityTagStats}
           communityPage={communityPage}
           resultCount={filteredCommunityServices.length}
           onCommunitySearchChange={setCommunitySearchValue}
+          onCommunityTransportTypeFilterChange={setCommunityTransportTypeFilter}
+          onCommunityTagFilterChange={setCommunityTagFilter}
           t={t}
         />
 

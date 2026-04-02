@@ -161,6 +161,9 @@ export default function AddMcpServiceModal({
         ) : (
           <AddMcpServiceCommunitySection
             communitySearchValue={community.communitySearchValue}
+            communityTransportTypeFilter={community.communityTransportTypeFilter}
+            communityTagFilter={community.communityTagFilter}
+            communityTagStats={community.communityTagStats}
             selectedCommunityService={community.selectedCommunityService}
             filteredCommunityServices={community.filteredCommunityServices}
             communityLoading={community.communityLoading}
@@ -171,6 +174,8 @@ export default function AddMcpServiceModal({
             quickAddSourceService={community.quickAddSourceService}
             quickAddDraft={community.quickAddDraft}
             setCommunitySearchValue={community.setCommunitySearchValue}
+            setCommunityTransportTypeFilter={community.setCommunityTransportTypeFilter}
+            setCommunityTagFilter={community.setCommunityTagFilter}
             setSelectedCommunityService={community.setSelectedCommunityService}
             updateQuickAddDraft={community.updateQuickAddDraft}
             addQuickAddTag={community.addQuickAddTag}

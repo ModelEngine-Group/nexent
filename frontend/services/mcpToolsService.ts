@@ -92,12 +92,14 @@ export const fetchCommunityMcpCards = async (params: {
   search?: string;
   cursor?: string | null;
   transportType?: "http" | "sse" | "stdio";
+  tag?: string;
   limit?: number;
 }) => {
   const result = await listCommunityMcpTools({
     search: params.search?.trim() || undefined,
     cursor: params.cursor || undefined,
     transport_type: params.transportType,
+    tag: params.tag?.trim() || undefined,
     limit: params.limit ?? 30,
   });
 
@@ -108,6 +110,20 @@ export const fetchCommunityMcpCards = async (params: {
       nextCursor: result.data.nextCursor ?? null,
     },
   } as McpToolsApiResult<{ items: CommunityMcpCard[]; nextCursor: string | null }>;
+};
+
+export const fetchCommunityMcpTagStats = async () => {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.communityTagsStats);
+    const data = await parseJson<ApiEnvelope<McpTagStat[]>>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to load community MCP tag stats");
+    }
+    return { success: true, data: data.data } as McpToolsApiResult<McpTagStat[]>;
+  } catch (error) {
+    log.error("fetchCommunityMcpTagStats failed", error);
+    throw error;
+  }
 };
 
 export const resolveContainerServerInfo = async (params: {
