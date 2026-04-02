@@ -10,7 +10,6 @@ import {
   searchSkillsByName as searchSkillsByNameApi,
   fetchSkillConfig,
   deleteSkillTempFile,
-  getAgentByName,
   fetchSkills,
 } from "@/services/agentConfigService";
 import {

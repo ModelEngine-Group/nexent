@@ -22,10 +22,51 @@ class TerminalTool(Tool):
                   "Uses password authentication for secure connection. " \
                   "Returns the command output as a string."
 
+    description_zh = "通过 SSH 连接在远程终端上执行 shell 命令。支持会话管理以在多个命令之间保持 shell 状态。使用密码认证确保连接安全。返回命令执行的输出结果。"
+
     inputs = {
-        "command": {"type": "string", "description": "Shell command to execute (e.g., 'ls -la', 'cd /var/log')"},
-        "session_name": {"type": "string", "description": "Session name for connection reuse. Default is 'default'", "default": "default", "nullable": True},
-        "timeout": {"type": "integer", "description": "Command timeout in seconds. Default is 30", "default": 30, "nullable": True}
+        "command": {
+            "type": "string",
+            "description": "Shell command to execute (e.g., 'ls -la', 'cd /var/log')",
+            "description_zh": "要执行的 shell 命令（例如：'ls -la', 'cd /var/log'）"
+        },
+        "session_name": {
+            "type": "string",
+            "description": "Session name for connection reuse. Default is 'default'",
+            "description_zh": "会话名称，用于连接复用。默认为 'default'",
+            "default": "default",
+            "nullable": True
+        },
+        "timeout": {
+            "type": "integer",
+            "description": "Command timeout in seconds. Default is 30",
+            "description_zh": "命令超时时间（秒）。默认为 30",
+            "default": 30,
+            "nullable": True
+        }
+    }
+
+    init_param_descriptions = {
+        "init_path": {
+            "description": "Initial workspace path",
+            "description_zh": "初始工作目录路径"
+        },
+        "ssh_host": {
+            "description": "SSH host",
+            "description_zh": "SSH 主机地址"
+        },
+        "ssh_port": {
+            "description": "SSH port",
+            "description_zh": "SSH 端口号"
+        },
+        "ssh_user": {
+            "description": "SSH username",
+            "description_zh": "SSH 用户名"
+        },
+        "password": {
+            "description": "SSH password",
+            "description_zh": "SSH 密码"
+        }
     }
     output_type = "string"
     category = ToolCategory.TERMINAL.value

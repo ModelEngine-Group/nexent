@@ -16,23 +16,88 @@ export interface SkillInfo {
 
 /**
  * Extract YAML frontmatter fields using js-yaml parser.
+ * Falls back to regex extraction if yaml.load fails or returns invalid result.
  */
 const extractFrontmatter = (content: string): { name: string | null; description: string | null } => {
   const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const frontmatterMatch = normalized.match(/^---\n([\s\S]*?)\n---/);
+
   if (!frontmatterMatch) return { name: null, description: null };
 
   const frontmatter = frontmatterMatch[1];
 
-  const parsed = yaml.load(frontmatter) as Record<string, unknown> | null;
-  if (!parsed || typeof parsed !== "object") {
-    return { name: null, description: null };
+  // Try yaml.load first
+  try {
+    const parsed = yaml.load(frontmatter) as Record<string, unknown> | null;
+
+    // Check if yaml.load returned a valid object with the required fields
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const name = typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : null;
+      const description = typeof parsed.description === "string" && parsed.description.trim()
+        ? parsed.description.trim()
+        : null;
+
+      // Only return early if we found valid values
+      if (name !== null || description !== null) {
+        return { name, description };
+      }
+    }
+  } catch {
+    // yaml.load failed, fall through to regex extraction
   }
 
-  const name = typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : null;
-  const description = typeof parsed.description === "string" && parsed.description.trim()
-    ? parsed.description.trim()
-    : null;
+  // Fallback: regex-based extraction for edge cases
+  // (e.g., multi-line description values that yaml.load may mishandle)
+  return extractFrontmatterByRegex(frontmatter);
+};
+
+/**
+ * Fallback regex-based extraction when yaml.load fails.
+ * Handles simple YAML key: value pairs including multi-line values.
+ */
+const extractFrontmatterByRegex = (frontmatter: string): { name: string | null; description: string | null } => {
+  let name: string | null = null;
+  let description: string | null = null;
+
+  // Extract name field - simple pattern: "name: value" at start of line
+  const nameMatch = frontmatter.match(/^name:\s*(.+?)\s*$/m);
+  if (nameMatch && nameMatch[1]) {
+    name = nameMatch[1].trim();
+  }
+
+  // Extract description field - handles multi-line values with proper indentation
+  // Look for "description:" followed by content until next top-level key
+  const lines = frontmatter.split('\n');
+  let descLines: string[] = [];
+  let inDescription = false;
+
+  for (const line of lines) {
+    // Skip empty lines at start
+    if (!inDescription && line.match(/^description:\s*$/)) {
+      inDescription = true;
+      continue;
+    }
+
+    if (inDescription) {
+      // Check if this line is a new top-level key (no leading whitespace)
+      if (line.match(/^[a-z_]+:/)) {
+        // End of description
+        break;
+      }
+      // Collect description lines
+      descLines.push(line.replace(/^[ \t]+/, ''));
+    }
+  }
+
+  if (descLines.length > 0) {
+    description = descLines.join(' ').trim();
+  } else {
+    // Fallback: try single-line description
+    const singleLineDescMatch = frontmatter.match(/^description:\s*(.+?)\s*$/m);
+    if (singleLineDescMatch && singleLineDescMatch[1]) {
+      description = singleLineDescMatch[1].trim();
+    }
+  }
 
   return { name, description };
 };

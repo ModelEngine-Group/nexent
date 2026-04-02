@@ -677,13 +677,13 @@ class KnowledgeBaseService {
       const requestBody: {
         name: string;
         description: string;
-        embeddingModel?: string;
+        embedding_model_name?: string;
         ingroup_permission?: string;
         group_ids?: number[];
       } = {
         name: params.name,
         description: params.description || "",
-        embeddingModel: params.embeddingModel || "",
+        embedding_model_name: params.embeddingModel || "",
       };
 
       // Include group permission and user groups if provided

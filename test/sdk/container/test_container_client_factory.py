@@ -13,6 +13,8 @@ from nexent.container.container_client_factory import (
 from nexent.container.container_client_base import ContainerClient, ContainerConfig
 from nexent.container.docker_config import DockerContainerConfig
 from nexent.container.docker_client import DockerContainerClient
+from nexent.container.k8s_config import KubernetesContainerConfig
+from nexent.container.k8s_client import KubernetesContainerClient
 
 
 # ---------------------------------------------------------------------------
@@ -240,4 +242,113 @@ class TestCreateContainerClientFromConfig:
         config_class, client_class = _CONTAINER_CLIENT_REGISTRY["docker"]
         assert config_class == DockerContainerConfig
         assert client_class == DockerContainerClient
+
+
+# ---------------------------------------------------------------------------
+# Test Kubernetes container client registration and creation
+# ---------------------------------------------------------------------------
+
+
+class TestKubernetesContainerClient:
+    """Test Kubernetes container client registration and creation"""
+
+    def test_kubernetes_config_properties(self):
+        """Test KubernetesContainerConfig properties"""
+        config = KubernetesContainerConfig(
+            namespace="test-namespace",
+            kubeconfig_path="/path/to/kubeconfig",
+            in_cluster=True,
+            service_port=8080,
+        )
+
+        assert config.container_type == "kubernetes"
+        assert config.namespace == "test-namespace"
+        assert config.kubeconfig_path == "/path/to/kubeconfig"
+        assert config.in_cluster is True
+        assert config.service_port == 8080
+
+    def test_kubernetes_config_default_values(self):
+        """Test KubernetesContainerConfig default values"""
+        config = KubernetesContainerConfig()
+
+        assert config.container_type == "kubernetes"
+        assert config.namespace == "nexent"
+        assert config.kubeconfig_path is None
+        assert config.in_cluster is False
+        assert config.service_port == 5020
+
+    def test_kubernetes_config_validate_empty_namespace(self):
+        """Test KubernetesContainerConfig validation with empty namespace"""
+        config = KubernetesContainerConfig(namespace="")
+
+        with pytest.raises(ValueError, match="Kubernetes namespace is required"):
+            config.validate()
+
+    def test_kubernetes_client_registered(self):
+        """Test that Kubernetes client is pre-registered"""
+        from nexent.container.container_client_factory import _CONTAINER_CLIENT_REGISTRY
+
+        assert "kubernetes" in _CONTAINER_CLIENT_REGISTRY
+        config_class, client_class = _CONTAINER_CLIENT_REGISTRY["kubernetes"]
+        assert config_class == KubernetesContainerConfig
+        assert client_class == KubernetesContainerClient
+
+    def test_create_container_client_with_k8s_config(self):
+        """Test creating container client with Kubernetes config"""
+        config = KubernetesContainerConfig(
+            namespace="test-namespace",
+            kubeconfig_path="mock-kubeconfig-content",
+            in_cluster=False,
+        )
+
+        with patch("nexent.container.k8s_client.kubernetes.config.load_kube_config_from_dict"):
+            with patch("nexent.container.k8s_client.client.CoreV1Api") as mock_core_api:
+                with patch("nexent.container.k8s_client.client.AppsV1Api") as mock_apps_api:
+                    mock_core_api_instance = MagicMock()
+                    mock_core_api.return_value = mock_core_api_instance
+
+                    # Mock the list_namespaced_pod call in __init__
+                    mock_core_api_instance.list_namespaced_pod.return_value = MagicMock(items=[])
+
+                    client = create_container_client_from_config(config)
+
+                    assert isinstance(client, KubernetesContainerClient)
+                    assert client.config == config
+                    mock_core_api.assert_called_once()
+                    mock_apps_api.assert_called_once()
+
+    def test_create_container_client_k8s_in_cluster(self):
+        """Test creating container client with in-cluster Kubernetes config"""
+        config = KubernetesContainerConfig(
+            namespace="prod-namespace",
+            in_cluster=True,
+        )
+
+        with patch("nexent.container.k8s_client.kubernetes.config.load_incluster_config") as mock_load_incluster:
+            with patch("nexent.container.k8s_client.client.CoreV1Api") as mock_core_api:
+                with patch("nexent.container.k8s_client.client.AppsV1Api") as mock_apps_api:
+                    mock_core_api_instance = MagicMock()
+                    mock_core_api.return_value = mock_core_api_instance
+                    mock_core_api_instance.list_namespaced_pod.return_value = MagicMock(items=[])
+
+                    client = create_container_client_from_config(config)
+
+                    assert isinstance(client, KubernetesContainerClient)
+                    mock_load_incluster.assert_called_once()
+
+    def test_kubernetes_client_creation_fails_on_invalid_connection(self):
+        """Test that Kubernetes client creation raises error on connection failure"""
+        config = KubernetesContainerConfig(
+            namespace="test-ns",
+            kubeconfig_path="invalid-content",
+        )
+
+        with patch("nexent.container.k8s_client.kubernetes.config.load_kube_config_from_dict"):
+            with patch("nexent.container.k8s_client.client.CoreV1Api") as mock_core_api:
+                mock_core_api.side_effect = Exception("Connection failed")
+
+                from nexent.container.k8s_client import ContainerError
+
+                with pytest.raises(ContainerError, match="Cannot connect to Kubernetes"):
+                    KubernetesContainerClient(config)
 

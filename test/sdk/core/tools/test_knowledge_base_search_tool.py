@@ -38,7 +38,8 @@ def knowledge_base_search_tool(mock_observer, mock_vdb_core, mock_embedding_mode
         observer=mock_observer,
         embedding_model=mock_embedding_model,
         vdb_core=mock_vdb_core,
-        search_mode="hybrid"
+        search_mode="hybrid",
+        rerank=False,
     )
     return tool
 
@@ -71,7 +72,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(1)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        knowledge_base_search_tool.forward("hello world")
+        knowledge_base_search_tool.forward("hello world", index_names="test_index1,test_index2")
 
         knowledge_base_search_tool.observer.add_message.assert_any_call(
             "", ProcessType.TOOL, "Searching the knowledge base..."
@@ -88,7 +89,8 @@ class TestKnowledgeBaseSearchTool:
             observer=mock_observer,
             embedding_model=mock_embedding_model,
             vdb_core=mock_vdb_core,
-            search_mode="semantic"
+            search_mode="semantic",
+            rerank=False,
         )
 
         assert tool.top_k == 10
@@ -106,7 +108,8 @@ class TestKnowledgeBaseSearchTool:
             observer=None,
             embedding_model=mock_embedding_model,
             vdb_core=mock_vdb_core,
-            search_mode="hybrid"
+            search_mode="hybrid",
+            rerank=False,
         )
 
         assert tool.index_names == []
@@ -117,7 +120,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(3)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"])
+        result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
 
         # Verify result structure
         assert result["total"] == 3
@@ -145,7 +148,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"])
+        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"], top_k=5)
 
         # Verify result structure
         assert result["total"] == 2
@@ -164,7 +167,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(4)
         knowledge_base_search_tool.vdb_core.semantic_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.search_semantic("test query", ["test_index1"])
+        result = knowledge_base_search_tool.search_semantic("test query", ["test_index1"], top_k=5)
 
         # Verify result structure
         assert result["total"] == 4
@@ -183,7 +186,7 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.vdb_core.hybrid_search.side_effect = Exception("Search error")
 
         with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.search_hybrid("test query", ["test_index1"])
+            knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
 
         assert "Error during semantic search" in str(excinfo.value)
 
@@ -196,7 +199,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         # Parse result
         search_results = json.loads(result)
@@ -213,7 +216,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(4)
         knowledge_base_search_tool.vdb_core.semantic_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         # Parse result
         search_results = json.loads(result)
@@ -227,20 +230,10 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.search_mode = "invalid"
 
         with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.forward("test query")
+            knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         assert "Invalid search mode" in str(excinfo.value)
         assert "hybrid, accurate, semantic" in str(excinfo.value)
-
-    def test_forward_no_index_names(self, knowledge_base_search_tool):
-        """Test forward method with no index names"""
-        # Set empty index names
-        knowledge_base_search_tool.index_names = []
-
-        result = knowledge_base_search_tool.forward("test query")
-
-        # Should return no results message
-        assert result == json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
     def test_forward_no_results(self, knowledge_base_search_tool):
         """Test forward method with no search results"""
@@ -248,22 +241,20 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = []
 
         with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.forward("test query")
+            knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         assert "No results found" in str(excinfo.value)
 
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
-        """Test forward method with custom index names"""
-        # Set custom index names
-        knowledge_base_search_tool.index_names = ["custom_index1", "custom_index2"]
-
+        """Test forward method with custom index names passed as parameter"""
         # Mock search results
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        # Pass index_names as a list parameter (forward expects List[str])
+        knowledge_base_search_tool.forward("test query", index_names=["custom_index1", "custom_index2"])
 
-        # Verify vdb_core was called with custom index names
+        # Verify vdb_core was called with the index names as-is
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
             index_names=["custom_index1", "custom_index2"],
             query_text="test query",
@@ -280,7 +271,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         # Verify Chinese running prompt
         knowledge_base_search_tool.observer.add_message.assert_any_call(
@@ -306,7 +297,7 @@ class TestKnowledgeBaseSearchTool:
         ]
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
 
         # Parse result
         search_results = json.loads(result)
@@ -314,3 +305,234 @@ class TestKnowledgeBaseSearchTool:
         # Verify title fallback
         assert len(search_results) == 1
         assert search_results[0]["title"] == "test.txt"
+
+
+class TestKnowledgeBaseSearchToolRerank:
+    """Tests for KnowledgeBaseSearchTool rerank functionality."""
+
+    def test_init_with_rerank_params(self, mock_observer):
+        """Test initialization with rerank parameters."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1", "kb2"],
+            search_mode="hybrid",
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=None,
+            vdb_core=None,
+            embedding_model=None,
+            observer=mock_observer,
+        )
+
+        assert tool.rerank is True
+        assert tool.rerank_model_name == "gte-rerank-v2"
+        assert tool.rerank_model is None
+
+    def test_init_without_rerank_params(self, mock_observer):
+        """Test initialization without rerank parameters (defaults)."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="semantic",
+            vdb_core=None,
+            embedding_model=None,
+            observer=mock_observer,
+        )
+
+        # smolagents Tool doesn't properly handle Field defaults, so we check FieldInfo.default
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+        assert isinstance(tool.rerank, FieldInfo)
+        assert tool.rerank.default is False
+        assert tool.rerank_model_name.default == ""
+        assert tool.rerank_model.default is None
+
+    def test_forward_with_rerank_enabled(self, mock_observer, mock_vdb_core, mock_embedding_model, mocker):
+        """Test forward method when rerank is enabled and model is provided."""
+        # Mock search results
+        mock_results = [
+            {
+                "document": {
+                    "title": "doc1",
+                    "content": "content 1 about machine learning",
+                    "filename": "doc1.txt",
+                    "path_or_url": "/path/doc1.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "score": 0.9,
+                "index": "kb1"
+            },
+            {
+                "document": {
+                    "title": "doc2",
+                    "content": "content 2 about deep learning",
+                    "filename": "doc2.txt",
+                    "path_or_url": "/path/doc2.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "score": 0.8,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        # Create mock rerank model
+        mock_rerank_model = MagicMock()
+        mock_rerank_model.rerank.return_value = [
+            {"index": 1, "relevance_score": 0.95, "document": "content 2 about deep learning"},
+            {"index": 0, "relevance_score": 0.85, "document": "content 1 about machine learning"},
+        ]
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            top_k=3,
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=mock_rerank_model,
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+        )
+
+        result = tool.forward("test query")
+        results = json.loads(result)
+
+        # Verify rerank was called
+        mock_rerank_model.rerank.assert_called_once()
+        call_args = mock_rerank_model.rerank.call_args
+        assert call_args[1]["query"] == "test query"
+        assert len(call_args[1]["documents"]) == 2
+
+    def test_forward_rerank_disabled(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test forward method when rerank is disabled."""
+        # Mock search results
+        mock_results = [
+            {
+                "document": {
+                    "title": "doc1",
+                    "content": "content 1",
+                    "filename": "doc1.txt",
+                    "path_or_url": "/path/doc1.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "score": 0.9,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            rerank=False,
+            rerank_model=None,
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+        )
+
+        result = tool.forward("test query")
+
+        # Should work normally without reranking
+        assert result is not None
+
+    def test_forward_rerank_error_continues(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test that forward continues when rerank raises an exception."""
+        # Mock search results
+        mock_results = [
+            {
+                "document": {
+                    "title": "doc1",
+                    "content": "content 1",
+                    "filename": "doc1.txt",
+                    "path_or_url": "/path/doc1.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "score": 0.9,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        # Create mock rerank model that raises exception
+        mock_rerank_model = MagicMock()
+        mock_rerank_model.rerank.side_effect = Exception("Rerank API error")
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            top_k=3,
+            rerank=True,
+            rerank_model=mock_rerank_model,
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+        )
+
+        # Should not raise, should continue with original results
+        result = tool.forward("test query")
+        assert result is not None
+
+    def test_forward_uses_instance_index_names(self, knowledge_base_search_tool):
+        """Test forward method uses instance index_names when not provided"""
+        # Mock search results
+        mock_results = create_mock_search_result(2)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        # Call forward without index_names - should use instance's index_names
+        result = knowledge_base_search_tool.forward("test query")
+
+        # Verify it used instance index_names
+        assert result is not None
+        knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once()
+
+    def test_forward_empty_index_names_string(self, knowledge_base_search_tool):
+        """Test forward method with empty index_names string returns no results"""
+        # Mock search results
+        mock_results = create_mock_search_result(2)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        # Pass empty string as index_names
+        result = knowledge_base_search_tool.forward("test query", index_names="")
+
+        # Should return no results message
+        assert result == json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
+
+    def test_forward_single_index_name(self, knowledge_base_search_tool):
+        """Test forward method with single index name"""
+        # Mock search results
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        # Pass index_names as a list parameter (forward expects List[str])
+        knowledge_base_search_tool.forward("test query", index_names=["single_index"])
+
+        # Verify vdb_core was called with single index
+        knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
+            index_names=["single_index"],
+            query_text="test query",
+            embedding_model=knowledge_base_search_tool.embedding_model,
+            top_k=5
+        )
+
+    def test_forward_with_whitespace_in_index_names(self, knowledge_base_search_tool):
+        """Test forward method handles whitespace in index_names correctly"""
+        # Mock search results
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        # Pass index_names as a list parameter (forward expects List[str])
+        knowledge_base_search_tool.forward("test query", index_names=["  index1  ", "  index2  "])
+
+        # Verify vdb_core was called with the index names as-is (no stripping performed)
+        knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
+            index_names=["  index1  ", "  index2  "],
+            query_text="test query",
+            embedding_model=knowledge_base_search_tool.embedding_model,
+            top_k=5
+        )

@@ -61,7 +61,14 @@ export default function SkillBuildModal({
 }: SkillBuildModalProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
-  const [activeTab, setActiveTab] = useState<string>("interactive");
+  // TODO: [FEATURE] Re-enable interactive skill creation tab
+  // Reason: Interactive tab depends on skill_creator agent which may not be available in all deployments
+  // When to re-enable:
+  //   1. Ensure skill_creator agent is properly configured and deployed
+  //   2. Verify conversationService works correctly with the agent
+  //   3. Test the full chat-to-form workflow end-to-end
+  //   4. Remove this TODO and restore the interactive tab in tabItems
+  const [activeTab, setActiveTab] = useState<string>("upload");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
   const [searchResults, setSearchResults] = useState<SkillListItem[]>([]);
@@ -121,10 +128,11 @@ export default function SkillBuildModal({
     };
   }, [isOpen]);
 
+  // TODO: [FEATURE] Update setActiveTab("upload") when interactive tab is re-enabled
   useEffect(() => {
     if (!isOpen) {
       form.resetFields();
-      setActiveTab("interactive");
+      setActiveTab("upload");
       setSelectedSkillName("");
       setUploadFile(null);
       setSearchResults([]);
@@ -826,17 +834,19 @@ export default function SkillBuildModal({
     );
   };
 
+  // TODO: [FEATURE] Re-enable interactive skill creation tab
+  // See comment above for re-enablement criteria
   const tabItems = [
-    {
-      key: "interactive",
-      label: (
-        <Flex gap={6} align="center">
-          <MessagesSquare size={14} />
-          <span>{t("skillManagement.tabs.interactive")}</span>
-        </Flex>
-      ),
-      children: renderInteractiveTab(),
-    },
+    // {
+    //   key: "interactive",
+    //   label: (
+    //     <Flex gap={6} align="center">
+    //       <MessagesSquare size={14} />
+    //       <span>{t("skillManagement.tabs.interactive")}</span>
+    //     </Flex>
+    //   ),
+    //   children: renderInteractiveTab(),
+    // },
     {
       key: "upload",
       label: (

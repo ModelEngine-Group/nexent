@@ -36,6 +36,11 @@ openai_model_module = ModuleType('nexent.core.models')
 openai_model_module.OpenAIModel = MagicMock
 sys.modules['nexent.core.models'] = openai_model_module
 sys.modules['nexent.core.models.embedding_model'] = MagicMock()
+# Mock rerank_model module with proper class exports
+rerank_model_module = ModuleType('nexent.core.models.rerank_model')
+rerank_model_module.OpenAICompatibleRerank = MagicMock()
+rerank_model_module.BaseRerank = MagicMock()
+sys.modules['nexent.core.models.rerank_model'] = rerank_model_module
 sys.modules['nexent.core.models.stt_model'] = MagicMock()
 sys.modules['nexent.core.nlp'] = _create_package_mock('nexent.core.nlp')
 sys.modules['nexent.core.nlp.tokenizer'] = MagicMock()
@@ -172,6 +177,13 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_embedding.model = "test-model"
         self.mock_get_embedding.return_value = self.mock_embedding
 
+        # Patch get_rerank_model for all tests
+        self.get_rerank_model_patcher = patch(
+            'backend.services.vectordatabase_service.get_rerank_model')
+        self.mock_get_rerank = self.get_rerank_model_patcher.start()
+        self.mock_rerank = MagicMock()
+        self.mock_get_rerank.return_value = self.mock_rerank
+
         ElasticSearchService.accurate_search = staticmethod(
             _accurate_search_impl)
         ElasticSearchService.semantic_search = staticmethod(
@@ -180,6 +192,7 @@ class TestElasticSearchService(unittest.TestCase):
     def tearDown(self):
         """Clean up resources after each test."""
         self.get_embedding_model_patcher.stop()
+        self.get_rerank_model_patcher.stop()
         if hasattr(ElasticSearchService, 'accurate_search'):
             del ElasticSearchService.accurate_search
         if hasattr(ElasticSearchService, 'semantic_search'):
@@ -392,6 +405,196 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("Failed to create index", str(context.exception))
         mock_create_knowledge.assert_not_called()
 
+    # =============================================================================
+    # Tests for create_knowledge_base with embedding_model_name parameter
+    # =============================================================================
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_knowledge_base_with_embedding_model_name(self, mock_get_embedding, mock_create_knowledge):
+        """
+        Test create_knowledge_base with embedding_model_name parameter.
+
+        This test verifies that:
+        1. When embedding_model_name is provided, it is passed to get_embedding_model
+        2. The embedding model name is saved in the knowledge record
+        3. The knowledge base is created successfully with the specified model
+        """
+        # Setup
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 10,
+            "index_name": "10-uuid-new",
+            "knowledge_name": "kb_with_model",
+        }
+
+        # Mock embedding model
+        mock_embedding_instance = MagicMock()
+        mock_embedding_instance.embedding_dim = 1024
+        mock_embedding_instance.model = "text-embedding-3-small"
+        mock_get_embedding.return_value = mock_embedding_instance
+
+        # Execute
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb_with_model",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            embedding_model_name="text-embedding-3-small",
+        )
+
+        # Assert
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["knowledge_id"], 10)
+
+        # Verify get_embedding_model was called with the model name
+        mock_get_embedding.assert_called_once_with("tenant-1", "text-embedding-3-small")
+
+        # Verify knowledge record was created with the embedding model name
+        mock_create_knowledge.assert_called_once()
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        self.assertEqual(call_kwargs["embedding_model_name"], "text-embedding-3-small")
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_knowledge_base_without_embedding_model_name_uses_default(self, mock_get_embedding,
+                                                                             mock_create_knowledge):
+        """
+        Test create_knowledge_base without embedding_model_name parameter (uses default).
+
+        This test verifies that:
+        1. When embedding_model_name is not provided, get_embedding_model is called with None
+        2. The model's display name is saved in the knowledge record
+        3. The knowledge base is created successfully
+        """
+        # Setup
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 11,
+            "index_name": "11-uuid-default",
+            "knowledge_name": "kb_default_model",
+        }
+
+        # Mock embedding model (tenant default)
+        mock_embedding_instance = MagicMock()
+        mock_embedding_instance.embedding_dim = 1536
+        mock_embedding_instance.model = "default-embedding-model"
+        mock_get_embedding.return_value = mock_embedding_instance
+
+        # Execute
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb_default_model",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            # embedding_model_name is not provided
+        )
+
+        # Assert
+        self.assertEqual(result["status"], "success")
+
+        # Verify get_embedding_model was called with None (no specific model)
+        mock_get_embedding.assert_called_once_with("tenant-1", None)
+
+        # Verify knowledge record was created with the model's display name
+        mock_create_knowledge.assert_called_once()
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        self.assertEqual(call_kwargs["embedding_model_name"], "default-embedding-model")
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_knowledge_base_with_group_permissions_and_embedding_model(self, mock_get_embedding,
+                                                                              mock_create_knowledge):
+        """
+        Test create_knowledge_base with both group permissions and embedding_model_name.
+
+        This test verifies that:
+        1. Both group permissions and embedding_model_name can be provided together
+        2. All parameters are correctly passed to create_knowledge_record
+        3. The knowledge base is created successfully
+        """
+        # Setup
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 12,
+            "index_name": "12-uuid-combined",
+            "knowledge_name": "kb_combined",
+        }
+
+        # Mock embedding model
+        mock_embedding_instance = MagicMock()
+        mock_embedding_instance.embedding_dim = 1024
+        mock_embedding_instance.model = "bge-large-zh-v1.5"
+        mock_get_embedding.return_value = mock_embedding_instance
+
+        # Execute
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb_combined",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            ingroup_permission="READ_ONLY",
+            group_ids=[1, 2],
+            embedding_model_name="bge-large-zh-v1.5",
+        )
+
+        # Assert
+        self.assertEqual(result["status"], "success")
+
+        # Verify all parameters were passed correctly
+        mock_create_knowledge.assert_called_once()
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        self.assertEqual(call_kwargs["ingroup_permission"], "READ_ONLY")
+        self.assertEqual(call_kwargs["group_ids"], [1, 2])
+        self.assertEqual(call_kwargs["embedding_model_name"], "bge-large-zh-v1.5")
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_knowledge_base_saves_user_provided_model_name_when_provided(self, mock_get_embedding,
+                                                                                mock_create_knowledge):
+        """
+        Test that when user provides embedding_model_name, that exact name is saved.
+
+        This test verifies that:
+        1. When embedding_model_name is explicitly provided by user
+        2. The same model name is saved to the knowledge record (not the model's display name)
+        """
+        # Setup
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 13,
+            "index_name": "13-uuid-user",
+            "knowledge_name": "kb_user_model",
+        }
+
+        # Mock embedding model - note: model's display name differs from user-provided name
+        mock_embedding_instance = MagicMock()
+        mock_embedding_instance.embedding_dim = 1024
+        mock_embedding_instance.model = "BAAI/bge-m3"  # Different from user-provided
+        mock_get_embedding.return_value = mock_embedding_instance
+
+        # Execute
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb_user_model",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            embedding_model_name="bge-large-zh-v1.5",  # User explicitly selected this
+        )
+
+        # Assert
+        self.assertEqual(result["status"], "success")
+
+        # Verify the user-provided model name is saved (not the model's display name)
+        mock_create_knowledge.assert_called_once()
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        # When user provides embedding_model_name, that exact name should be saved
+        self.assertEqual(call_kwargs["embedding_model_name"], "bge-large-zh-v1.5")
+
     @patch('backend.services.vectordatabase_service.delete_knowledge_record')
     def test_delete_index_success(self, mock_delete_knowledge):
         """
@@ -495,9 +698,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "test_tenant"},
+             "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch",
+             "ingroup_permission": "EDIT", "tenant_id": "test_tenant"},
             {"index_name": "index2", "embedding_model_name": "test-model",
-                "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY", "tenant_id": "test_tenant"}
+             "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY",
+             "tenant_id": "test_tenant"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -538,9 +743,11 @@ class TestElasticSearchService(unittest.TestCase):
         }
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "test_tenant"},
+             "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch",
+             "ingroup_permission": "EDIT", "tenant_id": "test_tenant"},
             {"index_name": "index2", "embedding_model_name": "test-model",
-                "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY", "tenant_id": "test_tenant"}
+             "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY",
+             "tenant_id": "test_tenant"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -579,7 +786,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["es_index"]
         mock_get_info.return_value = [
             {"index_name": "dangling_index",
-                "embedding_model_name": "model-A", "group_ids": "1", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
+             "embedding_model_name": "model-A", "group_ids": "1", "knowledge_sources": "elasticsearch",
+             "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "tenant-1"}
@@ -607,7 +815,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
             {"index_name": "index1", "embedding_model_name": "model-A",
-                "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
+             "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT",
+             "tenant_id": "tenant-1"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {}
         mock_get_user_tenant.return_value = {
@@ -630,14 +839,15 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    def test_list_indices_backfills_missing_model_names(self, mock_get_info, mock_update_model, mock_get_user_tenant, mock_get_group_ids):
+    def test_list_indices_backfills_missing_model_names(self, mock_get_info, mock_update_model, mock_get_user_tenant,
+                                                        mock_get_group_ids):
         """
         Test that list_indices updates database records when embedding_model_name is missing.
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
             {"index_name": "index1", "embedding_model_name": None,
-                "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
+             "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {
             "index1": {"base_info": {"embedding_model": "text-embedding-ada-002"}}
@@ -663,14 +873,16 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    def test_list_indices_stats_surfaces_elasticsearch_errors(self, mock_get_info, mock_get_user_tenant, mock_get_group_ids):
+    def test_list_indices_stats_surfaces_elasticsearch_errors(self, mock_get_info, mock_get_user_tenant,
+                                                              mock_get_group_ids):
         """
         Test that list_indices propagates Elasticsearch errors while fetching stats.
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
             {"index_name": "index1", "embedding_model_name": "model-A",
-                "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
+             "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT",
+             "tenant_id": "tenant-1"}
         ]
         self.mock_vdb_core.get_indices_detail.side_effect = Exception(
             "503 Service Unavailable"
@@ -700,7 +912,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
             {"index_name": "index1", "embedding_model_name": "model-A",
-                "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
+             "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT",
+             "tenant_id": "tenant-1"}
         ]
         detailed_stats = {
             "index1": {
@@ -787,7 +1000,8 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    def test_list_indices_permission_edit_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+    def test_list_indices_permission_edit_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
+                                                           mock_get_group_ids):
         """
         Test that non-creator user gets EDIT permission when ingroup_permission is EDIT.
 
@@ -833,7 +1047,8 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
     @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
-    def test_list_indices_permission_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+    def test_list_indices_permission_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
+                                                           mock_get_group_ids):
         """
         Test that non-creator user gets READ_ONLY permission when ingroup_permission is READ_ONLY.
 
@@ -879,7 +1094,8 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
     @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
-    def test_list_indices_permission_default_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+    def test_list_indices_permission_default_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
+                                                                   mock_get_group_ids):
         """
         Test that non-creator user gets default READ_ONLY permission when ingroup_permission is None or other value.
 
@@ -1205,7 +1421,8 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    def test_list_indices_uses_tenant_id_for_filtering(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+    def test_list_indices_uses_tenant_id_for_filtering(self, mock_get_knowledge, mock_get_user_tenant,
+                                                       mock_get_group_ids):
         """
         Test that list_indices uses tenant_id for filtering knowledge bases.
 
@@ -1275,7 +1492,8 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    def test_list_indices_includes_tenant_id_in_response(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+    def test_list_indices_includes_tenant_id_in_response(self, mock_get_knowledge, mock_get_user_tenant,
+                                                         mock_get_group_ids):
         """
         Test that list_indices includes tenant_id in the indices_info response.
 
@@ -2771,9 +2989,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["total"], 2)
         self.assertEqual(result["chunks"][0], {
-                         "id": "1", "content": "A", "path_or_url": "/a"})
+            "id": "1", "content": "A", "path_or_url": "/a"})
         self.assertEqual(result["chunks"][1], {
-                         "content": "B", "create_time": "2024-01-01T00:00:00"})
+            "content": "B", "create_time": "2024-01-01T00:00:00"})
         self.mock_vdb_core.get_index_chunks.assert_called_once_with(
             "kb-index",
             page=None,
@@ -2855,7 +3073,8 @@ class TestElasticSearchService(unittest.TestCase):
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_embedding_model')
-    def test_create_chunk_generates_embedding_when_tenant_provided(self, mock_get_embedding_model, mock_get_knowledge_record):
+    def test_create_chunk_generates_embedding_when_tenant_provided(self, mock_get_embedding_model,
+                                                                   mock_get_knowledge_record):
         """
         Test create_chunk generates and stores embedding when tenant_id is provided.
         """
@@ -2908,7 +3127,8 @@ class TestElasticSearchService(unittest.TestCase):
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_embedding_model')
-    def test_create_chunk_without_tenant_no_embedding_generated(self, mock_get_embedding_model, mock_get_knowledge_record):
+    def test_create_chunk_without_tenant_no_embedding_generated(self, mock_get_embedding_model,
+                                                                mock_get_knowledge_record):
         """
         Test create_chunk does not generate embedding when tenant_id is not provided.
         """
@@ -2946,7 +3166,8 @@ class TestElasticSearchService(unittest.TestCase):
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_embedding_model')
-    def test_create_chunk_handles_embedding_failure_gracefully(self, mock_get_embedding_model, mock_get_knowledge_record):
+    def test_create_chunk_handles_embedding_failure_gracefully(self, mock_get_embedding_model,
+                                                               mock_get_knowledge_record):
         """
         Test create_chunk handles embedding generation failure gracefully.
         """
@@ -3034,7 +3255,8 @@ class TestElasticSearchService(unittest.TestCase):
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_embedding_model')
-    def test_create_chunk_with_unknown_model_name_still_calls_embedding_model(self, mock_get_embedding_model, mock_get_knowledge_record):
+    def test_create_chunk_with_unknown_model_name_still_calls_embedding_model(self, mock_get_embedding_model,
+                                                                              mock_get_knowledge_record):
         """
         Test create_chunk when knowledge record has unknown embedding model.
         The backend still calls get_embedding_model (it doesn't check for "unknown").
@@ -3155,7 +3377,8 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
     @patch('fastapi.Response')
-    def test_list_indices_success_status_200(self, mock_response, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+    def test_list_indices_success_status_200(self, mock_response, mock_get_knowledge, mock_get_user_tenant,
+                                             mock_get_group_ids):
         """
         Test list_indices method returns status code 200 on success.
 
@@ -3169,9 +3392,9 @@ class TestElasticSearchService(unittest.TestCase):
         mock_response.status_code = 200
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
+             "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
             {"index_name": "index2", "embedding_model_name": "test-model",
-                "group_ids": "", "knowledge_sources": "elasticsearch"}
+             "group_ids": "", "knowledge_sources": "elasticsearch"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -3950,8 +4173,15 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.mock_embedding.model = "test-model"
         self.mock_get_embedding.return_value = self.mock_embedding
 
+        self.get_rerank_model_patcher = patch(
+            'backend.services.vectordatabase_service.get_rerank_model')
+        self.mock_get_rerank = self.get_rerank_model_patcher.start()
+        self.mock_rerank = MagicMock()
+        self.mock_get_rerank.return_value = self.mock_rerank
+
     def tearDown(self):
         self.get_embedding_model_patcher.stop()
+        self.get_rerank_model_patcher.stop()
 
     def test_rethrow_or_plain_rethrows_json_error_code(self):
         """_rethrow_or_plain should re-raise JSON payload when error_code present."""
@@ -4535,6 +4765,269 @@ class TestRethrowOrPlain(unittest.TestCase):
 
             messages = asyncio.run(run_test())
             self.assertTrue(any("error" in msg for msg in messages))
+
+    # Tests for get_rerank_model function
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_with_specific_model_name_found(
+        self, mock_get_model_name, mock_tenant_config, mock_get_records
+    ):
+        """Test get_rerank_model when specific model name is provided and found."""
+        # Setup
+        mock_get_records.return_value = [
+            {
+                "model_name": "gte-rerank-v2",
+                "model_repo": "Alibaba-NLP",
+                "base_url": "https://api.example.com",
+                "api_key": "test-key",
+                "ssl_verify": True
+            }
+        ]
+        mock_get_model_name.return_value = "gte-rerank-v2"
+
+        mock_config = {"model_type": "embedding"}
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123", "Alibaba-NLP/gte-rerank-v2")
+
+                # Assert
+                self.assertIsNotNone(result)
+                mock_get_records.assert_called_once_with({"model_type": "rerank"}, "tenant-123")
+                mock_rerank_class.assert_called_once_with(
+                    model_name="gte-rerank-v2",
+                    base_url="https://api.example.com",
+                    api_key="test-key",
+                    ssl_verify=True
+                )
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_with_specific_model_name_not_found(
+        self, mock_get_model_name, mock_tenant_config, mock_get_records
+    ):
+        """Test get_rerank_model when specific model name is not found, falls back to default."""
+        # Setup
+        mock_get_records.return_value = [
+            {
+                "model_name": "other-model",
+                "model_repo": "some-repo",
+                "base_url": "https://other.api.com",
+                "api_key": "other-key",
+                "ssl_verify": False
+            }
+        ]
+        mock_get_model_name.return_value = "other-model"
+
+        mock_config = {
+            "model_type": "rerank",
+            "model_name": "default-rerank",
+            "base_url": "https://default.api.com",
+            "api_key": "default-key",
+            "ssl_verify": True
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123", "nonexistent-model")
+
+                # Assert
+                self.assertIsNotNone(result)
+                mock_get_records.assert_called_once()
+                mock_tenant_config.get_model_config.assert_called_with(
+                    key="RERANK_ID", tenant_id="tenant-123"
+                )
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_with_specific_model_name_exception(
+        self, mock_get_model_name, mock_tenant_config, mock_get_records
+    ):
+        """Test get_rerank_model when get_model_records throws an exception."""
+        # Setup
+        mock_get_records.side_effect = Exception("Database error")
+
+        mock_config = {
+            "model_type": "rerank",
+            "model_name": "default-rerank",
+            "base_url": "https://default.api.com",
+            "api_key": "default-key",
+            "ssl_verify": True
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123", "some-model")
+
+                # Assert
+                # Should fall back to default model when exception occurs
+                self.assertIsNotNone(result)
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_default_rerank_type(self, mock_get_model_name, mock_tenant_config):
+        """Test get_rerank_model with default rerank model when model_type is rerank."""
+        # Setup
+        mock_get_model_name.return_value = "default-rerank"
+
+        mock_config = {
+            "model_type": "rerank",
+            "model_name": "default-rerank",
+            "base_url": "https://api.dashscope.aliyuncs.com",
+            "api_key": "secret-key",
+            "ssl_verify": True
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123")
+
+                # Assert
+                self.assertIsNotNone(result)
+                mock_tenant_config.get_model_config.assert_called_once_with(
+                    key="RERANK_ID", tenant_id="tenant-123"
+                )
+                mock_rerank_class.assert_called_once_with(
+                    model_name="default-rerank",
+                    base_url="https://api.dashscope.aliyuncs.com",
+                    api_key="secret-key",
+                    ssl_verify=True
+                )
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_non_rerank_type_returns_none(self, mock_get_model_name, mock_tenant_config):
+        """Test get_rerank_model returns None when model_type is not rerank."""
+        # Setup
+        mock_config = {
+            "model_type": "embedding",
+            "model_name": "embedding-model",
+            "base_url": "https://api.example.com",
+            "api_key": "key"
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123")
+
+                # Assert
+                self.assertIsNone(result)
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_empty_config(self, mock_get_model_name, mock_tenant_config):
+        """Test get_rerank_model returns None when model config is empty."""
+        # Setup
+        mock_tenant_config.get_model_config.return_value = {}
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123")
+
+                # Assert
+                self.assertIsNone(result)
+        finally:
+            self.get_rerank_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_rerank_model_with_model_name_no_repo(
+        self, mock_get_model_name, mock_tenant_config, mock_get_records
+    ):
+        """Test get_rerank_model when model has no model_repo."""
+        # Setup
+        mock_get_records.return_value = [
+            {
+                "model_name": "gte-rerank-v2",
+                "model_repo": None,
+                "base_url": "https://api.example.com",
+                "api_key": "test-key",
+                "ssl_verify": True
+            }
+        ]
+        mock_get_model_name.return_value = "gte-rerank-v2"
+
+        mock_config = {"model_type": "embedding"}
+        mock_tenant_config.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_rerank_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
+                mock_rerank_instance = MagicMock()
+                mock_rerank_class.return_value = mock_rerank_instance
+
+                # Execute
+                from backend.services.vectordatabase_service import get_rerank_model
+                result = get_rerank_model("tenant-123", "gte-rerank-v2")
+
+                # Assert
+                self.assertIsNotNone(result)
+                mock_rerank_class.assert_called_once()
+        finally:
+            self.get_rerank_model_patcher.start()
 
 
 if __name__ == '__main__':

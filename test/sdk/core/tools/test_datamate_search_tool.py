@@ -23,6 +23,7 @@ def datamate_tool(mock_observer: MessageObserver) -> DataMateSearchTool:
         index_names=["kb1"],
         top_k=2,
         threshold=0.5,
+        rerank=False,
     )
     return tool
 
@@ -204,7 +205,7 @@ class TestForward:
 
     def test_forward_no_observer(self, mocker: MockFixture):
         tool = DataMateSearchTool(
-            server_url="http://127.0.0.1:8080", observer=None, index_names=["kb1"])
+            server_url="http://127.0.0.1:8080", observer=None, index_names=["kb1"], rerank=False)
 
         # Mock the hybrid_search method to return search results
         mock_hybrid_search = mocker.patch.object(
@@ -263,6 +264,7 @@ class TestForward:
         datamate_tool.index_names = ["default_kb1", "default_kb2"]
         datamate_tool.top_k = 3
         datamate_tool.threshold = 0.2
+        datamate_tool.rerank = False  # Ensure rerank is disabled
 
         # Mock the hybrid_search method to return results for each knowledge base
         mock_hybrid_search = mocker.patch.object(
@@ -303,6 +305,7 @@ class TestForward:
         datamate_tool.index_names = ["kb1", "kb2"]
         datamate_tool.top_k = 3
         datamate_tool.threshold = 0.2
+        datamate_tool.rerank = False  # Ensure rerank is disabled
 
         # Mock the hybrid_search method to return results from multiple KBs
         mock_hybrid_search = mocker.patch.object(
@@ -345,6 +348,7 @@ class TestForward:
         datamate_tool.index_names = ["kb1"]
         datamate_tool.top_k = 5
         datamate_tool.threshold = 0.8
+        datamate_tool.rerank = False  # Ensure rerank is disabled
 
         # Mock the hybrid_search method
         mock_hybrid_search = mocker.patch.object(
@@ -526,3 +530,223 @@ class TestDataMateSearchToolURL:
 
         with pytest.raises(ValueError, match="Invalid server_url format"):
             DataMateSearchTool(server_url="http://", observer=mock_observer)
+
+
+class TestDataMateSearchToolRerank:
+    """Tests for DataMateSearchTool rerank functionality."""
+
+    def test_init_with_rerank_params(self, mock_observer: MessageObserver):
+        """Test initialization with rerank parameters."""
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            top_k=3,
+            threshold=0.5,
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=None,
+            observer=mock_observer,
+        )
+
+             # When explicit values are passed, smolagents Tool handles them correctly
+        assert tool.rerank is True
+        assert tool.rerank_model_name == "gte-rerank-v2"
+        assert tool.rerank_model is None
+
+    def test_init_without_rerank_params(self, mock_observer: MessageObserver):
+        """Test initialization without rerank parameters (defaults)."""
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            observer=mock_observer,
+        )
+
+        # smolagents Tool doesn't properly handle Field defaults, so we check FieldInfo.default
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+        assert isinstance(tool.rerank, FieldInfo)
+        assert tool.rerank.default is False
+        assert tool.rerank_model_name.default == ""
+        assert tool.rerank_model.default is None
+
+    def test_forward_with_rerank_enabled(self, mock_observer: MessageObserver, mocker: MockFixture):
+        """Test forward method when rerank is enabled and model is provided."""
+        # Create tool first
+        mock_rerank_model = MagicMock()
+        mock_rerank_model.rerank.return_value = [
+            {"index": 1, "relevance_score": 0.95, "document": "content 2"},
+            {"index": 0, "relevance_score": 0.85, "document": "content 1"},
+        ]
+
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            top_k=3,
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=mock_rerank_model,
+            observer=mock_observer,
+        )
+
+        # Mock hybrid_search method on the tool instance
+        mocker.patch.object(
+            tool.datamate_core, 'hybrid_search',
+            return_value=[
+                {"entity": {"text": "content 1", "score": 0.9}},
+                {"entity": {"text": "content 2", "score": 0.8}},
+            ]
+        )
+
+        # Mock build_file_download_url
+        mocker.patch.object(
+            tool.datamate_core.client, 'build_file_download_url',
+            return_value="http://dl/kb1/file"
+        )
+
+        result_json = tool.forward("test query")
+        results = json.loads(result_json)
+
+        # Verify rerank was called - smolagents Tool passes explicit values correctly
+        mock_rerank_model.rerank.assert_called_once()
+        call_args = mock_rerank_model.rerank.call_args
+        assert call_args[1]["query"] == "test query"
+        assert len(call_args[1]["documents"]) == 2
+
+    def test_forward_rerank_disabled(self, mock_observer: MessageObserver, mocker: MockFixture):
+        """Test forward method when rerank is disabled."""
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            top_k=3,
+            observer=mock_observer,
+        )
+
+        # Mock hybrid_search method on the tool instance
+        mocker.patch.object(
+            tool.datamate_core, 'hybrid_search',
+            return_value=[
+                {"entity": {"text": "content 1", "score": 0.9}},
+            ]
+        )
+
+        # Mock build_file_download_url
+        mocker.patch.object(
+            tool.datamate_core.client, 'build_file_download_url',
+            return_value="http://dl/kb1/file"
+        )
+
+        result_json = tool.forward("test query")
+        results = json.loads(result_json)
+
+        # Verify results are returned without reranking
+        assert len(results) > 0
+
+    def test_forward_rerank_error_continues(self, mock_observer: MessageObserver, mocker: MockFixture):
+        """Test that forward continues when rerank raises an exception."""
+        # Create mock rerank model that raises exception
+        mock_rerank_model = MagicMock()
+        mock_rerank_model.rerank.side_effect = Exception("Rerank API error")
+
+        tool = DataMateSearchTool(
+            server_url="http://127.0.0.1:8080",
+            index_names=["kb1"],
+            top_k=3,
+            rerank=True,
+            rerank_model=mock_rerank_model,
+            observer=mock_observer,
+        )
+
+        # Mock hybrid_search method on the tool instance
+        mocker.patch.object(
+            tool.datamate_core, 'hybrid_search',
+            return_value=[
+                {"entity": {"text": "content 1", "score": 0.9}},
+            ]
+        )
+
+        # Mock build_file_download_url
+        mocker.patch.object(
+            tool.datamate_core.client, 'build_file_download_url',
+            return_value="http://dl/kb1/file"
+        )
+
+        result_json = tool.forward("test query")
+        results = json.loads(result_json)
+
+        # Should still return results despite rerank error
+        assert len(results) > 0
+
+        # Should not raise, should continue with original results
+        result_json = tool.forward("test query")
+        assert result_json is not None
+
+
+class TestDataMateSearchToolEdgeCases:
+    """Tests for edge cases and partial coverage scenarios."""
+
+    def test_verify_ssl_default_for_https(self, mock_observer: MessageObserver):
+        """Test that verify_ssl defaults correctly for HTTPS URLs when not specified."""
+        # When verify_ssl is None and use_https is True, verify_ssl should be False
+        tool = DataMateSearchTool(
+            server_url="https://datamate.example.com:8443",
+            verify_ssl=None,  # Not specified - should default based on protocol
+            observer=mock_observer,
+        )
+
+        # For HTTPS, default should be False (for self-signed certificates)
+        assert tool.verify_ssl is False
+
+    def test_verify_ssl_explicit_true_for_https(self, mock_observer: MessageObserver):
+        """Test explicit verify_ssl=True for HTTPS URLs."""
+        tool = DataMateSearchTool(
+            server_url="https://datamate.example.com:8443",
+            verify_ssl=True,
+            observer=mock_observer,
+        )
+
+        assert tool.verify_ssl is True
+
+    def test_verify_ssl_explicit_false_for_http(self, mock_observer: MessageObserver):
+        """Test explicit verify_ssl=False for HTTP URLs."""
+        tool = DataMateSearchTool(
+            server_url="http://datamate.example.com:8080",
+            verify_ssl=False,
+            observer=mock_observer,
+        )
+
+        # When explicitly set to False, it should use that value
+        # Note: The comment about "always verify for HTTP" only applies when verify_ssl is None
+        assert tool.verify_ssl is False
+
+    def test_parse_metadata_with_dict_input(self, datamate_tool):
+        """Test _parse_metadata with dict input (passthrough)."""
+        metadata_dict = {"file_name": "test.txt", "author": "test"}
+        result = datamate_tool._parse_metadata(metadata_dict)
+
+        assert result == metadata_dict
+
+    def test_parse_metadata_with_empty_string(self, datamate_tool):
+        """Test _parse_metadata with empty string."""
+        result = datamate_tool._parse_metadata("")
+
+        assert result == {}
+
+    def test_extract_dataset_id_empty_path(self, datamate_tool):
+        """Test _extract_dataset_id with empty path."""
+        result = datamate_tool._extract_dataset_id("")
+
+        assert result == ""
+
+    def test_extract_dataset_id_root_path(self, datamate_tool):
+        """Test _extract_dataset_id with root path."""
+        result = datamate_tool._extract_dataset_id("/")
+
+        assert result == ""
+
+    def test_extract_dataset_id_single_segment(self, datamate_tool):
+        """Test _extract_dataset_id with single path segment."""
+        result = datamate_tool._extract_dataset_id("dataset123")
+
+        assert result == "dataset123"

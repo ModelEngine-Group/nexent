@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-redis
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+  selector:
+    app: nexent-redis

@@ -29,14 +29,14 @@ import {
   uploadAttachments,
   createMessageAttachments,
   cleanupAttachmentUrls,
-} from "@/app/chat/internal/chatPreprocess";
+} from "@/lib/chat/chatAttachmentUtils";
 import { ConversationListItem, ApiConversationDetail } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import {
   extractUserMsgFromResponse,
   extractAssistantMsgFromResponse,
-} from "./extractMsgFromHistoryResponse";
+} from "@/lib/chatMessageExtractor";
 
 import { Layout } from "antd";
 import log from "@/lib/logger";

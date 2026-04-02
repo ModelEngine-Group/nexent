@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-postgresql
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+  selector:
+    app: nexent-postgresql

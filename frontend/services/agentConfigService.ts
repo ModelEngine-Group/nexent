@@ -1,4 +1,3 @@
-import type { SkillListItem } from "@/services/skillService";
 import { API_ENDPOINTS } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
@@ -66,6 +65,7 @@ export const fetchTools = async () => {
       name: tool.name,
       origin_name: tool.origin_name,
       description: tool.description,
+      description_zh: tool.description_zh,
       source: tool.source,
       is_available: tool.is_available,
       create_time: tool.create_time,
@@ -79,6 +79,7 @@ export const fetchTools = async () => {
           required: !param.optional,
           value: param.default,
           description: param.description,
+          description_zh: param.description_zh,
         };
       }),
     }));
@@ -704,6 +705,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
               id: String(tool.tool_id),
               name: tool.name,
               description: tool.description,
+              description_zh: tool.description_zh,
               source: tool.source,
               is_available: tool.is_available,
               usage: tool.usage, // New: handle usage field
@@ -715,6 +717,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
                     required: !param.optional,
                     value: param.default,
                     description: param.description,
+                    description_zh: param.description_zh,
                   }))
                 : [],
             };
@@ -1246,8 +1249,8 @@ export const createSkillFromFile = async (
  */
 export const searchSkillsByName = <T extends { name: string }>(
   prefix: string,
-  allSkills: SkillListItem[]
-): SkillListItem[] => {
+  allSkills: T[]
+): T[] => {
   if (!prefix || prefix.trim() === "") {
     return [];
   }

@@ -5,10 +5,37 @@ import { ChatMessageType, AgentStep } from "@/types/chat";
 import log from "@/lib/logger";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 
-import {
-  deduplicateImages,
-  deduplicateSearchResults,
-} from "../internal/chatHelpers";
+// Merge new search results into an existing list, skipping duplicates by `text` field
+const deduplicateSearchResults = (
+  existingResults: any[],
+  newResults: any[]
+): any[] => {
+  const uniqueResults = [...existingResults];
+  const existingTexts = new Set(existingResults.map((item) => item.text));
+  for (const result of newResults) {
+    if (!existingTexts.has(result.text)) {
+      uniqueResults.push(result);
+      existingTexts.add(result.text);
+    }
+  }
+  return uniqueResults;
+};
+
+// Merge new image URLs into an existing list, skipping duplicates
+const deduplicateImages = (
+  existingImages: string[],
+  newImages: string[]
+): string[] => {
+  const uniqueImages = [...existingImages];
+  const existingUrls = new Set(existingImages);
+  for (const imageUrl of newImages) {
+    if (!existingUrls.has(imageUrl)) {
+      uniqueImages.push(imageUrl);
+      existingUrls.add(imageUrl);
+    }
+  }
+  return uniqueImages;
+};
 
 // function: process the user break tag
 const processUserBreakTag = (content: string, t: any): string => {
