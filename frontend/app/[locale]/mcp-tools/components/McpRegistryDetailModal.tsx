@@ -49,10 +49,14 @@ export default function McpRegistryDetailModal({
   const getHeaderFieldLabel = (key: string) => {
     const knownKeyMap: Record<string, string> = {
       name: "mcpTools.registry.headerField.name",
+      key: "mcpTools.registry.headerField.name",
+      url: "mcpTools.registry.headerField.url",
       description: "mcpTools.registry.headerField.description",
       isRequired: "mcpTools.registry.headerField.isRequired",
       isSecret: "mcpTools.registry.headerField.isSecret",
+      isRepeated: "mcpTools.registry.headerField.isRepeated",
       format: "mcpTools.registry.headerField.format",
+      valueHint: "mcpTools.registry.headerField.valueHint",
       value: "mcpTools.registry.headerField.value",
       default: "mcpTools.registry.headerField.default",
       placeholder: "mcpTools.registry.headerField.placeholder",
@@ -66,8 +70,12 @@ export default function McpRegistryDetailModal({
 
   const getVariableFieldLabel = (key: string) => {
     const knownKeyMap: Record<string, string> = {
+      name: "mcpTools.registry.variableField.name",
+      key: "mcpTools.registry.variableField.name",
+      url: "mcpTools.registry.variableField.url",
       description: "mcpTools.registry.variableField.description",
       format: "mcpTools.registry.variableField.format",
+      valueHint: "mcpTools.registry.variableField.valueHint",
       value: "mcpTools.registry.variableField.value",
       default: "mcpTools.registry.variableField.default",
       placeholder: "mcpTools.registry.variableField.placeholder",
@@ -76,6 +84,7 @@ export default function McpRegistryDetailModal({
       type: "mcpTools.registry.variableField.type",
       isRequired: "mcpTools.registry.variableField.isRequired",
       isSecret: "mcpTools.registry.variableField.isSecret",
+      isRepeated: "mcpTools.registry.variableField.isRepeated",
     };
     const translationKey = knownKeyMap[key];
     return translationKey ? t(translationKey) : key;
@@ -106,6 +115,61 @@ export default function McpRegistryDetailModal({
       return String(value);
     }
     return "";
+  };
+
+  const normalizeRecordItems = (items: unknown) => {
+    if (!Array.isArray(items)) return [] as Record<string, unknown>[];
+    return items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  };
+
+  const renderFieldRows = (
+    record: Record<string, unknown>,
+    labelResolver: (key: string) => string,
+    keyPath: string,
+    excludedKeys: string[] = []
+  ) => {
+    const excluded = new Set(excludedKeys);
+    const entries = Object.entries(record).filter(([key, value]) => !excluded.has(key) && hasRenderableValue(value));
+    if (entries.length === 0) {
+      return <p className="text-[11px] text-slate-400">-</p>;
+    }
+    return (
+      <div className="mt-1 space-y-1 text-[11px] text-slate-600">
+        {entries.map(([fieldKey, fieldValue]) => (
+          <div key={`${keyPath}-${fieldKey}`}>
+            <span className="font-medium text-slate-700">{labelResolver(fieldKey)}:</span>{" "}
+            {renderStructuredValue(fieldValue, `${keyPath}-${fieldKey}`)}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderConfigCards = (
+    title: string,
+    items: Record<string, unknown>[],
+    labelResolver: (key: string) => string,
+    keyPath: string,
+    titleResolver?: (item: Record<string, unknown>, index: number) => string,
+    excludedKeys: string[] = []
+  ) => {
+    if (!items.length) return null;
+    return (
+      <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
+        <p className="text-xs font-semibold text-slate-700">{title}</p>
+        {items.map((item, index) => {
+          const itemTitle = titleResolver
+            ? titleResolver(item, index)
+            : t("mcpTools.registry.variableFallback", { index: index + 1 });
+          return (
+            <div key={`${keyPath}-${index}`} className="rounded-md border border-slate-200 bg-white p-2">
+              <p className="break-all text-xs font-medium text-slate-900">{itemTitle}</p>
+              {renderFieldRows(item, labelResolver, `${keyPath}-${index}`, excludedKeys)}
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   const renderStructuredValue = (value: unknown, keyPath: string): React.ReactNode => {
@@ -318,7 +382,7 @@ export default function McpRegistryDetailModal({
                       <p className="font-medium text-slate-900 break-all">{String(pkg.identifier || "-")}</p>
                       <div className="mt-1 space-y-1 text-xs text-slate-600">
                         {Object.entries(pkg)
-                          .filter(([, value]) => hasRenderableValue(value))
+                          .filter(([fieldKey, value]) => !["transport", "runtimeArguments", "packageArguments", "environmentVariables"].includes(fieldKey) && hasRenderableValue(value))
                           .map(([fieldKey, fieldValue]) => (
                             <div key={`${server.name}-${String(pkg.identifier || index)}-${fieldKey}`}>
                               <span className="font-medium text-slate-700">{getPackageFieldLabel(fieldKey)}:</span>{" "}
@@ -326,6 +390,89 @@ export default function McpRegistryDetailModal({
                             </div>
                           ))}
                       </div>
+
+                      {pkg.transport && typeof pkg.transport === "object" ? (
+                        <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
+                          <p className="text-xs font-semibold text-slate-700">{t("mcpTools.registry.packageField.transport")}</p>
+                          <div className="rounded-md border border-slate-200 bg-white p-2">
+                            {renderFieldRows(
+                              pkg.transport as Record<string, unknown>,
+                              getVariableFieldLabel,
+                              `${server.name}-${String(pkg.identifier || index)}-transport`,
+                              ["headers", "variables"]
+                            )}
+                          </div>
+                          {renderConfigCards(
+                            t("mcpTools.registry.remoteHeaders"),
+                            normalizeRecordItems((pkg.transport as Record<string, unknown>).headers),
+                            getHeaderFieldLabel,
+                            `${server.name}-${String(pkg.identifier || index)}-transport-headers`,
+                            (item, headerIndex) =>
+                              typeof item.name === "string" && item.name.trim()
+                                ? item.name
+                                : t("mcpTools.registry.headerFallback", { index: headerIndex + 1 }),
+                            ["name"]
+                          )}
+                          {renderConfigCards(
+                            t("mcpTools.registry.remoteVariables"),
+                            Object.entries(((pkg.transport as Record<string, unknown>).variables as Record<string, unknown>) || {})
+                              .filter(([, value]) => Boolean(value) && typeof value === "object")
+                              .map(([key, value]) => ({ key, ...(value as Record<string, unknown>) })),
+                            getVariableFieldLabel,
+                            `${server.name}-${String(pkg.identifier || index)}-transport-variables`,
+                            (item, variableIndex) =>
+                              typeof item.key === "string" && item.key.trim()
+                                ? item.key
+                                : t("mcpTools.registry.variableFallback", { index: variableIndex + 1 }),
+                            ["key"]
+                          )}
+                        </div>
+                      ) : null}
+
+                      {renderConfigCards(
+                        t("mcpTools.registry.packageField.runtimeArguments"),
+                        normalizeRecordItems(pkg.runtimeArguments),
+                        getVariableFieldLabel,
+                        `${server.name}-${String(pkg.identifier || index)}-runtime-arguments`,
+                        (item, argIndex) =>
+                          typeof item.name === "string" && item.name.trim()
+                            ? item.name
+                            : t("mcpTools.registry.variableFallback", { index: argIndex + 1 })
+                      )}
+
+                      {renderConfigCards(
+                        t("mcpTools.registry.packageField.packageArguments"),
+                        normalizeRecordItems(pkg.packageArguments),
+                        getVariableFieldLabel,
+                        `${server.name}-${String(pkg.identifier || index)}-package-arguments`,
+                        (item, argIndex) =>
+                          typeof item.name === "string" && item.name.trim()
+                            ? item.name
+                            : t("mcpTools.registry.variableFallback", { index: argIndex + 1 })
+                      )}
+
+                      {(() => {
+                        const env = pkg.environmentVariables;
+                        const envItems = Array.isArray(env)
+                          ? normalizeRecordItems(env)
+                          : env && typeof env === "object"
+                          ? Object.entries(env as Record<string, unknown>).map(([key, value]) => ({ key, value }))
+                          : [];
+
+                        return renderConfigCards(
+                          t("mcpTools.registry.packageField.environmentVariables"),
+                          envItems,
+                          getVariableFieldLabel,
+                          `${server.name}-${String(pkg.identifier || index)}-environment-variables`,
+                          (item, envIndex) =>
+                            typeof item.name === "string" && item.name.trim()
+                              ? item.name
+                              : typeof item.key === "string" && item.key.trim()
+                              ? item.key
+                              : t("mcpTools.registry.variableFallback", { index: envIndex + 1 }),
+                          ["name", "key"]
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
