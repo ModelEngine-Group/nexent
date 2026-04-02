@@ -28,6 +28,7 @@ def dify_tool(mock_observer: MessageObserver) -> DifySearchTool:
             dataset_ids='["dataset1", "dataset2"]',
             top_k=3,
             observer=mock_observer,
+            rerank=False,
         )
         # Store the mock client for tests to use
         tool._mock_http_client = mock_client
@@ -73,6 +74,7 @@ class TestDifySearchToolInit:
             dataset_ids='["ds1", "ds2"]',
             top_k=5,
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.server_url == "https://api.dify.ai/v1"
@@ -90,6 +92,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids='["single_dataset"]',
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.server_url == "https://api.dify.ai/v1"
@@ -101,6 +104,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids='["0ab7096c-dfa5-4e0e-9dad-9265781447a3"]',
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.server_url == "https://api.dify.ai/v1"
@@ -112,6 +116,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids='["ds1", "ds2", "ds3"]',
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.server_url == "https://api.dify.ai/v1"
@@ -176,6 +181,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids=["ds1", "ds2", "ds3"],
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.dataset_ids == ["ds1", "ds2", "ds3"]
@@ -188,6 +194,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids=["single_dataset"],
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.dataset_ids == ["single_dataset"]
@@ -200,6 +207,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids=[123, 456, 789],
             observer=mock_observer,
+            rerank=False,
         )
 
         assert tool.dataset_ids == ["123", "456", "789"]
@@ -219,6 +227,7 @@ class TestDifySearchToolInit:
                 api_key="test_key",
                 dataset_ids=invalid_json,
                 observer=mock_observer,
+                rerank=False,
             )
         assert expected_error_contains in str(excinfo.value)
 
@@ -230,6 +239,7 @@ class TestDifySearchToolInit:
                 api_key="test_key",
                 dataset_ids='["ds1", "ds2"',  # Missing closing bracket
                 observer=mock_observer,
+                rerank=False,
             )
         assert "dataset_ids must be a valid JSON string array or list" in str(excinfo.value)
 
@@ -240,6 +250,7 @@ class TestDifySearchToolInit:
             api_key="test_key",
             dataset_ids='["ds1", 123, true, null]',
             observer=mock_observer,
+            rerank=False,
         )
 
         # Elements should be converted to strings using Python's str()
@@ -497,6 +508,7 @@ class TestForward:
                 api_key="test_api_key",
                 dataset_ids='["dataset1"]',
                 observer=None,
+                rerank=False,
             )
             tool._mock_http_client = mock_client
             self._setup_success_flow(tool)
@@ -564,3 +576,360 @@ class TestForward:
         assert len(results) == 2  # Still processes results even with download URL failure
         assert results[0]["title"] == "document1.txt"
         # URL should be empty string due to download failure
+
+
+class TestDifySearchToolRerank:
+    """Tests for DifySearchTool rerank functionality."""
+
+    def test_init_with_rerank_params(self, mock_observer: MessageObserver):
+        """Test initialization with rerank parameters."""
+        tool = DifySearchTool(
+            server_url="https://api.dify.ai/v1",
+            api_key="test_key",
+            dataset_ids='["ds1", "ds2"]',
+            top_k=5,
+            rerank=True,
+            rerank_model_name="gte-rerank-v2",
+            rerank_model=None,
+            observer=mock_observer,
+        )
+
+        assert tool.rerank is True
+        assert tool.rerank_model_name == "gte-rerank-v2"
+        assert tool.rerank_model is None
+
+    def test_init_without_rerank_params(self, mock_observer: MessageObserver):
+        """Test initialization without rerank parameters (defaults)."""
+        tool = DifySearchTool(
+            server_url="https://api.dify.ai/v1",
+            api_key="test_key",
+            dataset_ids='["ds1"]',
+            observer=mock_observer,
+        )
+
+        # smolagents Tool doesn't properly handle Field defaults, so we check FieldInfo.default
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+        assert isinstance(tool.rerank, FieldInfo)
+        assert tool.rerank.default is False
+        assert tool.rerank_model_name.default == ""
+        assert tool.rerank_model.default is None
+
+    def test_forward_with_rerank_enabled(self, mock_observer: MessageObserver):
+        """Test forward method when rerank is enabled and model is provided."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            # Create mock rerank model
+            mock_rerank_model = MagicMock()
+            mock_rerank_model.rerank.return_value = [
+                {"index": 1, "relevance_score": 0.95, "document": "content 2"},
+                {"index": 0, "relevance_score": 0.85, "document": "content 1"},
+            ]
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                top_k=3,
+                rerank=True,
+                rerank_model_name="gte-rerank-v2",
+                rerank_model=mock_rerank_model,
+                observer=mock_observer,
+            )
+
+            # Setup mock search response
+            search_response = {
+                "query": "test query",
+                "records": [
+                    {
+                        "segment": {"content": "content 1", "document": {"id": "doc1", "name": "doc1.txt"}},
+                        "score": 0.9
+                    },
+                    {
+                        "segment": {"content": "content 2", "document": {"id": "doc2", "name": "doc2.txt"}},
+                        "score": 0.8
+                    }
+                ]
+            }
+
+            mock_search_response = MagicMock()
+            mock_search_response.status_code = 200
+            mock_search_response.json.return_value = search_response
+
+            mock_download_response = MagicMock()
+            mock_download_response.status_code = 200
+            mock_download_response.json.return_value = {"download_url": "https://example.com/file.pdf"}
+
+            mock_client.post.return_value = mock_search_response
+            mock_client.get.return_value = mock_download_response
+
+            result_json = tool.forward("test query")
+            results = json.loads(result_json)
+
+            # Verify rerank was called
+            mock_rerank_model.rerank.assert_called_once()
+            call_args = mock_rerank_model.rerank.call_args
+            assert call_args[1]["query"] == "test query"
+            assert len(call_args[1]["documents"]) == 2
+
+    def test_forward_rerank_disabled(self, mock_observer: MessageObserver):
+        """Test forward method when rerank is disabled."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                top_k=3,
+                rerank=False,
+                rerank_model=None,
+                observer=mock_observer,
+            )
+
+            # Setup mock search response
+            search_response = {
+                "query": "test query",
+                "records": [
+                    {
+                        "segment": {"content": "content 1", "document": {"id": "doc1", "name": "doc1.txt"}},
+                        "score": 0.9
+                    }
+                ]
+            }
+
+            mock_search_response = MagicMock()
+            mock_search_response.status_code = 200
+            mock_search_response.json.return_value = search_response
+
+            mock_download_response = MagicMock()
+            mock_download_response.status_code = 200
+            mock_download_response.json.return_value = {"download_url": "https://example.com/file.pdf"}
+
+            mock_client.post.return_value = mock_search_response
+            mock_client.get.return_value = mock_download_response
+
+            result_json = tool.forward("test query")
+
+            # Should work normally without reranking
+            assert result_json is not None
+
+    def test_forward_rerank_error_continues(self, mock_observer: MessageObserver):
+        """Test that forward continues when rerank raises an exception."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            # Create mock rerank model that raises exception
+            mock_rerank_model = MagicMock()
+            mock_rerank_model.rerank.side_effect = Exception("Rerank API error")
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                top_k=3,
+                rerank=True,
+                rerank_model=mock_rerank_model,
+                observer=mock_observer,
+            )
+
+            # Setup mock search response
+            search_response = {
+                "query": "test query",
+                "records": [
+                    {
+                        "segment": {"content": "content 1", "document": {"id": "doc1", "name": "doc1.txt"}},
+                        "score": 0.9
+                    }
+                ]
+            }
+
+            mock_search_response = MagicMock()
+            mock_search_response.status_code = 200
+            mock_search_response.json.return_value = search_response
+
+            mock_download_response = MagicMock()
+            mock_download_response.status_code = 200
+            mock_download_response.json.return_value = {"download_url": "https://example.com/file.pdf"}
+
+            mock_client.post.return_value = mock_search_response
+            mock_client.get.return_value = mock_download_response
+
+            # Should not raise, should continue with original results
+            result_json = tool.forward("test query")
+            assert result_json is not None
+
+
+class TestDifySearchToolEdgeCases:
+    """Edge case tests for DifySearchTool."""
+
+    def test_get_document_download_url_empty_id(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url returns empty string for empty document_id."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+                rerank=False,
+            )
+
+            result = tool._get_document_download_url("")
+            assert result == ""
+
+    def test_get_document_download_url_request_error(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url handles RequestError."""
+        import httpx
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+            mock_client.get.side_effect = httpx.RequestError("request failed")
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+                rerank=False,
+            )
+
+            result = tool._get_document_download_url("doc123", "dataset1")
+            assert result == ""
+
+    def test_get_document_download_url_http_status_error(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url handles HTTPStatusError."""
+        import httpx
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "404 Not Found", request=MagicMock(), response=MagicMock()
+            )
+            mock_client.get.return_value = mock_response
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+                rerank=False,
+            )
+
+            result = tool._get_document_download_url("doc123", "dataset1")
+            assert result == ""
+
+    def test_get_document_download_url_json_decode_error(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url handles JSONDecodeError."""
+        import json
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.side_effect = json.JSONDecodeError("invalid json", "", 0)
+            mock_client.get.return_value = mock_response
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+                rerank=False,
+            )
+
+            result = tool._get_document_download_url("doc123", "dataset1")
+            assert result == ""
+
+    def test_get_document_download_url_missing_key(self, mock_observer: MessageObserver):
+        """Test _get_document_download_url handles missing download_url key."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = {}  # No download_url key
+            mock_client.get.return_value = mock_response
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+                rerank=False,
+            )
+
+            result = tool._get_document_download_url("doc123", "dataset1")
+            assert result == ""
+
+    def test_batch_get_download_urls_empty_pairs(self, mock_observer: MessageObserver):
+        """Test _batch_get_download_urls with empty pairs."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+                rerank=False,
+            )
+
+            result = tool._batch_get_download_urls([])
+            assert result == {}
+
+    def test_batch_get_download_urls_with_empty_document_id(self, mock_observer: MessageObserver):
+        """Test _batch_get_download_urls handles empty document_id."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager, \
+             patch.object(DifySearchTool, "_get_document_download_url", return_value=""):
+
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+                rerank=False,
+            )
+
+            # Include an empty document_id in the pairs
+            result = tool._batch_get_download_urls([("", "dataset1"), ("doc123", "dataset1")])
+            assert result == {"": "", "doc123": ""}
+
+    def test_search_dify_knowledge_base_missing_records_key(self, mock_observer: MessageObserver):
+        """Test _search_dify_knowledge_base raises when records key is missing."""
+        with patch("sdk.nexent.core.tools.dify_search_tool.http_client_manager") as mock_manager:
+            mock_client = MagicMock()
+            mock_manager.get_sync_client.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"query": "test"}  # Missing "records" key
+            mock_response.raise_for_status = MagicMock()
+            mock_client.post.return_value = mock_response
+
+            tool = DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_api_key",
+                dataset_ids='["dataset1"]',
+                observer=mock_observer,
+                rerank=False,
+            )
+
+            with pytest.raises(Exception, match="Unexpected Dify API response format"):
+                tool._search_dify_knowledge_base("test", 3, "semantic_search", "dataset1")

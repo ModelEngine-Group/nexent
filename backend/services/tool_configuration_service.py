@@ -28,7 +28,7 @@ from database.tool_db import (
     check_tool_list_initialized,
 )
 from services.file_management_service import get_llm_model
-from services.vectordatabase_service import get_embedding_model, get_vector_db_core
+from services.vectordatabase_service import get_embedding_model, get_rerank_model, get_vector_db_core
 from database.client import minio_client
 from services.image_service import get_vlm_model
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
@@ -694,10 +694,32 @@ def _validate_local_tool(
         if tool_name == "knowledge_base_search":
             embedding_model = get_embedding_model(tenant_id=tenant_id)
             vdb_core = get_vector_db_core()
+
+            # Get rerank configuration
+            rerank = instantiation_params.get("rerank", False)
+            rerank_model_name = instantiation_params.get("rerank_model_name", "")
+            rerank_model = None
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
+
             params = {
                 **instantiation_params,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
+                'rerank_model': rerank_model,
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name in ["dify_search", "datamate_search"]:
+            # Get rerank configuration for dify and datamate search tools
+            rerank = instantiation_params.get("rerank", False)
+            rerank_model_name = instantiation_params.get("rerank_model_name", "")
+            rerank_model = None
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
+
+            params = {
+                **instantiation_params,
+                'rerank_model': rerank_model,
             }
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_image":

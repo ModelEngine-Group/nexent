@@ -7,7 +7,9 @@ from smolagents.tools import Tool
 from urllib.parse import urlparse
 
 from ...vector_database import DataMateCore
+from ..models.rerank_model import BaseRerank
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
 # Get logger instance
@@ -84,6 +86,16 @@ class DataMateSearchTool(Tool):
             description="Default maximum number of search results to return", default=3),
         threshold: float = Field(
             description="Default similarity threshold for search results", default=0.2),
+        rerank: bool = Field(
+            description="Whether to enable reranking for search results",
+            default=False,
+        ),
+        rerank_model_name: str = Field(
+            description="The name of the rerank model to use",
+            default="",
+        ),
+        rerank_model: BaseRerank = Field(
+            description="The rerank model to use", default=None, exclude=True),
         kb_page: int = Field(
             description="Page index when listing knowledge bases from DataMate", default=1),
         kb_page_size: int = Field(
@@ -117,6 +129,9 @@ class DataMateSearchTool(Tool):
         self.index_names = [] if index_names is None else index_names
         self.top_k = top_k
         self.threshold = threshold
+        self.rerank = rerank
+        self.rerank_model_name = rerank_model_name
+        self.rerank_model = rerank_model
 
         # Determine SSL verification setting
         if verify_ssl is None:
@@ -214,19 +229,68 @@ class DataMateSearchTool(Tool):
             if len(knowledge_base_ids) == 0:
                 return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
+            # Compute effective top_k for initial search:
+            # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
+            effective_top_k = (
+                self.top_k * RERANK_OVERSEARCH_MULTIPLIER
+                if self.rerank else self.top_k
+            )
+
             # Step 2: Retrieve knowledge base content using DataMateCore hybrid search
             kb_search_results = []
             for knowledge_base_id in knowledge_base_ids:
                 kb_search = self.datamate_core.hybrid_search(
                     query_text=query,
                     index_names=[knowledge_base_id],
-                    top_k=self.top_k,
+                    top_k=effective_top_k,
                     weight_accurate=self.threshold,
                 )
                 if not kb_search:
                     raise Exception(
                         "No results found! Try a less restrictive/shorter query.")
                 kb_search_results.extend(kb_search)
+
+            # Apply reranking if enabled
+            if self.rerank and self.rerank_model and kb_search_results:
+                try:
+                    documents = []
+                    for r in kb_search_results:
+                        entity = r.get("entity", {}) or {}
+                        documents.append(entity.get("text", "") or "")
+
+                    reranked_results = self.rerank_model.rerank(
+                        query=query,
+                        documents=documents,
+                        top_n=len(documents),
+                    )
+
+                    if reranked_results:
+                        original_results_map = {
+                            i: kb_search_results[i] for i in range(len(kb_search_results))
+                        }
+                        reordered = []
+                        for reranked_item in reranked_results[: self.top_k]:
+                            orig_idx = reranked_item.get("index")
+                            if orig_idx is None or orig_idx not in original_results_map:
+                                continue
+                            result = original_results_map[orig_idx]
+                            entity = result.get("entity", {}) or {}
+                            entity["score"] = reranked_item.get(
+                                "relevance_score", entity.get("score", 0)
+                            )
+                            result["entity"] = entity
+                            reordered.append(result)
+
+                        if reordered:
+                            kb_search_results = reordered
+                            logger.info(
+                                f"Reranking applied: selected top {self.top_k} from "
+                                f"{len(documents)} candidates"
+                            )
+                except Exception as e:
+                    logger.warning(
+                        f"Reranking failed, using original results: {str(e)}"
+                    )
 
             # Format search results
             search_results_json = []  # Organize search results into a unified format
