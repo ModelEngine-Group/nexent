@@ -123,6 +123,8 @@ export interface RegistryQuickAddOption {
   serverUrl?: string;
   serverUrlTemplate?: string;
   remoteVariables?: RegistryRemoteVariable[];
+  remoteHeaders?: RegistryRemoteVariable[];
+  unsupportedRequiredHeaders?: string[];
   packageIndex?: number;
   packageRuntimeHint?: string;
   packageEnvironmentVariables?: RegistryRemoteVariable[];

@@ -186,9 +186,9 @@ const extractRuntimeArguments = (runtimeArguments: unknown, formPrefix: string):
     });
 };
 
-const extractRemoteVariables = (service: RegistryMcpCard, remoteType?: string, remoteUrl?: string): RegistryRemoteVariable[] => {
+const findMatchedRemote = (service: RegistryMcpCard, remoteType?: string, remoteUrl?: string): Record<string, unknown> | null => {
   const rawRemotes = service.server?.remotes;
-  if (!Array.isArray(rawRemotes)) return [];
+  if (!Array.isArray(rawRemotes)) return null;
 
   const matchedRemote = rawRemotes.find((entry) => {
     if (!entry || typeof entry !== "object") return false;
@@ -196,13 +196,27 @@ const extractRemoteVariables = (service: RegistryMcpCard, remoteType?: string, r
     const candidateType = typeof candidate.type === "string" ? candidate.type.toLowerCase() : "";
     const candidateUrl = typeof candidate.url === "string" ? candidate.url : "";
     return candidateType === String(remoteType || "").toLowerCase() && candidateUrl === String(remoteUrl || "");
-  }) as { variables?: Record<string, unknown> } | undefined;
+  }) as Record<string, unknown> | undefined;
+
+  return matchedRemote || null;
+};
+
+
+const extractRemoteVariables = (service: RegistryMcpCard, remoteType?: string, remoteUrl?: string): RegistryRemoteVariable[] => {
+  const matchedRemote = findMatchedRemote(service, remoteType, remoteUrl) as { variables?: Record<string, unknown> } | null;
 
   if (!matchedRemote || !matchedRemote.variables || typeof matchedRemote.variables !== "object") {
     return [];
   }
 
   return extractVariableMapInputs(matchedRemote.variables, "remote-var");
+};
+
+
+const extractRemoteHeaders = (service: RegistryMcpCard, remoteType?: string, remoteUrl?: string): RegistryRemoteVariable[] => {
+  const matchedRemote = findMatchedRemote(service, remoteType, remoteUrl);
+  if (!matchedRemote) return [];
+  return extractKeyValueInputs(matchedRemote.headers, "remote-header", "header");
 };
 
 const buildInitialVariableValues = (option: RegistryQuickAddOption | null): Record<string, string> => {
@@ -212,6 +226,7 @@ const buildInitialVariableValues = (option: RegistryQuickAddOption | null): Reco
 
   const fields: RegistryRemoteVariable[] = [
     ...(option.remoteVariables || []),
+    ...(option.remoteHeaders || []),
     ...(option.packageEnvironmentVariables || []),
     ...(option.packageTransportHeaders || []),
     ...(option.packageTransportVariables || []),
@@ -245,6 +260,25 @@ const getFieldValueByFormKey = (values: Record<string, string>, formKey?: string
 };
 
 const isFieldRequired = (field: { isRequired?: boolean }) => Boolean(field.isRequired);
+
+const normalizeHeaderKey = (value: string | undefined): string => String(value || "").trim().toLowerCase();
+
+const isAuthorizationHeader = (field: RegistryRemoteVariable): boolean => {
+  const key = normalizeHeaderKey(field.key);
+  const label = normalizeHeaderKey(field.label);
+  return key === "authorization" || label === "authorization";
+};
+
+const pickSupportedAuthorizationHeaders = (headers: RegistryRemoteVariable[] | undefined): RegistryRemoteVariable[] => {
+  return (headers || []).filter(isAuthorizationHeader);
+};
+
+const collectUnsupportedRequiredHeaderNames = (headers: RegistryRemoteVariable[] | undefined): string[] => {
+  return (headers || [])
+    .filter((header) => isFieldRequired(header) && !isAuthorizationHeader(header))
+    .map((header) => (header.label || header.key || "header").trim())
+    .filter((name, index, arr) => Boolean(name) && arr.indexOf(name) === index);
+};
 
 const buildResolvedRuntimeArgs = (option: RegistryQuickAddOption, values: Record<string, string>): string[] => {
   const runtimeArgs = option.packageRuntimeArguments || [];
@@ -290,6 +324,9 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
     if (!remoteTarget) return;
 
     const remoteVariables = extractRemoteVariables(service, remote.type, remote.url);
+    const allRemoteHeaders = extractRemoteHeaders(service, remote.type, remote.url);
+    const remoteHeaders = pickSupportedAuthorizationHeaders(allRemoteHeaders);
+    const unsupportedRequiredHeaders = collectUnsupportedRequiredHeaderNames(allRemoteHeaders);
 
     options.push({
       key: `remote-${index}`,
@@ -299,6 +336,8 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
       serverUrl: remoteTarget.serverUrl,
       serverUrlTemplate: remote.url,
       remoteVariables,
+      remoteHeaders,
+      unsupportedRequiredHeaders,
     });
   });
 
@@ -312,7 +351,9 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
     const transportUrl = toStringOrUndefined(packageTransport?.url) || "";
 
     const packageTarget = resolveQuickAddTarget(transportType, transportUrl);
-    const packageTransportHeaders = extractKeyValueInputs(packageTransport?.headers, `pkg-transport-header:${index}`, "header");
+    const allPackageTransportHeaders = extractKeyValueInputs(packageTransport?.headers, `pkg-transport-header:${index}`, "header");
+    const packageTransportHeaders = pickSupportedAuthorizationHeaders(allPackageTransportHeaders);
+    const unsupportedRequiredHeaders = collectUnsupportedRequiredHeaderNames(allPackageTransportHeaders);
     const packageTransportVariables = extractVariableMapInputs(packageTransport?.variables, `pkg-transport-var:${index}`);
     const packageEnvironmentVariables = extractKeyValueInputs(rawPackage?.environmentVariables, `pkg-env:${index}`, "env");
     const packageRuntimeArguments = extractRuntimeArguments(rawPackage?.runtimeArguments, `pkg-runtime-arg:${index}`);
@@ -330,6 +371,7 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
         packageRuntimeHint,
         packageEnvironmentVariables,
         packageTransportHeaders,
+        unsupportedRequiredHeaders,
         packageTransportVariables,
         packageRuntimeArguments,
       });
@@ -346,6 +388,7 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
         packageRuntimeHint,
         packageEnvironmentVariables,
         packageTransportHeaders,
+        unsupportedRequiredHeaders,
         packageTransportVariables,
         packageRuntimeArguments,
         packageIdentifier,
@@ -539,6 +582,15 @@ export function useMcpToolsAddRegistry({
       return;
     }
 
+    if ((selectedOption.unsupportedRequiredHeaders || []).length > 0) {
+      message.warning(
+        t("mcpTools.registry.quickAddPicker.unsupportedRequiredHeaders", {
+          headers: (selectedOption.unsupportedRequiredHeaders || []).join(", "),
+        })
+      );
+      return;
+    }
+
     setAddingService(true);
     try {
       if (selectedOption.transportType === "stdio") {
@@ -596,6 +648,7 @@ export function useMcpToolsAddRegistry({
       } else {
         const requiredFields = [
           ...(selectedOption.remoteVariables || []),
+          ...(selectedOption.remoteHeaders || []),
           ...(selectedOption.packageTransportVariables || []),
           ...(selectedOption.packageTransportHeaders || []),
         ];
@@ -636,7 +689,10 @@ export function useMcpToolsAddRegistry({
           transport_type: selectedOption.transportType === "sse" ? MCP_TRANSPORT_TYPE.SSE : MCP_TRANSPORT_TYPE.HTTP,
           server_url: resolvedUrl,
           tags: [],
-          authorization_token: resolveAuthorizationFromHeaders(selectedOption.packageTransportHeaders, quickAddVariableValues),
+          authorization_token: resolveAuthorizationFromHeaders(
+            [...(selectedOption.remoteHeaders || []), ...(selectedOption.packageTransportHeaders || [])],
+            quickAddVariableValues
+          ),
           version: quickAddCandidateService.server?.version || undefined,
           registry_json: quickAddCandidateService.server,
         });

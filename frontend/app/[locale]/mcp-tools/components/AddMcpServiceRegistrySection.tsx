@@ -228,6 +228,7 @@ export default function AddMcpServiceRegistrySection({
           </Radio.Group>
 
           {renderVariableInputs("mcpTools.registry.quickAddPicker.variablesTitle", selectedQuickAddOption?.remoteVariables || [])}
+          {renderVariableInputs("mcpTools.registry.quickAddPicker.remoteHeadersTitle", selectedQuickAddOption?.remoteHeaders || [])}
           {renderVariableInputs("mcpTools.registry.quickAddPicker.packageTransportVariablesTitle", selectedQuickAddOption?.packageTransportVariables || [])}
           {renderVariableInputs("mcpTools.registry.quickAddPicker.packageTransportHeadersTitle", selectedQuickAddOption?.packageTransportHeaders || [])}
           {renderVariableInputs("mcpTools.registry.quickAddPicker.packageEnvironmentVariablesTitle", selectedQuickAddOption?.packageEnvironmentVariables || [])}
