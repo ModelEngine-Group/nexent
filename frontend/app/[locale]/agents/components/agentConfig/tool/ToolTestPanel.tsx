@@ -322,8 +322,6 @@ export default function ToolTestPanel({
         toolParams.index_names = selectedKbIds;
       }
 
-      log.info(`[ToolTest] toolParams after override: ${JSON.stringify(toolParams)}`);
-
       // Prepare configuration parameters from currentParams
       // Filter out index_names from configs when KB selection is enabled since it's passed via toolParams
       const configs = (configParams || []).reduce(
@@ -342,14 +340,6 @@ export default function ToolTestPanel({
         },
         {} as Record<string, any>
       );
-
-      log.info(`[ToolTest] configParams raw: ${JSON.stringify(configParams)}`);
-      log.info(`[ToolTest] configs: ${JSON.stringify(configs)}`);
-      log.info(`[ToolTest] selectedKbIds: ${JSON.stringify(selectedKbIds)}`);
-      log.info(`[ToolTest] toolRequiresKbSelection: ${toolRequiresKbSelection}`);
-      log.info(`[ToolTest] isManualInputMode: ${isManualInputMode}`);
-      log.info(`[ToolTest] manualJsonInput: ${manualJsonInput}`);
-
       // Call validateTool with parameters
       const toolName = tool.origin_name || tool.name || "";
       const toolSource = tool.source || "";
