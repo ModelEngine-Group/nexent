@@ -39,6 +39,7 @@ from database.community_mcp_db import (
     delete_mcp_community_record_by_id,
     get_mcp_community_record_by_id_and_tenant,
     get_mcp_community_records,
+    get_mcp_community_tag_stats_by_tenant,
     list_mcp_community_records_by_tenant,
     update_mcp_community_record_by_id,
 )
@@ -219,6 +220,10 @@ async def list_community_mcp_services(
         "nextCursor": db_result.get("nextCursor"),
         "items": items,
     }
+
+
+def list_community_mcp_tag_stats(tenant_id: str) -> List[Dict[str, Any]]:
+    return get_mcp_community_tag_stats_by_tenant(tenant_id=tenant_id)
 
 
 def _normalize_transport_type(value: str | None) -> str:

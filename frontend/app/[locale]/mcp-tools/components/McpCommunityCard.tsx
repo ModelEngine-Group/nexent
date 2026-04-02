@@ -1,5 +1,5 @@
 import { Button } from "antd";
-import { MCP_REGISTRY_SERVER_STATUS } from "@/const/mcpTools";
+import { MCP_TRANSPORT_TYPE, MCP_REGISTRY_SERVER_STATUS } from "@/const/mcpTools";
 import { formatRegistryDate, formatRegistryVersion } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 
@@ -49,6 +49,21 @@ export default function McpCommunityCard({
       </div>
 
       <p className="mt-3 line-clamp-2 min-h-[40px] text-sm text-slate-600">{service.description}</p>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-700">
+          {service.transportType === MCP_TRANSPORT_TYPE.HTTP
+            ? t("mcpTools.serverType.http")
+            : service.transportType === MCP_TRANSPORT_TYPE.SSE
+            ? t("mcpTools.serverType.sse")
+            : t("mcpTools.serverType.stdio")}
+        </span>
+        {(service.tags || []).map((tag) => (
+          <span key={`${service.name}-${tag}`} className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">
+            {tag}
+          </span>
+        ))}
+      </div>
 
       <div className="mt-4 flex items-center justify-end gap-2">
         <Button
