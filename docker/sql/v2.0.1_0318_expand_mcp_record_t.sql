@@ -15,7 +15,7 @@ ALTER TABLE IF EXISTS nexent.mcp_record_t
     ADD COLUMN IF NOT EXISTS config_json JSON,
     ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE,
     ADD COLUMN IF NOT EXISTS tags TEXT[],
-    ADD COLUMN IF NOT EXISTS description VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS description TEXT,
     ADD COLUMN IF NOT EXISTS last_sync_time TIMESTAMP WITHOUT TIME ZONE;
 
 -- 2) Add comments for new columns

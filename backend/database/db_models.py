@@ -341,7 +341,7 @@ class McpRecord(TableBase):
     config_json = Column(JSON, doc="MCP config data")
     enabled = Column(Boolean, default=True, doc="Enabled")
     tags = Column(ARRAY(Text), doc="Tags")
-    description = Column(String(100), doc="Description")
+    description = Column(Text, doc="Description")
     last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 
 
@@ -368,7 +368,7 @@ class McpCommunityRecord(TableBase):
     transport_type = Column(String(30), doc="Transport type: http/sse/stdio")
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
     tags = Column(ARRAY(Text), doc="Tags")
-    description = Column(String(100), doc="Description")
+    description = Column(Text, doc="Description")
     last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 
 

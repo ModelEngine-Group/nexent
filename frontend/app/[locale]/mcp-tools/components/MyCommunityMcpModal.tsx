@@ -7,6 +7,7 @@ import {
   updateCommunityMcpTool,
 } from "@/services/mcpToolsService";
 import { formatRegistryVersion } from "@/lib/mcpTools";
+import McpDescriptionField from "./McpDescriptionField";
 
 type Props = {
   open: boolean;
@@ -199,6 +200,7 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
 
       <Modal
         open={Boolean(editDraft)}
+        width={900}
         onCancel={() => setEditDraft(null)}
         onOk={() => {
           void saveEdit();
@@ -218,14 +220,19 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
                 className="mt-1 rounded-xl"
               />
             </label>
-            <label className="block text-xs text-slate-500">
-              {t("mcpTools.detail.description")}
-              <Input
+            <div className="block text-xs text-slate-500">
+              <McpDescriptionField
+                label={t("mcpTools.detail.description")}
                 value={editDraft.description}
-                onChange={(event) => setEditDraft({ ...editDraft, description: event.target.value })}
-                className="mt-1 rounded-xl"
+                onChange={(value) => setEditDraft({ ...editDraft, description: value })}
+                t={(key, params) => String(t(key, params as any))}
+                minRows={10}
+                maxRows={24}
+                toggleMinChars={160}
+                toggleMinLines={5}
+                wrapperClassName="text-xs text-slate-500"
               />
-            </label>
+            </div>
             <label className="block text-xs text-slate-500">
               {t("mcpTools.detail.version")}
               <Input
