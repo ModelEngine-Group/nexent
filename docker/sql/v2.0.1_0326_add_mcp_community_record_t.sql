@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_community_record_t (
     transport_type VARCHAR(30),
     config_json JSON,
     tags TEXT[],
-    description VARCHAR(100),
+    description TEXT,
     last_sync_time TIMESTAMP WITHOUT TIME ZONE,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,

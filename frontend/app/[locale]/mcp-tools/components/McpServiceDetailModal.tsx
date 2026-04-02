@@ -14,6 +14,7 @@ import {
   type McpServiceItem,
 } from "@/types/mcpTools";
 import { extractRegistryLinks, toPrettyRegistryJson } from "@/lib/mcpTools";
+import McpDescriptionField from "./McpDescriptionField";
 import McpServiceDetailToolListModal from "./McpServiceDetailToolListModal";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 
@@ -152,19 +153,16 @@ export default function McpServiceDetailModal({
                 className="mt-2 w-full rounded-2xl"
               />
             </label>
-            <label className="text-sm text-slate-500">
-              {t("mcpTools.detail.description")}
-              <Input
-                value={draftService.description}
-                onChange={(event) =>
-                  setDraftService({
-                    ...draftService,
-                    description: event.target.value,
-                  })
-                }
-                className="mt-2 w-full rounded-2xl"
-              />
-            </label>
+            <McpDescriptionField
+              label={t("mcpTools.detail.description")}
+              value={draftService.description}
+              onChange={(value) => setDraftService({ ...draftService, description: value })}
+              t={(key, params) => String(t(key, params as any))}
+              minRows={10}
+              maxRows={24}
+              toggleMinChars={160}
+              toggleMinLines={5}
+            />
             <label className="text-sm text-slate-500">
               {t("mcpTools.detail.serverUrl")}
               <Input

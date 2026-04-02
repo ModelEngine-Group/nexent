@@ -8,6 +8,7 @@ import {
   toPrettyRegistryJson,
 } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
+import McpDescriptionField from "./McpDescriptionField";
 
 interface Props {
   service: CommunityMcpCard;
@@ -78,10 +79,14 @@ export default function McpCommunityDetailModal({
                 </p>
               </div>
               <div>
-                <p className="text-sm text-slate-500">{t("mcpTools.detail.description")}</p>
-                <p className="mt-1 break-all rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700">
-                  {service.description || "-"}
-                </p>
+                <McpDescriptionField
+                  label={t("mcpTools.detail.description")}
+                  value={service.description}
+                  readOnly
+                  t={(key, params) => String(t(key, params as any))}
+                  toggleMinChars={160}
+                  toggleMinLines={5}
+                />
               </div>
               <div>
                 <p className="text-sm text-slate-500">{t("mcpTools.detail.serverUrl")}</p>

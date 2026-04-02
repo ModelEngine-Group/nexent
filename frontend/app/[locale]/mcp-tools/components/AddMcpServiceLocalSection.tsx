@@ -1,6 +1,8 @@
+import { useMemo, useState } from "react";
 import { Button, Input, InputNumber, Select, Tag } from "antd";
 import { MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
 import type { McpTransportType } from "@/types/mcpTools";
+import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 
 interface Props {
   newServiceName: string;
@@ -51,6 +53,13 @@ export default function AddMcpServiceLocalSection({
   handleAddService,
   t,
 }: Props) {
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+
+  const canToggleDescription = useMemo(() => {
+    const text = String(newServiceDesc || "");
+    return text.length > 280 || text.split("\n").length > 8;
+  }, [newServiceDesc]);
+
   return (
     <>
       <div className="px-6 py-5 space-y-4">
@@ -65,11 +74,34 @@ export default function AddMcpServiceLocalSection({
 
         <label className="block text-sm text-slate-500">
           {t("mcpTools.addModal.description")}
-          <Input
+          <Input.TextArea
             value={newServiceDesc}
             onChange={(event) => setNewServiceDesc(event.target.value)}
+            autoSize={{ minRows: 8, maxRows: 20 }}
             className="mt-2 w-full rounded-2xl"
+            placeholder={t("mcpTools.community.descriptionMarkdownPlaceholder")}
           />
+          <p className="mt-2 text-[11px] text-slate-400">{t("mcpTools.community.descriptionMarkdownHint")}</p>
+          <div className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                {t("mcpTools.community.descriptionPreview")}
+              </p>
+              {canToggleDescription ? (
+                <Button type="link" className="px-0" onClick={() => setDescriptionExpanded((prev) => !prev)}>
+                  {descriptionExpanded ? t("mcpTools.detail.descriptionCollapse") : t("mcpTools.detail.descriptionExpand")}
+                </Button>
+              ) : null}
+            </div>
+            <div className={descriptionExpanded ? "" : "max-h-40 overflow-hidden"}>
+              <MarkdownRenderer
+                content={newServiceDesc.trim() || "-"}
+                className="text-sm text-slate-700"
+                enableMultimodal={false}
+                showDiagramToggle={false}
+              />
+            </div>
+          </div>
         </label>
 
         <label className="block text-sm text-slate-500">
