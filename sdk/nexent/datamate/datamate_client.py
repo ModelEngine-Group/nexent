@@ -134,44 +134,65 @@ class DataMateClient:
 
     def list_knowledge_bases(
         self,
-        page: int = 0,
+        page: int = 1,
         size: int = 20,
         authorization: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Get list of knowledge bases from DataMate.
+        Get list of all knowledge bases from DataMate by paginating through all pages.
+
+        Always starts from page 1, reads the total page count from the first response,
+        then fetches all remaining pages and aggregates the results.
 
         Args:
-            page: Page index (default: 0)
-            size: Page size (default: 20)
-            authorization: Optional authorization header
+            page: Ignored; pagination always starts from page 1 (kept for backward compat).
+            size: Page size for each request (default: 20).
+            authorization: Optional authorization header.
 
         Returns:
-            List of knowledge base dictionaries with their IDs and metadata.
+            Aggregated list of all knowledge base dictionaries with their IDs and metadata.
 
         Raises:
-            RuntimeError: If the API request fails
+            RuntimeError: If any API request fails.
         """
         try:
             url = self._build_url("/api/knowledge-base/list")
-            payload = {"page": page, "size": size}
             headers = self._build_headers(authorization)
 
+            all_knowledge_bases: List[Dict[str, Any]] = []
+
+            # Always start from page 1 to get totalPages
+            current_page = 1
+            total_pages = 1
+
+            while current_page <= total_pages:
+                payload = {"page": current_page, "size": size}
+                logger.info(
+                    f"Fetching DataMate knowledge bases from: {url}, page={current_page}, size={size}")
+
+                response = self._make_request(
+                    "POST", url, headers, json=payload,
+                    error_message="Failed to get knowledge base list")
+                data = response.json()
+
+                page_content: List[Dict[str, Any]] = []
+                if data.get("data"):
+                    page_content = data.get("data", {}).get("content", [])
+
+                    # Read totalPages from the first page response only
+                    if current_page == 1:
+                        total_pages = data.get("data", {}).get("totalPages", 1)
+
+                all_knowledge_bases.extend(page_content)
+                logger.info(
+                    f"Fetched page {current_page}/{total_pages} "
+                    f"({len(page_content)} items, cumulative: {len(all_knowledge_bases)})")
+                current_page += 1
+
             logger.info(
-                f"Fetching DataMate knowledge bases from: {url}, page={page}, size={size}")
-
-            response = self._make_request(
-                "POST", url, headers, json=payload, error_message="Failed to get knowledge base list")
-            data = response.json()
-
-            # Extract knowledge base list from response
-            knowledge_bases = []
-            if data.get("data"):
-                knowledge_bases = data.get("data").get("content", [])
-
-            logger.info(
-                f"Successfully fetched {len(knowledge_bases)} knowledge bases from DataMate")
-            return knowledge_bases
+                f"Successfully fetched {len(all_knowledge_bases)} knowledge bases from DataMate "
+                f"across {total_pages} page(s)")
+            return all_knowledge_bases
 
         except httpx.HTTPError as e:
             logger.error(

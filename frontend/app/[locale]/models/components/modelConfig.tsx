@@ -489,7 +489,7 @@ export const ModelConfigSection = forwardRef<
           if (category === "voice") {
             modelType =
               optionId === MODEL_TYPES.TTS ? MODEL_TYPES.TTS : MODEL_TYPES.STT;
-          } else if (category === MODEL_TYPES.RERANK) {
+          } else if (category === "reranker") {
             modelType = MODEL_TYPES.RERANK;
           } else if (category === "multimodal") {
             modelType = MODEL_TYPES.VLM;
@@ -651,7 +651,7 @@ export const ModelConfigSection = forwardRef<
     if (category === "voice") {
       modelType =
         option === MODEL_TYPES.TTS ? MODEL_TYPES.TTS : MODEL_TYPES.STT;
-    } else if (category === MODEL_TYPES.RERANK) {
+    } else if (category === "reranker") {
       modelType = MODEL_TYPES.RERANK;
     } else if (category === "multimodal") {
       modelType = MODEL_TYPES.VLM;
@@ -680,7 +680,7 @@ export const ModelConfigSection = forwardRef<
       configKey = "multiEmbedding";
     } else if (category === "multimodal") {
       configKey = MODEL_TYPES.VLM;
-    } else if (category === MODEL_TYPES.RERANK) {
+    } else if (category === "reranker") {
       configKey = MODEL_TYPES.RERANK;
     } else if (category === "voice" && option === "tts") {
       configKey = MODEL_TYPES.TTS;
@@ -985,7 +985,9 @@ export const ModelConfigSection = forwardRef<
                               : key === MODEL_TYPES.EMBEDDING &&
                                   option.id === MODEL_TYPES.MULTI_EMBEDDING
                                 ? MODEL_TYPES.MULTI_EMBEDDING
-                                : (key as ModelType)
+                                : key === "reranker"
+                                  ? MODEL_TYPES.RERANK
+                                  : (key as ModelType)
                         }
                         modelId={option.id}
                         modelTypeName={option.name}

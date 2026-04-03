@@ -195,6 +195,11 @@ class DataMateConnectionError(Exception):
     pass
 
 
+class SkillException(Exception):
+    """Raised when skill operations fail."""
+    pass
+
+
 # ==================== Legacy Aliases (same as above, for compatibility) ====================
 # These are additional aliases that map to the same simple exception classes above.
 # They provide backward compatibility for code that uses these names.

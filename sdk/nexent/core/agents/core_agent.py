@@ -264,10 +264,6 @@ Additional Args:
                     self.logger.log(
                         Group(*execution_outputs_console), level=LogLevel.INFO)
             error_msg = str(e)
-            if "Import of " in error_msg and " is not allowed" in error_msg:
-                self.logger.log(
-                    "[bold red]Warning to user: Code execution failed due to an unauthorized import - Consider passing said import under `additional_authorized_imports` when initializing your CodeAgent.",
-                    level=LogLevel.INFO, )
             raise AgentExecutionError(error_msg, self.logger)
 
         truncated_output = None

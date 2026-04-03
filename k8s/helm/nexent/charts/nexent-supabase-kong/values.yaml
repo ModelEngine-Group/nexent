@@ -1,0 +1,18 @@
+replicaCount: 1
+
+image:
+  repository: kong
+  tag: 2.8.1
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 200m
+  limits:
+    memory: 512Mi
+    cpu: 500m
+
+config:
+  dashboardUsername: "supabase"
+  dashboardPassword: "Huawei123"

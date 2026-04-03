@@ -6,7 +6,7 @@ export default defineConfig({
   base: (globalThis as any).process?.env?.GITHUB_PAGES ? "/nexent/" : "/",
   title: "Nexent Doc",
   description:
-    "A zero-code platform for auto-generating agents  no orchestration, no complex drag-and-drop required.",
+    "A zero-code platform for auto-generating production-grade AI agents using Harness Engineering principles.",
 
   // Add favicon to head
   head: [
@@ -61,8 +61,16 @@ export default defineConfig({
                 link: "/en/quick-start/installation",
               },
               {
+                text: "Kubernetes Installation & Deployment",
+                link: "/en/quick-start/kubernetes-installation",
+              },
+              {
                 text: "Upgrade Guide",
                 link: "/en/quick-start/upgrade-guide",
+              },
+              {
+                text: "Kubernetes Upgrade Guide",
+                link: "/en/quick-start/kubernetes-upgrade-guide",
               },
               { text: "FAQ", link: "/en/quick-start/faq" },
             ],
@@ -280,8 +288,16 @@ export default defineConfig({
             items: [
               { text: "安装部署", link: "/zh/quick-start/installation" },
               {
+                text: "Kubernetes 安装与部署",
+                link: "/zh/quick-start/kubernetes-installation",
+              },
+              {
                 text: "升级指导",
                 link: "/zh/quick-start/upgrade-guide",
+              },
+              {
+                text: "Kubernetes 升级指南",
+                link: "/zh/quick-start/kubernetes-upgrade-guide",
               },
               { text: "常见问题", link: "/zh/quick-start/faq" },
             ],

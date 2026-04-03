@@ -4,6 +4,7 @@ import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
+import yaml from "js-yaml";
 
 /**
  * Parse tool inputs string to extract parameter information
@@ -64,6 +65,7 @@ export const fetchTools = async () => {
       name: tool.name,
       origin_name: tool.origin_name,
       description: tool.description,
+      description_zh: tool.description_zh,
       source: tool.source,
       is_available: tool.is_available,
       create_time: tool.create_time,
@@ -77,6 +79,7 @@ export const fetchTools = async () => {
           required: !param.optional,
           value: param.default,
           description: param.description,
+          description_zh: param.description_zh,
         };
       }),
     }));
@@ -390,6 +393,7 @@ export interface UpdateAgentInfoPayload {
   business_logic_model_name?: string;
   business_logic_model_id?: number;
   enabled_tool_ids?: number[];
+  enabled_skill_ids?: number[];
   related_agent_ids?: number[];
   ingroup_permission?: string;
 }
@@ -701,6 +705,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
               id: String(tool.tool_id),
               name: tool.name,
               description: tool.description,
+              description_zh: tool.description_zh,
               source: tool.source,
               is_available: tool.is_available,
               usage: tool.usage, // New: handle usage field
@@ -712,6 +717,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
                     required: !param.optional,
                     value: param.default,
                     description: param.description,
+                    description_zh: param.description_zh,
                   }))
                 : [],
             };
@@ -916,5 +922,476 @@ export const validateTool = async (
       message: "Network error occurred during validation",
       error: error instanceof Error ? error.message : String(error),
     };
+  }
+};
+
+/**
+ * Fetch all available skills
+ * @returns list of skills with skill_id, name, description, source, etc.
+ */
+export const fetchSkills = async () => {
+  try {
+    const response = await fetch(API_ENDPOINTS.skills.list, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+
+    const skills = data.skills || data || [];
+
+    const formattedSkills = skills.map((skill: any) => ({
+      skill_id: String(skill.skill_id),
+      name: skill.name,
+      description: skill.description || "",
+      source: skill.source || "custom",
+      tags: skill.tags || [],
+      content: skill.content || "",
+      params: skill.params ?? null,
+      tool_ids: Array.isArray(skill.tool_ids) ? skill.tool_ids.map(Number) : [],
+      update_time: skill.update_time,
+      create_time: skill.create_time,
+    }));
+
+    return {
+      success: true,
+      data: formattedSkills,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error fetching skill list:", error);
+    return {
+      success: false,
+      data: [],
+      message: "agentConfig.skills.fetchFailed",
+    };
+  }
+};
+
+/**
+ * Fetch skill instances for an agent
+ * @param agentId agent ID
+ * @param versionNo version number (default 0 for draft)
+ * @returns list of skill instances with enabled status
+ */
+export const fetchSkillInstances = async (
+  agentId: number,
+  versionNo: number = 0
+) => {
+  try {
+    const url = `${API_ENDPOINTS.skills.instanceList}?agent_id=${agentId}&version_no=${versionNo}`;
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+
+    const instances = data.instances || data || [];
+
+    const formattedInstances = instances.map((instance: any) => ({
+      skill_id: String(instance.skill_id),
+      enabled: instance.enabled ?? true,
+      skill_name: instance.skill_name,
+      skill_description: instance.skill_description,
+    }));
+
+    return {
+      success: true,
+      data: formattedInstances,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error fetching skill instances:", error);
+    return {
+      success: false,
+      data: [],
+      message: "agentConfig.skills.instanceFetchFailed",
+    };
+  }
+};
+
+/**
+ * Save (create/update) a skill instance for an agent
+ * @param skillId skill ID
+ * @param agentId agent ID
+ * @param enabled whether the skill is enabled
+ * @param versionNo version number (default 0 for draft)
+ * @returns save result
+ */
+export const saveSkillInstance = async (
+  skillId: number,
+  agentId: number,
+  enabled: boolean,
+  versionNo: number = 0
+) => {
+  try {
+    const requestBody = {
+      skill_id: skillId,
+      agent_id: agentId,
+      enabled: enabled,
+      version_no: versionNo,
+    };
+
+    const response = await fetch(API_ENDPOINTS.skills.instanceUpdate, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      data: data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error saving skill instance:", error);
+    return {
+      success: false,
+      data: null,
+      message: "agentConfig.skills.saveFailed",
+    };
+  }
+};
+
+/**
+ * Create a new skill
+ * @param skillData skill data including name, description, source, tags, content
+ * @returns created skill
+ */
+export const createSkill = async (skillData: {
+  name: string;
+  description?: string;
+  source?: string;
+  tags?: string[];
+  content?: string;
+}) => {
+  try {
+    const requestBody = {
+      name: skillData.name,
+      description: skillData.description || "",
+      source: skillData.source || "custom",
+      tags: skillData.tags || [],
+      content: skillData.content || "",
+    };
+
+    const response = await fetch(API_ENDPOINTS.skills.create, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      data: data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error creating skill:", error);
+    return {
+      success: false,
+      data: null,
+      message: error instanceof Error ? error.message : "Failed to create skill",
+    };
+  }
+};
+
+/**
+ * Update an existing skill
+ * @param skillName skill name
+ * @param skillData skill data to update
+ * @returns updated skill
+ */
+export const updateSkill = async (
+  skillName: string,
+  skillData: {
+    description?: string;
+    source?: string;
+    tags?: string[];
+    content?: string;
+    params?: Record<string, unknown>;
+  }
+) => {
+  try {
+    const requestBody: Record<string, any> = {};
+    if (skillData.description !== undefined) requestBody.description = skillData.description;
+    if (skillData.source !== undefined) requestBody.source = skillData.source;
+    if (skillData.tags !== undefined) requestBody.tags = skillData.tags;
+    if (skillData.content !== undefined) requestBody.content = skillData.content;
+    if (skillData.params !== undefined) requestBody.params = skillData.params;
+
+    const response = await fetch(API_ENDPOINTS.skills.update(skillName), {
+      method: "PUT",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      data: data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error updating skill:", error);
+    return {
+      success: false,
+      data: null,
+      message: error instanceof Error ? error.message : "Failed to update skill",
+    };
+  }
+};
+
+/**
+ * Create or update skill from file upload
+ * @param skillName skill name (optional for new skill)
+ * @param file file content
+ * @param isUpdate whether this is an update operation
+ * @returns created/updated skill
+ */
+export const createSkillFromFile = async (
+  skillName: string | null,
+  file: File | Blob,
+  isUpdate: boolean = false
+) => {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (skillName) {
+      formData.append("skill_name", skillName);
+    }
+
+    const endpoint = isUpdate && skillName
+      ? API_ENDPOINTS.skills.updateUpload(skillName)
+      : API_ENDPOINTS.skills.upload;
+
+    const method = isUpdate ? "PUT" : "POST";
+
+    // Don't set Content-Type for FormData - browser needs to set multipart/form-data with boundary
+    const headers: Record<string, string> = {
+      "User-Agent": "AgentFrontEnd/1.0",
+    };
+
+    const response = await fetch(endpoint, {
+      method: method,
+      headers: headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorData: any = {};
+      try {
+        errorData = await response.json();
+      } catch {
+        // JSON parse failed
+      }
+
+      const errorMessage = typeof errorData.detail === 'string'
+        ? errorData.detail
+        : Array.isArray(errorData.detail)
+          ? errorData.detail.map((e: any) => e.msg || JSON.stringify(e)).join('; ')
+          : JSON.stringify(errorData.detail);
+      throw new Error(errorMessage || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      data: data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error creating skill from file:", error);
+    return {
+      success: false,
+      data: null,
+      message: error instanceof Error ? error.message : "Failed to create skill from file",
+    };
+  }
+};
+
+/**
+ * Search skills by name prefix for autocomplete
+ * @param prefix name prefix to search
+ * @param allSkills all available skills
+ * @returns filtered skills matching the prefix
+ */
+export const searchSkillsByName = <T extends { name: string }>(
+  prefix: string,
+  allSkills: T[]
+): T[] => {
+  if (!prefix || prefix.trim() === "") {
+    return [];
+  }
+  const lowerPrefix = prefix.toLowerCase();
+  return allSkills
+    .filter((skill) => skill.name.toLowerCase().startsWith(lowerPrefix))
+    .slice(0, 10);
+};
+
+/**
+ * Fetch skill directory structure (files and folders)
+ * @param skillName skill name
+ * @returns file/folder structure
+ */
+export interface SkillFileNode {
+  name: string;
+  type: "file" | "directory";
+  children?: SkillFileNode[];
+}
+
+export const fetchSkillFiles = async (skillName: string): Promise<SkillFileNode[]> => {
+  try {
+    const response = await fetch(API_ENDPOINTS.skills.files(skillName), {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return data.files || data || [];
+  } catch (error) {
+    log.error("Error fetching skill files:", error);
+    return [];
+  }
+};
+
+/**
+ * Fetch skill file content
+ * @param skillName skill name
+ * @param filePath file path relative to skill directory
+ * @returns file content
+ */
+export const getAgentByName = async (agentName: string): Promise<{
+  agent_id: number;
+  latest_version_no: number | null;
+} | null> => {
+  try {
+    const response = await fetch(API_ENDPOINTS.agent.byName(agentName), {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return {
+      agent_id: data.agent_id,
+      latest_version_no: data.latest_version_no ?? null,
+    };
+  } catch (error) {
+    log.error("Error fetching agent by name:", error);
+    return null;
+  }
+};
+
+/**
+ * Fetch skill file content
+ * @param skillName skill name
+ * @param filePath file path relative to skill directory
+ * @returns file content
+ */
+export const fetchSkillFileContent = async (skillName: string, filePath: string): Promise<string | null> => {
+  try {
+    const encodedPath = encodeURIComponent(filePath);
+    const response = await fetch(`${API_ENDPOINTS.skills.fileContent(skillName, encodedPath)}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return data.content || data;
+  } catch (error) {
+    log.error("Error fetching skill file content:", error);
+    return null;
+  }
+};
+
+/**
+ * Delete a specific file within a skill directory
+ * @param skillName skill name
+ * @param filePath file path relative to skill directory
+ * @returns delete result
+ */
+export const deleteSkillTempFile = async (skillName: string, filePath: string): Promise<boolean> => {
+  try {
+    const encodedPath = encodeURIComponent(filePath);
+    const response = await fetch(`${API_ENDPOINTS.skills.deleteFile(skillName, encodedPath)}`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      log.warn(`Failed to delete skill temp file: ${response.status}`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    log.error("Error deleting skill temp file:", error);
+    return false;
+  }
+};
+
+/**
+ * Get skill configuration from config.yaml
+ * @param skillName skill name
+ * @returns skill config object or null
+ */
+/**
+ * Fetch skill configuration (config.yaml)
+ * @param skillName The skill name
+ * @returns Parsed config object with temp_filename and progress info
+ */
+export const fetchSkillConfig = async (skillName: string): Promise<Record<string, unknown> | null> => {
+  try {
+    const response = await fetch(
+      `${API_ENDPOINTS.skills.fileContent(skillName, "config.yaml")}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) {
+      log.warn(`Failed to fetch skill config: ${response.status}`);
+      return null;
+    }
+    const data = await response.json();
+    const yamlContent = data.content;
+    if (!yamlContent) return null;
+
+    // Parse YAML string to object using js-yaml
+    const parsed = yaml.load(yamlContent) as Record<string, unknown>;
+    return parsed || null;
+  } catch (error) {
+    log.error("Error fetching skill config:", error);
+    return null;
   }
 };

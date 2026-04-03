@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Input, Button, Card, Typography, Tooltip, Modal, Form } from "antd";
+import { Input, Button, Card, Typography, Tooltip, Modal, Form, Tag, Skeleton } from "antd";
 import { Settings, PenLine, X } from "lucide-react";
+import { CloseOutlined } from "@ant-design/icons";
 
 import { Tool, ToolParam } from "@/types/agentConfig";
+import { KnowledgeBase } from "@/types/knowledgeBase";
 import {
   validateTool,
   parseToolInputs,
@@ -13,6 +15,7 @@ import {
 } from "@/services/agentConfigService";
 import log from "@/lib/logger";
 import { DEFAULT_TYPE } from "@/const/constants";
+import { getLocalizedDescription } from "@/lib/utils";
 
 const { Text, Title } = Typography;
 
@@ -25,6 +28,22 @@ export interface ToolTestPanelProps {
   configParams: ToolParam[];
   /** Callback when panel is closed */
   onClose: () => void;
+  /** Whether the tool requires knowledge base selection */
+  toolRequiresKbSelection?: boolean;
+  /** Knowledge bases for selection */
+  knowledgeBases?: KnowledgeBase[];
+  /** Whether knowledge bases are loading */
+  kbLoading?: boolean;
+  /** Callback to open knowledge base selector modal */
+  onOpenKbSelector?: (paramIndex: number) => void;
+  /** Selected knowledge base IDs for the index_names parameter */
+  selectedKbIds?: string[];
+  /** Selected knowledge base display names */
+  selectedKbDisplayNames?: string[];
+  /** Callback when knowledge base selection changes */
+  onKbSelectionChange?: (ids: string[], displayNames: string[]) => void;
+  /** Callback to remove a knowledge base from selection */
+  onRemoveKb?: (index: number, paramIndex: number) => void;
 }
 
 export default function ToolTestPanel({
@@ -32,9 +51,22 @@ export default function ToolTestPanel({
   tool,
   configParams,
   onClose,
+  toolRequiresKbSelection = false,
+  knowledgeBases = [],
+  kbLoading = false,
+  onOpenKbSelector,
+  selectedKbIds = [],
+  selectedKbDisplayNames = [],
+  onKbSelectionChange,
+  onRemoveKb,
 }: ToolTestPanelProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
+
+  // Track if form has been initialized (to avoid resetting user input)
+  const formInitializedRef = useRef<boolean>(false);
+  // Track the last known tool to detect tool changes
+  const lastToolRef = useRef<string>("");
 
   // Tool test related state
   const [testExecuting, setTestExecuting] = useState<boolean>(false);
@@ -44,6 +76,13 @@ export default function ToolTestPanel({
   const [isManualInputMode, setIsManualInputMode] = useState(false);
   const [manualJsonInput, setManualJsonInput] = useState<string>("");
   const [isParseSuccessful, setIsParseSuccessful] = useState<boolean>(false);
+
+  // Reset form initialization flag when modal is closed or tool changes
+  useEffect(() => {
+    if (!visible) {
+      formInitializedRef.current = false;
+    }
+  }, [visible]);
 
   // Initialize test panel when opened
   useEffect(() => {
@@ -57,6 +96,22 @@ export default function ToolTestPanel({
       setManualJsonInput("");
       setIsParseSuccessful(false);
       form.resetFields();
+      formInitializedRef.current = false;
+      return;
+    }
+
+    // Detect if tool has changed
+    const currentToolName = tool.origin_name || tool.name || "";
+    const toolChanged = lastToolRef.current !== currentToolName;
+
+    // Only re-initialize if the tool has changed, not just selectedKbIds
+    if (toolChanged) {
+      lastToolRef.current = currentToolName;
+      formInitializedRef.current = false;
+    }
+
+    // Skip if form is already initialized and tool hasn't changed
+    if (formInitializedRef.current && !toolChanged) {
       return;
     }
 
@@ -76,7 +131,14 @@ export default function ToolTestPanel({
         Object.entries(parsedInputs).forEach(([paramName, paramInfo]) => {
           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
-          if (
+          // Check if this is the index_names parameter and KB selection is enabled
+          const isIndexNamesParam = paramName === "index_names" && toolRequiresKbSelection;
+
+          if (isIndexNamesParam && selectedKbIds.length > 0) {
+            // Use the selected KB IDs from configParams as default
+            parameterValues[paramName] = selectedKbIds;
+            formValues[`param_${paramName}`] = selectedKbIds;
+          } else if (
             paramInfo &&
             typeof paramInfo === "object" &&
             paramInfo.default != null
@@ -113,12 +175,15 @@ export default function ToolTestPanel({
         setIsManualInputMode(false);
         // Set manual input to current parsed values as default
         setManualJsonInput(JSON.stringify(parameterValues, null, 2));
+        // Mark form as initialized
+        formInitializedRef.current = true;
       } else {
         // Parsing returned empty object, treat as failed
         setParsedInputs({});
         setParameterValues({});
         setIsManualInputMode(true);
         setManualJsonInput("{}");
+        formInitializedRef.current = true;
       }
     } catch (error) {
       log.error("Parameter parsing error:", error);
@@ -128,8 +193,45 @@ export default function ToolTestPanel({
       // When parsing fails, automatically switch to manual input mode
       setIsManualInputMode(true);
       setManualJsonInput("{}");
+      formInitializedRef.current = true;
     }
-  }, [tool]);
+  }, [tool, toolRequiresKbSelection, visible, form]);
+
+  // Sync KB selection with form values when selectedKbIds changes (but don't reset other fields)
+  useEffect(() => {
+    if (!toolRequiresKbSelection) return;
+
+    const fieldName = `param_index_names`;
+    const currentValue = form.getFieldValue(fieldName);
+
+    // Only update if the value is different
+    const idsMatch = Array.isArray(currentValue) &&
+      currentValue.length === selectedKbIds.length &&
+      currentValue.every((id: string, i: number) => id === selectedKbIds[i]);
+
+    if (!idsMatch) {
+      form.setFieldValue(fieldName, selectedKbIds);
+
+      // Also update the parameter values
+      if (selectedKbIds.length > 0) {
+        setParameterValues((prev) => ({
+          ...prev,
+          index_names: selectedKbIds,
+        }));
+        // Update manual JSON input while preserving other values
+        setManualJsonInput((prev) => {
+          try {
+            const parsed = JSON.parse(prev);
+            parsed.index_names = selectedKbIds;
+            return JSON.stringify(parsed, null, 2);
+          } catch {
+            // If JSON is invalid, keep the current value
+            return prev;
+          }
+        });
+      }
+    }
+  }, [selectedKbIds, toolRequiresKbSelection, form]);
 
   // Close test panel
   const handleClose = () => {
@@ -139,6 +241,12 @@ export default function ToolTestPanel({
   // Execute tool test
   const executeTest = async () => {
     if (!tool) return;
+
+    // Validate that knowledge base is selected when required
+    if (toolRequiresKbSelection && selectedKbIds.length === 0) {
+      setTestResult(`Test failed: Please select at least one knowledge base`);
+      return;
+    }
 
     setTestExecuting(true);
 
@@ -164,7 +272,16 @@ export default function ToolTestPanel({
           const paramInfo = parsedInputs[paramName];
           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
-          if (value && value.trim() !== "") {
+          // Check if this is a KB selector parameter (index_names with KB selection enabled)
+          const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection;
+
+          // Skip KB selector parameters - they will be handled separately
+          if (isKbSelectorParam) {
+            return;
+          }
+
+          // Handle string values
+          if (typeof value === "string" && value.trim() !== "") {
             // Convert value to correct type based on parameter type from inputs
             switch (paramType) {
               case "integer":
@@ -190,23 +307,45 @@ export default function ToolTestPanel({
               default:
                 toolParams[paramName] = value.trim();
             }
+          } else if (Array.isArray(value) && value.length > 0) {
+            // Handle array values (for non-KB selector array parameters)
+            toolParams[paramName] = value;
+          } else if (typeof value === "object" && value !== null) {
+            // Handle object values
+            toolParams[paramName] = value;
           }
         });
       }
 
+      // Override index_names with selectedKbIds if KB selection is enabled
+      if (toolRequiresKbSelection && selectedKbIds.length > 0) {
+        toolParams.index_names = selectedKbIds;
+      }
+
       // Prepare configuration parameters from currentParams
+      // Filter out index_names from configs when KB selection is enabled since it's passed via toolParams
       const configs = (configParams || []).reduce(
         (acc: Record<string, any>, param: ToolParam) => {
-          acc[param.name] = param.value;
+          // Skip index_names when KB selection is enabled (it's passed via toolParams)
+          if (toolRequiresKbSelection && (param.name === "index_names" || param.name === "dataset_ids")) {
+            return acc;
+          }
+          // Ensure top_k is always a number, not an array
+          if (param.name === "top_k" && Array.isArray(param.value)) {
+            acc[param.name] = param.value[0] || 3;
+          } else {
+            acc[param.name] = param.value;
+          }
           return acc;
         },
         {} as Record<string, any>
       );
-
       // Call validateTool with parameters
+      const toolName = tool.origin_name || tool.name || "";
+      const toolSource = tool.source || "";
       const result = await validateTool(
-        tool.origin_name || tool.name,
-        tool.source, // Tool source
+        toolName,
+        toolSource, // Tool source
         tool.usage || "", // Tool usage
         toolParams, // tool input parameters
         configs // tool configuration parameters
@@ -274,7 +413,20 @@ export default function ToolTestPanel({
 
                       Object.keys(parameterValues).forEach((paramName) => {
                         const formValue = currentFormValues[`param_${paramName}`];
-                        if (formValue && formValue.trim() !== "") {
+
+                        // Check if this is a KB selector parameter
+                        const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection;
+
+                        // Handle KB selector parameters - use selectedKbIds
+                        if (isKbSelectorParam) {
+                          if (selectedKbIds.length > 0) {
+                            currentParamsJson[paramName] = selectedKbIds;
+                          }
+                          return;
+                        }
+
+                        // Handle string values
+                        if (typeof formValue === "string" && formValue.trim() !== "") {
                           const paramInfo = parsedInputs[paramName];
                           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
@@ -302,6 +454,12 @@ export default function ToolTestPanel({
                           } catch {
                             currentParamsJson[paramName] = formValue.trim();
                           }
+                        } else if (Array.isArray(formValue) && formValue.length > 0) {
+                          // Handle array values
+                          currentParamsJson[paramName] = formValue;
+                        } else if (typeof formValue === "object" && formValue !== null) {
+                          // Handle object values
+                          currentParamsJson[paramName] = formValue;
                         }
                       });
                       setManualJsonInput(
@@ -318,25 +476,35 @@ export default function ToolTestPanel({
                           const paramInfo = parsedInputs[paramName];
                           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
+                          // Check if this is a KB selector parameter
+                          const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection;
+
                           if (manualValue !== undefined) {
-                            // Convert to string for display based on parameter type
-                            switch (paramType) {
-                              case "boolean":
-                                formValues[`param_${paramName}`] = manualValue
-                                  ? "true"
-                                  : "false";
-                                break;
-                              case "array":
-                              case "object":
-                                formValues[`param_${paramName}`] =
-                                  JSON.stringify(manualValue, null, 2);
-                                break;
-                              default:
-                                formValues[`param_${paramName}`] =
-                                  String(manualValue);
+                            // KB selector parameters should keep their array form
+                            if (isKbSelectorParam) {
+                              formValues[`param_${paramName}`] = Array.isArray(manualValue)
+                                ? manualValue
+                                : [];
+                            } else {
+                              // Convert to string for display based on parameter type
+                              switch (paramType) {
+                                case "boolean":
+                                  formValues[`param_${paramName}`] = manualValue
+                                    ? "true"
+                                    : "false";
+                                  break;
+                                case "array":
+                                case "object":
+                                  formValues[`param_${paramName}`] =
+                                    JSON.stringify(manualValue, null, 2);
+                                  break;
+                                default:
+                                  formValues[`param_${paramName}`] =
+                                    String(manualValue);
+                              }
                             }
                           } else {
-                            formValues[`param_${paramName}`] = "";
+                            formValues[`param_${paramName}`] = isKbSelectorParam ? [] : "";
                           }
                         });
                         form.setFieldsValue(formValues);
@@ -385,9 +553,28 @@ export default function ToolTestPanel({
                         paramInfo.description
                           ? paramInfo.description
                           : paramName;
+                      const description_zh =
+                        paramInfo &&
+                        typeof paramInfo === "object" &&
+                        paramInfo.description_zh
+                          ? paramInfo.description_zh
+                          : undefined;
 
                       const fieldName = `param_${paramName}`;
                       const rules: any[] = [];
+
+                      // Check if this is the index_names parameter and KB selection is enabled
+                      const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection;
+
+                      // Get display names based on selected KB IDs and knowledge bases
+                      let displayNames: string[] = [];
+                      if (isKbSelectorParam && selectedKbIds.length > 0 && knowledgeBases.length > 0) {
+                        displayNames = selectedKbIds.map((id) => {
+                          const cleanId = id.trim();
+                          const kb = knowledgeBases.find((k) => k.id === cleanId);
+                          return kb?.display_name || kb?.name || cleanId;
+                        });
+                      }
 
                       // Add type-specific validation rules
                       switch (paramInfo?.type || DEFAULT_TYPE) {
@@ -441,6 +628,83 @@ export default function ToolTestPanel({
                           break;
                       }
 
+                      // Render knowledge base selector for index_names parameter
+                      if (isKbSelectorParam) {
+                        return (
+                          <Form.Item
+                            key={paramName}
+                            label={
+                              <span
+                                style={{ width: "100%" }}
+                                title={paramName}
+                              >
+                                {paramName}
+                              </span>
+                            }
+                            name={fieldName}
+                            rules={rules}
+                            tooltip={{
+                              title: getLocalizedDescription(description, description_zh),
+                              placement: "topLeft",
+                              styles: { root: { maxWidth: 400 } },
+                            }}
+                          >
+                            <div>
+                              <div
+                                className="cursor-pointer bg-white border rounded px-3 py-2 transition-colors border-gray-300 hover:border-blue-400"
+                                onClick={() => onOpenKbSelector?.(-1)} // -1 indicates this is from test panel
+                                style={{
+                                  width: "100%",
+                                  minHeight: "32px",
+                                  display: "flex",
+                                  flexWrap: "wrap",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                                title={displayNames.join(", ")}
+                              >
+                                {kbLoading && knowledgeBases.length === 0 ? (
+                                  <div className="flex items-center gap-2 w-full">
+                                    <Skeleton.Input active size="small" style={{ width: "60%" }} />
+                                  </div>
+                                ) : displayNames.length > 0 ? (
+                                  displayNames.map((name, i) => (
+                                    <Tag
+                                      key={selectedKbIds[i]}
+                                      closeIcon={
+                                        <span className="ant-tag-close-icon">
+                                          <CloseOutlined style={{ fontSize: "10px" }} />
+                                        </span>
+                                      }
+                                      onClose={(e) => {
+                                        e.stopPropagation();
+                                        onRemoveKb?.(i, -1); // -1 indicates this is from test panel
+                                      }}
+                                      style={{
+                                        marginRight: 0,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        lineHeight: "20px",
+                                        padding: "0 8px",
+                                        fontSize: "13px",
+                                      }}
+                                    >
+                                      {name}
+                                    </Tag>
+                                  ))
+                                ) : (
+                                  <span className="text-gray-400 text-sm">
+                                    {t("toolConfig.input.knowledgeBaseSelector.placeholder", {
+                                      name: getLocalizedDescription(description, description_zh) || paramName,
+                                    })}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </Form.Item>
+                        );
+                      }
+
                       return (
                         <Form.Item
                           key={paramName}
@@ -455,13 +719,13 @@ export default function ToolTestPanel({
                           name={fieldName}
                           rules={rules}
                           tooltip={{
-                            title: description,
+                            title: getLocalizedDescription(description, description_zh),
                             placement: "topLeft",
                             styles: { root: { maxWidth: 400 } },
                           }}
                         >
                           <Input
-                            placeholder={description}
+                            placeholder={getLocalizedDescription(description, description_zh)}
                           />
                         </Form.Item>
                       );

@@ -432,7 +432,6 @@ export function ChatInterface() {
       const runAgentParams: any = {
         query: finalQuery, // Use preprocessed query or original query
         conversation_id: id,
-        is_set: isSwitchedConversation || currentMessages.length <= 1,
         history: currentMessages
           .filter((msg) => msg.id !== userMessage.id)
           .map((msg) => ({
