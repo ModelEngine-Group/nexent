@@ -1621,6 +1621,28 @@ export default function ToolConfigModal({
                 tool={tool}
                 onClose={handleCloseTestPanel}
                 configParams={currentParams}
+                toolRequiresKbSelection={toolRequiresKbSelection}
+                knowledgeBases={knowledgeBases}
+                kbLoading={kbLoading}
+                selectedKbIds={selectedKbIds}
+                selectedKbDisplayNames={selectedKbDisplayNames}
+                onOpenKbSelector={(paramIndex) => openKbSelector(paramIndex === -1 ? 0 : paramIndex)}
+                onKbSelectionChange={(ids, displayNames) => {
+                  setSelectedKbIds(ids);
+                  setSelectedKbDisplayNames(displayNames);
+                }}
+                onRemoveKb={(index, paramIndex) => {
+                  if (paramIndex === -1) {
+                    // Called from test panel - remove from selectedKbIds
+                    const newIds = selectedKbIds.filter((_, i) => i !== index);
+                    const newDisplayNames = selectedKbDisplayNames.filter((_, i) => i !== index);
+                    setSelectedKbIds(newIds);
+                    setSelectedKbDisplayNames(newDisplayNames);
+                  } else {
+                    // Called from config panel
+                    removeKbFromSelection(index, paramIndex);
+                  }
+                }}
               />
             )}
           </div>
