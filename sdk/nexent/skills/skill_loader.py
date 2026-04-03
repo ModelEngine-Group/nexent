@@ -46,7 +46,7 @@ class SkillLoader:
             # Fix YAML parsing to handle special characters in values
             frontmatter = cls._fix_yaml_frontmatter(frontmatter)
             meta = yaml.safe_load(frontmatter)
-        except yaml.YamlError as e:
+        except yaml.YAMLError as e:
             logger.warning(f"YAML parse error, falling back to regex extraction: {e}")
 
         # If yaml.safe_load failed or returned invalid result, use regex fallback
@@ -87,6 +87,12 @@ class SkillLoader:
                 fixed_lines.append(line)
                 continue
 
+            # Skip indented lines - these are content of multi-line values (block scalars)
+            # They should NOT be modified as they're part of block scalar values
+            if line.startswith(' ') or line.startswith('\t'):
+                fixed_lines.append(line)
+                continue
+
             # Check if this is a key-value line (contains ':' but not in quotes)
             if ':' in line:
                 # Find the first colon to identify the key
@@ -98,6 +104,11 @@ class SkillLoader:
                 # These must be preserved as-is for multi-line strings
                 base_symbols = ('|', '|+', '|-', '>', '>+', '>-')
                 if value_part and value_part.rstrip().startswith(base_symbols):
+                    fixed_lines.append(line)
+                    continue
+
+                # Skip YAML list items (lines starting with '-')
+                if key == '' or line.strip().startswith('-'):
                     fixed_lines.append(line)
                     continue
 
@@ -128,9 +139,40 @@ class SkillLoader:
             result["name"] = name_match.group(1).strip().strip('"').strip("'")
 
         # Extract description field
-        desc_match = re.search(r"^description:\s*(.+?)\s*$", frontmatter, re.MULTILINE)
-        if desc_match:
-            result["description"] = desc_match.group(1).strip().strip('"').strip("'")
+        # Using non-greedy (.+?) will capture minimum, so "description: >" captures ">"
+        # Need to check if this is a block scalar first
+        desc_start_match = re.search(r"^description:\s*", frontmatter, re.MULTILINE)
+        if desc_start_match:
+            # Find the actual description line
+            lines = frontmatter.split('\n')
+            desc_line_idx = -1
+            for i, line in enumerate(lines):
+                if re.match(r"^description:\s*", line):
+                    desc_line_idx = i
+                    break
+
+            if desc_line_idx >= 0:
+                desc_line = lines[desc_line_idx]
+
+                # Check if it's a block scalar
+                has_block_scalar = re.match(r"^description:\s*[>|]", desc_line)
+                if has_block_scalar:
+                    # Collect all indented lines
+                    content_lines = []
+                    for line in lines[desc_line_idx + 1:]:
+                        # Empty line or non-indented line ends block
+                        if line.strip() == "":
+                            continue
+                        if not line.startswith(" ") and not line.startswith("\t"):
+                            break
+                        content_lines.append(line)
+                    description_text = " ".join([l.lstrip() for l in content_lines]).strip()
+                    result["description"] = description_text
+                else:
+                    # Single line value
+                    desc_match = re.search(r"^description:\s*(.+?)\s*$", desc_line)
+                    if desc_match:
+                        result["description"] = desc_match.group(1).strip().strip('"').strip("'")
 
         # Extract tags field (YAML list format)
         tags_match = re.search(r"^tags:\s*\[(.*?)\]\s*$", frontmatter, re.MULTILINE | re.DOTALL)

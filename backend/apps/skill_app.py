@@ -368,47 +368,6 @@ async def list_skill_instances(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# Skill creator temp file endpoints (must be before /{skill_name} route)
-@router.get("/creator/cache")
-async def get_skill_creator_temp_file(
-    authorization: Optional[str] = Header(None)
-) -> JSONResponse:
-    """Read the skill creator temp file (tmp.md).
-
-    Returns the content of the tmp.md file stored in the skills root directory.
-    """
-    try:
-        get_current_user_id(authorization)
-
-        service = SkillService()
-        content = service.skill_manager.read_tmp_file()
-
-        return JSONResponse(content={"content": content or ""})
-    except Exception as e:
-        logger.error(f"Error reading skill creator temp file: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.delete("/creator/cache")
-async def delete_skill_creator_temp_file(
-    authorization: Optional[str] = Header(None)
-) -> JSONResponse:
-    """Delete the skill creator temp file (tmp.md).
-
-    Removes the tmp.md file from the skills root directory.
-    """
-    try:
-        get_current_user_id(authorization)
-
-        service = SkillService()
-        service.skill_manager.delete_tmp_file()
-
-        return JSONResponse(content={"success": True})
-    except Exception as e:
-        logger.error(f"Error deleting skill creator temp file: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
 @router.get("/{skill_name}")
 async def get_skill(skill_name: str) -> JSONResponse:
     """Get a specific skill by name."""
@@ -537,13 +496,25 @@ async def create_simple_skill(
 
     Loads the skill_creation_simple prompt template, runs an internal agent
     with WriteSkillFileTool and ReadSkillMdTool, extracts the <SKILL> block
-    from the final answer, and streams step progress via SSE.
+    from the final answer, and streams step progress and token content via SSE.
 
     Yields SSE events:
         - step_count: Current agent step number
+        - skill_content: Token-level content (thinking, code, deep_thinking, tool output)
         - final_answer: Complete skill content
+        - done: Stream completion signal
     """
+    # Message types to stream as skill_content (token-level output)
+    STREAMABLE_CONTENT_TYPES = frozenset([
+        "model_output_thinking",
+        "model_output_code",
+        "model_output_deep_thinking",
+        "tool",
+        "execution_logs",
+    ])
+
     async def generate():
+        import json
         try:
             _, tenant_id, language = get_current_user_info(authorization)
 
@@ -571,21 +542,48 @@ async def create_simple_skill(
             thread = threading.Thread(target=run_task)
             thread.start()
 
-            # Poll observer for step_count messages
+            # Poll observer for step_count and token content messages
             while thread.is_alive():
                 cached = observer.get_cached_message()
                 for msg in cached:
                     if isinstance(msg, str):
                         try:
-                            import json
                             data = json.loads(msg)
-                            if data.get("type") == "step_count":
-                                yield f"data: {json.dumps({'type': 'step_count', 'content': data.get('content', '')}, ensure_ascii=False)}\n\n"
+                            msg_type = data.get("type", "")
+                            content = data.get("content", "")
+
+                            # Stream step progress
+                            if msg_type == "step_count":
+                                yield f"data: {json.dumps({'type': 'step_count', 'content': content}, ensure_ascii=False)}\n\n"
+                            # Stream token content (thinking, code, deep_thinking, tool output)
+                            elif msg_type in STREAMABLE_CONTENT_TYPES:
+                                yield f"data: {json.dumps({'type': 'skill_content', 'content': content}, ensure_ascii=False)}\n\n"
+                            # Stream final_answer content separately
+                            elif msg_type == "final_answer":
+                                yield f"data: {json.dumps({'type': 'final_answer', 'content': content}, ensure_ascii=False)}\n\n"
                         except (json.JSONDecodeError, Exception):
                             pass
                 await asyncio.sleep(0.1)
 
             thread.join()
+
+            # Stream any remaining cached messages after thread completes
+            remaining = observer.get_cached_message()
+            for msg in remaining:
+                if isinstance(msg, str):
+                    try:
+                        data = json.loads(msg)
+                        msg_type = data.get("type", "")
+                        content = data.get("content", "")
+
+                        if msg_type == "step_count":
+                            yield f"data: {json.dumps({'type': 'step_count', 'content': content}, ensure_ascii=False)}\n\n"
+                        elif msg_type in STREAMABLE_CONTENT_TYPES:
+                            yield f"data: {json.dumps({'type': 'skill_content', 'content': content}, ensure_ascii=False)}\n\n"
+                        elif msg_type == "final_answer":
+                            yield f"data: {json.dumps({'type': 'final_answer', 'content': content}, ensure_ascii=False)}\n\n"
+                    except (json.JSONDecodeError, Exception):
+                        pass
 
             # Stream final answer content from observer
             final_result = observer.get_final_answer()
@@ -597,7 +595,6 @@ async def create_simple_skill(
 
         except Exception as e:
             logger.error(f"Error in create_simple_skill stream: {e}")
-            import json
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")

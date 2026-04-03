@@ -31,29 +31,6 @@ def create_skill_creation_agent_config(
 
     first_model = model_config_list[0]
 
-    builtin_tools = [
-        ToolConfig(
-            class_name="WriteSkillFileTool",
-            name="write_skill_file",
-            description="Write skill file content to disk",
-            source="builtin",
-            params={"local_skills_dir": local_skills_dir},
-            metadata={},
-            inputs="filename: str, content: str",
-            output_type="bool"
-        ),
-        ToolConfig(
-            class_name="ReadSkillMdTool",
-            name="read_skill_md",
-            description="Read skill markdown file content",
-            source="builtin",
-            params={"local_skills_dir": local_skills_dir},
-            metadata={},
-            inputs="file_path: str",
-            output_type="str"
-        )
-    ]
-
     prompt_templates = {
         "system_prompt": system_prompt,
         "managed_agent": {
@@ -75,7 +52,7 @@ def create_skill_creation_agent_config(
         name="__skill_creator__",
         description="Internal skill creator agent",
         prompt_templates=prompt_templates,
-        tools=builtin_tools,
+        tools=[],
         max_steps=5,
         model_name=first_model.cite_name
     )

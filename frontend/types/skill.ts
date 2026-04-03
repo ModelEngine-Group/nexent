@@ -10,30 +10,19 @@
 export const MAX_RECENT_SKILLS = 5;
 
 /**
- * Temporary file name for skill creator drafts
- */
-export const SKILL_CREATOR_TEMP_FILE = "tmp.md";
-
-/**
  * Interactive skill creation steps (Chinese)
  */
 export const THINKING_STEPS_ZH = [
-  { step: 0, description: "等待大模型响应 ..." },
-  { step: 1, description: "查询草稿内容 ..." },
-  { step: 2, description: "生成技能 SKILL.md ..." },
-  { step: 3, description: "解析并保存 ..." },
-  { step: 4, description: "总结中 ..." },
+  { step: 1, description: "生成技能内容中 ..." },
+  { step: 2, description: "总结中 ..." },
 ];
 
 /**
  * Interactive skill creation steps (English)
  */
 export const THINKING_STEPS_EN = [
-  { step: 0, description: "Waiting for model response..." },
-  { step: 1, description: "Reading draft content..." },
-  { step: 2, description: "Generating skill SKILL.md ..." },
-  { step: 3, description: "Parsing and saving..." },
-  { step: 4, description: "Summarizing..." },
+  { step: 1, description: "Generating skill content..." },
+  { step: 2, description: "Summarizing..." },
 ];
 
 /**

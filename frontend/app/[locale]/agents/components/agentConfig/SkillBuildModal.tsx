@@ -12,7 +12,6 @@ import {
   Select,
   message,
   Flex,
-  Progress,
   Row,
   Col,
   Spin,
@@ -23,6 +22,7 @@ import {
   Trash2,
   MessagesSquare,
   HardDriveUpload,
+  Loader2,
 } from "lucide-react";
 import { extractSkillInfo, extractSkillInfoFromContent } from "@/lib/skillFileUtils";
 import {
@@ -35,11 +35,9 @@ import {
   fetchSkillsList,
   submitSkillForm,
   submitSkillFromFile,
-  deleteSkillCreatorTempFile,
   findSkillByName,
   searchSkillsByName as searchSkillsByNameUtil,
   createSimpleSkillStream,
-  fetchSkillCreatorTempFile,
   clearChatAndTempFile,
   type SkillListItem,
 } from "@/services/skillService";
@@ -78,11 +76,21 @@ export default function SkillBuildModal({
   const [thinkingDescription, setThinkingDescription] = useState<string>("");
   const [isThinkingVisible, setIsThinkingVisible] = useState(false);
   const [interactiveSkillName, setInteractiveSkillName] = useState<string>("");
-  const [hasTempDraft, setHasTempDraft] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const contentTextAreaId = useRef<string>("skill-content-textarea-" + Date.now());
+
+  // Content input streaming state
+  const [formStreamingContent, setFormStreamingContent] = useState<string>("");
+  const [isContentStreaming, setIsContentStreaming] = useState(false);
+  const [thinkingStreamingContent, setThinkingStreamingContent] = useState<string>("");
+  const [summaryStreamingContent, setSummaryStreamingContent] = useState<string>("");
+  const [isSummaryVisible, setIsSummaryVisible] = useState(false);
 
   // Track if component is mounted to prevent state updates after unmount
   const isMountedRef = useRef(true);
+  const currentAssistantIdRef = useRef<string>("");
+  // Track if streaming is complete to prevent late onFormContent callbacks from overwriting cleaned content
+  const isStreamingCompleteRef = useRef(false);
 
   // Name input dropdown control
   const [isNameDropdownOpen, setIsNameDropdownOpen] = useState(false);
@@ -128,7 +136,6 @@ export default function SkillBuildModal({
       setChatMessages([]);
       setChatInput("");
       setInteractiveSkillName("");
-      setHasTempDraft(false);
       setIsNameDropdownOpen(false);
       setIsTagsFocused(false);
       setIsCreateMode(true);
@@ -137,6 +144,12 @@ export default function SkillBuildModal({
       setThinkingStep(0);
       setThinkingDescription("");
       setIsThinkingVisible(false);
+      setFormStreamingContent("");
+      setThinkingStreamingContent("");
+      setSummaryStreamingContent("");
+      setIsSummaryVisible(false);
+      setIsContentStreaming(false);
+      currentAssistantIdRef.current = "";
     }
   }, [isOpen, form]);
 
@@ -148,41 +161,26 @@ export default function SkillBuildModal({
     };
   }, []);
 
-  // Load tmp.md when switching to interactive tab
+  // Sync streaming content to the current assistant chat message for real-time display.
+  // Show thinking content while thinking is visible, then switch to summary.
   useEffect(() => {
-    if (activeTab !== "interactive") return;
+    if (!currentAssistantIdRef.current) return;
+    const displayContent = isSummaryVisible ? summaryStreamingContent : thinkingStreamingContent;
+    if (!displayContent) return;
+    setChatMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === currentAssistantIdRef.current
+          ? { ...msg, content: displayContent }
+          : msg
+      )
+    );
+  }, [thinkingStreamingContent, summaryStreamingContent, isSummaryVisible]);
 
-    let cancelled = false;
-    fetchSkillCreatorTempFile()
-      .then((content) => {
-        if (cancelled || !content) return;
-
-        const skillInfo = extractSkillInfoFromContent(content);
-        if (skillInfo && skillInfo.name) {
-          form.setFieldsValue({ name: skillInfo.name });
-          setInteractiveSkillName(skillInfo.name);
-          const matchedSkill = findSkillByName(skillInfo.name, allSkills);
-          setIsCreateMode(!matchedSkill);
-        }
-        if (skillInfo && skillInfo.description) {
-          form.setFieldsValue({ description: skillInfo.description });
-        }
-        if (skillInfo && skillInfo.tags && skillInfo.tags.length > 0) {
-          form.setFieldsValue({ tags: skillInfo.tags });
-        }
-        if (skillInfo && skillInfo.contentWithoutFrontmatter) {
-          form.setFieldsValue({ content: skillInfo.contentWithoutFrontmatter });
-        }
-        setHasTempDraft(true);
-      })
-      .catch((err) => {
-        log.warn("Failed to load tmp.md", err);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, allSkills, form]);
+  // Sync formStreamingContent to the form content field for real-time display
+  useEffect(() => {
+    if (!formStreamingContent) return;
+    form.setFieldValue("content", formStreamingContent);
+  }, [formStreamingContent, form]);
 
   // Detect create/update mode when skill name changes
   useEffect(() => {
@@ -262,7 +260,7 @@ export default function SkillBuildModal({
       form.setFieldsValue({
         name: skill.name,
         description: skill.description || "",
-        source: skill.source || "Custom",
+        source: skill.source || "自定义",
         content: skill.content || "",
       });
     }
@@ -285,12 +283,8 @@ export default function SkillBuildModal({
     }, 200);
   };
 
-  // Cleanup temp file when modal is closed
-  const handleModalClose = async () => {
-    if (hasTempDraft || activeTab === "interactive") {
-      await deleteSkillCreatorTempFile();
-      setHasTempDraft(false);
-    }
+  // Cleanup when modal is closed
+  const handleModalClose = () => {
     onCancel();
   };
 
@@ -345,6 +339,15 @@ export default function SkillBuildModal({
     const currentInput = chatInput.trim();
     setChatInput("");
 
+    // Read current form fields to provide context to the model
+    const formValues = form.getFieldsValue();
+    const formContext = [
+      formValues.name ? `当前技能名称：${formValues.name}` : "",
+      formValues.description ? `当前技能描述：${formValues.description}` : "",
+      formValues.tags?.length ? `当前标签：${formValues.tags.join(", ")}` : "",
+      formValues.content ? `当前内容：\n${formValues.content}` : "",
+    ].filter(Boolean).join("\n\n");
+
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: "user",
@@ -354,83 +357,96 @@ export default function SkillBuildModal({
 
     setChatMessages((prev) => [...prev, userMessage]);
     setIsChatLoading(true);
-    setThinkingStep(0);
-    setThinkingDescription(THINKING_STEPS_ZH.find((s) => s.step === 0)?.description || "");
+    setThinkingStep(1);
+    setThinkingDescription(THINKING_STEPS_ZH.find((s) => s.step === 1)?.description || "生成技能内容中 ...");
     setIsThinkingVisible(true);
 
+    // Clear content input before streaming
+    form.setFieldValue("content", "");
+    setFormStreamingContent("");
+    setThinkingStreamingContent("");
+    setSummaryStreamingContent("");
+    setIsSummaryVisible(false);
+    setIsContentStreaming(true);
+    // Reset streaming complete flag
+    isStreamingCompleteRef.current = false;
+
     const assistantId = (Date.now() + 1).toString();
-    let finalAnswerContent = "";
 
     setChatMessages((prev) => [
       ...prev,
       { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
     ]);
 
+    // Track current assistant message ID for streaming updates
+    currentAssistantIdRef.current = assistantId;
+
     try {
+      // Build user prompt with form context
+      const userPrompt = formContext
+        ? `用户需求：${currentInput}\n\n${formContext}`
+        : `用户需求：${currentInput}`;
+
       await createSimpleSkillStream(
-        { user_request: currentInput },
+        { user_request: userPrompt },
         {
           onThinkingUpdate: (step, desc) => {
             setThinkingStep(step);
             setThinkingDescription(desc || THINKING_STEPS_ZH.find((s) => s.step === step)?.description || "");
           },
-          onThinkingVisible: (visible) => setIsThinkingVisible(visible),
+          onThinkingVisible: (visible) => {
+            setIsThinkingVisible(visible);
+          },
           onStepCount: (step) => {
             setThinkingStep(step);
-            setThinkingDescription(THINKING_STEPS_ZH.find((s) => s.step === step)?.description || "");
+            setThinkingDescription(THINKING_STEPS_ZH.find((s) => s.step === step)?.description || "生成技能内容中 ...");
           },
-          onFinalAnswer: (content) => {
-            finalAnswerContent = content;
-            // Update assistant message with final answer content
-            if (isMountedRef.current) {
-              setChatMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === assistantId ? { ...msg, content } : msg
-                )
-              );
-            }
+          onFormContent: (content) => {
+            if (isStreamingCompleteRef.current) return;
+            setFormStreamingContent((prev) => prev + content);
           },
-          onDone: async () => {
+          onSummaryContent: (content) => {
+            setSummaryStreamingContent((prev) => prev + content);
+            setIsSummaryVisible(true);
+          },
+          onDone: (finalResult) => {
             if (!isMountedRef.current) return;
             setIsThinkingVisible(false);
+            setIsContentStreaming(false);
+            currentAssistantIdRef.current = "";
+            isStreamingCompleteRef.current = true;
 
-            // Read tmp.md and parse skill info
-            try {
-              if (isMountedRef.current) {
-                const tempContent = await fetchSkillCreatorTempFile();
+            const finalFormContent = finalResult.formContent;
+            if (finalFormContent) {
+              const skillInfo = extractSkillInfoFromContent(finalFormContent);
 
-                if (tempContent) {
-                  const skillInfo = extractSkillInfoFromContent(tempContent);
-
-                  if (skillInfo && skillInfo.name) {
-                    form.setFieldsValue({ name: skillInfo.name });
-                    setInteractiveSkillName(skillInfo.name);
-                    const existingSkill = allSkills.find(
-                      (s) => s.name.toLowerCase() === skillInfo.name?.toLowerCase()
-                    );
-                    setIsCreateMode(!existingSkill);
-                  }
-                  if (skillInfo && skillInfo.description) {
-                    form.setFieldsValue({ description: skillInfo.description });
-                  }
-                  if (skillInfo && skillInfo.tags && skillInfo.tags.length > 0) {
-                    form.setFieldsValue({ tags: skillInfo.tags });
-                  }
-                  if (skillInfo && skillInfo.contentWithoutFrontmatter) {
-                    form.setFieldsValue({ content: skillInfo.contentWithoutFrontmatter });
-                  }
-                  message.success(t("skillManagement.message.skillReadyForSave"));
-                  setHasTempDraft(true);
-                }
+              if (skillInfo && skillInfo.name) {
+                form.setFieldsValue({ name: skillInfo.name });
+                setInteractiveSkillName(skillInfo.name);
+                const existingSkill = allSkills.find(
+                  (s) => s.name.toLowerCase() === skillInfo.name?.toLowerCase()
+                );
+                setIsCreateMode(!existingSkill);
               }
-            } catch (error) {
-              log.warn("Failed to read tmp.md content:", error);
+              if (skillInfo && skillInfo.description) {
+                form.setFieldsValue({ description: skillInfo.description });
+              }
+              if (skillInfo && skillInfo.tags && skillInfo.tags.length > 0) {
+                form.setFieldsValue({ tags: skillInfo.tags });
+              }
+              if (skillInfo && skillInfo.contentWithoutFrontmatter) {
+                form.setFieldsValue({ content: skillInfo.contentWithoutFrontmatter });
+                setFormStreamingContent(skillInfo.contentWithoutFrontmatter);
+              }
+              message.success(t("skillManagement.message.skillReadyForSave"));
             }
           },
           onError: (errorMsg) => {
             log.error("Interactive skill creation error:", errorMsg);
             message.error(t("skillManagement.message.chatError"));
             setChatMessages((prev) => prev.filter((m) => m.id !== assistantId));
+            setIsContentStreaming(false);
+            currentAssistantIdRef.current = "";
           },
         }
       );
@@ -438,18 +454,22 @@ export default function SkillBuildModal({
       log.error("Interactive skill creation error:", error);
       message.error(t("skillManagement.message.chatError"));
       setChatMessages((prev) => prev.filter((m) => m.id !== assistantId));
+      setIsContentStreaming(false);
     } finally {
       setIsChatLoading(false);
     }
   };
 
-  // Handle chat clear
+  // Handle chat clear - reset all form fields
   const handleChatClear = async () => {
     await clearChatAndTempFile();
     setChatMessages([]);
-    setHasTempDraft(false);
-    form.resetFields(["name", "description", "tags", "content"]);
+    form.resetFields(["name", "description", "source", "tags", "content"]);
     setInteractiveSkillName("");
+    setFormStreamingContent("");
+    setThinkingStreamingContent("");
+    setSummaryStreamingContent("");
+    setIsSummaryVisible(false);
   };
 
   // Scroll to bottom of chat when new messages arrive
@@ -458,6 +478,16 @@ export default function SkillBuildModal({
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatMessages]);
+
+  // Scroll to bottom of content textarea when streaming content updates
+  useEffect(() => {
+    if (formStreamingContent) {
+      const textarea = document.getElementById(contentTextAreaId.current);
+      if (textarea) {
+        textarea.scrollTop = textarea.scrollHeight;
+      }
+    }
+  }, [formStreamingContent]);
 
   const renderInteractiveTab = () => {
     return (
@@ -472,7 +502,7 @@ export default function SkillBuildModal({
             <span className="text-sm font-medium text-gray-700">
               {t("skillManagement.tabs.interactive")}
             </span>
-            {(hasTempDraft || chatMessages.length > 0) && (
+            {chatMessages.length > 0 && (
               <button
                 onClick={handleChatClear}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -505,23 +535,21 @@ export default function SkillBuildModal({
                       : "bg-gray-100 text-gray-800"
                   }`}
                 >
-                  {msg.role === "assistant" && isThinkingVisible && msg.content === "" ? (
-                    <div className="min-w-[200px]">
-                      <Progress
-                        percent={thinkingStep * 25}
-                        status="active"
-                        strokeColor="#52c41a"
-                        railColor="#e8e8e8"
-                      />
+                  {msg.role === "assistant" && isThinkingVisible && !isSummaryVisible ? (
+                    <div className="min-w-[200px] flex flex-col items-center">
+                      <Loader2 size={24} className="animate-spin text-blue-500" />
                       {thinkingDescription && (
-                        <span className="text-xs text-gray-500 mt-1 block">
+                        <span className="text-xs text-gray-500 mt-2">
                           {thinkingDescription}
                         </span>
                       )}
                     </div>
                   ) : msg.role === "assistant" ? (
                     <div className="markdown-content">
-                      <MarkdownRenderer content={msg.content} className="text-sm" />
+                      <MarkdownRenderer
+                        content={isSummaryVisible ? summaryStreamingContent : msg.content}
+                        className="text-sm"
+                      />
                     </div>
                   ) : (
                     <div className="whitespace-pre-wrap">{msg.content}</div>
@@ -647,8 +675,16 @@ export default function SkillBuildModal({
               label={t("skillManagement.form.content")}
             >
               <TextArea
+                id={contentTextAreaId.current}
                 rows={6}
                 placeholder={t("skillManagement.form.contentPlaceholder")}
+                value={formStreamingContent}
+                onChange={(e) => {
+                  if (isContentStreaming) return;
+                  form.setFieldValue("content", e.target.value);
+                  setFormStreamingContent(e.target.value);
+                }}
+                disabled={isContentStreaming}
               />
             </Form.Item>
           </Form>
