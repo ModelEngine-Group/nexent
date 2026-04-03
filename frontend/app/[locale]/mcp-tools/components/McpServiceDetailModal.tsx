@@ -158,10 +158,10 @@ export default function McpServiceDetailModal({
               value={draftService.description}
               onChange={(value) => setDraftService({ ...draftService, description: value })}
               t={(key, params) => String(t(key, params as any))}
-              minRows={10}
+              minRows={1}
               maxRows={24}
               toggleMinChars={160}
-              toggleMinLines={5}
+              toggleMinLines={1}
             />
             <label className="text-sm text-slate-500">
               {t("mcpTools.detail.serverUrl")}
