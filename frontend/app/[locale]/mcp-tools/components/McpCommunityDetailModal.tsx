@@ -85,7 +85,7 @@ export default function McpCommunityDetailModal({
                   readOnly
                   t={(key, params) => String(t(key, params as any))}
                   toggleMinChars={160}
-                  toggleMinLines={5}
+                  toggleMinLines={1}
                 />
               </div>
               <div>

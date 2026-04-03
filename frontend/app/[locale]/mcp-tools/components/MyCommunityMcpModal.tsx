@@ -226,10 +226,10 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
                 value={editDraft.description}
                 onChange={(value) => setEditDraft({ ...editDraft, description: value })}
                 t={(key, params) => String(t(key, params as any))}
-                minRows={10}
+                minRows={1}
                 maxRows={24}
                 toggleMinChars={160}
-                toggleMinLines={5}
+                toggleMinLines={1}
                 wrapperClassName="text-xs text-slate-500"
               />
             </div>

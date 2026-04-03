@@ -21,10 +21,10 @@ export default function McpDescriptionField({
   t,
   readOnly = false,
   onChange,
-  minRows = 10,
+  minRows = 1,
   maxRows = 24,
   toggleMinChars = 160,
-  toggleMinLines = 5,
+  toggleMinLines = 1,
   wrapperClassName = "text-sm text-slate-500",
 }: Props) {
   const [expanded, setExpanded] = useState(false);
@@ -37,7 +37,6 @@ export default function McpDescriptionField({
   }, [value]);
 
   const canToggle = useMemo(() => {
-    if (descriptionText === "-") return false;
     const lineCount = descriptionText.split("\n").length;
     return descriptionText.length > toggleMinChars || lineCount > toggleMinLines;
   }, [descriptionText, toggleMinChars, toggleMinLines]);

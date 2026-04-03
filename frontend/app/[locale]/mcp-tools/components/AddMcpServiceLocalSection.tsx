@@ -77,7 +77,7 @@ export default function AddMcpServiceLocalSection({
           <Input.TextArea
             value={newServiceDesc}
             onChange={(event) => setNewServiceDesc(event.target.value)}
-            autoSize={{ minRows: 8, maxRows: 20 }}
+            autoSize={{ minRows: 1, maxRows: 20 }}
             className="mt-2 w-full rounded-2xl"
             placeholder={t("mcpTools.community.descriptionMarkdownPlaceholder")}
           />
