@@ -19,8 +19,6 @@ WORKDIR /opt/frontend
 RUN --mount=type=cache,id=npm-cache,target=/root/.npm,sharing=locked \
     --mount=type=cache,id=node-modules,target=/opt/frontend/node_modules,sharing=locked \
     if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
-    # Remove pnpm lockfile to avoid conflict with npm
-    rm -f package-lock.json pnpm-lock.yaml && \
     npm install --verbose && \
     NODE_ENV=production npm run build && \
     mkdir -p ../frontend-dist && \
