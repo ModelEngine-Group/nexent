@@ -109,41 +109,9 @@ export function useMcpToolsAddLocal({
     setAddingService(false);
   }, []);
 
-  const validateLocalAdd = useCallback(() => {
-    if (!newServiceName.trim()) {
-      return t("mcpTools.add.validate.nameRequired");
-    }
-    if ((newTransportType === MCP_TRANSPORT_TYPE.HTTP || newTransportType === MCP_TRANSPORT_TYPE.SSE) && !newServiceUrl.trim()) {
-      return t("mcpTools.add.validate.httpUrlRequired");
-    }
-    if (newTransportType === MCP_TRANSPORT_TYPE.STDIO) {
-      const hasConfig = containerConfigJson.trim().length > 0;
-      if (!hasConfig) return t("mcpTools.add.validate.containerConfigRequired");
-      if (!containerPort) {
-        return t("mcpTools.add.validate.containerRequired");
-      }
-    }
-    if (addModalTab !== MCP_TAB.LOCAL) return t("mcpTools.add.validate.localTabOnly");
-    return null;
-  }, [
-    addModalTab,
-    containerConfigJson,
-    containerPort,
-    newTransportType,
-    newServiceName,
-    newServiceUrl,
-    t,
-  ]);
-
   const handleAddService = useCallback(async () => {
-    const validationError = validateLocalAdd();
-    if (validationError) {
-      log.error("[useMcpToolsAddLocal] Local add validation failed", {
-        validationError,
-        addModalTab,
-        transportType: newTransportType,
-      });
-      message.error(validationError);
+    if (addModalTab !== MCP_TAB.LOCAL) {
+      message.error(t("mcpTools.add.validate.localTabOnly"));
       return;
     }
 
@@ -220,7 +188,6 @@ export function useMcpToolsAddLocal({
     onClose,
     onServiceAdded,
     t,
-    validateLocalAdd,
   ]);
 
   const addNewTag = useCallback(() => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Empty, Input, Modal, Popconfirm, Spin, Tag } from "antd";
+import { Button, Empty, Form, Input, Modal, Popconfirm, Spin, Tag } from "antd";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import {
   deleteCommunityMcpTool,
@@ -25,6 +25,7 @@ type Draft = {
 };
 
 export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
+  const [editForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<CommunityMcpCard[]>([]);
   const [search, setSearch] = useState("");
@@ -64,13 +65,19 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
 
   const openEdit = (item: CommunityMcpCard) => {
     if (!item.communityId) return;
-    setEditDraft({
+    const nextDraft = {
       communityId: item.communityId,
       name: item.name || "",
       description: item.description || "",
       version: item.version || "",
       tags: item.tags || [],
       tagInputValue: "",
+    };
+    setEditDraft(nextDraft);
+    editForm.setFieldsValue({
+      name: nextDraft.name,
+      description: nextDraft.description,
+      version: nextDraft.version,
     });
   };
 
@@ -101,6 +108,7 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
     if (!editDraft) return;
     setSaving(true);
     try {
+      await editForm.validateFields();
       await updateCommunityMcpTool({
         community_id: editDraft.communityId,
         name: editDraft.name.trim(),
@@ -109,6 +117,7 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
         tags: editDraft.tags,
       });
       setEditDraft(null);
+      editForm.resetFields();
       await loadMine();
     } finally {
       setSaving(false);
@@ -201,7 +210,10 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
       <Modal
         open={Boolean(editDraft)}
         width={900}
-        onCancel={() => setEditDraft(null)}
+        onCancel={() => {
+          setEditDraft(null);
+          editForm.resetFields();
+        }}
         onOk={() => {
           void saveEdit();
         }}
@@ -211,20 +223,35 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
         cancelText={t("common.cancel")}
       >
         {editDraft ? (
-          <div className="space-y-3">
-            <label className="block text-xs text-slate-500">
-              {t("mcpTools.detail.name")}
+          <Form form={editForm} layout="vertical" requiredMark={false} className="space-y-3">
+            <Form.Item
+              label={t("mcpTools.detail.name")}
+              name="name"
+              className="mb-0 text-xs text-slate-500"
+              rules={[
+                { required: true, whitespace: true, message: t("mcpTools.add.validate.nameRequired") },
+                { type: "string", max: 100, message: t("mcpTools.add.validate.nameMaxLength") },
+              ]}
+            >
               <Input
                 value={editDraft.name}
                 onChange={(event) => setEditDraft({ ...editDraft, name: event.target.value })}
                 className="mt-1 rounded-xl"
               />
-            </label>
-            <div className="block text-xs text-slate-500">
+            </Form.Item>
+
+            <Form.Item
+              name="description"
+              className="mb-0 text-xs text-slate-500"
+              rules={[{ type: "string", max: 5000, message: t("mcpTools.add.validate.descriptionMaxLength") }]}
+            >
               <McpDescriptionField
                 label={t("mcpTools.detail.description")}
                 value={editDraft.description}
-                onChange={(value) => setEditDraft({ ...editDraft, description: value })}
+                onChange={(value) => {
+                  setEditDraft({ ...editDraft, description: value });
+                  editForm.setFieldValue("description", value);
+                }}
                 t={(key, params) => String(t(key, params as any))}
                 minRows={1}
                 maxRows={24}
@@ -232,16 +259,37 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
                 toggleMinLines={1}
                 wrapperClassName="text-xs text-slate-500"
               />
-            </div>
-            <label className="block text-xs text-slate-500">
-              {t("mcpTools.detail.version")}
+            </Form.Item>
+
+            <Form.Item
+              label={t("mcpTools.detail.version")}
+              name="version"
+              className="mb-0 text-xs text-slate-500"
+              rules={[
+                {
+                  validator: async (_rule, value) => {
+                    const text = String(value || "").trim();
+                    if (!text) {
+                      return;
+                    }
+                    if (text.length > 100) {
+                      throw new Error(t("mcpTools.community.mine.versionMaxLength"));
+                    }
+                    if (!/^\d+(?:\.\d+){0,2}$/.test(text)) {
+                      throw new Error(t("mcpTools.community.mine.versionFormat"));
+                    }
+                  },
+                },
+              ]}
+            >
               <Input
                 value={editDraft.version}
                 onChange={(event) => setEditDraft({ ...editDraft, version: event.target.value })}
                 className="mt-1 rounded-xl"
               />
-            </label>
-            <label className="block text-xs text-slate-500">
+            </Form.Item>
+
+            <div className="block text-xs text-slate-500">
               {t("mcpTools.detail.tags")}
               <div className="mt-2 flex flex-wrap gap-2">
                 {editDraft.tags.map((tag, index) => (
@@ -267,8 +315,8 @@ export default function MyCommunityMcpModal({ open, onClose, t }: Props) {
                   className="w-40 rounded-full"
                 />
               </div>
-            </label>
-          </div>
+            </div>
+          </Form>
         ) : null}
       </Modal>
     </>

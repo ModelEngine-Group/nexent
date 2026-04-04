@@ -290,27 +290,6 @@ export function useMcpToolsAddCommunity({
     const transportType = draft.transportType;
     const serverUrl = draft.serverUrl.trim();
 
-    if (!serviceName) {
-      message.error(t("mcpTools.add.validate.nameRequired"));
-      return;
-    }
-
-    if ((transportType === MCP_TRANSPORT_TYPE.HTTP || transportType === MCP_TRANSPORT_TYPE.SSE) && !serverUrl) {
-      message.error(t("mcpTools.add.validate.httpUrlRequired"));
-      return;
-    }
-
-    if (transportType === MCP_TRANSPORT_TYPE.STDIO) {
-      if (!draft.containerConfigJson.trim()) {
-        message.error(t("mcpTools.add.validate.containerConfigRequired"));
-        return;
-      }
-      if (!draft.containerPort) {
-        message.error(t("mcpTools.add.validate.containerRequired"));
-        return;
-      }
-    }
-
     setAddingService(true);
     try {
       if (transportType === MCP_TRANSPORT_TYPE.STDIO) {

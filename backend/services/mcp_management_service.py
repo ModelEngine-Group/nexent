@@ -170,7 +170,26 @@ async def list_community_mcp_services(
         limit=limit,
     )
 
-    items = db_result.get("items", [])
+    raw_items = db_result.get("items", [])
+    items = []
+    for item in raw_items:
+        registry_json = item.get("registry_json") if isinstance(item.get("registry_json"), dict) else {}
+        items.append({
+            "communityId": item.get("community_id"),
+            "name": item.get("mcp_name") or "",
+            "version": item.get("version"),
+            "description": item.get("description") or "",
+            "status": "active",
+            "publishedAt": item.get("last_sync_time"),
+            "updatedAt": item.get("update_time") or item.get("last_sync_time"),
+            "serverJson": registry_json,
+            "source": "community",
+            "transportType": item.get("transport_type"),
+            "serverUrl": item.get("mcp_server") or "",
+            "configJson": item.get("config_json") if isinstance(item.get("config_json"), dict) else None,
+            "mcpRegistryJson": registry_json,
+            "tags": item.get("tags") or [],
+        })
     return {
         "count": len(items),
         "nextCursor": db_result.get("nextCursor"),
@@ -249,7 +268,25 @@ async def delete_community_mcp_service(*, tenant_id: str, user_id: str, communit
 
 async def list_my_community_mcp_services(*, tenant_id: str) -> Dict[str, Any]:
     rows = list_mcp_community_records_by_tenant(tenant_id=tenant_id)
-    items = rows
+    items = []
+    for row in rows:
+        registry_json = row.get("registry_json") if isinstance(row.get("registry_json"), dict) else {}
+        items.append({
+            "communityId": row.get("community_id"),
+            "name": row.get("mcp_name") or "",
+            "version": row.get("version"),
+            "description": row.get("description") or "",
+            "status": "active",
+            "publishedAt": row.get("last_sync_time"),
+            "updatedAt": row.get("update_time") or row.get("last_sync_time"),
+            "serverJson": registry_json,
+            "source": "community",
+            "transportType": row.get("transport_type"),
+            "serverUrl": row.get("mcp_server") or "",
+            "configJson": row.get("config_json") if isinstance(row.get("config_json"), dict) else None,
+            "mcpRegistryJson": registry_json,
+            "tags": row.get("tags") or [],
+        })
     return {
         "count": len(items),
         "items": items,
