@@ -16,6 +16,7 @@ ALTER TABLE IF EXISTS nexent.mcp_record_t
     ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE,
     ADD COLUMN IF NOT EXISTS tags TEXT[],
     ADD COLUMN IF NOT EXISTS description TEXT,
+    ADD COLUMN IF NOT EXISTS container_port INTEGER,
     ADD COLUMN IF NOT EXISTS last_sync_time TIMESTAMP WITHOUT TIME ZONE;
 
 -- 2) Add comments for new columns
@@ -27,6 +28,7 @@ COMMENT ON COLUMN nexent.mcp_record_t.config_json IS 'MCP config data';
 COMMENT ON COLUMN nexent.mcp_record_t.enabled IS 'Enabled';
 COMMENT ON COLUMN nexent.mcp_record_t.tags IS 'Tags';
 COMMENT ON COLUMN nexent.mcp_record_t.description IS 'Description';
+COMMENT ON COLUMN nexent.mcp_record_t.container_port IS 'Host port bound for containerized MCP service';
 COMMENT ON COLUMN nexent.mcp_record_t.last_sync_time IS 'Last sync time';
 
 -- 3) Add indexes for common management queries

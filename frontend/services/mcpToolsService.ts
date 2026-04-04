@@ -45,6 +45,10 @@ type AddContainerMcpToolPayload = {
   mcp_config: AddMcpRuntimeFromConfigPayload;
 };
 
+type PortConflictResult = {
+  available: boolean;
+};
+
 const parseJson = async <T = ApiEnvelope>(response: Response): Promise<T> => {
   return (await response.json()) as T;
 };
@@ -122,6 +126,44 @@ export const fetchCommunityMcpTagStats = async () => {
     return { success: true, data: data.data } as McpToolsApiResult<McpTagStat[]>;
   } catch (error) {
     log.error("fetchCommunityMcpTagStats failed", error);
+    throw error;
+  }
+};
+
+export const checkMcpContainerPortConflictService = async (payload: {
+  port: number;
+}) => {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.portCheck, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJson<ApiEnvelope<PortConflictResult>>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to check MCP port conflict");
+    }
+    return { success: true, data: data.data } as McpToolsApiResult<PortConflictResult>;
+  } catch (error) {
+    log.error("checkMcpContainerPortConflictService failed", error);
+    throw error;
+  }
+};
+
+export const suggestMcpContainerPortService = async (payload: {
+  start_port?: number;
+}) => {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.portSuggest, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJson<ApiEnvelope<{ port: number }>>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to suggest MCP port");
+    }
+    return { success: true, data: data.data } as McpToolsApiResult<{ port: number }>;
+  } catch (error) {
+    log.error("suggestMcpContainerPortService failed", error);
     throw error;
   }
 };

@@ -120,6 +120,11 @@ class McpNameConflictError(Exception):
     pass
 
 
+class McpPortConflictError(Exception):
+    """Raised when an MCP container port conflicts with an existing service or runtime port."""
+    pass
+
+
 class NoInviteCodeException(Exception):
     """Raised when invite code is not found."""
     pass

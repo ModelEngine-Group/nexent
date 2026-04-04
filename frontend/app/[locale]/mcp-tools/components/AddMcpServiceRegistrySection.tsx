@@ -2,6 +2,7 @@ import { Button, Input, Modal, Radio } from "antd";
 import McpRegistryToolbar from "./McpRegistryToolbar";
 import McpRegistryCardList from "./McpRegistryCardList";
 import McpRegistryDetailModal from "./McpRegistryDetailModal";
+import ContainerPortField from "./ContainerPortField";
 import type { RegistryMcpCard, RegistryQuickAddOption } from "@/types/mcpTools";
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
   quickAddOptions: RegistryQuickAddOption[];
   selectedQuickAddOptionKey: string;
   quickAddVariableValues: Record<string, string>;
+  quickAddContainerPort: number | undefined;
   quickAddSubmitting: boolean;
   setRegistrySearchValue: (value: string) => void;
   setSelectedRegistryService: (service: RegistryMcpCard | null) => void;
@@ -28,11 +30,16 @@ interface Props {
   setRegistryIncludeDeleted: (value: boolean) => void;
   setSelectedQuickAddOptionKey: (value: string) => void;
   handleQuickAddVariableValueChange: (key: string, value: string) => void;
+  setQuickAddContainerPort: (value: number | undefined) => void;
   handleRegistryPrevPage: () => void;
   handleRegistryNextPage: () => void;
   handleQuickAddFromRegistry: (service: RegistryMcpCard) => void;
   handleCloseQuickAddPicker: () => void;
   handleConfirmQuickAddOption: () => Promise<void>;
+  handleSuggestContainerPort: () => void;
+  containerPortCheckLoading: boolean;
+  containerPortSuggesting: boolean;
+  containerPortAvailable: boolean;
   t: (key: string, params?: Record<string, unknown>) => string;
 }
 
@@ -52,6 +59,7 @@ export default function AddMcpServiceRegistrySection({
   quickAddOptions,
   selectedQuickAddOptionKey,
   quickAddVariableValues,
+  quickAddContainerPort,
   quickAddSubmitting,
   setRegistrySearchValue,
   setSelectedRegistryService,
@@ -60,11 +68,16 @@ export default function AddMcpServiceRegistrySection({
   setRegistryIncludeDeleted,
   setSelectedQuickAddOptionKey,
   handleQuickAddVariableValueChange,
+  setQuickAddContainerPort,
   handleRegistryPrevPage,
   handleRegistryNextPage,
   handleQuickAddFromRegistry,
   handleCloseQuickAddPicker,
   handleConfirmQuickAddOption,
+  handleSuggestContainerPort,
+  containerPortCheckLoading,
+  containerPortSuggesting,
+  containerPortAvailable,
   t,
 }: Props) {
   const selectedQuickAddOption = quickAddOptions.find((option) => option.key === selectedQuickAddOptionKey) || null;
@@ -226,6 +239,20 @@ export default function AddMcpServiceRegistrySection({
               );
             })}
           </Radio.Group>
+
+          {selectedQuickAddOption?.transportType === "stdio" ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <ContainerPortField
+                containerPort={quickAddContainerPort}
+                containerPortCheckLoading={containerPortCheckLoading}
+                containerPortSuggesting={containerPortSuggesting}
+                containerPortAvailable={containerPortAvailable}
+                setContainerPort={setQuickAddContainerPort}
+                handleSuggestContainerPort={handleSuggestContainerPort}
+                t={t}
+              />
+            </div>
+          ) : null}
 
           {renderVariableInputs("mcpTools.registry.quickAddPicker.variablesTitle", selectedQuickAddOption?.remoteVariables || [])}
           {renderVariableInputs("mcpTools.registry.quickAddPicker.remoteHeadersTitle", selectedQuickAddOption?.remoteHeaders || [])}

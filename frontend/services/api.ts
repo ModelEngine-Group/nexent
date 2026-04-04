@@ -241,6 +241,8 @@ export const API_ENDPOINTS = {
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
     communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
     communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
+    portCheck: `${API_BASE_URL}/mcp-tools/port/check`,
+    portSuggest: `${API_BASE_URL}/mcp-tools/port/suggest`,
   },
   skills: {
     list: `${API_BASE_URL}/skills`,

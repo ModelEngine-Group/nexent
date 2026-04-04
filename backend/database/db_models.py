@@ -329,6 +329,10 @@ class McpRecord(TableBase):
         String(200),
         doc="Docker container ID for MCP service, None for non-containerized MCP",
     )
+    container_port = Column(
+        Integer,
+        doc="Host port bound for containerized MCP service",
+    )
     authorization_token = Column(
         String(500),
         doc="Authorization token for MCP server authentication (e.g., Bearer token)",

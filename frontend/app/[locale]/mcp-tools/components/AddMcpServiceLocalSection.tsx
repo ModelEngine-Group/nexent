@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Button, Input, InputNumber, Select, Tag } from "antd";
+import { Button, Input, Select, Tag } from "antd";
 import { MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
 import type { McpTransportType } from "@/types/mcpTools";
 import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
+import ContainerPortField from "./ContainerPortField";
 
 interface Props {
   newServiceName: string;
@@ -26,6 +27,10 @@ interface Props {
   removeNewTag: (index: number) => void;
   setNewTagInputValue: (value: string) => void;
   handleAddService: () => void;
+  handleSuggestContainerPort: () => void;
+  containerPortCheckLoading: boolean;
+  containerPortSuggesting: boolean;
+  containerPortAvailable: boolean;
   t: (key: string, params?: Record<string, unknown>) => string;
 }
 
@@ -51,6 +56,10 @@ export default function AddMcpServiceLocalSection({
   removeNewTag,
   setNewTagInputValue,
   handleAddService,
+  handleSuggestContainerPort,
+  containerPortCheckLoading,
+  containerPortSuggesting,
+  containerPortAvailable,
   t,
 }: Props) {
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
@@ -152,18 +161,15 @@ export default function AddMcpServiceLocalSection({
               />
             </label>
 
-            <label className="block text-sm text-slate-500">
-              {t("mcpTools.addModal.containerPort")}
-              <InputNumber
-                value={containerPort}
-                onChange={(value) => setContainerPort(value === null ? undefined : value)}
-                min={1}
-                max={65535}
-                controls={false}
-                className="mt-2 w-full"
-                placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
-              />
-            </label>
+            <ContainerPortField
+              containerPort={containerPort}
+              containerPortCheckLoading={containerPortCheckLoading}
+              containerPortSuggesting={containerPortSuggesting}
+              containerPortAvailable={containerPortAvailable}
+              setContainerPort={setContainerPort}
+              handleSuggestContainerPort={handleSuggestContainerPort}
+              t={t}
+            />
           </div>
         )}
 

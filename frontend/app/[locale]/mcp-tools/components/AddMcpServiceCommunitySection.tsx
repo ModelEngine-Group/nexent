@@ -1,8 +1,9 @@
-import { Input, InputNumber, Modal, Select, Tag } from "antd";
+import { Button, Input, Modal, Select, Tag } from "antd";
 import { MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
 import McpCommunityToolbar from "./McpCommunityToolbar";
 import McpCommunityCardList from "./McpCommunityCardList";
 import McpCommunityDetailModal from "./McpCommunityDetailModal";
+import ContainerPortField from "./ContainerPortField";
 import type { CommunityMcpCard, McpTransportType } from "@/types/mcpTools";
 
 interface Props {
@@ -51,6 +52,10 @@ interface Props {
   handleCloseQuickAddConfirm: () => void;
   handleConfirmQuickAddFromCommunity: () => void;
   quickAddSubmitting: boolean;
+  handleSuggestContainerPort: () => void;
+  containerPortCheckLoading: boolean;
+  containerPortSuggesting: boolean;
+  containerPortAvailable: boolean;
   t: (key: string, params?: Record<string, unknown>) => string;
 }
 
@@ -81,6 +86,10 @@ export default function AddMcpServiceCommunitySection({
   handleCloseQuickAddConfirm,
   handleConfirmQuickAddFromCommunity,
   quickAddSubmitting,
+  handleSuggestContainerPort,
+  containerPortCheckLoading,
+  containerPortSuggesting,
+  containerPortAvailable,
   t,
 }: Props) {
   return (
@@ -197,18 +206,15 @@ export default function AddMcpServiceCommunitySection({
                 />
               </label>
 
-              <label className="block text-sm text-slate-500">
-                {t("mcpTools.addModal.containerPort")}
-                <InputNumber
-                  value={quickAddDraft.containerPort}
-                  onChange={(value) => updateQuickAddDraft({ containerPort: value === null ? undefined : value })}
-                  min={1}
-                  max={65535}
-                  controls={false}
-                  className="mt-2 w-full"
-                  placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
-                />
-              </label>
+              <ContainerPortField
+                containerPort={quickAddDraft.containerPort}
+                containerPortCheckLoading={containerPortCheckLoading}
+                containerPortSuggesting={containerPortSuggesting}
+                containerPortAvailable={containerPortAvailable}
+                setContainerPort={(value) => updateQuickAddDraft({ containerPort: value })}
+                handleSuggestContainerPort={handleSuggestContainerPort}
+                t={t}
+              />
             </div>
           )}
 

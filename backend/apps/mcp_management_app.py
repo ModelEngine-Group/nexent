@@ -1,22 +1,25 @@
-import logging
+﻿import logging
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from consts.exceptions import (
     MCPConnectionError,
     MCPContainerError,
     McpNameConflictError,
+    McpPortConflictError,
     McpNotFoundError,
     McpValidationError,
+    UnauthorizedError,
 )
 from consts.model import MCPConfigRequest
 from services.mcp_management_service import (
     add_mcp_service,
     add_container_mcp_service,
+    check_container_port_conflict,
     check_mcp_service_health,
     delete_mcp_service,
     delete_community_mcp_service,
@@ -28,6 +31,7 @@ from services.mcp_management_service import (
     list_mcp_services,
     list_mcp_tag_stats,
     publish_community_mcp_service,
+    suggest_container_port,
     update_mcp_service,
     update_community_mcp_service,
     update_mcp_service_enabled,
@@ -44,47 +48,91 @@ class AddMcpServiceRequest(BaseModel):
     description: Optional[str] = None
     source: Literal["local", "mcp_registry", "community", "market"] = "local"
     transport_type: Literal["http", "sse", "stdio", "container"] = "http"
-    tags: Optional[list[str]] = None
+    tags: list[str] = Field(default_factory=list)
     authorization_token: Optional[str] = None
     container_config: Optional[dict[str, Any]] = None
     version: Optional[str] = None
     registry_json: Optional[dict[str, Any]] = None
+
+    @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
+    @classmethod
+    def _strip_optional_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped
+        return value
+
+    @field_validator("source", "transport_type", mode="before")
+    @classmethod
+    def _normalize_enum_text(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
 
 class AddContainerMcpServiceRequest(BaseModel):
     name: str = Field(min_length=1)
     description: Optional[str] = None
     source: Literal["local", "community", "market"] = "local"
-    tags: Optional[list[str]] = None
+    tags: list[str] = Field(default_factory=list)
     authorization_token: Optional[str] = None
     registry_json: Optional[dict[str, Any]] = None
     port: int = Field(..., ge=1, le=65535)
     mcp_config: MCPConfigRequest
 
+    @field_validator("name", "description", "authorization_token", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def _normalize_source(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+
+class PortConflictCheckRequest(BaseModel):
+    port: int = Field(..., ge=1, le=65535)
+
+
+class PortSuggestionRequest(BaseModel):
+    start_port: int = Field(default=5500, ge=1, le=65535)
+
 
 class UpdateMcpServiceByIdRequest(BaseModel):
-    mcp_id: int
+    mcp_id: int = Field(gt=0)
     name: str = Field(min_length=1)
     description: Optional[str] = None
     server_url: str = Field(min_length=1)
-    tags: Optional[list[str]] = None
+    tags: list[str] = Field(default_factory=list)
     authorization_token: Optional[str] = None
+
+    @field_validator("name", "server_url", "description", "authorization_token", mode="before")
+    @classmethod
+    def _strip_update_text(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
 
 class EnableMcpServiceByIdRequest(BaseModel):
-    mcp_id: int
+    mcp_id: int = Field(gt=0)
 
 
 class DisableMcpServiceByIdRequest(BaseModel):
-    mcp_id: int
+    mcp_id: int = Field(gt=0)
 
 
 class HealthcheckMcpServiceByIdRequest(BaseModel):
-    mcp_id: int
+    mcp_id: int = Field(gt=0)
 
 
 class ListMcpToolsByIdRequest(BaseModel):
-    mcp_id: int
+    mcp_id: int = Field(gt=0)
 
 
 class CommunityListRequest(BaseModel):
@@ -93,6 +141,22 @@ class CommunityListRequest(BaseModel):
     transport_type: Optional[Literal["http", "sse", "stdio"]] = None
     cursor: Optional[str] = None
     limit: int = Field(default=30, ge=1, le=100)
+
+    @field_validator("search", "tag", "cursor", mode="before")
+    @classmethod
+    def _strip_optional_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("transport_type", mode="before")
+    @classmethod
+    def _normalize_transport_type(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip().lower()
+            return stripped or None
+        return value
 
 
 class CommunityPublishRequest(BaseModel):
@@ -103,9 +167,46 @@ class CommunityUpdateRequest(BaseModel):
     community_id: int = Field(gt=0)
     name: Optional[str] = Field(default=None, min_length=1)
     description: Optional[str] = None
-    tags: Optional[list[str]] = None
+    tags: list[str] = Field(default_factory=list)
     version: Optional[str] = None
     registry_json: Optional[dict[str, Any]] = None
+
+    @field_validator("name", "description", "version", mode="before")
+    @classmethod
+    def _strip_optional_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class ListMcpServicesQuery(BaseModel):
+    tag: Optional[str] = None
+
+    @field_validator("tag", mode="before")
+    @classmethod
+    def _strip_tag(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class RegistryListQuery(BaseModel):
+    search: Optional[str] = None
+    include_deleted: bool = False
+    updated_since: Optional[str] = None
+    version: Optional[str] = None
+    cursor: Optional[str] = None
+    limit: int = Field(default=30, ge=1, le=100)
+
+    @field_validator("search", "updated_since", "version", "cursor", mode="before")
+    @classmethod
+    def _strip_optional_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
 
 @router.post("/add")
@@ -116,30 +217,19 @@ async def add_mcp_service_api(
 ):
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        name = payload.name.strip()
-        server_url = payload.server_url.strip()
-        description = payload.description
-        source = payload.source
-        transport_type = payload.transport_type
-        tags = payload.tags
-        authorization_token = (payload.authorization_token or "").strip()
-        container_config = payload.container_config
-        version = (payload.version or "").strip()
-        registry_json = payload.registry_json
-
         await add_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
-            name=name,
-            description=description,
-            source=source,
-            transport_type=transport_type,
-            server_url=server_url,
-            tags=tags,
-            authorization_token=authorization_token,
-            container_config=container_config,
-            version=version,
-            registry_json=registry_json,
+            name=payload.name,
+            description=payload.description,
+            source=payload.source,
+            transport_type=payload.transport_type,
+            server_url=payload.server_url,
+            tags=payload.tags,
+            authorization_token=payload.authorization_token,
+            container_config=payload.container_config,
+            version=payload.version,
+            registry_json=payload.registry_json,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -154,6 +244,11 @@ async def add_mcp_service_api(
     except McpValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc),
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc),
         )
     except HTTPException:
@@ -205,6 +300,11 @@ async def add_container_mcp_service_api(
             status_code=HTTPStatus.CONFLICT,
             detail=str(exc),
         )
+    except McpPortConflictError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=str(exc),
+        )
     except McpValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -222,6 +322,13 @@ async def add_container_mcp_service_api(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail="MCP connection failed",
         )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Failed to add container MCP service: {exc}")
         raise HTTPException(
@@ -229,20 +336,92 @@ async def add_container_mcp_service_api(
             detail="Failed to add container MCP service",
         )
 
+@router.post("/port/check")
+async def check_mcp_container_port_api(
+    payload: PortConflictCheckRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    try:
+        get_current_user_info(authorization, http_request)
+        available = check_container_port_conflict(port=payload.port)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": {"available": available}},
+        )
+    except McpValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc),
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to check MCP container port: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to check MCP container port",
+        )
+
+
+@router.post("/port/suggest")
+async def suggest_mcp_container_port_api(
+    payload: PortSuggestionRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    try:
+        get_current_user_info(authorization, http_request)
+        port = suggest_container_port(start_port=payload.start_port)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": {"port": port}},
+        )
+    except McpPortConflictError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=str(exc),
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to suggest MCP container port: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to suggest MCP container port",
+        )
+
 
 @router.get("/list")
 async def list_mcp_services_api(
-    tag: Optional[str] = None,
+    query: ListMcpServicesQuery = Depends(),
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
     try:
         _, tenant_id, _ = get_current_user_info(authorization, http_request)
-        services = list_mcp_services(tenant_id=tenant_id, tag=(tag or "").strip() or None)
+        services = list_mcp_services(tenant_id=tenant_id, tag=query.tag)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": services},
         )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Failed to list MCP services: {exc}")
         raise HTTPException(
@@ -263,6 +442,13 @@ async def list_mcp_tag_stats_api(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": stats},
         )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Failed to list MCP tag stats: {exc}")
         raise HTTPException(
@@ -273,12 +459,7 @@ async def list_mcp_tag_stats_api(
 
 @router.get("/registry/list")
 async def list_registry_mcp_services_api(
-    search: Optional[str] = None,
-    include_deleted: bool = False,
-    updated_since: Optional[str] = None,
-    version: Optional[str] = None,
-    cursor: Optional[str] = None,
-    limit: int = 30,
+    query: RegistryListQuery = Depends(),
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
@@ -287,17 +468,21 @@ async def list_registry_mcp_services_api(
         get_current_user_info(authorization, http_request)
 
         data = await list_registry_mcp_services(
-            search=(search or "").strip() or None,
-            include_deleted=bool(include_deleted),
-            updated_since=(updated_since or "").strip() or None,
-            version=(version or "").strip() or None,
-            cursor=(cursor or "").strip() or None,
-            # Registry currently validates limit <= 100.
-            limit=max(1, min(limit, 100)),
+            search=query.search,
+            include_deleted=query.include_deleted,
+            updated_since=query.updated_since,
+            version=query.version,
+            cursor=query.cursor,
+            limit=query.limit,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content=data,
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
         )
     except HTTPException:
         raise
@@ -318,15 +503,20 @@ async def list_community_mcp_services_api(
     try:
         get_current_user_info(authorization, http_request)
         data = await list_community_mcp_services(
-            search=(payload.search or "").strip() or None,
-            tag=(payload.tag or "").strip() or None,
-            transport_type=(payload.transport_type or "").strip() or None,
-            cursor=(payload.cursor or "").strip() or None,
+            search=payload.search,
+            tag=payload.tag,
+            transport_type=payload.transport_type,
+            cursor=payload.cursor,
             limit=payload.limit,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": data},
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
         )
     except HTTPException:
         raise
@@ -349,6 +539,11 @@ async def list_community_mcp_tag_stats_api(
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": stats},
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
         )
     except HTTPException:
         raise
@@ -381,6 +576,11 @@ async def publish_community_mcp_service_api(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
     except McpValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -403,10 +603,10 @@ async def update_community_mcp_service_api(
             tenant_id=tenant_id,
             user_id=user_id,
             community_id=payload.community_id,
-            name=(payload.name or "").strip() or None,
+            name=payload.name,
             description=payload.description,
             tags=payload.tags,
-            version=(payload.version or "").strip() or None,
+            version=payload.version,
             registry_json=payload.registry_json,
         )
         return JSONResponse(
@@ -417,6 +617,11 @@ async def update_community_mcp_service_api(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
     except McpValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -446,6 +651,11 @@ async def delete_community_mcp_service_api(
         )
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -467,6 +677,11 @@ async def list_my_community_mcp_services_api(
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": data},
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
         )
     except HTTPException:
         raise
@@ -510,6 +725,11 @@ async def list_mcp_tools_api(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail="MCP connection failed",
         )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -535,7 +755,7 @@ async def update_mcp_service_by_id_api(
             new_name=payload.name,
             description=payload.description,
             server_url=payload.server_url,
-            authorization_token=(payload.authorization_token or "").strip(),
+            authorization_token=payload.authorization_token,
             tags=payload.tags,
         )
         return JSONResponse(
@@ -550,6 +770,11 @@ async def update_mcp_service_by_id_api(
     except McpValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc),
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc),
         )
     except HTTPException:
@@ -590,6 +815,11 @@ async def enable_mcp_service_by_id_api(
             status_code=HTTPStatus.CONFLICT,
             detail=str(exc),
         )
+    except McpPortConflictError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=str(exc),
+        )
     except McpValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -600,6 +830,11 @@ async def enable_mcp_service_by_id_api(
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail="MCP connection failed",
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
         )
     except HTTPException:
         raise
@@ -637,6 +872,11 @@ async def disable_mcp_service_by_id_api(
     except McpValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc),
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc),
         )
     except HTTPException:
@@ -682,6 +922,11 @@ async def check_mcp_health_by_id_api(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail=str(exc) or "MCP connection failed",
         )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -714,6 +959,11 @@ async def delete_mcp_service_by_id_api(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc),
         )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -722,3 +972,8 @@ async def delete_mcp_service_by_id_api(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to delete MCP service",
         )
+
+
+
+
+

@@ -103,6 +103,22 @@ def get_mcp_records_by_tenant(tenant_id: str, tag: str | None = None) -> List[Di
         return [as_dict(record) for record in mcp_records]
 
 
+def get_mcp_records_by_container_port(container_port: int) -> List[Dict[str, Any]]:
+    """
+    Get enabled MCP records that already use the given container port.
+
+    The lookup is global.
+    """
+    with get_db_session() as session:
+        query = session.query(McpRecord).filter(
+            McpRecord.container_port == container_port,
+            McpRecord.delete_flag != 'Y'
+        )
+
+        records = query.order_by(McpRecord.create_time.desc()).all()
+        return [as_dict(record) for record in records]
+
+
 def get_mcp_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
     with get_db_session() as session:
         rows = (
@@ -191,6 +207,7 @@ def update_mcp_record_runtime_fields_by_id(
     tenant_id: str,
     user_id: str,
     container_id: str | None,
+    container_port: int | None,
     mcp_server: str,
     status: bool | None,
 ) -> None:
@@ -202,6 +219,7 @@ def update_mcp_record_runtime_fields_by_id(
         ).update(
             {
                 "container_id": container_id,
+                "container_port": container_port,
                 "mcp_server": mcp_server,
                 "status": status,
                 "updated_by": user_id,
