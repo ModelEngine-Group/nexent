@@ -1,4 +1,5 @@
-import { Button, Input, Modal, Radio } from "antd";
+import { useEffect } from "react";
+import { Button, Form, Input, Modal, Radio } from "antd";
 import McpRegistryToolbar from "./McpRegistryToolbar";
 import McpRegistryCardList from "./McpRegistryCardList";
 import McpRegistryDetailModal from "./McpRegistryDetailModal";
@@ -80,7 +81,17 @@ export default function AddMcpServiceRegistrySection({
   containerPortAvailable,
   t,
 }: Props) {
+  const [form] = Form.useForm();
   const selectedQuickAddOption = quickAddOptions.find((option) => option.key === selectedQuickAddOptionKey) || null;
+
+  useEffect(() => {
+    if (!quickAddPickerVisible) return;
+    form.setFieldsValue({
+      selectedQuickAddOptionKey,
+      quickAddContainerPort,
+      ...quickAddVariableValues,
+    });
+  }, [form, quickAddContainerPort, quickAddPickerVisible, quickAddVariableValues, selectedQuickAddOptionKey]);
 
   const renderVariableInputs = (
     titleKey: string,
@@ -107,12 +118,26 @@ export default function AddMcpServiceRegistrySection({
               {field.isRequired ? <span className="ml-1 text-rose-500">*</span> : null}
             </span>
             {field.description ? <p className="mt-1 text-xs text-slate-500">{field.description}</p> : null}
-            <Input
-              value={quickAddVariableValues[field.formKey || ""] || ""}
-              onChange={(event) => handleQuickAddVariableValueChange(field.formKey || "", event.target.value)}
-              className="mt-2 w-full rounded-xl"
-              placeholder={field.placeholder || field.default || field.format || t("mcpTools.registry.quickAddPicker.variablePlaceholder")}
-            />
+            <Form.Item
+              name={field.formKey}
+              className="mb-0"
+              rules={[
+                ...(field.isRequired
+                  ? [{ required: true, whitespace: true, message: t("mcpTools.registry.quickAddPicker.variableRequiredMissing", { key: field.label || field.key }) }]
+                  : []),
+                { type: "string", max: 2000, message: t("mcpTools.registry.quickAddPicker.fieldMaxLength") },
+              ]}
+            >
+              <Input
+                value={quickAddVariableValues[field.formKey || ""] || ""}
+                onChange={(event) => {
+                  handleQuickAddVariableValueChange(field.formKey || "", event.target.value);
+                  form.setFieldValue(field.formKey, event.target.value);
+                }}
+                className="mt-2 w-full rounded-xl"
+                placeholder={field.placeholder || field.default || field.format || t("mcpTools.registry.quickAddPicker.variablePlaceholder")}
+              />
+            </Form.Item>
             <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
               {field.format ? (
                 <span>{t("mcpTools.registry.quickAddPicker.variableFormat")}: {field.format}</span>
@@ -144,12 +169,26 @@ export default function AddMcpServiceRegistrySection({
               {arg.type === "named" ? t("mcpTools.registry.quickAddPicker.runtimeNamed") : t("mcpTools.registry.quickAddPicker.runtimePositional")}
             </p>
             {arg.description ? <p className="mt-1 text-xs text-slate-500">{arg.description}</p> : null}
-            <Input
-              value={quickAddVariableValues[arg.formKey] || ""}
-              onChange={(event) => handleQuickAddVariableValueChange(arg.formKey, event.target.value)}
-              className="mt-2 w-full rounded-xl"
-              placeholder={arg.default || arg.format || t("mcpTools.registry.quickAddPicker.variablePlaceholder")}
-            />
+            <Form.Item
+              name={arg.formKey}
+              className="mb-0"
+              rules={[
+                ...(arg.isRequired
+                  ? [{ required: true, whitespace: true, message: t("mcpTools.registry.quickAddPicker.variableRequiredMissing", { key: arg.label }) }]
+                  : []),
+                { type: "string", max: 2000, message: t("mcpTools.registry.quickAddPicker.fieldMaxLength") },
+              ]}
+            >
+              <Input
+                value={quickAddVariableValues[arg.formKey] || ""}
+                onChange={(event) => {
+                  handleQuickAddVariableValueChange(arg.formKey, event.target.value);
+                  form.setFieldValue(arg.formKey, event.target.value);
+                }}
+                className="mt-2 w-full rounded-xl"
+                placeholder={arg.default || arg.format || t("mcpTools.registry.quickAddPicker.variablePlaceholder")}
+              />
+            </Form.Item>
             <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
               {arg.format ? <span>{t("mcpTools.registry.quickAddPicker.variableFormat")}: {arg.format}</span> : null}
               {arg.default ? <span>{t("mcpTools.registry.quickAddPicker.variableDefault")}: {arg.default}</span> : null}
@@ -207,18 +246,27 @@ export default function AddMcpServiceRegistrySection({
         centered
         destroyOnHidden
       >
-        <div className="space-y-4">
+        <Form form={form} layout="vertical" requiredMark={false} className="space-y-4">
           <p className="text-sm text-slate-600">
             {t("mcpTools.registry.quickAddPicker.description", {
               name: quickAddCandidateService?.name || "-",
             })}
           </p>
 
-          <Radio.Group
-            value={selectedQuickAddOptionKey}
-            onChange={(event) => setSelectedQuickAddOptionKey(String(event.target.value || ""))}
-            className="flex w-full flex-col gap-2"
+          <Form.Item
+            name="selectedQuickAddOptionKey"
+            className="mb-0"
+            rules={[{ required: true, message: t("mcpTools.registry.quickAddPicker.targetRequired") }]}
           >
+            <Radio.Group
+              value={selectedQuickAddOptionKey}
+              onChange={(event) => {
+                const nextValue = String(event.target.value || "");
+                setSelectedQuickAddOptionKey(nextValue);
+                form.setFieldValue("selectedQuickAddOptionKey", nextValue);
+              }}
+              className="flex w-full flex-col gap-2"
+            >
             {quickAddOptions.map((option) => {
               const sourceLabel =
                 option.sourceType === "remote"
@@ -238,19 +286,43 @@ export default function AddMcpServiceRegistrySection({
                 </Radio>
               );
             })}
-          </Radio.Group>
+            </Radio.Group>
+          </Form.Item>
 
           {selectedQuickAddOption?.transportType === "stdio" ? (
             <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <ContainerPortField
-                containerPort={quickAddContainerPort}
-                containerPortCheckLoading={containerPortCheckLoading}
-                containerPortSuggesting={containerPortSuggesting}
-                containerPortAvailable={containerPortAvailable}
-                setContainerPort={setQuickAddContainerPort}
-                handleSuggestContainerPort={handleSuggestContainerPort}
-                t={t}
-              />
+              <Form.Item
+                name="quickAddContainerPort"
+                className="mb-0"
+                rules={[
+                  {
+                    validator: async (_rule, value) => {
+                      if (value === undefined || value === null || value === "") {
+                        throw new Error(t("mcpTools.add.validate.containerRequired"));
+                      }
+                      const port = Number(value);
+                      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                        throw new Error(t("mcpTools.add.validate.containerPortRange"));
+                      }
+                    },
+                  },
+                ]}
+              >
+                <div>
+                  <ContainerPortField
+                    containerPort={quickAddContainerPort}
+                    containerPortCheckLoading={containerPortCheckLoading}
+                    containerPortSuggesting={containerPortSuggesting}
+                    containerPortAvailable={containerPortAvailable}
+                    setContainerPort={(value) => {
+                      setQuickAddContainerPort(value);
+                      form.setFieldValue("quickAddContainerPort", value);
+                    }}
+                    handleSuggestContainerPort={handleSuggestContainerPort}
+                    t={t}
+                  />
+                </div>
+              </Form.Item>
             </div>
           ) : null}
 
@@ -270,14 +342,19 @@ export default function AddMcpServiceRegistrySection({
               className="rounded-full"
               loading={quickAddSubmitting}
               disabled={!selectedQuickAddOptionKey}
-              onClick={() => {
-                void handleConfirmQuickAddOption();
+              onClick={async () => {
+                try {
+                  await form.validateFields();
+                  await handleConfirmQuickAddOption();
+                } catch {
+                  return;
+                }
               }}
             >
               {t("mcpTools.registry.quickAddPicker.confirm")}
             </Button>
           </div>
-        </div>
+        </Form>
       </Modal>
     </>
   );

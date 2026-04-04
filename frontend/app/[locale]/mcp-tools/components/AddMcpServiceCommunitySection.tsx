@@ -1,9 +1,11 @@
-import { Button, Input, Modal, Select, Tag } from "antd";
+import { useEffect } from "react";
+import { Button, Form, Input, Modal, Select, Tag } from "antd";
 import { MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
 import McpCommunityToolbar from "./McpCommunityToolbar";
 import McpCommunityCardList from "./McpCommunityCardList";
 import McpCommunityDetailModal from "./McpCommunityDetailModal";
 import ContainerPortField from "./ContainerPortField";
+import McpDescriptionField from "./McpDescriptionField";
 import type { CommunityMcpCard, McpTransportType } from "@/types/mcpTools";
 
 interface Props {
@@ -92,6 +94,30 @@ export default function AddMcpServiceCommunitySection({
   containerPortAvailable,
   t,
 }: Props) {
+  const [form] = Form.useForm();
+
+  const isHttpUrl = (value: string): boolean => {
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    if (!quickAddConfirmVisible) return;
+    form.setFieldsValue({
+      name: quickAddDraft.name,
+      description: quickAddDraft.description,
+      transportType: quickAddDraft.transportType,
+      serverUrl: quickAddDraft.serverUrl,
+      authorizationToken: quickAddDraft.authorizationToken,
+      containerConfigJson: quickAddDraft.containerConfigJson,
+      containerPort: quickAddDraft.containerPort,
+    });
+  }, [form, quickAddConfirmVisible, quickAddDraft]);
+
   return (
     <>
       <div className="px-6 py-5 space-y-5">
@@ -134,36 +160,65 @@ export default function AddMcpServiceCommunitySection({
         open={quickAddConfirmVisible}
         title={t("mcpTools.community.quickAddConfirmTitle", { name: quickAddSourceService?.name || "" })}
         onCancel={handleCloseQuickAddConfirm}
-        onOk={handleConfirmQuickAddFromCommunity}
+        onOk={() => form.submit()}
         okText={t("mcpTools.community.quickAddConfirm")}
         cancelText={t("common.cancel")}
         confirmLoading={quickAddSubmitting}
         width={900}
       >
-        <div className="space-y-4 pt-2">
-          <label className="block text-sm text-slate-500">
-            {t("mcpTools.addModal.name")}
+        <Form form={form} layout="vertical" requiredMark={false} className="space-y-4 pt-2" onFinish={handleConfirmQuickAddFromCommunity}>
+          <Form.Item
+            label={t("mcpTools.addModal.name")}
+            name="name"
+            className="mb-0 text-sm text-slate-500"
+            rules={[
+              { required: true, whitespace: true, message: t("mcpTools.add.validate.nameRequired") },
+              { type: "string", max: 100, message: t("mcpTools.add.validate.nameMaxLength") },
+            ]}
+          >
             <Input
               value={quickAddDraft.name}
-              onChange={(event) => updateQuickAddDraft({ name: event.target.value })}
+              onChange={(event) => {
+                updateQuickAddDraft({ name: event.target.value });
+                form.setFieldValue("name", event.target.value);
+              }}
               className="mt-2 w-full rounded-2xl"
             />
-          </label>
+          </Form.Item>
 
-          <label className="block text-sm text-slate-500">
-            {t("mcpTools.addModal.description")}
-            <Input
+          <Form.Item
+            label={t("mcpTools.addModal.description")}
+            name="description"
+            className="mb-0 text-sm text-slate-500"
+            rules={[{ type: "string", max: 5000, message: t("mcpTools.add.validate.descriptionMaxLength") }]}
+          >
+            <McpDescriptionField
+              label={t("mcpTools.addModal.description")}
               value={quickAddDraft.description}
-              onChange={(event) => updateQuickAddDraft({ description: event.target.value })}
-              className="mt-2 w-full rounded-2xl"
+              onChange={(value) => {
+                updateQuickAddDraft({ description: value });
+                form.setFieldValue("description", value);
+              }}
+              t={(key, params) => String(t(key, params as any))}
+              minRows={1}
+              maxRows={24}
+              toggleMinChars={160}
+              toggleMinLines={1}
             />
-          </label>
+          </Form.Item>
 
-          <label className="block text-sm text-slate-500">
-            {t("mcpTools.addModal.serverType")}
+          <Form.Item
+            label={t("mcpTools.addModal.serverType")}
+            name="transportType"
+            className="mb-0 text-sm text-slate-500"
+            rules={[{ required: true, message: t("mcpTools.add.validate.transportTypeRequired") }]}
+          >
             <Select
               value={quickAddDraft.transportType}
-              onChange={(value) => updateQuickAddDraft({ transportType: value as McpTransportType })}
+              onChange={(value) => {
+                updateQuickAddDraft({ transportType: value as McpTransportType });
+                form.setFieldValue("transportType", value);
+              }}
               className="mt-2 w-full"
               options={[
                 { label: t("mcpTools.serverType.http"), value: MCP_TRANSPORT_TYPE.HTTP },
@@ -171,50 +226,123 @@ export default function AddMcpServiceCommunitySection({
                 { label: t("mcpTools.serverType.stdio"), value: MCP_TRANSPORT_TYPE.STDIO },
               ]}
             />
-          </label>
+          </Form.Item>
 
           {quickAddDraft.transportType === MCP_TRANSPORT_TYPE.HTTP || quickAddDraft.transportType === MCP_TRANSPORT_TYPE.SSE ? (
             <div className="space-y-4">
-              <label className="block text-sm text-slate-500">
-                {t("mcpTools.addModal.serverUrl")}
+              <Form.Item
+                label={t("mcpTools.addModal.serverUrl")}
+                name="serverUrl"
+                className="mb-0 text-sm text-slate-500"
+                rules={[
+                  {
+                    validator: async (_rule, value) => {
+                      const text = String(value || "").trim();
+                      if (!text) {
+                        throw new Error(t("mcpTools.add.validate.httpUrlRequired"));
+                      }
+                      if (text.length > 500) {
+                        throw new Error(t("mcpTools.add.validate.httpUrlMaxLength"));
+                      }
+                      if (!isHttpUrl(text)) {
+                        throw new Error(t("mcpTools.add.validate.httpUrlFormat"));
+                      }
+                    },
+                  },
+                ]}
+              >
                 <Input
                   value={quickAddDraft.serverUrl}
-                  onChange={(event) => updateQuickAddDraft({ serverUrl: event.target.value })}
+                  onChange={(event) => {
+                    updateQuickAddDraft({ serverUrl: event.target.value });
+                    form.setFieldValue("serverUrl", event.target.value);
+                  }}
                   className="mt-2 w-full rounded-2xl"
                 />
-              </label>
-              <label className="block text-sm text-slate-500">
-                {t("mcpTools.addModal.bearerTokenOptional")}
+              </Form.Item>
+              <Form.Item
+                label={t("mcpTools.addModal.bearerTokenOptional")}
+                name="authorizationToken"
+                className="mb-0 text-sm text-slate-500"
+                rules={[{ type: "string", max: 500, message: t("mcpTools.add.validate.authorizationTokenMaxLength") }]}
+              >
                 <Input
                   value={quickAddDraft.authorizationToken}
-                  onChange={(event) => updateQuickAddDraft({ authorizationToken: event.target.value })}
+                  onChange={(event) => {
+                    updateQuickAddDraft({ authorizationToken: event.target.value });
+                    form.setFieldValue("authorizationToken", event.target.value);
+                  }}
                   className="mt-2 w-full rounded-2xl"
                   placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
                 />
-              </label>
+              </Form.Item>
             </div>
           ) : (
             <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <label className="block text-sm text-slate-500">
-                {t("mcpTools.addModal.containerConfig")}
+              <Form.Item
+                label={t("mcpTools.addModal.containerConfig")}
+                name="containerConfigJson"
+                className="mb-0 text-sm text-slate-500"
+                rules={[
+                  {
+                    validator: async (_rule, value) => {
+                      const text = String(value || "").trim();
+                      if (!text) {
+                        throw new Error(t("mcpTools.add.validate.containerConfigRequired"));
+                      }
+                      try {
+                        JSON.parse(text);
+                      } catch {
+                        throw new Error(t("mcpTools.add.error.containerJsonInvalid"));
+                      }
+                    },
+                  },
+                ]}
+              >
                 <Input.TextArea
                   value={quickAddDraft.containerConfigJson}
-                  onChange={(event) => updateQuickAddDraft({ containerConfigJson: event.target.value })}
+                  onChange={(event) => {
+                    updateQuickAddDraft({ containerConfigJson: event.target.value });
+                    form.setFieldValue("containerConfigJson", event.target.value);
+                  }}
                   rows={6}
                   className="mt-2"
                   placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
                 />
-              </label>
+              </Form.Item>
 
-              <ContainerPortField
-                containerPort={quickAddDraft.containerPort}
-                containerPortCheckLoading={containerPortCheckLoading}
-                containerPortSuggesting={containerPortSuggesting}
-                containerPortAvailable={containerPortAvailable}
-                setContainerPort={(value) => updateQuickAddDraft({ containerPort: value })}
-                handleSuggestContainerPort={handleSuggestContainerPort}
-                t={t}
-              />
+              <Form.Item
+                name="containerPort"
+                className="mb-0"
+                rules={[
+                  {
+                    validator: async (_rule, value) => {
+                      if (value === undefined || value === null || value === "") {
+                        throw new Error(t("mcpTools.add.validate.containerRequired"));
+                      }
+                      const port = Number(value);
+                      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                        throw new Error(t("mcpTools.add.validate.containerPortRange"));
+                      }
+                    },
+                  },
+                ]}
+              >
+                <div>
+                  <ContainerPortField
+                    containerPort={quickAddDraft.containerPort}
+                    containerPortCheckLoading={containerPortCheckLoading}
+                    containerPortSuggesting={containerPortSuggesting}
+                    containerPortAvailable={containerPortAvailable}
+                    setContainerPort={(value) => {
+                      updateQuickAddDraft({ containerPort: value });
+                      form.setFieldValue("containerPort", value);
+                    }}
+                    handleSuggestContainerPort={handleSuggestContainerPort}
+                    t={t}
+                  />
+                </div>
+              </Form.Item>
             </div>
           )}
 
@@ -245,7 +373,7 @@ export default function AddMcpServiceCommunitySection({
               />
             </div>
           </div>
-        </div>
+        </Form>
       </Modal>
     </>
   );

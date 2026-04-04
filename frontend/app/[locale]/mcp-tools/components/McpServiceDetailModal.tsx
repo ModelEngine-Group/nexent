@@ -1,6 +1,6 @@
-import { Modal, Input, Button, Tag } from "antd";
+import { Modal, Input, Button, Form, Tag } from "antd";
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   MCP_CONTAINER_STATUS,
   MCP_HEALTH_STATUS,
@@ -79,6 +79,7 @@ export default function McpServiceDetailModal({
   onToggleEnable,
   onClose,
 }: McpServiceDetailModalProps) {
+  const [form] = Form.useForm();
 
   const { t } = useTranslation("common");
   const [logsModalOpen, setLogsModalOpen] = useState(false);
@@ -92,6 +93,25 @@ export default function McpServiceDetailModal({
   );
   const registryJsonPretty = toPrettyRegistryJson(draftService?.mcpRegistryJson);
   const configJsonPretty = toPrettyRegistryJson(draftService?.configJson);
+
+  const isHttpUrl = (value: string): boolean => {
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    if (!open || !draftService) return;
+    form.setFieldsValue({
+      name: draftService.name,
+      description: draftService.description,
+      serverUrl: draftService.serverUrl,
+      authorizationToken: draftService.authorizationToken ?? "",
+    });
+  }, [draftService, form, open]);
 
   const getHealthStatusLabel = (status: McpHealthStatus) => {
     if (status === MCP_HEALTH_STATUS.HEALTHY) {
@@ -139,60 +159,105 @@ export default function McpServiceDetailModal({
         </div>
 
         <div className="px-6 py-5 space-y-5">
-          <div className="grid gap-4">
-            <label className="text-sm text-slate-500">
-              {t("mcpTools.detail.name")}
+          <Form form={form} layout="vertical" requiredMark={false} className="grid gap-4">
+            <Form.Item
+              label={t("mcpTools.detail.name")}
+              name="name"
+              className="mb-0 text-sm text-slate-500"
+              rules={[
+                { required: true, whitespace: true, message: t("mcpTools.add.validate.nameRequired") },
+                { type: "string", max: 100, message: t("mcpTools.add.validate.nameMaxLength") },
+              ]}
+            >
               <Input
                 value={draftService.name}
-                onChange={(event) =>
+                onChange={(event) => {
                   setDraftService({
                     ...draftService,
                     name: event.target.value,
-                  })
-                }
+                  });
+                  form.setFieldValue("name", event.target.value);
+                }}
                 className="mt-2 w-full rounded-2xl"
               />
-            </label>
-            <McpDescriptionField
+            </Form.Item>
+
+            <Form.Item
               label={t("mcpTools.detail.description")}
-              value={draftService.description}
-              onChange={(value) => setDraftService({ ...draftService, description: value })}
-              t={(key, params) => String(t(key, params as any))}
-              minRows={1}
-              maxRows={24}
-              toggleMinChars={160}
-              toggleMinLines={1}
-            />
-            <label className="text-sm text-slate-500">
-              {t("mcpTools.detail.serverUrl")}
+              name="description"
+              className="mb-0"
+              rules={[{ type: "string", max: 5000, message: t("mcpTools.add.validate.descriptionMaxLength") }]}
+            >
+              <McpDescriptionField
+                label={t("mcpTools.detail.description")}
+                value={draftService.description}
+                onChange={(value) => {
+                  setDraftService({ ...draftService, description: value });
+                  form.setFieldValue("description", value);
+                }}
+                t={(key, params) => String(t(key, params as any))}
+                minRows={1}
+                maxRows={24}
+                toggleMinChars={160}
+                toggleMinLines={1}
+              />
+            </Form.Item>
+
+            <Form.Item
+              label={t("mcpTools.detail.serverUrl")}
+              name="serverUrl"
+              className="mb-0 text-sm text-slate-500"
+              rules={[
+                {
+                  validator: async (_rule, value) => {
+                    const text = String(value || "").trim();
+                    if (!text) {
+                      throw new Error(t("mcpTools.add.validate.httpUrlRequired"));
+                    }
+                    if (text.length > 500) {
+                      throw new Error(t("mcpTools.add.validate.httpUrlMaxLength"));
+                    }
+                    if (!isHttpUrl(text)) {
+                      throw new Error(t("mcpTools.add.validate.httpUrlFormat"));
+                    }
+                  },
+                },
+              ]}
+            >
               <Input
                 value={draftService.serverUrl}
-                onChange={(event) =>
+                onChange={(event) => {
                   setDraftService({
                     ...draftService,
                     serverUrl: event.target.value,
-                  })
-                }
+                  });
+                  form.setFieldValue("serverUrl", event.target.value);
+                }}
                 className="mt-2 w-full rounded-2xl"
               />
-            </label>
+            </Form.Item>
             {draftService.transportType === MCP_TRANSPORT_TYPE.HTTP || draftService.transportType === MCP_TRANSPORT_TYPE.SSE ? (
-              <label className="text-sm text-slate-500">
-                {t("mcpTools.detail.bearerTokenOptional")}
+              <Form.Item
+                label={t("mcpTools.detail.bearerTokenOptional")}
+                name="authorizationToken"
+                className="mb-0 text-sm text-slate-500"
+                rules={[{ type: "string", max: 500, message: t("mcpTools.add.validate.authorizationTokenMaxLength") }]}
+              >
                 <Input
                   value={draftService.authorizationToken ?? ""}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setDraftService({
                       ...draftService,
                       authorizationToken: event.target.value,
-                    })
-                  }
+                    });
+                    form.setFieldValue("authorizationToken", event.target.value);
+                  }}
                   className="mt-2 w-full rounded-2xl"
                   placeholder={t("mcpTools.detail.bearerTokenPlaceholder")}
                 />
-              </label>
+              </Form.Item>
             ) : null}
-          </div>
+          </Form>
 
           <div className="grid gap-3 text-sm text-slate-700">
             <div className="flex items-center justify-between">
@@ -365,7 +430,17 @@ export default function McpServiceDetailModal({
           >
             {t("common.delete")}
           </Button>
-          <Button className="rounded-full" onClick={handleSaveUpdates}>
+          <Button
+            className="rounded-full"
+            onClick={async () => {
+              try {
+                await form.validateFields();
+                handleSaveUpdates();
+              } catch {
+                return;
+              }
+            }}
+          >
             {t("mcpTools.detail.save")}
           </Button>
           <Button className="rounded-full" loading={publishLoading} onClick={onPublishToCommunity}>
