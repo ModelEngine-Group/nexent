@@ -158,6 +158,7 @@ export interface CommunityMcpCard {
 export interface McpServiceItem {
   mcpId: number;
   containerId?: string;
+  containerPort?: number | null;
   name: string;
   description: string;
   source: McpTab;

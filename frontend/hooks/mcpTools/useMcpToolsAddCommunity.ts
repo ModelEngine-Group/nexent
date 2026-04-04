@@ -4,10 +4,12 @@ import type { MessageInstance } from "antd/es/message/interface";
 import log from "@/lib/logger";
 import { MCP_TRANSPORT_TYPE, MCP_TAB } from "@/const/mcpTools";
 import {
+  checkMcpContainerPortConflictService,
   addContainerMcpToolService,
   addMcpToolService,
   fetchCommunityMcpTagStats,
   fetchCommunityMcpCards,
+  suggestMcpContainerPortService,
 } from "@/services/mcpToolsService";
 import {
   type AddMcpRuntimeFromConfigPayload,
@@ -20,7 +22,7 @@ import {
 type UseMcpToolsAddCommunityParams = {
   open: boolean;
   addModalTab: McpTab;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, unknown>) => string;
   message: MessageInstance;
   onServiceAdded: () => Promise<unknown>;
   onClose: () => void;
@@ -72,7 +74,9 @@ export function useMcpToolsAddCommunity({
   const [quickAddConfirmVisible, setQuickAddConfirmVisible] = useState(false);
   const [quickAddSourceService, setQuickAddSourceService] = useState<CommunityMcpCard | null>(null);
   const [quickAddDraft, setQuickAddDraft] = useState<CommunityQuickAddDraft>(INITIAL_DRAFT);
+  const [debouncedContainerPort, setDebouncedContainerPort] = useState<number | undefined>(undefined);
   const [addingService, setAddingService] = useState(false);
+  const [suggestingContainerPort, setSuggestingContainerPort] = useState(false);
   const communityPageSize = 30;
 
   const addMutation = useMutation({ mutationFn: addMcpToolService });
@@ -142,6 +146,65 @@ export function useMcpToolsAddCommunity({
   const communityTagStats = communityTagStatsQuery.data || [];
 
   useEffect(() => {
+    if (quickAddDraft.transportType !== MCP_TRANSPORT_TYPE.STDIO || !quickAddDraft.containerPort) {
+      setDebouncedContainerPort(undefined);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setDebouncedContainerPort(quickAddDraft.containerPort);
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [quickAddDraft.containerPort, quickAddDraft.transportType]);
+
+  const containerPortCheckQuery = useQuery({
+    queryKey: ["mcp-tools", "community-container-port-check", debouncedContainerPort],
+    enabled: open && addModalTab === MCP_TAB.COMMUNITY && quickAddDraft.transportType === MCP_TRANSPORT_TYPE.STDIO && typeof debouncedContainerPort === "number",
+    retry: false,
+    staleTime: 10_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    queryFn: async () => {
+      const result = await checkMcpContainerPortConflictService({
+        port: debouncedContainerPort as number,
+      });
+      return result.data;
+    },
+  });
+
+  const isPortCheckEnabled =
+    open &&
+    addModalTab === MCP_TAB.COMMUNITY &&
+    quickAddDraft.transportType === MCP_TRANSPORT_TYPE.STDIO &&
+    typeof quickAddDraft.containerPort === "number";
+  const isCurrentPortChecked =
+    typeof quickAddDraft.containerPort === "number" &&
+    debouncedContainerPort === quickAddDraft.containerPort &&
+    typeof containerPortCheckQuery.data?.available === "boolean";
+  const containerPortCheckLoading = isPortCheckEnabled && !isCurrentPortChecked && !containerPortCheckQuery.isError;
+  const containerPortAvailable = containerPortCheckQuery.data?.available === true;
+
+  const updateQuickAddDraft = useCallback((next: Partial<CommunityQuickAddDraft>) => {
+    setQuickAddDraft((prev) => ({ ...prev, ...next }));
+  }, []);
+
+  const handleSuggestContainerPort = useCallback(async () => {
+    setSuggestingContainerPort(true);
+    try {
+      const startPort = Math.max((quickAddDraft.containerPort || 5500) + 1, 1);
+      const result = await suggestMcpContainerPortService({ start_port: startPort });
+      updateQuickAddDraft({ containerPort: result.data.port });
+      message.success(t("mcpTools.addModal.portSuggested", { port: result.data.port }));
+    } catch (error) {
+      log.error("[useMcpToolsAddCommunity] Failed to suggest container port", { error });
+      message.error(t("mcpTools.addModal.portSuggestFailed"));
+    } finally {
+      setSuggestingContainerPort(false);
+    }
+  }, [message, quickAddDraft.containerPort, t, updateQuickAddDraft]);
+
+  useEffect(() => {
     if (!(communityQuery.error instanceof Error)) return;
     log.error("[useMcpToolsAddCommunity] Failed to load community MCP cards", {
       error: communityQuery.error,
@@ -195,10 +258,6 @@ export function useMcpToolsAddCommunity({
       registryJson: service.mcpRegistryJson || (service.serverJson as Record<string, unknown>) || undefined,
     });
     setQuickAddConfirmVisible(true);
-  }, []);
-
-  const updateQuickAddDraft = useCallback((next: Partial<CommunityQuickAddDraft>) => {
-    setQuickAddDraft((prev) => ({ ...prev, ...next }));
   }, []);
 
   const addQuickAddTag = useCallback(() => {
@@ -269,6 +328,14 @@ export function useMcpToolsAddCommunity({
           return;
         }
 
+        const portCheck = await checkMcpContainerPortConflictService({
+          port: draft.containerPort as number,
+        });
+        if (!portCheck.data.available) {
+          message.error(t("mcpTools.addModal.portOccupied", { port: draft.containerPort }));
+          return;
+        }
+
         await addContainerMcpToolService({
           name: serviceName,
           description: draft.description.trim(),
@@ -323,6 +390,10 @@ export function useMcpToolsAddCommunity({
     quickAddConfirmVisible,
     quickAddSourceService,
     quickAddDraft,
+    handleSuggestContainerPort,
+    containerPortCheckLoading,
+    containerPortSuggesting: suggestingContainerPort,
+    containerPortAvailable,
     setCommunitySearchValue,
     setCommunityTransportTypeFilter,
     setCommunityTagFilter,

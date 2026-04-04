@@ -27,7 +27,7 @@ export default function AddMcpServiceModal({
 
   const local = useMcpToolsAddLocal({
     addModalTab,
-    t: (key) => String(t(key)),
+    t: (key, params) => String(t(key, params)),
     message,
     onServiceAdded,
     onClose,
@@ -45,7 +45,7 @@ export default function AddMcpServiceModal({
   const community = useMcpToolsAddCommunity({
     open,
     addModalTab,
-    t: (key) => String(t(key)),
+    t: (key, params) => String(t(key, params)),
     message,
     onServiceAdded,
     onClose,
@@ -124,6 +124,10 @@ export default function AddMcpServiceModal({
             removeNewTag={local.removeNewTag}
             setNewTagInputValue={local.setNewTagInputValue}
             handleAddService={local.handleAddService}
+            handleSuggestContainerPort={local.handleSuggestContainerPort}
+            containerPortCheckLoading={local.containerPortCheckLoading}
+            containerPortSuggesting={local.containerPortSuggesting}
+            containerPortAvailable={local.containerPortAvailable}
             t={(key, params) => String(t(key, params))}
           />
         ) : addModalTab === MCP_TAB.MCP_REGISTRY ? (
@@ -143,6 +147,7 @@ export default function AddMcpServiceModal({
             quickAddOptions={registry.quickAddOptions}
             selectedQuickAddOptionKey={registry.selectedQuickAddOptionKey}
             quickAddVariableValues={registry.quickAddVariableValues}
+            quickAddContainerPort={registry.quickAddContainerPort}
             quickAddSubmitting={registry.quickAddSubmitting}
             setRegistrySearchValue={registry.setRegistrySearchValue}
             setSelectedRegistryService={registry.setSelectedRegistryService}
@@ -151,11 +156,16 @@ export default function AddMcpServiceModal({
             setRegistryIncludeDeleted={registry.setRegistryIncludeDeleted}
             setSelectedQuickAddOptionKey={registry.setSelectedQuickAddOptionKey}
             handleQuickAddVariableValueChange={registry.handleQuickAddVariableValueChange}
+            setQuickAddContainerPort={registry.setQuickAddContainerPort}
             handleRegistryPrevPage={registry.handleRegistryPrevPage}
             handleRegistryNextPage={registry.handleRegistryNextPage}
             handleQuickAddFromRegistry={registry.handleQuickAddFromRegistry}
             handleCloseQuickAddPicker={registry.handleCloseQuickAddPicker}
             handleConfirmQuickAddOption={registry.handleConfirmQuickAddOption}
+            handleSuggestContainerPort={registry.handleSuggestContainerPort}
+            containerPortCheckLoading={registry.containerPortCheckLoading}
+            containerPortSuggesting={registry.containerPortSuggesting}
+            containerPortAvailable={registry.containerPortAvailable}
             t={(key, params) => String(t(key, params))}
           />
         ) : (
@@ -186,6 +196,10 @@ export default function AddMcpServiceModal({
             handleCloseQuickAddConfirm={community.handleCloseQuickAddConfirm}
             handleConfirmQuickAddFromCommunity={community.handleConfirmQuickAddFromCommunity}
             quickAddSubmitting={community.quickAddSubmitting}
+            handleSuggestContainerPort={community.handleSuggestContainerPort}
+            containerPortCheckLoading={community.containerPortCheckLoading}
+            containerPortSuggesting={community.containerPortSuggesting}
+            containerPortAvailable={community.containerPortAvailable}
             t={(key, params) => String(t(key, params))}
           />
         )}
