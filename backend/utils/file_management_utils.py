@@ -47,6 +47,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
         # Get tenant_id from authorization for downstream task processing
         embedding_model_id = process_params.model_id
         tenant_id = None
+        is_multimodal = process_params.is_multimodal
         try:
             _, tenant_id = get_current_user_id(process_params.authorization)
         except Exception as e:
@@ -68,6 +69,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                 "index_name": process_params.index_name,
                 "original_filename": file_details.get("filename"),
                 "embedding_model_id": embedding_model_id,
+                "is_multimodal": is_multimodal,
                 "tenant_id": tenant_id
             }
 
@@ -99,6 +101,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     "index_name": process_params.index_name,
                     "original_filename": file_details.get("filename"),
                     "embedding_model_id": embedding_model_id,
+                    "is_multimodal": is_multimodal,
                     "tenant_id": tenant_id
                 }
                 sources.append(source)
