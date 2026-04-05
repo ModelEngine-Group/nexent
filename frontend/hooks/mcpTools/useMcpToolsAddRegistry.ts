@@ -657,7 +657,19 @@ export function useMcpToolsAddRegistry({
     try {
       if (selectedOption.transportType === "stdio") {
         const packageIdentifier = (selectedOption.packageIdentifier || "").trim();
-        const command = (selectedOption.packageRuntimeHint || "").trim() || inferStdioCommand(selectedOption.packageRegistryType);
+        const packageRegistryType = (selectedOption.packageRegistryType || "").trim().toLowerCase();
+        const packageRuntimeHint = (selectedOption.packageRuntimeHint || "").trim();
+        if (packageRegistryType === "oci") {
+          log.warn("[useMcpToolsAddRegistry] OCI stdio package is blocked for quick add because runtime container cannot execute nested docker", {
+            serviceName: quickAddCandidateService.server?.name,
+            packageIdentifier,
+            packageRuntimeHint,
+          });
+          message.warning(t("mcpTools.registry.quickAddUnsupported"));
+          return;
+        }
+
+        const command = packageRuntimeHint || inferStdioCommand(selectedOption.packageRegistryType);
         if (!packageIdentifier || !command) {
           message.warning(t("mcpTools.registry.quickAddUnsupported"));
           return;
