@@ -512,7 +512,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["knowledge_id"], 10)
 
         # Verify get_embedding_model was called with the model name
-        mock_get_embedding.assert_called_once_with("tenant-1", "text-embedding-3-small")
+        mock_get_embedding.assert_called_once_with(
+            "tenant-1", is_multimodal=False, model_name="text-embedding-3-small"
+        )
 
         # Verify knowledge record was created with the embedding model name
         mock_create_knowledge.assert_called_once()
@@ -559,7 +561,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
 
         # Verify get_embedding_model was called with None (no specific model)
-        mock_get_embedding.assert_called_once_with("tenant-1", None)
+        mock_get_embedding.assert_called_once_with("tenant-1", is_multimodal=False)
 
         # Verify knowledge record was created with the model's display name
         mock_create_knowledge.assert_called_once()

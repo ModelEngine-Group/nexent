@@ -1667,14 +1667,18 @@ class TestDataProcessService(unittest.TestCase):
                 'source_type': 'url',
                 'chunking_strategy': 'semantic',
                 'index_name': 'test_index_1',
-                'original_filename': 'doc1.pdf'
+                'original_filename': 'doc1.pdf',
+                'embedding_model_id': None,
+                'tenant_id': None
             },
             {
                 'source': 'http://example.com/doc2.pdf',
                 'source_type': 'url',
                 'chunking_strategy': 'fixed',
                 'index_name': 'test_index_2',
-                'original_filename': 'doc2.pdf'
+                'original_filename': 'doc2.pdf',
+                'embedding_model_id': None,
+                'tenant_id': None
             }
         ]
         actual_process_calls = [kwargs for args,

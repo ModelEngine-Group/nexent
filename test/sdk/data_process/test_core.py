@@ -207,7 +207,8 @@ class TestDataProcessCore:
     )
     def test_select_processor_by_filename(self, core, filename, expected_processor, expected_extractor):
         """Test processor selection based on filename"""
-        processor_name, extractor = core._select_processor_by_filename(filename)
+        params = {"model_type": "multi_embedding"} if expected_extractor else {}
+        processor_name, extractor = core._select_processor_by_filename(filename, params)
         assert processor_name == expected_processor
         assert extractor == expected_extractor
 
@@ -349,7 +350,7 @@ class TestDataProcessCore:
         core.processors["UniversalImageExtractor"] = mock_extractor
 
         result = core.file_process(
-            b"data", "sample.pdf", chunking_strategy="basic"
+            b"data", "sample.pdf", chunking_strategy="basic", model_type="multi_embedding"
         )
 
         chunks = _unpack_chunks(result)
@@ -366,7 +367,11 @@ class TestDataProcessCore:
         )
 
         result = core.file_process(
-            b"data", "report.pdf", chunking_strategy="basic", processor="Unstructured"
+            b"data",
+            "report.pdf",
+            chunking_strategy="basic",
+            processor="Unstructured",
+            model_type="multi_embedding",
         )
 
         chunks = _unpack_chunks(result)

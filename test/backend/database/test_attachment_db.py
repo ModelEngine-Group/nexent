@@ -17,6 +17,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(
 # Mock consts module
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
+# Ensure constants are real strings to avoid startswith TypeError
+consts_mock.const.S3_URL_PREFIX = "s3://"
 # Environment variables are now configured in conftest.py
 
 sys.modules['consts'] = consts_mock
