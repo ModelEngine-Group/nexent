@@ -2340,5 +2340,988 @@ class TestStreamContentTypes:
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
 
 
+# ===== Streaming Flow Tests =====
+class TestStreamingFlow:
+    """Test the complete streaming flow including thread polling and final results."""
+
+    def _setup_streaming_mocks(self, mocker, cached_messages_list, final_answer, skill_service_local_dir=None):
+        """Helper to set up comprehensive mocks for streaming tests."""
+        # Set up config utils mocks
+        utils_config_utils_mock.tenant_config_manager = MagicMock()
+        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+
+        # Create mock observer that returns messages on each call
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message = MagicMock(side_effect=cached_messages_list)
+        mock_observer_instance.get_final_answer = MagicMock(return_value=final_answer)
+
+        # Create mock MessageObserver class
+        mocker.patch(
+            'backend.apps.skill_app.MessageObserver',
+            return_value=mock_observer_instance
+        )
+
+        # Create mock SkillService
+        mock_skill_service_instance = MagicMock()
+        mock_skill_manager = MagicMock()
+        mock_skill_manager.local_skills_dir = skill_service_local_dir
+        mock_skill_service_instance.skill_manager = mock_skill_manager
+        mocker.patch(
+            'backend.apps.skill_app.SkillService',
+            return_value=mock_skill_service_instance
+        )
+
+        # Mock create_simple_skill_from_request to be a no-op (background task)
+        mocker.patch(
+            'backend.apps.skill_app.create_simple_skill_from_request'
+        )
+
+        return mock_observer_instance, mock_skill_service_instance
+
+    def test_streaming_with_step_count_messages(self, mocker):
+        """Test streaming step_count messages during polling (lines 557-558, 580-581)."""
+        cached_messages = [
+            ['{"type": "step_count", "content": "1"}'],
+            ['{"type": "step_count", "content": "2"}'],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer=None,
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with steps"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "step_count"' in response.content
+        assert mock_observer.get_cached_message.call_count >= 1
+
+    def test_streaming_with_skill_content_messages(self, mocker):
+        """Test streaming skill_content messages (thinking, code, etc.) during polling (lines 560-561, 582-583)."""
+        cached_messages = [
+            ['{"type": "model_output_thinking", "content": "Thinking about the skill..."}'],
+            ['{"type": "model_output_code", "content": "# SKILL.md\\ncontent"}'],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer=None,
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with content"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "skill_content"' in response.content
+        assert b'Thinking about the skill' in response.content
+
+    def test_streaming_with_final_answer_during_polling(self, mocker):
+        """Test streaming final_answer during polling phase (lines 563-564, 584-585)."""
+        cached_messages = [
+            [],
+            ['{"type": "final_answer", "content": "Partial answer during poll"}'],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer="<SKILL>\nFinal Answer</SKILL>",
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with final answer"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "final_answer"' in response.content
+        assert b'Final Answer' in response.content
+
+    def test_streaming_remaining_messages_after_thread(self, mocker):
+        """Test streaming remaining messages after thread completes (lines 572-587)."""
+        # Note: Due to mock behavior, thread completes immediately without producing messages.
+        # This test verifies the streaming endpoint works correctly even without messages.
+        cached_messages = [
+            [],  # During polling
+            [],  # After thread
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer="<SKILL>Final Skill</SKILL>",
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with remaining"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        # Should still work and send done signal
+        assert b'"type": "done"' in response.content
+
+    def test_streaming_final_result_from_observer(self, mocker):
+        """Test streaming final result from observer after thread completes (lines 590-592)."""
+        cached_messages = [
+            [],
+            [],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer="<SKILL>\n# Complete Skill Content\nThis is the final result.</SKILL>",
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create complete skill"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'Complete Skill Content' in response.content
+        assert b'"type": "final_answer"' in response.content
+
+    def test_streaming_done_signal(self, mocker):
+        """Test streaming done signal at the end (line 595)."""
+        cached_messages = [
+            [],
+            [],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer=None,
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill and finish"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "done"' in response.content
+
+    def test_streaming_with_empty_final_answer(self, mocker):
+        """Test streaming when final_answer is None/empty (lines 591-592)."""
+        cached_messages = [
+            [],
+            [],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer=None,
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with no final answer"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "done"' in response.content
+        assert response.content.count(b'"type": "final_answer"') <= 1
+
+    def test_streaming_with_empty_local_skills_dir(self, mocker):
+        """Test streaming with None local_skills_dir (line 530)."""
+        cached_messages = [
+            [],
+            [],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer="<SKILL>Skill</SKILL>",
+            skill_service_local_dir=None
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with no skills dir"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "done"' in response.content
+
+    def test_streaming_with_tool_messages(self, mocker):
+        """Test streaming tool messages (lines 560-561, 582-583)."""
+        cached_messages = [
+            ['{"type": "tool", "content": "Writing file: SKILL.md"}'],
+            [],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer="<SKILL>\n# Tool Result</SKILL>",
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill using tools"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "skill_content"' in response.content
+        assert b'Writing file' in response.content
+
+    def test_streaming_with_mixed_message_types(self, mocker):
+        """Test streaming with mixed message types across polling and remaining phases."""
+        cached_messages = [
+            ['{"type": "step_count", "content": "1"}', '{"type": "model_output_thinking", "content": "Thinking"}'],
+            ['{"type": "tool", "content": "Tool executed"}', '{"type": "final_answer", "content": "Partial"}'],
+            [],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer="<SKILL>\nFinal Complete Skill</SKILL>",
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create complex skill"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "step_count"' in response.content
+        assert b'"type": "skill_content"' in response.content
+        assert b'"type": "final_answer"' in response.content
+        assert b'"type": "done"' in response.content
+
+    def test_streaming_with_json_decode_error_in_message(self, mocker):
+        """Test handling of invalid JSON in cached messages (lines 565-566, 586-587)."""
+        cached_messages = [
+            ['{"type": "step_count", "content": "1"}', 'invalid json {{{', '{"type": "model_output_thinking", "content": "Valid"}'],
+            [],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer="<SKILL>Skill</SKILL>",
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with bad json"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "done"' in response.content
+
+    def test_streaming_with_non_string_message(self, mocker):
+        """Test handling of non-string messages in cached messages (lines 550, 574)."""
+        cached_messages = [
+            ['{"type": "step_count", "content": "1"}', 123, None, '{"type": "model_output_thinking", "content": "Valid"}'],
+            [],
+        ]
+
+        mock_observer, _ = self._setup_streaming_mocks(
+            mocker,
+            cached_messages_list=cached_messages,
+            final_answer="<SKILL>Skill</SKILL>",
+            skill_service_local_dir="/tmp/skills"
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with weird messages"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "done"' in response.content
+
+
+# ===== Thread Polling Tests =====
+class TestThreadPolling:
+    """Test thread polling behavior and message streaming during polling phase."""
+
+    def _setup_thread_polling_mocks(self, mocker, observer_messages_per_poll, skill_service_local_dir="/tmp/skills"):
+        """Set up mocks for thread polling tests.
+
+        Args:
+            observer_messages_per_poll: List of message lists, each returned on successive calls to get_cached_message
+        """
+        # Set up config utils mocks
+        utils_config_utils_mock.tenant_config_manager = MagicMock()
+        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+
+        # Track which call we're on
+        call_count = [0]
+
+        def get_cached_message_side_effect():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(observer_messages_per_poll):
+                return observer_messages_per_poll[idx]
+            return []
+
+        # Create mock observer
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
+        mock_observer_instance.get_final_answer = MagicMock(return_value=None)
+
+        # Track thread state to control polling behavior
+        thread_polled = [False]
+
+        def create_mock_thread():
+            """Create a mock thread that stays alive for multiple polls."""
+            import time
+            poll_count = [0]
+            max_polls = len(observer_messages_per_poll)
+
+            class MockThread:
+                def is_alive(self):
+                    poll_count[0] += 1
+                    # Stay alive for the first few polls, then die
+                    if poll_count[0] < max_polls:
+                        thread_polled[0] = True
+                        return True
+                    return False
+
+                def join(self):
+                    pass
+
+            return MockThread()
+
+        mocker.patch(
+            'backend.apps.skill_app.MessageObserver',
+            return_value=mock_observer_instance
+        )
+
+        mocker.patch(
+            'backend.apps.skill_app.create_simple_skill_from_request'
+        )
+
+        return mock_observer_instance, thread_polled, create_mock_thread
+
+    def test_polling_loop_executes_multiple_times(self, mocker):
+        """Test that the polling loop executes multiple times while thread is alive (lines 547-567)."""
+        # Set up 3 polls worth of messages
+        observer_messages = [
+            ['{"type": "step_count", "content": "1"}'],
+            ['{"type": "model_output_thinking", "content": "Thinking..."}'],
+            [],  # Thread dies after this poll
+        ]
+
+        utils_config_utils_mock.tenant_config_manager = MagicMock()
+        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+
+        call_count = [0]
+
+        def get_cached_message_side_effect():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(observer_messages):
+                return observer_messages[idx]
+            return []
+
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
+        mock_observer_instance.get_final_answer = MagicMock(return_value=None)
+
+        mocker.patch(
+            'backend.apps.skill_app.MessageObserver',
+            return_value=mock_observer_instance
+        )
+
+        mocker.patch(
+            'backend.apps.skill_app.create_simple_skill_from_request'
+        )
+
+        poll_count = [0]
+        max_polls = len(observer_messages)
+
+        def mock_thread_init(target=None):
+            poll_count[0] = 0
+            class MockThread:
+                def is_alive(self):
+                    nonlocal poll_count
+                    poll_count[0] += 1
+                    if poll_count[0] < max_polls:
+                        return True
+                    return False
+
+                def start(self):
+                    pass
+
+                def join(self):
+                    pass
+
+            return MockThread()
+
+        mocker.patch('threading.Thread', side_effect=mock_thread_init)
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with polling"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        # Verify observer was polled multiple times
+        assert mock_observer_instance.get_cached_message.call_count >= 2
+        assert b'"type": "step_count"' in response.content
+
+    def test_polling_with_step_count_streaming(self, mocker):
+        """Test step_count messages are streamed during polling (lines 557-558)."""
+        observer_messages = [
+            ['{"type": "step_count", "content": "1"}', '{"type": "step_count", "content": "2"}'],
+            [],
+        ]
+
+        utils_config_utils_mock.tenant_config_manager = MagicMock()
+        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+
+        call_count = [0]
+
+        def get_cached_message_side_effect():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(observer_messages):
+                return observer_messages[idx]
+            return []
+
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
+        mock_observer_instance.get_final_answer = MagicMock(return_value=None)
+
+        mocker.patch(
+            'backend.apps.skill_app.MessageObserver',
+            return_value=mock_observer_instance
+        )
+
+        mocker.patch(
+            'backend.apps.skill_app.create_simple_skill_from_request'
+        )
+
+        poll_count = [0]
+        max_polls = len(observer_messages)
+
+        def mock_thread_init(target=None):
+            poll_count[0] = 0
+            class MockThread:
+                def is_alive(self):
+                    nonlocal poll_count
+                    poll_count[0] += 1
+                    if poll_count[0] < max_polls:
+                        return True
+                    return False
+
+                def start(self):
+                    pass
+
+                def join(self):
+                    pass
+
+            return MockThread()
+
+        mocker.patch('threading.Thread', side_effect=mock_thread_init)
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with steps"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "step_count"' in response.content
+
+    def test_polling_with_skill_content_streaming(self, mocker):
+        """Test skill_content messages are streamed during polling (lines 560-561)."""
+        observer_messages = [
+            ['{"type": "model_output_thinking", "content": "Thinking step 1"}', '{"type": "model_output_code", "content": "Code block"}'],
+            [],
+        ]
+
+        utils_config_utils_mock.tenant_config_manager = MagicMock()
+        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+
+        call_count = [0]
+
+        def get_cached_message_side_effect():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(observer_messages):
+                return observer_messages[idx]
+            return []
+
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
+        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Final</SKILL>")
+
+        mocker.patch(
+            'backend.apps.skill_app.MessageObserver',
+            return_value=mock_observer_instance
+        )
+
+        mocker.patch(
+            'backend.apps.skill_app.create_simple_skill_from_request'
+        )
+
+        poll_count = [0]
+        max_polls = len(observer_messages)
+
+        def mock_thread_init(target=None):
+            poll_count[0] = 0
+            class MockThread:
+                def is_alive(self):
+                    nonlocal poll_count
+                    poll_count[0] += 1
+                    if poll_count[0] < max_polls:
+                        return True
+                    return False
+
+                def start(self):
+                    pass
+
+                def join(self):
+                    pass
+
+            return MockThread()
+
+        mocker.patch('threading.Thread', side_effect=mock_thread_init)
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with content"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert b'"type": "skill_content"' in response.content
+        assert b'Thinking step 1' in response.content
+
+    def test_polling_with_final_answer_during_polling(self, mocker):
+        """Test final_answer messages during polling are streamed (lines 563-564)."""
+        # final_answer must arrive while thread is still alive (not in remaining messages)
+        observer_messages = [
+            ['{"type": "final_answer", "content": "Partial answer in poll"}'],  # Thread is alive
+            [],  # Thread dies after this poll
+        ]
+
+        utils_config_utils_mock.tenant_config_manager = MagicMock()
+        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+
+        call_count = [0]
+
+        def get_cached_message_side_effect():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(observer_messages):
+                return observer_messages[idx]
+            return []
+
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
+        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Final</SKILL>")
+
+        mocker.patch(
+            'backend.apps.skill_app.MessageObserver',
+            return_value=mock_observer_instance
+        )
+
+        mocker.patch(
+            'backend.apps.skill_app.create_simple_skill_from_request'
+        )
+
+        # Thread stays alive for max_polls-1 polls, dies on the last one
+        poll_count = [0]
+        max_polls = len(observer_messages)
+
+        def mock_thread_init(target=None):
+            poll_count[0] = 0
+            class MockThread:
+                def is_alive(self):
+                    nonlocal poll_count
+                    poll_count[0] += 1
+                    # Stay alive while we have more polls to do
+                    if poll_count[0] <= max_polls - 1:
+                        return True
+                    return False
+
+                def start(self):
+                    pass
+
+                def join(self):
+                    pass
+
+            return MockThread()
+
+        mocker.patch('threading.Thread', side_effect=mock_thread_init)
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with partial answer"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        # Verify final_answer was streamed during polling
+        assert b'"type": "final_answer"' in response.content
+        assert b'Partial answer in poll' in response.content
+
+    def test_polling_skips_non_string_messages(self, mocker):
+        """Test that non-string messages are skipped (line 550)."""
+        observer_messages = [
+            [123, None, '{"type": "step_count", "content": "1"}'],
+            [],
+        ]
+
+        utils_config_utils_mock.tenant_config_manager = MagicMock()
+        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+
+        call_count = [0]
+
+        def get_cached_message_side_effect():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(observer_messages):
+                return observer_messages[idx]
+            return []
+
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
+        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Skill</SKILL>")
+
+        mocker.patch(
+            'backend.apps.skill_app.MessageObserver',
+            return_value=mock_observer_instance
+        )
+
+        mocker.patch(
+            'backend.apps.skill_app.create_simple_skill_from_request'
+        )
+
+        poll_count = [0]
+        max_polls = len(observer_messages)
+
+        def mock_thread_init(target=None):
+            poll_count[0] = 0
+            class MockThread:
+                def is_alive(self):
+                    nonlocal poll_count
+                    poll_count[0] += 1
+                    if poll_count[0] < max_polls:
+                        return True
+                    return False
+
+                def start(self):
+                    pass
+
+                def join(self):
+                    pass
+
+            return MockThread()
+
+        mocker.patch('threading.Thread', side_effect=mock_thread_init)
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with mixed messages"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        # Should handle gracefully and only stream the valid string message
+        assert response.status_code == 200
+        assert b'"type": "step_count"' in response.content
+
+    def test_polling_handles_json_decode_error(self, mocker):
+        """Test that JSON decode errors are caught and ignored (lines 565-566)."""
+        observer_messages = [
+            ['{"invalid json', '{"type": "step_count", "content": "1"}'],
+            [],
+        ]
+
+        utils_config_utils_mock.tenant_config_manager = MagicMock()
+        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+
+        call_count = [0]
+
+        def get_cached_message_side_effect():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(observer_messages):
+                return observer_messages[idx]
+            return []
+
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
+        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Skill</SKILL>")
+
+        mocker.patch(
+            'backend.apps.skill_app.MessageObserver',
+            return_value=mock_observer_instance
+        )
+
+        mocker.patch(
+            'backend.apps.skill_app.create_simple_skill_from_request'
+        )
+
+        poll_count = [0]
+        max_polls = len(observer_messages)
+
+        def mock_thread_init(target=None):
+            poll_count[0] = 0
+            class MockThread:
+                def is_alive(self):
+                    nonlocal poll_count
+                    poll_count[0] += 1
+                    if poll_count[0] < max_polls:
+                        return True
+                    return False
+
+                def start(self):
+                    pass
+
+                def join(self):
+                    pass
+
+            return MockThread()
+
+        mocker.patch('threading.Thread', side_effect=mock_thread_init)
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with bad json"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        # Should handle gracefully and continue streaming valid messages
+        assert response.status_code == 200
+        assert b'"type": "step_count"' in response.content
+
+    def test_remaining_messages_after_thread_with_step_count(self, mocker):
+        """Test remaining messages with step_count after thread completes (lines 580-581, 584-585)."""
+        observer_messages = [
+            [],
+            ['{"type": "step_count", "content": "Final step"}', '{"type": "final_answer", "content": "Partial"}'],
+        ]
+
+        utils_config_utils_mock.tenant_config_manager = MagicMock()
+        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+
+        call_count = [0]
+
+        def get_cached_message_side_effect():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(observer_messages):
+                return observer_messages[idx]
+            return []
+
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
+        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Final Complete</SKILL>")
+
+        mocker.patch(
+            'backend.apps.skill_app.MessageObserver',
+            return_value=mock_observer_instance
+        )
+
+        mocker.patch(
+            'backend.apps.skill_app.create_simple_skill_from_request'
+        )
+
+        poll_count = [0]
+        max_polls = len(observer_messages)
+
+        def mock_thread_init(target=None):
+            poll_count[0] = 0
+            class MockThread:
+                def is_alive(self):
+                    nonlocal poll_count
+                    poll_count[0] += 1
+                    if poll_count[0] < max_polls:
+                        return True
+                    return False
+
+                def start(self):
+                    pass
+
+                def join(self):
+                    pass
+
+            return MockThread()
+
+        mocker.patch('threading.Thread', side_effect=mock_thread_init)
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create skill with remaining"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        # Should have streamed step_count from remaining messages
+        assert b'"type": "step_count"' in response.content
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
