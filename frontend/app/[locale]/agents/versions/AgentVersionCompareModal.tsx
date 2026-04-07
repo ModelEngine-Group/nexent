@@ -1,7 +1,8 @@
 "use client";
 
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Flex, Spin, Empty, Table, Tag, Typography, Button, Select } from "antd";
+import { Modal, Flex, Spin, Empty, Table, Tag, Typography, Button, Select, Input } from "antd";
 import {
   AlertTriangle,
   RotateCcw,
@@ -14,6 +15,12 @@ import {
 } from "lucide-react";
 
 import type { VersionCompareResponse } from "@/services/agentVersionService";
+import { conversationService } from "@/services/conversationService";
+import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
+import { MESSAGE_ROLES } from "@/const/chatConfig";
+import { ChatMessageType } from "@/types/chat";
+import log from "@/lib/logger";
+import DebugMessageList from "../components/agentInfo/DebugMessageList";
 
 const { Text } = Typography;
 
@@ -22,6 +29,7 @@ export interface AgentVersionCompareModalProps {
   loading: boolean;
   compareData: VersionCompareResponse | null;
   onCancel: () => void;
+  agentId?: number | null;
   /**
    * Whether to show rollback confirm action.
    * If true, confirm button and rollback title will be used.
@@ -46,6 +54,7 @@ export default function AgentVersionCompareModal({
   loading,
   compareData,
   onCancel,
+  agentId,
   showRollback = false,
   onRollbackConfirm,
   rollbackLoading = false,
@@ -57,6 +66,29 @@ export default function AgentVersionCompareModal({
   onChangeVersionB,
 }: AgentVersionCompareModalProps) {
   const { t } = useTranslation("common");
+  const [compareQuestion, setCompareQuestion] = useState("");
+  const [compareLeftMessages, setCompareLeftMessages] = useState<ChatMessageType[]>([]);
+  const [compareRightMessages, setCompareRightMessages] = useState<ChatMessageType[]>([]);
+  const [isCompareStreaming, setIsCompareStreaming] = useState(false);
+  const [compareStreamingLeft, setCompareStreamingLeft] = useState(false);
+  const [compareStreamingRight, setCompareStreamingRight] = useState(false);
+  const compareTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const compareAbortControllersRef = useRef<{
+    left: AbortController | null;
+    right: AbortController | null;
+  }>({ left: null, right: null });
+  const compareConversationIdsRef = useRef<{
+    left: number | null;
+    right: number | null;
+  }>({ left: null, right: null });
+  const compareStepIdCountersRef = useRef<{
+    left: { current: number };
+    right: { current: number };
+  }>({
+    left: { current: 0 },
+    right: { current: 0 },
+  });
+  const compareInFlightRef = useRef(0);
 
   const versionOptions =
     versionList?.map((version) => {
@@ -91,6 +123,286 @@ export default function AgentVersionCompareModal({
           {t("common.button.close")}
         </Button>,
       ];
+
+  const resetCompareTimeout = () => {
+    if (compareTimeoutRef.current) {
+      clearTimeout(compareTimeoutRef.current);
+    }
+    compareTimeoutRef.current = setTimeout(() => {
+      setIsCompareStreaming(false);
+    }, 30000);
+  };
+
+  const markCompareStopped = (
+    setSideMessages: (value: (prev: ChatMessageType[]) => ChatMessageType[]) => void
+  ) => {
+    setSideMessages((prev) => {
+      const newMessages = [...prev];
+      const lastMsg = newMessages[newMessages.length - 1];
+      if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+        lastMsg.isComplete = true;
+        lastMsg.thinking = undefined;
+        lastMsg.content = t("agent.debug.stopped");
+      }
+      return newMessages;
+    });
+  };
+
+  const handleCompareStop = async () => {
+    if (compareAbortControllersRef.current.left) {
+      try {
+        compareAbortControllersRef.current.left.abort(t("agent.debug.userStop"));
+      } catch (error) {
+        log.error(t("agent.debug.cancelError"), error);
+      }
+    }
+    if (compareAbortControllersRef.current.right) {
+      try {
+        compareAbortControllersRef.current.right.abort(t("agent.debug.userStop"));
+      } catch (error) {
+        log.error(t("agent.debug.cancelError"), error);
+      }
+    }
+
+    compareAbortControllersRef.current = { left: null, right: null };
+
+    if (compareTimeoutRef.current) {
+      clearTimeout(compareTimeoutRef.current);
+      compareTimeoutRef.current = null;
+    }
+
+    setIsCompareStreaming(false);
+    setCompareStreamingLeft(false);
+    setCompareStreamingRight(false);
+    markCompareStopped(setCompareLeftMessages);
+    markCompareStopped(setCompareRightMessages);
+
+    const { left, right } = compareConversationIdsRef.current;
+    compareConversationIdsRef.current = { left: null, right: null };
+
+    if (left != null) {
+      try {
+        await conversationService.stop(left);
+      } catch (error) {
+        log.error(t("agent.debug.stopError"), error);
+      }
+    }
+    if (right != null) {
+      try {
+        await conversationService.stop(right);
+      } catch (error) {
+        log.error(t("agent.debug.stopError"), error);
+      }
+    }
+  };
+
+  const resetCompareState = () => {
+    setCompareQuestion("");
+    setCompareLeftMessages([]);
+    setCompareRightMessages([]);
+    compareStepIdCountersRef.current.left.current = 0;
+    compareStepIdCountersRef.current.right.current = 0;
+    setIsCompareStreaming(false);
+    setCompareStreamingLeft(false);
+    setCompareStreamingRight(false);
+  };
+
+  useEffect(() => {
+    if (!open) {
+      handleCompareStop();
+      resetCompareState();
+      return;
+    }
+    resetCompareState();
+  }, [open]);
+
+  useEffect(() => {
+    if (isCompareStreaming) {
+      handleCompareStop();
+    }
+    resetCompareState();
+  }, [selectedVersionNoA, selectedVersionNoB]);
+
+  const runCompareStream = async (params: {
+    versionNo: number;
+    conversationId: number;
+    controller: AbortController;
+    setSideMessages: Dispatch<SetStateAction<ChatMessageType[]>>;
+    stepIdCounterRef: { current: number };
+    question: string;
+    agentIdValue: number;
+    onStreamEnd: () => void;
+  }) => {
+    try {
+      const reader = await conversationService.runAgent(
+        {
+          query: params.question,
+          conversation_id: params.conversationId,
+          is_set: true,
+          history: [],
+          is_debug: true,
+          agent_id: params.agentIdValue,
+          version_no: params.versionNo,
+        },
+        params.controller.signal
+      );
+
+      if (!reader) throw new Error(t("agent.debug.nullResponse"));
+
+      await handleStreamResponse(
+        reader,
+        params.setSideMessages,
+        resetCompareTimeout,
+        params.stepIdCounterRef,
+        () => {},
+        false,
+        () => {},
+        async () => {},
+        params.conversationId,
+        conversationService,
+        true,
+        t
+      );
+    } catch (error) {
+      const err = error as Error;
+      if (err.name === "AbortError") {
+        markCompareStopped(params.setSideMessages);
+      } else {
+        log.error(t("agent.debug.streamError"), error);
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : t("agent.debug.processError");
+        params.setSideMessages((prev) => {
+          const newMessages = [...prev];
+          const lastMsg = newMessages[newMessages.length - 1];
+          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+            lastMsg.content = errorMessage;
+            lastMsg.isComplete = true;
+            lastMsg.error = errorMessage;
+          }
+          return newMessages;
+        });
+      }
+    } finally {
+      compareInFlightRef.current -= 1;
+      if (compareInFlightRef.current <= 0) {
+        setIsCompareStreaming(false);
+      }
+      params.onStreamEnd();
+    }
+  };
+
+  const resolveVersionLabel = (versionNo: number | null | undefined) => {
+    if (!versionNo) return "-";
+    const matched = versionList?.find((v) => v.version_no === versionNo);
+    return matched?.version_name || `V${versionNo}`;
+  };
+
+  const resolveVersionModel = (versionNo: number | null | undefined) => {
+    if (!versionNo || !compareData?.data) return "-";
+    const { version_a, version_b } = compareData.data;
+    if (version_a?.version?.version_no === versionNo) {
+      return version_a.model_name || "-";
+    }
+    if (version_b?.version?.version_no === versionNo) {
+      return version_b.model_name || "-";
+    }
+    return "-";
+  };
+
+  const handleCompareAsk = async () => {
+    if (!agentId) return;
+    const question = compareQuestion.trim();
+    if (!question) return;
+
+    const versionNoA = selectedVersionNoA ?? compareData?.data?.version_a?.version?.version_no;
+    const versionNoB = selectedVersionNoB ?? compareData?.data?.version_b?.version?.version_no;
+    if (!versionNoA || !versionNoB) return;
+    if (versionNoA === versionNoB) return;
+
+    setIsCompareStreaming(true);
+    setCompareStreamingLeft(true);
+    setCompareStreamingRight(true);
+    compareInFlightRef.current = 2;
+    compareStepIdCountersRef.current.left.current = 0;
+    compareStepIdCountersRef.current.right.current = 0;
+
+    const leftUserMessage: ChatMessageType = {
+      id: `${Date.now()}-left-user`,
+      role: MESSAGE_ROLES.USER,
+      content: question,
+      timestamp: new Date(),
+    };
+    const rightUserMessage: ChatMessageType = {
+      id: `${Date.now()}-right-user`,
+      role: MESSAGE_ROLES.USER,
+      content: question,
+      timestamp: new Date(),
+    };
+
+    const leftAssistantMessage: ChatMessageType = {
+      id: `${Date.now()}-left-assistant`,
+      role: MESSAGE_ROLES.ASSISTANT,
+      content: "",
+      timestamp: new Date(),
+      isComplete: false,
+    };
+    const rightAssistantMessage: ChatMessageType = {
+      id: `${Date.now()}-right-assistant`,
+      role: MESSAGE_ROLES.ASSISTANT,
+      content: "",
+      timestamp: new Date(),
+      isComplete: false,
+    };
+
+    setCompareLeftMessages([leftUserMessage, leftAssistantMessage]);
+    setCompareRightMessages([rightUserMessage, rightAssistantMessage]);
+
+    const baseId = -Math.abs(Date.now());
+    const leftConversationId = baseId;
+    const rightConversationId = baseId - 1;
+    compareConversationIdsRef.current = {
+      left: leftConversationId,
+      right: rightConversationId,
+    };
+
+    const leftController = new AbortController();
+    const rightController = new AbortController();
+    compareAbortControllersRef.current = {
+      left: leftController,
+      right: rightController,
+    };
+
+    await Promise.allSettled([
+      runCompareStream({
+        versionNo: versionNoA,
+        conversationId: leftConversationId,
+        controller: leftController,
+        setSideMessages: setCompareLeftMessages,
+        stepIdCounterRef: compareStepIdCountersRef.current.left,
+        question,
+        agentIdValue: agentId,
+        onStreamEnd: () => setCompareStreamingLeft(false),
+      }),
+      runCompareStream({
+        versionNo: versionNoB,
+        conversationId: rightConversationId,
+        controller: rightController,
+        setSideMessages: setCompareRightMessages,
+        stepIdCounterRef: compareStepIdCountersRef.current.right,
+        question,
+        agentIdValue: agentId,
+        onStreamEnd: () => setCompareStreamingRight(false),
+      }),
+    ]);
+
+    compareAbortControllersRef.current = { left: null, right: null };
+    if (compareTimeoutRef.current) {
+      clearTimeout(compareTimeoutRef.current);
+      compareTimeoutRef.current = null;
+    }
+  };
 
   return (
     <Modal
@@ -162,64 +474,37 @@ export default function AgentVersionCompareModal({
 
               const data = [
                 {
-                  key: "name",
+                  key: "name_model",
                   field: (
                     <Flex align="center" gap={6}>
                       <PencilLine size={14} className="text-gray-400" />
-                      <span>{t("agent.version.field.name")}</span>
+                      <span>
+                        {t("agent.version.field.name")}/{t("agent.version.field.modelName")}
+                      </span>
                     </Flex>
                   ),
                   current: (
                     <span
                       className={
-                        version_a.name !== version_b.name
-                          ? "text-orange-500 font-medium"
-                          : "text-gray-600"
-                      }
-                    >
-                      {version_a.name}
-                    </span>
-                  ),
-                  version: (
-                    <span
-                      className={
-                        version_a.name !== version_b.name
-                          ? "text-green-500 font-medium"
-                          : "text-gray-600"
-                      }
-                    >
-                      {version_b.name}
-                    </span>
-                  ),
-                },
-                {
-                  key: "model_name",
-                  field: (
-                    <Flex align="center" gap={6}>
-                      <Cpu size={14} className="text-gray-400" />
-                      <span>{t("agent.version.field.modelName")}</span>
-                    </Flex>
-                  ),
-                  current: (
-                    <span
-                      className={
+                        version_a.name !== version_b.name ||
                         version_a.model_name !== version_b.model_name
                           ? "text-orange-500 font-medium"
                           : "text-gray-600"
                       }
                     >
-                      {version_a.model_name || "-"}
+                      {version_a.name || "-"} / {version_a.model_name || "-"}
                     </span>
                   ),
                   version: (
                     <span
                       className={
+                        version_a.name !== version_b.name ||
                         version_a.model_name !== version_b.model_name
                           ? "text-green-500 font-medium"
                           : "text-gray-600"
                       }
                     >
-                      {version_b.model_name || "-"}
+                      {version_b.name || "-"} / {version_b.model_name || "-"}
                     </span>
                   ),
                 },
@@ -253,45 +538,6 @@ export default function AgentVersionCompareModal({
                       }`}
                     >
                       {version_b.description || "-"}
-                    </Text>
-                  ),
-                },
-                {
-                  key: "duty_prompt",
-                  field: (
-                    <Flex align="center" gap={6}>
-                      <MessageCircle size={14} className="text-gray-400" />
-                      <span>{t("agent.version.field.dutyPrompt")}</span>
-                    </Flex>
-                  ),
-                  current: (
-                    <Text
-                      type="secondary"
-                      className={`text-xs ${
-                        version_a.duty_prompt !== version_b.duty_prompt
-                          ? "text-orange-500"
-                          : ""
-                      }`}
-                    >
-                      {version_a.duty_prompt?.slice(0, 100) || "-"}
-                      {version_a.duty_prompt &&
-                        version_a.duty_prompt.length > 100 &&
-                        "..."}
-                    </Text>
-                  ),
-                  version: (
-                    <Text
-                      type="secondary"
-                      className={`text-xs ${
-                        version_a.duty_prompt !== version_b.duty_prompt
-                          ? "text-green-500"
-                          : ""
-                      }`}
-                    >
-                      {version_b.duty_prompt?.slice(0, 100) || "-"}
-                      {version_b.duty_prompt &&
-                        version_b.duty_prompt.length > 100 &&
-                        "..."}
                     </Text>
                   ),
                 },
@@ -371,6 +617,67 @@ export default function AgentVersionCompareModal({
                 />
               );
             })()}
+            <div className="flex flex-col gap-3">
+              <div className="text-sm font-medium">
+                {t("agent.version.compareQaTitle")}
+              </div>
+              <Input.TextArea
+                value={compareQuestion}
+                onChange={(e) => setCompareQuestion(e.target.value)}
+                placeholder={t("agent.version.compareQaPlaceholder")}
+                autoSize={{ minRows: 2, maxRows: 4 }}
+                disabled={isCompareStreaming}
+                onPressEnter={(e) => {
+                  if (!e.shiftKey) {
+                    e.preventDefault();
+                    handleCompareAsk();
+                  }
+                }}
+              />
+              <Flex align="center" justify="space-between">
+                <div className="text-xs text-gray-500">
+                  {t("agent.version.compareQaHint")}
+                </div>
+                <Flex gap={8}>
+                  {isCompareStreaming && (
+                    <Button danger onClick={handleCompareStop}>
+                      {t("agent.debug.stop")}
+                    </Button>
+                  )}
+                  <Button
+                    type="primary"
+                    onClick={handleCompareAsk}
+                    disabled={isCompareStreaming}
+                  >
+                    {t("agent.version.compareQaRun")}
+                  </Button>
+                </Flex>
+              </Flex>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col min-h-0 border border-gray-200 rounded-md p-3 overflow-hidden">
+                  <div className="text-xs text-gray-500 mb-2">
+                    {resolveVersionLabel(selectedVersionNoA ?? version_a.version.version_no)} ·{" "}
+                    {resolveVersionModel(selectedVersionNoA ?? version_a.version.version_no)}
+                  </div>
+                  <DebugMessageList
+                    messages={compareLeftMessages}
+                    isStreaming={compareStreamingLeft}
+                    emptyPlaceholder={t("agent.version.compareQaEmpty")}
+                  />
+                </div>
+                <div className="flex flex-col min-h-0 border border-gray-200 rounded-md p-3 overflow-hidden">
+                  <div className="text-xs text-gray-500 mb-2">
+                    {resolveVersionLabel(selectedVersionNoB ?? version_b.version.version_no)} ·{" "}
+                    {resolveVersionModel(selectedVersionNoB ?? version_b.version.version_no)}
+                  </div>
+                  <DebugMessageList
+                    messages={compareRightMessages}
+                    isStreaming={compareStreamingRight}
+                    emptyPlaceholder={t("agent.version.compareQaEmpty")}
+                  />
+                </div>
+              </div>
+            </div>
           </Flex>
         ) : (
           <Empty description={t("agent.version.compareFailed")} />

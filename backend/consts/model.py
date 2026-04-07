@@ -136,6 +136,8 @@ class AgentRequest(BaseModel):
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
+    model_id: Optional[int] = None
+    version_no: Optional[int] = None
     is_debug: Optional[bool] = False
 
 

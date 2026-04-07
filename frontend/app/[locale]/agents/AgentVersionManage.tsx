@@ -158,6 +158,7 @@ export default function AgentVersionManage() {
         currentVersionNo={agentInfo?.current_version_no}
         compareData={compareData}
         onCancel={() => setCompareModalOpen(false)}
+        agentId={currentAgentId ?? undefined}
         selectedVersionNoA={selectedVersionA}
         selectedVersionNoB={selectedVersionB}
         onChangeVersionA={handleChangeVersionA}

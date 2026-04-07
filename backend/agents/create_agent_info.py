@@ -77,6 +77,7 @@ async def create_agent_config(
     last_user_query: str = None,
     allow_memory_search: bool = True,
     version_no: int = 0,
+    override_model_id: int | None = None,
 ):
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
@@ -97,6 +98,7 @@ async def create_agent_config(
             last_user_query=last_user_query,
             allow_memory_search=allow_memory_search,
             version_no=sub_agent_version_no,
+            override_model_id=None,
         )
         managed_agents.append(sub_agent_config)
 
@@ -186,8 +188,9 @@ async def create_agent_config(
     else:
         system_prompt = agent_info.get("prompt", "")
 
-    if agent_info.get("model_id") is not None:
-        model_info = get_model_by_model_id(agent_info.get("model_id"))
+    model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
+    if model_id_to_use is not None:
+        model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
         model_name = model_info["display_name"] if model_info is not None else "main_model"
     else:
         model_name = "main_model"
@@ -362,16 +365,18 @@ async def create_agent_run_info(
     language: str = "zh",
     allow_memory_search: bool = True,
     is_debug: bool = False,
+    version_no_override: int | None = None,
+    override_model_id: int | None = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
     # If is_debug=true, use version 0 (draft/editing state)
-    if is_debug:
+    if version_no_override is not None:
+        version_no = version_no_override
+    elif is_debug:
         version_no = 0
     else:
-        # Get current published version number
         version_no = query_current_version_no(agent_id=agent_id, tenant_id=tenant_id)
-        # Fallback to 0 if no published version exists
         if version_no is None:
             version_no = 0
             logger.info(f"Agent {agent_id} has no published version, using draft version 0")
@@ -386,6 +391,7 @@ async def create_agent_run_info(
         last_user_query=final_query,
         allow_memory_search=allow_memory_search,
         version_no=version_no,
+        override_model_id=override_model_id,
     )
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)

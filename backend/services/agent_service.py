@@ -1582,6 +1582,8 @@ async def prepare_agent_run(
         language=language,
         allow_memory_search=allow_memory_search,
         is_debug=agent_request.is_debug,
+        version_no_override=agent_request.version_no,
+        override_model_id=agent_request.model_id,
     )
     agent_run_manager.register_agent_run(
         agent_request.conversation_id, agent_run_info, user_id)
