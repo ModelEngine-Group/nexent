@@ -1,26 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Flex, Spin, Empty, Table, Tag, Typography, Button, Select, Input } from "antd";
 import {
   AlertTriangle,
   RotateCcw,
-  Cpu,
   FileText,
-  MessageCircle,    
   Wrench,
   Bot,
   PencilLine
 } from "lucide-react";
 
 import type { VersionCompareResponse } from "@/services/agentVersionService";
-import { conversationService } from "@/services/conversationService";
-import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
-import { MESSAGE_ROLES } from "@/const/chatConfig";
-import { ChatMessageType } from "@/types/chat";
-import log from "@/lib/logger";
 import DebugMessageList from "../components/agentInfo/DebugMessageList";
+import { useCompareStream } from "../components/agentInfo/useCompareStream";
 
 const { Text } = Typography;
 
@@ -67,28 +61,43 @@ export default function AgentVersionCompareModal({
 }: AgentVersionCompareModalProps) {
   const { t } = useTranslation("common");
   const [compareQuestion, setCompareQuestion] = useState("");
-  const [compareLeftMessages, setCompareLeftMessages] = useState<ChatMessageType[]>([]);
-  const [compareRightMessages, setCompareRightMessages] = useState<ChatMessageType[]>([]);
-  const [isCompareStreaming, setIsCompareStreaming] = useState(false);
-  const [compareStreamingLeft, setCompareStreamingLeft] = useState(false);
-  const [compareStreamingRight, setCompareStreamingRight] = useState(false);
-  const compareTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const compareAbortControllersRef = useRef<{
-    left: AbortController | null;
-    right: AbortController | null;
-  }>({ left: null, right: null });
-  const compareConversationIdsRef = useRef<{
-    left: number | null;
-    right: number | null;
-  }>({ left: null, right: null });
-  const compareStepIdCountersRef = useRef<{
-    left: { current: number };
-    right: { current: number };
-  }>({
-    left: { current: 0 },
-    right: { current: 0 },
+
+  const resolveVersionNo = useCallback(
+    (side: "left" | "right") => {
+      const selected = side === "left" ? selectedVersionNoA : selectedVersionNoB;
+      if (selected !== null && selected !== undefined) return selected;
+      if (compareData?.data) {
+        return side === "left"
+          ? compareData.data.version_a.version.version_no
+          : compareData.data.version_b.version.version_no;
+      }
+      return null;
+    },
+    [selectedVersionNoA, selectedVersionNoB, compareData]
+  );
+
+  const {
+    leftMessages: compareLeftMessages,
+    rightMessages: compareRightMessages,
+    isCompareStreaming,
+    compareStreamingLeft,
+    compareStreamingRight,
+    runCompare,
+    stopCompare,
+    resetCompareState,
+  } = useCompareStream({
+    t,
+    buildRunParams: ({ side, question, conversationId, history }) => ({
+      query: question,
+      conversation_id: conversationId,
+      is_set: true,
+      history,
+      is_debug: true,
+      agent_id: agentId ?? undefined,
+      version_no: resolveVersionNo(side) ?? undefined,
+    }),
+    getHistory: () => [],
   });
-  const compareInFlightRef = useRef(0);
 
   const versionOptions =
     versionList?.map((version) => {
@@ -97,7 +106,7 @@ export default function AgentVersionCompareModal({
       return {
         value: version.version_no,
         label: isCurrent
-          ? `${baseLabel}（${t("agent.version.currentVersion")}）`
+          ? `${baseLabel} (${t("agent.version.currentVersion")})`
           : baseLabel,
       };
     }) ?? [];
@@ -124,183 +133,33 @@ export default function AgentVersionCompareModal({
         </Button>,
       ];
 
-  const resetCompareTimeout = () => {
-    if (compareTimeoutRef.current) {
-      clearTimeout(compareTimeoutRef.current);
-    }
-    compareTimeoutRef.current = setTimeout(() => {
-      setIsCompareStreaming(false);
-    }, 30000);
-  };
-
-  const markCompareStopped = (
-    setSideMessages: (value: (prev: ChatMessageType[]) => ChatMessageType[]) => void
-  ) => {
-    setSideMessages((prev) => {
-      const newMessages = [...prev];
-      const lastMsg = newMessages[newMessages.length - 1];
-      if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
-        lastMsg.isComplete = true;
-        lastMsg.thinking = undefined;
-        lastMsg.content = t("agent.debug.stopped");
-      }
-      return newMessages;
-    });
-  };
-
-  const handleCompareStop = async () => {
-    if (compareAbortControllersRef.current.left) {
-      try {
-        compareAbortControllersRef.current.left.abort(t("agent.debug.userStop"));
-      } catch (error) {
-        log.error(t("agent.debug.cancelError"), error);
-      }
-    }
-    if (compareAbortControllersRef.current.right) {
-      try {
-        compareAbortControllersRef.current.right.abort(t("agent.debug.userStop"));
-      } catch (error) {
-        log.error(t("agent.debug.cancelError"), error);
-      }
-    }
-
-    compareAbortControllersRef.current = { left: null, right: null };
-
-    if (compareTimeoutRef.current) {
-      clearTimeout(compareTimeoutRef.current);
-      compareTimeoutRef.current = null;
-    }
-
-    setIsCompareStreaming(false);
-    setCompareStreamingLeft(false);
-    setCompareStreamingRight(false);
-    markCompareStopped(setCompareLeftMessages);
-    markCompareStopped(setCompareRightMessages);
-
-    const { left, right } = compareConversationIdsRef.current;
-    compareConversationIdsRef.current = { left: null, right: null };
-
-    if (left != null) {
-      try {
-        await conversationService.stop(left);
-      } catch (error) {
-        log.error(t("agent.debug.stopError"), error);
-      }
-    }
-    if (right != null) {
-      try {
-        await conversationService.stop(right);
-      } catch (error) {
-        log.error(t("agent.debug.stopError"), error);
-      }
-    }
-  };
-
-  const resetCompareState = () => {
-    setCompareQuestion("");
-    setCompareLeftMessages([]);
-    setCompareRightMessages([]);
-    compareStepIdCountersRef.current.left.current = 0;
-    compareStepIdCountersRef.current.right.current = 0;
-    setIsCompareStreaming(false);
-    setCompareStreamingLeft(false);
-    setCompareStreamingRight(false);
-  };
-
   useEffect(() => {
     if (!open) {
-      handleCompareStop();
+      stopCompare();
       resetCompareState();
+      setCompareQuestion("");
       return;
     }
     resetCompareState();
-  }, [open]);
+    setCompareQuestion("");
+  }, [open, resetCompareState, stopCompare]);
 
   useEffect(() => {
     if (isCompareStreaming) {
-      handleCompareStop();
+      stopCompare();
     }
     resetCompareState();
-  }, [selectedVersionNoA, selectedVersionNoB]);
-
-  const runCompareStream = async (params: {
-    versionNo: number;
-    conversationId: number;
-    controller: AbortController;
-    setSideMessages: Dispatch<SetStateAction<ChatMessageType[]>>;
-    stepIdCounterRef: { current: number };
-    question: string;
-    agentIdValue: number;
-    onStreamEnd: () => void;
-  }) => {
-    try {
-      const reader = await conversationService.runAgent(
-        {
-          query: params.question,
-          conversation_id: params.conversationId,
-          is_set: true,
-          history: [],
-          is_debug: true,
-          agent_id: params.agentIdValue,
-          version_no: params.versionNo,
-        },
-        params.controller.signal
-      );
-
-      if (!reader) throw new Error(t("agent.debug.nullResponse"));
-
-      await handleStreamResponse(
-        reader,
-        params.setSideMessages,
-        resetCompareTimeout,
-        params.stepIdCounterRef,
-        () => {},
-        false,
-        () => {},
-        async () => {},
-        params.conversationId,
-        conversationService,
-        true,
-        t
-      );
-    } catch (error) {
-      const err = error as Error;
-      if (err.name === "AbortError") {
-        markCompareStopped(params.setSideMessages);
-      } else {
-        log.error(t("agent.debug.streamError"), error);
-        const errorMessage =
-          error instanceof Error
-            ? error.message
-            : t("agent.debug.processError");
-        params.setSideMessages((prev) => {
-          const newMessages = [...prev];
-          const lastMsg = newMessages[newMessages.length - 1];
-          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
-            lastMsg.content = errorMessage;
-            lastMsg.isComplete = true;
-            lastMsg.error = errorMessage;
-          }
-          return newMessages;
-        });
-      }
-    } finally {
-      compareInFlightRef.current -= 1;
-      if (compareInFlightRef.current <= 0) {
-        setIsCompareStreaming(false);
-      }
-      params.onStreamEnd();
-    }
-  };
+    setCompareQuestion("");
+  }, [selectedVersionNoA, selectedVersionNoB, resetCompareState, stopCompare]);
 
   const resolveVersionLabel = (versionNo: number | null | undefined) => {
-    if (!versionNo) return "-";
+    if (versionNo === null || versionNo === undefined) return "-";
     const matched = versionList?.find((v) => v.version_no === versionNo);
     return matched?.version_name || `V${versionNo}`;
   };
 
   const resolveVersionModel = (versionNo: number | null | undefined) => {
-    if (!versionNo || !compareData?.data) return "-";
+    if ((versionNo === null || versionNo === undefined) || !compareData?.data) return "-";
     const { version_a, version_b } = compareData.data;
     if (version_a?.version?.version_no === versionNo) {
       return version_a.model_name || "-";
@@ -316,92 +175,12 @@ export default function AgentVersionCompareModal({
     const question = compareQuestion.trim();
     if (!question) return;
 
-    const versionNoA = selectedVersionNoA ?? compareData?.data?.version_a?.version?.version_no;
-    const versionNoB = selectedVersionNoB ?? compareData?.data?.version_b?.version?.version_no;
-    if (!versionNoA || !versionNoB) return;
+    const versionNoA = resolveVersionNo("left");
+    const versionNoB = resolveVersionNo("right");
+    if (versionNoA === null || versionNoA === undefined) return;
+    if (versionNoB === null || versionNoB === undefined) return;
     if (versionNoA === versionNoB) return;
-
-    setIsCompareStreaming(true);
-    setCompareStreamingLeft(true);
-    setCompareStreamingRight(true);
-    compareInFlightRef.current = 2;
-    compareStepIdCountersRef.current.left.current = 0;
-    compareStepIdCountersRef.current.right.current = 0;
-
-    const leftUserMessage: ChatMessageType = {
-      id: `${Date.now()}-left-user`,
-      role: MESSAGE_ROLES.USER,
-      content: question,
-      timestamp: new Date(),
-    };
-    const rightUserMessage: ChatMessageType = {
-      id: `${Date.now()}-right-user`,
-      role: MESSAGE_ROLES.USER,
-      content: question,
-      timestamp: new Date(),
-    };
-
-    const leftAssistantMessage: ChatMessageType = {
-      id: `${Date.now()}-left-assistant`,
-      role: MESSAGE_ROLES.ASSISTANT,
-      content: "",
-      timestamp: new Date(),
-      isComplete: false,
-    };
-    const rightAssistantMessage: ChatMessageType = {
-      id: `${Date.now()}-right-assistant`,
-      role: MESSAGE_ROLES.ASSISTANT,
-      content: "",
-      timestamp: new Date(),
-      isComplete: false,
-    };
-
-    setCompareLeftMessages([leftUserMessage, leftAssistantMessage]);
-    setCompareRightMessages([rightUserMessage, rightAssistantMessage]);
-
-    const baseId = -Math.abs(Date.now());
-    const leftConversationId = baseId;
-    const rightConversationId = baseId - 1;
-    compareConversationIdsRef.current = {
-      left: leftConversationId,
-      right: rightConversationId,
-    };
-
-    const leftController = new AbortController();
-    const rightController = new AbortController();
-    compareAbortControllersRef.current = {
-      left: leftController,
-      right: rightController,
-    };
-
-    await Promise.allSettled([
-      runCompareStream({
-        versionNo: versionNoA,
-        conversationId: leftConversationId,
-        controller: leftController,
-        setSideMessages: setCompareLeftMessages,
-        stepIdCounterRef: compareStepIdCountersRef.current.left,
-        question,
-        agentIdValue: agentId,
-        onStreamEnd: () => setCompareStreamingLeft(false),
-      }),
-      runCompareStream({
-        versionNo: versionNoB,
-        conversationId: rightConversationId,
-        controller: rightController,
-        setSideMessages: setCompareRightMessages,
-        stepIdCounterRef: compareStepIdCountersRef.current.right,
-        question,
-        agentIdValue: agentId,
-        onStreamEnd: () => setCompareStreamingRight(false),
-      }),
-    ]);
-
-    compareAbortControllersRef.current = { left: null, right: null };
-    if (compareTimeoutRef.current) {
-      clearTimeout(compareTimeoutRef.current);
-      compareTimeoutRef.current = null;
-    }
+    await runCompare(question);
   };
 
   return (
@@ -640,7 +419,7 @@ export default function AgentVersionCompareModal({
                 </div>
                 <Flex gap={8}>
                   {isCompareStreaming && (
-                    <Button danger onClick={handleCompareStop}>
+                    <Button danger onClick={stopCompare}>
                       {t("agent.debug.stop")}
                     </Button>
                   )}
