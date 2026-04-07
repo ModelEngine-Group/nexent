@@ -26,8 +26,6 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
     Returns:
         dict: Loaded prompt template
     """
-    logger.info(
-        f"Getting prompt template for type: {template_type}, language: {language}, kwargs: {kwargs}")
 
     # Define template path mapping
     template_paths = {

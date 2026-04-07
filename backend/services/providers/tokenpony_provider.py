@@ -47,7 +47,7 @@ class TokenPonyModelProvider(AbstractModelProvider):
                 "chat": [],       # Maps to "llm"
                 "vlm": [],        # Maps to "vlm"
                 "embedding": [],  # Maps to "embedding" / "multi_embedding"
-                "reranker": [],   # Maps to "reranker"
+                "rerank": [],   # Maps to "rerank"
                 "tts": [],        # Maps to "tts"
                 "stt": []         # Maps to "stt"
             }
@@ -66,10 +66,10 @@ class TokenPonyModelProvider(AbstractModelProvider):
                     "model_type": "",
                     "max_tokens": DEFAULT_LLM_MAX_TOKENS
                 }
-                # 1. reranker
+                # 1. rerank
                 if 'rerank' in m_id:
-                    cleaned_model.update({"model_tag": "reranker", "model_type": "reranker"})
-                    categorized_models['reranker'].append(cleaned_model)
+                    cleaned_model.update({"model_tag": "rerank", "model_type": "rerank"})
+                    categorized_models['rerank'].append(cleaned_model)
                 #2. embedding
                 elif 'embedding' in m_id or m_id.startswith('bge-'):
                     cleaned_model.update({"model_tag": "embedding", "model_type": "embedding"})

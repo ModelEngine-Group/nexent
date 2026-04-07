@@ -88,6 +88,72 @@ def mock_convert_list_to_string(items):
         return ""
     return ",".join(str(item) for item in items)
 
+    import backend.services.agent_service as agent_service
+    from backend.services.agent_service import update_agent_info_impl
+    from backend.services.agent_service import get_creating_sub_agent_info_impl
+    from backend.services.agent_service import list_all_agent_info_impl
+    from backend.services.agent_service import get_agent_info_impl
+    from backend.services.agent_service import get_creating_sub_agent_id_service
+    from backend.services.agent_service import get_enable_tool_id_by_agent_id
+    from backend.services.agent_service import (
+        get_agent_call_relationship_impl,
+        delete_agent_impl,
+        export_agent_impl,
+        export_agent_by_agent_id,
+        import_agent_by_agent_id,
+        insert_related_agent_impl,
+        load_default_agents_json_file,
+        clear_agent_memory,
+        import_agent_impl,
+        get_agent_id_by_name,
+        save_messages,
+        prepare_agent_run,
+        run_agent_stream,
+        stop_agent_tasks,
+        _resolve_user_tenant_language,
+        _apply_duplicate_name_availability_rules,
+        _check_single_model_availability,
+        _normalize_language_key,
+        _render_prompt_template,
+        _format_existing_values,
+        _generate_unique_agent_name_with_suffix,
+        _generate_unique_display_name_with_suffix,
+        _generate_unique_value_with_suffix,
+        _regenerate_agent_value_with_llm,
+        clear_agent_new_mark_impl,
+    )
+    from consts.model import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
+
+    # Ensure db_client is set to our mock after import
+    import backend.database.client as db_client_module
+    db_client_module.db_client = mock_postgres_client
+
+# Mock Elasticsearch (already done in the import section above, but keeping for reference)
+elasticsearch_client_mock = MagicMock()
+
+
+# Mock memory-related modules
+nexent_mock = MagicMock()
+sys.modules['nexent'] = nexent_mock
+sys.modules['nexent.core'] = MagicMock()
+sys.modules['nexent.core.agents'] = MagicMock()
+sys.modules['nexent.core.models'] = MagicMock()
+
+# Mock rerank_model module with proper class exports
+class MockBaseRerank:
+    pass
+
+class MockOpenAICompatibleRerank(MockBaseRerank):
+    def __init__(self, *args, **kwargs):
+        pass
+
+rerank_module = MagicMock()
+rerank_module.BaseRerank = MockBaseRerank
+rerank_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
+sys.modules['nexent.core.models.rerank_model'] = rerank_module
+# Don't mock agent_model yet, we need to import ToolConfig first
+sys.modules['nexent.memory'] = MagicMock()
+sys.modules['nexent.memory.memory_service'] = MagicMock()
 sys.modules['utils.str_utils'] = MagicMock()
 sys.modules['utils.str_utils'].convert_list_to_string = mock_convert_list_to_string
 sys.modules['utils.str_utils'].convert_string_to_list = lambda s: s.split(",") if s else []
