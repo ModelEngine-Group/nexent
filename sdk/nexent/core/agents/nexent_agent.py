@@ -239,6 +239,7 @@ class NexentAgent:
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=["*"],
+                instructions=agent_config.instructions,
             )
             agent.stop_event = self.stop_event
 
