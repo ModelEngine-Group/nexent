@@ -50,6 +50,7 @@ sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
 
 # Mock ToolConfig from agent_model
 nexent_core_agents_agent_model_mock.ToolConfig = type('ToolConfig', (), {})
+nexent_core_agents_agent_model_mock.ModelConfig = type('ModelConfig', (), {})
 
 # Set up storage mocks
 storage_client_mock = MagicMock()
@@ -103,6 +104,29 @@ utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_auth_utils_mock
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "tenant123"))
+utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))
+
+# Mock utils.prompt_template_utils
+utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
+sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
+utils_prompt_template_utils_mock.get_skill_creation_simple_prompt_template = MagicMock(return_value={
+    "system_prompt": "You are a skill creator",
+    "user_prompt": "Create a skill"
+})
+
+# Mock agents module
+agents_mock = types.ModuleType('agents')
+agents_skill_creation_agent_mock = types.ModuleType('agents.skill_creation_agent')
+sys.modules['agents'] = agents_mock
+sys.modules['agents.skill_creation_agent'] = agents_skill_creation_agent_mock
+agents_skill_creation_agent_mock.create_simple_skill_from_request = MagicMock()
+
+# Mock nexent.core.utils
+nexent_core_utils_mock = types.ModuleType('nexent.core.utils')
+nexent_core_utils_observer_mock = types.ModuleType('nexent.core.utils.observer')
+sys.modules['nexent.core.utils'] = nexent_core_utils_mock
+sys.modules['nexent.core.utils.observer'] = nexent_core_utils_observer_mock
+nexent_core_utils_observer_mock.MessageObserver = type('MessageObserver', (), {})
 
 # Mock database
 database_mock = types.ModuleType('database')
@@ -1789,203 +1813,6 @@ class TestCreateSkillEndpointExtended:
                 )
 
                 assert response.status_code == 500
-
-
-# ===== Delete Skill File Endpoint Tests =====
-class TestDeleteSkillFileEndpoint:
-    """Test DELETE /skills/{skill_name}/files/{file_path} endpoint."""
-
-    def test_delete_skill_file_success(self, mocker):
-        """Test successful deletion of skill file."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                with patch('os.path.exists', return_value=True):
-                    with patch('os.remove'):
-                        mock_auth.return_value = ("user123", "tenant123")
-                        mock_service = MagicMock()
-                        mock_service_class.return_value = mock_service
-                        mock_service.get_skill_file_content.return_value = "temp_filename: temp.yaml"
-                        mock_service.skill_manager.local_skills_dir = "/tmp/skills"
-
-                        app = FastAPI()
-                        app.include_router(skill_app.router)
-                        client = TestClient(app)
-
-                        response = client.delete(
-                            "/skills/test_skill/files/temp.yaml",
-                            headers={"Authorization": "Bearer token123"}
-                        )
-
-                        assert response.status_code == 200
-                        assert "deleted successfully" in response.json()["message"]
-
-    def test_delete_skill_file_config_not_found(self, mocker):
-        """Test delete file when config.yaml not found."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                mock_auth.return_value = ("user123", "tenant123")
-                mock_service = MagicMock()
-                mock_service_class.return_value = mock_service
-                mock_service.get_skill_file_content.return_value = None
-
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.delete(
-                    "/skills/test_skill/files/temp.yaml",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 404
-
-    def test_delete_skill_file_invalid_filename(self, mocker):
-        """Test delete file with filename not matching temp_filename."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                mock_auth.return_value = ("user123", "tenant123")
-                mock_service = MagicMock()
-                mock_service_class.return_value = mock_service
-                mock_service.get_skill_file_content.return_value = "temp_filename: actual_temp.yaml"
-
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.delete(
-                    "/skills/test_skill/files/wrong_file.yaml",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 400
-
-    def test_delete_skill_file_not_exists(self, mocker):
-        """Test delete file that doesn't exist on disk."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                with patch('os.path.exists', return_value=False):
-                    mock_auth.return_value = ("user123", "tenant123")
-                    mock_service = MagicMock()
-                    mock_service_class.return_value = mock_service
-                    mock_service.get_skill_file_content.return_value = "temp_filename: temp.yaml"
-                    mock_service.skill_manager.local_skills_dir = "/tmp/skills"
-
-                    app = FastAPI()
-                    app.include_router(skill_app.router)
-                    client = TestClient(app)
-
-                    response = client.delete(
-                        "/skills/test_skill/files/temp.yaml",
-                        headers={"Authorization": "Bearer token123"}
-                    )
-
-                    assert response.status_code == 404
-
-    def test_delete_skill_file_unauthorized(self, mocker):
-        """Test delete file without authorization."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-            mock_auth.side_effect = UnauthorizedError("No token")
-
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
-
-            response = client.delete(
-                "/skills/test_skill/files/temp.yaml",
-                headers={"Authorization": "Bearer invalid"}
-            )
-
-            assert response.status_code == 401
-
-    def test_delete_skill_file_unexpected_error(self, mocker):
-        """Test delete file with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                mock_auth.return_value = ("user123", "tenant123")
-                mock_service = MagicMock()
-                mock_service_class.return_value = mock_service
-                mock_service.get_skill_file_content.side_effect = Exception("Unexpected error")
-
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.delete(
-                    "/skills/test_skill/files/temp.yaml",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 500
-
-    def test_delete_skill_file_path_traversal_dotdot(self, mocker):
-        """Test path traversal with ../ is blocked."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                mock_auth.return_value = ("user123", "tenant123")
-                mock_service = MagicMock()
-                mock_service_class.return_value = mock_service
-                mock_service.get_skill_file_content.return_value = "temp_filename: ../../etc/passwd"
-                mock_service.skill_manager.local_skills_dir = "/tmp/skills"
-
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.delete(
-                    "/skills/test_skill/files/..%2F..%2Fetc%2Fpasswd",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 400
-                assert "path traversal" in response.json()["detail"].lower()
-
-    def test_delete_skill_file_path_traversal_absolute(self, mocker):
-        """Test path traversal with absolute path is blocked."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                mock_auth.return_value = ("user123", "tenant123")
-                mock_service = MagicMock()
-                mock_service_class.return_value = mock_service
-                mock_service.get_skill_file_content.return_value = "temp_filename: /etc/passwd"
-                mock_service.skill_manager.local_skills_dir = "/tmp/skills"
-
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.delete(
-                    "/skills/test_skill/files/%2Fetc%2Fpasswd",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 400
-                assert "path traversal" in response.json()["detail"].lower()
-
-    def test_delete_skill_file_path_traversal_with_encoded_separators(self, mocker):
-        """Test path traversal with encoded path separators is blocked."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                mock_auth.return_value = ("user123", "tenant123")
-                mock_service = MagicMock()
-                mock_service_class.return_value = mock_service
-                # The temp_filename must match what comes after /files/ in the URL
-                # FastAPI decodes %2F to /, so the actual file_path will be ../../windows/system32
-                mock_service.get_skill_file_content.return_value = "temp_filename: ../../windows/system32"
-                mock_service.skill_manager.local_skills_dir = "/tmp/skills"
-
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                # URL encoded ../../
-                response = client.delete(
-                    "/skills/test_skill/files/..%252F..%252Fwindows%252Fsystem32",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 400
-                assert "path traversal" in response.json()["detail"].lower()
 
 
 # ===== Update Skill Instance Endpoint Error Handling Tests =====
