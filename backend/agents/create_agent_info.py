@@ -383,16 +383,19 @@ async def create_agent_run_info(
 
     final_query = await join_minio_file_description_to_query(minio_files=minio_files, query=query)
     model_list = await create_model_config_list(tenant_id)
-    agent_config = await create_agent_config(
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        language=language,
-        last_user_query=final_query,
-        allow_memory_search=allow_memory_search,
-        version_no=version_no,
-        override_model_id=override_model_id,
-    )
+    create_config_kwargs = {
+        "agent_id": agent_id,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "language": language,
+        "last_user_query": final_query,
+        "allow_memory_search": allow_memory_search,
+        "version_no": version_no,
+    }
+    if override_model_id is not None:
+        create_config_kwargs["override_model_id"] = override_model_id
+
+    agent_config = await create_agent_config(**create_config_kwargs)
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
