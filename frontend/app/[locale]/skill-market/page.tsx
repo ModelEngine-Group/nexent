@@ -3,39 +3,40 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Puzzle, Search, ChevronLeft, ChevronRight, Star } from "lucide-react";
+import { ShoppingBag, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Tabs, Input, Empty } from "antd";
 import log from "@/lib/logger";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { McpToolsItem, McpToolsDetail } from "@/types/mcpTools";
+import { SkillMarketItem, SkillMarketDetail } from "@/types/skillMarket";
 import {
-  MCP_TOOLS_CATEGORIES,
-  getMcpToolsByCategory,
-  searchMcpTools,
-} from "@/data/mcpToolsData";
-import { McpToolsCard } from "./components/McpToolsCard";
-import McpToolsDetailModal from "./components/McpToolsDetailModal";
-import "./McpToolsContent.css";
+  SKILL_CATEGORIES,
+  STATIC_SKILL_MARKET_DATA,
+  getSkillsByCategory,
+  searchSkills,
+} from "@/data/skillMarketData";
+import { SkillMarketCard } from "./components/SkillMarketCard";
+import SkillMarketDetailModal from "./components/SkillMarketDetailModal";
+import "./SkillMarketContent.css";
 
 /**
- * McpToolsContent - MCP Tools marketplace page
- * Browse and learn about MCP tools from the marketplace
+ * SkillMarketContent - Skill marketplace page
+ * Browse and view pre-built skills from the marketplace
  */
-export default function McpToolsContent() {
+export default function SkillMarketContent() {
   const { t, i18n } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
   const isZh = i18n.language === "zh" || i18n.language === "zh-CN";
 
   // State management
-  const [tools, setTools] = useState<McpToolsItem[]>([]);
-  const [featuredItems, setFeaturedItems] = useState<McpToolsItem[]>([]);
+  const [skills, setSkills] = useState<SkillMarketItem[]>([]);
+  const [featuredItems, setFeaturedItems] = useState<SkillMarketItem[]>([]);
   const [currentCategory, setCurrentCategory] = useState<string>("all");
   const [searchKeyword, setSearchKeyword] = useState("");
 
   // Detail modal state
   const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<McpToolsDetail | null>(
+  const [selectedSkill, setSelectedSkill] = useState<SkillMarketDetail | null>(
     null
   );
 
@@ -65,40 +66,40 @@ export default function McpToolsContent() {
     return () => window.removeEventListener("resize", calc);
   }, [featuredItems]);
 
-  // Load tools when category or search changes
+  // Load skills when category or search changes
   useEffect(() => {
-    loadTools();
+    loadSkills();
   }, [currentCategory, searchKeyword]);
 
   /**
-   * Load tools based on current category and search
+   * Load skills based on current category and search
    */
-  const loadTools = () => {
+  const loadSkills = () => {
     try {
-      let items: McpToolsItem[];
+      let items: SkillMarketItem[];
 
       if (searchKeyword.trim()) {
-        items = searchMcpTools(searchKeyword.trim());
+        items = searchSkills(searchKeyword.trim());
       } else {
-        items = getMcpToolsByCategory(currentCategory);
+        items = getSkillsByCategory(currentCategory);
       }
 
       // Separate featured and regular items
-      // Sort: medical featured first, then by github_stars
-      const featured = items.filter((t) => t.is_featured).sort((a, b) => {
-        const aIsMedical = a.category.name === "medical_healthcare";
-        const bIsMedical = b.category.name === "medical_healthcare";
+      // Sort: medical featured first, then by download count
+      const featured = items.filter((s) => s.is_featured).sort((a, b) => {
+        const aIsMedical = a.category.name === "medical";
+        const bIsMedical = b.category.name === "medical";
         if (aIsMedical && !bIsMedical) return -1;
         if (!aIsMedical && bIsMedical) return 1;
-        return b.github_stars - a.github_stars;
+        return b.download_count - a.download_count;
       });
-      const regular = items.filter((t) => !t.is_featured);
+      const regular = items.filter((s) => !s.is_featured);
 
       setFeaturedItems(featured);
-      setTools(regular);
+      setSkills(regular);
     } catch (error) {
-      log.error("Failed to load MCP tools:", error);
-      setTools([]);
+      log.error("Failed to load skills:", error);
+      setSkills([]);
       setFeaturedItems([]);
     }
   };
@@ -119,10 +120,10 @@ export default function McpToolsContent() {
   };
 
   /**
-   * Handle view tool details
+   * Handle view skill details
    */
-  const handleViewDetails = (tool: McpToolsItem) => {
-    setSelectedTool(tool as McpToolsDetail);
+  const handleViewDetails = (skill: SkillMarketItem) => {
+    setSelectedSkill(skill as SkillMarketDetail);
     setDetailModalVisible(true);
   };
 
@@ -131,7 +132,7 @@ export default function McpToolsContent() {
    */
   const handleCloseDetail = () => {
     setDetailModalVisible(false);
-    setSelectedTool(null);
+    setSelectedSkill(null);
   };
 
   /**
@@ -140,9 +141,9 @@ export default function McpToolsContent() {
   const tabItems = [
     {
       key: "all",
-      label: t("mcpTools.category.all", "All"),
+      label: t("skillMarket.category.all", "All"),
     },
-    ...MCP_TOOLS_CATEGORIES.map((cat) => ({
+    ...SKILL_CATEGORIES.map((cat) => ({
       key: cat.name,
       label: isZh ? cat.display_name_zh : cat.display_name,
     })),
@@ -169,17 +170,17 @@ export default function McpToolsContent() {
                   transition={{ duration: 0.5 }}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
-                      <Puzzle className="h-6 w-6 text-white" />
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
+                      <ShoppingBag className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <h1 className="text-3xl font-bold text-amber-600 dark:text-amber-500">
-                        {t("mcpTools.title", "MCP Tools")}
+                      <h1 className="text-3xl font-bold text-blue-600 dark:text-blue-500">
+                        {t("skillMarket.title", "Skill Market")}
                       </h1>
                       <p className="text-slate-600 dark:text-slate-300 mt-1">
                         {t(
-                          "mcpTools.description",
-                          "Discover and learn about Model Context Protocol tools"
+                          "skillMarket.description",
+                          "Discover and learn from pre-built intelligent skills"
                         )}
                       </p>
                     </div>
@@ -197,8 +198,8 @@ export default function McpToolsContent() {
                 <Input
                   size="large"
                   placeholder={t(
-                    "mcpTools.searchPlaceholder",
-                    "Search MCP tools by name or description..."
+                    "skillMarket.searchPlaceholder",
+                    "Search skills by name or description..."
                   )}
                   prefix={<Search className="h-4 w-4 text-slate-400" />}
                   value={searchKeyword}
@@ -223,17 +224,17 @@ export default function McpToolsContent() {
                 />
               </motion.div>
 
-              {/* Tools grid */}
+              {/* Skills grid */}
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.5, delay: 0.4 }}
               >
-                {tools.length === 0 && featuredItems.length === 0 ? (
+                {skills.length === 0 && featuredItems.length === 0 ? (
                   <Empty
                     description={t(
-                      "mcpTools.noTools",
-                      "No MCP tools found in this category"
+                      "skillMarket.noSkills",
+                      "No skills found in this category"
                     )}
                     className="py-16"
                   />
@@ -243,15 +244,14 @@ export default function McpToolsContent() {
                     {featuredItems.length > 0 && (
                       <div className="mb-6">
                         <div className="flex items-center justify-between mb-5">
-                          <h2 className="text-2xl font-bold flex items-center gap-2">
-                            <Star className="h-5 w-5 text-amber-500" />
-                            {t("mcpTools.featuredTitle", "Featured Tools")}
+                          <h2 className="text-2xl font-bold">
+                            {t("skillMarket.featuredTitle", "Featured Skills")}
                           </h2>
                           <div className="hidden md:flex items-center gap-2">
                             <button
                               aria-label="Prev featured"
                               onClick={() => {
-                                const el = document.getElementById("mcp-featured-row");
+                                const el = document.getElementById("skill-featured-row");
                                 if (el) el.scrollBy({ left: -Math.floor(el.clientWidth * 0.9), behavior: "smooth" });
                               }}
                               className="px-2 py-1 hover:opacity-90"
@@ -262,7 +262,7 @@ export default function McpToolsContent() {
                             <button
                               aria-label="Next featured"
                               onClick={() => {
-                                const el = document.getElementById("mcp-featured-row");
+                                const el = document.getElementById("skill-featured-row");
                                 if (el) el.scrollBy({ left: Math.floor(el.clientWidth * 0.9), behavior: "smooth" });
                               }}
                               className="px-2 py-1 hover:opacity-90"
@@ -273,18 +273,18 @@ export default function McpToolsContent() {
                           </div>
                         </div>
                         <div
-                          id="mcp-featured-row"
+                          id="skill-featured-row"
                           ref={featuredRowRef}
-                          className="flex gap-4 overflow-x-auto mcp-tools-noScrollbar pt-2 pb-2"
+                          className="flex gap-4 overflow-x-auto skill-market-noScrollbar pt-2 pb-2"
                         >
-                          {featuredItems.map((tool) => (
+                          {featuredItems.map((skill) => (
                             <div
-                              key={`featured-${tool.id}`}
+                              key={`featured-${skill.id}`}
                               className="flex-shrink-0 h-full"
                               style={featuredCardWidth ? { width: `${featuredCardWidth}px` } : undefined}
                             >
-                              <McpToolsCard
-                                tool={tool}
+                              <SkillMarketCard
+                                skill={skill}
                                 onViewDetails={handleViewDetails}
                                 variant="featured"
                               />
@@ -295,17 +295,17 @@ export default function McpToolsContent() {
                     )}
 
                     {/* Separator between featured and main list */}
-                    {featuredItems.length > 0 && tools.length > 0 && (
+                    {featuredItems.length > 0 && skills.length > 0 && (
                       <div className="mt-4 mb-8">
                         <div className="w-full h-[0.5px] bg-slate-200 dark:bg-slate-700 rounded" />
                       </div>
                     )}
 
-                    {tools.length > 0 && (
+                    {skills.length > 0 && (
                       <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-8">
-                        {tools.map((tool, index) => (
+                        {skills.map((skill, index) => (
                           <motion.div
-                            key={tool.id}
+                            key={skill.id}
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{
@@ -314,8 +314,8 @@ export default function McpToolsContent() {
                             }}
                             className="h-full"
                           >
-                            <McpToolsCard
-                              tool={tool}
+                            <SkillMarketCard
+                              skill={skill}
                               onViewDetails={handleViewDetails}
                             />
                           </motion.div>
@@ -328,11 +328,11 @@ export default function McpToolsContent() {
             </div>
           </div>
 
-          {/* Tool Detail Modal */}
-          <McpToolsDetailModal
+          {/* Skill Detail Modal */}
+          <SkillMarketDetailModal
             visible={detailModalVisible}
             onClose={handleCloseDetail}
-            toolDetails={selectedTool}
+            skillDetails={selectedSkill}
           />
         </motion.div>
       </div>

@@ -1,0 +1,44 @@
+/* Custom styles for SkillMarketContent component */
+
+/* Hide scrollbars for featured row with subtle hover reveal */
+.skill-market-noScrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  -ms-overflow-style: none;
+}
+
+.skill-market-noScrollbar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.skill-market-noScrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.skill-market-noScrollbar::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 2px;
+  transition: background-color 0.2s ease;
+}
+
+@media (hover: hover) {
+  .skill-market-noScrollbar:hover::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.2);
+  }
+
+  .skill-market-noScrollbar:hover {
+    scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+  }
+}
+
+/* Skill detail modal styles */
+.skill-market-detail-modal .ant-modal-title {
+  padding-bottom: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .skill-market-detail-modal .ant-modal {
+    max-width: 95vw;
+  }
+}

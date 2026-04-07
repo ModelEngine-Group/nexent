@@ -18,6 +18,7 @@ import {
   Puzzle,
   Activity,
   Building2,
+  Star,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -50,16 +51,17 @@ const ROUTE_CONFIG: RouteConfig[] = [
   { path: "/", Icon: Home, labelKey: "sidebar.homePage", order: 0 },
   { path: "/chat", Icon: Bot, labelKey: "sidebar.startChat", order: 1 },
   { path: "/setup", Icon: Zap, labelKey: "sidebar.quickConfig", order: 2 },
-  { path: "/space", Icon: Globe, labelKey: "sidebar.agentSpace", order: 3 },
-  { path: "/market", Icon: ShoppingBag, labelKey: "sidebar.agentMarket", order: 4 },
+  { path: "/models", Icon: Settings, labelKey: "sidebar.modelManagement", order: 3 },
+  { path: "/knowledges", Icon: BookOpen, labelKey: "sidebar.knowledgeBase", order: 4 },
   { path: "/agents", Icon: Code, labelKey: "sidebar.agentDev", order: 5 },
-  { path: "/knowledges", Icon: BookOpen, labelKey: "sidebar.knowledgeBase", order: 6 },
-  { path: "/mcp-tools", Icon: Puzzle, labelKey: "sidebar.mcpToolsManagement", order: 7 },
-  { path: "/monitoring", Icon: Activity, labelKey: "sidebar.monitoringManagement", order: 8 },
-  { path: "/models", Icon: Settings, labelKey: "sidebar.modelManagement", order: 9 },
-  { path: "/memory", Icon: Database, labelKey: "sidebar.memoryManagement", order: 10 },
-  { path: "/users", Icon: User, labelKey: "sidebar.userManagement", order: 11 },
-  { path: "/tenant-resources", Icon: Building2, labelKey: "sidebar.tenantResources", order: 12 },
+  { path: "/space", Icon: Globe, labelKey: "sidebar.agentSpace", order: 6 },
+  { path: "/market", Icon: ShoppingBag, labelKey: "sidebar.agentMarket", order: 7 },
+  { path: "/mcp-tools", Icon: Puzzle, labelKey: "sidebar.mcpToolsManagement", order: 8 },
+  { path: "/skill-market", Icon: Star, labelKey: "sidebar.skillMarket", order: 9 },
+  { path: "/monitoring", Icon: Activity, labelKey: "sidebar.monitoringManagement", order: 10 },
+  { path: "/memory", Icon: Database, labelKey: "sidebar.memoryManagement", order: 11 },
+  { path: "/users", Icon: User, labelKey: "sidebar.userManagement", order: 12 },
+  { path: "/tenant-resources", Icon: Building2, labelKey: "sidebar.tenantResources", order: 13 },
 ];
 
 /**

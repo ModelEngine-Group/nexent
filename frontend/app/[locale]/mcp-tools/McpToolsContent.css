@@ -1,0 +1,44 @@
+/* Custom styles for McpToolsContent component */
+
+/* Hide scrollbars for featured row with subtle hover reveal */
+.mcp-tools-noScrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  -ms-overflow-style: none;
+}
+
+.mcp-tools-noScrollbar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.mcp-tools-noScrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mcp-tools-noScrollbar::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 2px;
+  transition: background-color 0.2s ease;
+}
+
+@media (hover: hover) {
+  .mcp-tools-noScrollbar:hover::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.2);
+  }
+
+  .mcp-tools-noScrollbar:hover {
+    scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+  }
+}
+
+/* MCP Tools detail modal styles */
+.mcp-tools-detail-modal .ant-modal-title {
+  padding-bottom: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .mcp-tools-detail-modal .ant-modal {
+    max-width: 95vw;
+  }
+}
