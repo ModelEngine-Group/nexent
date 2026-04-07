@@ -99,6 +99,9 @@ export default function AgentVersionCompareModal({
     getHistory: () => [],
   });
 
+  const versionA = compareData?.data?.version_a;
+  const versionB = compareData?.data?.version_b;
+
   const versionOptions =
     versionList?.map((version) => {
       const baseLabel = version.version_name || `V${version.version_no}`;
@@ -435,8 +438,8 @@ export default function AgentVersionCompareModal({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col min-h-0 border border-gray-200 rounded-md p-3 overflow-hidden">
                   <div className="text-xs text-gray-500 mb-2">
-                    {resolveVersionLabel(selectedVersionNoA ?? version_a.version.version_no)} ·{" "}
-                    {resolveVersionModel(selectedVersionNoA ?? version_a.version.version_no)}
+                    {resolveVersionLabel(selectedVersionNoA ?? versionA?.version.version_no)} ·{" "}
+                    {resolveVersionModel(selectedVersionNoA ?? versionA?.version.version_no)}
                   </div>
                   <DebugMessageList
                     messages={compareLeftMessages}
@@ -446,8 +449,8 @@ export default function AgentVersionCompareModal({
                 </div>
                 <div className="flex flex-col min-h-0 border border-gray-200 rounded-md p-3 overflow-hidden">
                   <div className="text-xs text-gray-500 mb-2">
-                    {resolveVersionLabel(selectedVersionNoB ?? version_b.version.version_no)} ·{" "}
-                    {resolveVersionModel(selectedVersionNoB ?? version_b.version.version_no)}
+                    {resolveVersionLabel(selectedVersionNoB ?? versionB?.version.version_no)} ·{" "}
+                    {resolveVersionModel(selectedVersionNoB ?? versionB?.version.version_no)}
                   </div>
                   <DebugMessageList
                     messages={compareRightMessages}

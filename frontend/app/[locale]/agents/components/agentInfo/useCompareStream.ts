@@ -7,6 +7,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
+import type { TFunction } from "i18next";
 
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
@@ -19,7 +20,7 @@ type CompareHistoryItem = { role: string; content: string };
 type RunAgentParams = Parameters<typeof conversationService.runAgent>[0];
 
 interface UseCompareStreamOptions {
-  t: (key: string, defaultText?: string) => string;
+  t: TFunction;
   buildRunParams: (args: {
     side: CompareSide;
     question: string;
@@ -34,6 +35,11 @@ export function useCompareStream({
   buildRunParams,
   getHistory,
 }: UseCompareStreamOptions) {
+  const translate = useCallback(
+    (key: string, defaultText?: string) =>
+      defaultText !== undefined ? t(key, { defaultValue: defaultText }) : t(key),
+    [t]
+  );
   const [leftMessages, setLeftMessages] = useState<ChatMessageType[]>([]);
   const [rightMessages, setRightMessages] = useState<ChatMessageType[]>([]);
   const [isCompareStreaming, setIsCompareStreaming] = useState(false);
@@ -75,27 +81,27 @@ export function useCompareStream({
         if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined;
-          lastMsg.content = t("agent.debug.stopped");
+          lastMsg.content = translate("agent.debug.stopped");
         }
         return newMessages;
       });
     },
-    [t]
+    [translate]
   );
 
   const stopCompare = useCallback(async () => {
     if (compareAbortControllersRef.current.left) {
       try {
-        compareAbortControllersRef.current.left.abort(t("agent.debug.userStop"));
+        compareAbortControllersRef.current.left.abort(translate("agent.debug.userStop"));
       } catch (error) {
-        log.error(t("agent.debug.cancelError"), error);
+        log.error(translate("agent.debug.cancelError"), error);
       }
     }
     if (compareAbortControllersRef.current.right) {
       try {
-        compareAbortControllersRef.current.right.abort(t("agent.debug.userStop"));
+        compareAbortControllersRef.current.right.abort(translate("agent.debug.userStop"));
       } catch (error) {
-        log.error(t("agent.debug.cancelError"), error);
+        log.error(translate("agent.debug.cancelError"), error);
       }
     }
 
@@ -119,17 +125,17 @@ export function useCompareStream({
       try {
         await conversationService.stop(left);
       } catch (error) {
-        log.error(t("agent.debug.stopError"), error);
+        log.error(translate("agent.debug.stopError"), error);
       }
     }
     if (right != null) {
       try {
         await conversationService.stop(right);
       } catch (error) {
-        log.error(t("agent.debug.stopError"), error);
+        log.error(translate("agent.debug.stopError"), error);
       }
     }
-  }, [markCompareStopped, t]);
+  }, [markCompareStopped, translate]);
 
   const resetCompareState = useCallback(() => {
     setLeftMessages([]);
@@ -165,7 +171,7 @@ export function useCompareStream({
           params.controller.signal
         );
 
-        if (!reader) throw new Error(t("agent.debug.nullResponse"));
+        if (!reader) throw new Error(translate("agent.debug.nullResponse"));
 
         await handleStreamResponse(
           reader,
@@ -185,15 +191,15 @@ export function useCompareStream({
         const err = error as Error;
         const isUserStop =
           err.name === "AbortError" ||
-          err.message === t("agent.debug.userStop");
+          err.message === translate("agent.debug.userStop");
         if (isUserStop) {
           markCompareStopped(params.setSideMessages);
         } else {
-          log.error(t("agent.debug.streamError"), error);
+          log.error(translate("agent.debug.streamError"), error);
           const errorMessage =
             error instanceof Error
               ? error.message
-              : t("agent.debug.processError");
+              : translate("agent.debug.processError");
           params.setSideMessages((prev) => {
             const newMessages = [...prev];
             const lastMsg = newMessages[newMessages.length - 1];
@@ -213,7 +219,7 @@ export function useCompareStream({
         params.onStreamEnd();
       }
     },
-    [buildRunParams, markCompareStopped, resetCompareTimeout, t]
+    [buildRunParams, markCompareStopped, resetCompareTimeout, t, translate]
   );
 
   const runCompare = useCallback(
