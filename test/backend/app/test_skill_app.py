@@ -50,7 +50,31 @@ sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
 
 # Mock ToolConfig from agent_model
 nexent_core_agents_agent_model_mock.ToolConfig = type('ToolConfig', (), {})
-nexent_core_agents_agent_model_mock.ModelConfig = type('ModelConfig', (), {})
+
+# ModelConfig mock that accepts kwargs
+class MockModelConfig:
+    def __init__(
+        self,
+        cite_name: str = None,
+        api_key: str = None,
+        model_name: str = None,
+        url: str = None,
+        temperature: float = None,
+        top_p: float = None,
+        ssl_verify: bool = None,
+        model_factory: str = None,
+        **kwargs
+    ):
+        self.cite_name = cite_name
+        self.api_key = api_key
+        self.model_name = model_name
+        self.url = url
+        self.temperature = temperature
+        self.top_p = top_p
+        self.ssl_verify = ssl_verify
+        self.model_factory = model_factory
+
+nexent_core_agents_agent_model_mock.ModelConfig = MockModelConfig
 
 # Set up storage mocks
 storage_client_mock = MagicMock()
@@ -72,9 +96,12 @@ nexent_skills_mock.SkillManager = MockSkillManager
 consts_mock = types.ModuleType('consts')
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
 consts_model_mock = types.ModuleType('consts.model')
+consts_const_mock = types.ModuleType('consts.const')
 sys.modules['consts'] = consts_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 sys.modules['consts.model'] = consts_model_mock
+sys.modules['consts.const'] = consts_const_mock
+consts_const_mock.MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
 
 class SkillException(Exception):
     pass
@@ -101,10 +128,14 @@ services_skill_service_mock.get_skill_manager = MagicMock()
 # Mock utils
 utils_mock = types.ModuleType('utils')
 utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
+utils_config_utils_mock = types.ModuleType('utils.config_utils')
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_auth_utils_mock
+sys.modules['utils.config_utils'] = utils_config_utils_mock
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "tenant123"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))
+utils_config_utils_mock.tenant_config_manager = MagicMock()
+utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
 
 # Mock utils.prompt_template_utils
 utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
@@ -1992,6 +2023,321 @@ class TestUpdateSkillFieldEdgeCases:
                 )
 
                 assert response.status_code == 200
+
+
+# ===== Create Simple Skill Endpoint Tests =====
+class TestCreateSimpleSkillEndpoint:
+    """Test POST /skills/create-simple endpoint (SSE streaming)."""
+
+    def test_create_simple_skill_success(self, mocker):
+        """Test successful simple skill creation with streaming response."""
+        # Mock dependencies
+        mock_user_info = patch('backend.apps.skill_app.get_current_user_info')
+        mock_user_info.return_value = ("user123", "tenant123", "zh")
+        mock_user_info.start()
+
+        mock_template = patch('backend.apps.skill_app.get_skill_creation_simple_prompt_template')
+        mock_template.return_value = {
+            "system_prompt": "You are a skill creator",
+            "user_prompt": "Create a skill"
+        }
+        mock_template.start()
+
+        mock_observer = patch('backend.apps.skill_app.MessageObserver')
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message.return_value = []
+        mock_observer_instance.get_final_answer.return_value = "<SKILL>\n# Test Skill\n</SKILL>"
+        mock_observer.return_value = mock_observer_instance
+        mock_observer.start()
+
+        mock_service = patch('backend.apps.skill_app.SkillService')
+        mock_service_instance = MagicMock()
+        mock_service_instance.skill_manager = MagicMock()
+        mock_service_instance.skill_manager.local_skills_dir = "/tmp/skills"
+        mock_service.return_value = mock_service_instance
+        mock_service.start()
+
+        mock_create = patch('backend.apps.skill_app.create_simple_skill_from_request')
+        mock_create.start()
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create a greeting skill"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+        mock_user_info.stop()
+        mock_template.stop()
+        mock_observer.stop()
+        mock_service.stop()
+        mock_create.stop()
+
+    def test_create_simple_skill_with_streaming_messages(self, mocker):
+        """Test streaming messages are properly sent."""
+        # Mock dependencies
+        mock_user_info = patch('backend.apps.skill_app.get_current_user_info')
+        mock_user_info.return_value = ("user123", "tenant123", "zh")
+        mock_user_info.start()
+
+        mock_template = patch('backend.apps.skill_app.get_skill_creation_simple_prompt_template')
+        mock_template.return_value = {
+            "system_prompt": "You are a skill creator",
+            "user_prompt": "Create a skill"
+        }
+        mock_template.start()
+
+        mock_observer = patch('backend.apps.skill_app.MessageObserver')
+        mock_observer_instance = MagicMock()
+        # Return cached messages that will be streamed
+        cached_messages = [
+            '{"type": "step_count", "content": "1"}',
+            '{"type": "model_output_thinking", "content": "Thinking..."}',
+            '{"type": "tool", "content": "Tool executed"}',
+            '{"type": "final_answer", "content": "<SKILL>Content</SKILL>"}'
+        ]
+        mock_observer_instance.get_cached_message.side_effect = [
+            cached_messages[:2],
+            cached_messages[2:],
+            []
+        ]
+        mock_observer_instance.get_final_answer.return_value = "<SKILL>Final Content</SKILL>"
+        mock_observer.return_value = mock_observer_instance
+        mock_observer.start()
+
+        mock_service = patch('backend.apps.skill_app.SkillService')
+        mock_service_instance = MagicMock()
+        mock_service_instance.skill_manager = MagicMock()
+        mock_service_instance.skill_manager.local_skills_dir = "/tmp/skills"
+        mock_service.return_value = mock_service_instance
+        mock_service.start()
+
+        mock_create = patch('backend.apps.skill_app.create_simple_skill_from_request')
+        mock_create.start()
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create a test skill"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+
+        mock_user_info.stop()
+        mock_template.stop()
+        mock_observer.stop()
+        mock_service.stop()
+        mock_create.stop()
+
+    def test_create_simple_skill_unauthorized(self, mocker):
+        """Test create simple skill without authorization - error is sent via SSE stream."""
+        from backend.apps.skill_app import UnauthorizedError
+
+        mocker.patch(
+            'backend.apps.skill_app.get_current_user_info',
+            side_effect=UnauthorizedError("No token")
+        )
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create a skill"},
+            headers={"Authorization": "Bearer invalid"}
+        )
+
+        # Exception is caught in generate() and returned as 200 with SSE error event
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+        # SSE stream contains error event
+        assert b'"type": "error"' in response.content
+        assert b'No token' in response.content
+
+
+# ===== Build Model Config Tests =====
+class TestBuildModelConfigFromTenant:
+    """Test _build_model_config_from_tenant function."""
+
+    def test_build_model_config_success(self, mocker):
+        """Test successful ModelConfig building."""
+        # Set up mocks for the config utilities
+        mock_config_manager_instance = MagicMock()
+        mock_config_manager_instance.get_model_config.return_value = {
+            "display_name": "gpt-4",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com",
+            "model_factory": "openai"
+        }
+
+        utils_config_utils_mock.tenant_config_manager = mock_config_manager_instance
+        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4-0613")
+
+        mocker.patch.object(
+            utils_config_utils_mock,
+            'tenant_config_manager',
+            mock_config_manager_instance
+        )
+        mocker.patch.object(
+            utils_config_utils_mock,
+            'get_model_name_from_config',
+            return_value="gpt-4-0613"
+        )
+
+        result = skill_app._build_model_config_from_tenant("tenant123")
+
+        assert result.cite_name == "gpt-4"
+        assert result.api_key == "test-key"
+        assert result.url == "https://api.openai.com"
+        assert result.model_factory == "openai"
+
+    def test_build_model_config_no_llm_config(self, mocker):
+        """Test ValueError when no LLM model configured for tenant."""
+        mock_config_manager_instance = MagicMock()
+        mock_config_manager_instance.get_model_config.return_value = None
+
+        mocker.patch.object(
+            utils_config_utils_mock,
+            'tenant_config_manager',
+            mock_config_manager_instance
+        )
+
+        with pytest.raises(ValueError, match="No LLM model configured for tenant"):
+            skill_app._build_model_config_from_tenant("tenant123")
+
+
+# ===== Stream Content Types Tests =====
+class TestStreamContentTypes:
+    """Test different content types in streaming response."""
+
+    def test_stream_model_output_code(self, mocker):
+        """Test streaming model_output_code content."""
+        mock_user_info = patch('backend.apps.skill_app.get_current_user_info')
+        mock_user_info.return_value = ("user123", "tenant123", "zh")
+        mock_user_info.start()
+
+        mock_template = patch('backend.apps.skill_app.get_skill_creation_simple_prompt_template')
+        mock_template.return_value = {
+            "system_prompt": "You are a skill creator",
+            "user_prompt": "Create a skill"
+        }
+        mock_template.start()
+
+        mock_observer = patch('backend.apps.skill_app.MessageObserver')
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message.side_effect = [
+            ['{"type": "model_output_code", "content": "def hello(): pass"}'],
+            []
+        ]
+        mock_observer_instance.get_final_answer.return_value = None
+        mock_observer.return_value = mock_observer_instance
+        mock_observer.start()
+
+        mock_service = patch('backend.apps.skill_app.SkillService')
+        mock_service_instance = MagicMock()
+        mock_service_instance.skill_manager = MagicMock()
+        mock_service_instance.skill_manager.local_skills_dir = "/tmp/skills"
+        mock_service.return_value = mock_service_instance
+        mock_service.start()
+
+        mock_create = patch('backend.apps.skill_app.create_simple_skill_from_request')
+        mock_create.start()
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create a code skill"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+
+        mock_user_info.stop()
+        mock_template.stop()
+        mock_observer.stop()
+        mock_service.stop()
+        mock_create.stop()
+
+    def test_stream_deep_thinking(self, mocker):
+        """Test streaming model_output_deep_thinking content."""
+        mock_user_info = patch('backend.apps.skill_app.get_current_user_info')
+        mock_user_info.return_value = ("user123", "tenant123", "zh")
+        mock_user_info.start()
+
+        mock_template = patch('backend.apps.skill_app.get_skill_creation_simple_prompt_template')
+        mock_template.return_value = {
+            "system_prompt": "You are a skill creator",
+            "user_prompt": "Create a skill"
+        }
+        mock_template.start()
+
+        mock_observer = patch('backend.apps.skill_app.MessageObserver')
+        mock_observer_instance = MagicMock()
+        mock_observer_instance.get_cached_message.side_effect = [
+            ['{"type": "model_output_deep_thinking", "content": "Deep thought process"}'],
+            []
+        ]
+        mock_observer_instance.get_final_answer.return_value = None
+        mock_observer.return_value = mock_observer_instance
+        mock_observer.start()
+
+        mock_service = patch('backend.apps.skill_app.SkillService')
+        mock_service_instance = MagicMock()
+        mock_service_instance.skill_manager = MagicMock()
+        mock_service_instance.skill_manager.local_skills_dir = "/tmp/skills"
+        mock_service.return_value = mock_service_instance
+        mock_service.start()
+
+        mock_create = patch('backend.apps.skill_app.create_simple_skill_from_request')
+        mock_create.start()
+
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create a thinking skill"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+
+        mock_user_info.stop()
+        mock_template.stop()
+        mock_observer.stop()
+        mock_service.stop()
+        mock_create.stop()
+
+    def test_stream_execution_logs(self, mocker):
+        """Test streaming execution_logs content."""
+        # Rely on module-level mocks for basic test
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+
+        response = client.post(
+            "/skills/create-simple",
+            json={"user_request": "Create a logging skill"},
+            headers={"Authorization": "Bearer token123"}
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
 
 
 if __name__ == "__main__":
