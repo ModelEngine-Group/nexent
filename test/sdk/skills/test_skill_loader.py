@@ -341,8 +341,8 @@ This skill was loaded from a file.
 class TestSkillLoaderEdgeCases:
     """Test edge cases for SkillLoader."""
 
-    def test_parse_with_invalid_yaml_raises(self):
-        """Test parsing with invalid YAML structure."""
+    def test_parse_with_invalid_yaml_falls_back_to_regex(self):
+        """Test parsing with invalid YAML falls back to regex extraction."""
         content = """---
 name: test
 description: Test
@@ -350,8 +350,10 @@ description: Test
 ---
 # Body
 """
-        with pytest.raises(Exception):
-            SkillLoader.parse(content)
+        # YAML parsing fails, but regex extraction succeeds since name/description are valid
+        result = SkillLoader.parse(content)
+        assert result["name"] == "test"
+        assert result["description"] == "Test"
 
     def test_parse_empty_content(self):
         """Test parsing empty content."""
@@ -380,7 +382,9 @@ description: >
 ---
 # Body
 """
-        with pytest.raises(ValueError, match="Invalid YAML frontmatter"):
+        # Frontmatter is a YAML list (not a dict), so regex fallback extracts nothing
+        # and raises because 'name' field is missing
+        with pytest.raises(ValueError, match="'name' field"):
             SkillLoader.parse(content)
 
     def test_parse_with_block_sequence_frontmatter_raises(self):
@@ -391,7 +395,9 @@ description: >
 ---
 # Body
 """
-        with pytest.raises(ValueError, match="Invalid YAML frontmatter"):
+        # Frontmatter is a YAML list (block sequence), so regex fallback extracts nothing
+        # and raises because 'name' field is missing
+        with pytest.raises(ValueError, match="'name' field"):
             SkillLoader.parse(content)
 
     def test_parse_with_inline_yaml_list(self):

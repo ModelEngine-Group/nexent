@@ -22,6 +22,7 @@ from nexent.core.utils.observer import MessageObserver
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/skills", tags=["skills"])
+skill_creator_router = APIRouter(prefix="/skills", tags=["simple-skills"])
 
 
 class SkillCreateRequest(BaseModel):
@@ -487,7 +488,7 @@ def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
     )
 
 
-@router.post("/create-simple")
+@skill_creator_router.post("/create-simple")
 async def create_simple_skill(
     request: SkillCreateSimpleRequest,
     authorization: Optional[str] = Header(None)
