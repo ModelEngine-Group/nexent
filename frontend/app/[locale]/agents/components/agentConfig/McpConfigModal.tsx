@@ -22,12 +22,12 @@ import {
   Eye,
   Plus,
   LoaderCircle,
-  RefreshCw,
   FileText,
   Container,
   Upload as UploadIcon,
   Unplug,
   Settings,
+  Import,
 } from "lucide-react";
 
 import { McpConfigModalProps } from "@/types/agentConfig";
@@ -37,6 +37,9 @@ import { useMcpConfig } from "@/hooks/useMcpConfig";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import McpEditServerModal from "@/components/mcp/McpEditServerModal";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
+import { API_ENDPOINTS } from "@/services/api";
+import { getAuthHeaders } from "@/lib/auth";
+import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
 
@@ -58,6 +61,7 @@ export default function McpConfigModal({
     healthCheckLoading,
     loadServerList,
     loadContainerList,
+    refreshToolsAndAgents,
     handleAddServer,
     handleDeleteServer,
     handleViewTools,
@@ -69,6 +73,12 @@ export default function McpConfigModal({
     handleViewLogs,
     handleGetMcpRecord,
   } = useMcpConfig({ enabled: visible });
+
+  // OpenAPI to MCP state
+  const [openApiJson, setOpenApiJson] = useState("");
+  const [importingOpenApi, setImportingOpenApi] = useState(false);
+  const [outerApiTools, setOuterApiTools] = useState<any[]>([]);
+  const [loadingOuterApiTools, setLoadingOuterApiTools] = useState(false);
 
   // Local UI state
   const [addingServer, setAddingServer] = useState(false);
@@ -417,6 +427,105 @@ export default function McpConfigModal({
     setLogsModalVisible(true);
   };
 
+  // OpenAPI to MCP handlers
+  const loadOuterApiTools = async () => {
+    setLoadingOuterApiTools(true);
+    try {
+      const response = await fetch(API_ENDPOINTS.tool.outerApiTools, {
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (result.data) {
+        setOuterApiTools(result.data);
+      } else {
+        message.error(t("mcpConfig.openApiToMcp.message.loadToolsFailed"));
+      }
+    } catch (error) {
+      log.error("Failed to load outer API tools:", error);
+      message.error(t("mcpConfig.openApiToMcp.message.loadToolsFailed"));
+    }
+    setLoadingOuterApiTools(false);
+  };
+
+  const onImportOpenApi = async () => {
+    if (!openApiJson.trim()) {
+      message.error(t("mcpConfig.openApiToMcp.jsonPlaceholder"));
+      return;
+    }
+
+    let parsedJson;
+    try {
+      parsedJson = JSON.parse(openApiJson);
+    } catch {
+      message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+      return;
+    }
+
+    setImportingOpenApi(true);
+    try {
+      const response = await fetch(API_ENDPOINTS.tool.importOpenapi, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(parsedJson),
+      });
+
+      if (response.ok) {
+        message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
+        setOpenApiJson("");
+        await loadOuterApiTools();
+        await refreshToolsAndAgents();
+      } else {
+        const errorData = await response.json();
+        message.error(
+          errorData.detail || t("mcpConfig.openApiToMcp.message.importFailed")
+        );
+      }
+    } catch (error) {
+      log.error("Failed to import OpenAPI:", error);
+      message.error(t("mcpConfig.openApiToMcp.message.importFailed"));
+    }
+    setImportingOpenApi(false);
+  };
+
+  const onDeleteOuterApiTool = (tool: any) => {
+    confirm({
+      title: t("mcpConfig.delete.confirmTitle"),
+      content: t("mcpConfig.delete.confirmContent", {
+        name: tool.name,
+      }),
+      okText: t("common.delete", "Delete"),
+      onOk: async () => {
+        try {
+          const response = await fetch(
+            API_ENDPOINTS.tool.deleteOuterApiTool(tool.id),
+            {
+              method: "DELETE",
+              headers: getAuthHeaders(),
+            }
+          );
+
+          if (response.ok) {
+            message.success(
+              t("mcpConfig.openApiToMcp.message.deleteSuccess")
+            );
+            await loadOuterApiTools();
+            await refreshToolsAndAgents();
+          } else {
+            message.error(
+              t("mcpConfig.openApiToMcp.message.deleteFailed")
+            );
+          }
+        } catch (error) {
+          log.error("Failed to delete outer API tool:", error);
+          message.error(t("mcpConfig.openApiToMcp.message.deleteFailed"));
+        }
+      },
+    });
+  };
+
   // Server list table columns
   const serverColumns = [
     {
@@ -588,6 +697,52 @@ export default function McpConfigModal({
       },
     },
   ];
+
+  // Outer API tools table columns
+  const outerApiToolsColumns = [
+    {
+      title: t("mcpConfig.openApiToMcp.toolList.column.name"),
+      dataIndex: "name",
+      key: "name",
+      width: "35%",
+      ellipsis: true,
+    },
+    {
+      title: t("mcpConfig.openApiToMcp.toolList.column.description"),
+      dataIndex: "description",
+      key: "description",
+      width: "45%",
+      ellipsis: true,
+    },
+    {
+      title: t("mcpConfig.openApiToMcp.toolList.column.action"),
+      key: "action",
+      width: "20%",
+      render: (_: any, record: any) => (
+        <Space size="small">
+          {renderPermissionControlledButton({
+            isReadOnly: false,
+            button: {
+              type: "link",
+              danger: true,
+              icon: <Trash size={16} />,
+              onClick: () => onDeleteOuterApiTool(record),
+              size: "small",
+              disabled: actionsLocked,
+              children: t("mcpConfig.serverList.button.delete"),
+            },
+          })}
+        </Space>
+      ),
+    },
+  ];
+
+  // Load outer API tools when modal opens
+  useEffect(() => {
+    if (visible) {
+      loadOuterApiTools();
+    }
+  }, [visible]);
 
   return (
     <>
@@ -945,6 +1100,65 @@ export default function McpConfigModal({
                     },
                   ]
                 : []),
+              {
+                key: "openapi",
+                label: (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <Import style={{ width: 16, height: 16 }} />
+                    {t("mcpConfig.openApiToMcp.title")}
+                  </span>
+                ),
+                children: (
+                  <Card size="small" style={{ marginTop: 8 }}>
+                    <Space direction="vertical" style={{ width: "100%" }} size="middle">
+                      <div>
+                        <Input.TextArea
+                          placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
+                          value={openApiJson}
+                          onChange={(e) => setOpenApiJson(e.target.value)}
+                          rows={6}
+                          disabled={actionsLocked || importingOpenApi}
+                          style={{ fontFamily: "monospace", fontSize: 12 }}
+                        />
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "flex-end",
+                          gap: 8,
+                        }}
+                      >
+                        <Button
+                          type="primary"
+                          onClick={onImportOpenApi}
+                          loading={importingOpenApi || updatingTools}
+                          icon={
+                            importingOpenApi || updatingTools ? (
+                              <LoaderCircle
+                                className="animate-spin"
+                                size={16}
+                              />
+                            ) : (
+                              <Plus className="size-4" />
+                            )
+                          }
+                          disabled={actionsLocked}
+                        >
+                          {updatingTools
+                            ? t("mcpConfig.openApiToMcp.button.adding")
+                            : t("mcpConfig.openApiToMcp.button.add")}
+                        </Button>
+                      </div>
+                    </Space>
+                  </Card>
+                ),
+              },
             ]}
           />
 
@@ -999,6 +1213,30 @@ export default function McpConfigModal({
               size="small"
               pagination={false}
               locale={{ emptyText: t("mcpConfig.containerList.empty") }}
+              scroll={{ y: 300 }}
+              style={{ width: "100%" }}
+            />
+          </div>
+
+          {/* Outer API Tools list */}
+          <div>
+            <div
+              style={{
+                marginBottom: 12,
+              }}
+            >
+              <Title level={5} style={{ margin: 0 }}>
+                {t("mcpConfig.openApiToMcp.toolList.title")}
+              </Title>
+            </div>
+            <Table
+              columns={outerApiToolsColumns}
+              dataSource={outerApiTools}
+              rowKey="id"
+              loading={loadingOuterApiTools}
+              size="small"
+              pagination={false}
+              locale={{ emptyText: t("mcpConfig.openApiToMcp.toolList.empty") }}
               scroll={{ y: 300 }}
               style={{ width: "100%" }}
             />

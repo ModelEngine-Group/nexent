@@ -17,6 +17,7 @@ config:
     elasticsearchService: "http://nexent-config:5010/api"
     runtimeUrl: "http://nexent-runtime:5014"
     mcpServer: "http://nexent-mcp:5011"
+    mcpManagementServer: "http://nexent-mcp:5015"
     dataProcessService: "http://nexent-data-process:5012/api"
     northboundServer: "http://nexent-northbound:5013/api"
   postgres:
@@ -114,17 +115,17 @@ secrets:
   minio:
     rootUser: "nexent"
     rootPassword: "nexent@4321"
-    accessKey: ""
-    secretKey: ""
+    accessKey: "nexent-uowuc"
+    secretKey: "EE1oWgz0b7eu1n8evf4kXH8G"
   ssh:
     username: "nexent"
     password: "nexent@2025"
   supabase:
-    jwtSecret: ""
-    secretKeyBase: ""
-    vaultEncKey: ""
-    anonKey: ""
-    serviceRoleKey: ""
+    jwtSecret: "/jlIerOP2lLihbvbM40lUUzG2uFZdydaOAWD5N74Se4="
+    secretKeyBase: "MtfrNzZnrD2NJeqvyOt3FRqzqdwH1KwJFaMJKPgNmwbn3F1yO0/vTgXRpCZKua3zEQT64Cm3eGPVBDmz4zBiBw=="
+    vaultEncKey: "krUFjeG+qK2InOe3tUrM34rY4bWL4AGnAJWtjriMFAw="
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzc0Njg0NzkwLCJleHAiOjE5MzIzNjQ3OTB9.JL7gjCJnpyeW7aRScqoTJaKZpgo5rediYrRegoHRsQ4"
+    serviceRoleKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3NzQ2ODQ3OTAsImV4cCI6MTkzMjM2NDc5MH0.3KOJYHOo5DJwDgf2vJ9RiwBHqzf2DjL4qSEJ-KKKY7Y"
     postgresPassword: "Huawei123"
     gotrueDbUrl: "postgres://supabase_auth_admin:Huawei123@nexent-supabase-db:5436/supabase?search_path=auth&sslmode=disable"
 

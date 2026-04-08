@@ -70,6 +70,10 @@ export const API_ENDPOINTS = {
     validate: `${API_BASE_URL}/tool/validate`,
     loadConfig: (toolId: number) =>
       `${API_BASE_URL}/tool/load_config/${toolId}`,
+    importOpenapi: `${API_BASE_URL}/tool/import_openapi`,
+    outerApiTools: `${API_BASE_URL}/tool/outer_api_tools`,
+    deleteOuterApiTool: (toolId: number) =>
+      `${API_BASE_URL}/tool/outer_api_tools/${toolId}`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
