@@ -388,7 +388,15 @@ export default function SkillBuildModal({
         : `用户需求：${currentInput}`;
 
       await createSimpleSkillStream(
-        { user_request: userPrompt },
+        {
+          user_request: userPrompt,
+          existing_skill: !isCreateMode ? {
+            name: formValues.name || "",
+            description: formValues.description || "",
+            tags: formValues.tags || [],
+            content: formValues.content || "",
+          } : undefined,
+        },
         {
           onThinkingUpdate: (step, desc) => {
             setThinkingStep(step);
