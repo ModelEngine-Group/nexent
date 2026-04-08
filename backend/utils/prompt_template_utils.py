@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import yaml
 
@@ -150,18 +150,26 @@ def get_cluster_summary_reduce_prompt_template(language: str = LANGUAGE["ZH"]) -
     return get_prompt_template('cluster_summary_reduce', language)
 
 
-def get_skill_creation_simple_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, str]:
+def get_skill_creation_simple_prompt_template(
+    language: str = LANGUAGE["ZH"],
+    existing_skill: Optional[Dict[str, Any]] = None
+) -> Dict[str, str]:
     """
-    Get skill creation simple prompt template.
+    Get skill creation simple prompt template with Jinja2 rendering.
 
-    This template is now structured YAML with system_prompt and user_prompt sections.
+    This template is structured YAML with system_prompt and user_prompt sections.
+    Supports Jinja2 template syntax for dynamic content based on existing_skill.
 
     Args:
         language: Language code ('zh' or 'en')
+        existing_skill: Optional dict containing existing skill info for update scenarios.
+            Expected keys: name, description, tags, content
 
     Returns:
-        Dict[str, str]: Template with keys 'system_prompt' and 'user_prompt'
+        Dict[str, str]: Template with keys 'system_prompt' and 'user_prompt', rendered with variables
     """
+    from jinja2 import Template
+
     template_path_map = {
         LANGUAGE["ZH"]: 'backend/prompts/skill_creation_simple_zh.yaml',
         LANGUAGE["EN"]: 'backend/prompts/skill_creation_simple_en.yaml'
@@ -176,7 +184,28 @@ def get_skill_creation_simple_prompt_template(language: str = LANGUAGE["ZH"]) ->
     with open(absolute_template_path, 'r', encoding='utf-8') as f:
         template_data = yaml.safe_load(f)
 
+    # Prepare template context with existing_skill info
+    context = {
+        "existing_skill": existing_skill
+    }
+
+    # Render templates with Jinja2
+    system_prompt_raw = template_data.get("system_prompt", "")
+    user_prompt_raw = template_data.get("user_prompt", "")
+
+    try:
+        system_prompt = Template(system_prompt_raw).render(**context)
+    except Exception as e:
+        logger.warning(f"Failed to render system_prompt template: {e}, using raw content")
+        system_prompt = system_prompt_raw
+
+    try:
+        user_prompt = Template(user_prompt_raw).render(**context)
+    except Exception as e:
+        logger.warning(f"Failed to render user_prompt template: {e}, using raw content")
+        user_prompt = user_prompt_raw
+
     return {
-        "system_prompt": template_data.get("system_prompt", ""),
-        "user_prompt": template_data.get("user_prompt", "")
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt
     }
