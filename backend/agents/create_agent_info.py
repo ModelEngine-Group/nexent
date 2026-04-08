@@ -297,8 +297,6 @@ async def create_agent_config(
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
-    _print_prompt_with_token_count(system_prompt, agent_id, "BEFORE_INJECTION")
-
     if agent_info.get("model_id") is not None:
         model_info = get_model_by_model_id(agent_info.get("model_id"))
         model_name = model_info["display_name"] if model_info is not None else "main_model"
@@ -452,23 +450,7 @@ async def prepare_prompt_templates(
     prompt_templates = get_agent_prompt_template(is_manager, language)
     prompt_templates["system_prompt"] = system_prompt
 
-    # Print final prompt with all injections
-    _print_prompt_with_token_count(prompt_templates["system_prompt"], agent_id, "FINAL_PROMPT")
-
     return prompt_templates
-
-
-def _print_prompt_with_token_count(prompt: str, agent_id: int = None, stage: str = "PROMPT"):
-    """Print prompt content and estimate token count using tiktoken."""
-    try:
-        import tiktoken
-        encoding = tiktoken.get_encoding("cl100k_base")
-        token_count = len(encoding.encode(prompt))
-        logger.info(f"[Skill Debug][{stage}] Agent {agent_id} token count: {token_count}")
-        logger.info(f"[Skill Debug][{stage}] Agent {agent_id} prompt:\n{prompt}")
-    except Exception as e:
-        logger.warning(f"[Skill Debug][{stage}] Failed to count tokens: {e}")
-        logger.info(f"[Skill Debug][{stage}] Agent {agent_id} prompt:\n{prompt}")
 
 
 async def join_minio_file_description_to_query(minio_files, query):

@@ -28,7 +28,7 @@ const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
 const MARKET_BACKEND =
-  process.env.MARKET_BACKEND || "https://market.nexent.tech"; // market
+  process.env.MARKET_BACKEND || "http://60.204.251.153:8010"; // market
 const PORT = 3000;
 
 const proxy = createProxyServer();

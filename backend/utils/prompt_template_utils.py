@@ -26,8 +26,6 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
     Returns:
         dict: Loaded prompt template
     """
-    logger.info(
-        f"Getting prompt template for type: {template_type}, language: {language}, kwargs: {kwargs}")
 
     # Define template path mapping
     template_paths = {
@@ -56,6 +54,10 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'cluster_summary_reduce': {
             LANGUAGE["ZH"]: 'backend/prompts/cluster_summary_reduce_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/cluster_summary_reduce_en.yaml'
+        },
+        'skill_creation_simple': {
+            LANGUAGE["ZH"]: 'backend/prompts/skill_creation_simple_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/skill_creation_simple_en.yaml'
         }
     }
 
@@ -146,3 +148,35 @@ def get_cluster_summary_reduce_prompt_template(language: str = LANGUAGE["ZH"]) -
         dict: Loaded cluster summary reduce prompt template configuration
     """
     return get_prompt_template('cluster_summary_reduce', language)
+
+
+def get_skill_creation_simple_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, str]:
+    """
+    Get skill creation simple prompt template.
+
+    This template is now structured YAML with system_prompt and user_prompt sections.
+
+    Args:
+        language: Language code ('zh' or 'en')
+
+    Returns:
+        Dict[str, str]: Template with keys 'system_prompt' and 'user_prompt'
+    """
+    template_path_map = {
+        LANGUAGE["ZH"]: 'backend/prompts/skill_creation_simple_zh.yaml',
+        LANGUAGE["EN"]: 'backend/prompts/skill_creation_simple_en.yaml'
+    }
+
+    template_path = template_path_map.get(language, template_path_map[LANGUAGE["ZH"]])
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.dirname(current_dir)
+    absolute_template_path = os.path.join(backend_dir, template_path.replace('backend/', ''))
+
+    with open(absolute_template_path, 'r', encoding='utf-8') as f:
+        template_data = yaml.safe_load(f)
+
+    return {
+        "system_prompt": template_data.get("system_prompt", ""),
+        "user_prompt": template_data.get("user_prompt", "")
+    }
