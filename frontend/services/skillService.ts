@@ -1,23 +1,15 @@
 import { message } from "antd";
 import log from "@/lib/logger";
-import { conversationService } from "@/services/conversationService";
 import {
   createSkill,
   updateSkill,
   createSkillFromFile,
   searchSkillsByName as searchSkillsByNameApi,
-  fetchSkillConfig,
-  deleteSkillTempFile,
   fetchSkills,
 } from "@/services/agentConfigService";
 import {
-  extractSkillInfoFromContent,
-  parseSkillDraft,
-} from "@/lib/skillFileUtils";
-import {
   THINKING_STEPS_ZH,
-  THINKING_STEPS_EN,
-  type SkillDraftResult,
+  type CreateSimpleSkillRequest,
 } from "@/types/skill";
 
 // ========== Type Definitions ==========
@@ -78,7 +70,7 @@ export interface ThinkingStep {
  * Get thinking steps based on language
  */
 export const getThinkingSteps = (lang: string): ThinkingStep[] => {
-  return lang === "zh" ? THINKING_STEPS_ZH : THINKING_STEPS_EN;
+  return lang === "zh" ? THINKING_STEPS_ZH : THINKING_STEPS_ZH;
 };
 
 
@@ -148,20 +140,6 @@ export const processSkillStream = async (
   }
 
   return finalAnswer;
-};
-
-/**
- * Delete temp file from skill creator directory
- */
-export const deleteSkillCreatorTempFile = async (): Promise<void> => {
-  try {
-    const config = await fetchSkillConfig("simple-skill-creator");
-    if (config && typeof config === "object" && config.temp_filename) {
-      await deleteSkillTempFile("simple-skill-creator", config.temp_filename as string);
-    }
-  } catch (error) {
-    log.warn("Failed to delete temp file:", error);
-  }
 };
 
 // ========== Skill Operation Functions ==========
@@ -244,7 +222,6 @@ export const submitSkillForm = async (
     }
 
     if (result.success) {
-      await deleteSkillCreatorTempFile();
       message.success(
         existingSkill
           ? t("skillManagement.message.updateSuccess")
@@ -304,113 +281,10 @@ export const submitSkillFromFile = async (
 };
 
 /**
- * Interactive skill creation via chat with agent
- */
-export const runInteractiveSkillCreation = async (
-  input: string,
-  history: { role: "user" | "assistant"; content: string }[],
-  skillCreatorAgentId: number,
-  onThinkingUpdate: (step: number, description: string) => void,
-  onThinkingVisible: (visible: boolean) => void,
-  onMessageUpdate: (messages: { id: string; role: "user" | "assistant"; content: string; timestamp: Date }[]) => void,
-  onLoadingChange: (loading: boolean) => void,
-  allSkills: SkillListItem[],
-  form: { setFieldValue: (name: string, value: unknown) => void },
-  t: (key: string) => string,
-  isMountedRef: React.MutableRefObject<boolean>
-): Promise<{ success: boolean; skillDraft: SkillDraftResult | null }> => {
-  try {
-    const reader = await conversationService.runAgent(
-      {
-        query: input,
-        conversation_id: 0,
-        history,
-        agent_id: skillCreatorAgentId,
-        is_debug: true,
-      },
-      undefined as unknown as AbortSignal
-    );
-
-    let finalAnswer = "";
-
-    await processSkillStream(
-      reader,
-      onThinkingUpdate,
-      onThinkingVisible,
-      (answer) => {
-        finalAnswer = answer;
-      },
-      "zh"
-    );
-
-    if (!isMountedRef.current) {
-      return { success: false, skillDraft: null };
-    }
-
-    const skillDraft = parseSkillDraft(finalAnswer);
-    if (skillDraft) {
-      form.setFieldValue("name", skillDraft.name);
-      form.setFieldValue("description", skillDraft.description);
-      form.setFieldValue("tags", skillDraft.tags);
-      form.setFieldValue("content", skillDraft.content);
-
-      message.success(t("skillManagement.message.skillReadyForSave"));
-      return { success: true, skillDraft };
-    } else {
-      // Fallback: read temp file if no skill draft parsed
-      if (!isMountedRef.current) {
-        return { success: false, skillDraft: null };
-      }
-
-      try {
-        const config = await fetchSkillConfig("simple-skill-creator");
-        if (config && config.temp_filename && isMountedRef.current) {
-          const { fetchSkillFileContent } = await import("@/services/agentConfigService");
-          const tempFilename = config.temp_filename as string;
-          const tempContent = await fetchSkillFileContent("simple-skill-creator", tempFilename);
-
-          if (tempContent && isMountedRef.current) {
-            const skillInfo = extractSkillInfoFromContent(tempContent);
-
-            if (skillInfo && skillInfo.name) {
-              form.setFieldValue("name", skillInfo.name);
-            }
-            if (skillInfo && skillInfo.description) {
-              form.setFieldValue("description", skillInfo.description);
-            }
-            if (skillInfo && skillInfo.tags && skillInfo.tags.length > 0) {
-              form.setFieldValue("tags", skillInfo.tags);
-            }
-            if (skillInfo.contentWithoutFrontmatter) {
-              form.setFieldValue("content", skillInfo.contentWithoutFrontmatter);
-            }
-          }
-        }
-      } catch (error) {
-        log.warn("Failed to load temp file content:", error);
-      }
-
-      return { success: false, skillDraft: null };
-    }
-  } catch (error) {
-    log.error("Interactive skill creation error:", error);
-    message.error(t("skillManagement.message.chatError"));
-    return { success: false, skillDraft: null };
-  }
-};
-
-/**
- * Clear chat and delete temp file
+ * Clear chat state (no backend call needed)
  */
 export const clearChatAndTempFile = async (): Promise<void> => {
-  try {
-    const config = await fetchSkillConfig("simple-skill-creator");
-    if (config && typeof config === "object" && config.temp_filename) {
-      await deleteSkillTempFile("simple-skill-creator", config.temp_filename as string);
-    }
-  } catch (error) {
-    log.warn("Failed to delete temp file on clear:", error);
-  }
+  // No backend call needed - just clear local state
 };
 
 /**
@@ -444,3 +318,363 @@ export const skillNameExists = (
 };
 
 export { updateSkill };
+
+/**
+ * Call the /skills/create-simple backend API to generate a skill.
+ */
+import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
+
+export interface CreateSimpleSkillResponse {
+  skill_name: string;
+  skill_description: string;
+  tags: string[];
+  skill_content: string;
+}
+
+/**
+ * Interactive skill creation via backend API (SDK-backed).
+ */
+export const createSimpleSkill = async (
+  request: CreateSimpleSkillRequest
+): Promise<CreateSimpleSkillResponse> => {
+  const response = await fetchWithErrorHandling(API_ENDPOINTS.skills.createSimple, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return response.json();
+};
+
+/**
+ * Parse streaming content with <SKILL> delimiters.
+ * Content inside <SKILL></SKILL> goes to form content.
+ * Content outside <SKILL></SKILL> that appears BEFORE the <SKILL> tag is ignored (preceding noise).
+ * Content outside that appears AFTER the </SKILL> tag is the summary.
+ */
+export interface SkillDelimiterParseResult {
+  formContent: string;
+  summaryContent: string;
+  newFormContent: string;
+  newSummaryContent: string;
+  summaryStarted: boolean;
+}
+
+/**
+ * Extract summary content from final_answer.
+ * final_answer contains the FULL response including <SKILL> block.
+ * The SKILL content was already streamed via skill_content events,
+ * so we only need the summary (content AFTER </SKILL>).
+ */
+function extractSummaryFromFinalAnswer(fullContent: string): string {
+  const SKILL_CLOSE = "</SKILL>";
+  const closeIndex = fullContent.indexOf(SKILL_CLOSE);
+  if (closeIndex === -1) {
+    return fullContent;
+  }
+  return fullContent.substring(closeIndex + SKILL_CLOSE.length).trim();
+}
+
+/**
+ * Initialize a skill delimiter parser state.
+ * Matches uppercase <SKILL></SKILL> XML delimiters from the backend.
+ */
+export function createSkillDelimiterParser(): {
+  update: (chunk: string) => SkillDelimiterParseResult;
+  getFullResult: () => SkillDelimiterParseResult;
+} {
+  let formContent = "";
+  let summaryContent = "";
+  let buffer = "";
+  let isInsideSkillTag = false;
+  let summaryStarted = false;
+  // Tracks potential partial </SKILL> prefix across chunks
+  let pendingClose = "";
+  const SKILL_OPEN = "<SKILL>";
+  const SKILL_CLOSE = "</SKILL>";
+  const CLOSE_LEN = SKILL_CLOSE.length; // 8
+
+  return {
+    update(chunk: string): SkillDelimiterParseResult {
+      buffer += chunk;
+      let newFormContent = "";
+      let newSummaryContent = "";
+
+      while (buffer.length > 0) {
+        if (isInsideSkillTag) {
+          // Check if pendingClose + buffer contains </SKILL>
+          const combined = pendingClose + buffer;
+          const closeIdx = combined.indexOf(SKILL_CLOSE);
+          if (closeIdx !== -1) {
+            // Found </SKILL>!
+            // Content before it (minus pendingClose) is safe to output as form content.
+            const content = combined.substring(0, closeIdx);
+            const safeContent = content.substring(pendingClose.length);
+            if (safeContent.length > 0) {
+              formContent += safeContent;
+              newFormContent += safeContent;
+            }
+            // Everything after </SKILL> is summary.
+            const afterClose = combined.substring(closeIdx + CLOSE_LEN);
+            if (afterClose.length > 0) {
+              summaryContent += afterClose;
+              newSummaryContent += afterClose;
+            }
+            buffer = "";
+            pendingClose = "";
+            isInsideSkillTag = false;
+            summaryStarted = true;
+            break;
+          }
+
+          // No full </SKILL> in combined. Decide what to save as pendingClose.
+          if (combined.length <= CLOSE_LEN - 1) {
+            // Too short to contain </SKILL>. Hold all as pending, output nothing.
+            pendingClose = combined;
+            buffer = "";
+            break;
+          }
+
+          // Buffer is long enough. Check if combined ends with potential partial </SKILL.
+          const lastPossible = combined.slice(-(CLOSE_LEN - 1)); // Last 7 chars
+          if (lastPossible.startsWith("</SK")) {
+            // Looks like partial </SKILL. Hold last 7 chars, output rest.
+            const safeLen = combined.length - (CLOSE_LEN - 1);
+            const safe = combined.substring(0, safeLen);
+            formContent += safe;
+            newFormContent += safe;
+            pendingClose = lastPossible;
+            buffer = "";
+            break;
+          }
+
+          // Does not look like partial </SKILL>. Output all as content.
+          formContent += combined;
+          newFormContent += combined;
+          buffer = "";
+          pendingClose = "";
+          break;
+        } else {
+          const openIdx = buffer.indexOf(SKILL_OPEN);
+          if (openIdx !== -1) {
+            buffer = buffer.substring(openIdx + SKILL_OPEN.length);
+            isInsideSkillTag = true;
+            pendingClose = "";
+          } else {
+            if (buffer.includes("<")) {
+              break;
+            } else {
+              buffer = "";
+              break;
+            }
+          }
+        }
+      }
+
+      return {
+        formContent,
+        summaryContent,
+        newFormContent,
+        newSummaryContent,
+        summaryStarted,
+      };
+    },
+
+    getFullResult(): SkillDelimiterParseResult {
+      if (isInsideSkillTag) {
+        // Any remaining buffer or pendingClose is form content
+        if (buffer.length > 0) {
+          formContent += buffer;
+        }
+        if (pendingClose.length > 0) {
+          formContent += pendingClose;
+        }
+      }
+      isInsideSkillTag = false;
+      return {
+        formContent,
+        summaryContent,
+        newFormContent: "",
+        newSummaryContent: "",
+        summaryStarted: true,
+      };
+    },
+  };
+}
+
+/**
+ * SSE event types for streaming skill creation
+ */
+export interface SkillCreationStreamEvent {
+  type: "step_count" | "final_answer" | "skill_content" | "skill_result" | "done" | "error";
+  content?: string;
+  skill_name?: string;
+  skill_description?: string;
+  tags?: string[];
+  message?: string;
+}
+
+/**
+ * Interactive skill creation via SSE stream with progress updates.
+ * Uses <SKILL></SKILL> delimiters to separate form content from summary.
+ */
+export const createSimpleSkillStream = async (
+  request: CreateSimpleSkillRequest,
+  callbacks: {
+    onStepCount: (step: number, description: string) => void;
+    onThinkingVisible: (visible: boolean) => void;
+    onThinkingUpdate: (step: number, description: string) => void;
+    onSkillContent?: (content: string) => void;
+    onSkillResult?: (result: { skill_name: string; skill_description: string; tags: string[] }) => void;
+    onFormContent?: (content: string) => void;
+    onSummaryContent?: (content: string) => void;
+    onDone: (finalResult: SkillDelimiterParseResult) => void;
+    onError: (message: string) => void;
+  }
+): Promise<SkillDelimiterParseResult> => {
+  const response = await fetch(API_ENDPOINTS.skills.createSimple, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    callbacks.onError(`HTTP error: ${response.status}`);
+    return { formContent: "", summaryContent: "", newFormContent: "", newSummaryContent: "", summaryStarted: false };
+  }
+
+  if (!response.body) {
+    callbacks.onError("No response body");
+    return { formContent: "", summaryContent: "", newFormContent: "", newSummaryContent: "", summaryStarted: false };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const delimiterParser = createSkillDelimiterParser();
+  // Track pending stream promises so 'done' case can await them
+  const pendingStreamPromises: Promise<void>[] = [];
+
+  callbacks.onThinkingVisible(true);
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      // Strip any stray \r so the buffer uses only \n internally.
+      // This handles Windows CRLF line endings in the SSE stream.
+      const cleanChunk = decoder.decode(value, { stream: true }).replace(/\r/g, "");
+      buffer += cleanChunk;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const jsonStr = line.substring(5).trim();
+        if (!jsonStr) continue;
+
+        try {
+          const event: SkillCreationStreamEvent = JSON.parse(jsonStr);
+
+          switch (event.type) {
+            case "step_count": {
+              const stepMatch = String(event.content).match(/\d+/);
+              const stepNum = stepMatch ? parseInt(stepMatch[0], 10) : NaN;
+              if (!isNaN(stepNum)) {
+                callbacks.onThinkingUpdate(stepNum, "");
+                callbacks.onStepCount(stepNum, "");
+              }
+              break;
+            }
+            case "skill_content":
+              if (event.content) {
+                const parsed = delimiterParser.update(event.content);
+                // Only send to form when still inside <SKILL> tags (summaryStarted=false).
+                // Once summaryStarted=true, all content is summary text, not form content.
+                if (parsed.newFormContent && !parsed.summaryStarted && callbacks.onFormContent) {
+                  callbacks.onFormContent(parsed.newFormContent);
+                }
+                if (parsed.newSummaryContent && callbacks.onSummaryContent) {
+                  callbacks.onSummaryContent(parsed.newSummaryContent);
+                }
+                if (callbacks.onSkillContent) {
+                  callbacks.onSkillContent(event.content);
+                }
+              }
+              break;
+            case "final_answer":
+              if (event.content) {
+                // final_answer contains the FULL response including <SKILL> block.
+                // The SKILL content was already streamed via skill_content events.
+                // Only extract the summary (content after </SKILL>) from final_answer.
+                const summary = extractSummaryFromFinalAnswer(event.content);
+                if (summary && callbacks.onSummaryContent) {
+                  // Use async loop with setTimeout to allow React to render each chunk.
+                  // Without the delay, all state updates batch into one render.
+                  const CHUNK_SIZE = 3; // characters per chunk
+                  const CHUNK_DELAY = 15; // ms between chunks
+                  // Wrap streaming in a promise so we can await it before onDone
+                  const streamPromise = new Promise<void>((resolve) => {
+                    const streamChunk = (index: number): void => {
+                      if (index >= summary.length) {
+                        resolve();
+                        return;
+                      }
+                      const chunk = summary.substring(index, index + CHUNK_SIZE);
+                      callbacks.onSummaryContent!(chunk);
+                      setTimeout(() => streamChunk(index + CHUNK_SIZE), CHUNK_DELAY);
+                    };
+                    streamChunk(0);
+                  });
+                  // Store promise to be awaited in 'done' case
+                  pendingStreamPromises.push(streamPromise);
+                }
+              }
+              break;
+            case "skill_result":
+              if (callbacks.onSkillResult) {
+                callbacks.onSkillResult({
+                  skill_name: event.skill_name || "",
+                  skill_description: event.skill_description || "",
+                  tags: event.tags || [],
+                });
+              }
+              break;
+            case "done":
+              callbacks.onThinkingVisible(false);
+              {
+                const finalResult = delimiterParser.getFullResult();
+                // Await all pending stream promises before calling onDone
+                Promise.all(pendingStreamPromises)
+                  .then(() => {
+                    try {
+                      callbacks.onDone(finalResult);
+                    } catch {
+                      // Ignore callback errors
+                    }
+                  })
+                  .catch(() => {
+                    // Ignore promise errors
+                    try {
+                      callbacks.onDone(finalResult);
+                    } catch {
+                      // Ignore callback errors
+                    }
+                  });
+              }
+              break;
+            case "error":
+              callbacks.onThinkingVisible(false);
+              callbacks.onError(event.message || "Unknown error");
+              break;
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+  } finally {
+    callbacks.onThinkingVisible(false);
+  }
+  return delimiterParser.getFullResult();
+};
