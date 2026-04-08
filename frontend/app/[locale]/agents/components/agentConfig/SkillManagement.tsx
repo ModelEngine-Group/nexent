@@ -3,10 +3,12 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SkillGroup, Skill } from "@/types/agentConfig";
-import { Tabs } from "antd";
+import { Tabs, message } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSkillList } from "@/hooks/agent/useSkillList";
-import { Info } from "lucide-react";
+import { Info, Trash2 } from "lucide-react";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { deleteSkill } from "@/services/agentConfigService";
 import SkillDetailModal from "./SkillDetailModal";
 
 interface SkillManagementProps {
@@ -21,6 +23,7 @@ export default function SkillManagement({
   currentAgentId,
 }: SkillManagementProps) {
   const { t } = useTranslation("common");
+  const { confirm } = useConfirmModal();
 
   const currentAgentPermission = useAgentConfigStore(
     (state) => state.currentAgentPermission
@@ -39,7 +42,7 @@ export default function SkillManagement({
 
   const updateSkills = useAgentConfigStore((state) => state.updateSkills);
 
-  const { groupedSkills } = useSkillList();
+  const { groupedSkills, invalidate } = useSkillList();
 
   const [activeTabKey, setActiveTabKey] = useState<string>("");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
@@ -74,6 +77,25 @@ export default function SkillManagement({
     e.stopPropagation();
     setSelectedSkill(skill);
     setIsDetailModalOpen(true);
+  };
+
+  const handleDeleteClick = async (skill: Skill, e: React.MouseEvent) => {
+    e.stopPropagation();
+    confirm({
+      title: t("skillManagement.delete.confirmTitle"),
+      content: t("skillManagement.delete.confirmContent", { skillName: skill.name }),
+      okText: t("common.confirm"),
+      cancelText: t("common.cancel"),
+      onOk: async () => {
+        const result = await deleteSkill(skill.name);
+        if (result.success) {
+          message.success(t("skillManagement.delete.success"));
+          invalidate();
+        } else {
+          message.error(result.message || t("skillManagement.delete.failed"));
+        }
+      },
+    });
   };
 
   const tabItems = skillGroups.map((group) => {
@@ -123,11 +145,18 @@ export default function SkillManagement({
                 <span className="font-medium text-gray-800 truncate">
                   {skill.name}
                 </span>
-                <Info
-                  size={16}
-                  className="flex-shrink-0 cursor-pointer text-gray-400 hover:text-gray-600 transition-colors"
-                  onClick={(e) => handleInfoClick(skill, e)}
-                />
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Info
+                    size={16}
+                    className="cursor-pointer text-gray-400 hover:text-gray-600 transition-colors"
+                    onClick={(e) => handleInfoClick(skill, e)}
+                  />
+                  <Trash2
+                    size={16}
+                    className="cursor-pointer text-gray-400 hover:text-red-500 transition-colors"
+                    onClick={(e) => handleDeleteClick(skill, e)}
+                  />
+                </div>
               </div>
             );
           })}
