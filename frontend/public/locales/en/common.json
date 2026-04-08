@@ -1030,6 +1030,11 @@
   "skillManagement.detail.noFiles": "No files",
   "skillManagement.detail.selectFile": "Select a file on the left to preview",
 
+  "skillManagement.delete.confirmTitle": "Confirm Delete Skill",
+  "skillManagement.delete.confirmContent": "Are you sure you want to delete skill 「{{skillName}}」? This action cannot be undone.",
+  "skillManagement.delete.success": "Skill deleted successfully",
+  "skillManagement.delete.failed": "Failed to delete skill",
+
   "mcpConfig.modal.title": "MCP Server Configuration",
   "mcpConfig.modal.close": "Close",
   "mcpConfig.modal.updatingTools": "Updating tools list...",

@@ -1395,3 +1395,33 @@ export const fetchSkillConfig = async (skillName: string): Promise<Record<string
     return null;
   }
 };
+
+/**
+ * Delete a skill by name
+ * @param skillName skill name to delete
+ * @returns delete result
+ */
+export const deleteSkill = async (skillName: string) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.skills.delete(skillName), {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    return {
+      success: true,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error deleting skill:", error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Failed to delete skill",
+    };
+  }
+};
