@@ -28,6 +28,7 @@ import {
   Unplug,
   Settings,
   Import,
+  RefreshCw,
 } from "lucide-react";
 
 import { McpConfigModalProps } from "@/types/agentConfig";
