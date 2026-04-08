@@ -238,7 +238,6 @@ export const API_ENDPOINTS = {
     instanceList: `${API_BASE_URL}/skills/instance/list`,
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
     createSimple: `${API_BASE_URL}/skills/create-simple`,
-    creatorCache: `${API_BASE_URL}/skills/creator/cache`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
