@@ -213,6 +213,21 @@ class MinioClient:
         """
         return self._storage_client.get_file_stream(object_name, bucket)
 
+    def get_file_range(self, object_name: str, start: int, end: int, bucket: Optional[str] = None) -> Tuple[bool, Any]:
+        """
+        Get a byte-range slice of a file from MinIO.
+
+        Args:
+            object_name: Object name
+            start: Start byte offset (inclusive)
+            end: End byte offset (inclusive), matching HTTP Range semantics
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, Any]: (True, raw_body_stream) on success, (False, error_str) on failure
+        """
+        return self._storage_client.get_file_range(object_name, start, end, bucket)
+
     def file_exists(self, object_name: str, bucket: Optional[str] = None) -> bool:
         """
         Check if file exists in MinIO

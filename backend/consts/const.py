@@ -1,5 +1,6 @@
 import os
 from enum import Enum
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -43,6 +44,11 @@ CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
 # Limit concurrent Office-to-PDF conversions
 MAX_CONCURRENT_CONVERSIONS = 5
+# LibreOffice profile directory
+LIBREOFFICE_PROFILE_DIR = os.getenv(
+    "LIBREOFFICE_PROFILE_DIR",
+    str(Path.home() / ".cache" / "nexent" / "libreoffice-profile"),
+)
 # Supported Office file MIME types
 OFFICE_MIME_TYPES = [
     'application/msword',  # .doc
