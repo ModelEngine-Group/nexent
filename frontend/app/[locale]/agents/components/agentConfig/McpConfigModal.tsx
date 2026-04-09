@@ -93,9 +93,7 @@ export default function McpConfigModal({
   );
 
   const [logsModalVisible, setLogsModalVisible] = useState(false);
-  const [currentContainerLogs, setCurrentContainerLogs] = useState("");
   const [currentContainerId, setCurrentContainerId] = useState("");
-  const [loadingLogs, setLoadingLogs] = useState(false);
 
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([]);
@@ -416,18 +414,7 @@ export default function McpConfigModal({
 
   const onViewLogs = async (containerId: string) => {
     setCurrentContainerId(containerId);
-    setLoadingLogs(true);
     setLogsModalVisible(true);
-    setCurrentContainerLogs("");
-
-    const result = await handleViewLogs(containerId, 500);
-    if (result.success) {
-      setCurrentContainerLogs(result.data);
-    } else {
-      message.error(result.messageKey ? t(result.messageKey) : t("mcpConfig.message.getContainerLogsFailed"));
-      setCurrentContainerLogs(t("mcpConfig.message.getContainerLogsFailed"));
-    }
-    setLoadingLogs(false);
   };
 
   // Server list table columns
@@ -610,7 +597,7 @@ export default function McpConfigModal({
         onCancel={actionsLocked ? undefined : onCancel}
         width={1200}
         closable={!actionsLocked}
-        maskClosable={!actionsLocked}
+        mask={{ closable: !actionsLocked }}
         footer={[
           <Button key="cancel" onClick={onCancel} disabled={actionsLocked}>
             {actionsLocked
@@ -1046,9 +1033,8 @@ export default function McpConfigModal({
       <McpContainerLogsModal
         open={logsModalVisible}
         onCancel={() => setLogsModalVisible(false)}
-        loading={loadingLogs}
-        logs={currentContainerLogs}
         containerId={currentContainerId}
+        tail={500}
       />
     </>
   );

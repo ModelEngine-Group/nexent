@@ -213,6 +213,33 @@ class MinioClient:
         """
         return self._storage_client.get_file_stream(object_name, bucket)
 
+    def file_exists(self, object_name: str, bucket: Optional[str] = None) -> bool:
+        """
+        Check if file exists in MinIO
+
+        Args:
+            object_name: Object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            bool: True if file exists, False otherwise
+        """
+        return self._storage_client.exists(object_name, bucket)
+
+    def copy_file(self, source_object: str, dest_object: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Copy a file within the same bucket (atomic operation)
+
+        Args:
+            source_object: Source object name
+            dest_object: Destination object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, Destination object name or error message)
+        """
+        return self._storage_client.copy_file(source_object, dest_object, bucket)
+
 
 # Create global database and MinIO client instances
 db_client = PostgresClient()
@@ -241,10 +268,19 @@ def get_db_session(db_session=None):
 
 
 def as_dict(obj):
+    from datetime import datetime
 
     # Handle SQLAlchemy ORM objects (both TableBase and other DeclarativeBase subclasses)
     if hasattr(obj, '__class__') and hasattr(obj.__class__, '__mapper__'):
-        return {c.key: getattr(obj, c.key) for c in class_mapper(obj.__class__).columns}
+        result = {}
+        for c in class_mapper(obj.__class__).columns:
+            value = getattr(obj, c.key)
+            # Convert datetime to ISO format string for JSON serialization
+            if isinstance(value, datetime):
+                result[c.key] = value.isoformat()
+            else:
+                result[c.key] = value
+        return result
 
     # noinspection PyProtectedMember
     return dict(obj._mapping)

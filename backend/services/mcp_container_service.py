@@ -6,11 +6,15 @@ interface while using the standardized SDK container management module.
 """
 
 import logging
-from typing import Dict, List, Optional
+import asyncio
+import threading
+from typing import Dict, List, Optional, AsyncGenerator
 
 from consts.exceptions import MCPConnectionError, MCPContainerError
+from consts.const import IS_DEPLOYED_BY_KUBERNETES, KUBERNETES_NAMESPACE
 from nexent.container import (
     DockerContainerConfig,
+    KubernetesContainerConfig,
     create_container_client_from_config,
     ContainerError,
     ContainerConnectionError,
@@ -34,19 +38,26 @@ class MCPContainerManager:
         Args:
             docker_socket_path: Path to Docker socket. If None, uses platform default.
                 For container access, mount docker socket: -v /var/run/docker.sock:/var/run/docker.sock
+                Only used when running in Docker mode.
         """
         try:
-            # Create Docker configuration
-            config = DockerContainerConfig(
-                docker_socket_path=docker_socket_path
-            )
-            # Create container client from config
+            if IS_DEPLOYED_BY_KUBERNETES:
+                logger.info("Initializing Kubernetes container client")
+                config = KubernetesContainerConfig(
+                    namespace=KUBERNETES_NAMESPACE,
+                    in_cluster=True,
+                )
+            else:
+                logger.info("Initializing Docker container client")
+                config = DockerContainerConfig(
+                    docker_socket_path=docker_socket_path
+                )
             self.client = create_container_client_from_config(config)
             logger.info(
-                "MCPContainerManager initialized using SDK container module")
+                f"MCPContainerManager initialized using SDK container module (type: {'kubernetes' if IS_DEPLOYED_BY_KUBERNETES else 'docker'})")
         except ContainerError as e:
             logger.error(f"Failed to initialize container manager: {e}")
-            raise MCPContainerError(f"Cannot connect to Docker: {e}")
+            raise MCPContainerError(f"Cannot connect to container runtime: {e}")
 
     async def load_image_from_tar_file(self, tar_file_path: str) -> str:
         """
@@ -252,3 +263,166 @@ class MCPContainerManager:
         except Exception as e:
             logger.error(f"Failed to get container logs: {e}")
             return f"Error retrieving logs: {e}"
+
+    async def stream_container_logs(
+        self, container_id: str, tail: int = 100, follow: bool = True
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream container logs in real-time
+
+        Args:
+            container_id: Container ID or name
+            tail: Number of log lines to retrieve initially
+            follow: Whether to follow logs (stream new logs as they appear)
+
+        Yields:
+            Log lines as strings
+        """
+        try:
+            if IS_DEPLOYED_BY_KUBERNETES:
+                # Kubernetes mode: use SDK's read_namespaced_pod_log with follow
+                namespace = KUBERNETES_NAMESPACE
+                # Resolve container_id (UID) to actual Pod name
+                pod_name = self.client._resolve_pod_name(container_id)
+                if not pod_name:
+                    logger.warning(f"Pod {container_id} not found")
+                    return
+
+                # First, get initial logs
+                initial_logs = self.client.get_container_logs(container_id, tail=tail)
+                if initial_logs:
+                    for line in initial_logs.splitlines():
+                        if line.strip():
+                            yield line
+
+                if follow:
+                    # Use Kubernetes log API with follow=True in background thread
+                    # (same pattern as Docker)
+                    loop = asyncio.get_event_loop()
+                    log_queue = asyncio.Queue()
+                    stop_flag = [False]
+
+                    def _stream_logs_sync():
+                        """Run blocking Kubernetes log stream in thread"""
+                        try:
+                            # Kubernetes log API with follow=True returns a generator
+                            log_stream = self.client.core_v1.read_namespaced_pod_log(
+                                name=pod_name,
+                                namespace=namespace,
+                                container="mcp-server",
+                                follow=True,
+                                timestamps=False,
+                                _preload_content=False,
+                                tail_lines=0,  # Only new logs after initial batch
+                            )
+                            for log_line in log_stream:
+                                if stop_flag[0]:
+                                    break
+                                # Kubernetes API returns bytes, decode to string
+                                if isinstance(log_line, bytes):
+                                    log_line = log_line.decode("utf-8", errors="replace")
+                                # Strip trailing newline (Kubernetes API adds \n per line)
+                                if log_line.strip():
+                                    asyncio.run_coroutine_threadsafe(
+                                        log_queue.put(log_line.rstrip("\n")), loop
+                                    )
+                            # Signal end of stream
+                            asyncio.run_coroutine_threadsafe(
+                                log_queue.put(None), loop
+                            )
+                        except Exception as e:
+                            logger.error(f"Error in Kubernetes log stream thread: {e}")
+                            asyncio.run_coroutine_threadsafe(
+                                log_queue.put(None), loop
+                            )
+
+                    # Start streaming in background thread
+                    stream_thread = threading.Thread(
+                        target=_stream_logs_sync, daemon=True
+                    )
+                    stream_thread.start()
+
+                    # Process log lines from queue
+                    try:
+                        while True:
+                            log_line = await log_queue.get()
+                            if log_line is None:  # End of stream signal
+                                break
+                            if log_line.strip():
+                                yield log_line
+                    finally:
+                        stop_flag[0] = True
+            else:
+                # Docker mode: use native Docker API for streaming
+                container = self.client.client.containers.get(container_id)
+                loop = asyncio.get_event_loop()
+
+                # First, get initial logs in a thread pool to avoid blocking
+                initial_logs = await loop.run_in_executor(
+                    None,
+                    lambda: container.logs(
+                        tail=tail, stdout=True, stderr=True, timestamps=False
+                    )
+                )
+                if initial_logs:
+                    decoded = initial_logs.decode("utf-8", errors="replace")
+                    for line in decoded.splitlines():
+                        if line.strip():  # Only yield non-empty lines
+                            yield line
+
+                # Then, if follow is True, stream new logs
+                if follow:
+                    # Create a queue to pass log chunks from thread to async generator
+                    log_queue = asyncio.Queue()
+                    # Use list to allow modification from nested function
+                    stop_flag = [False]
+
+                    def _stream_logs_sync():
+                        """Run blocking log stream in thread"""
+                        try:
+                            log_stream = container.logs(
+                                stdout=True,
+                                stderr=True,
+                                follow=True,
+                                stream=True,
+                                timestamps=False,
+                                tail=0,  # Only new logs
+                            )
+                            for log_chunk in log_stream:
+                                if stop_flag[0]:
+                                    break
+                                # Put chunks in queue (will be processed in async context)
+                                asyncio.run_coroutine_threadsafe(
+                                    log_queue.put(log_chunk), loop
+                                )
+                            # Signal end of stream
+                            asyncio.run_coroutine_threadsafe(
+                                log_queue.put(None), loop
+                            )
+                        except Exception as e:
+                            logger.error(f"Error in log stream thread: {e}")
+                            asyncio.run_coroutine_threadsafe(
+                                log_queue.put(None), loop
+                            )
+
+                    # Start streaming in background thread
+                    stream_thread = threading.Thread(
+                        target=_stream_logs_sync, daemon=True)
+                    stream_thread.start()
+
+                    # Process log chunks from queue
+                    try:
+                        while True:
+                            log_chunk = await log_queue.get()
+                            if log_chunk is None:  # End of stream signal
+                                break
+                            decoded = log_chunk.decode("utf-8", errors="replace")
+                            # Split by newlines and yield each line
+                            for line in decoded.splitlines():
+                                if line.strip():  # Only yield non-empty lines
+                                    yield line
+                    finally:
+                        stop_flag[0] = True
+        except Exception as e:
+            logger.error(f"Failed to stream container logs: {e}")
+            yield f"Error retrieving logs: {e}"

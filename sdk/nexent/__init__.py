@@ -5,6 +5,7 @@ from .memory import *
 from .storage import *
 from .vector_database import *
 from .container import *
+from .skills import *
 
 
-__all__ = ["core", "data_process", "memory", "storage", "vector_database", "container", "datamate"]
+__all__ = ["core", "data_process", "memory", "storage", "vector_database", "container", "datamate", "skills"]

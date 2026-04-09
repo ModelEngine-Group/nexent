@@ -5,10 +5,37 @@ import { ChatMessageType, AgentStep } from "@/types/chat";
 import log from "@/lib/logger";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 
-import {
-  deduplicateImages,
-  deduplicateSearchResults,
-} from "../internal/chatHelpers";
+// Merge new search results into an existing list, skipping duplicates by `text` field
+const deduplicateSearchResults = (
+  existingResults: any[],
+  newResults: any[]
+): any[] => {
+  const uniqueResults = [...existingResults];
+  const existingTexts = new Set(existingResults.map((item) => item.text));
+  for (const result of newResults) {
+    if (!existingTexts.has(result.text)) {
+      uniqueResults.push(result);
+      existingTexts.add(result.text);
+    }
+  }
+  return uniqueResults;
+};
+
+// Merge new image URLs into an existing list, skipping duplicates
+const deduplicateImages = (
+  existingImages: string[],
+  newImages: string[]
+): string[] => {
+  const uniqueImages = [...existingImages];
+  const existingUrls = new Set(existingImages);
+  for (const imageUrl of newImages) {
+    if (!existingUrls.has(imageUrl)) {
+      uniqueImages.push(imageUrl);
+      existingUrls.add(imageUrl);
+    }
+  }
+  return uniqueImages;
+};
 
 // function: process the user break tag
 const processUserBreakTag = (content: string, t: any): string => {
@@ -555,19 +582,19 @@ export const handleStreamResponse = async (
                         return recordMessages;
                       }
 
-                      if (!lastMsg.searchResults) {
-                        lastMsg.searchResults = [];
-                      }
-
                       // Use the public deduplication function to process search results
                       if (
                         searchResultsContent &&
                         searchResultsContent.length > 0
                       ) {
-                        lastMsg.searchResults = deduplicateSearchResults(
-                          lastMsg.searchResults,
-                          searchResultsContent
-                        );
+                        const updatedMsg = {
+                          ...lastMsg,
+                          searchResults: deduplicateSearchResults(
+                            lastMsg.searchResults || [],
+                            searchResultsContent
+                          ),
+                        };
+                        recordMessages[recordMessages.length - 1] = updatedMsg;
                       }
 
                       return recordMessages;
@@ -596,16 +623,15 @@ export const handleStreamResponse = async (
                           return newMessages;
                         }
 
-                        // If there is no image array, initialize it
-                        if (!lastMsg.images) {
-                          lastMsg.images = [];
-                        }
-
-                        // Use the public deduplication function to process images
-                        lastMsg.images = deduplicateImages(
-                          lastMsg.images,
-                          imageUrls
-                        );
+                        // Create a new object reference so React.memo detects the change
+                        const updatedMsg = {
+                          ...lastMsg,
+                          images: deduplicateImages(
+                            lastMsg.images || [],
+                            imageUrls
+                          ),
+                        };
+                        newMessages[newMessages.length - 1] = updatedMsg;
                         return newMessages;
                       });
                     }
@@ -848,29 +874,35 @@ export const handleStreamResponse = async (
                 const lastMsg = newMessages[newMessages.length - 1];
 
                 if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+                  // Create a new object reference so React.memo detects the change
+                  const updatedMsg = { ...lastMsg };
+
                   // Update the current step
                   if (currentStep) {
-                    if (!lastMsg.steps) lastMsg.steps = [];
+                    const steps = updatedMsg.steps ? [...updatedMsg.steps] : [];
 
                     // Find and update existing steps
-                    const stepIndex = lastMsg.steps.findIndex(
+                    const stepIndex = steps.findIndex(
                       (s) => s.id === currentStep?.id
                     );
                     if (stepIndex >= 0) {
-                      lastMsg.steps[stepIndex] = currentStep;
+                      steps[stepIndex] = currentStep;
                     } else {
                       // Only add new steps when there is content
                       if (
                         currentStep.contents &&
                         currentStep.contents.length > 0
                       ) {
-                        lastMsg.steps.push(currentStep);
+                        steps.push(currentStep);
                       }
                     }
+                    updatedMsg.steps = steps;
                   }
 
                   // Update other special content
-                  if (finalAnswer) lastMsg.finalAnswer = finalAnswer;
+                  if (finalAnswer) updatedMsg.finalAnswer = finalAnswer;
+
+                  newMessages[newMessages.length - 1] = updatedMsg;
                 }
 
                 return newMessages;
@@ -909,14 +941,15 @@ export const handleStreamResponse = async (
       const lastMsg = newMessages[newMessages.length - 1];
 
       if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
-        lastMsg.isComplete = true;
+        // Create a new object reference so React.memo detects the change
+        const updatedMsg = { ...lastMsg, isComplete: true };
 
         // Check and remove duplicate steps
-        if (lastMsg.steps && lastMsg.steps.length > 0) {
+        if (updatedMsg.steps && updatedMsg.steps.length > 0) {
           const uniqueSteps = [];
           const seenTitles = new Set();
 
-          for (const step of lastMsg.steps) {
+          for (const step of updatedMsg.steps) {
             // If it is an empty step or there is already a step with the same title, skip it
             if (
               !step.contents ||
@@ -931,8 +964,13 @@ export const handleStreamResponse = async (
           }
 
           // Update to the deduplicated step list
-          lastMsg.steps = uniqueSteps;
+          updatedMsg.steps = uniqueSteps;
         }
+
+        // Also persist any finalAnswer accumulated in the trailing buffer
+        if (finalAnswer) updatedMsg.finalAnswer = finalAnswer;
+
+        newMessages[newMessages.length - 1] = updatedMsg;
       }
 
       return newMessages;

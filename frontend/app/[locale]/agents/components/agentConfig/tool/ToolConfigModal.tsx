@@ -16,7 +16,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { CloseOutlined } from "@ant-design/icons";
-import { ConfigStore } from "@/lib/config";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
@@ -24,14 +23,13 @@ import { KnowledgeBase } from "@/types/knowledgeBase";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
-import {
-  useKnowledgeBasesForToolConfig,
-} from "@/hooks/useKnowledgeBaseSelector";
-import {
-  useKnowledgeBaseConfigChangeHandler,
-} from "@/hooks/useKnowledgeBaseConfigChangeHandler";
+import { useConfig } from "@/hooks/useConfig";
+import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
+import { useKnowledgeBaseConfigChangeHandler } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { API_ENDPOINTS } from "@/services/api";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
+import { isZhLocale, getLocalizedDescription } from "@/lib/utils";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -49,7 +47,46 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "knowledge_base_search",
   "dify_search",
   "datamate_search",
+  "idata_search",
 ];
+
+const TOOLS_SUPPORTING_RERANK = [
+  "knowledge_base_search",
+  "dify_search",
+  "datamate_search",
+];
+
+function withRerankParams(params: ToolParam[], toolName?: string): ToolParam[] {
+  if (!toolName || !TOOLS_SUPPORTING_RERANK.includes(toolName)) return params;
+
+  const hasRerank = params.some((p) => p.name === "rerank");
+  const hasRerankModelName = params.some((p) => p.name === "rerank_model_name");
+  if (hasRerank && hasRerankModelName) return params;
+
+  const next = [...params];
+
+  if (!hasRerank) {
+    next.push({
+      name: "rerank",
+      type: "boolean",
+      required: false,
+      value: false,
+      description: "Whether to enable reranking for search results",
+    });
+  }
+
+  if (!hasRerankModelName) {
+    next.push({
+      name: "rerank_model_name",
+      type: "string",
+      required: false,
+      value: "",
+      description: "The name of the rerank model to use",
+    });
+  }
+
+  return next;
+}
 
 export default function ToolConfigModal({
   isOpen,
@@ -77,6 +114,9 @@ export default function ToolConfigModal({
     null
   );
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+
+  // Use React Query for config data
+  const { data: configData } = useConfig();
   const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
     string[]
   >([]);
@@ -92,53 +132,41 @@ export default function ToolConfigModal({
     apiKey: "",
   });
 
+  // iData configuration state
+  const [idataConfig, setIdataConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+    userId: string;
+    knowledgeSpaceId: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+    userId: "",
+    knowledgeSpaceId: "",
+  });
+
+  // iData knowledge spaces state
+  const [idataKnowledgeSpaces, setIdataKnowledgeSpaces] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [idataKnowledgeSpacesLoading, setIdataKnowledgeSpacesLoading] =
+    useState(false);
+
   // DataMate URL from knowledge base configuration
   const [knowledgeBaseDataMateUrl, setKnowledgeBaseDataMateUrl] =
     useState<string>("");
+  // Track if knowledge base config has changed (server_url or api_key changed)
+  const [hasKbConfigChanged, setHasKbConfigChanged] = useState(false);
   // Track if user has manually modified the datamate URL field
   const [hasUserModifiedDatamateUrl, setHasUserModifiedDatamateUrl] =
     useState(false);
 
-  // Helper function to get authorization headers
-  const getAuthHeaders = () => {
-    const session =
-      typeof window !== "undefined" ? localStorage.getItem("session") : null;
-    const sessionObj = session ? JSON.parse(session) : null;
-    return {
-      "Content-Type": "application/json",
-      "User-Agent": "AgentFrontEnd/1.0",
-      ...(sessionObj?.access_token && {
-        Authorization: `Bearer ${sessionObj.access_token}`,
-      }),
-    };
-  };
-
-  // Load DataMate URL from knowledge base configuration
-  const loadKnowledgeBaseDataMateUrl = useCallback(async () => {
-    try {
-      const response = await fetch(API_ENDPOINTS.config.load, {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const config = result.config;
-        if (
-          config &&
-          config.app &&
-          typeof config.app.datamateUrl === "string"
-        ) {
-          setKnowledgeBaseDataMateUrl(config.app.datamateUrl);
-        }
-      }
-    } catch (error) {
-      log.error(
-        "Failed to load DataMate URL from knowledge base config:",
-        error
-      );
+  // Load DataMate URL from knowledge base configuration via React Query cached data
+  const loadKnowledgeBaseDataMateUrl = useCallback(() => {
+    if (configData?.app && typeof configData.app.datamateUrl === "string") {
+      setKnowledgeBaseDataMateUrl(configData.app.datamateUrl);
     }
-  }, []);
+  }, [configData]);
 
   // Check if current tool requires knowledge base selection (must be declared before toolKbType)
   const toolRequiresKbSelection = useMemo(() => {
@@ -150,11 +178,13 @@ export default function ToolConfigModal({
     | "knowledge_base_search"
     | "dify_search"
     | "datamate_search"
+    | "idata_search"
     | null => {
     if (!toolRequiresKbSelection) return null;
     const name = tool?.name;
     if (name === "dify_search") return "dify_search";
     if (name === "datamate_search") return "datamate_search";
+    if (name === "idata_search") return "idata_search";
     return "knowledge_base_search";
   }, [tool?.name, toolRequiresKbSelection]);
 
@@ -180,6 +210,46 @@ export default function ToolConfigModal({
     }
   }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
 
+  // Get iData configuration from initial params
+  const idataServerUrlParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "server_url");
+  }, [currentParams]);
+
+  const idataApiKeyParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "api_key");
+  }, [currentParams]);
+
+  const idataUserIdParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "user_id");
+  }, [currentParams]);
+
+  const idataKnowledgeSpaceIdParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "knowledge_space_id");
+  }, [currentParams]);
+
+  // Initialize iData config from params
+  useEffect(() => {
+    if (toolKbType === "idata_search") {
+      const serverUrl = idataServerUrlParam?.value || "";
+      const apiKey = idataApiKeyParam?.value || "";
+      const userId = idataUserIdParam?.value || "";
+      const knowledgeSpaceId = idataKnowledgeSpaceIdParam?.value || "";
+
+      setIdataConfig({
+        serverUrl,
+        apiKey,
+        userId,
+        knowledgeSpaceId,
+      });
+    }
+  }, [
+    toolKbType,
+    idataServerUrlParam,
+    idataApiKeyParam,
+    idataUserIdParam,
+    idataKnowledgeSpaceIdParam,
+  ]);
+
   // Fetch knowledge bases for tool config based on tool type (now uses React Query caching)
   // For datamate_search, use the server_url from the form as config
   const datamateServerUrl = useMemo(() => {
@@ -190,28 +260,97 @@ export default function ToolConfigModal({
     return "";
   }, [toolKbType, currentParams]);
 
+  // Fetch iData knowledge spaces when config is available
+  useEffect(() => {
+    if (
+      toolKbType === "idata_search" &&
+      idataConfig.serverUrl &&
+      idataConfig.apiKey &&
+      idataConfig.userId
+    ) {
+      setIdataKnowledgeSpacesLoading(true);
+      knowledgeBaseService
+        .getIdataKnowledgeSpaces(
+          idataConfig.serverUrl,
+          idataConfig.apiKey,
+          idataConfig.userId
+        )
+        .then((spaces) => {
+          setIdataKnowledgeSpaces(spaces);
+          setIdataKnowledgeSpacesLoading(false);
+        })
+        .catch((error) => {
+          log.error("Failed to fetch iData knowledge spaces:", error);
+          setIdataKnowledgeSpaces([]);
+          setIdataKnowledgeSpacesLoading(false);
+        });
+    } else if (toolKbType === "idata_search") {
+      setIdataKnowledgeSpaces([]);
+    }
+  }, [
+    toolKbType,
+    idataConfig.serverUrl,
+    idataConfig.apiKey,
+    idataConfig.userId,
+  ]);
+
   const {
     data: knowledgeBases = [],
     isLoading: kbLoading,
     refetch: refetchKnowledgeBases,
+    clearKnowledgeBases,
   } = useKnowledgeBasesForToolConfig(
     toolKbType,
     toolKbType === "dify_search"
       ? difyConfig
       : toolKbType === "datamate_search"
         ? { serverUrl: datamateServerUrl }
-        : undefined
+        : toolKbType === "idata_search"
+          ? idataConfig.serverUrl &&
+            idataConfig.apiKey &&
+            idataConfig.userId &&
+            idataConfig.knowledgeSpaceId
+            ? {
+                serverUrl: idataConfig.serverUrl,
+                apiKey: idataConfig.apiKey,
+                userId: idataConfig.userId,
+                knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+              }
+            : undefined
+          : undefined
   );
 
   // Handle config change: clear knowledge base selection and refetch
   // Uses shared hook for both Dify and DataMate tools
   const handleKbConfigChange = useCallback(() => {
+    // Mark that config has changed - this prevents restoring from initialParams
+    setHasKbConfigChanged(true);
+
     // Clear previous knowledge base selection
     setSelectedKbIds([]);
     setSelectedKbDisplayNames([]);
+
+    // Clear form value for knowledge base field (index_names or dataset_ids)
+    const kbFieldIndex = currentParams.findIndex(
+      (p) => p.name === "index_names" || p.name === "dataset_ids"
+    );
+    if (kbFieldIndex >= 0) {
+      form.setFieldValue(`param_${kbFieldIndex}`, []);
+      // Also clear the value in currentParams
+      const updatedParams = [...currentParams];
+      updatedParams[kbFieldIndex] = {
+        ...updatedParams[kbFieldIndex],
+        value: [],
+      };
+      setCurrentParams(updatedParams);
+    }
+
+    // Clear knowledge base list when config changes (API key/URL changed)
+    clearKnowledgeBases();
+
     // Refetch knowledge bases with new config
     refetchKnowledgeBases();
-  }, [refetchKnowledgeBases]);
+  }, [refetchKnowledgeBases, clearKnowledgeBases, currentParams, form]);
 
   useKnowledgeBaseConfigChangeHandler({
     toolKbType,
@@ -220,45 +359,114 @@ export default function ToolConfigModal({
         ? difyConfig
         : toolKbType === "datamate_search"
           ? { serverUrl: datamateServerUrl }
-          : undefined,
+          : toolKbType === "idata_search"
+            ? {
+                serverUrl: idataConfig.serverUrl,
+                apiKey: idataConfig.apiKey,
+                userId: idataConfig.userId,
+              }
+            : undefined,
     onConfigChange: handleKbConfigChange,
   });
+
+  // Handle iData knowledge space ID change: clear knowledge base selection and refetch
+  const prevKnowledgeSpaceIdRef = useRef<string>("");
+  useEffect(() => {
+    if (
+      toolKbType === "idata_search" &&
+      idataConfig.knowledgeSpaceId &&
+      idataConfig.serverUrl &&
+      idataConfig.apiKey &&
+      idataConfig.userId
+    ) {
+      // Only trigger if knowledge space ID actually changed
+      // Skip if this is the initial load (prevKnowledgeSpaceIdRef is empty and we have a value from initialParams)
+      if (prevKnowledgeSpaceIdRef.current === idataConfig.knowledgeSpaceId) {
+        return;
+      }
+
+      // If prevKnowledgeSpaceIdRef is empty, this is likely the initial load
+      // Don't clear dataset_ids on initial load, only when space ID actually changes
+      if (prevKnowledgeSpaceIdRef.current === "") {
+        // This is initial load, just update the ref without clearing
+        prevKnowledgeSpaceIdRef.current = idataConfig.knowledgeSpaceId;
+        return;
+      }
+
+      // Update ref
+      prevKnowledgeSpaceIdRef.current = idataConfig.knowledgeSpaceId;
+
+      // Clear previous knowledge base selection when space ID changes
+      setSelectedKbIds([]);
+      setSelectedKbDisplayNames([]);
+
+      // Clear form value for dataset_ids field
+      const kbFieldIndex = currentParams.findIndex(
+        (p) => p.name === "dataset_ids"
+      );
+      if (kbFieldIndex >= 0) {
+        form.setFieldValue(`param_${kbFieldIndex}`, []);
+        const updatedParams = [...currentParams];
+        updatedParams[kbFieldIndex] = {
+          ...updatedParams[kbFieldIndex],
+          value: [],
+        };
+        setCurrentParams(updatedParams);
+      }
+
+      // Refetch knowledge bases with new space ID
+      refetchKnowledgeBases();
+    } else if (toolKbType === "idata_search") {
+      // Reset ref when config is cleared
+      prevKnowledgeSpaceIdRef.current = "";
+    }
+  }, [
+    toolKbType,
+    idataConfig.knowledgeSpaceId,
+    idataConfig.serverUrl,
+    idataConfig.apiKey,
+    idataConfig.userId,
+    refetchKnowledgeBases,
+    currentParams,
+    form,
+  ]);
+
+  // Reset prevKnowledgeSpaceIdRef when modal opens/closes
+  useEffect(() => {
+    if (!isOpen) {
+      // Reset ref when modal closes
+      prevKnowledgeSpaceIdRef.current = "";
+    } else if (isOpen && toolKbType === "idata_search") {
+      // Initialize ref with current knowledgeSpaceId when modal opens
+      // This prevents clearing dataset_ids on initial load
+      if (idataConfig.knowledgeSpaceId) {
+        prevKnowledgeSpaceIdRef.current = idataConfig.knowledgeSpaceId;
+      }
+    }
+  }, [isOpen, toolKbType, idataConfig.knowledgeSpaceId]);
 
   // Get current embedding model from config for model matching
   const currentEmbeddingModel = useMemo(() => {
     try {
-      const configStore = ConfigStore.getInstance();
-      const modelConfig = configStore.getModelConfig();
-      // Use modelName if available, otherwise try displayName
+      const modelConfig = configData?.models;
       return (
-        modelConfig.embedding?.modelName ||
-        modelConfig.embedding?.displayName ||
+        modelConfig?.embedding?.modelName ||
+        modelConfig?.embedding?.displayName ||
         null
       );
     } catch {
       return null;
     }
-  }, []);
+  }, [configData]);
 
   // Check if a knowledge base can be selected
   const canSelectKnowledgeBase = useCallback(
     (kb: KnowledgeBase): boolean => {
-      // Empty knowledge bases cannot be selected
+      // Only empty knowledge bases (0 documents AND 0 chunks) cannot be selected
       const isEmpty =
         (kb.documentCount || 0) === 0 && (kb.chunkCount || 0) === 0;
       if (isEmpty) {
         return false;
-      }
-
-      // For nexent source, check model matching
-      if (kb.source === "nexent" && currentEmbeddingModel) {
-        if (
-          kb.embeddingModel &&
-          kb.embeddingModel !== "unknown" &&
-          kb.embeddingModel !== currentEmbeddingModel
-        ) {
-          return false;
-        }
       }
 
       return true;
@@ -274,6 +482,7 @@ export default function ToolConfigModal({
     if (!isOpen) {
       setModalOpened(false);
       setKnowledgeBaseDataMateUrl("");
+      setHasKbConfigChanged(false);
     }
   }, [isOpen]);
 
@@ -282,10 +491,7 @@ export default function ToolConfigModal({
     // Load DataMate URL from knowledge base configuration
     // This should run every time the modal opens for datamate_search tool
     if (tool?.name === "datamate_search" && isOpen && !modalOpened) {
-      loadKnowledgeBaseDataMateUrl().then(() => {
-        // After loading, check if we need to apply the URL
-        // The other useEffect will handle the application
-      });
+      loadKnowledgeBaseDataMateUrl();
     }
   }, [tool?.name, isOpen, modalOpened]);
 
@@ -310,15 +516,16 @@ export default function ToolConfigModal({
     // If server_url already has a saved value, use it
     if (serverUrlParam?.value) {
       // Initialize form with saved values (including server_url)
-      setCurrentParams(initialParams);
+      const paramsWithRerank = withRerankParams(initialParams, tool.name);
+      setCurrentParams(paramsWithRerank);
       const formValues: Record<string, any> = {};
-      initialParams.forEach((param, index) => {
+      paramsWithRerank.forEach((param, index) => {
         formValues[`param_${index}`] = param.value;
       });
       form.setFieldsValue(formValues);
 
       // Parse initial index_names/dataset_ids value for knowledge base selection
-      const kbParam = initialParams.find(
+      const kbParam = paramsWithRerank.find(
         (p) => p.name === "index_names" || p.name === "dataset_ids"
       );
       if (kbParam?.value) {
@@ -353,18 +560,20 @@ export default function ToolConfigModal({
         return param;
       });
 
-      setCurrentParams(updatedParams);
+      const paramsWithRerank = withRerankParams(updatedParams, tool.name);
+      setCurrentParams(paramsWithRerank);
 
       const formValues: Record<string, any> = {};
-      updatedParams.forEach((param, index) => {
+      paramsWithRerank.forEach((param, index) => {
         formValues[`param_${index}`] = param.value;
       });
       form.setFieldsValue(formValues);
     } else {
       // Either no default available OR user has modified the URL, initialize with initialParams
-      setCurrentParams(initialParams);
+      const paramsWithRerank = withRerankParams(initialParams, tool.name);
+      setCurrentParams(paramsWithRerank);
       const formValues: Record<string, any> = {};
-      initialParams.forEach((param, index) => {
+      paramsWithRerank.forEach((param, index) => {
         formValues[`param_${index}`] = param.value;
       });
       form.setFieldsValue(formValues);
@@ -439,10 +648,11 @@ export default function ToolConfigModal({
       return param;
     });
 
-    setCurrentParams(updatedParams);
+    const paramsWithRerank = withRerankParams(updatedParams, tool.name);
+    setCurrentParams(paramsWithRerank);
 
     const formValues: Record<string, any> = {};
-    updatedParams.forEach((param, index) => {
+    paramsWithRerank.forEach((param, index) => {
       formValues[`param_${index}`] = param.value;
     });
     form.setFieldsValue(formValues);
@@ -464,9 +674,10 @@ export default function ToolConfigModal({
     }
 
     // Initialize form values
-    setCurrentParams(initialParams);
+    const paramsWithRerank = withRerankParams(initialParams, tool?.name);
+    setCurrentParams(paramsWithRerank);
     const formValues: Record<string, any> = {};
-    initialParams.forEach((param, index) => {
+    paramsWithRerank.forEach((param, index) => {
       formValues[`param_${index}`] = param.value;
     });
     form.setFieldsValue(formValues);
@@ -513,7 +724,9 @@ export default function ToolConfigModal({
     if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
       const displayNames = selectedKbIds.map((id) => {
         // Use robust ID comparison
-        const kb = knowledgeBases.find((k) => String(k.id).trim() === String(id).trim());
+        const kb = knowledgeBases.find(
+          (k) => String(k.id).trim() === String(id).trim()
+        );
         return kb?.display_name || kb?.name || id;
       });
       setSelectedKbDisplayNames(displayNames);
@@ -531,7 +744,9 @@ export default function ToolConfigModal({
         setSelectedKbIds(validKbIds);
         // Also update display names
         const displayNames = validKbIds.map((id) => {
-          const kb = knowledgeBases.find((k) => String(k.id).trim() === String(id).trim());
+          const kb = knowledgeBases.find(
+            (k) => String(k.id).trim() === String(id).trim()
+          );
           return kb?.display_name || kb?.name || id;
         });
         setSelectedKbDisplayNames(displayNames);
@@ -542,7 +757,16 @@ export default function ToolConfigModal({
   // Force sync selectedKbIds when modal is about to open (kbSelectorVisible changes to true)
   // This ensures the modal receives the correct selected IDs
   useEffect(() => {
-    if (kbSelectorVisible && selectedKbIds.length === 0 && initialParams.length > 0) {
+    // Skip if config has changed - don't restore from initialParams after server_url/api_key change
+    if (hasKbConfigChanged) {
+      return;
+    }
+
+    if (
+      kbSelectorVisible &&
+      selectedKbIds.length === 0 &&
+      initialParams.length > 0
+    ) {
       // Parse initial index_names/dataset_ids value for knowledge base selection
       if (toolRequiresKbSelection) {
         const kbParam = initialParams.find(
@@ -568,13 +792,47 @@ export default function ToolConfigModal({
         }
       }
     }
-  }, [kbSelectorVisible, initialParams, toolRequiresKbSelection]);
+  }, [
+    kbSelectorVisible,
+    initialParams,
+    toolRequiresKbSelection,
+    hasKbConfigChanged,
+  ]);
 
   // Trigger refetch when opening for knowledge base tools (with loading state support)
   // Skip if initial load was already done to avoid duplicate API calls
+  // Reset when currentAgentId changes (i.e., when switching agents)
   const hasTriggeredInitialRefetch = useRef(false);
+  const prevAgentIdRef = useRef<number | undefined>(undefined);
+  // Track if sync message has been shown when KB selector opens
+  const hasShownSyncMessageRef = useRef(false);
+
+  // Reset refetch flag when switching agents and invalidate cache to force fresh fetch
   useEffect(() => {
-    if (toolRequiresKbSelection && isOpen && !hasTriggeredInitialRefetch.current) {
+    if (currentAgentId !== prevAgentIdRef.current) {
+      prevAgentIdRef.current = currentAgentId;
+      hasTriggeredInitialRefetch.current = false;
+
+      // Invalidate knowledge base cache when switching agents to force fresh fetch
+      // This ensures we get the correct knowledge bases for the new agent's config
+      if (toolKbType === "dify_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "dify_search"],
+        });
+      } else if (toolKbType === "datamate_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "datamate_search"],
+        });
+      }
+    }
+  }, [currentAgentId, toolKbType, queryClient]);
+
+  useEffect(() => {
+    if (
+      toolRequiresKbSelection &&
+      isOpen &&
+      !hasTriggeredInitialRefetch.current
+    ) {
       hasTriggeredInitialRefetch.current = true;
       // For Dify, only refetch if we have valid config
       if (toolKbType === "dify_search") {
@@ -592,6 +850,43 @@ export default function ToolConfigModal({
     toolKbType,
     difyConfig,
   ]);
+
+  // Show sync message when knowledge base selector modal opens
+  // This provides immediate feedback on sync status to the user
+  useEffect(() => {
+    // Only trigger when KB selector opens and tool requires KB selection
+    if (kbSelectorVisible && toolRequiresKbSelection && !hasShownSyncMessageRef.current) {
+      // Mark as shown to avoid duplicate messages
+      hasShownSyncMessageRef.current = true;
+
+      // Trigger sync and show message based on result
+      refetchKnowledgeBases()
+        .then((result) => {
+          if (result.isError || result.error) {
+            log.error("Failed to sync knowledge bases:", result.error);
+            // Clear knowledge base list on sync failure
+            clearKnowledgeBases();
+            message.error(t("knowledgeBase.message.syncError"));
+          } else {
+            // Show success message after sync completes
+            message.success(t("knowledgeBase.message.syncSuccess"));
+          }
+        })
+        .catch((error) => {
+          log.error("Failed to sync knowledge bases:", error);
+          // Clear knowledge base list on sync failure
+          clearKnowledgeBases();
+          message.error(t("knowledgeBase.message.syncError"));
+        });
+    }
+  }, [kbSelectorVisible, toolRequiresKbSelection, refetchKnowledgeBases, clearKnowledgeBases, t]);
+
+  // Reset sync message flag when KB selector closes
+  useEffect(() => {
+    if (!kbSelectorVisible) {
+      hasShownSyncMessageRef.current = false;
+    }
+  }, [kbSelectorVisible]);
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
@@ -676,51 +971,10 @@ export default function ToolConfigModal({
         newSelectedTools = [...currentTools, updatedTool];
       }
 
-      // For editing mode (when currentAgentId exists), always call API
-      // For creating mode (isCreatingMode=true), update local state only
-      if (isCreatingMode) {
-        // In creating mode, just update local state
-        updateTools(newSelectedTools);
-        message.success(t("toolConfig.message.saveSuccess"));
-        handleClose(); // Close modal
-        return;
-      }
-
-      if (!currentAgentId) {
-        // Should not happen in normal editing mode, but handle gracefully
-        updateTools(newSelectedTools);
-        message.success(t("toolConfig.message.saveSuccess"));
-        handleClose(); // Close modal
-        return;
-      }
-
-      // Edit mode: call API to persist changes
-      try {
-        setIsLoading(true);
-        const isEnabled = true; //  New tool is enabled by default
-        const result = await updateToolConfig(
-          parseInt(toolToSave.id),
-          currentAgentId,
-          paramsObj,
-          isEnabled
-        );
-        setIsLoading(false);
-
-        if (result.success) {
-          // Update local state and invalidate queries
-          updateTools(newSelectedTools);
-          queryClient.invalidateQueries({
-            queryKey: ["toolInfo", parseInt(toolToSave.id), currentAgentId],
-          });
-          message.success(t("toolConfig.message.saveSuccess"));
-          handleClose(); // Close modal
-        } else {
-          message.error(result.message || t("toolConfig.message.saveError"));
-        }
-      } catch (error) {
-        setIsLoading(false);
-        message.error(t("toolConfig.message.saveError"));
-      }
+      // Update local state only - actual save will happen when user clicks "Save Agent"
+      updateTools(newSelectedTools);
+      message.success(t("toolConfig.message.saveSuccess"));
+      handleClose(); // Close modal
 
       // Call original onSave if provided
       if (onSave) {
@@ -818,7 +1072,8 @@ export default function ToolConfigModal({
   const getToolType = ():
     | "knowledge_base_search"
     | "dify_search"
-    | "datamate_search" => {
+    | "datamate_search"
+    | "idata_search" => {
     return toolKbType || "knowledge_base_search";
   };
 
@@ -869,7 +1124,7 @@ export default function ToolConfigModal({
       const placeholder = t(
         "toolConfig.input.knowledgeBaseSelector.placeholder",
         {
-          name: param.description || param.name,
+          name: getLocalizedDescription(param.description, param.description_zh) || param.name,
         }
       );
 
@@ -955,19 +1210,83 @@ export default function ToolConfigModal({
   );
 
   const renderParamInput = (param: ToolParam, index: number) => {
+    // Get field name for form
+    const fieldName = `param_${index}`;
+
     // Get options from frontend configuration based on tool name and parameter name
     const options = getToolParamOptions(tool.name, param.name);
 
     // Determine if this parameter should be rendered as a select dropdown
     const isSelectType = options && options.length > 0;
 
+    // Special handling for rerank_model_name parameter - show model selector
+    if (param.name === "rerank_model_name") {
+      // First try to get the list of available rerank models from config
+      const rerankConfig = configData?.models?.rerank;
+      const hasRerankModel = rerankConfig?.modelName;
+
+      if (hasRerankModel) {
+        // If rerank model is configured, show it as an option
+        const modelOptions = [{ value: rerankConfig.modelName, label: rerankConfig.displayName || rerankConfig.modelName }];
+        return (
+          <Select
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: param.description,
+            })}
+            options={modelOptions}
+            allowClear
+          />
+        );
+      }
+      // If no rerank model configured, show text input for manual entry
+      return (
+        <Input.TextArea
+          placeholder={t("toolConfig.input.string.placeholder", {
+            name: param.description,
+          })}
+          autoSize={{ minRows: 1, maxRows: 2 }}
+        />
+      );
+    }
+
+    // Special handling for iData knowledge_space_id parameter
+    const isIdataKnowledgeSpaceId =
+      toolKbType === "idata_search" && param.name === "knowledge_space_id";
+
     const inputComponent = (() => {
+      // Handle iData knowledge space ID selector
+      if (isIdataKnowledgeSpaceId) {
+        const currentValue = form.getFieldValue(fieldName);
+        return (
+          <Select
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: param.description,
+            })}
+            loading={idataKnowledgeSpacesLoading}
+            value={currentValue}
+            options={idataKnowledgeSpaces.map((space) => ({
+              value: space.id,
+              label: space.name,
+            }))}
+            onChange={(value) => {
+              // Update idataConfig when space ID changes
+              setIdataConfig((prev) => ({
+                ...prev,
+                knowledgeSpaceId: value || "",
+              }));
+              // Also update form value
+              form.setFieldValue(fieldName, value);
+            }}
+          />
+        );
+      }
+
       // Handle select type - when options are defined in frontend config
       if (isSelectType) {
         return (
           <Select
             placeholder={t("toolConfig.input.string.placeholder", {
-              name: param.description,
+              name: getLocalizedDescription(param.description, param.description_zh),
             })}
             options={options.map((option) => ({
               value: option,
@@ -982,7 +1301,7 @@ export default function ToolConfigModal({
           return (
             <InputNumber
               placeholder={t("toolConfig.input.string.placeholder", {
-                name: param.description,
+                name: getLocalizedDescription(param.description, param.description_zh),
               })}
             />
           );
@@ -1001,7 +1320,7 @@ export default function ToolConfigModal({
             return (
               <Input.Password
                 placeholder={t("toolConfig.input.string.placeholder", {
-                  name: param.description,
+                  name: getLocalizedDescription(param.description, param.description_zh),
                 })}
               />
             );
@@ -1011,7 +1330,7 @@ export default function ToolConfigModal({
           return (
             <Input.TextArea
               placeholder={t(`toolConfig.input.${param.type}.placeholder`, {
-                name: param.description,
+                name: getLocalizedDescription(param.description, param.description_zh),
               })}
               autoSize={{ minRows: 1, maxRows: 8 }}
               style={{ resize: "vertical" }}
@@ -1023,13 +1342,20 @@ export default function ToolConfigModal({
     return inputComponent;
   };
 
+  const isRerankEnabled = useMemo(() => {
+    const rerankIndex = currentParams.findIndex((p) => p.name === "rerank");
+    if (rerankIndex < 0) return false;
+    const fieldName = `param_${rerankIndex}`;
+    const value = form.getFieldValue(fieldName);
+    return Boolean(value);
+  }, [currentParams, form, formValues]);
+
   if (!tool) return null;
 
   return (
     <>
       <Modal
         mask={true}
-        maskClosable={false}
         title={
           <div className="flex justify-between items-center w-full pr-8">
             <span>{`${tool?.name}`}</span>
@@ -1095,7 +1421,9 @@ export default function ToolConfigModal({
         }
       >
         <div className="mb-4">
-          <p className="text-sm text-gray-500 mb-4">{tool?.description}</p>
+          <p className="text-sm text-gray-500 mb-4">
+            {getLocalizedDescription(tool?.description, tool?.description_zh)}
+          </p>
           <div className="text-sm font-medium mb-2">
             {t("toolConfig.title.paramConfig")}
           </div>
@@ -1127,6 +1455,9 @@ export default function ToolConfigModal({
             >
               <div className="pr-2 mt-3">
                 {currentParams.map((param, index) => {
+                  if (param.name === "rerank_model_name" && !isRerankEnabled) {
+                    return null;
+                  }
                   const fieldName = `param_${index}`;
                   const rules: any[] = [];
 
@@ -1154,7 +1485,10 @@ export default function ToolConfigModal({
                             );
                           }
                           // Check if protocol is http or https
-                          if (url.protocol !== "http:" && url.protocol !== "https:") {
+                          if (
+                            url.protocol !== "http:" &&
+                            url.protocol !== "https:"
+                          ) {
                             return Promise.reject(
                               t("knowledgeBase.error.invalidUrlProtocol")
                             );
@@ -1263,7 +1597,7 @@ export default function ToolConfigModal({
                       }
                       rules={rules}
                       tooltip={{
-                        title: param.description,
+                        title: getLocalizedDescription(param.description, param.description_zh),
                         placement: "topLeft",
                         styles: { root: { maxWidth: 400 } },
                       }}
@@ -1303,10 +1637,28 @@ export default function ToolConfigModal({
         knowledgeBases={knowledgeBases}
         isLoading={kbLoading}
         showCheckbox={true}
-        onSync={(toolType) =>
-          // Use refetchKnowledgeBases instead of syncKnowledgeBases to properly update React Query cache
-          refetchKnowledgeBases()
-        }
+        onSync={async (toolType) => {
+          try {
+            const result = await refetchKnowledgeBases();
+            // Check if refetch has an error - React Query sets isError when queryFn throws
+            // Note: if queryFn catches error internally and returns data, isError will be false
+            // So we need to check both error and isError
+            if (result.isError || result.error) {
+              log.error("Failed to sync knowledge bases:", result.error);
+              // Clear knowledge base list on sync failure
+              clearKnowledgeBases();
+              message.error(t("knowledgeBase.message.syncError"));
+              return;
+            }
+            // Show success message after sync completes
+            message.success(t("knowledgeBase.message.syncSuccess"));
+          } catch (error) {
+            log.error("Failed to sync knowledge bases:", error);
+            // Clear knowledge base list on sync failure
+            clearKnowledgeBases();
+            message.error(t("knowledgeBase.message.syncError"));
+          }
+        }}
         syncLoading={kbLoading}
         isSelectable={canSelectKnowledgeBase}
         currentEmbeddingModel={currentEmbeddingModel}
@@ -1315,7 +1667,14 @@ export default function ToolConfigModal({
             ? difyConfig
             : toolKbType === "datamate_search"
               ? { serverUrl: datamateServerUrl }
-              : undefined
+              : toolKbType === "idata_search"
+                ? {
+                    serverUrl: idataConfig.serverUrl,
+                    apiKey: idataConfig.apiKey,
+                    userId: idataConfig.userId,
+                    knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+                  }
+                : undefined
         }
       />
     </>

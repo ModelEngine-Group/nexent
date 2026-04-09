@@ -1,4 +1,5 @@
 from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -483,3 +484,86 @@ class AgentVersion(TableBase):
     source_version_no = Column(Integer, doc="Source version number. If this version is a rollback, record the source version")
     source_type = Column(String(30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
     status = Column(String(30), default="RELEASED", doc="Version status: RELEASED / DISABLED / ARCHIVED")
+
+
+class UserTokenInfo(TableBase):
+    """
+    User token (AK/SK) information table
+    """
+    __tablename__ = "user_token_info_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    token_id = Column(Integer, Sequence("user_token_info_t_token_id_seq", schema=SCHEMA),
+                      primary_key=True, nullable=False, doc="Token ID, unique primary key")
+    access_key = Column(String(100), nullable=False, doc="Access Key (AK)")
+    user_id = Column(String(100), nullable=False, doc="User ID who owns this token")
+
+
+class UserTokenUsageLog(TableBase):
+    """
+    User token usage log table
+    """
+    __tablename__ = "user_token_usage_log_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    token_usage_id = Column(Integer, Sequence("user_token_usage_log_t_token_usage_id_seq", schema=SCHEMA),
+                            primary_key=True, nullable=False, doc="Token usage log ID, unique primary key")
+    token_id = Column(Integer, nullable=False, doc="Foreign key to user_token_info_t.token_id")
+    call_function_name = Column(String(100), doc="API function name being called")
+    related_id = Column(Integer, doc="Related resource ID (e.g., conversation_id)")
+    meta_data = Column(JSONB, doc="Additional metadata for this usage log entry, stored as JSON")
+
+
+class SkillInfo(TableBase):
+    """
+    Skill information table - stores skill metadata and content.
+    """
+    __tablename__ = "ag_skill_info_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
+                      primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
+    skill_name = Column(String(100), nullable=False, unique=True, doc="Unique skill name")
+    skill_description = Column(String(1000), doc="Skill description")
+    skill_tags = Column(JSON, doc="Skill tags as JSON array")
+    skill_content = Column(Text, doc="Skill content in markdown format")
+    params = Column(JSON, doc="Skill configuration parameters as JSON object")
+    source = Column(String(30), nullable=False, default="official",
+                    doc="Skill source: official, custom, etc.")
+
+
+class SkillToolRelation(TableBase):
+    """
+    Skill-Tool relation table - many-to-many relationship between skills and tools.
+    """
+    __tablename__ = "ag_skill_tools_rel_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    rel_id = Column(Integer, Sequence("ag_skill_tools_rel_t_rel_id_seq", schema=SCHEMA),
+                    primary_key=True, nullable=False, autoincrement=True, doc="Relation ID")
+    skill_id = Column(Integer, nullable=False, doc="Foreign key to ag_skill_info_t.skill_id")
+    tool_id = Column(Integer, nullable=False, doc="Foreign key to ag_tool_info_t.tool_id")
+
+
+class SkillInstance(TableBase):
+    """
+    Skill instance table - stores per-agent skill configuration.
+    Similar to ToolInstance, stores skill settings for each agent version.
+    Note: skill_description and skill_content removed - these are now retrieved from ag_skill_info_t.
+    """
+    __tablename__ = "ag_skill_instance_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    skill_instance_id = Column(
+        Integer,
+        Sequence("ag_skill_instance_t_skill_instance_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Skill instance ID"
+    )
+    skill_id = Column(Integer, nullable=False, doc="Foreign key to ag_skill_info_t.skill_id")
+    agent_id = Column(Integer, nullable=False, doc="Agent ID")
+    user_id = Column(String(100), doc="User ID")
+    tenant_id = Column(String(100), doc="Tenant ID")
+    enabled = Column(Boolean, default=True, doc="Whether this skill is enabled for the agent")
+    version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")

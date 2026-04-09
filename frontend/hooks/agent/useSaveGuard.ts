@@ -4,9 +4,77 @@ import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useConfirmModal } from "../useConfirmModal";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { updateAgentInfo, updateToolConfig } from "@/services/agentConfigService";
+import { updateAgentInfo, updateToolConfig, searchToolConfig } from "@/services/agentConfigService";
 import { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
+
+/**
+ * Batch update tool configurations for an agent
+ * Handles create, update, and enable/disable operations
+ *
+ * Logic:
+ * 1. For newly selected tools (not in baseline): Create tool instance with enable=true
+ * 2. For previously selected tools (in baseline): Update tool params with enable=true
+ * 3. For deselected tools (in baseline but not in current): Set enable=false
+ *
+ * @param agentId - The agent ID
+ * @param currentTools - Current tool list from edited agent
+ * @param baselineTools - Baseline tool list (original state before editing)
+ */
+async function batchUpdateToolConfigs(
+  agentId: number,
+  currentTools: any[],
+  baselineTools: any[]
+) {
+  // Get the set of currently selected tool IDs
+  const currentToolIds = new Set(
+    currentTools.map((tool) => parseInt(tool.id))
+  );
+
+  // Get the set of baseline (original) tool IDs
+  const baselineToolIds = new Set(
+    baselineTools.map((tool) => parseInt(tool.id))
+  );
+
+  // Process each tool in the current selection
+  for (const tool of currentTools) {
+    const toolId = parseInt(tool.id);
+    const isEnabled = true; // Selected tools are always enabled
+    const params = tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
+      acc[param.name] = param.value;
+      return acc;
+    }, {} as Record<string, any>) || {};
+
+    try {
+      // Update or create tool instance with current params and enabled status
+      await updateToolConfig(toolId, agentId, params, isEnabled);
+    } catch (error) {
+      log.error(`Failed to save tool config for tool ${toolId}:`, error);
+      // Continue with other tools even if one fails
+    }
+  }
+
+  // Disable tools that were previously selected but are now deselected
+  const toolsToDisable = Array.from(baselineToolIds).filter(
+    (toolId) => !currentToolIds.has(toolId)
+  );
+
+  for (const toolId of toolsToDisable) {
+    try {
+      // Fetch existing params to preserve them when disabling
+      const toolInstance = await searchToolConfig(toolId, agentId);
+      const existingParams = toolInstance.success && toolInstance.data?.params
+        ? toolInstance.data.params
+        : {};
+
+      // Disable the tool while preserving its params
+      await updateToolConfig(toolId, agentId, existingParams, false);
+    } catch (error) {
+      log.error(`Failed to disable tool ${toolId}:`, error);
+      // Continue with other tools even if one fails
+    }
+  }
+}
 
 /**
  * Hook for handling agent save guard logic
@@ -48,6 +116,10 @@ export const useSaveGuard = () => {
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
+      const enabledSkillIds = (currentEditedAgent.skills || [])
+        .map((skill: any) => Number(skill.skill_id))
+        .filter((id: number) => Number.isFinite(id));
+
       const result = await updateAgentInfo({
         agent_id: currentAgentId ?? undefined, // undefined=create, number=update
         name: currentEditedAgent.name,
@@ -67,12 +139,14 @@ export const useSaveGuard = () => {
         business_logic_model_name: currentEditedAgent.business_logic_model_name ?? undefined,
         business_logic_model_id: currentEditedAgent.business_logic_model_id ?? undefined,
         enabled_tool_ids: enabledToolIds,
+        enabled_skill_ids: enabledSkillIds,
         related_agent_ids: relatedAgentIds,
         ingroup_permission: currentEditedAgent.ingroup_permission ?? "READ_ONLY",
       });
 
       if (result.success) {
-        useAgentConfigStore.getState().markAsSaved(); // Mark as saved
+        // Mark as saved
+        useAgentConfigStore.getState().markAsSaved();
         message.success(
             t("businessLogic.config.message.agentSaveSuccess")
         );
@@ -83,28 +157,9 @@ export const useSaveGuard = () => {
           throw new Error("Failed to get agent ID after save operation");
         }
 
-        // Handle new agent creation - save tool configurations
-        if (!currentAgentId && result.data?.agent_id) {
-          // Save tool configurations for the newly created agent
-          const agentIdNumber = result.data.agent_id;
-          if (currentEditedAgent.tools && currentEditedAgent.tools.length > 0) {
-            for (const tool of currentEditedAgent.tools) {
-              const toolId = parseInt(tool.id);
-              const isEnabled = tool.is_available !== false; // Default to true if not explicitly set to false
-              const params = tool.initParams?.reduce((acc, param) => {
-                acc[param.name] = param.value;
-                return acc;
-              }, {} as Record<string, any>) || {};
-
-              try {
-                await updateToolConfig(toolId, agentIdNumber, params, isEnabled);
-              } catch (error) {
-                log.error(`Failed to save tool config for tool ${toolId}:`, error);
-                // Continue with other tools even if one fails
-              }
-            }
-          }
-        }
+        // Batch process tool configurations for both create and update modes
+        const baselineTools = useAgentConfigStore.getState().baselineAgent?.tools || [];
+        await batchUpdateToolConfigs(finalAgentId, currentEditedAgent.tools || [], baselineTools);
 
         // Common logic for both creation and update: refresh cache and update store
         await queryClient.invalidateQueries({
@@ -113,37 +168,11 @@ export const useSaveGuard = () => {
         await queryClient.refetchQueries({
           queryKey: ["agentInfo", finalAgentId]
         });
-        // Get the updated agent data from the refreshed cache
-        let updatedAgent = queryClient.getQueryData(["agentInfo", finalAgentId]) as Agent;
 
-        // For new agents, the cache might not be populated yet
-        // Construct a minimal Agent object from the edited data
-        if (!updatedAgent && finalAgentId) {
-          updatedAgent = {
-            id: String(finalAgentId),
-            name: currentEditedAgent.name,
-            display_name: currentEditedAgent.display_name,
-            description: currentEditedAgent.description,
-            author: currentEditedAgent.author,
-            model: currentEditedAgent.model,
-            model_id: currentEditedAgent.model_id,
-            max_step: currentEditedAgent.max_step,
-            provide_run_summary: currentEditedAgent.provide_run_summary,
-            tools: currentEditedAgent.tools || [],
-            duty_prompt: currentEditedAgent.duty_prompt,
-            constraint_prompt: currentEditedAgent.constraint_prompt,
-            few_shots_prompt: currentEditedAgent.few_shots_prompt,
-            business_description: currentEditedAgent.business_description,
-            business_logic_model_name: currentEditedAgent.business_logic_model_name,
-            business_logic_model_id: currentEditedAgent.business_logic_model_id,
-            sub_agent_id_list: currentEditedAgent.sub_agent_id_list,
-            group_ids: currentEditedAgent.group_ids || [],
-          };
-        }
-
-        if (updatedAgent) {
-          useAgentConfigStore.getState().setCurrentAgent(updatedAgent);
-        }
+        // Refresh skill instances after save
+        await queryClient.invalidateQueries({
+          queryKey: ["agentSkillInstances", finalAgentId]
+        });
 
         // Also invalidate the agents list cache to ensure the list reflects any changes
         queryClient.invalidateQueries({ queryKey: ["agents"] });

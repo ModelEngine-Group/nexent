@@ -13,6 +13,11 @@ import { TaskWindow } from "@/app/chat/streaming/taskWindow";
 import { transformMessagesToTaskMessages } from "@/app/chat/streaming/messageTransformer";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import log from "@/lib/logger";
+import {
+  getCachedDebugError,
+  cacheDebugError,
+  clearCachedDebugError,
+} from "@/lib/agentDebugErrorCache";
 
 // Agent debugging component Props interface
 interface AgentDebuggingProps {
@@ -97,8 +102,10 @@ function AgentDebugging({
                 {message.role === MESSAGE_ROLES.ASSISTANT &&
                   currentTaskMessages.length > 0 && (
                     <TaskWindow
+                      key={message.id || `task-${index}`}
                       messages={currentTaskMessages}
                       isStreaming={isStreaming && index === messages.length - 1}
+                      defaultExpanded={true}
                     />
                   )}
 
@@ -183,6 +190,46 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     if (hasActiveStream) {
       handleStop();
     }
+
+    // Check for cached error from previous debug session
+    if (agentId !== undefined && agentId !== null && !isNaN(Number(agentId))) {
+      const cachedError = getCachedDebugError(Number(agentId));
+      if (cachedError) {
+        // Restore the cached error as a message with a step containing the error
+        const errorMessage: ChatMessageType = {
+          id: Date.now().toString(),
+          role: MESSAGE_ROLES.ASSISTANT,
+          content: cachedError,
+          timestamp: new Date(),
+          isComplete: true,
+          error: cachedError,
+          // Add a step with the error info so TaskWindow can display it
+          steps: [
+            {
+              id: "error-step",
+              title: "Error",
+              content: cachedError,
+              expanded: true,
+              metrics: "",
+              thinking: { content: "", expanded: true },
+              code: { content: "", expanded: true },
+              output: { content: cachedError, expanded: true },
+              contents: [
+                {
+                  id: "error-content",
+                  type: "error" as const,
+                  content: cachedError,
+                  expanded: true,
+                  timestamp: Date.now(),
+                  subType: "error",
+                },
+              ],
+            },
+          ],
+        };
+        setMessages([errorMessage]);
+      }
+    }
   }, [agentId]);
 
   // Reset timeout timer
@@ -241,6 +288,10 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   const handleClearHistory = async () => {
     setMessages([]);
     stepIdCounter.current.current = 0;
+    // Clear cached error for this agent
+    if (agentId !== undefined && agentId !== null && !isNaN(Number(agentId))) {
+      clearCachedDebugError(Number(agentId));
+    }
   };
 
   // Process test question
@@ -269,27 +320,26 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
 
-    try {
-      // Ensure agent_id is a number
-      let agentIdValue = undefined;
-      if (agentId !== undefined && agentId !== null) {
-        agentIdValue = Number(agentId);
-        if (isNaN(agentIdValue)) {
-          agentIdValue = undefined;
-        }
+    // Ensure agent_id is a number
+    let agentIdValue: number | undefined = undefined;
+    if (agentId !== undefined && agentId !== null) {
+      agentIdValue = Number(agentId);
+      if (isNaN(agentIdValue)) {
+        agentIdValue = undefined;
       }
+    }
 
+    try {
       // Call agent_run with AbortSignal
       const reader = await conversationService.runAgent(
         {
           query: question,
           conversation_id: -1, // Debug mode uses -1 as conversation ID
-          is_set: true,
           history: messages
             .filter(msg => msg.isComplete !== false) // Only pass completed messages
-            .map(msg => ({ 
-              role: msg.role, 
-              content: msg.content 
+            .map(msg => ({
+              role: msg.role,
+              content: msg.content
             })),
           is_debug: true, // Add debug mode flag
           agent_id: agentIdValue, // Use the properly parsed agent_id
@@ -334,6 +384,11 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
           error instanceof Error
             ? error.message
             : t("agent.debug.processError");
+
+        // Cache the error for future debug sessions
+        if (agentIdValue !== undefined) {
+          cacheDebugError(agentIdValue, errorMessage);
+        }
 
         setMessages((prev) => {
           const newMessages = [...prev];

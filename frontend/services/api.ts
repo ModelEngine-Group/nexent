@@ -1,4 +1,5 @@
 import { STATUS_CODES } from "@/const/auth";
+import { ErrorCode } from "@/const/errorCode";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type { MarketAgentListParams } from "@/types/market";
@@ -16,6 +17,8 @@ export const API_ENDPOINTS = {
     currentUserInfo: `${API_BASE_URL}/user/current_user_info`,
     serviceHealth: `${API_BASE_URL}/user/service_health`,
     revoke: `${API_BASE_URL}/user/revoke`,
+    tokens: `${API_BASE_URL}/user/tokens`,
+    deleteToken: (tokenId: number) => `${API_BASE_URL}/user/tokens/${tokenId}`,
   },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
@@ -45,6 +48,7 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
+    byName: (agentName: string) => `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
     versions: {
@@ -183,6 +187,10 @@ export const API_ENDPOINTS = {
   dify: {
     datasets: `${API_BASE_URL}/dify/datasets`,
   },
+  idata: {
+    knowledgeSpaces: `${API_BASE_URL}/idata/knowledge-space`,
+    datasets: `${API_BASE_URL}/idata/datasets`,
+  },
   datamate: {
     syncDatamateKnowledges: `${API_BASE_URL}/datamate/sync_datamate_knowledges`,
     testConnection: `${API_BASE_URL}/datamate/test_connection`,
@@ -214,6 +222,21 @@ export const API_ENDPOINTS = {
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
+  },
+  skills: {
+    list: `${API_BASE_URL}/skills`,
+    create: `${API_BASE_URL}/skills`,
+    upload: `${API_BASE_URL}/skills/upload`,
+    get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    updateUpload: (skillName: string) => `${API_BASE_URL}/skills/${skillName}/upload`,
+    delete: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    deleteFile: (skillName: string, filePath: string) => `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
+    files: (skillName: string) => `${API_BASE_URL}/skills/${skillName}/files`,
+    fileContent: (skillName: string, filePath: string) =>
+      `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
+    instanceList: `${API_BASE_URL}/skills/instance/list`,
+    instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
@@ -301,7 +324,7 @@ export const API_ENDPOINTS = {
 // Common error handling
 export class ApiError extends Error {
   constructor(
-    public code: number,
+    public code: string | number,
     message: string
   ) {
     super(message);
@@ -319,20 +342,42 @@ export const fetchWithErrorHandling = async (
 
     // Handle HTTP errors
     if (!response.ok) {
-      // Check if it's a session expired error (401)
-      if (response.status === 401) {
+      // Try to parse JSON response for business error code first
+      let errorCode = response.status;
+      let errorMessage = `Request failed: ${response.status}`;
+      const errorText = await response.text();
+
+      let parsedErrorData = null;
+      try {
+        const errorData = JSON.parse(errorText);
+        if (errorData && errorData.code) {
+          parsedErrorData = errorData;
+          errorCode = errorData.code;
+          errorMessage = errorData.message || errorMessage;
+        } else {
+          errorMessage = errorText || errorMessage;
+        }
+      } catch {
+        // Not JSON, use text as message
+        errorMessage = errorText || errorMessage;
+      }
+
+      // Check if it's a session expiration error based on business error code
+      // TOKEN_EXPIRED = "000203", TOKEN_INVALID = "000204"
+      const errorCodeStr = String(errorCode);
+      if (
+        errorCodeStr === ErrorCode.TOKEN_EXPIRED ||
+        errorCodeStr === ErrorCode.TOKEN_INVALID
+      ) {
         handleSessionExpired();
-        throw new ApiError(
-          STATUS_CODES.TOKEN_EXPIRED,
-          "Login expired, please login again"
-        );
+        throw new ApiError(errorCode, errorMessage);
       }
 
       // Handle custom 499 error code (client closed connection)
       if (response.status === 499) {
         handleSessionExpired();
         throw new ApiError(
-          STATUS_CODES.TOKEN_EXPIRED,
+          ErrorCode.TOKEN_EXPIRED,
           "Connection disconnected, session may have expired"
         );
       }
@@ -340,17 +385,12 @@ export const fetchWithErrorHandling = async (
       // Handle request entity too large error (413)
       if (response.status === 413) {
         throw new ApiError(
-          STATUS_CODES.REQUEST_ENTITY_TOO_LARGE,
-          "REQUEST_ENTITY_TOO_LARGE"
+          ErrorCode.FILE_TOO_LARGE,
+          "File size exceeds limit."
         );
       }
 
-      // Other HTTP errors
-      const errorText = await response.text();
-      throw new ApiError(
-        response.status,
-        errorText || `Request failed: ${response.status}`
-      );
+      throw new ApiError(errorCode, errorMessage);
     }
 
     return response;

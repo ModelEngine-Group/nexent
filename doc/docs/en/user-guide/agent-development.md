@@ -144,7 +144,28 @@ Based on the selected collaborative agents and tools, you can now describe in si
 
 1. In the editor under "Describe how should this agent work", enter a brief description, such as "You are a professional knowledge Q&A assistant with local knowledge search and online search capabilities, synthesizing information to answer user questions"
 2. Select a model (choose a smarter model when generating prompts to optimize response logic), click the "Generate Agent" button, and Nexent will generate detailed agent content for you, including basic information and prompts (role, usage requirements, examples)
-3. You can edit and fine-tune the auto-generated content (especially the prompts) in the Agent Detail Content below
+3. You can edit and fine-tune the auto-generated content (including agent information and prompts) in the Agent Detail Content below
+
+#### 📋 Agent Basic Information Configuration
+
+In the basic information section, if you are not satisfied of the auto-generated content, you can configure the following fields by your own:
+
+| Field | Description |
+|-------|-------------|
+| **Agent Name** | The display name shown in the interface and recognized by users. |
+| **Agent Variable Name** | The internal identifier for the agent, used to reference it in code. Can only contain letters, numbers, and underscores, and must start with a letter or underscore. |
+| **Author** | The creator of the agent. Defaults to the current logged-in user's email. |
+| **User Group** | The user group the agent belongs to, used for permission management and organization. If empty, the agent has no assigned user group. |
+| **Group Permission** | Controls how users in the same group can access this agent:<br>- **Editable**: Group members can view and edit the agent<br>- **Read-only**: Group members can only view, not edit<br>- **Private**: Only the creator and administrators can access |
+| **Model** | The LLM used by the agent for reasoning and generating responses. |
+| **Max Steps of Agent Run** | The maximum number of think-act cycles the agent can execute in a single conversation. More steps allow the agent to handle more complex tasks, but also consume more resources. |
+| **Provide Run Summary** | Controls whether the agent provides run details to the main agent when used as a sub-agent:<br>- **Enabled (default)**: When used as a sub-agent, provides a detailed run summary to the main agent<br>- **Disabled**: When used as a sub-agent, only returns the final result without detailed run information |
+| **Description** | A description of the agent's functionality, explaining its purpose and capabilities. |
+
+> 💡 **Usage Suggestions**:
+> - Use meaningful English names for the agent variable name, such as `code_assistant`, `data_analyst`, etc.
+> - Set the max steps based on task complexity: 3-5 steps for simple Q&A, 10-20 steps for complex reasoning tasks
+> - Keep "Provide Run Summary" enabled if the sub-agent's run process is valuable for the main agent's decision-making. Disable it if you only need the final result to reduce context consumption.
 
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent-development/generate-agent.png" style="width: 50%; height: auto;" />

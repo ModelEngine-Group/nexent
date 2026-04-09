@@ -157,6 +157,8 @@ sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 class _ProviderEnumStub:
     SILICON = mock.Mock(value="silicon")
     MODELENGINE = mock.Mock(value="modelengine")
+    DASHSCOPE = mock.Mock(value="dashscope")
+    TOKENPONY = mock.Mock(value="tokenpony")
 
 
 sys.modules["consts.provider"].ProviderEnum = _ProviderEnumStub
@@ -653,6 +655,263 @@ async def test_prepare_model_dict_multi_embedding_defaults():
             "max_tokens": 1536,
         }
         assert result == expected
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_rerank_dashscope():
+    """Rerank models with DashScope provider should use special URL format."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("Alibaba-NLP", "gte-rerank-v2"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="Alibaba-NLP/gte-rerank-v2",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ) as mock_emb_dim_check, mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "dashscope",
+            "model_name": "gte-rerank-v2",
+            "model_type": "rerank",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "Alibaba-NLP/gte-rerank-v2",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        provider = "dashscope"
+        model = {
+            "id": "Alibaba-NLP/gte-rerank-v2",
+            "model_type": "rerank",
+        }
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        mock_split_repo.assert_called_once_with("Alibaba-NLP/gte-rerank-v2")
+        mock_add_repo_to_name.assert_called_once_with("Alibaba-NLP", "gte-rerank-v2")
+
+        # Embedding dimension check should NOT be called for rerank
+        mock_emb_dim_check.assert_not_called()
+
+        # Verify DashScope rerank URL format
+        assert "api/v1" in result["base_url"]
+        assert "services/rerank" in result["base_url"]
+        assert "text-rerank/text-rerank" in result["base_url"]
+        assert "rerank" in result["base_url"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_rerank_non_dashscope():
+    """Rerank models with non-DashScope provider should use standard /rerank URL."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("jina", "jina-rerank-v2-base"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="jina/jina-rerank-v2-base",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ) as mock_emb_dim_check, mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "jina",
+            "model_name": "jina-rerank-v2-base",
+            "model_type": "rerank",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "jina/jina-rerank-v2-base",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        provider = "jina"
+        model = {
+            "id": "jina/jina-rerank-v2-base",
+            "model_type": "rerank",
+        }
+        base_url = "https://api.jina.ai/v1"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        mock_split_repo.assert_called_once_with("jina/jina-rerank-v2-base")
+        mock_add_repo_to_name.assert_called_once_with("jina", "jina-rerank-v2-base")
+
+        # Embedding dimension check should NOT be called for rerank
+        mock_emb_dim_check.assert_not_called()
+
+        # Verify non-DashScope rerank URL format
+        assert result["base_url"] == "https://api.jina.ai/v1/rerank"
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_rerank_with_compatible_mode_url():
+    """Rerank models with DashScope should handle compatible-mode/v1 URL replacement."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("Alibaba-NLP", "gte-rerank-v2"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="Alibaba-NLP/gte-rerank-v2",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "dashscope",
+            "model_name": "gte-rerank-v2",
+            "model_type": "rerank",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "Alibaba-NLP/gte-rerank-v2",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        provider = "dashscope"
+        model = {
+            "id": "Alibaba-NLP/gte-rerank-v2",
+            "model_type": "rerank",
+        }
+        # Test with trailing slash and compatible-mode
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        # Verify the URL is properly processed
+        assert "compatible-mode/v1" not in result["base_url"]
+        assert "api/v1" in result["base_url"]
+        # Trailing slash should be stripped
+        assert not result["base_url"].endswith("//")
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_modelengine_non_embedding_ssl_verify():
+    """ModelEngine non-embedding models should have ssl_verify set to False."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("meta", "llama-3-8b"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="meta/llama-3-8b",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.get_model_engine_raw_url",
+        return_value="https://modelengine.example.com/v1",
+    ) as mock_raw_url, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ) as mock_emb_dim_check, mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "modelengine",
+            "model_name": "llama-3-8b",
+            "model_type": "llm",
+            "api_key": "test-key",
+            "max_tokens": 4096,
+            "display_name": "meta/llama-3-8b",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        provider = "modelengine"
+        model = {
+            "id": "meta/llama-3-8b",
+            "model_type": "llm",
+            "max_tokens": 4096,
+            "base_url": "https://120.253.225.102:50001",
+        }
+        base_url = "https://modelengine.example.com/v1"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        # Verify ssl_verify is set to False for ModelEngine
+        assert result["ssl_verify"] is False
+
+        # Verify the raw URL function was called
+        mock_raw_url.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_modelengine_embedding_ssl_verify():
+    """ModelEngine embedding models should have ssl_verify set to False."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("openai", "text-embedding-3-small"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="openai/text-embedding-3-small",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.get_model_engine_raw_url",
+        return_value="https://modelengine.example.com/v1",
+    ) as mock_raw_url, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+        return_value=1536,
+    ) as mock_emb_dim_check, mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "modelengine",
+            "model_name": "text-embedding-3-small",
+            "model_type": "embedding",
+            "api_key": "test-key",
+            "max_tokens": 8191,
+            "display_name": "openai/text-embedding-3-small",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        provider = "modelengine"
+        model = {
+            "id": "openai/text-embedding-3-small",
+            "model_type": "embedding",
+            "base_url": "https://120.253.225.102:50001",
+        }
+        base_url = "https://modelengine.example.com/v1"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        # Verify ssl_verify is set to False for ModelEngine
+        assert result["ssl_verify"] is False
+
+        # Verify embedding dimension check was called
+        mock_emb_dim_check.assert_called_once()
 
 
 # ============================================================================
@@ -1903,3 +2162,125 @@ def test_get_model_engine_raw_url_trailing_slash():
     for input_url, expected in test_cases:
         result = get_model_engine_raw_url(input_url)
         assert result == expected, f"Failed for input: {input_url}"
+
+
+# ============================================================================
+# Test-cases for get_provider_models with DashScope provider
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_dashscope_success():
+    """Should successfully get models from DashScope provider."""
+    from backend.services.model_provider_service import DashScopeModelProvider
+
+    model_data = {
+        "provider": "dashscope",
+        "model_type": "llm",
+        "api_key": "test-key",
+    }
+
+    expected_models = [
+        {
+            "id": "qwen-turbo",
+            "model_tag": "chat",
+            "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+        }
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.DashScopeModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = expected_models
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == expected_models
+        mock_provider_class.assert_called_once()
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_dashscope_empty_result():
+    """Should handle empty result from DashScope provider."""
+    model_data = {
+        "provider": "dashscope",
+        "model_type": "embedding",
+        "api_key": "test-key",
+    }
+
+    with mock.patch(
+        "backend.services.model_provider_service.DashScopeModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = []
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == []
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+# ============================================================================
+# Test-cases for get_provider_models with TokenPony provider
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_tokenpony_success():
+    """Should successfully get models from TokenPony provider."""
+    from backend.services.model_provider_service import TokenPonyModelProvider
+
+    model_data = {
+        "provider": "tokenpony",
+        "model_type": "llm",
+        "api_key": "test-key",
+    }
+
+    expected_models = [
+        {
+            "id": "gpt-4",
+            "model_tag": "chat",
+            "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+        }
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.TokenPonyModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = expected_models
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == expected_models
+        mock_provider_class.assert_called_once()
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_tokenpony_empty_result():
+    """Should handle empty result from TokenPony provider."""
+    model_data = {
+        "provider": "tokenpony",
+        "model_type": "embedding",
+        "api_key": "test-key",
+    }
+
+    with mock.patch(
+        "backend.services.model_provider_service.TokenPonyModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = []
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == []
+        mock_provider_instance.get_models.assert_called_once_with(model_data)

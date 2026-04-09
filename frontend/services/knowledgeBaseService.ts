@@ -2,7 +2,7 @@
 
 import i18n from "i18next";
 
-import { API_ENDPOINTS } from "./api";
+import { API_ENDPOINTS, ApiError } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { FILE_TYPES, EXTENSION_TO_TYPE_MAP } from "@/const/knowledgeBase";
@@ -14,7 +14,6 @@ import {
   DataMateSyncError,
 } from "@/types/knowledgeBase";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
-import { configStore } from "@/lib/config";
 import log from "@/lib/logger";
 
 // @ts-ignore
@@ -53,32 +52,35 @@ class KnowledgeBaseService {
     count: number;
     indices_info: any[];
   }> {
-    try {
-      // Call backend proxy endpoint to avoid CORS issues
-      const url = new URL(API_ENDPOINTS.dify.datasets, window.location.origin);
-      url.searchParams.set("dify_api_base", difyApiBase);
-      url.searchParams.set("api_key", apiKey);
+    // Call backend proxy endpoint to avoid CORS issues
+    const url = new URL(API_ENDPOINTS.dify.datasets, window.location.origin);
+    url.searchParams.set("dify_api_base", difyApiBase);
+    url.searchParams.set("api_key", apiKey);
 
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || "Failed to fetch Dify datasets");
-      }
+    const result = await response.json();
 
-      const result = await response.json();
-      return {
-        indices: result.indices || [],
-        count: result.count || 0,
-        indices_info: result.indices_info || [],
-      };
-    } catch (error) {
-      log.error("Failed to sync Dify knowledge bases:", error);
-      throw error;
+    // Check for error response from middleware (has code field)
+    if (result.code !== undefined && result.code !== 0) {
+      // Use backend error code and message
+      const errorCode = result.code || response.status;
+      const errorMessage = result.message || "Failed to fetch Dify datasets";
+      log.error("Dify API error:", { code: errorCode, message: errorMessage });
+
+      // Use ApiError for proper error handling with i18n support
+      throw new ApiError(errorCode, errorMessage);
     }
+
+    // Success: result is directly the data (indices, count, indices_info)
+    return {
+      indices: result.indices || [],
+      count: result.count || 0,
+      indices_info: result.indices_info || [],
+    };
   }
 
   // Get Dify knowledge bases as KnowledgeBase array
@@ -128,6 +130,144 @@ class KnowledgeBaseService {
       return difyKnowledgeBases;
     } catch (error) {
       log.error("Failed to get Dify knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Get iData knowledge spaces
+  async getIdataKnowledgeSpaces(
+    idataApiBase: string,
+    apiKey: string,
+    userId: string
+  ): Promise<Array<{ id: string; name: string }>> {
+    try {
+      const url = new URL(API_ENDPOINTS.idata.knowledgeSpaces, window.location.origin);
+      url.searchParams.set("idata_api_base", idataApiBase);
+      url.searchParams.set("api_key", apiKey);
+      url.searchParams.set("user_id", userId);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const result = await response.json();
+
+      // Check for error response from middleware (has code field)
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage = result.message || "Failed to fetch iData knowledge spaces";
+        log.error("iData API error:", { code: errorCode, message: errorMessage });
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      // Success: result is directly the array of knowledge spaces
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      log.error("Failed to get iData knowledge spaces:", error);
+      throw error;
+    }
+  }
+
+  // Sync iData knowledge bases (datasets)
+  async syncIdataKnowledgeBases(
+    idataApiBase: string,
+    apiKey: string,
+    userId: string,
+    knowledgeSpaceId: string
+  ): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+  }> {
+    try {
+      const url = new URL(API_ENDPOINTS.idata.datasets, window.location.origin);
+      url.searchParams.set("idata_api_base", idataApiBase);
+      url.searchParams.set("api_key", apiKey);
+      url.searchParams.set("user_id", userId);
+      url.searchParams.set("knowledge_space_id", knowledgeSpaceId);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const result = await response.json();
+
+      // Check for error response from middleware (has code field)
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage = result.message || "Failed to fetch iData datasets";
+        log.error("iData API error:", { code: errorCode, message: errorMessage });
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      // Success: result is directly the data (indices, count, indices_info)
+      return {
+        indices: result.indices || [],
+        count: result.count || 0,
+        indices_info: result.indices_info || [],
+      };
+    } catch (error) {
+      log.error("Failed to sync iData knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Get iData knowledge bases as KnowledgeBase array
+  async getIdataKnowledgeBases(
+    idataApiBase: string,
+    apiKey: string,
+    userId: string,
+    knowledgeSpaceId: string
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const syncResult = await this.syncIdataKnowledgeBases(
+        idataApiBase,
+        apiKey,
+        userId,
+        knowledgeSpaceId
+      );
+
+      if (!syncResult.indices_info || syncResult.indices_info.length === 0) {
+        return [];
+      }
+
+      // Transform to KnowledgeBase format
+      const idataKnowledgeBases: KnowledgeBase[] = syncResult.indices_info.map(
+        (indexInfo: any) => {
+          const stats = indexInfo.stats?.base_info || {};
+          return {
+            id: indexInfo.name,
+            name: indexInfo.display_name || indexInfo.name,
+            display_name: indexInfo.display_name || indexInfo.name,
+            description: "iData knowledge base",
+            documentCount: stats.doc_count || 0,
+            chunkCount: stats.chunk_count || 0,
+            createdAt: stats.creation_date || null,
+            updatedAt: stats.update_date || stats.creation_date || null,
+            embeddingModel: stats.embedding_model || "unknown",
+            knowledge_sources: "idata",
+            ingroup_permission: "",
+            group_ids: [],
+            store_size: stats.store_size || "",
+            process_source: stats.process_source || "iData",
+            avatar: "",
+            chunkNum: 0,
+            language: "",
+            nickname: "",
+            parserId: "",
+            permission: "",
+            tokenNum: 0,
+            source: "idata",
+            tenant_id: "",
+          };
+        }
+      );
+
+      return idataKnowledgeBases;
+    } catch (error) {
+      log.error("Failed to get iData knowledge bases:", error);
       throw error;
     }
   }
@@ -286,7 +426,8 @@ class KnowledgeBaseService {
   async getKnowledgeBasesInfo(
     skipHealthCheck = false,
     includeDataMateSync = true,
-    tenantId: string | null = null
+    tenantId: string | null = null,
+    datamateUrl: string | null = null
   ): Promise<KnowledgeBasesWithDataMateStatus> {
     try {
       const knowledgeBases: KnowledgeBase[] = [];
@@ -388,11 +529,7 @@ class KnowledgeBaseService {
 
       // Sync DataMate knowledge bases and get the synced data (only if enabled and URL is configured)
       if (includeDataMateSync) {
-        // Check if DataMate URL is configured before attempting sync
-        const config = configStore.getConfig();
-        const currentDataMateUrl = config.app?.datamateUrl;
-
-        if (!currentDataMateUrl || currentDataMateUrl.trim() === "") {
+        if (!datamateUrl || datamateUrl.trim() === "") {
           // Skip DataMate sync if URL is not configured
           log.info(
             "DataMate URL not configured, skipping DataMate knowledge base sync"
@@ -540,13 +677,13 @@ class KnowledgeBaseService {
       const requestBody: {
         name: string;
         description: string;
-        embeddingModel?: string;
+        embedding_model_name?: string;
         ingroup_permission?: string;
         group_ids?: number[];
       } = {
         name: params.name,
         description: params.description || "",
-        embeddingModel: params.embeddingModel || "",
+        embedding_model_name: params.embeddingModel || "",
       };
 
       // Include group permission and user groups if provided

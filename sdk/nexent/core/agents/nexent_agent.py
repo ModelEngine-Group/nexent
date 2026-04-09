@@ -8,7 +8,7 @@ from smolagents.tools import Tool
 
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
-from ..utils.constants import THINK_TAG_PATTERN
+from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
@@ -73,7 +73,7 @@ class NexentAgent:
                 # These parameters have exclude=True and cannot be passed to __init__
                 # due to smolagents.tools.Tool wrapper restrictions
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -83,9 +83,16 @@ class NexentAgent:
                     "vdb_core", None) if tool_config.metadata else None
                 tools_obj.embedding_model = tool_config.metadata.get(
                     "embedding_model", None) if tool_config.metadata else None
-            elif class_name == "DataMateSearchTool":
-                tools_obj = tool_class(**params)
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
+            elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
+                # These parameters have exclude=True and cannot be passed to __init__
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "rerank_model"]}
+                tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
             elif class_name == "AnalyzeTextFileTool":
                 tools_obj = tool_class(observer=self.observer,
                                        llm_model=tool_config.metadata.get("llm_model", []),
@@ -118,6 +125,68 @@ class NexentAgent:
             raise ValueError(f"{class_name} not found in MCP server")
         return tool_obj
 
+    def create_builtin_tool(self, tool_config: ToolConfig):
+        """Create a builtin tool instance.
+
+        Args:
+            tool_config: Tool configuration with class_name, params, and optional metadata.
+
+        Returns:
+            Tool instance
+
+        Raises:
+            ValueError: If builtin tool is not found
+        """
+        class_name = tool_config.class_name
+        params = tool_config.params or {}
+
+        if class_name == "RunSkillScriptTool":
+            from nexent.core.tools.run_skill_script_tool import get_run_skill_script_tool
+            metadata = tool_config.metadata or {}
+            get_run_skill_script_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.run_skill_script_tool import run_skill_script
+            return run_skill_script
+        elif class_name == "ReadSkillMdTool":
+            from nexent.core.tools.read_skill_md_tool import get_read_skill_md_tool
+            metadata = tool_config.metadata or {}
+            get_read_skill_md_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.read_skill_md_tool import read_skill_md
+            return read_skill_md
+        elif class_name == "WriteSkillFileTool":
+            from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool
+            metadata = tool_config.metadata or {}
+            get_write_skill_file_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.write_skill_file_tool import write_skill_file
+            return write_skill_file
+        elif class_name == "ReadSkillConfigTool":
+            from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool
+            metadata = tool_config.metadata or {}
+            get_read_skill_config_tool(
+                local_skills_dir=params.get("local_skills_dir"),
+                agent_id=metadata.get("agent_id"),
+                tenant_id=metadata.get("tenant_id"),
+                version_no=metadata.get("version_no", 0),
+            )
+            from nexent.core.tools.read_skill_config_tool import read_skill_config
+            return read_skill_config
+        else:
+            raise ValueError(f"Unknown builtin tool: {class_name}")
+
     def create_tool(self, tool_config: ToolConfig):
         """create a tool instance according to the tool config"""
         if not isinstance(tool_config, ToolConfig):
@@ -132,6 +201,8 @@ class NexentAgent:
                 tool_obj = self.create_mcp_tool(class_name)
             elif source == "langchain":
                 tool_obj = self.create_langchain_tool(tool_config)
+            elif source == "builtin":
+                tool_obj = self.create_builtin_tool(tool_config)
             else:
                 raise ValueError(f"unsupported tool source: {source}")
             return tool_obj
@@ -166,7 +237,8 @@ class NexentAgent:
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
                 provide_run_summary=agent_config.provide_run_summary,
-                managed_agents=managed_agents_list
+                managed_agents=managed_agents_list,
+                additional_authorized_imports=["*"],
             )
             agent.stop_event = self.stop_event
 
@@ -225,8 +297,13 @@ class NexentAgent:
             else:
                 # prepare for multi-modal final_answer
                 final_answer_str = convert_code_format(str(final_answer))
-            final_answer_str = re.sub(THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
-            observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, final_answer_str)
+            final_answer_str = re.sub(
+                THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
+            # Remove "思考：" or "思考:" prefix content (until two newlines)
+            final_answer_str = re.sub(
+                THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+            observer.add_message(self.agent.agent_name,
+                                 ProcessType.FINAL_ANSWER, final_answer_str)
 
             # Check if we need to stop from external stop_event
             if self.agent.stop_event.is_set():

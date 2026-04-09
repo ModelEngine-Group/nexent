@@ -1,5 +1,6 @@
 import pytest
 import importlib
+import sys
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 from threading import Event
@@ -19,6 +20,8 @@ mock_smolagents.__path__ = []
 mock_smolagents_tool_cls = MagicMock(name="Tool")
 mock_smolagents_tools_mod = ModuleType("smolagents.tools")
 mock_smolagents_tools_mod.Tool = mock_smolagents_tool_cls
+# Also mock the tool decorator function at smolagents.tools level
+mock_smolagents_tools_mod.tool = MagicMock(name="tool_decorator")
 
 # Attach tools sub-module to the parent module and to sys.modules via module_mocks later
 setattr(mock_smolagents, "tools", mock_smolagents_tools_mod)
@@ -92,6 +95,8 @@ for _name in ["ActionStep", "TaskStep", "AgentText", "handle_agent_output_types"
 setattr(mock_smolagents, "Timing", mock_smolagents.monitoring.Timing)
 # Also export Tool at top-level so that `from smolagents import Tool` works
 setattr(mock_smolagents, "Tool", mock_smolagents_tool_cls)
+# Also export tool decorator at top-level for modules that import from smolagents
+setattr(mock_smolagents, "tool", mock_smolagents_tools_mod.tool)
 
 # Mock langchain_core.tools.BaseTool
 mock_langchain_core_tools_mod = MagicMock(name="langchain_core.tools")
@@ -110,6 +115,13 @@ mock_openai_chat_completion_message = MagicMock()
 # Mock memory_service to avoid importing mem0
 mock_memory_service = MagicMock()
 mock_memory_service.add_memory_in_levels = MagicMock()
+
+# Mock nexent.skills module for run_skill_script_tool
+mock_nexent = ModuleType("nexent")
+mock_nexent.skills = ModuleType("nexent.skills")
+mock_nexent.skills.SkillManager = MagicMock(name="SkillManager")
+sys.modules["nexent"] = mock_nexent
+sys.modules["nexent.skills"] = mock_nexent.skills
 
 module_mocks = {
     "smolagents": mock_smolagents,
@@ -138,6 +150,9 @@ module_mocks = {
     "exa_py": MagicMock(Exa=MagicMock()),
     # Mock memory_service to avoid importing mem0
     "sdk.nexent.memory.memory_service": mock_memory_service,
+    # Mock nexent.skills for skill tools
+    "nexent.skills": mock_nexent.skills,
+    "nexent.skills.skill_manager": MagicMock(),
 }
 
 # ---------------------------------------------------------------------------
@@ -579,3 +594,132 @@ async def test_agent_run_skips_loop_when_thread_not_alive(basic_agent_run_info, 
         received.append(item)
 
     assert received == ["final_only"]
+
+
+# ----------------------------------------------------------------------------
+# Additional tests for improved coverage
+# ----------------------------------------------------------------------------
+
+def test_agent_run_thread_mcp_connection_error(basic_agent_run_info, monkeypatch):
+    """Test that MCP connection errors are properly handled."""
+    basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
+
+    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
+    mock_context_manager = MagicMock(__enter__=MagicMock(return_value=mock_tool_collection), __exit__=MagicMock(return_value=None))
+    monkeypatch.setattr(run_agent.ToolCollection, "from_mcp", MagicMock(return_value=mock_context_manager))
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    mock_nexent_instance.create_single_agent.side_effect = Exception("Couldn't connect to the MCP server")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    with pytest.raises(ValueError) as exc_info:
+        run_agent.agent_run_thread(basic_agent_run_info)
+
+    assert "Error in agent_run_thread" in str(exc_info.value)
+
+
+def test_agent_run_thread_chinese_lang(basic_agent_run_info, monkeypatch):
+    """Test MCP connection error message in Chinese when observer.lang is zh."""
+    basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
+    basic_agent_run_info.observer.lang = "zh"
+
+    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
+    mock_context_manager = MagicMock(__enter__=MagicMock(return_value=mock_tool_collection), __exit__=MagicMock(return_value=None))
+    monkeypatch.setattr(run_agent.ToolCollection, "from_mcp", MagicMock(return_value=mock_context_manager))
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    mock_nexent_instance.create_single_agent.side_effect = Exception("Couldn't connect to the MCP server")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    with pytest.raises(ValueError):
+        run_agent.agent_run_thread(basic_agent_run_info)
+
+    basic_agent_run_info.observer.add_message.assert_called()
+    call_args = basic_agent_run_info.observer.add_message.call_args
+    assert "MCP" in str(call_args)
+
+
+@pytest.mark.asyncio
+async def test_agent_run_empty_cached_messages(basic_agent_run_info, monkeypatch):
+    """Test agent_run yields nothing when cached messages are empty."""
+    basic_agent_run_info.observer.get_cached_message.return_value = []
+
+    async def fast_sleep(duration):
+        return None
+
+    monkeypatch.setattr(run_agent.asyncio, "sleep", fast_sleep)
+
+    class FakeThread:
+        def __init__(self, target=None, args=None):
+            self._alive_checks = 0
+
+        def start(self):
+            pass
+
+        def is_alive(self):
+            self._alive_checks += 1
+            return self._alive_checks == 1
+
+    monkeypatch.setattr(run_agent, "Thread", FakeThread)
+
+    received = []
+    async for item in run_agent.agent_run(basic_agent_run_info):
+        received.append(item)
+
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_agent_run_cached_messages_multiple_batches(basic_agent_run_info, monkeypatch):
+    """Test agent_run with multiple batches of cached messages."""
+    basic_agent_run_info.observer.get_cached_message.side_effect = [
+        ["msg1", "msg2"],
+        ["msg3", "msg4"],
+        ["msg5"],
+        ["msg6"],  # Final call after thread ends
+    ]
+
+    async def fast_sleep(duration):
+        return None
+
+    monkeypatch.setattr(run_agent.asyncio, "sleep", fast_sleep)
+
+    class FakeThread:
+        def __init__(self, target=None, args=None):
+            self._alive_checks = 0
+
+        def start(self):
+            pass
+
+        def is_alive(self):
+            self._alive_checks += 1
+            return self._alive_checks <= 3
+
+    monkeypatch.setattr(run_agent, "Thread", FakeThread)
+
+    received = []
+    async for item in run_agent.agent_run(basic_agent_run_info):
+        received.append(item)
+
+    assert received == ["msg1", "msg2", "msg3", "msg4", "msg5", "msg6"]
+
+
+def test_detect_transport_edge_cases():
+    """Test transport detection with edge cases."""
+    assert run_agent._detect_transport("http://server/SSE") == "streamable-http"
+    assert run_agent._detect_transport("http://server/MCP") == "streamable-http"
+    assert run_agent._detect_transport("http://server/sse/more") == "streamable-http"
+    assert run_agent._detect_transport("http://server/mcp/extra") == "streamable-http"
+
+
+def test_normalize_mcp_config_edge_cases():
+    """Test MCP config normalization with edge cases."""
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/sse",
+        "authorization": "",
+        "headers": None
+    })
+    assert result["url"] == "http://server/sse"
+    assert result["transport"] == "sse"
+    # Empty string authorization creates empty headers dict
+    assert result.get("headers") == {"Authorization": ""}

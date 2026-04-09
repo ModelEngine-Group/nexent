@@ -20,8 +20,8 @@ Each agent appears as a card showing:
 
 Click a card to open its details:
 
-- **Basic info:** ID, name, description, and status.
-- **Model configuration:** Model name, max tokens, business logic model, etc.
+- **Basic info:** ID, name, description, status, max steps, and whether to provide run summary.
+- **Model configuration:** Model name, business logic model, etc.
 - **Prompts:** Role, constraints, examples, and the original description.
 - **Tools:** Every tool the agent can use.
 - **Sub-agents:** Any collaborative agents that are configured.

@@ -2,10 +2,12 @@
 
 import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import log from "@/lib/logger";
+import { showErrorToUser } from "@/const/errorMessageI18n";
 
 /**
  * Query key factory for knowledge bases
@@ -28,15 +30,22 @@ export function useKnowledgeBasesForToolConfig(
     | "knowledge_base_search"
     | "dify_search"
     | "datamate_search"
+    | "idata_search"
     | null = null,
   config?: {
     serverUrl?: string;
     apiKey?: string;
+    userId?: string;
+    knowledgeSpaceId?: string;
   }
 ) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+
   // Support both difyConfig and datamateConfig naming conventions
   const difyConfig = config;
   const datamateConfig = config;
+  const idataConfig = config;
 
   const query = useQuery({
     queryKey: knowledgeBaseKeys.list(
@@ -89,17 +98,39 @@ export function useKnowledgeBasesForToolConfig(
       } else if (toolType === "dify_search") {
         // For Dify, fetch knowledge bases using provided config
         if (difyConfig?.serverUrl && difyConfig?.apiKey) {
+          // Don't catch error here - let it propagate to React Query so caller can handle it
+          kbs = await knowledgeBaseService.getDifyKnowledgeBases(
+            difyConfig.serverUrl,
+            difyConfig.apiKey
+          );
+          log.info("Dify knowledge bases fetched successfully:", kbs.length);
+        } else {
+          // No Dify config provided, return empty
+          kbs = [];
+        }
+      } else if (toolType === "idata_search") {
+        // For iData, fetch knowledge bases using provided config
+        if (
+          idataConfig?.serverUrl &&
+          idataConfig?.apiKey &&
+          idataConfig?.userId &&
+          idataConfig?.knowledgeSpaceId
+        ) {
           try {
-            kbs = await knowledgeBaseService.getDifyKnowledgeBases(
-              difyConfig.serverUrl,
-              difyConfig.apiKey
+            kbs = await knowledgeBaseService.getIdataKnowledgeBases(
+              idataConfig.serverUrl,
+              idataConfig.apiKey,
+              idataConfig.userId,
+              idataConfig.knowledgeSpaceId
             );
-          } catch (error) {
-            log.error("Failed to fetch Dify knowledge bases:", error);
+          } catch (error: any) {
+            log.error("Failed to fetch iData knowledge bases:", error);
+            // Show i18n error message to user
+            showErrorToUser(error, t);
             kbs = [];
           }
         } else {
-          // No Dify config provided, return empty
+          // No iData config provided, return empty
           kbs = [];
         }
       } else {
@@ -120,9 +151,18 @@ export function useKnowledgeBasesForToolConfig(
     gcTime: 5 * 60_000, // Keep in cache for 5 minutes
     refetchOnMount: false, // Only refetch if data is stale
     refetchOnWindowFocus: false, // Don't refetch on window focus
+    retry: 0, // Don't retry on failure - show error immediately
   });
 
-  return query;
+  // Provide a method to clear knowledge bases cache (useful when sync fails)
+  const clearKnowledgeBases = useCallback(() => {
+    queryClient.setQueryData(
+      knowledgeBaseKeys.list(toolType || "default", difyConfig?.serverUrl || ""),
+      []
+    );
+  }, [queryClient, toolType, difyConfig?.serverUrl]);
+
+  return { ...query, clearKnowledgeBases };
 }
 
 /**
@@ -130,6 +170,7 @@ export function useKnowledgeBasesForToolConfig(
  * Call this when the user navigates to the agent config page
  */
 export function usePrefetchKnowledgeBases() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   const prefetchKnowledgeBases = useCallback(
@@ -138,10 +179,13 @@ export function usePrefetchKnowledgeBases() {
         | "knowledge_base_search"
         | "dify_search"
         | "datamate_search"
+        | "idata_search"
         | null,
       difyConfig?: {
         serverUrl?: string;
         apiKey?: string;
+        userId?: string;
+        knowledgeSpaceId?: string;
       }
     ) => {
       if (!toolType) return;
@@ -194,8 +238,33 @@ export function usePrefetchKnowledgeBases() {
                   difyConfig.serverUrl,
                   difyConfig.apiKey
                 );
-              } catch (error) {
+              } catch (error: any) {
                 log.error("Failed to prefetch Dify knowledge bases:", error);
+                // Show i18n error message to user
+                showErrorToUser(error, t);
+                kbs = [];
+              }
+            } else {
+              kbs = [];
+            }
+          } else if (toolType === "idata_search") {
+            if (
+              difyConfig?.serverUrl &&
+              difyConfig?.apiKey &&
+              difyConfig?.userId &&
+              difyConfig?.knowledgeSpaceId
+            ) {
+              try {
+                kbs = await knowledgeBaseService.getIdataKnowledgeBases(
+                  difyConfig.serverUrl,
+                  difyConfig.apiKey,
+                  difyConfig.userId,
+                  difyConfig.knowledgeSpaceId
+                );
+              } catch (error: any) {
+                log.error("Failed to prefetch iData knowledge bases:", error);
+                // Show i18n error message to user
+                showErrorToUser(error, t);
                 kbs = [];
               }
             } else {
@@ -225,6 +294,7 @@ export function usePrefetchKnowledgeBases() {
  * Hook for syncing knowledge bases by tool type
  */
 export function useSyncKnowledgeBases() {
+  const { t } = useTranslation();
   const [isSyncing, setIsSyncing] = useState<string | null>(null);
 
   const syncKnowledgeBases = useCallback(
@@ -233,6 +303,8 @@ export function useSyncKnowledgeBases() {
       config?: {
         serverUrl?: string;
         apiKey?: string;
+        userId?: string;
+        knowledgeSpaceId?: string;
       }
     ): Promise<void> => {
       setIsSyncing(toolType);
@@ -257,10 +329,30 @@ export function useSyncKnowledgeBases() {
               );
             }
             break;
+          case "idata_search":
+            // iData sync requires API credentials and knowledge space ID
+            if (
+              config?.serverUrl &&
+              config?.apiKey &&
+              config?.userId &&
+              config?.knowledgeSpaceId
+            ) {
+              await knowledgeBaseService.getIdataKnowledgeBases(
+                config.serverUrl,
+                config.apiKey,
+                config.userId,
+                config.knowledgeSpaceId
+              );
+            }
+            break;
           default:
             // Default sync behavior - sync Nexent only
             await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
         }
+      } catch (error: any) {
+        log.error("Failed to sync knowledge bases:", error);
+        // Show i18n error message to user
+        showErrorToUser(error, t);
       } finally {
         setIsSyncing(null);
       }

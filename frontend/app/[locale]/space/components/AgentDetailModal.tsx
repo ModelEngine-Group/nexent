@@ -16,6 +16,7 @@ import {
 // Using AntD Avatar directly in this component
 import { generateAvatarFromName } from "@/lib/avatar";
 import { getToolSourceLabel, getCategoryLabel } from "@/lib/agentLabelMapper";
+import { getLocalizedDescription } from "@/lib/utils";
 
 interface AgentDetailModalProps {
   visible: boolean;
@@ -188,7 +189,7 @@ export default function AgentDetailModal({
                   <div className="flex-1">
                     <h4 className="font-semibold text-base">{tool.name}</h4>
                     <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-                      {tool.description || t("space.noDescription", "No description")}
+                      {getLocalizedDescription(tool.description, tool.description_zh) || t("space.noDescription", "No description")}
                     </p>
                   </div>
                   {tool.is_available ? (
@@ -218,6 +219,36 @@ export default function AgentDetailModal({
                     </Tag>
                   )}
                 </div>
+                {(() => {
+                  let parsedInputs: Record<string, any> = {};
+                  try {
+                    parsedInputs = tool.inputs ? JSON.parse(tool.inputs) : {};
+                  } catch {
+                    parsedInputs = {};
+                  }
+                  return Object.keys(parsedInputs).length > 0 ? (
+                    <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600">
+                      <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2">
+                        {t("space.detail.inputParameters", "Input Parameters")}:
+                      </div>
+                      <div className="space-y-2">
+                        {Object.entries(parsedInputs).map(([key, value]) => (
+                          <div key={key} className="text-xs">
+                            <span className="font-medium">{key}</span>
+                            <span className="text-slate-500 dark:text-slate-400 ml-2">
+                              ({value.type})
+                            </span>
+                            {getLocalizedDescription(value.description, value.description_zh) && (
+                              <div className="text-slate-600 dark:text-slate-300 mt-1">
+                                {getLocalizedDescription(value.description, value.description_zh)}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
                 {tool.initParams && tool.initParams.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600">
                     <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2">
@@ -235,9 +266,9 @@ export default function AgentDetailModal({
                           <span className="text-slate-500 dark:text-slate-400 ml-2">
                             ({param.type})
                           </span>
-                          {param.description && (
+                          {getLocalizedDescription(param.description, param.description_zh) && (
                             <div className="text-slate-600 dark:text-slate-300 mt-1">
-                              {param.description}
+                              {getLocalizedDescription(param.description, param.description_zh)}
                             </div>
                           )}
                         </div>

@@ -73,6 +73,10 @@ interface DocumentListProps {
   onIngroupPermissionChange?: (value: string) => void;
   selectedGroupIds?: number[];
   onSelectedGroupIdsChange?: (values: number[]) => void;
+  // Embedding model for create mode
+  availableEmbeddingModels?: ModelOption[];
+  selectedEmbeddingModel?: string;
+  onEmbeddingModelChange?: (value: string) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
 
   // Upload related props
@@ -112,6 +116,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onIngroupPermissionChange,
       selectedGroupIds,
       onSelectedGroupIdsChange,
+      // Embedding model for create mode
+      availableEmbeddingModels,
+      selectedEmbeddingModel,
+      onEmbeddingModelChange,
       permission,
 
       // Upload related props
@@ -133,7 +141,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const tenantId = user?.tenantId || null;
 
     // Fetch groups for group selection
-    const { data: groupData } = useGroupList(tenantId, 1, 100);
+    const { data: groupData } = useGroupList(tenantId);
     const groups = groupData?.groups || [];
 
     // Create group name mapping
@@ -276,6 +284,16 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     }, [isCreatingMode, tenantId]);
 
+    // Clear group IDs when permission is set to PRIVATE
+    React.useEffect(() => {
+      if (ingroupPermission === "PRIVATE" && onSelectedGroupIdsChange) {
+        onSelectedGroupIdsChange([]);
+      }
+    }, [ingroupPermission, onSelectedGroupIdsChange]);
+
+    // Check if group select should be disabled (when permission is PRIVATE)
+    const isGroupSelectDisabled = ingroupPermission === "PRIVATE";
+
     // Load available models when showing detail
     useEffect(() => {
       const loadModels = async () => {
@@ -283,7 +301,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           setIsLoadingModels(true);
           try {
             const models = await modelService.getLLMModels();
-            setAvailableModels(models);
+            setAvailableModels(models.filter(m => m.connect_status === "available"));
 
             // Determine initial selection order:
             // 1) Knowledge base's own configured model (server-side config)
@@ -468,20 +486,35 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                   />
                   {/* Right-aligned container for dropdowns */}
                   <div className="flex items-center ml-auto justify-end" style={{ gap: "12px", justifyContent: "flex-end", alignItems: "flex-end", width: "100%" }}>
-                    {/* User groups multi-select - first position */}
+                    {/* Embedding model selection - first position in create mode */}
+                    {isCreatingMode && onEmbeddingModelChange && (
+                      <Select
+                        value={selectedEmbeddingModel}
+                        onChange={onEmbeddingModelChange}
+                        style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
+                        placeholder={t("knowledgeBase.create.embeddingModelPlaceholder") || "Select embedding model"}
+                        options={(availableEmbeddingModels || []).map((model) => ({
+                          value: model.displayName,
+                          label: model.displayName,
+                          disabled: model.connect_status === "unavailable",
+                        }))}
+                      />
+                    )}
+                    {/* User groups multi-select */}
                     <Can permission="kb.groups:update">
                       <Select
                         mode="multiple"
-                        value={selectedGroupIds}
+                        value={isGroupSelectDisabled ? [] : selectedGroupIds}
                         onChange={onSelectedGroupIdsChange}
                         style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={t("knowledgeBase.create.permission.groupPlaceholder")}
                         options={groupOptions}
                         maxTagCount={2}
                         allowClear
+                        disabled={isGroupSelectDisabled}
                       />
                     </Can>
-                    {/* Group permission dropdown - second position */}
+                    {/* Group permission dropdown */}
                     <Can permission="kb.groups:update">
                       <Select
                         value={ingroupPermission}

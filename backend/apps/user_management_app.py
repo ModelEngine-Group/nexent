@@ -1,9 +1,10 @@
 import logging
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Header, Query, Request, HTTPException
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
+from typing import Optional
 
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
@@ -11,7 +12,7 @@ from consts.model import UserSignInRequest, UserSignUpRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
-    get_session_by_authorization, get_user_info
+    get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token
 from services.user_service import delete_user_and_cleanup
 from consts.exceptions import UnauthorizedError
 from utils.auth_utils import get_current_user_id
@@ -44,7 +45,8 @@ async def signup(request: UserSignUpRequest):
     try:
         user_data = await signup_user_with_invitation(email=request.email,
                                                       password=request.password,
-                                                      invite_code=request.invite_code)
+                                                      invite_code=request.invite_code,
+                                                      auto_login=request.auto_login)
         success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message":success_message, "data":user_data})
@@ -211,25 +213,19 @@ async def get_user_id(request: Request):
                             content={"message": "User not logged in",
                                      "data": {"user_id": None}})
     try:
-        # Use the unified token validation function
+        # Use the unified token validation function (validates signature via Supabase)
         is_valid, user = validate_token(authorization)
         if is_valid and user:
             return JSONResponse(status_code=HTTPStatus.OK,
                                 content={"message": "Get user ID successfully",
-                                         "data":{"user_id": user.id}})
+                                         "data": {"user_id": user.id}})
 
-        # If the token is invalid, try to parse the user ID from the token
-        user_id, _ = get_current_user_id(authorization)
-        if user_id:
-            return JSONResponse(status_code=HTTPStatus.OK,
-                                content={"message": "Successfully parsed user ID from token",
-                                         "data": {"user_id": user_id}})
-        raise ValueError("User not logged in or session invalid")
-
-    except ValueError as e:
-        logging.error(f"Get user ID failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+        # Token invalid or expired - do not trust unsigned JWT, return 401
+        logging.warning("Get user ID failed: token validation failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                             detail="User not logged in or session invalid")
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Get user ID failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -279,3 +275,107 @@ async def revoke_user_account(request: Request):
         logging.error(f"User revoke failed: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="User revoke failed")
+
+@router.post("/tokens")
+async def create_token_endpoint(
+    authorization: Optional[str] = Header(None)
+):
+    """Create a new token for the authenticated user.
+
+    The user_id is extracted from the Authorization header (JWT token).
+    Returns the complete token including the secret key.
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: No authorization header found")
+
+        user_id, _ = get_current_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+
+        result = create_token(str(user_id))
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "success", "data": result}
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to create token: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.get("/tokens")
+async def list_tokens_endpoint(
+    user_id: str = Query(..., description="User ID to query tokens for"),
+    authorization: Optional[str] = Header(None)
+):
+    """List all tokens for the specified user.
+
+    Returns token information with masked access keys (middle part replaced with *).
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: No authorization header found")
+
+        request_user_id, _ = get_current_user_id(authorization)
+        if not request_user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+
+        # Only allow users to list their own tokens
+        if str(request_user_id) != user_id:
+            raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
+                                detail="Forbidden: cannot list tokens for other users")
+
+        tokens = list_tokens_by_user(user_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "success", "data": tokens}
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to list tokens: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.delete("/tokens/{token_id}")
+async def delete_token_endpoint(
+    token_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    """Soft delete a token.
+
+    Only the owner of the token can delete it.
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: No authorization header found")
+
+        user_id, _ = get_current_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+
+        success = delete_token(token_id, str(user_id))
+        if not success:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Token not found or not owned by user")
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "success", "data": {"token_id": token_id}}
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to delete token: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")

@@ -1,0 +1,24 @@
+replicaCount: 1
+
+image:
+  repository: docker.elastic.co/elasticsearch/elasticsearch
+  tag: 8.17.4
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 2
+  limits:
+    memory: 4Gi
+    cpu: 2
+
+storage:
+  size: 20Gi
+  hostPath: "/var/lib/nexent-data/nexent-elasticsearch"
+
+config:
+  javaOpts: "-Xms2g -Xmx2g"
+  diskWatermarkLow: "85%"
+  diskWatermarkHigh: "90%"
+  diskWatermarkFloodStage: "95%"

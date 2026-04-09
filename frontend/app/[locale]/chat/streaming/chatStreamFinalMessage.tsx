@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Copy,
@@ -20,7 +20,7 @@ import { copyToClipboard } from "@/lib/clipboard";
 import log from "@/lib/logger";
 import { AttachmentItem } from "@/types/chat";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
-import { ChatAttachment } from "../internal/chatAttachment";
+import { ChatAttachment } from "../components/chatAttachment";
 
 interface FinalMessageProps {
   message: ChatMessageType;
@@ -39,7 +39,7 @@ interface FinalMessageProps {
 // TTS playback status
 type TTSStatus = typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus];
 
-export function ChatStreamFinalMessage({
+function ChatStreamFinalMessageInner({
   message,
   onSelectMessage,
   isSelected = false,
@@ -411,3 +411,20 @@ export function ChatStreamFinalMessage({
     </div>
   );
 }
+
+function areEqualFinalMessage(prev: FinalMessageProps, next: FinalMessageProps): boolean {
+  return (
+    // Message object reference covers content, finalAnswer, isComplete, opinion_flag, attachments, etc.
+    prev.message === next.message &&
+    prev.isSelected === next.isSelected &&
+    prev.searchResultsCount === next.searchResultsCount &&
+    prev.imagesCount === next.imagesCount &&
+    prev.hideButtons === next.hideButtons &&
+    prev.index === next.index &&
+    prev.currentConversationId === next.currentConversationId
+    // Callbacks (onSelectMessage, onOpinionChange, onCitationHover, onImageClick) are intentionally
+    // excluded: they do not affect rendered output and will be stabilized with useCallback (Phase 1.2).
+  );
+}
+
+export const ChatStreamFinalMessage = React.memo(ChatStreamFinalMessageInner, areEqualFinalMessage);

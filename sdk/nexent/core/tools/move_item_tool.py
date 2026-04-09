@@ -21,9 +21,26 @@ class MoveItemTool(Tool):
                   "Works for both files and directories. If destination directory doesn't exist, it will be created. " \
                   "If destination already exists, the operation will fail to prevent overwriting."
 
+    description_zh = "将文件或目录从源路径移动到目标路径，路径需为工作区相对路径（例如，从'documents/file.txt'移动到'backup/file.txt'），出于安全考虑，不支持绝对路径。如果目标目录不存在，则自动创建。为防止文件覆盖，如果目标文件已存在，操作会执行失败。"
+
     inputs = {
-        "source_path": {"type": "string", "description": "Relative path of the source file or directory to move (e.g., 'documents/file.txt')"},
-        "destination_path": {"type": "string", "description": "Relative path of the destination (e.g., 'backup/file.txt')"}
+        "source_path": {
+            "type": "string",
+            "description": "Relative path of source file or directory to move (e.g., 'documents/file.txt')",
+            "description_zh": "要移动的源文件或目录的相对路径（例如，'documents/file.txt'）"
+        },
+        "destination_path": {
+            "type": "string",
+            "description": "Relative path of destination (e.g., 'backup/file.txt')",
+            "description_zh": "目标的相对路径（例如，'backup/file.txt'）"
+        }
+    }
+
+    init_param_descriptions = {
+        "init_path": {
+            "description": "Initial workspace path",
+            "description_zh": "初始工作区路径"
+        }
     }
     output_type = "string"
     category = ToolCategory.FILE.value

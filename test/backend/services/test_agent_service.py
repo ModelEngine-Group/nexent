@@ -8,57 +8,85 @@ import os
 import pytest
 from fastapi.responses import StreamingResponse
 from fastapi import Request
-from nexent.core.agents.agent_model import ToolConfig
 
-from backend.consts.model import (
-    AgentNameBatchCheckItem,
-    AgentNameBatchCheckRequest,
-    AgentNameBatchRegenerateItem,
-    AgentNameBatchRegenerateRequest,
-)
+# =============================================================================
+# STEP 1: Set up ALL sys.modules mocks BEFORE any backend imports
+# =============================================================================
 
+# Create mock ToolConfig class with all necessary methods
+class MockToolConfig:
+    """Mock ToolConfig for testing - accepts any arguments."""
+    def __init__(self, *args, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+    
+    def model_dump(self, **kwargs):
+        """Return a dict representation of the ToolConfig."""
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
-# Patch environment variables before any imports that might use them
-# Environment variables are now configured in conftest.py
+# Mock nexent module hierarchy
+nexent_agent_model_mock = MagicMock()
+nexent_agent_model_mock.ToolConfig = MockToolConfig
+sys.modules['nexent'] = MagicMock()
+sys.modules['nexent.core'] = MagicMock()
+sys.modules['nexent.core.agents'] = MagicMock()
+sys.modules['nexent.core.agents.agent_model'] = nexent_agent_model_mock
+sys.modules['nexent.core.agents.run_agent'] = MagicMock()
 
-# Mock boto3 before importing the module under test
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+# Mock other nexent submodules
+sys.modules['nexent.memory'] = MagicMock()
+sys.modules['nexent.memory.memory_service'] = MagicMock()
+sys.modules['nexent.storage'] = MagicMock()
+sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
+sys.modules['nexent.storage.minio_config'] = MagicMock()
+sys.modules['nexent.monitor'] = MagicMock()
+sys.modules['nexent.monitor.monitoring'] = MagicMock()
 
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-# These patches must be started before any imports that use MinioClient
-storage_client_mock = MagicMock()
-minio_client_mock = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+# Mock external dependencies
+sys.modules['boto3'] = MagicMock()
+sys.modules['elasticsearch'] = MagicMock()
+sys.modules['sqlalchemy'] = MagicMock()
+sys.modules['sqlalchemy.create_engine'] = MagicMock()
 
-# Mock external dependencies before importing backend modules that might initialize them
-# Mock create_engine to prevent database connection attempts
-mock_engine = MagicMock()
-mock_session_maker = MagicMock()
-mock_db_session = MagicMock()
-mock_session_maker.return_value = mock_db_session
+# Mock database submodules
+sys.modules['database'] = MagicMock()
+sys.modules['database.agent_db'] = MagicMock()
+sys.modules['database.tool_db'] = MagicMock()
+sys.modules['database.remote_mcp_db'] = MagicMock()
+sys.modules['database.agent_version_db'] = MagicMock()
+sys.modules['database.group_db'] = MagicMock()
+sys.modules['database.user_tenant_db'] = MagicMock()
+sys.modules['database.model_management_db'] = MagicMock()
 
-# Mock PostgresClient to prevent database connection attempts
-# Create a mock class that returns the same instance (singleton pattern)
-mock_postgres_client = MagicMock()
-mock_postgres_client.session_maker = mock_session_maker
-mock_postgres_client_class = MagicMock(return_value=mock_postgres_client)
+# Mock services submodules
+sys.modules['services'] = MagicMock()
+sys.modules['services.conversation_management_service'] = MagicMock()
+sys.modules['services.memory_config_service'] = MagicMock()
+sys.modules['services.agent_version_service'] = MagicMock()
 
-# Mock get_db_session context manager - create a proper context manager mock
-def mock_get_db_session(db_session=None):
-    session = mock_db_session if db_session is None else db_session
-    @contextmanager
-    def _mock_context():
-        yield session
-    return _mock_context()
+# Mock agents submodules
+sys.modules['agents'] = MagicMock()
+sys.modules['agents.create_agent_info'] = MagicMock()
+sys.modules['agents.agent_run_manager'] = MagicMock()
+sys.modules['agents.preprocess_manager'] = MagicMock()
 
-with patch('sqlalchemy.create_engine', return_value=mock_engine), \
-     patch('backend.database.client.PostgresClient', new=mock_postgres_client_class), \
-     patch('backend.database.client.get_db_session', side_effect=mock_get_db_session), \
-     patch('backend.database.client.MinioClient', return_value=minio_client_mock) as minio_mock, \
-     patch('elasticsearch.Elasticsearch', return_value=MagicMock()) as es_mock:
+# Need to set up create_tool_config_list as an async mock
+mock_create_agent_info = MagicMock()
+mock_create_agent_info.create_tool_config_list = AsyncMock(return_value=[])
+sys.modules['agents.create_agent_info'].create_agent_info = mock_create_agent_info
+
+# Mock utils submodules
+sys.modules['utils'] = MagicMock()
+sys.modules['utils.auth_utils'] = MagicMock()
+sys.modules['utils.memory_utils'] = MagicMock()
+sys.modules['utils.thread_utils'] = MagicMock()
+
+# Mock str_utils with actual convert_list_to_string implementation
+def mock_convert_list_to_string(items):
+    """Mock implementation of convert_list_to_string."""
+    if not items:
+        return ""
+    return ",".join(str(item) for item in items)
 
     import backend.services.agent_service as agent_service
     from backend.services.agent_service import update_agent_info_impl
@@ -109,21 +137,51 @@ nexent_mock = MagicMock()
 sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
+sys.modules['nexent.core.models'] = MagicMock()
+
+# Mock rerank_model module with proper class exports
+class MockBaseRerank:
+    pass
+
+class MockOpenAICompatibleRerank(MockBaseRerank):
+    def __init__(self, *args, **kwargs):
+        pass
+
+rerank_module = MagicMock()
+rerank_module.BaseRerank = MockBaseRerank
+rerank_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
+sys.modules['nexent.core.models.rerank_model'] = rerank_module
 # Don't mock agent_model yet, we need to import ToolConfig first
 sys.modules['nexent.memory'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()
+sys.modules['utils.str_utils'] = MagicMock()
+sys.modules['utils.str_utils'].convert_list_to_string = mock_convert_list_to_string
+sys.modules['utils.str_utils'].convert_string_to_list = lambda s: s.split(",") if s else []
 
-# Mock monitoring modules
+sys.modules['utils.config_utils'] = MagicMock()
+sys.modules['utils.prompt_template_utils'] = MagicMock()
+sys.modules['utils.llm_utils'] = MagicMock()
+sys.modules['utils.monitoring'] = MagicMock()
+
+# =============================================================================
+# STEP 2: Now import after all mocks are in place
+# =============================================================================
+
+from nexent.core.agents.agent_model import ToolConfig
+from backend.consts.model import (
+    AgentNameBatchCheckItem,
+    AgentNameBatchCheckRequest,
+    AgentNameBatchRegenerateItem,
+    AgentNameBatchRegenerateRequest,
+)
+
+# Set up mock for nexent.monitor
 monitoring_manager_mock = MagicMock()
-
-# Define a decorator that simply returns the original function unchanged
-
 
 def pass_through_decorator(*args, **kwargs):
     def decorator(func):
         return func
     return decorator
-
 
 monitoring_manager_mock.monitor_endpoint = pass_through_decorator
 monitoring_manager_mock.monitor_llm_call = pass_through_decorator
@@ -132,50 +190,89 @@ monitoring_manager_mock.configure = MagicMock()
 monitoring_manager_mock.add_span_event = MagicMock()
 monitoring_manager_mock.set_span_attributes = MagicMock()
 
-# Mock nexent.monitor modules
-sys.modules['nexent.monitor'] = MagicMock()
-sys.modules['nexent.monitor.monitoring'] = MagicMock()
 sys.modules['nexent.monitor'].get_monitoring_manager = lambda: monitoring_manager_mock
 sys.modules['nexent.monitor'].monitoring_manager = monitoring_manager_mock
+sys.modules['utils.monitoring'].monitoring_manager = monitoring_manager_mock
+sys.modules['utils.monitoring'].setup_fastapi_app = MagicMock(return_value=True)
 
-# Mock other dependencies
-sys.modules['agents'] = MagicMock()
-sys.modules['agents.create_agent_info'] = MagicMock()
-sys.modules['database'] = MagicMock()
-sys.modules['database.agent_db'] = MagicMock()
-sys.modules['database.tool_db'] = MagicMock()
-sys.modules['database.remote_mcp_db'] = MagicMock()
-sys.modules['services'] = MagicMock()
-sys.modules['services.remote_mcp_service'] = MagicMock()
-sys.modules['services.tool_configuration_service'] = MagicMock()
-sys.modules['services.conversation_management_service'] = MagicMock()
-sys.modules['services.memory_config_service'] = MagicMock()
-sys.modules['utils'] = MagicMock()
-sys.modules['utils.auth_utils'] = MagicMock()
-sys.modules['utils.memory_utils'] = MagicMock()
-sys.modules['utils.thread_utils'] = MagicMock()
-# Mock utils.monitoring to return our monitoring_manager_mock
-utils_monitoring_mock = MagicMock()
-utils_monitoring_mock.monitoring_manager = monitoring_manager_mock
-utils_monitoring_mock.setup_fastapi_app = MagicMock(return_value=True)
-sys.modules['utils.monitoring'] = utils_monitoring_mock
-sys.modules['agents.agent_run_manager'] = MagicMock()
-sys.modules['agents.preprocess_manager'] = MagicMock()
-sys.modules['nexent.core.agents.run_agent'] = MagicMock()
+# Mock storage config validate
+sys.modules['nexent.storage.minio_config'].MinIOStorageConfig = type('MinIOStorageConfig', (), {'validate': lambda self: None})
 
+# =============================================================================
+# STEP 3: Create mock objects for database clients
+# =============================================================================
 
-original_agent_model = sys.modules['nexent.core.agents.agent_model']
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+mock_engine = MagicMock()
+mock_session_maker = MagicMock()
+mock_db_session = MagicMock()
+mock_session_maker.return_value = mock_db_session
 
-# Mock specific classes that might be imported
-MemoryContext = MagicMock()
-MemoryUserConfig = MagicMock()
-sys.modules['nexent.core.agents.agent_model'].MemoryContext = MemoryContext
-sys.modules['nexent.core.agents.agent_model'].MemoryUserConfig = MemoryUserConfig
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = ToolConfig
+mock_postgres_client = MagicMock()
+mock_postgres_client.session_maker = mock_session_maker
 
+minio_client_mock = MagicMock()
 
+def mock_get_db_session(db_session=None):
+    session = mock_db_session if db_session is None else db_session
+    @contextmanager
+    def _mock_context():
+        yield session
+    return _mock_context()
+
+# Mock database client module
+mock_backend_database_client = MagicMock()
+mock_backend_database_client.PostgresClient = MagicMock(return_value=mock_postgres_client)
+mock_backend_database_client.get_db_session = mock_get_db_session
+mock_backend_database_client.MinioClient = MagicMock(return_value=minio_client_mock)
+mock_backend_database_client.db_client = mock_postgres_client
+sys.modules['backend.database.client'] = mock_backend_database_client
+
+# Mock storage client factory
+sys.modules['nexent.storage.storage_client_factory'].create_storage_client_from_config = MagicMock(return_value=MagicMock())
+
+# Now import backend modules
+import backend.services.agent_service as agent_service
+from backend.services.agent_service import update_agent_info_impl
+from backend.services.agent_service import get_creating_sub_agent_info_impl
+from backend.services.agent_service import list_all_agent_info_impl
+from backend.services.agent_service import get_agent_info_impl
+from backend.services.agent_service import get_creating_sub_agent_id_service
+from backend.services.agent_service import get_enable_tool_id_by_agent_id
+from backend.services.agent_service import (
+    get_agent_call_relationship_impl,
+    delete_agent_impl,
+    delete_related_agent_impl,
+    export_agent_impl,
+    export_agent_by_agent_id,
+    import_agent_by_agent_id,
+    insert_related_agent_impl,
+    load_default_agents_json_file,
+    clear_agent_memory,
+    import_agent_impl,
+    get_agent_id_by_name,
+    get_agent_by_name_impl,
+    save_messages,
+    prepare_agent_run,
+    run_agent_stream,
+    stop_agent_tasks,
+    _resolve_user_tenant_language,
+    _apply_duplicate_name_availability_rules,
+    _check_single_model_availability,
+    _normalize_language_key,
+    _render_prompt_template,
+    _format_existing_values,
+    _generate_unique_agent_name_with_suffix,
+    _generate_unique_display_name_with_suffix,
+    _generate_unique_value_with_suffix,
+    _regenerate_agent_value_with_llm,
+    clear_agent_new_mark_impl,
+)
+from consts.model import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
+
+# =============================================================================
 # Setup and teardown for each test
+# =============================================================================
+
 @pytest.fixture(autouse=True)
 def reset_mocks():
     """Reset all mocks before each test to ensure a clean test environment."""
@@ -1145,8 +1242,8 @@ async def test_export_agent_impl_success(mock_get_current_user_info, mock_export
     mock_get_current_user_info.return_value = (
         "test_user", "test_tenant", "en")
 
-    # Create tools with MCP source
-    mcp_tool = ToolConfig(
+    # Create tools with MCP source - use MockToolConfig directly
+    mcp_tool = MockToolConfig(
         class_name="MCPTool",
         name="MCP Tool",
         source="mcp",
@@ -1159,7 +1256,6 @@ async def test_export_agent_impl_success(mock_get_current_user_info, mock_export
     )
 
     # Create a proper ExportAndImportAgentInfo object with MCP tools
-    mcp_tool_dict = mcp_tool.model_dump()
     mock_agent_info = ExportAndImportAgentInfo(
         agent_id=123,
         name="Test Agent",
@@ -1172,7 +1268,7 @@ async def test_export_agent_impl_success(mock_get_current_user_info, mock_export
         constraint_prompt="Test constraint prompt",
         few_shots_prompt="Test few shots prompt",
         enabled=True,
-        tools=[mcp_tool_dict],
+        tools=[mcp_tool],
         managed_agents=[]
     )
     mock_export_agent_by_id.return_value = mock_agent_info
@@ -2494,14 +2590,14 @@ async def test_list_all_agent_info_impl_creator_can_see_own_agent_without_group_
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
 
     # Should see:
+    # - Agent 1: created by current_user (creators can always see their own agents, even without group overlap)
     # - Agent 3: groups overlap (1 is in both user's groups and agent's groups)
     # Should NOT see:
-    # - Agent 1: created by current_user but groups don't overlap (no group overlap hides it regardless of creator)
     # - Agent 2: not created by current_user AND groups don't overlap
-    assert len(result) == 1
+    assert len(result) == 2
     agent_ids = [a["agent_id"] for a in result]
+    assert 1 in agent_ids, "Agent 1 should be visible because user is the creator"
     assert 3 in agent_ids, "Agent 3 should be visible because groups overlap"
-    assert 1 not in agent_ids, "Agent 1 should be filtered out (no group overlap, even though user is creator)"
     assert 2 not in agent_ids, "Agent 2 should be filtered out (not creator and no group overlap)"
 
 
@@ -3370,6 +3466,7 @@ async def test_import_agent_impl_imports_all_agents_and_links_relations(
         parent_agent_id=202,
         child_agent_id=101,
         tenant_id="test_tenant",
+        user_id="test_user",
     )
 
 
@@ -4799,7 +4896,7 @@ def test_apply_duplicate_name_availability_rules_handles_missing_fields():
 # ============================================================================
 
 
-@patch('backend.services.agent_service.create_tool_config_list')
+@patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
@@ -4865,7 +4962,7 @@ async def test_export_agent_includes_model_names(
     assert exported_agent.display_name == "Test Agent"
 
 
-@patch('backend.services.agent_service.create_tool_config_list')
+@patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
@@ -4919,7 +5016,7 @@ async def test_export_agent_with_null_model_id(
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
 @patch('backend.services.agent_service.create_agent')
 @patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.create_tool_config_list')
+@patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
@@ -5038,7 +5135,7 @@ async def test_export_then_import_preserves_model_names(
     assert second_call[0][1] == "target_tenant"  # tenant_id
 
 
-@patch('backend.services.agent_service.create_tool_config_list')
+@patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
@@ -6535,8 +6632,8 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
 
     relationships = []
 
-    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id):
-        relationships.append((parent_agent_id, child_agent_id, tenant_id))
+    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id, user_id):
+        relationships.append((parent_agent_id, child_agent_id, tenant_id, user_id))
 
     async def fake_update_tool_list(tenant_id, user_id):
         return None
@@ -6563,7 +6660,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     # Child (2) must be imported before parent (1)
     assert imported_ids == [2, 1]
     # Relationship should be created between new IDs 101 (child) and 100 (parent)
-    assert relationships == [(100 + 1, 100 + 2, "tenant1")]
+    assert relationships == [(100 + 1, 100 + 2, "tenant1", "user1")]
 
 
 # =====================================================================
@@ -8026,8 +8123,10 @@ async def test_list_all_agent_info_impl_creator_with_private_permission_no_group
 
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
 
-    # Creator cannot see their own agent if no group overlap (no group overlap hides it regardless of creator)
-    assert len(result) == 0
+    # Creator can see their own agent even if no group overlap and permission is PRIVATE
+    assert len(result) == 1
+    agent_ids = [a["agent_id"] for a in result]
+    assert 1 in agent_ids, "Agent 1 should be visible because user is the creator"
 
 
 @pytest.mark.asyncio
@@ -8449,7 +8548,223 @@ async def test_list_all_agent_info_impl_creator_no_group_overlap_hidden(
 
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
 
-    # Creator cannot see their own agent if no group overlap (no group overlap hides it regardless of creator)
-    assert len(result) == 0
+    # Creator can see their own agent even if no group overlap
+    assert len(result) == 1
+    agent_ids = [a["agent_id"] for a in result]
+    assert 1 in agent_ids, "Agent 1 should be visible because user is the creator"
 
 # Deprecated tests for mark_agents_as_new_impl have been removed as the API is cleaned up.
+
+
+# ============================================================================
+# Additional tests for uncovered code paths (improving coverage)
+# ============================================================================
+
+
+# Tests for get_creating_sub_agent_info_impl exception handling
+@patch("backend.services.agent_service.get_enable_tool_id_by_agent_id")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("backend.services.agent_service.get_creating_sub_agent_id_service")
+@patch("backend.services.agent_service.get_current_user_info")
+@pytest.mark.asyncio
+async def test_get_creating_sub_agent_info_impl_get_id_exception(
+    mock_get_user_info,
+    mock_get_sub_agent_id,
+    mock_search_info,
+    mock_query_sub_agents,
+    mock_get_enable_tool
+):
+    """Test that exception getting sub agent ID is raised as ValueError."""
+    mock_get_user_info.return_value = ("user_1", "tenant_1", "en")
+    mock_get_sub_agent_id.side_effect = Exception("Database error getting sub agent id")
+
+    with pytest.raises(ValueError, match="Failed to get creating sub agent id"):
+        await get_creating_sub_agent_info_impl(authorization="Bearer token")
+
+
+@patch("backend.services.agent_service.get_enable_tool_id_by_agent_id")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("backend.services.agent_service.get_creating_sub_agent_id_service")
+@patch("backend.services.agent_service.get_current_user_info")
+@pytest.mark.asyncio
+async def test_get_creating_sub_agent_info_impl_search_info_exception(
+    mock_get_user_info,
+    mock_get_sub_agent_id,
+    mock_search_info,
+    mock_query_sub_agents,
+    mock_get_enable_tool
+):
+    """Test that exception searching agent info is raised as ValueError."""
+    mock_get_user_info.return_value = ("user_1", "tenant_1", "en")
+    mock_get_sub_agent_id.return_value = 123
+    mock_search_info.side_effect = Exception("Database error searching agent info")
+
+    with pytest.raises(ValueError, match="Failed to get sub agent info"):
+        await get_creating_sub_agent_info_impl(authorization="Bearer token")
+
+
+@patch("backend.services.agent_service.get_enable_tool_id_by_agent_id")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("backend.services.agent_service.get_creating_sub_agent_id_service")
+@patch("backend.services.agent_service.get_current_user_info")
+@pytest.mark.asyncio
+async def test_get_creating_sub_agent_info_impl_get_tool_ids_exception(
+    mock_get_user_info,
+    mock_get_sub_agent_id,
+    mock_search_info,
+    mock_query_sub_agents,
+    mock_get_enable_tool
+):
+    """Test that exception getting tool IDs is raised as ValueError."""
+    mock_get_user_info.return_value = ("user_1", "tenant_1", "en")
+    mock_get_sub_agent_id.return_value = 123
+    mock_search_info.return_value = {
+        "name": "sub_agent",
+        "display_name": "Sub Agent",
+        "description": "desc",
+        "model_name": "model",
+        "model_id": 1,
+        "max_steps": 10,
+        "business_description": "biz desc",
+    }
+    mock_get_enable_tool.side_effect = Exception("Database error getting tool ids")
+
+    with pytest.raises(ValueError, match="Failed to get sub agent enable tool id list"):
+        await get_creating_sub_agent_info_impl(authorization="Bearer token")
+
+
+# Tests for get_agent_by_name_impl
+@patch("backend.services.agent_service.query_version_list")
+@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+def test_get_agent_by_name_impl_empty_name(mock_search, mock_query_versions):
+    """Test that empty agent name raises Exception."""
+    with pytest.raises(Exception, match="agent_name required"):
+        get_agent_by_name_impl("", "tenant_1")
+
+
+@patch("backend.services.agent_service.query_version_list")
+@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+def test_get_agent_by_name_impl_success(mock_search, mock_query_versions):
+    """Test successful get_agent_by_name_impl."""
+    mock_search.return_value = 123
+    mock_query_versions.return_value = [{"version_no": 5}]
+
+    result = get_agent_by_name_impl("test_agent", "tenant_1")
+
+    assert result["agent_id"] == 123
+    assert result["latest_version_no"] == 5
+
+
+@patch("backend.services.agent_service.query_version_list")
+@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
+    """Test that agent not found raises Exception."""
+    mock_search.side_effect = Exception("Agent not found")
+
+    with pytest.raises(Exception, match="agent not found"):
+        get_agent_by_name_impl("nonexistent_agent", "tenant_1")
+
+
+@patch("backend.services.agent_service.query_version_list")
+@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+def test_get_agent_by_name_impl_empty_name_service(mock_search, mock_query_versions):
+    """Test that empty agent name in impl raises Exception."""
+    with pytest.raises(Exception, match="agent_name required"):
+        get_agent_by_name_impl("", "tenant_1")
+
+
+# Tests for get_agent_by_name_impl (different path)
+@patch("backend.services.agent_service.query_version_list")
+@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+def test_get_agent_by_impl_agent_not_found(mock_search, mock_query_versions):
+    """Test agent not found error in get_agent_by_name_impl."""
+    mock_search.side_effect = Exception("Not found")
+
+    with pytest.raises(Exception, match="agent not found"):
+        get_agent_by_name_impl("missing_agent", "tenant_1")
+
+
+# Tests for delete_related_agent_impl
+@patch("backend.services.agent_service.delete_related_agent")
+def test_delete_related_agent_impl_success(mock_delete):
+    """Test successful delete_related_agent_impl."""
+    mock_delete.return_value = True
+
+    result = delete_related_agent_impl(1, 2, "tenant_1")
+
+    assert result is True
+    mock_delete.assert_called_once_with(1, 2, "tenant_1")
+
+
+@patch("backend.services.agent_service.delete_related_agent")
+def test_delete_related_agent_impl_exception(mock_delete):
+    """Test that exception in delete_related_agent_impl is raised."""
+    mock_delete.side_effect = Exception("Database error")
+
+    with pytest.raises(Exception, match="Failed to delete related agent"):
+        delete_related_agent_impl(1, 2, "tenant_1")
+
+
+# Tests for get_agent_call_relationship_impl max depth
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+def test_get_agent_call_relationship_impl_deep_recursion(mock_query_sub, mock_search_info, mock_search_tools):
+    """Test that get_agent_call_relationship handles deep recursion gracefully."""
+    mock_query_sub.return_value = [2, 3, 4, 5, 6]  # Multiple sub agents
+    mock_search_info.return_value = {"name": "agent", "display_name": "Agent"}
+    mock_search_tools.return_value = []
+
+    result = get_agent_call_relationship_impl(agent_id=1, tenant_id="tenant_1")
+
+    assert result["agent_id"] == "1"
+    assert "tools" in result
+    assert "sub_agents" in result
+
+
+# Tests for update_agent_info_impl skill handling exception
+@patch("backend.services.agent_service.skill_db.create_or_update_skill_by_skill_info")
+@patch("backend.services.agent_service.skill_db.query_skill_instances_by_agent_id")
+@patch("backend.services.agent_service.get_current_user_info")
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_skill_update_exception(
+    mock_get_user,
+    mock_query_skills,
+    mock_create_skill
+):
+    """Test that exception in skill update is raised as ValueError."""
+    from backend.consts.model import AgentInfoRequest
+
+    mock_get_user.return_value = ("user_1", "tenant_1", "en")
+
+    mock_request = MagicMock(spec=AgentInfoRequest)
+    mock_request.agent_id = 1
+    mock_request.name = "Test"
+    mock_request.display_name = "Test Display"
+    mock_request.description = "Desc"
+    mock_request.business_description = "Biz Desc"
+    mock_request.author = "Author"
+    mock_request.model_id = 1
+    mock_request.model_name = "Model"
+    mock_request.business_logic_model_id = None
+    mock_request.business_logic_model_name = None
+    mock_request.max_steps = 5
+    mock_request.provide_run_summary = True
+    mock_request.duty_prompt = "Duty"
+    mock_request.constraint_prompt = "Constraint"
+    mock_request.few_shots_prompt = "Few shots"
+    mock_request.enabled = True
+    mock_request.enabled_tool_ids = None
+    mock_request.enabled_skill_ids = [1, 2]
+    mock_request.related_agent_ids = None
+    mock_request.group_ids = None
+    mock_request.ingroup_permission = None
+
+    mock_query_skills.return_value = []
+    mock_create_skill.side_effect = Exception("Skill update failed")
+
+    with pytest.raises(ValueError, match="Failed to update agent skills"):
+        await update_agent_info_impl(mock_request, authorization="Bearer token")

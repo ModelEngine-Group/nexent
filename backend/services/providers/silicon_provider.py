@@ -30,6 +30,8 @@ class SiliconModelProvider(AbstractModelProvider):
                 silicon_url = f"{SILICON_GET_URL}?sub_type=chat"
             elif model_type in ("embedding", "multi_embedding"):
                 silicon_url = f"{SILICON_GET_URL}?sub_type=embedding"
+            elif model_type == "rerank":
+                silicon_url = f"{SILICON_GET_URL}?sub_type=reranker"
             else:
                 silicon_url = SILICON_GET_URL
 
@@ -47,6 +49,10 @@ class SiliconModelProvider(AbstractModelProvider):
             elif model_type in ("embedding", "multi_embedding"):
                 for item in model_list:
                     item["model_tag"] = "embedding"
+                    item["model_type"] = model_type
+            elif model_type == "rerank":
+                for item in model_list:
+                    item["model_tag"] = "rerank"
                     item["model_type"] = model_type
 
             # Return empty list to indicate successful API call but no models

@@ -1,9 +1,11 @@
 import re
+import json
 from typing import List
-
 from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
+from consts.model import ToolSourceEnum
+from utils.tool_utils import get_local_tools_description_zh
 
 
 def create_tool(tool_info, version_no: int = 0):
@@ -36,7 +38,7 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
     Args:
         tool_info: Dictionary containing tool information
         tenant_id: Tenant ID for filtering, mandatory
-        user_id: Optional user ID for filtering
+        user_id: User ID for updating (will be set as the last updater)
         version_no: Version number to filter. Default 0 = draft/editing state
 
     Returns:
@@ -47,9 +49,10 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
 
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
+        # Note: Do not filter by user_id to avoid creating duplicate instances
+        # for the same agent_id and tool_id when different users save
         query = session.query(ToolInstance).filter(
             ToolInstance.tenant_id == tenant_id,
-            ToolInstance.user_id == user_id,
             ToolInstance.agent_id == tool_info_dict['agent_id'],
             ToolInstance.delete_flag != 'Y',
             ToolInstance.tool_id == tool_info_dict['tool_id'],
@@ -62,7 +65,12 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
                 if hasattr(tool_instance, key):
                     setattr(tool_instance, key, value)
         else:
-            create_tool(tool_info_dict, version_no)
+            # Create a new ToolInstance
+            new_tool_instance = ToolInstance(
+                **filter_property(tool_info_dict, ToolInstance))
+            session.add(new_tool_instance)
+            session.flush()  # Flush to get the ID
+            tool_instance = new_tool_instance
         return tool_instance
 
 
@@ -190,13 +198,23 @@ def check_tool_list_initialized(tenant_id: str) -> bool:
 def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_list: List[ToolInfo]):
     """
     scan all tools and update the tool table in PG database, remove the duplicate tools
+    For MCP tools, use name&source&usage as unique key to allow same tool name from different MCP servers
     """
     with get_db_session() as session:
         # get all existing tools (including complete information)
         existing_tools = session.query(ToolInfo).filter(ToolInfo.delete_flag != 'Y',
                                                         ToolInfo.author == tenant_id).all()
-        existing_tool_dict = {
-            f"{tool.name}&{tool.source}": tool for tool in existing_tools}
+        # Build existing_tool_dict with different keys for MCP vs non-MCP tools
+        existing_tool_dict = {}
+        for tool in existing_tools:
+            if tool.source == ToolSourceEnum.MCP.value:
+                # For MCP tools, use name + source + usage (MCP server name) as unique key
+                key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
+            else:
+                # For other tools, use name + source as unique key
+                key = f"{tool.name}&{tool.source}"
+            existing_tool_dict[key] = tool
+
         # set all tools to unavailable
         for tool in existing_tools:
             tool.is_available = False
@@ -208,9 +226,15 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
             is_available = True if re.match(
                 r'^[a-zA-Z_][a-zA-Z0-9_]*$', tool.name) is not None else False
 
-            if f"{tool.name}&{tool.source}" in existing_tool_dict:
+            # Build key for lookup - same logic as existing_tool_dict
+            if tool.source == ToolSourceEnum.MCP.value:
+                key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
+            else:
+                key = f"{tool.name}&{tool.source}"
+
+            if key in existing_tool_dict:
                 # by tool name and source to update the existing tool
-                existing_tool = existing_tool_dict[f"{tool.name}&{tool.source}"]
+                existing_tool = existing_tool_dict[key]
                 for key, value in filtered_tool_data.items():
                     setattr(existing_tool, key, value)
                 existing_tool.updated_by = user_id
@@ -230,16 +254,44 @@ def add_tool_field(tool_info):
         query = session.query(ToolInfo).filter(
             ToolInfo.tool_id == tool_info["tool_id"])
         tool = query.first()
-
         # add tool params
         tool_params = tool.params
         for ele in tool_params:
             param_name = ele["name"]
             ele["default"] = tool_info["params"].get(param_name)
-
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
-
+        
+        # Merge description_zh from SDK for local tools
+        tool_name = tool_dict.get("name")
+        if tool_dict.get("source") == "local":
+            local_tool_descriptions = get_local_tools_description_zh()
+            if tool_name in local_tool_descriptions:
+                sdk_info = local_tool_descriptions[tool_name]
+                tool_dict["description_zh"] = sdk_info.get("description_zh")
+                
+                # Merge params description_zh from SDK
+                for param in tool_params:
+                    if not param.get("description_zh"):
+                        for sdk_param in sdk_info.get("params", []):
+                            if sdk_param.get("name") == param.get("name"):
+                                param["description_zh"] = sdk_param.get("description_zh")
+                                break
+                
+                # Merge inputs description_zh from SDK
+                inputs_str = tool_dict.get("inputs", "{}")
+                try:
+                    inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+                    if isinstance(inputs, dict):
+                        for key, value in inputs.items():
+                            if isinstance(value, dict) and not value.get("description_zh"):
+                                sdk_inputs = sdk_info.get("inputs", {})
+                                if key in sdk_inputs:
+                                    value["description_zh"] = sdk_inputs[key].get("description_zh")
+                        tool_dict["inputs"] = json.dumps(inputs, ensure_ascii=False)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        
         # combine tool_info and tool_dict
         tool_info.update(tool_dict)
         return tool_info

@@ -45,12 +45,34 @@ bash deploy.sh
 - **区域优化**: 中国大陆用户可使用优化的镜像源
 
 
->⚠️ **重要提示**：首次部署 v1.8.0 及以上版本时，需特别留意 Docker 日志中输出的 `suadmin` 超级管理员账号信息。该账号为系统最高权限账户，密码仅在首次生成时显示，后续无法再次查看，请务必妥善保存。
+### ⚠️ 重要提示
+1️⃣ **首次部署 v1.8.0 及以上版本时**，需特别留意 Docker 日志中输出的 `suadmin` 超级管理员账号信息。该账号为系统最高权限账户，密码仅在首次生成时显示，后续无法再次查看，请务必妥善保存。
+> 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/user-management)
 
+2️⃣ 忘记留意 `suadmin` 账号密码？请按照以下步骤操作：
+```bash
+# Step1: 在supabase容器中删除su账号记录
+docker exec -it supabase-db-mini bash
+psql -U postgres
+select id, email from auth.users;
+#获取到suadmin@nexent.com账号的user_id
+delete from auth.users where id = '你的user_id';
+delete from auth.identities where user_id = '你的user_id';
+
+#Step2：在nexent的数据库中删除su账号记录
+docker exec -it nexent-postgresql bash
+psql -U root -d nexent
+delete from nexent.user_tenant_t where user_id = '你的user_id';
+
+#Step3：重新部署并记录su账号密码
+```
 ### 3. 访问您的安装
 
 部署成功完成后：
 1. 在浏览器中打开 **http://localhost:3000**
+2. 登录超级管理员账号
+3. 访问租户资源 → 创建租户及租户管理员
+4. 登录租户管理员账号
 2. 参考 [用户指南](../user-guide/home-page) 进行智能体的开发
 
 

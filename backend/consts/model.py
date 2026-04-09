@@ -31,6 +31,7 @@ class UserSignUpRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6)
     invite_code: Optional[str] = None
+    auto_login: Optional[bool] = True  # Whether to return session after signup
 
 
 class UserSignInRequest(BaseModel):
@@ -114,6 +115,7 @@ class AppConfig(BaseModel):
     appName: str
     appDescription: str
     iconType: str
+    iconKey: Optional[str] = "search"
     customIconUrl: Optional[str] = None
     avatarUri: Optional[str] = None
     modelEngineEnabled: bool = False
@@ -129,7 +131,6 @@ class GlobalConfig(BaseModel):
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
-    is_set: Optional[bool] = False
     history: Optional[List[Dict]] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
@@ -275,6 +276,7 @@ class AgentInfoRequest(BaseModel):
     business_logic_model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
     enabled_tool_ids: Optional[List[int]] = None
+    enabled_skill_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
@@ -293,6 +295,18 @@ class ToolInstanceInfoRequest(BaseModel):
     version_no: int = 0
 
 
+class SkillInstanceInfoRequest(BaseModel):
+    """Request model for skill instance update.
+
+    Note: skill_description and skill_content are no longer accepted.
+    These fields are now retrieved from ag_skill_info_t table.
+    """
+    skill_id: int
+    agent_id: int
+    enabled: bool = True
+    version_no: int = 0
+
+
 class ToolInstanceSearchRequest(BaseModel):
     tool_id: int
     agent_id: int
@@ -302,11 +316,13 @@ class ToolSourceEnum(Enum):
     LOCAL = "local"
     MCP = "mcp"
     LANGCHAIN = "langchain"
+    BUILTIN = "builtin"
 
 
 class ToolInfo(BaseModel):
     name: str
     description: str
+    description_zh: Optional[str] = None
     params: List
     source: str
     inputs: str
@@ -537,21 +553,27 @@ class GroupUpdateRequest(BaseModel):
 class GroupListRequest(BaseModel):
     """Request model for listing groups"""
     tenant_id: str = Field(..., description="Tenant ID to filter groups")
-    page: int = Field(1, ge=1, description="Page number for pagination")
-    page_size: int = Field(
-        20, ge=1, le=100, description="Number of items per page")
-    sort_by: Optional[str] = Field("created_at", description="Field to sort by")
-    sort_order: Optional[str] = Field("desc", description="Sort order (asc or desc)")
+    page: Optional[int] = Field(
+        None, ge=1, description="Page number for pagination. If not provided, returns all data")
+    page_size: Optional[int] = Field(
+        None, ge=1, le=100, description="Number of items per page. If not provided, returns all data")
+    sort_by: Optional[str] = Field(
+        "created_at", description="Field to sort by")
+    sort_order: Optional[str] = Field(
+        "desc", description="Sort order (asc or desc)")
 
 
 class UserListRequest(BaseModel):
     """Request model for listing users"""
     tenant_id: str = Field(..., description="Tenant ID to filter users")
-    page: int = Field(1, ge=1, description="Page number for pagination")
-    page_size: int = Field(
-        20, ge=1, le=100, description="Number of items per page")
-    sort_by: Optional[str] = Field("created_at", description="Field to sort by")
-    sort_order: Optional[str] = Field("desc", description="Sort order (asc or desc)")
+    page: Optional[int] = Field(
+        None, ge=1, description="Page number for pagination. If not provided, returns all data")
+    page_size: Optional[int] = Field(
+        None, ge=1, le=100, description="Number of items per page. If not provided, returns all data")
+    sort_by: Optional[str] = Field(
+        "created_at", description="Field to sort by")
+    sort_order: Optional[str] = Field(
+        "desc", description="Sort order (asc or desc)")
 
 
 class GroupUserRequest(BaseModel):

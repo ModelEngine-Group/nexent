@@ -24,11 +24,9 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
-import { API_ENDPOINTS } from "@/services/api";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
-import { ConfigStore } from "@/lib/config";
-import { configService } from "@/services/configService";
+import { useModelList } from "@/hooks/model/useModelList";
 import {
   SETUP_PAGE_CONTAINER,
   TWO_COLUMN_LAYOUT,
@@ -127,76 +125,32 @@ function DataConfig({ isActive }: DataConfigProps) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
-  const { modelConfig } = useConfig();
+  const { modelConfig, data: configData, invalidateConfig, config, updateConfig, saveConfig } = useConfig();
   const { token } = theme.useToken();
+
+  // Get available embedding models for knowledge base creation
+  const { availableEmbeddingModels } = useModelList({ enabled: true });
 
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
     localStorage.removeItem("kb_cache");
-
-    // Load DataMate URL configuration
-    const loadConfig = async () => {
-      try {
-        await loadDataMateConfig();
-      } catch (error) {
-        console.error("Failed to load DataMate configuration on mount:", error);
-        // Set default values if loading fails
-        setDataMateUrl("");
-      }
-    };
-    loadConfig();
+    loadDataMateConfig();
   }, []);
 
-  // Load DataMate URL configuration
-  const loadDataMateConfig = async () => {
-    try {
-      const response = await fetch(API_ENDPOINTS.config.load, {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const config = result.config;
-        console.log("Loaded config:", config);
-        // DataMate URL would be in the app config section
-        if (
-          config &&
-          config.app &&
-          typeof config.app.datamateUrl === "string"
-        ) {
-          console.log("Setting DataMate URL to:", config.app.datamateUrl);
-          setDataMateUrl(config.app.datamateUrl);
-        } else {
-          console.log("No DataMate URL found in config, setting to empty");
-          setDataMateUrl("");
-        }
-
-        if (
-          config &&
-          config.app &&
-          typeof config.app.modelEngineEnabled === "boolean"
-        ) {
-          setModelEngineEnabled(config.app.modelEngineEnabled);
-        }
-
-        // Return the DataMate URL for verification
-        return config.app?.datamateUrl || "";
-      } else {
-        console.error(
-          "Failed to load config, response status:",
-          response.status,
-          response.statusText
-        );
-        throw new Error(
-          `Failed to load config: ${response.status} ${response.statusText}`
-        );
-      }
-    } catch (error) {
-      log.error("Failed to load DataMate configuration:", error);
-      throw error; // Re-throw so the calling function can handle it
+  // Load DataMate URL configuration from React Query cached data
+  const loadDataMateConfig = () => {
+    if (configData?.app && typeof configData.app.datamateUrl === "string") {
+      setDataMateUrl(configData.app.datamateUrl);
+    } else {
+      setDataMateUrl("");
     }
+
+    if (configData?.app && typeof configData.app.modelEngineEnabled === "boolean") {
+      setModelEngineEnabled(configData.app.modelEngineEnabled);
+    }
+
+    return configData?.app?.datamateUrl || "";
   };
 
   // Get context values
@@ -230,6 +184,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [newKbName, setNewKbName] = useState("");
   const [newKbIngroupPermission, setNewKbIngroupPermission] = useState<string>("READ_ONLY");
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
+  const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
@@ -301,20 +256,6 @@ function DataConfig({ isActive }: DataConfigProps) {
     // Update ref
     prevIsActiveRef.current = isActive;
   }, [isActive]);
-
-  // Helper function to get authorization headers
-  const getAuthHeaders = () => {
-    const session =
-      typeof window !== "undefined" ? localStorage.getItem("session") : null;
-    const sessionObj = session ? JSON.parse(session) : null;
-    return {
-      "Content-Type": "application/json",
-      "User-Agent": "AgentFrontEnd/1.0",
-      ...(sessionObj?.access_token && {
-        Authorization: `Bearer ${sessionObj.access_token}`,
-      }),
-    };
-  };
 
   // Separately listen for knowledge base loading state, load user configuration when knowledge base loading is complete and in active state
   useEffect(() => {
@@ -561,7 +502,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [showDataMateConfigModal, setShowDataMateConfigModal] = useState(false);
   const [dataMateUrl, setDataMateUrl] = useState("");
   const [dataMateUrlError, setDataMateUrlError] = useState<string | null>(null);
-  const configStore = ConfigStore.getInstance();
 
   /**
    * Validate DataMate URL format
@@ -640,10 +580,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     setDataMateUrlError(null);
 
     try {
-      console.log("Saving DataMate URL:", dataMateUrl);
-
-      // Update global configuration with DataMate URL
-      const currentConfig = configStore.getConfig();
+      const currentConfig = config;
       const updatedConfig = {
         ...currentConfig,
         app: {
@@ -652,35 +589,17 @@ function DataConfig({ isActive }: DataConfigProps) {
         },
       };
 
-      // Save to backend using global config API
-      const success = await configService.saveConfigToBackend(updatedConfig);
+      updateConfig(updatedConfig);
 
-      if (!success) {
-        throw new Error("Failed to save configuration to backend");
+      const ok = await saveConfig(updatedConfig as any);
+      if (!ok) {
+        message.error(t("knowledgeBase.message.dataMateConfigError"));
+        return;
       }
 
       message.success(t("knowledgeBase.message.dataMateConfigSaved"));
-
-      // Update local config store
-      configStore.updateConfig(updatedConfig);
-
-      // Update local state
       setDataMateUrl(dataMateUrl);
-
-      try {
-        await configService.loadConfigToFrontend();
-        console.log("Configuration reloaded from backend successfully");
-      } catch (reloadError) {
-        console.warn(
-          "Failed to reload configuration from backend, but save was successful:",
-          reloadError
-        );
-        // Don't fail the entire operation if reload fails
-      }
-
-      // Trigger knowledge base sync with the new configuration
       await handleSync();
-
       setShowDataMateConfigModal(false);
     } catch (error) {
       log.error("Failed to save DataMate configuration:", error);
@@ -690,11 +609,21 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Handle new knowledge base creation
   const handleCreateNew = () => {
+    // Clear active knowledge base selection when entering create mode
+    // This prevents issues with chunk loading from previously selected KB
+    setActiveKnowledgeBase(null);
+
     // Generate default knowledge base name
     const defaultName = generateUniqueKbName(kbState.knowledgeBases);
     setNewKbName(defaultName);
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
+    // Set default embedding model - prioritize config's default model, fall back to first available model
+    const configModel = modelConfig?.embedding?.modelName;
+    const defaultModel = configModel || (availableEmbeddingModels.length > 0
+      ? availableEmbeddingModels[0].displayName
+      : "");
+    setNewKbEmbeddingModel(defaultModel);
     setIsCreatingMode(true);
     setHasClickedUpload(false); // Reset upload button click state
     setUploadFiles([]); // Reset upload files array, clear all pending upload files
@@ -757,7 +686,8 @@ function DataConfig({ isActive }: DataConfigProps) {
           t("knowledgeBase.description.default"),
           "elasticsearch",
           newKbIngroupPermission,
-          newKbGroupIds
+          newKbGroupIds,
+          newKbEmbeddingModel
         );
 
         if (!newKB) {
@@ -969,6 +899,12 @@ function DataConfig({ isActive }: DataConfigProps) {
               getModelDisplayName={(modelId) => modelId}
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
               onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
+              onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
+                // Update active knowledge base in context when it's updated
+                if (kbState.activeKnowledgeBase && kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id) {
+                  setActiveKnowledgeBase(updatedKnowledgeBase);
+                }
+              }}
               // Search and filter props
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
@@ -997,6 +933,7 @@ function DataConfig({ isActive }: DataConfigProps) {
           >
             {isCreatingMode ? (
               <DocumentList
+                key="create-mode"
                 documents={[]}
                 onDelete={() => {}}
                 knowledgeBaseSource={""}
@@ -1011,6 +948,10 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onIngroupPermissionChange={setNewKbIngroupPermission}
                 selectedGroupIds={newKbGroupIds}
                 onSelectedGroupIdsChange={setNewKbGroupIds}
+                // Embedding model for create mode
+                availableEmbeddingModels={availableEmbeddingModels}
+                selectedEmbeddingModel={newKbEmbeddingModel}
+                onEmbeddingModelChange={setNewKbEmbeddingModel}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}
@@ -1022,6 +963,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               />
             ) : kbState.activeKnowledgeBase ? (
               <DocumentList
+                key={`kb-${kbState.activeKnowledgeBase.id}`}
                 documents={viewingDocuments}
                 onDelete={handleDeleteDocument}
                 knowledgeBaseSource={kbState.activeKnowledgeBase?.source}

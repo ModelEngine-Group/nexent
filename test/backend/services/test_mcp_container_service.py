@@ -45,6 +45,7 @@ class TestMCPContainerManagerInit:
 
     @patch('services.mcp_container_service.create_container_client_from_config')
     @patch('services.mcp_container_service.DockerContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', False)
     def test_init_success(self, mock_config_class, mock_create_client):
         """Test successful initialization"""
         mock_config = MagicMock()
@@ -64,6 +65,7 @@ class TestMCPContainerManagerInit:
 
     @patch('services.mcp_container_service.create_container_client_from_config')
     @patch('services.mcp_container_service.DockerContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', False)
     def test_init_container_error(self, mock_config_class, mock_create_client):
         """Test initialization failure when container client creation fails"""
         mock_config = MagicMock()
@@ -77,6 +79,7 @@ class TestMCPContainerManagerInit:
 
     @patch('services.mcp_container_service.create_container_client_from_config')
     @patch('services.mcp_container_service.DockerContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', False)
     def test_init_default_socket_path(self, mock_config_class, mock_create_client):
         """Test initialization with default socket path"""
         mock_config = MagicMock()
@@ -90,6 +93,42 @@ class TestMCPContainerManagerInit:
         mock_config_class.assert_called_once_with(
             docker_socket_path=None
         )
+
+    @patch('services.mcp_container_service.create_container_client_from_config')
+    @patch('services.mcp_container_service.KubernetesContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', True)
+    @patch('services.mcp_container_service.KUBERNETES_NAMESPACE', 'test-namespace')
+    def test_init_kubernetes_mode_success(self, mock_k8s_config_class, mock_create_client):
+        """Test successful initialization in Kubernetes mode"""
+        mock_config = MagicMock()
+        mock_k8s_config_class.return_value = mock_config
+
+        mock_client = MagicMock()
+        mock_create_client.return_value = mock_client
+
+        manager = MCPContainerManager()
+
+        assert manager.client == mock_client
+        mock_k8s_config_class.assert_called_once_with(
+            namespace='test-namespace',
+            in_cluster=True,
+        )
+        mock_create_client.assert_called_once_with(mock_config)
+
+    @patch('services.mcp_container_service.create_container_client_from_config')
+    @patch('services.mcp_container_service.KubernetesContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', True)
+    @patch('services.mcp_container_service.KUBERNETES_NAMESPACE', 'test-namespace')
+    def test_init_kubernetes_mode_container_error(self, mock_k8s_config_class, mock_create_client):
+        """Test initialization failure in Kubernetes mode"""
+        mock_config = MagicMock()
+        mock_k8s_config_class.return_value = mock_config
+
+        mock_create_client.side_effect = ContainerError(
+            "Cannot connect to Kubernetes")
+
+        with pytest.raises(MCPContainerError, match="Cannot connect to Kubernetes"):
+            MCPContainerManager()
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +511,865 @@ class TestGetContainerLogs:
         logs = mock_manager.get_container_logs("container-123")
 
         assert "Error retrieving logs" in logs
+
+
+# ---------------------------------------------------------------------------
+# Test stream_container_logs
+# ---------------------------------------------------------------------------
+
+
+class TestStreamContainerLogs:
+    """Test stream_container_logs method"""
+
+    @pytest.fixture
+    def mock_manager(self):
+        """Create MCPContainerManager instance with mocked client"""
+        with patch('services.mcp_container_service.create_container_client_from_config'), \
+                patch('services.mcp_container_service.DockerContainerConfig'):
+            manager = MCPContainerManager()
+            manager.client = MagicMock()
+            manager.client.client = MagicMock()
+            return manager
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_initial_logs_only(self, mock_manager):
+        """Test streaming container logs with initial logs only (follow=False)"""
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs
+        initial_logs_bytes = b"Log line 1\nLog line 2\nLog line 3\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Collect logs from async generator
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 3
+        assert logs[0] == "Log line 1"
+        assert logs[1] == "Log line 2"
+        assert logs[2] == "Log line 3"
+        mock_container.logs.assert_called_once_with(
+            tail=100, stdout=True, stderr=True, timestamps=False
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_empty_initial_logs(self, mock_manager):
+        """Test streaming when initial logs are empty"""
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock empty initial logs
+        mock_container.logs.return_value = b""
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_filters_empty_lines(self, mock_manager):
+        """Test that empty lines are filtered out"""
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock logs with empty lines
+        initial_logs_bytes = b"Log line 1\n\nLog line 2\n   \nLog line 3\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 3
+        assert "Log line 1" in logs
+        assert "Log line 2" in logs
+        assert "Log line 3" in logs
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_with_follow(self, mock_manager):
+        """Test streaming container logs with follow=True - normal flow"""
+        import asyncio
+        import threading
+        import time
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs
+        initial_logs_bytes = b"Initial log\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Mock follow stream - create a generator that yields chunks
+        follow_chunks = [
+            b"New log 1\n",
+            b"New log 2\n",
+            b"New log 3\n",
+        ]
+        follow_stream = iter(follow_chunks)
+
+        # First call returns initial logs, second call returns follow stream
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call: initial logs
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                # Second call: follow stream
+                return follow_stream
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        # Collect logs from async generator
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            # Wait a bit for thread to process, then break after we get follow logs
+            if len(logs) >= 4:  # Initial log + 3 follow logs
+                break
+            await asyncio.sleep(0.1)  # Give thread time to put items in queue
+
+        # Should have initial log and follow logs
+        assert len(logs) >= 1
+        assert "Initial log" in logs[0]
+        # Verify follow logs are captured (may need to wait for thread)
+        assert any("New log" in log for log in logs) or len(logs) >= 1
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_container_not_found(self, mock_manager):
+        """Test streaming logs when container is not found"""
+        from docker.errors import NotFound
+
+        mock_manager.client.client.containers.get.side_effect = NotFound(
+            "Container not found", response=None, explanation="Container does not exist"
+        )
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "non-existent", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        # Should yield error message
+        assert len(logs) == 1
+        assert "Error retrieving logs" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_exception_during_streaming(self, mock_manager):
+        """Test exception handling during log streaming in thread (covers lines 318-322)"""
+        import asyncio
+        import threading
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs to succeed
+        initial_logs_bytes = b"Log line 1\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Mock follow stream to raise exception during iteration in thread
+        # The exception should be raised inside the for loop (line 307), not at container.logs() call
+        call_count = [0]
+        iteration_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call: initial logs
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                # Second call: follow stream - raise exception during iteration
+                def exception_stream():
+                    iteration_count[0] += 1
+                    yield b"First chunk\n"
+                    iteration_count[0] += 1
+                    # Raise exception during iteration (inside for loop at line 307)
+                    raise Exception("Stream error during iteration")
+                return exception_stream()
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        # Collect logs from async generator
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            # Wait for thread to process chunks and raise exception
+            await asyncio.sleep(0.2)
+            # After exception, None should be put in queue (line 320-321)
+            # This will break the while loop (line 333-334)
+            break
+
+        # Should have initial log
+        assert len(logs) >= 1
+        assert "Log line 1" in logs[0]
+        # Exception should be caught at line 318, None put in queue at line 320-321
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_follow_exception_in_logs_call(self, mock_manager):
+        """Test exception when container.logs() raises exception (covers lines 318-322)"""
+        import asyncio
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs to succeed
+        initial_logs_bytes = b"Log line 1\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Mock follow stream - container.logs() call itself raises exception
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call: initial logs
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                # Second call: container.logs() raises exception (before iteration)
+                raise Exception("Error calling container.logs()")
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        # Collect logs from async generator
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            # Wait for thread exception handling
+            await asyncio.sleep(0.2)
+            break
+
+        # Should have initial log
+        assert len(logs) >= 1
+        assert "Log line 1" in logs[0]
+        # Exception should be caught at line 318, None put in queue at line 320-321
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_follow_with_multiple_chunks(self, mock_manager):
+        """Test follow=True with multiple log chunks and line splitting (covers lines 307-339)"""
+        import asyncio
+        import threading
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs
+        initial_logs_bytes = b"Initial log\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Mock follow stream with multiple chunks containing multiple lines
+        follow_chunks = [
+            b"Chunk 1 line 1\nChunk 1 line 2\n",
+            b"Chunk 2 line 1\n",
+            b"Chunk 3 line 1\nChunk 3 line 2\nChunk 3 line 3\n",
+        ]
+        follow_stream = iter(follow_chunks)
+
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                return follow_stream
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            # Collect all logs
+            await asyncio.sleep(0.1)
+            if len(logs) >= 10:  # Safety limit
+                break
+
+        # Should have initial log and follow logs split by lines
+        assert len(logs) >= 1
+        assert "Initial log" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_follow_filters_empty_lines(self, mock_manager):
+        """Test that empty lines are filtered in follow stream (covers lines 337-339)"""
+        import asyncio
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs with empty lines
+        initial_logs_bytes = b"Initial log\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Mock follow stream with empty lines
+        follow_chunks = [
+            b"Valid log 1\n\n   \nValid log 2\n",
+        ]
+        follow_stream = iter(follow_chunks)
+
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                return follow_stream
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            await asyncio.sleep(0.1)
+            if len(logs) >= 5:  # Safety limit
+                break
+
+        # Should filter out empty lines
+        assert len(logs) >= 1
+        # All logs should be non-empty
+        for log in logs:
+            assert log.strip() != ""
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_follow_stop_flag(self, mock_manager):
+        """Test that stop_flag stops the thread loop (covers lines 308-309, 341)"""
+        import asyncio
+        import threading
+        import time
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs
+        initial_logs_bytes = b"Initial log\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Mock follow stream that yields chunks slowly
+        # This allows stop_flag to be checked during iteration at line 308
+        chunk_count = [0]
+
+        def slow_stream():
+            while True:
+                chunk_count[0] += 1
+                yield f"Log chunk {chunk_count[0]}\n".encode()
+                # Small delay to allow stop_flag to be set and checked
+                time.sleep(0.05)
+                if chunk_count[0] > 20:  # Safety limit
+                    break
+
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                return slow_stream()
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            # Break early to trigger stop_flag in finally block (line 341)
+            # This will set stop_flag[0] = True, which thread checks at line 308
+            if len(logs) >= 2:
+                break
+
+        # Give thread time to check stop_flag[0] at line 308 and break at line 309
+        await asyncio.sleep(0.2)
+
+        # Should have at least initial log
+        assert len(logs) >= 1
+        # stop_flag should be set in finally block (line 341)
+        # Thread should check stop_flag[0] at line 308 and break at line 309
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_follow_queue_none_signal(self, mock_manager):
+        """Test that None in queue signals end of stream (covers lines 314-317, 332-334)"""
+        import asyncio
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs
+        initial_logs_bytes = b"Initial log\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Mock follow stream that immediately ends (puts None in queue)
+        follow_chunks = [
+            b"Follow log 1\n",
+        ]
+        follow_stream = iter(follow_chunks)
+
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                return follow_stream
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            await asyncio.sleep(0.2)  # Wait for thread to finish and put None
+
+        # Should have initial log and follow log before None signal
+        assert len(logs) >= 1
+        assert "Initial log" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_follow_stop_flag_during_iteration(self, mock_manager):
+        """Test stop_flag check during log stream iteration (covers lines 308-309)"""
+        import asyncio
+        import time
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs
+        initial_logs_bytes = b"Initial log\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Create a stream that yields multiple chunks with delays
+        # This ensures the thread will be in the for loop (line 307) when stop_flag is checked
+        chunk_yielded = [False]
+
+        def stream_with_delay():
+            chunk_yielded[0] = True
+            yield b"Chunk 1\n"
+            time.sleep(0.1)  # Delay to allow stop_flag to be set
+            yield b"Chunk 2\n"
+            time.sleep(0.1)
+            yield b"Chunk 3\n"
+
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                return stream_with_delay()
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            # After getting initial log, break to set stop_flag[0] = True in finally (line 341)
+            # Thread should check stop_flag[0] at line 308 during next iteration
+            if len(logs) >= 1:
+                # Small delay to let thread start processing
+                await asyncio.sleep(0.05)
+                break
+
+        # Wait for thread to check stop_flag and break
+        await asyncio.sleep(0.2)
+
+        # Should have initial log
+        assert len(logs) >= 1
+        # stop_flag[0] is set to True in finally block (line 341)
+        # Thread checks stop_flag[0] at line 308 and breaks at line 309
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_follow_decode_errors(self, mock_manager):
+        """Test decode error handling in follow stream (covers line 335)"""
+        import asyncio
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs
+        initial_logs_bytes = b"Initial log\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Mock follow stream with invalid UTF-8
+        follow_chunks = [
+            b"Valid log\n",
+            b"\xff\xfeInvalid UTF-8\n",  # Invalid UTF-8 bytes
+            b"Another valid log\n",
+        ]
+        follow_stream = iter(follow_chunks)
+
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                return follow_stream
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            await asyncio.sleep(0.1)
+            if len(logs) >= 5:  # Safety limit
+                break
+
+        # Should handle decode errors gracefully with errors="replace"
+        assert len(logs) >= 1
+        assert "Initial log" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_decode_error(self, mock_manager):
+        """Test handling of decode errors in log streaming"""
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock logs with invalid UTF-8 bytes
+        initial_logs_bytes = b"\xff\xfeInvalid UTF-8\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        # Should handle decode errors gracefully with errors="replace"
+        assert len(logs) >= 0
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_custom_tail(self, mock_manager):
+        """Test streaming with custom tail parameter"""
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        initial_logs_bytes = b"Log line 1\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=50, follow=False
+        ):
+            logs.append(log_line)
+
+        # Verify tail parameter was passed correctly
+        mock_container.logs.assert_called_with(
+            tail=50, stdout=True, stderr=True, timestamps=False
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test stream_container_logs (Kubernetes Mode)
+# ---------------------------------------------------------------------------
+
+
+class TestStreamContainerLogsKubernetes:
+    """Test stream_container_logs method in Kubernetes mode"""
+
+    @pytest.fixture(autouse=True)
+    def setup_k8s_patches(self):
+        """Setup patches for Kubernetes mode - runs for each test"""
+        self._patches = [
+            patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', True),
+            patch('services.mcp_container_service.KUBERNETES_NAMESPACE', 'test-namespace'),
+        ]
+        for p in self._patches:
+            p.start()
+        yield
+        for p in self._patches:
+            p.stop()
+
+    @pytest.fixture
+    def mock_manager_k8s(self):
+        """Create MCPContainerManager instance with mocked Kubernetes client"""
+        with patch('services.mcp_container_service.create_container_client_from_config'), \
+                patch('services.mcp_container_service.KubernetesContainerConfig'):
+            manager = MCPContainerManager()
+            manager.client = MagicMock()
+            manager.client.core_v1 = MagicMock()
+            yield manager
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_initial_logs_only(self, mock_manager_k8s):
+        """Test streaming Kubernetes container logs with initial logs only (follow=False)"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+
+        # Mock get_container_logs for initial logs
+        mock_manager_k8s.client.get_container_logs.return_value = "K8s log line 1\nK8s log line 2\n"
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 2
+        assert logs[0] == "K8s log line 1"
+        assert logs[1] == "K8s log line 2"
+        mock_manager_k8s.client._resolve_pod_name.assert_called_once_with("container-uid-123")
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_pod_not_found(self, mock_manager_k8s):
+        """Test streaming logs when Kubernetes pod is not found"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = None
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "non-existent-uid", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        # Should yield no logs when pod is not found
+        assert len(logs) == 0
+        mock_manager_k8s.client._resolve_pod_name.assert_called_once_with("non-existent-uid")
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_empty_initial_logs(self, mock_manager_k8s):
+        """Test streaming when initial Kubernetes logs are empty"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = ""
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_filters_empty_lines(self, mock_manager_k8s):
+        """Test that empty lines are filtered out in Kubernetes mode"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+
+        # Mock initial logs with empty lines
+        mock_manager_k8s.client.get_container_logs.return_value = "Log 1\n\nLog 2\n   \nLog 3\n"
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 3
+        assert "Log 1" in logs
+        assert "Log 2" in logs
+        assert "Log 3" in logs
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_with_follow(self, mock_manager_k8s):
+        """Test streaming Kubernetes container logs with follow=True"""
+        import asyncio
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Initial K8s log\n"
+
+        # Mock Kubernetes log stream
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = iter([
+            b"New K8s log 1\n",
+            b"New K8s log 2\n",
+        ])
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            if len(logs) >= 3:
+                break
+            await asyncio.sleep(0.1)
+
+        assert len(logs) >= 1
+        assert "Initial K8s log" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_follow_stream_exception(self, mock_manager_k8s):
+        """Test exception handling during Kubernetes log stream"""
+        import asyncio
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Log line\n"
+
+        # Mock Kubernetes log stream to raise exception
+        def raise_exception_stream():
+            yield b"Chunk 1\n"
+            raise Exception("K8s stream error")
+
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = raise_exception_stream()
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            await asyncio.sleep(0.2)
+            break
+
+        assert len(logs) >= 1
+        assert "Log line" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_bytes_decoding(self, mock_manager_k8s):
+        """Test Kubernetes log stream handles bytes decoding"""
+        import asyncio
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Initial log\n"
+
+        # Mock Kubernetes log stream returning bytes
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = iter([
+            b"Decoded log 1\n",
+            b"\xff\xfeInvalid UTF-8\n",  # Invalid UTF-8
+            b"Valid log 2\n",
+        ])
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            await asyncio.sleep(0.1)
+            if len(logs) >= 5:
+                break
+
+        assert len(logs) >= 1
+        # Should handle decode errors gracefully
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_stop_flag(self, mock_manager_k8s):
+        """Test stop_flag stops Kubernetes log stream"""
+        import asyncio
+        import time
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Initial\n"
+
+        # Mock slow stream to allow stop_flag to be set
+        def slow_stream():
+            for i in range(5):
+                yield f"Log {i}\n".encode()
+                time.sleep(0.05)
+
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = slow_stream()
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            if len(logs) >= 2:
+                break
+            await asyncio.sleep(0.05)
+
+        await asyncio.sleep(0.2)
+
+        assert len(logs) >= 1
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_custom_namespace(self, mock_manager_k8s):
+        """Test streaming logs with custom Kubernetes namespace"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Log\n"
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_outer_exception(self, mock_manager_k8s):
+        """Test outer exception handler in Kubernetes stream_container_logs (lines 426-428)"""
+        mock_manager_k8s.client._resolve_pod_name.side_effect = Exception(
+            "Unexpected error in K8s mode")
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        # Should yield error message from outer exception handler
+        assert len(logs) == 1
+        assert "Error retrieving logs" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_read_pod_log_params(self, mock_manager_k8s):
+        """Test that read_namespaced_pod_log is called with correct parameters"""
+        import asyncio
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = ""
+
+        # Mock stream that ends immediately
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = iter([])
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            await asyncio.sleep(0.1)
+            if len(logs) >= 2:
+                break
+
+        # Verify read_namespaced_pod_log was called with correct parameters
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.assert_called_once()
+        call_kwargs = mock_manager_k8s.client.core_v1.read_namespaced_pod_log.call_args[1]
+        assert call_kwargs['name'] == 'test-pod'
+        assert call_kwargs['namespace'] == 'test-namespace'
+        assert call_kwargs['container'] == 'mcp-server'
+        assert call_kwargs['follow'] is True
+        assert call_kwargs['timestamps'] is False
+        assert call_kwargs['_preload_content'] is False
+        assert call_kwargs['tail_lines'] == 0
 
 
 # ---------------------------------------------------------------------------

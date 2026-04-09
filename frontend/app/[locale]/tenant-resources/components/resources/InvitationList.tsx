@@ -69,7 +69,7 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
   }, [refreshKey, tenantId, refetch]);
 
   // Fetch groups for group selection
-  const { data: groupData } = useGroupList(tenantId, 1, 100); // Get all groups for selection
+  const { data: groupData } = useGroupList(tenantId); // Get all groups for selection
   const groups = groupData?.groups || [];
 
   const invitations = data?.items || [];
@@ -425,7 +425,6 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         width={600}
-        maskClosable={false}
       >
         <Form form={form} layout="vertical">
           {!editingInvitation && (

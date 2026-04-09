@@ -11,12 +11,13 @@ import {
 } from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
-import { configService } from "@/services/configService";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import { modelService } from "@/services/modelService";
 import { ModelType, SingleModelConfig } from "@/types/modelConfig";
 import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
+import { useDashscopeModelList } from "@/hooks/model/useDashscopeModelList";
+import { useTokenPonyModelList } from "@/hooks/model/useTokenponyModelList";
 import log from "@/lib/logger";
 import {
   ModelChunkSizeSlider,
@@ -191,7 +192,7 @@ export const ModelAddDialog = ({
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { updateModelConfig, getConfig } = useConfig();
+  const { updateModelConfig, saveConfig } = useConfig();
 
   // Parse backend error message and return i18n key with params
   const parseModelError = (
@@ -236,16 +237,11 @@ export const ModelAddDialog = ({
   const [loadingModelList, setLoadingModelList] = useState(false);
 
   const persistModelConfig = useCallback(async () => {
-    try {
-      const ok = await configService.saveConfigToBackend(getConfig() as any);
-      if (!ok) {
-        message.error(t("setup.page.error.saveConfig"));
-      }
-    } catch (error) {
+    const ok = await saveConfig();
+    if (!ok) {
       message.error(t("setup.page.error.saveConfig"));
-      log.error("Failed to auto save model configuration", error);
     }
-  }, [getConfig, message, t]);
+  }, [saveConfig, message, t]);
 
   // Settings modal state
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
@@ -254,7 +250,7 @@ export const ModelAddDialog = ({
   const [modelMaxTokens, setModelMaxTokens] = useState("4096");
 
   // Use the silicon model list hook
-  const { getModelList, getProviderSelectedModalList } = useSiliconModelList({
+  const siliconHook  = useSiliconModelList({
     form,
     setModelList,
     setSelectedModelIds,
@@ -262,7 +258,33 @@ export const ModelAddDialog = ({
     setLoadingModelList,
     tenantId,
   });
+  const dashscopeHook = useDashscopeModelList({
+    form,
+    setModelList,
+    setSelectedModelIds,
+    setShowModelList,
+    setLoadingModelList,
+    tenantId,
+  });
+  const tokenponyHook = useTokenPonyModelList({
+    form,
+    setModelList,
+    setSelectedModelIds,
+    setShowModelList,
+    setLoadingModelList,
+    tenantId,
+  });
+  let getModelList;
+  let getProviderSelectedModalList;
 
+// 2. 根据条件赋值
+  if (form.provider === "silicon") {
+    ({ getModelList, getProviderSelectedModalList } = siliconHook);
+  } else if (form.provider === "dashscope") {
+    ({ getModelList, getProviderSelectedModalList } = dashscopeHook);
+  } else if (form.provider === "tokenpony") {
+    ({ getModelList, getProviderSelectedModalList } = tokenponyHook);
+  }
   // Reset form to default state
   const resetForm = useCallback(() => {
     setForm(DEFAULT_FORM_STATE);
@@ -398,6 +420,9 @@ export const ModelAddDialog = ({
         isValidVectorDimension(form.vectorDimension)
       );
     }
+    if (form.type === MODEL_TYPES.RERANK) {
+      return form.name.trim() !== "" && form.url.trim() !== "";
+    }
     return (
       form.name.trim() !== "" &&
       form.url.trim() !== "" &&
@@ -454,7 +479,9 @@ export const ModelAddDialog = ({
           maxTokens:
             form.type === MODEL_TYPES.EMBEDDING
               ? parseInt(form.vectorDimension)
-              : parseInt(form.maxTokens),
+              : form.type === MODEL_TYPES.RERANK
+                ? 0
+                : parseInt(form.maxTokens),
           embeddingDim:
             form.type === MODEL_TYPES.EMBEDDING
               ? parseInt(form.vectorDimension)
@@ -637,9 +664,10 @@ export const ModelAddDialog = ({
       let maxTokensValue = parseInt(form.maxTokens);
       if (
         form.type === MODEL_TYPES.EMBEDDING ||
-        form.type === MODEL_TYPES.MULTI_EMBEDDING
+        form.type === MODEL_TYPES.MULTI_EMBEDDING ||
+        form.type === MODEL_TYPES.RERANK
       ) {
-        // For embedding models, use the vector dimension as maxTokens
+        // For embedding/rerank models, the backend does not rely on max_tokens in the same way as LLM.
         maxTokensValue = 0;
       }
 
@@ -756,6 +784,7 @@ export const ModelAddDialog = ({
   };
 
   const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
+  const isRerankModel = form.type === MODEL_TYPES.RERANK;
 
   return (
     <Modal
@@ -800,6 +829,8 @@ export const ModelAddDialog = ({
                 {t("model.provider.modelengine")}
               </Option>
               <Option value="silicon">{t("model.provider.silicon")}</Option>
+              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
+              <Option value="tokenpony">{t("model.provider.tokenpony")}</Option>
             </Select>
             {/* ModelEngine URL input (only when provider is ModelEngine) */}
             {form.provider === "modelengine" && (
@@ -835,7 +866,7 @@ export const ModelAddDialog = ({
               {t("model.type.embedding")}
             </Option>
             <Option value={MODEL_TYPES.VLM}>{t("model.type.vlm")}</Option>
-            <Option value={MODEL_TYPES.RERANK} disabled>
+            <Option value={MODEL_TYPES.RERANK}>
               {t("model.type.rerank")}
             </Option>
             <Option value={MODEL_TYPES.STT} disabled>
@@ -998,7 +1029,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* Max Tokens */}
-        {!isEmbeddingModel && !form.isBatchImport && (
+        {!isEmbeddingModel && !isRerankModel && !form.isBatchImport && (
           <div>
             <label
               htmlFor="maxTokens"
@@ -1276,19 +1307,47 @@ export const ModelAddDialog = ({
                 </a>
               </Tooltip>
               {form.isBatchImport && (
-                <Tooltip title="SiliconFlow">
-                  <a
-                    href={PROVIDER_LINKS.siliconflow}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <img
-                      src="/siliconflow.png"
-                      alt="SiliconFlow"
-                      className="h-4 ml-1.5 cursor-pointer"
-                    />
-                  </a>
-                </Tooltip>
+                <>
+                  <Tooltip title="SiliconFlow">
+                    <a
+                      href={PROVIDER_LINKS.siliconflow}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/siliconflow.png"
+                        alt="SiliconFlow"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                  <Tooltip title={t("model.provider.dashscope")}>
+                    <a
+                      href={PROVIDER_LINKS.dashscope}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/aliyuncs.png"
+                        alt="DashScope"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                  <Tooltip title={t("model.provider.tokenpony")}>
+                    <a
+                      href={PROVIDER_LINKS.tokenpony}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/tokenpony.png"
+                        alt="TokenPony"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                </>
               )}
               {form.type === "llm" && !form.isBatchImport && (
                 <>

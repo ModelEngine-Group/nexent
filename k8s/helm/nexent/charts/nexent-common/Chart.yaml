@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nexent-common
+description: Nexent Common - Shared resources including ConfigMap, Secret, RBAC, PVC, and Namespace
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - nexent
+  - common
+  - shared
+maintainers:
+  - name: Nexent Team

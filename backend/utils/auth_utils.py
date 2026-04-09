@@ -1,198 +1,214 @@
 import logging
-import hashlib
-import hmac
 import time
+import hmac
+import hashlib
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import jwt
 from fastapi import Request
 from supabase import create_client
 
-from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID, IS_SPEED_MODE, SUPABASE_URL, SUPABASE_KEY, SERVICE_ROLE_KEY, DEBUG_JWT_EXPIRE_SECONDS, LANGUAGE
-from consts.exceptions import LimitExceededError, SignatureValidationError, UnauthorizedError
+from consts.const import (
+    DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
+    IS_SPEED_MODE,
+    SUPABASE_JWT_SECRET,
+    SUPABASE_URL,
+    SUPABASE_KEY,
+    SERVICE_ROLE_KEY,
+    DEBUG_JWT_EXPIRE_SECONDS,
+    LANGUAGE,
+)
+from consts.exceptions import LimitExceededError, UnauthorizedError
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.token_db import get_token_by_access_key
 
 # Module logger
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# AK/SK authentication helpers (merged from aksk_auth_utils.py)
+# Shared test constants
 # ---------------------------------------------------------------------------
 
-# Mock AK/SK configuration (replace with DB/config lookup in production)
-MOCK_ACCESS_KEY = "mock_access_key_12345"
-MOCK_SECRET_KEY = "mock_secret_key_67890abcdef"
-MOCK_JWT_SECRET_KEY = "mock_jwt_secret_key_67890abcdef"
+# Fixed test secret used by generate_test_jwt and unit tests.
+MOCK_JWT_SECRET_KEY = "nexent-mock-jwt-secret"
 
-# Timestamp validity window in seconds (prevent replay attacks)
-TIMESTAMP_VALIDITY_WINDOW = 300
+# ---------------------------------------------------------------------------
+# AK/SK (Access Key / Secret Key) authentication helpers
+# ---------------------------------------------------------------------------
+
+# Validity window in seconds for X-Timestamp header.
+TIMESTAMP_VALIDITY_WINDOW = 5 * 60
 
 
-def get_aksk_config(tenant_id: str) -> Tuple[str, str]:
+def calculate_hmac_signature(secret_key: str, access_key: str, timestamp: str, body: str) -> str:
     """
-    Get AK/SK configuration according to tenant_id
+    Calculate HMAC-SHA256 signature for AK/SK authentication.
 
-    Returns:
-        Tuple[str, str]: (access_key, secret_key)
+    Returns a lowercase hex digest of length 64.
     """
-
-    # TODO: get ak/sk according to tenant_id from DB
-    return MOCK_ACCESS_KEY, MOCK_SECRET_KEY
+    message = f"{access_key}\n{timestamp}\n{body}".encode("utf-8")
+    return hmac.new(secret_key.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
 def validate_timestamp(timestamp: str) -> bool:
-    """
-    Validate timestamp is within validity window
-
-    Args:
-        timestamp: timestamp string
-
-    Returns:
-        bool: whether timestamp is valid
-    """
+    """Validate that timestamp is within allowed window."""
     try:
-        timestamp_int = int(timestamp)
-        current_time = int(time.time())
-
-        if abs(current_time - timestamp_int) > TIMESTAMP_VALIDITY_WINDOW:
-            logger.warning(
-                f"Timestamp validation failed: current={current_time}, provided={timestamp_int}"
-            )
-            return False
-
-        return True
-    except (ValueError, TypeError) as e:
-        logger.error(f"Invalid timestamp format: {timestamp}, error: {e}")
+        ts = int(timestamp)
+    except (TypeError, ValueError):
         return False
 
-
-def calculate_hmac_signature(secret_key: str, access_key: str, timestamp: str, request_body: str = "") -> str:
-    """
-    Calculate HMAC-SHA256 signature
-
-    Args:
-        secret_key: secret key
-        access_key: access key
-        timestamp: timestamp
-        request_body: request body (optional)
-
-    Returns:
-        str: HMAC-SHA256 signature (hex string)
-    """
-    string_to_sign = f"{access_key}{timestamp}{request_body}"
-    signature = hmac.new(
-        secret_key.encode("utf-8"),
-        string_to_sign.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    return signature
+    now = int(time.time())
+    return abs(now - ts) <= TIMESTAMP_VALIDITY_WINDOW
 
 
-def verify_aksk_signature(
-    access_key: str, timestamp: str, signature: str, request_body: str = ""
-) -> bool:
-    """
-    Validate AK/SK signature
+def extract_aksk_headers(headers: Dict[str, str]) -> Tuple[str, str, str]:
+    """Extract AK/SK headers or raise UnauthorizedError when missing."""
+    access_key = headers.get("X-Access-Key") if headers else None
+    timestamp = headers.get("X-Timestamp") if headers else None
+    signature = headers.get("X-Signature") if headers else None
 
-    Args:
-        access_key: access key
-        timestamp: timestamp
-        signature: provided signature
-        request_body: request body (optional)
-
-    Returns:
-        bool: whether signature is valid
-    """
-    try:
-        if not validate_timestamp(timestamp):
-            raise SignatureValidationError("Timestamp is invalid or expired")
-
-        # TODO: get ak/sk according to tenant_id from DB
-        mock_access_key, mock_secret_key = get_aksk_config(
-            tenant_id="tenant_id")
-
-        if access_key != mock_access_key:
-            logger.warning(f"Invalid access key: {access_key}")
-            return False
-
-        expected_signature = calculate_hmac_signature(
-            mock_secret_key, access_key, timestamp, request_body
-        )
-
-        if not hmac.compare_digest(signature, expected_signature):
-            logger.warning(
-                f"Signature mismatch: expected={expected_signature}, provided={signature}"
-            )
-            return False
-
-        return True
-    except Exception as e:
-        logger.error(f"Error during signature verification: {e}")
-        return False
-
-
-def extract_aksk_headers(headers: dict) -> Tuple[str, str, str]:
-    """
-    Extract AK/SK related information from request headers
-
-    Args:
-        headers: request headers dictionary
-
-    Returns:
-        Tuple[str, str, str]: (access_key, timestamp, signature)
-
-    Raises:
-        UnauthorizedError: when required headers are missing
-    """
-
-    def get_header(headers: dict, name: str) -> Optional[str]:
-        for k, v in headers.items():
-            if k.lower() == name.lower():
-                return v
-        return None
-
-    access_key = get_header(headers, "X-Access-Key")
-    timestamp = get_header(headers, "X-Timestamp")
-    signature = get_header(headers, "X-Signature")
-
-    if not access_key:
-        raise UnauthorizedError("Missing X-Access-Key header")
-    if not timestamp:
-        raise UnauthorizedError("Missing X-Timestamp header")
-    if not signature:
-        raise UnauthorizedError("Missing X-Signature header")
+    if not access_key or not timestamp or not signature:
+        raise UnauthorizedError("Missing AK/SK authentication headers")
 
     return access_key, timestamp, signature
 
 
-def validate_aksk_authentication(headers: dict, request_body: str = "") -> bool:
+def get_aksk_config(tenant_id: str) -> Tuple[str, str]:
     """
-    Validate AK/SK authentication
+    Get (access_key, secret_key) configuration for a tenant.
 
-    Args:
-        headers: request headers dictionary
-        request_body: request body (optional)
-
-    Returns:
-        bool: whether authentication is successful
-
-    Raises:
-        UnauthorizedError: when authentication fails
-        SignatureValidationError: when signature verification fails
+    This is intentionally a thin indirection so tests can monkeypatch it.
     """
+    raise UnauthorizedError("AK/SK authentication is not configured")
+
+
+def verify_aksk_signature(access_key: str, timestamp: str, signature: str, body: str, tenant_id: str = None) -> bool:
+    """Verify AK/SK signature; returns False instead of raising on mismatch."""
+    tenant = tenant_id or DEFAULT_TENANT_ID
     try:
-        access_key, timestamp, signature = extract_aksk_headers(headers)
+        expected_access_key, secret_key = get_aksk_config(tenant)
+    except Exception:
+        return False
 
-        if not verify_aksk_signature(access_key, timestamp, signature, request_body):
+    if access_key != expected_access_key:
+        return False
+
+    expected_sig = calculate_hmac_signature(secret_key, access_key, timestamp, body)
+    return hmac.compare_digest(expected_sig, signature)
+
+
+def validate_aksk_authentication(headers: Dict[str, str], body: str, tenant_id: str = None) -> bool:
+    """
+    Validate AK/SK authentication.
+
+    Returns True when valid, otherwise raises domain exceptions.
+    """
+    from consts.exceptions import SignatureValidationError  # imported lazily for test-time stubbing
+
+    try:
+        access_key, ts, sig = extract_aksk_headers(headers)
+
+        if not validate_timestamp(ts):
+            raise UnauthorizedError("Invalid or expired timestamp")
+
+        # Call with positional args so tests can monkeypatch with simple lambdas.
+        if tenant_id is None:
+            ok = verify_aksk_signature(access_key, ts, sig, body)
+        else:
+            ok = verify_aksk_signature(access_key, ts, sig, body, tenant_id)
+
+        if not ok:
             raise SignatureValidationError("Invalid signature")
 
         return True
-    except (UnauthorizedError, SignatureValidationError, LimitExceededError) as e:
-        raise e
+    except (UnauthorizedError, SignatureValidationError):
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error during AK/SK authentication")
+        raise UnauthorizedError("Authentication failed") from exc
+
+# ---------------------------------------------------------------------------
+# Bearer Token (API Key) authentication
+# ---------------------------------------------------------------------------
+
+
+def validate_bearer_token(authorization: Optional[str]) -> Tuple[bool, Optional[dict]]:
+    """
+    Validate Bearer token (API Key) from Authorization header.
+
+    Args:
+        authorization: Authorization header value (e.g., "Bearer nexent-xxxxx")
+
+    Returns:
+        Tuple of (is_valid, token_info_dict)
+        - is_valid: True if token exists and is active
+        - token_info: Token information dict if valid, None otherwise
+    """
+    if not authorization:
+        logger.warning("No authorization header provided")
+        return False, None
+
+    # Extract token from "Bearer <token>" format
+    token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+
+    if not token:
+        logger.warning("Empty bearer token")
+        return False, None
+
+    # Look up token in database
+    try:
+        token_info = get_token_by_access_key(token)
+        if token_info and token_info.get("delete_flag") != "Y":
+            logger.debug(f"Token validated successfully for user {token_info.get('user_id')}")
+            return True, token_info
+        else:
+            logger.warning(f"Invalid or inactive token: {token[:20]}...")
+            return False, None
     except Exception as e:
-        logger.error(f"Unexpected error during AK/SK authentication: {e}")
-        raise UnauthorizedError("Authentication failed")
+        logger.error(f"Error validating bearer token: {str(e)}")
+        return False, None
+
+
+def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
+    """
+    Get user_id and tenant_id from access_key by querying user_token_info_t and user_tenant_t.
+
+    Args:
+        access_key: The access key (API Key) from the Authorization header.
+
+    Returns:
+        Dict containing user_id and tenant_id.
+
+    Raises:
+        UnauthorizedError: If the access key is not found or invalid.
+    """
+    if not access_key:
+        raise UnauthorizedError("Invalid access key")
+
+    # Query token from user_token_info_t
+    token_info = get_token_by_access_key(access_key)
+    if not token_info or token_info.get("delete_flag") == "Y":
+        raise UnauthorizedError("Invalid or inactive access key")
+
+    user_id = token_info.get("user_id")
+    if not user_id:
+        raise UnauthorizedError("No user associated with this access key")
+
+    # Query tenant from user_tenant_t
+    user_tenant_record = get_user_tenant_by_user_id(user_id)
+    if user_tenant_record and user_tenant_record.get("tenant_id"):
+        tenant_id = user_tenant_record["tenant_id"]
+    else:
+        tenant_id = DEFAULT_TENANT_ID
+        logger.warning(f"No tenant relationship found for user {user_id}, using default tenant")
+
+    return {
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "token_id": token_info.get("token_id")
+    }
 
 
 def get_supabase_client():
@@ -272,26 +288,50 @@ def calculate_expires_at(token: Optional[str] = None) -> int:
 
 def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
     """
-    Extract user ID from JWT token
+    Extract user ID from JWT token after verifying signature and expiration.
 
     Args:
         authorization: Authorization header value
 
     Returns:
         Optional[str]: User ID, return None if parsing fails
+
+    Raises:
+        UnauthorizedError: If token is invalid, expired, or signature verification fails
     """
+    if not SUPABASE_JWT_SECRET:
+        logging.error("SUPABASE_JWT_SECRET (or JWT_SECRET) is not configured; cannot verify JWT")
+        raise UnauthorizedError("JWT verification is not configured")
+
     try:
         # Format authorization header
         token = authorization.replace("Bearer ", "") if authorization.startswith(
             "Bearer ") else authorization
 
-        # Decode JWT token (without signature verification, only parse content)
-        decoded = jwt.decode(token, options={"verify_signature": False})
+        # Decode and verify JWT (signature + expiration)
+        # verify_aud=False: allow tokens with aud claim (e.g. test JWT, Supabase) without strict audience check
+        decoded = jwt.decode(
+            token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            options={"verify_exp": True, "verify_aud": False},
+        )
 
         # Extract user ID from JWT claims
         user_id = decoded.get("sub")
 
         return user_id
+    except jwt.ExpiredSignatureError:
+        logging.warning("Token expired")
+        raise UnauthorizedError("Token has expired")
+    except jwt.InvalidSignatureError:
+        logging.warning("JWT signature verification failed")
+        raise UnauthorizedError("Invalid or expired authentication token")
+    except jwt.InvalidTokenError as e:
+        logging.warning(f"Invalid JWT: {e}")
+        raise UnauthorizedError("Invalid or expired authentication token")
+    except UnauthorizedError:
+        raise
     except Exception as e:
         logging.error(f"Failed to extract user ID from token: {str(e)}")
         raise UnauthorizedError("Invalid or expired authentication token")
@@ -307,11 +347,15 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     Returns:
         tuple[str, str]: (user_id, tenant_id)
     """
-    # if deploy in speed mode or authorization is None, return default user id and tenant id
-    if IS_SPEED_MODE or authorization is None:
+    # In speed mode, allow unauthenticated access with default user for demo/dev
+    if IS_SPEED_MODE:
         logging.debug(
-            "Speed mode or no valid authorization header detected - returning default user ID and tenant ID")
+            "Speed mode detected - returning default user ID and tenant ID")
         return DEFAULT_USER_ID, DEFAULT_TENANT_ID
+
+    # In normal mode, missing auth header means unauthorized - return 401, not default user
+    if authorization is None or (isinstance(authorization, str) and not authorization.strip()):
+        raise UnauthorizedError("No authorization header provided")
 
     try:
         user_id = _extract_user_id_from_jwt_token(authorization)

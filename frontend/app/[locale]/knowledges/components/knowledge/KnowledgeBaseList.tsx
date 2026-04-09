@@ -42,7 +42,8 @@ interface KnowledgeBaseListProps {
   showDataMateConfig?: boolean; // Control whether to show DataMate config button
   getModelDisplayName: (modelId: string) => string;
   containerHeight?: string; // Container total height, consistent with DocumentList
-  onKnowledgeBaseChange?: () => void; // New: callback function when knowledge base switches
+  onKnowledgeBaseChange?: () => void; // Callback when knowledge base switches
+  onKnowledgeBaseUpdate?: (updatedKnowledgeBase: KnowledgeBase) => void; // Callback when knowledge base is updated
   // Optional controlled search / filter props (if parent wants to control filters)
   searchQuery?: string;
   onSearchChange?: (value: string) => void;
@@ -67,6 +68,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   getModelDisplayName,
   containerHeight = "70vh", // Default container height consistent with DocumentList
   onKnowledgeBaseChange, // New: callback function when knowledge base switches
+  onKnowledgeBaseUpdate, // Callback when knowledge base is updated
   searchQuery,
   onSearchChange,
   sourceFilter,
@@ -81,7 +83,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const tenantId = user?.tenantId || null;
 
   // Fetch groups for group name mapping
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
 
   // Create group name mapping from group_id to group_name
@@ -291,15 +293,15 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
       <div
         className={`${KB_LAYOUT.HEADER_PADDING} border-b border-gray-200 shrink-0`}
       >
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="shrink-0">
             <h3
               className={`${KB_LAYOUT.TITLE_MARGIN} ${KB_LAYOUT.TITLE_TEXT} text-gray-800`}
             >
               {t("knowledgeBase.list.title")}
             </h3>
           </div>
-          <div className="flex items-center" style={{ gap: "6px" }}>
+          <div className="flex items-center min-w-0" style={{ gap: "6px" }}>
             <Button
               style={{
                 padding: "4px 15px",
@@ -310,6 +312,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 backgroundColor: "#1677ff",
                 color: "white",
                 border: "none",
+                flexShrink: 0,
               }}
               className="hover:!bg-blue-600"
               type="primary"
@@ -328,6 +331,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 backgroundColor: "#1677ff",
                 color: "white",
                 border: "none",
+                flexShrink: 0,
               }}
               className="hover:!bg-blue-600"
               type="primary"
@@ -352,18 +356,22 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   padding: "4px 15px",
                   display: "inline-flex",
                   alignItems: "center",
-                  justifyContent: "center",
                   gap: "8px",
                   backgroundColor: "#1677ff",
                   color: "white",
                   border: "none",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                  minWidth: 0,
                 }}
                 className="hover:!bg-blue-600"
                 type="primary"
                 onClick={onDataMateConfig}
                 icon={<SettingOutlined />}
               >
-                {t("knowledgeBase.button.dataMateConfig")}
+                <span className="overflow-hidden text-ellipsis">
+                  {t("knowledgeBase.button.dataMateConfig")}
+                </span>
               </Button>
             )}
           </div>
@@ -571,26 +579,18 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 })}
                               </span>
                             )}
-                            {kb.embeddingModel !== "unknown" &&
-                              kb.embeddingModel !== currentEmbeddingModel &&
-                              kb.source !== "datamate" && (
-                                <span
-                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.warning} mr-1`}
-                                >
-                                  {t("knowledgeBase.tag.modelMismatch")}
-                                </span>
-                              )}
 
-                            {/* User group tags */}
+                            {/* User group tags - only show when not PRIVATE */}
                             <Can permission="group:read">
-                              {getGroupNames(kb.group_ids).map((groupName, idx) => (
-                                <span
-                                  key={idx}
-                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
-                                >
-                                  {groupName}
-                                </span>
-                              ))}
+                              {kb.ingroup_permission !== "PRIVATE" &&
+                                getGroupNames(kb.group_ids).map((groupName, idx) => (
+                                  <span
+                                    key={idx}
+                                    className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
+                                  >
+                                    {groupName}
+                                  </span>
+                                ))}
                             </Can>
                           </>
                         )}
@@ -620,7 +620,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         knowledgeBase={editingKnowledge}
         tenantId={tenantId}
         onCancel={closeEditModal}
-        onSuccess={() => {}}
+        onSuccess={(updatedKnowledgeBase) => {
+          if (onKnowledgeBaseUpdate) {
+            onKnowledgeBaseUpdate(updatedKnowledgeBase);
+          }
+        }}
       />
     </div>
   );

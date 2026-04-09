@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -62,16 +62,43 @@ export function ChatStreamMain({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showTopFade, setShowTopFade] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [chatInputHeight, setChatInputHeight] = useState(130); // Default ChatInput height
-  const [processedMessages, setProcessedMessages] = useState<ProcessedMessages>(
-    {
-      finalMessages: [],
-      taskMessages: [],
-      conversationGroups: new Map(),
-    }
-  );
+  const [chatInputHeight, setChatInputHeight] = useState(130);
   const lastUserMessageIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Process messages with useMemo to avoid double-render on each SSE chunk
+  const processedMessages = useMemo<ProcessedMessages>(() => {
+    const finalMsgs: ChatMessageType[] = [];
+
+    // Track the latest user message ID for scroll behavior
+    messages.forEach((message) => {
+      if (message.role === MESSAGE_ROLES.USER && message.id) {
+        lastUserMessageIdRef.current = message.id;
+      }
+    });
+
+    // Process all messages, distinguish user messages and final answers
+    messages.forEach((message) => {
+      if (message.role === MESSAGE_ROLES.USER) {
+        finalMsgs.push(message);
+      } else if (message.role === MESSAGE_ROLES.ASSISTANT) {
+        if (message.finalAnswer || message.content !== undefined) {
+          finalMsgs.push(message);
+        }
+      }
+    });
+
+    const { taskMessages: taskMsgs, conversationGroups } = transformMessagesToTaskMessages(
+      messages,
+      { includeCode: false }
+    );
+
+    return {
+      finalMessages: finalMsgs,
+      taskMessages: taskMsgs,
+      conversationGroups: conversationGroups,
+    };
+  }, [messages]);
 
   // Monitor ChatInput height changes
   useEffect(() => {
@@ -93,45 +120,7 @@ export function ChatStreamMain({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [processedMessages.finalMessages.length]); // Re-observe when messages change (initial vs regular mode)
-
-  // Handle message classification
-  useEffect(() => {
-    const finalMsgs: ChatMessageType[] = [];
-
-    // Track the latest user message ID for scroll behavior
-    messages.forEach((message) => {
-      if (message.role === MESSAGE_ROLES.USER && message.id) {
-        lastUserMessageIdRef.current = message.id;
-      }
-    });
-
-    // Process all messages, distinguish user messages and final answers
-    messages.forEach((message) => {
-      // User messages are directly added to the final message array
-      if (message.role === MESSAGE_ROLES.USER) {
-        finalMsgs.push(message);
-      }
-      // Assistant messages - if there is a final answer or content, add it to the final message array
-      else if (message.role === MESSAGE_ROLES.ASSISTANT) {
-        if (message.finalAnswer || message.content !== undefined) {
-          finalMsgs.push(message);
-        }
-      }
-    });
-
-    // Use unified message transformer (includeCode: false for normal chat mode)
-    const { taskMessages: taskMsgs, conversationGroups } = transformMessagesToTaskMessages(
-      messages,
-      { includeCode: false }
-    );
-
-    setProcessedMessages({
-      finalMessages: finalMsgs,
-      taskMessages: taskMsgs,
-      conversationGroups: conversationGroups,
-    });
-  }, [messages]);
+  }, [processedMessages.finalMessages.length]);
 
   // Listen for scroll events
   useEffect(() => {
@@ -210,110 +199,91 @@ export function ChatStreamMain({
     }, 0);
   };
 
-  // Force scroll to bottom when entering history conversation
+  // Unified auto-scroll effect: handles all scroll triggers in one place
   useEffect(() => {
+    const scrollAreaElement = scrollAreaRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    ) as HTMLElement | null;
+
+    if (!scrollAreaElement) return;
+
+    // Force scroll when shouldScrollToBottom is true (e.g., entering history conversation)
     if (shouldScrollToBottom && processedMessages.finalMessages.length > 0) {
       setAutoScroll(true);
-      scrollToBottom(false);
-
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         scrollToBottom(false);
-      }, 300);
+        // Double-scroll for safety after initial render
+        setTimeout(() => scrollToBottom(false), 300);
+      });
+      return;
     }
-  }, [shouldScrollToBottom, processedMessages.finalMessages.length]);
 
-  // Scroll to bottom when messages are updated (if user is already at the bottom)
-  useEffect(() => {
-    if (processedMessages.finalMessages.length > 0 && autoScroll) {
-      const scrollAreaElement = scrollAreaRef.current?.querySelector(
-        "[data-radix-scroll-area-viewport]"
-      );
-      if (!scrollAreaElement) return;
-
-      const { scrollTop, scrollHeight, clientHeight } =
-        scrollAreaElement as HTMLElement;
+    // Auto-scroll when messages update, if user is near bottom
+    if (autoScroll && processedMessages.finalMessages.length > 0) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollAreaElement;
       const distanceToBottom = scrollHeight - scrollTop - clientHeight;
 
-      // When shouldScrollToBottom is true, force scroll to the bottom, regardless of distance.
-      if (shouldScrollToBottom || distanceToBottom < 50) {
-        scrollToBottom();
+      // Scroll if user is within 150px of bottom
+      if (distanceToBottom < 150) {
+        requestAnimationFrame(() => scrollToBottom());
       }
     }
   }, [
     processedMessages.finalMessages.length,
     processedMessages.conversationGroups.size,
-    autoScroll,
-    shouldScrollToBottom,
-  ]);
-
-  // Additional scroll trigger for async content like Mermaid diagrams
-  useEffect(() => {
-    if (processedMessages.finalMessages.length > 0 && autoScroll) {
-      const scrollAreaElement = scrollAreaRef.current?.querySelector(
-        "[data-radix-scroll-area-viewport]"
-      );
-      if (!scrollAreaElement) return;
-
-      // Use ResizeObserver to detect when content height changes (e.g., Mermaid diagrams finish rendering)
-      const resizeObserver = new ResizeObserver(() => {
-        const { scrollTop, scrollHeight, clientHeight } =
-          scrollAreaElement as HTMLElement;
-        const distanceToBottom = scrollHeight - scrollTop - clientHeight;
-
-        // Auto-scroll if user is near bottom and content height changed
-        if (distanceToBottom < 100) {
-          scrollToBottom();
-        }
-      });
-
-      resizeObserver.observe(scrollAreaElement);
-
-      // Also use a timeout as fallback for async content
-      const timeoutId = setTimeout(() => {
-        const { scrollTop, scrollHeight, clientHeight } =
-          scrollAreaElement as HTMLElement;
-        const distanceToBottom = scrollHeight - scrollTop - clientHeight;
-
-        if (distanceToBottom < 100) {
-          scrollToBottom();
-        }
-      }, 1000); // Wait 1 second for async content to render
-
-      return () => {
-        resizeObserver.disconnect();
-        clearTimeout(timeoutId);
-      };
-    }
-  }, [processedMessages.finalMessages.length, autoScroll]);
-
-  // Scroll to bottom when task messages are updated
-  useEffect(() => {
-    if (autoScroll) {
-      const scrollAreaElement = scrollAreaRef.current?.querySelector(
-        "[data-radix-scroll-area-viewport]"
-      );
-      if (!scrollAreaElement) return;
-
-      const { scrollTop, scrollHeight, clientHeight } =
-        scrollAreaElement as HTMLElement;
-      const distanceToBottom = scrollHeight - scrollTop - clientHeight;
-
-      // When shouldScrollToBottom is true, force scroll to the bottom, regardless of distance.
-      if (shouldScrollToBottom || distanceToBottom < 150) {
-        scrollToBottom();
-      }
-    }
-  }, [
     processedMessages.taskMessages.length,
     isStreaming,
     autoScroll,
     shouldScrollToBottom,
   ]);
 
+  // Observe async content height changes (e.g., diagrams/images) and scroll when near bottom
+  useEffect(() => {
+    const scrollAreaElement = scrollAreaRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    ) as HTMLElement | null;
+
+    // Guard for environments without DOM / ResizeObserver
+    if (!scrollAreaElement || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    let previousScrollHeight = scrollAreaElement.scrollHeight;
+
+    const observer = new ResizeObserver(() => {
+      // Only auto-scroll when enabled
+      if (!autoScroll) {
+        previousScrollHeight = scrollAreaElement.scrollHeight;
+        return;
+      }
+
+      const { scrollTop, scrollHeight, clientHeight } = scrollAreaElement;
+      const heightIncreased = scrollHeight > previousScrollHeight;
+      previousScrollHeight = scrollHeight;
+
+      if (!heightIncreased) {
+        return;
+      }
+
+      const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+
+      // If user is already near the bottom, keep them pinned when content grows
+      if (distanceToBottom < 200) {
+        requestAnimationFrame(() => scrollToBottom());
+      }
+    });
+
+    observer.observe(scrollAreaElement);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [autoScroll]);
+
   return (
-    <div className="flex-1 flex flex-col overflow-hidden relative custom-scrollbar">
+    <div className="flex-1 flex flex-col overflow-hidden relative custom-scrollbar bg-white">
       {/* Main message area */}
-      <ScrollArea className="flex-1 px-4 pt-4" ref={scrollAreaRef}>
+      <ScrollArea className="flex-1 px-4 pt-4 bg-white" ref={scrollAreaRef}>
         <div className="max-w-3xl mx-auto">
           {processedMessages.finalMessages.length === 0 ? (
             isLoadingHistoricalConversation ? (
@@ -474,18 +444,6 @@ export function ChatStreamMain({
         </AnimatePresence>
       )}
 
-      {/* Add animation keyframes */}
-      <style jsx global>{`
-        @keyframes taskWindowEnter {
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-task-window {
-          animation: taskWindowEnter 0.5s ease-out forwards;
-        }
-      `}</style>
     </div>
   );
 }

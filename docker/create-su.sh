@@ -54,10 +54,32 @@ wait_for_postgresql_ready() {
 create_default_super_admin_user() {
   local email="suadmin@nexent.com"
   local password
-  password="$(generate_random_password)"
+  
+  # Get password from command line argument, or generate random one if not provided
+  if [ -n "$1" ]; then
+    password="$1"
+  else
+    # Fallback to random password if no argument provided (for backward compatibility)
+    password="$(generate_random_password)"
+    echo "   ⚠️  Warning: No password provided, using random password"
+  fi
 
   echo "🔧 Creating super admin user..."
-  RESPONSE=$(docker exec nexent-config bash -c "curl -s -X POST http://kong:8000/auth/v1/signup -H \"apikey: ${SUPABASE_KEY}\" -H \"Authorization: Bearer ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"${password}\",\"email_confirm\":true}'" 2>/dev/null)
+  
+  # Determine which container to use for curl command
+  local curl_container="nexent-config"
+  if [ "$DEPLOYMENT_MODE" = "infrastructure" ] || ! docker ps | grep -q "nexent-config"; then
+    # In infrastructure mode or if nexent-config is not running, use supabase-db-mini
+    if docker ps | grep -q "supabase-db-mini"; then
+      curl_container="supabase-db-mini"
+      echo "   ℹ️  Using supabase-db-mini container (infrastructure mode)"
+    else
+      echo "   ❌ Neither nexent-config nor supabase-db-mini container is available."
+      return 1
+    fi
+  fi
+
+  RESPONSE=$(docker exec "$curl_container" bash -c "curl -s -X POST http://kong:8000/auth/v1/signup -H \"apikey: ${SUPABASE_KEY}\" -H \"Authorization: Bearer ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"${password}\",\"email_confirm\":true}'" 2>/dev/null)
 
   if [ -z "$RESPONSE" ]; then
     echo "   ❌ No response received from Supabase."
@@ -65,21 +87,24 @@ create_default_super_admin_user() {
   elif echo "$RESPONSE" | grep -q '"access_token"' && echo "$RESPONSE" | grep -q '"user"'; then
     echo "   ✅ Default super admin user has been successfully created."
     echo ""
-    echo "      Please save the following credentials carefully, which would ONLY be shown once."
+    echo "      Please save the following credentials carefully."
     echo "   📧 Email:    ${email}"
-    echo "   🔏 Password: ${password}"
+    if [ -n "$1" ]; then
+      echo "   🔏 Password: [User provided password]"
+    else
+      echo "   🔏 Password: ${password}"
+    fi
 
     # Extract user.id from RESPONSE JSON
     local user_id
-    # Try using Python to parse JSON (most reliable)
-    user_id=$(echo "$RESPONSE" | docker exec -i nexent-config python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('user', {}).get('id', ''))" 2>/dev/null)
-
-    # Fallback to jq if Python fails
-    if [ -z "$user_id" ] && command -v jq >/dev/null 2>&1; then
+    # Try using jq first (if available in the container or on host)
+    if docker exec "$curl_container" command -v jq >/dev/null 2>&1; then
+      user_id=$(echo "$RESPONSE" | docker exec -i "$curl_container" jq -r '.user.id // empty' 2>/dev/null)
+    elif command -v jq >/dev/null 2>&1; then
       user_id=$(echo "$RESPONSE" | jq -r '.user.id // empty' 2>/dev/null)
     fi
 
-    # Final fallback: use grep and sed
+    # Fallback: use grep and sed (works without any special tools)
     if [ -z "$user_id" ]; then
       user_id=$(echo "$RESPONSE" | grep -o '"user"[^}]*"id":"[^"]*"' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' 2>/dev/null)
     fi
@@ -150,7 +175,8 @@ create_default_super_admin_user() {
 }
 
 # Main execution
-if create_default_super_admin_user; then
+# Pass password as first argument if provided
+if create_default_super_admin_user "$1"; then
   exit 0
 else
   exit 1

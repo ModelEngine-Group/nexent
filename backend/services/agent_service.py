@@ -27,6 +27,7 @@ from consts.model import (
     ExportAndImportAgentInfo,
     ExportAndImportDataFormat,
     MCPInfo,
+    SkillInstanceInfoRequest,
     ToolInstanceInfoRequest,
     ToolSourceEnum, ModelConnectStatusEnum
 )
@@ -57,6 +58,8 @@ from database.tool_db import (
     query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
+from database import skill_db
+from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.str_utils import convert_list_to_string, convert_string_to_list
@@ -613,12 +616,9 @@ async def _stream_agent_chunks(
     except Exception as run_exc:
         logger.error(f"Agent run error: {str(run_exc)}")
         # Emit an error chunk and terminate the stream immediately
-        try:
-            error_payload = json.dumps(
-                {"type": "error", "content": str(run_exc)}, ensure_ascii=False)
-            yield f"data: {error_payload}\n\n"
-        finally:
-            return
+        error_payload = json.dumps(
+            {"type": "error", "content": str(run_exc)}, ensure_ascii=False)
+        yield f"data: {error_payload}\n\n"
     finally:
         # Persist assistant messages for non-debug runs
         if not agent_request.is_debug:
@@ -880,6 +880,55 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
         logger.error(f"Failed to update agent tools: {str(e)}")
         raise ValueError(f"Failed to update agent tools: {str(e)}")
 
+    # Handle enabled skills saving when provided
+    try:
+        if request.enabled_skill_ids is not None and agent_id is not None:
+            enabled_set = set(request.enabled_skill_ids)
+            # Query existing skill instances for this agent
+            existing_instances = skill_db.query_skill_instances_by_agent_id(
+                agent_id, tenant_id)
+
+            # Handle unselected skill (already exist instance) -> enabled=False
+            for instance in existing_instances:
+                inst_skill_id = instance.get("skill_id")
+                if inst_skill_id is not None and inst_skill_id not in enabled_set:
+                    skill_db.create_or_update_skill_by_skill_info(
+                        skill_info=SkillInstanceInfoRequest(
+                            skill_id=inst_skill_id,
+                            agent_id=agent_id,
+                            skill_description=instance.get("skill_description"),
+                            skill_content=instance.get("skill_content"),
+                            enabled=False
+                        ),
+                        tenant_id=tenant_id,
+                        user_id=user_id
+                    )
+
+            # Handle selected skill -> enabled=True (create or update)
+            for skill_id in enabled_set:
+                # Keep existing skill_description and skill_content if any
+                existing_instance = next(
+                    (inst for inst in existing_instances
+                     if inst.get("skill_id") == skill_id),
+                    None
+                )
+                skill_description = (existing_instance or {}).get("skill_description")
+                skill_content = (existing_instance or {}).get("skill_content")
+                skill_db.create_or_update_skill_by_skill_info(
+                    skill_info=SkillInstanceInfoRequest(
+                        skill_id=skill_id,
+                        agent_id=agent_id,
+                        skill_description=skill_description,
+                        skill_content=skill_content,
+                        enabled=True,
+                    ),
+                    tenant_id=tenant_id,
+                    user_id=user_id
+                )
+    except Exception as e:
+        logger.error(f"Failed to update agent skills: {str(e)}")
+        raise ValueError(f"Failed to update agent skills: {str(e)}")
+
     # Handle related agents saving when provided
     try:
         if request.related_agent_ids is not None and agent_id is not None:
@@ -930,6 +979,7 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
+        skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
 
         # Clean up all memory data related to the agent
         await clear_agent_memory(agent_id, tenant_id, user_id)
@@ -1140,7 +1190,8 @@ async def import_agent_impl(
             for sub_agent_id in managed_agents:
                 insert_related_agent(parent_agent_id=mapping_agent_id[need_import_agent_id],
                                      child_agent_id=mapping_agent_id[sub_agent_id],
-                                     tenant_id=tenant_id)
+                                     tenant_id=tenant_id,
+                                     user_id=user_id)
         else:
             # Current agent still has sub-agents that haven't been imported
             agent_stack.append(need_import_agent_id)
@@ -1329,7 +1380,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 ingroup_permission = agent.get("ingroup_permission")
                 is_creator = str(agent.get("created_by")) == str(user_id)
                 # Hide agent if: no group overlap OR (ingroup_permission is PRIVATE AND user is not creator)
-                if len(user_group_ids.intersection(agent_group_ids)) == 0 or (ingroup_permission == PERMISSION_PRIVATE and not is_creator):
+                if not is_creator and (len(user_group_ids.intersection(agent_group_ids)) == 0 or ingroup_permission == PERMISSION_PRIVATE):
                     continue
 
             # Use shared availability check function
@@ -1949,6 +2000,26 @@ async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:
     except Exception as _:
         logger.error(
             f"Failed to find agent id with '{agent_name}' in tenant {tenant_id}")
+        raise Exception("agent not found")
+
+
+def get_agent_by_name_impl(agent_name: str, tenant_id: str) -> dict:
+    """
+    Resolve agent id and latest published version by agent name.
+
+    Returns:
+        dict with agent_id and latest_version_no (may be None)
+    """
+    if not agent_name:
+        raise Exception("agent_name required")
+    try:
+        agent_id = search_agent_id_by_agent_name(agent_name, tenant_id)
+        versions = query_version_list(agent_id, tenant_id)
+        latest_version = versions[0]["version_no"] if versions else None
+        return {"agent_id": agent_id, "latest_version_no": latest_version}
+    except Exception as _:
+        logger.error(
+            f"Failed to find agent '{agent_name}' in tenant {tenant_id}")
         raise Exception("agent not found")
 
 
