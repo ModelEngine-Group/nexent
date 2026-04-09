@@ -118,6 +118,7 @@ const AUTH_INTERCEPT_ENDPOINTS = new Set([
   "/api/user/refresh_token",
   "/api/user/logout",
   "/api/user/revoke",
+  "/api/user/oauth/callback",
 ]);
 
 function collectRequestBody(req) {
@@ -192,11 +193,16 @@ function forwardAuthRequest(req, res, targetUrl) {
             if (isLogout || isRevoke) {
               clearAuthCookies(res);
             } else if (data.data && data.data.session) {
-              // Extract tokens, set cookies, strip tokens from response
               const session = data.data.session;
               setAuthCookies(res, session);
 
-              // Remove sensitive tokens from the response body sent to browser
+              const isOAuthCallback = req.parsedPathname === "/api/user/oauth/callback";
+              if (isOAuthCallback) {
+                res.writeHead(302, { Location: "/chat" });
+                res.end();
+                return;
+              }
+
               const sanitized = { ...data };
               sanitized.data = { ...data.data };
               sanitized.data.session = {
@@ -204,6 +210,14 @@ function forwardAuthRequest(req, res, targetUrl) {
                 expires_in_seconds: session.expires_in_seconds,
               };
               finalBody = Buffer.from(JSON.stringify(sanitized));
+            } else if (req.parsedPathname === "/api/user/oauth/callback" && data.data && data.data.oauth_error) {
+              const errorParams = new URLSearchParams({
+                oauth_error: data.data.oauth_error,
+                oauth_error_description: data.data.oauth_error_description || "",
+              });
+              res.writeHead(302, { Location: `/?${errorParams.toString()}` });
+              res.end();
+              return;
             }
           }
         } catch {

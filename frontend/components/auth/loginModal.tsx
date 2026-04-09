@@ -1,17 +1,48 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Form, Input, Button, Typography, Space } from "antd";
-import { UserRound, LockKeyhole } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { Modal, Form, Input, Button, Typography, Space, Divider, Alert } from "antd";
+import { UserRound, LockKeyhole, Github } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
 
 const { Text } = Typography;
+
+function OAuthLoginButtons() {
+  const { t } = useTranslation("common");
+  const [providers, setProviders] = useState<Array<{ name: string; display_name: string; icon: string }>>([]);
+
+  useEffect(() => {
+    oauthService.getEnabledProviders().then((p) => setProviders(p));
+  }, []);
+
+  if (providers.length === 0) return null;
+
+  return (
+    <div className="mt-2 mb-2">
+      <Divider plain>{t("auth.oauthDivider") || "or"}</Divider>
+      <div className="flex flex-col gap-2">
+        {providers.map((provider) => (
+          <Button
+            key={provider.name}
+            block
+            size="large"
+            icon={<Github size={18} />}
+            onClick={() => oauthService.startOAuthLogin(provider.name)}
+          >
+            {t("auth.oauthLogin", { provider: provider.display_name }) || `${provider.display_name} Login`}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * LoginModal Component
@@ -32,14 +63,26 @@ export function LoginModal() {
 
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [form] = Form.useForm();
   const [isLoading, setIsLoading] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const error = searchParams.get("oauth_error");
+    const description = searchParams.get("oauth_error_description");
+    if (error) {
+      setOauthError(description || error);
+      router.replace("/");
+    }
+  }, [searchParams, router]);
 
   const resetForm = () => {
     setEmailError("");
     setPasswordError(false);
+    setOauthError(null);
     form.resetFields();
   };
 
@@ -188,6 +231,16 @@ export function LoginModal() {
           className="mt-6"
           autoComplete="off"
         >
+          {oauthError && (
+            <Alert
+              message={oauthError}
+              type="error"
+              showIcon
+              closable
+              onClose={() => setOauthError(null)}
+              className="mb-4"
+            />
+          )}
           {/* Email input field */}
           <Form.Item
             name="email"
@@ -241,6 +294,9 @@ export function LoginModal() {
               {isLoading ? t("auth.loggingIn") : t("auth.login")}
             </Button>
           </Form.Item>
+
+          {/* OAuth login section */}
+          <OAuthLoginButtons />
 
           {/* Registration link section (hidden when opened from session expired flow) */}
           

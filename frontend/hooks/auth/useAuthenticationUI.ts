@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -27,6 +27,7 @@ export function useAuthenticationUI({
 }): AuthenticationUIReturn {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { t } = useTranslation("common");
   const { isSpeedMode } = useDeployment();
 
@@ -108,7 +109,23 @@ export function useAuthenticationUI({
     };
   }, [isSpeedMode, setIsSessionExpiredModalOpen]);
 
+  // Auto-open login modal when returning from a failed OAuth redirect
+  useEffect(() => {
+    if (isSpeedMode) return;
+    if (isAuthChecking) return;
+    if (isAuthenticated) {
+      const oauthError = searchParams.get("oauth_error");
+      if (oauthError) {
+        router.replace("/");
+      }
+      return;
+    }
 
+    const oauthError = searchParams.get("oauth_error");
+    if (oauthError && !isLoginModalOpen) {
+      setIsLoginModalOpen(true);
+    }
+  }, [searchParams, isAuthChecking, isAuthenticated, isSpeedMode, isLoginModalOpen, router]);
 
   // Route guard for unauthenticated users - check when pathname changes
   useEffect(() => {

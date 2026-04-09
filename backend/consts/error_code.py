@@ -142,6 +142,20 @@ class ErrorCode(Enum):
     PROFILE_USER_ALREADY_EXISTS = "110103"  # User already exists
     PROFILE_INVALID_CREDENTIALS = "110104"  # Invalid credentials
 
+    # ==================== 16 OAuth / 第三方登录 ====================
+    # 01 - Provider
+    OAUTH_PROVIDER_NOT_CONFIGURED = "160101"  # OAuth provider not configured
+    OAUTH_PROVIDER_DISABLED = "160102"  # OAuth provider disabled
+    OAUTH_PROVIDER_UNSUPPORTED = "160103"  # OAuth provider not supported
+    OAUTH_PROVIDER_ERROR = "160104"  # OAuth provider returned an error
+
+    # 02 - Account Linking
+    OAUTH_LINK_FAILED = "160201"  # Failed to link OAuth account
+    OAUTH_UNLINK_FAILED = "160202"  # Failed to unlink OAuth account
+    OAUTH_UNLINK_LAST_METHOD = "160203"  # Cannot unlink last auth method
+    OAUTH_ACCOUNT_NOT_FOUND = "160204"  # OAuth account link not found
+    OAUTH_ACCOUNT_ALREADY_LINKED = "160205"  # OAuth account already linked
+
     # ==================== 12 TenantResource / 租户资源 ====================
     # 01 - Tenant
     TENANT_NOT_FOUND = "120101"  # Tenant not found
@@ -237,4 +251,14 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.IDATA_CONNECTION_ERROR: 502,
     ErrorCode.IDATA_RESPONSE_ERROR: 502,
     ErrorCode.IDATA_RATE_LIMIT: 429,
+    # OAuth (module 16)
+    ErrorCode.OAUTH_PROVIDER_NOT_CONFIGURED: 400,
+    ErrorCode.OAUTH_PROVIDER_DISABLED: 400,
+    ErrorCode.OAUTH_PROVIDER_UNSUPPORTED: 400,
+    ErrorCode.OAUTH_PROVIDER_ERROR: 502,
+    ErrorCode.OAUTH_LINK_FAILED: 500,
+    ErrorCode.OAUTH_UNLINK_FAILED: 500,
+    ErrorCode.OAUTH_UNLINK_LAST_METHOD: 400,
+    ErrorCode.OAUTH_ACCOUNT_NOT_FOUND: 404,
+    ErrorCode.OAUTH_ACCOUNT_ALREADY_LINKED: 409,
 }
