@@ -401,7 +401,11 @@ class TestUnstructuredProcessor:
         assert ".odt" in result
         assert ".pptx" in result
         assert ".ppt" in result
-        assert len(result) == 11
+        assert ".json" in result
+        assert ".csv" in result
+        assert ".xml" in result
+        assert ".epub" in result
+        assert len(result) == 15
 
     @pytest.mark.parametrize(
         "filename,expected",
