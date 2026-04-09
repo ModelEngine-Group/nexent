@@ -142,6 +142,7 @@ services:
     restart: always
     ports:
       - "5011:5011" # MCP service port
+      - "5015:5015" # MCP management API port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro

@@ -70,6 +70,10 @@ export const API_ENDPOINTS = {
     validate: `${API_BASE_URL}/tool/validate`,
     loadConfig: (toolId: number) =>
       `${API_BASE_URL}/tool/load_config/${toolId}`,
+    importOpenapi: `${API_BASE_URL}/tool/import_openapi`,
+    outerApiTools: `${API_BASE_URL}/tool/outer_api_tools`,
+    deleteOuterApiTool: (toolId: number) =>
+      `${API_BASE_URL}/tool/outer_api_tools/${toolId}`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
@@ -245,7 +249,6 @@ export const API_ENDPOINTS = {
     instanceList: `${API_BASE_URL}/skills/instance/list`,
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
     createSimple: `${API_BASE_URL}/skills/create-simple`,
-    creatorCache: `${API_BASE_URL}/skills/creator/cache`,
   },
   memory: {
     // ---------------- Memory configuration ----------------

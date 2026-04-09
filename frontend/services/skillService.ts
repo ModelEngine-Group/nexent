@@ -6,6 +6,7 @@ import {
   createSkillFromFile,
   searchSkillsByName as searchSkillsByNameApi,
   fetchSkills,
+  deleteSkill,
 } from "@/services/agentConfigService";
 import {
   THINKING_STEPS_ZH,
@@ -677,4 +678,13 @@ export const createSimpleSkillStream = async (
     callbacks.onThinkingVisible(false);
   }
   return delimiterParser.getFullResult();
+};
+
+/**
+ * Delete a skill by name
+ * @param skillName skill name to delete
+ * @returns delete result
+ */
+export const deleteSkillByName = async (skillName: string) => {
+  return deleteSkill(skillName);
 };

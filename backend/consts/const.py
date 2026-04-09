@@ -211,6 +211,7 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
+MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 
 
 # Invite code
