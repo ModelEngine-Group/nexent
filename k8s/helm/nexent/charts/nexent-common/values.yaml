@@ -41,7 +41,7 @@ config:
   skipProxy: "true"
   umask: "0022"
   isDeployedByKubernetes: "true"
-  marketBackend: "https://market.nexent.tech"
+  marketBackend: "http://60.204.251.153:8010"
   modelEngine:
     enabled: "false"
   voiceService:
