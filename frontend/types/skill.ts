@@ -54,10 +54,21 @@ export interface ChatMessage {
 }
 
 /**
+ * Existing skill data for update scenarios
+ */
+export interface ExistingSkill {
+  name: string;
+  description: string;
+  tags: string[];
+  content: string;
+}
+
+/**
  * Result of parsing a skill draft from AI response
  */
 export interface CreateSimpleSkillRequest {
   user_request: string;
+  existing_skill?: ExistingSkill;
 }
 
 /**

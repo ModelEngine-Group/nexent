@@ -133,8 +133,7 @@ class SkillLoader:
         """
         result: Dict[str, Any] = {}
 
-        # Extract name field
-        name_match = re.search(r"^name:\s*(.+?)\s*$", frontmatter, re.MULTILINE)
+        name_match = re.search(r"^name:\s*([^\n]*?)\s*$", frontmatter, re.MULTILINE)
         if name_match:
             result["name"] = name_match.group(1).strip().strip('"').strip("'")
 
@@ -169,8 +168,7 @@ class SkillLoader:
                     description_text = " ".join([l.lstrip() for l in content_lines]).strip()
                     result["description"] = description_text
                 else:
-                    # Single line value
-                    desc_match = re.search(r"^description:\s*(.+?)\s*$", desc_line)
+                    desc_match = re.search(r"^description:\s*([^\n]*?)\s*$", desc_line)
                     if desc_match:
                         result["description"] = desc_match.group(1).strip().strip('"').strip("'")
 

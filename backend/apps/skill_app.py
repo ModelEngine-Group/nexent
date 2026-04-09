@@ -22,7 +22,7 @@ from nexent.core.utils.observer import MessageObserver
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/skills", tags=["skills"])
-skill_creator_router = APIRouter(prefix="/skills", tags=["simple-skills"])
+skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
 
 
 class SkillCreateRequest(BaseModel):
@@ -462,6 +462,7 @@ async def delete_skill(
 class SkillCreateSimpleRequest(BaseModel):
     """Request model for interactive skill creation."""
     user_request: str
+    existing_skill: Optional[Dict[str, Any]] = None
 
 
 def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
@@ -519,7 +520,10 @@ async def create_simple_skill(
         try:
             _, tenant_id, language = get_current_user_info(authorization)
 
-            template = get_skill_creation_simple_prompt_template(language)
+            template = get_skill_creation_simple_prompt_template(
+                language,
+                existing_skill=request.existing_skill
+            )
 
             model_config = _build_model_config_from_tenant(tenant_id)
             observer = MessageObserver(lang=language)
