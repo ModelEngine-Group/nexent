@@ -247,6 +247,16 @@ export const storageService = {
   },
 
   /**
+   * Get preview URL for a file (supports PDF, Office, Images, Text)
+   * @param objectName File object name in storage
+   * @param filename Optional filename for Content-Disposition header
+   * @returns Preview URL
+   */
+  getPreviewUrl(objectName: string, filename?: string): string {
+    return API_ENDPOINTS.storage.preview(objectName, filename);
+  },
+
+  /**
    * Download file directly using backend API (faster, browser handles download)
    * @param objectName File object name
    * @param filename Optional filename for download
