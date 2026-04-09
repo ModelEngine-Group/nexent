@@ -151,6 +151,13 @@ update_env_file() {
     echo "NORTHBOUND_API_SERVER=http://localhost:5013/api" >> ../.env
   fi
 
+  # MCP_MANAGEMENT_API
+  if grep -q "^MCP_MANAGEMENT_API=" ../.env; then
+    sed -i.bak "s~^MCP_MANAGEMENT_API=.*~MCP_MANAGEMENT_API=http://localhost:5015~" ../.env
+  else
+    echo "MCP_MANAGEMENT_API=http://localhost:5015" >> ../.env
+  fi
+
   # MINIO_ENDPOINT
   if grep -q "^MINIO_ENDPOINT=" ../.env; then
     sed -i.bak "s~^MINIO_ENDPOINT=.*~MINIO_ENDPOINT=http://localhost:9010~" ../.env

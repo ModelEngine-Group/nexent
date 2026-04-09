@@ -2067,7 +2067,7 @@ class TestCreateAgentConfig:
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
-            
+
             # Create a tool that raises exception when accessing class_name
             mock_tool = MagicMock()
             type(mock_tool).class_name = PropertyMock(side_effect=Exception("Test Error"))
@@ -2428,8 +2428,8 @@ class TestCreateAgentRunInfo:
                     "status": True,
                     "authorization_token": None
                 },
-                "nexent": {
-                    "remote_mcp_server_name": "nexent",
+                "outer-apis": {
+                    "remote_mcp_server_name": "outer-apis",
                     "remote_mcp_server": "http://nexent.mcp/sse",
                     "status": True,
                     "authorization_token": None
@@ -2894,7 +2894,7 @@ class TestCreateAgentRunInfo:
 
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
-            
+
             # Verify that the returned data includes authorization_token (used in mcp_host construction)
             assert mock_get_mcp.return_value[0]["authorization_token"] == "secret_token_123"
 
