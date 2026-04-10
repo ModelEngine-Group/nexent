@@ -40,13 +40,18 @@ class SkillLoader:
         if not frontmatter:
             raise ValueError("SKILL.md must have YAML frontmatter")
 
-        # Fix YAML parsing to handle special characters in values
-        # Wrap unquoted values that may contain colons
-        frontmatter = cls._fix_yaml_frontmatter(frontmatter)
+        # Try to parse with yaml.safe_load first
+        meta = None
+        try:
+            # Fix YAML parsing to handle special characters in values
+            frontmatter = cls._fix_yaml_frontmatter(frontmatter)
+            meta = yaml.safe_load(frontmatter)
+        except yaml.YAMLError as e:
+            logger.warning(f"YAML parse error, falling back to regex extraction: {e}")
 
-        meta = yaml.safe_load(frontmatter)
+        # If yaml.safe_load failed or returned invalid result, use regex fallback
         if not isinstance(meta, dict):
-            raise ValueError("Invalid YAML frontmatter")
+            meta = cls._extract_frontmatter_by_regex(frontmatter)
 
         if "name" not in meta:
             raise ValueError("Skill must have 'name' field")
@@ -82,6 +87,12 @@ class SkillLoader:
                 fixed_lines.append(line)
                 continue
 
+            # Skip indented lines - these are content of multi-line values (block scalars)
+            # They should NOT be modified as they're part of block scalar values
+            if line.startswith(' ') or line.startswith('\t'):
+                fixed_lines.append(line)
+                continue
+
             # Check if this is a key-value line (contains ':' but not in quotes)
             if ':' in line:
                 # Find the first colon to identify the key
@@ -96,6 +107,11 @@ class SkillLoader:
                     fixed_lines.append(line)
                     continue
 
+                # Skip YAML list items (lines starting with '-')
+                if key == '' or line.strip().startswith('-'):
+                    fixed_lines.append(line)
+                    continue
+
                 # If value exists and is not quoted, we need to handle it
                 if value_part and not value_part.startswith('"') and not value_part.startswith("'"):
                     # Check if value contains unescaped colons that would break YAML
@@ -107,6 +123,68 @@ class SkillLoader:
             fixed_lines.append(line)
 
         return '\n'.join(fixed_lines)
+
+    @classmethod
+    def _extract_frontmatter_by_regex(cls, frontmatter: str) -> Dict[str, Any]:
+        """Extract frontmatter fields using regex when YAML parsing fails.
+
+        This handles cases where YAML contains unexpected metadata or
+        formatting issues that break the parser.
+        """
+        result: Dict[str, Any] = {}
+
+        name_match = re.search(r"^name:\s*([^\n]*?)\s*$", frontmatter, re.MULTILINE)
+        if name_match:
+            result["name"] = name_match.group(1).strip().strip('"').strip("'")
+
+        # Extract description field
+        # Using non-greedy (.+?) will capture minimum, so "description: >" captures ">"
+        # Need to check if this is a block scalar first
+        desc_start_match = re.search(r"^description:\s*", frontmatter, re.MULTILINE)
+        if desc_start_match:
+            # Find the actual description line
+            lines = frontmatter.split('\n')
+            desc_line_idx = -1
+            for i, line in enumerate(lines):
+                if re.match(r"^description:\s*", line):
+                    desc_line_idx = i
+                    break
+
+            if desc_line_idx >= 0:
+                desc_line = lines[desc_line_idx]
+
+                # Check if it's a block scalar
+                has_block_scalar = re.match(r"^description:\s*[>|]", desc_line)
+                if has_block_scalar:
+                    # Collect all indented lines
+                    content_lines = []
+                    for line in lines[desc_line_idx + 1:]:
+                        # Empty line or non-indented line ends block
+                        if line.strip() == "":
+                            continue
+                        if not line.startswith(" ") and not line.startswith("\t"):
+                            break
+                        content_lines.append(line)
+                    description_text = " ".join([l.lstrip() for l in content_lines]).strip()
+                    result["description"] = description_text
+                else:
+                    desc_match = re.search(r"^description:\s*([^\n]*?)\s*$", desc_line)
+                    if desc_match:
+                        result["description"] = desc_match.group(1).strip().strip('"').strip("'")
+
+        # Extract tags field (YAML list format)
+        tags_match = re.search(r"^tags:\s*\[(.*?)\]\s*$", frontmatter, re.MULTILINE | re.DOTALL)
+        if tags_match:
+            tags_str = tags_match.group(1)
+            result["tags"] = [t.strip().strip('"').strip("'") for t in tags_str.split(",") if t.strip()]
+
+        # Extract allowed-tools field (YAML list format)
+        tools_match = re.search(r"^allowed-tools:\s*\[(.*?)\]\s*$", frontmatter, re.MULTILINE | re.DOTALL)
+        if tools_match:
+            tools_str = tools_match.group(1)
+            result["allowed-tools"] = [t.strip().strip('"').strip("'") for t in tools_str.split(",") if t.strip()]
+
+        return result
 
     @classmethod
     def _split_frontmatter(cls, content: str) -> Tuple[Optional[str], str]:

@@ -629,7 +629,7 @@ class SkillManager:
         lines.append("</skills>")
 
         return "\n".join(lines)
-    
+
 
     def load_skill_directory(self, name: str) -> Optional[Dict[str, Any]]:
         """Load entire skill directory including scripts.

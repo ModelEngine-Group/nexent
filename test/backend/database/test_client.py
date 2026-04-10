@@ -348,6 +348,45 @@ class TestMinioClient:
 
     @patch('backend.database.client.create_storage_client_from_config')
     @patch('backend.database.client.MinIOStorageConfig')
+    def test_minio_client_get_file_range_success(self, mock_config_class, mock_create_client):
+        """Test MinioClient.get_file_range delegates to storage client and returns body"""
+        MinioClient._instance = None
+
+        mock_storage_client = MagicMock()
+        mock_body = MagicMock()
+        mock_storage_client.get_file_range.return_value = (True, mock_body)
+        mock_create_client.return_value = mock_storage_client
+        mock_config_class.return_value = MagicMock()
+
+        client = MinioClient()
+        success, result = client.get_file_range('file.pdf', 0, 4095, 'bucket')
+
+        assert success is True
+        assert result is mock_body
+        mock_storage_client.get_file_range.assert_called_once_with(
+            'file.pdf', 0, 4095, 'bucket')
+
+    @patch('backend.database.client.create_storage_client_from_config')
+    @patch('backend.database.client.MinIOStorageConfig')
+    def test_minio_client_get_file_range_failure(self, mock_config_class, mock_create_client):
+        """Test MinioClient.get_file_range passes through failure from storage client"""
+        MinioClient._instance = None
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.get_file_range.return_value = (False, 'File not found: file.pdf')
+        mock_create_client.return_value = mock_storage_client
+        mock_config_class.return_value = MagicMock()
+
+        client = MinioClient()
+        success, result = client.get_file_range('file.pdf', 0, 4095)
+
+        assert success is False
+        assert 'File not found' in result
+        mock_storage_client.get_file_range.assert_called_once_with(
+            'file.pdf', 0, 4095, None)
+
+    @patch('backend.database.client.create_storage_client_from_config')
+    @patch('backend.database.client.MinIOStorageConfig')
     def test_minio_client_file_exists_true(self, mock_config_class, mock_create_client):
         """Test MinioClient.file_exists returns True when file exists"""
         MinioClient._instance = None

@@ -182,7 +182,6 @@ from backend.agents.create_agent_info import (
     prepare_prompt_templates,
     _get_skills_for_template,
     _get_skill_script_tools,
-    _print_prompt_with_token_count,
 )
 
 # Import constants for testing
@@ -431,88 +430,6 @@ class TestGetSkillScriptTools:
                 desc = call[1]['description']
                 assert len(desc) > 0
                 assert "skill" in desc.lower()
-
-
-class TestPrintPromptWithTokenCount:
-    """Tests for the _print_prompt_with_token_count function"""
-
-    def test_print_prompt_with_token_count_success(self):
-        """Test successful token counting with tiktoken available"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = ["token1", "token2", "token3"]
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("test prompt content", agent_id=123, stage="TEST")
-
-                mock_encoding.encode.assert_called_once_with("test prompt content")
-                mock_logger.info.assert_called()
-
-                # Check that log messages contain expected content
-                log_calls = mock_logger.info.call_args_list
-                log_text = " ".join([str(call) for call in log_calls])
-                assert "TEST" in log_text
-                assert "123" in log_text
-                assert "3" in log_text  # Token count
-
-    def test_print_prompt_with_token_count_tiktoken_failure(self):
-        """Test graceful handling when tiktoken fails"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            with patch.object(tiktoken, 'get_encoding', side_effect=Exception("tiktoken not available")):
-                _print_prompt_with_token_count("test prompt", agent_id=456, stage="FALLBACK")
-
-                # Should log a warning and then log the prompt
-                mock_logger.warning.assert_called_once()
-                assert "Failed to count tokens: tiktoken not available" in mock_logger.warning.call_args[0][0]
-
-                # Should still log the prompt
-                mock_logger.info.assert_called()
-
-    def test_print_prompt_with_token_count_default_stage(self):
-        """Test with default stage parameter"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = ["a", "b"]
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("short prompt")
-
-                log_calls = mock_logger.info.call_args_list
-                log_text = " ".join([str(call) for call in log_calls])
-                assert "PROMPT" in log_text  # Default stage
-
-    def test_print_prompt_with_token_count_empty_prompt(self):
-        """Test with empty prompt"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = []
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("", agent_id=1, stage="EMPTY")
-
-                mock_encoding.encode.assert_called_once_with("")
-                # Should log token count of 0
-                log_calls = mock_logger.info.call_args_list
-                log_text = " ".join([str(call) for call in log_calls])
-                assert "0" in log_text
-
-    def test_print_prompt_with_token_count_none_agent_id(self):
-        """Test with None agent_id"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = ["token"]
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("prompt", agent_id=None, stage="NO_ID")
-
-                # Should not raise an error
-                mock_encoding.encode.assert_called_once_with("prompt")
 
 
 class TestDiscoverLangchainTools:
@@ -2150,7 +2067,7 @@ class TestCreateAgentConfig:
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
-            
+
             # Create a tool that raises exception when accessing class_name
             mock_tool = MagicMock()
             type(mock_tool).class_name = PropertyMock(side_effect=Exception("Test Error"))
@@ -2511,8 +2428,8 @@ class TestCreateAgentRunInfo:
                     "status": True,
                     "authorization_token": None
                 },
-                "nexent": {
-                    "remote_mcp_server_name": "nexent",
+                "outer-apis": {
+                    "remote_mcp_server_name": "outer-apis",
                     "remote_mcp_server": "http://nexent.mcp/sse",
                     "status": True,
                     "authorization_token": None
@@ -2977,7 +2894,7 @@ class TestCreateAgentRunInfo:
 
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
-            
+
             # Verify that the returned data includes authorization_token (used in mcp_host construction)
             assert mock_get_mcp.return_value[0]["authorization_token"] == "secret_token_123"
 

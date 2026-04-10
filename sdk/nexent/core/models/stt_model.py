@@ -503,7 +503,7 @@ class STTModel:
                             try:
                                 await ws_client.send_json({"error": f"STT service error: {str(e)}"})
                                 client_connected = False
-                            except:
+                            except Exception:
                                 pass
                         break
 
@@ -515,7 +515,7 @@ class STTModel:
                         try:
                             result_text = result['payload_msg']['result']['text'] if result['payload_msg']['result'][
                                 'text'] else "empty"
-                        except:
+                        except Exception:
                             logger.error(f"Malformed result: {result}")
                         logger.info(f"Received response: {result_text}")
 
@@ -550,7 +550,7 @@ class STTModel:
                             try:
                                 await ws_client.send_json({"error": f"STT service connection closed unexpectedly: {e}"})
                                 client_connected = False
-                            except:
+                            except Exception:
                                 pass
                             break
 
@@ -572,7 +572,7 @@ class STTModel:
             if client_connected:
                 try:
                     await ws_client.send_json({"error": error_msg})
-                except:
+                except Exception:
                     logger.error("Cannot send error message: client disconnected")
 
         except websockets.exceptions.WebSocketException as e:
@@ -581,7 +581,7 @@ class STTModel:
             if client_connected:
                 try:
                     await ws_client.send_json({"error": error_msg})
-                except:
+                except Exception:
                     logger.error("Cannot send error message: client disconnected")
 
         except Exception as e:
@@ -592,7 +592,7 @@ class STTModel:
             if client_connected:
                 try:
                     await ws_client.send_json({"error": error_msg})
-                except:
+                except Exception:
                     logger.error("Cannot send error message: client disconnected")
 
         finally:

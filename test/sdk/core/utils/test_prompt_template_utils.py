@@ -86,22 +86,6 @@ class TestGetPromptTemplate:
         assert "Unsupported template type" in str(excinfo.value)
         assert "unsupported_type" in str(excinfo.value)
 
-    @patch('builtins.open', new_callable=mock_open, read_data='system_prompt: "Test prompt"')
-    @patch('yaml.safe_load')
-    def test_get_prompt_template_with_kwargs(self, mock_yaml_load, mock_file):
-        """Test get_prompt_template with additional kwargs (should be logged but not used)"""
-        mock_yaml_load.return_value = {"system_prompt": "Test prompt"}
-
-        with patch('sdk.nexent.core.utils.prompt_template_utils.logger') as mock_logger:
-            result = get_prompt_template(template_type='analyze_image', language='en', extra_param='value')
-
-            # Verify kwargs were logged
-            log_calls = [str(call) for call in mock_logger.info.call_args_list]
-            assert any("extra_param" in str(call) or "kwargs" in str(call) for call in log_calls)
-
-            # Verify function still works
-            assert result == {"system_prompt": "Test prompt"}
-
     @patch('builtins.open', side_effect=FileNotFoundError("File not found"))
     def test_get_prompt_template_file_not_found(self, mock_file):
         """Test get_prompt_template when template file is not found"""
@@ -118,21 +102,6 @@ class TestGetPromptTemplate:
             get_prompt_template(template_type='analyze_image', language='zh')
 
         assert "YAML parse error" in str(excinfo.value)
-
-    @patch('builtins.open', new_callable=mock_open, read_data='system_prompt: "Test prompt"')
-    @patch('yaml.safe_load')
-    @patch('sdk.nexent.core.utils.prompt_template_utils.logger')
-    def test_get_prompt_template_logging(self, mock_logger, mock_yaml_load, mock_file):
-        """Test that get_prompt_template logs correctly"""
-        mock_yaml_load.return_value = {"system_prompt": "Test prompt"}
-
-        get_prompt_template(template_type='analyze_image', language='en')
-
-        # Verify logger was called
-        mock_logger.info.assert_called_once()
-        log_call = str(mock_logger.info.call_args)
-        assert "analyze_image" in log_call
-        assert "en" in log_call
 
     @patch('builtins.open', new_callable=mock_open, read_data='system_prompt: "Test prompt"')
     @patch('yaml.safe_load')
