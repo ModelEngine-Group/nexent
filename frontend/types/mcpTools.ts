@@ -99,7 +99,7 @@ export interface RegistryRemoteVariable {
   [key: string]: unknown;
 }
 
-export interface RegistryRuntimeArgumentInput {
+export interface RegistryPackageArgumentInput {
   key: string;
   formKey: string;
   label: string;
@@ -130,7 +130,8 @@ export interface RegistryQuickAddOption {
   packageEnvironmentVariables?: RegistryRemoteVariable[];
   packageTransportHeaders?: RegistryRemoteVariable[];
   packageTransportVariables?: RegistryRemoteVariable[];
-  packageRuntimeArguments?: RegistryRuntimeArgumentInput[];
+  packageRuntimeArguments?: RegistryPackageArgumentInput[];
+  packageArguments?: RegistryPackageArgumentInput[];
   packageIdentifier?: string;
   packageRegistryType?: string;
   packageEnvTemplate?: Record<string, string>;

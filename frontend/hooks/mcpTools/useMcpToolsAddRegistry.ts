@@ -14,7 +14,7 @@ import {
 import {
   type RegistryQuickAddOption,
   type RegistryRemoteVariable,
-  type RegistryRuntimeArgumentInput,
+  type RegistryPackageArgumentInput,
   type McpTab,
 } from "@/types/mcpTools";
 
@@ -54,6 +54,7 @@ const inferStdioCommand = (registryType?: string): string | null => {
   const normalized = (registryType || "").trim().toLowerCase();
   if (normalized === "npm") return "npx";
   if (normalized === "pypi") return "uvx";
+  if (normalized === "oci") return "docker";
   return null;
 };
 
@@ -62,6 +63,7 @@ const inferStdioArgs = (registryType?: string, identifier?: string): string[] =>
   const normalized = (registryType || "").trim().toLowerCase();
   if (!packageId) return [];
   if (normalized === "npm") return ["-y", packageId];
+  if (normalized === "oci") return ["run", packageId];
   return [packageId];
 };
 
@@ -155,7 +157,7 @@ const extractVariableMapInputs = (
     });
 };
 
-const extractRuntimeArguments = (runtimeArguments: unknown, formPrefix: string): RegistryRuntimeArgumentInput[] => {
+const extractRuntimeArguments = (runtimeArguments: unknown, formPrefix: string): RegistryPackageArgumentInput[] => {
   if (!Array.isArray(runtimeArguments)) return [];
 
   return runtimeArguments
@@ -354,6 +356,7 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
     const packageTransportVariables = extractVariableMapInputs(packageTransport?.variables, `pkg-transport-var:${index}`);
     const packageEnvironmentVariables = extractKeyValueInputs(rawPackage?.environmentVariables, `pkg-env:${index}`, "env");
     const packageRuntimeArguments = extractRuntimeArguments(rawPackage?.runtimeArguments, `pkg-runtime-arg:${index}`);
+    const packageArguments = extractRuntimeArguments(rawPackage?.packageArguments, `pkg-arg:${index}`);
     const packageRuntimeHint = toStringOrUndefined(rawPackage?.runtimeHint) || undefined;
 
     if (packageTarget) {
@@ -371,6 +374,9 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
         unsupportedRequiredHeaders,
         packageTransportVariables,
         packageRuntimeArguments,
+        packageArguments,
+        packageIdentifier,
+        packageRegistryType,
       });
       return;
     }
@@ -388,6 +394,7 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
         unsupportedRequiredHeaders,
         packageTransportVariables,
         packageRuntimeArguments,
+        packageArguments,
         packageIdentifier,
         packageRegistryType,
         packageEnvTemplate: extractPackageEnvTemplate(service, packageIdentifier),
@@ -644,6 +651,17 @@ export function useMcpToolsAddRegistry({
       return;
     }
 
+    const packageRegistryType = (selectedOption.packageRegistryType || "").trim().toLowerCase();
+    if (selectedOption.sourceType === "package" && packageRegistryType === "oci") {
+      log.warn("[useMcpToolsAddRegistry] OCI package is blocked for quick add", {
+        serviceName: quickAddCandidateService.server?.name,
+        packageIdentifier: selectedOption.packageIdentifier,
+        transportType: selectedOption.transportType,
+      });
+      message.warning(t("mcpTools.registry.quickAddUnsupported"));
+      return;
+    }
+
     if ((selectedOption.unsupportedRequiredHeaders || []).length > 0) {
       message.warning(
         t("mcpTools.registry.quickAddPicker.unsupportedRequiredHeaders", {
@@ -730,6 +748,7 @@ export function useMcpToolsAddRegistry({
               },
             },
           },
+          registry_json: quickAddCandidateService.server,
         });
       } else {
         const requiredFields = [
