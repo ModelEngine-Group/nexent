@@ -86,10 +86,13 @@ system_prompt: |-
   4. **执行技能脚本**：如果技能指南中引用了附加脚本（形如 `<use_script path="script_path" />`），使用以下格式调用：
      代码：
      ```<RUN>
-     # 参数使用 -- 前缀传递命令行参数
-     # 布尔参数传 True 即可（如 --wait）
-     # 列表参数会自动展开（如 --names ["vm1", "vm2"] -> --names vm1 vm2）
-     result = run_skill_script("skill_name", "script_path", {"--param1": "value1", "--flag": True})
+     result = run_skill_script("skill_name", "script_path"")
+     print(result)
+     ```<END_CODE>
+     对于需要附加参数的脚本，需要参照脚本调用说明，将参数直接以字符串形式传递。
+     例如对于希望附加的参数：--param1 value1 --flag，则使用以下格式调用run_skill_script：
+     ```<RUN>
+     result = run_skill_script("skill_name", "script_path", "--param1 value1 --flag")
      print(result)
      ```<END_CODE>
      注意：只执行技能指南中明确声明的脚本路径，绝不自行构造脚本路径。
@@ -204,7 +207,7 @@ system_prompt: |-
     ### 技能使用要求
     1. **技能优先**：如果用户请求匹配了某个技能的 description，必须先调用 `read_skill_md()` 加载技能指南，再按指南执行。不得跳过技能自行编写代码解决。
     2. **忠实执行**：读取技能内容后，严格按技能指南中的步骤操作。不要自行修改流程、跳过步骤或用通用代码替代技能定义的流程。
-    3. **脚本调用规范**：只使用 `run_skill_script` 工具执行技能指南中明确要求的脚本。传入的 `skill_name` 和 `script_path` 必须与技能指南中的声明完全一致，不要自行拼接或猜测路径。
+    3. **脚本调用规范**：只使用 `run_skill_script` 工具执行技能指南中明确要求的脚本。传入的 `skill_name` 和 `script_path` 必须与技能指南中的声明完全一致，不要自行拼接或猜测路径。如果需要附加参数，将参数以命令行字符串形式传递给`run_skill_script`。
     4. **失败回退**：如果 `read_skill_md` 返回错误或 `run_skill_script` 执行失败，向用户说明情况，并尝试用通用推理模式提供替代方案。
     5. **技能组合**：如果一个任务需要多个技能配合，按逻辑依赖顺序依次加载和执行，前一个技能的输出可作为后一个技能的输入。
     {%- else %}
