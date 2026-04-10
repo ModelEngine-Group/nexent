@@ -54,7 +54,7 @@ const inferStdioCommand = (registryType?: string): string | null => {
   const normalized = (registryType || "").trim().toLowerCase();
   if (normalized === "npm") return "npx";
   if (normalized === "pypi") return "uvx";
-  if (normalized === "oci") return "docker";
+  //if (normalized === "oci") return "docker";
   return null;
 };
 
@@ -63,7 +63,7 @@ const inferStdioArgs = (registryType?: string, identifier?: string): string[] =>
   const normalized = (registryType || "").trim().toLowerCase();
   if (!packageId) return [];
   if (normalized === "npm") return ["-y", packageId];
-  if (normalized === "oci") return ["run", packageId];
+  //if (normalized === "oci") return ["run", packageId];
   return [packageId];
 };
 
@@ -651,17 +651,6 @@ export function useMcpToolsAddRegistry({
       return;
     }
 
-    const packageRegistryType = (selectedOption.packageRegistryType || "").trim().toLowerCase();
-    if (selectedOption.sourceType === "package" && packageRegistryType === "oci") {
-      log.warn("[useMcpToolsAddRegistry] OCI package is blocked for quick add", {
-        serviceName: quickAddCandidateService.server?.name,
-        packageIdentifier: selectedOption.packageIdentifier,
-        transportType: selectedOption.transportType,
-      });
-      message.warning(t("mcpTools.registry.quickAddUnsupported"));
-      return;
-    }
-
     if ((selectedOption.unsupportedRequiredHeaders || []).length > 0) {
       message.warning(
         t("mcpTools.registry.quickAddPicker.unsupportedRequiredHeaders", {
@@ -675,17 +664,7 @@ export function useMcpToolsAddRegistry({
     try {
       if (selectedOption.transportType === "stdio") {
         const packageIdentifier = (selectedOption.packageIdentifier || "").trim();
-        const packageRegistryType = (selectedOption.packageRegistryType || "").trim().toLowerCase();
         const packageRuntimeHint = (selectedOption.packageRuntimeHint || "").trim();
-        if (packageRegistryType === "oci") {
-          log.warn("[useMcpToolsAddRegistry] OCI stdio package is blocked for quick add because runtime container cannot execute nested docker", {
-            serviceName: quickAddCandidateService.server?.name,
-            packageIdentifier,
-            packageRuntimeHint,
-          });
-          message.warning(t("mcpTools.registry.quickAddUnsupported"));
-          return;
-        }
 
         const command = packageRuntimeHint || inferStdioCommand(selectedOption.packageRegistryType);
         if (!packageIdentifier || !command) {

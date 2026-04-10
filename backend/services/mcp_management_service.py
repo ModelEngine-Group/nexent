@@ -113,9 +113,7 @@ def suggest_container_port(
 ) -> int:
     port = start_port
     while port <= 65535:
-        no_conflicts_record = check_container_port_conflict_records(port)
-        runtime_available = check_runtime_host_port_available(port)
-        if no_conflicts_record and runtime_available:
+        if check_container_port_conflict(port=port):
             return port
         port += 1
 
@@ -350,12 +348,7 @@ async def add_container_mcp_service(
     if check_enabled_mcp_name_exists(mcp_name=service_name, tenant_id=tenant_id):
         raise McpNameConflictError("Enabled MCP name already exists")
 
-    runtime_available = check_runtime_host_port_available(port)
-    if not runtime_available:
-        raise McpPortConflictError(f"Port {port} is already in use")
-
-    no_conflicts_record = check_container_port_conflict_records(port)
-    if not no_conflicts_record:
+    if not check_container_port_conflict(port=port):
         raise McpPortConflictError(f"Port {port} is already in use")
 
     servers = mcp_config.mcpServers
