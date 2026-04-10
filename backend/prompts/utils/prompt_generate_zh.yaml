@@ -78,7 +78,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   思考：我先使用knowledge_base_search工具查找本地知识库是否有相关信息。
   代码：
   ```python
-  knowledge_info = knowledge_base_search(query="东方明珠 介绍", index_names=["本地知识库1"， "本地知识库2"])
+  knowledge_info = knowledge_base_search(query="东方明珠 介绍", index_names=["本地知识库1", "本地知识库2"])
   print(knowledge_info)
   ```
   观察结果：未找到查询"东方明珠 介绍"的结果。检索结果难以支撑回答。
