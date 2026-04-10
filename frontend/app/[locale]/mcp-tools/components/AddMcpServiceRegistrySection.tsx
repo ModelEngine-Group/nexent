@@ -1,10 +1,10 @@
 import { useEffect } from "react";
-import { Button, Form, Input, Modal, Radio } from "antd";
+import { Alert, Button, Form, Input, Modal, Radio } from "antd";
 import McpRegistryToolbar from "./McpRegistryToolbar";
 import McpRegistryCardList from "./McpRegistryCardList";
 import McpRegistryDetailModal from "./McpRegistryDetailModal";
 import ContainerPortField from "./ContainerPortField";
-import type { RegistryMcpCard, RegistryQuickAddOption } from "@/types/mcpTools";
+import type { RegistryMcpCard, RegistryQuickAddOption, RegistryPackageArgumentInput } from "@/types/mcpTools";
 
 interface Props {
   registrySearchValue: string;
@@ -83,6 +83,9 @@ export default function AddMcpServiceRegistrySection({
 }: Props) {
   const [form] = Form.useForm();
   const selectedQuickAddOption = quickAddOptions.find((option) => option.key === selectedQuickAddOptionKey) || null;
+  const selectedQuickAddOptionIsUnsupportedOci =
+    selectedQuickAddOption?.sourceType === "package"  &&
+    (selectedQuickAddOption.packageRegistryType || "").trim().toLowerCase() === "oci";
 
   useEffect(() => {
     if (!quickAddPickerVisible) return;
@@ -152,13 +155,12 @@ export default function AddMcpServiceRegistrySection({
     );
   };
 
-  const renderRuntimeArgumentInputs = () => {
-    const args = selectedQuickAddOption?.packageRuntimeArguments || [];
+  const renderArgumentInputs = (args: RegistryPackageArgumentInput[], title: string) => {
     if (!args.length) return null;
 
     return (
       <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <p className="text-sm font-medium text-slate-800">{t("mcpTools.registry.quickAddPicker.runtimeArgumentsTitle")}</p>
+        <p className="text-sm font-medium text-slate-800">{title}</p>
         {args.map((arg) => (
           <label key={`${selectedQuickAddOption?.key || "option"}-${arg.formKey}`} className="block text-sm text-slate-600">
             <span className="font-medium text-slate-800 break-all">
@@ -197,6 +199,16 @@ export default function AddMcpServiceRegistrySection({
         ))}
       </div>
     );
+  };
+
+  const renderRuntimeArgumentInputs = () => {
+    const args = selectedQuickAddOption?.packageRuntimeArguments || [];
+    return renderArgumentInputs(args, t("mcpTools.registry.quickAddPicker.runtimeArgumentsTitle"));
+  };
+
+  const renderPackageArgumentInputs = () => {
+    const args = selectedQuickAddOption?.packageArguments || [];
+    return renderArgumentInputs(args, t("mcpTools.registry.packageField.packageArguments"));
   };
 
   return (
@@ -289,49 +301,60 @@ export default function AddMcpServiceRegistrySection({
             </Radio.Group>
           </Form.Item>
 
-          {selectedQuickAddOption?.transportType === "stdio" ? (
-            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <Form.Item
-                name="quickAddContainerPort"
-                className="mb-0"
-                rules={[
-                  {
-                    validator: async (_rule, value) => {
-                      if (value === undefined || value === null || value === "") {
-                        throw new Error(t("mcpTools.add.validate.containerRequired"));
-                      }
-                      const port = Number(value);
-                      if (!Number.isInteger(port) || port < 1 || port > 65535) {
-                        throw new Error(t("mcpTools.add.validate.containerPortRange"));
-                      }
-                    },
-                  },
-                ]}
-              >
-                <div>
-                  <ContainerPortField
-                    containerPort={quickAddContainerPort}
-                    containerPortCheckLoading={containerPortCheckLoading}
-                    containerPortSuggesting={containerPortSuggesting}
-                    containerPortAvailable={containerPortAvailable}
-                    setContainerPort={(value) => {
-                      setQuickAddContainerPort(value);
-                      form.setFieldValue("quickAddContainerPort", value);
-                    }}
-                    handleSuggestContainerPort={handleSuggestContainerPort}
-                    t={t}
-                  />
+          {selectedQuickAddOptionIsUnsupportedOci ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={t("mcpTools.registry.quickAddUnsupported")}
+            />
+          ) : (
+            <>
+              {selectedQuickAddOption?.transportType === "stdio" ? (
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <Form.Item
+                    name="quickAddContainerPort"
+                    className="mb-0"
+                    rules={[
+                      {
+                        validator: async (_rule, value) => {
+                          if (value === undefined || value === null || value === "") {
+                            throw new Error(t("mcpTools.add.validate.containerRequired"));
+                          }
+                          const port = Number(value);
+                          if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                            throw new Error(t("mcpTools.add.validate.containerPortRange"));
+                          }
+                        },
+                      },
+                    ]}
+                  >
+                    <div>
+                      <ContainerPortField
+                        containerPort={quickAddContainerPort}
+                        containerPortCheckLoading={containerPortCheckLoading}
+                        containerPortSuggesting={containerPortSuggesting}
+                        containerPortAvailable={containerPortAvailable}
+                        setContainerPort={(value) => {
+                          setQuickAddContainerPort(value);
+                          form.setFieldValue("quickAddContainerPort", value);
+                        }}
+                        handleSuggestContainerPort={handleSuggestContainerPort}
+                        t={t}
+                      />
+                    </div>
+                  </Form.Item>
                 </div>
-              </Form.Item>
-            </div>
-          ) : null}
+              ) : null}
 
-          {renderVariableInputs("mcpTools.registry.quickAddPicker.variablesTitle", selectedQuickAddOption?.remoteVariables || [])}
-          {renderVariableInputs("mcpTools.registry.quickAddPicker.remoteHeadersTitle", selectedQuickAddOption?.remoteHeaders || [])}
-          {renderVariableInputs("mcpTools.registry.quickAddPicker.packageTransportVariablesTitle", selectedQuickAddOption?.packageTransportVariables || [])}
-          {renderVariableInputs("mcpTools.registry.quickAddPicker.packageTransportHeadersTitle", selectedQuickAddOption?.packageTransportHeaders || [])}
-          {renderVariableInputs("mcpTools.registry.quickAddPicker.packageEnvironmentVariablesTitle", selectedQuickAddOption?.packageEnvironmentVariables || [])}
-          {renderRuntimeArgumentInputs()}
+              {renderVariableInputs("mcpTools.registry.quickAddPicker.variablesTitle", selectedQuickAddOption?.remoteVariables || [])}
+              {renderVariableInputs("mcpTools.registry.quickAddPicker.remoteHeadersTitle", selectedQuickAddOption?.remoteHeaders || [])}
+              {renderVariableInputs("mcpTools.registry.quickAddPicker.packageTransportVariablesTitle", selectedQuickAddOption?.packageTransportVariables || [])}
+              {renderVariableInputs("mcpTools.registry.quickAddPicker.packageTransportHeadersTitle", selectedQuickAddOption?.packageTransportHeaders || [])}
+              {renderVariableInputs("mcpTools.registry.quickAddPicker.packageEnvironmentVariablesTitle", selectedQuickAddOption?.packageEnvironmentVariables || [])}
+              {renderRuntimeArgumentInputs()}
+              {renderPackageArgumentInputs()}
+            </>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button className="rounded-full" onClick={handleCloseQuickAddPicker}>
@@ -341,7 +364,7 @@ export default function AddMcpServiceRegistrySection({
               type="primary"
               className="rounded-full"
               loading={quickAddSubmitting}
-              disabled={!selectedQuickAddOptionKey}
+              disabled={!selectedQuickAddOptionKey || selectedQuickAddOptionIsUnsupportedOci}
               onClick={async () => {
                 try {
                   await form.validateFields();

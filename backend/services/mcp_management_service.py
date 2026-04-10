@@ -366,6 +366,8 @@ async def add_container_mcp_service(
     command = config.command
     if not command:
         raise McpValidationError("command is required")
+    if command.strip().lower() == "docker":
+        raise McpValidationError("Docker command is not supported")
 
     env_vars = dict(config.env or {})
     auth_token = authorization_token
@@ -388,20 +390,19 @@ async def add_container_mcp_service(
     ]
 
     container_manager = MCPContainerManager()
-    container_info = await container_manager.start_mcp_container(
-        service_name=service_name,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        env_vars=env_vars,
-        host_port=port,
-        image=config.image or NEXENT_MCP_DOCKER_IMAGE,
-        full_command=full_command,
-    )
-    started_container_id: str | None = container_info.get("container_id")
-
-    container_config = mcp_config.model_dump(exclude_none=True)
-
     try:
+        container_info = await container_manager.start_mcp_container(
+            service_name=service_name,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            env_vars=env_vars,
+            host_port=port,
+            image=NEXENT_MCP_DOCKER_IMAGE,
+            full_command=full_command,
+        )
+
+        container_config = mcp_config.model_dump(exclude_none=True)
+
         await add_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -419,13 +420,8 @@ async def add_container_mcp_service(
             container_id=container_info.get("container_id"),
             container_port=container_info.get("host_port"),
         )
-    except MCPConnectionError:
-        if started_container_id:
-            try:
-                cleanup_manager = MCPContainerManager()
-                await cleanup_manager.stop_mcp_container(started_container_id)
-            except Exception as cleanup_exc:
-                logger.warning(f"Failed to cleanup container {started_container_id}: {cleanup_exc}")
+    except Exception as exc:
+        logger.warning(f"Failed to start container MCP service, status: {exc}")
         raise
 
     return {
@@ -639,7 +635,9 @@ async def update_mcp_service_enabled(
             next_container_port = container_info.get("host_port") or next_container_port
 
             health_ok = False
-            for attempt in range(10):
+            MCP_CONTAINER_HEALTH_CHECK_ATTEMPTS = 4
+            MCP_CONTAINER_HEALTH_CHECK_DELAY_SECONDS = 0.5
+            for attempt in range(MCP_CONTAINER_HEALTH_CHECK_ATTEMPTS):
                 try:
                     health_ok = await mcp_server_health(
                         remote_mcp_server=next_server_url,
@@ -649,8 +647,8 @@ async def update_mcp_service_enabled(
                     health_ok = False
                 if health_ok:
                     break
-                if attempt < 9:
-                    await asyncio.sleep(1)
+                if attempt < MCP_CONTAINER_HEALTH_CHECK_ATTEMPTS - 1:
+                    await asyncio.sleep(MCP_CONTAINER_HEALTH_CHECK_DELAY_SECONDS)
             if not health_ok:
                 await _stop_container_without_remove_if_exists(next_container_id)
                 update_mcp_record_runtime_fields_by_id(
