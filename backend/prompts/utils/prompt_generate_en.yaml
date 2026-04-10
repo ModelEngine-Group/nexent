@@ -173,7 +173,6 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
     right = [x for x in arr if x > pivot]
     return quick_sort(left) + middle + quick_sort(right)
   ```
-  ```
 
   ---
 
