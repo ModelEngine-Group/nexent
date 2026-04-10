@@ -42,8 +42,7 @@ system_prompt: |-
   2. 如果knowledge_base_search未找到相关信息，则使用web_search工具进行网络搜索。
   
   ### python代码规范 ###
-  1. 代码内容必须以以'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'标识符结尾，否则你将失败。
-  2. 如果认为是需要执行的代码，代码内容以'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'标识符结尾。如果是不需要执行仅用于展示的代码，代码内容以'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_CODE>'标识符结尾，其中语言类型例如python、java、javascript等；
+  1. 如果认为是需要执行的代码，代码内容以 '代码：\n```python\n' 开头并以 '```' 结尾；如果是不需要执行仅用于展示的代码，代码内容以 '代码：\n```DISPLAY:语言类型\n' 开头并以 '```' 结尾，其中语言类型例如 python、java、javascript 等；
   2. 只使用已定义的变量，变量将在多次调用之间持续保持。使用'print()'函数让下一次的模型调用看到对应变量信息
   3. 正确使用工具的入参，使用关键字参数，不要用字典形式。
   4. 避免在一轮对话中进行过多的工具调用，这会导致输出格式难以预测。
@@ -56,19 +55,19 @@ system_prompt: |-
   
   思考：我先使用knowledge_base_search工具查找本地知识库是否有相关信息。
   代码：
-  ```<RUN>
+  ```python
   knowledge_info = knowledge_base_search(query="东方明珠 介绍")
   print(knowledge_info)
-  ```<END_CODE>
+  ```
   观察结果：
   未找到查询"东方明珠 介绍"的结果。检索结果难以支撑回答。
   
   思考：从本地知识库中没有找到相关信息，我需要使用web_search工具查询网络信息。
   代码：
-  ```<RUN>
+  ```python
   web_info = web_search(query="东方明珠 介绍")
   print(web_info)
-  ```<END_CODE>
+  ```
   观察结果：
   [东方明珠相关信息]
   
@@ -81,10 +80,10 @@ system_prompt: |-
   
   思考：我将使用knowledge_base_search工具查找公司内部关于项目管理的政策。
   代码：
-  ```<RUN>
+  ```python
   policy_info = knowledge_base_search(query="公司内部关于项目管理的政策")
   print(policy_info)
-  ```<END_CODE>
+  ```
   观察结果：
   [公司内部项目管理政策的相关信息]
   
@@ -97,19 +96,19 @@ system_prompt: |-
   
   思考：我先使用knowledge_base_search工具查找本地知识库是否有相关信息。
   代码：
-  ```<RUN>
+  ```python
   knowledge_info = knowledge_base_search(query="量子计算 最新研究进展")
   print(knowledge_info)
-  ```<END_CODE>
+  ```
   观察结果：
   未找到查询"量子计算 最新研究进展"的结果。检索结果难以支撑回答。
   
   思考：从本地知识库中没有找到相关信息，我需要使用web_search工具查询网络信息。
   代码：
-  ```<RUN>
+  ```python
   web_info = web_search(query="量子计算 最新研究进展")
   print(web_info)
-  ```<END_CODE>
+  ```
   观察结果：
   [量子计算最新研究进展的相关信息]
   

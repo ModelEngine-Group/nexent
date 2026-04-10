@@ -52,8 +52,8 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
      - 用简单的Python编写代码
      - 遵循python代码规范和python语法
      - 根据格式规范正确调用工具/助手
-     - 考虑到代码执行与展示用户代码的区别，使用'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'表达运行代码，使用'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_DISPLAY_CODE>'表达展示代码
-     - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_DISPLAY_CODE>'表达展示代码。
+     - 考虑到代码执行与展示用户代码的区别，使用 '代码：\n```python\n' 开头并以 '```' 结尾表示运行代码，使用 '代码：\n```DISPLAY:语言类型\n' 开头并以 '```' 结尾表示展示代码
+     - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用 '代码：\n```DISPLAY:语言类型\n' 开头并以 '```' 结尾表示展示代码。
 
   3. 观察结果：
      - 查看代码执行结果
@@ -61,7 +61,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   在思考结束后，当Agent认为可以回答用户问题，那么可以不生成代码，直接生成最终回答给到用户并停止循环。
 
   ### python代码规范
-  1. 如果认为是需要执行的代码，代码内容以'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'标识符结尾。如果是不需要执行仅用于展示的代码，代码内容以'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_DISPLAY_CODE>'标识符结尾，其中语言类型例如python、java、javascript等；
+  1. 如果认为是需要执行的代码，代码内容以 '代码：\n```python\n' 开头并以 '```' 结尾；如果是不需要执行仅用于展示的代码，代码内容以 '代码：\n```DISPLAY:语言类型\n' 开头并以 '```' 结尾，其中语言类型例如 python、java、javascript 等；
   2. 只使用已定义的变量，变量将在多次调用之间持续保持；
   3. 使用“print()”函数让下一次的模型调用看到对应变量信息；
   4. 正确使用工具/助手的入参，使用关键字参数，不要用字典形式；
@@ -77,18 +77,18 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   
   思考：我先使用knowledge_base_search工具查找本地知识库是否有相关信息。
   代码：
-  ```<RUN>
+  ```python
   knowledge_info = knowledge_base_search(query="东方明珠 介绍", index_names=["本地知识库1"， "本地知识库2"])
   print(knowledge_info)
-  ```<END_CODE>
+  ```
   观察结果：未找到查询"东方明珠 介绍"的结果。检索结果难以支撑回答。
   
   思考：从本地知识库中没有找到相关信息，我需要使用web_search工具查询网络信息。
   代码：
-  ```<RUN>
+  ```python
   web_info = web_search(query="东方明珠 介绍")
   print(web_info)
-  ```<END_CODE>
+  ```
   观察结果：东方明珠广播电视塔位于中国上海市浦东新区陆家嘴... 
   
   思考：我已经获得了有关信息，现在我将生成最终回答。
@@ -100,10 +100,10 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   
   思考：我需要调用旅程规划助手来规划出行。
   代码：
-  ```<RUN>
+  ```python
   itinerary_result = travel_planning_assistant(task="帮我规划明天从上海出发去北京的行程")
   print(itinerary_result)
-  ```<END_CODE>
+  ```
   观察结果：明天从上海出发去北京的行程规划，包括交通、住宿、景点等。
   
   思考：我已经获得了出行规划，现在我将生成最终回答。
@@ -115,18 +115,18 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   
   思考：我需要先获取天气数据，然后让分析助手帮我分析。
   代码：
-  ```<RUN>
+  ```python
   weather_data = weather_api(city="北京")
   print(weather_data)
-  ```<END_CODE>
+  ```
   观察结果：{"temperature": 25, "humidity": 60%, "condition": "晴天"}
   
   思考：现在我有天气数据了，让分析助手帮我分析这些数据。
   代码：
-  ```<RUN>
+  ```python
   analysis_result = data_analysis_assistant(task="分析今天的天气数据：温度25度，湿度60%，晴天")
   print(analysis_result)
-  ```<END_CODE>
+  ```
   观察结果：今天天气适宜，温度适中，湿度正常，适合户外活动。
   
   思考：我已经获得了天气数据和分析结果，现在我将生成最终回答。
@@ -143,9 +143,9 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   
   任务5："帮我用Python写一个快速排序的代码"
 
-  思考：我需要直接写一个python代码，此代码仅用于展示，因此我以'代码：\n```<DISPLAY:python>\n'开头。
+  思考：我需要直接写一个python代码，此代码仅用于展示，因此我以'代码：\n```DISPLAY:python\n'开头。
   代码：
-  ```<DISPLAY:python>
+  ```DISPLAY:python
   def quick_sort(arr):
     if len(arr) <= 1:
       return arr
@@ -154,13 +154,13 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
     middle = [x for x in arr if x == pivot]
     right = [x for x in arr if x > pivot]
     return quick_sort(left) + middle + quick_sort(right)
-  ```<END_DISPLAY_CODE>
+  ```
   观察结果：快速排序的python代码。
-  
+
   思考：我已经获得了快速排序的python代码，现在我将生成最终回答。
   快速排序的python代码如下：
   代码：
-  ```<DISPLAY:python>
+  ```DISPLAY:python
   def quick_sort(arr):
     if len(arr) <= 1:
       return arr
@@ -169,7 +169,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
     middle = [x for x in arr if x == pivot]
     right = [x for x in arr if x > pivot]
     return quick_sort(left) + middle + quick_sort(right)
-  ```<END_DISPLAY_CODE>
+  ```
 
   ---
 

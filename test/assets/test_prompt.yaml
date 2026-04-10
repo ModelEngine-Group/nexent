@@ -62,8 +62,7 @@ system_prompt: |-
   3. 每次使用email_send工具发送邮件时，邮件内容必须基于search_agent的搜索结果生成。
   
   ### python代码规范 ###
-  1. 代码内容必须以以'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'标识符结尾，否则你将失败。
-  2. 如果认为是需要执行的代码，代码内容以'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'标识符结尾。如果是不需要执行仅用于展示的代码，代码内容以'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_CODE>'标识符结尾，其中语言类型例如python、java、javascript等；
+  1. 如果认为是需要执行的代码，代码内容以 '代码：\n```python\n' 开头并以 '```' 结尾；如果是不需要执行仅用于展示的代码，代码内容以 '代码：\n```DISPLAY:语言类型\n' 开头并以 '```' 结尾，其中语言类型例如 python、java、javascript 等；
   2. 只使用已定义的变量，变量将在多次调用之间持续保持。使用'print()'函数让下一次的模型调用看到对应变量信息
   3. 正确使用工具和Agent的入参，使用关键字参数，不要用字典形式。
   4. 避免在一轮对话中进行过多的工具调用，这会导致输出格式难以预测。
@@ -76,18 +75,18 @@ system_prompt: |-
   
   思考: 首先，我将使用search_agent搜索关于人工智能的最新研究。
   代码:
-  ```<RUN>
+  ```python
   search_results = search_agent(task="最新的人工智能研究")
   print(search_results)
-  ```<END_CODE>
+  ```
   观察结果:
   {"summary": "最新的人工智能研究集中在机器学习和深度学习领域，特别是在自然语言处理和图像识别方面取得了显著进展。", "details": "具体的研究包括但不限于：1. 使用Transformer模型改进自然语言理解；2. 利用卷积神经网络提升图像识别精度。"}
   
   思考: 我已经获取了关于人工智能的最新研究信息，现在我将使用email_send工具将这些信息发送到指定邮箱。
   代码:
-  ```<RUN>
+  ```python
   email_send(address="user@example.com", content=search_results["summary"])
-  ```<END_CODE>
+  ```
   
   思考：我将生成最终回答。
   已经将关于人工智能的最新研究信息发送到指定邮箱。

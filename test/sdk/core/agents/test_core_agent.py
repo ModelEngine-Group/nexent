@@ -222,49 +222,8 @@ MessageObserver = _module_mocks["sdk.nexent.core.utils.observer"].MessageObserve
 # Tests for parse_code_blobs function
 # ----------------------------------------------------------------------------
 
-def test_parse_code_blobs_run_format():
-    """Test parse_code_blobs with ```<RUN>\\ncontent\\n```<END_CODE> pattern."""
-    text = """Here is some code:
-```<RUN>
-print("Hello World")
-x = 42
-```<END_CODE>
-And some more text."""
-
-    result = core_agent_module.parse_code_blobs(text)
-    expected = "print(\"Hello World\")\nx = 42"
-    assert result == expected
-
-
-def test_parse_code_blobs_run_format_without_end_code():
-    """Test parse_code_blobs with ```<RUN>\\ncontent\\n``` pattern (without END_CODE)."""
-    text = """Here is some code:
-```<RUN>
-print("Hello World")
-```
-And some more text."""
-
-    result = core_agent_module.parse_code_blobs(text)
-    expected = "print(\"Hello World\")"
-    assert result == expected
-
-
-def test_parse_code_blobs_multiple_run_blocks():
-    """Test parse_code_blobs with multiple ```<RUN> blocks."""
-    text = """```<RUN>
-first_block()
-```<END_CODE>
-```<RUN>
-second_block()
-```<END_CODE>"""
-
-    result = core_agent_module.parse_code_blobs(text)
-    expected = "first_block()\n\nsecond_block()"
-    assert result == expected
-
-
 def test_parse_code_blobs_python_match():
-    """Test parse_code_blobs with ```python\\ncontent\\n``` pattern (legacy format)."""
+    """Test parse_code_blobs with ```python\\ncontent\\n``` pattern."""
     text = """Here is some code:
 ```python
 print("Hello World")
@@ -338,7 +297,7 @@ def test_parse_code_blobs_display_only_raises():
 ```<DISPLAY:python>
 def hello():
     return "Hello"
-```<END_DISPLAY_CODE>
+```
 And some more text."""
 
     with pytest.raises(ValueError) as exc_info:
@@ -399,24 +358,6 @@ def test_convert_code_format_display_replacements():
     original_text = """Here is code:
 ```<DISPLAY:python>
 print('hello')
-```<END_DISPLAY_CODE>
-And some more text."""
-
-    expected_text = """Here is code:
-```python
-print('hello')
-```
-And some more text."""
-
-    transformed = core_agent_module.convert_code_format(original_text)
-    assert transformed == expected_text
-
-
-def test_convert_code_format_display_without_end_code():
-    """Validate convert_code_format handles <DISPLAY:language> without <END_DISPLAY_CODE>."""
-    original_text = """Here is code:
-```<DISPLAY:python>
-print('hello')
 ```
 And some more text."""
 
@@ -448,11 +389,11 @@ And some more text."""
     assert transformed == expected_text
 
 
-def test_convert_code_format_restore_end_code():
-    """Test that <END_CODE> is properly restored after replacements."""
+def test_convert_code_format_simple_display():
+    """Test that simple <DISPLAY:language> format is converted to standard markdown."""
     original_text = """```<DISPLAY:python>
 print('hello')
-```<END_CODE>"""
+```"""
 
     expected_text = """```python
 print('hello')
@@ -476,10 +417,10 @@ def test_convert_code_format_multiple_displays():
     """Test convert_code_format with multiple DISPLAY blocks."""
     original_text = """```<DISPLAY:python>
 first()
-```<END_DISPLAY_CODE>
+```
 ```<DISPLAY:javascript>
 second()
-```<END_DISPLAY_CODE>"""
+```"""
 
     expected_text = """```python
 first()
@@ -497,7 +438,7 @@ def test_convert_code_format_mixed_with_code():
     original_text = """Some text before
 ```<DISPLAY:python>
 print('displayed')
-```<END_DISPLAY_CODE>
+```
 Some text after"""
 
     expected_text = """Some text before
@@ -635,7 +576,7 @@ def test_convert_code_format_preserves_content():
 def complex_function():
     """Docstring with special chars: <>&'"""
     return "Hello 世界"
-```<END_DISPLAY_CODE>'''
+```'''
 
     transformed = core_agent_module.convert_code_format(code)
 
@@ -647,7 +588,7 @@ def complex_function():
 def test_convert_code_format_handles_empty_end_tags():
     """Test convert_code_format with empty DISPLAY blocks."""
     text = """```<DISPLAY:python>
-```<END_DISPLAY_CODE>"""
+```"""
     transformed = core_agent_module.convert_code_format(text)
     expected = """```python
 ```"""
@@ -659,11 +600,11 @@ def test_convert_code_format_complex_nested():
     text = '''# Start
 ```<DISPLAY:python>
 # Python code
-```<END_DISPLAY_CODE>
+```
 Middle
 ```<DISPLAY:javascript>
 // JavaScript
-```<END_DISPLAY_CODE>
+```
 End'''
 
     transformed = core_agent_module.convert_code_format(text)
@@ -678,26 +619,26 @@ End'''
 # Additional edge case tests
 # ----------------------------------------------------------------------------
 
-def test_convert_code_format_code_end_tag_restoration():
-    """Test that ```<END_CODE> is properly restored to ```."""
+def test_convert_code_format_remaining_lt_cleanup():
+    """Test that remaining ```< patterns are cleaned up."""
     text = """Some code:
 ```<DISPLAY:python>
 print('hello')
-```<END_CODE>
+```
 More text."""
 
     transformed = core_agent_module.convert_code_format(text)
 
     assert "```python" in transformed
-    assert "```<END_CODE>" not in transformed
+    assert "```<END_DISPLAY_CODE>" not in transformed
     assert "```\n" in transformed or '```"' in transformed or transformed.endswith("```")
 
 
-def test_parse_code_blobs_whitespace_only_run_block():
-    """Test parse_code_blobs with whitespace-only RUN block."""
-    text = """```<RUN>
+def test_parse_code_blobs_whitespace_only_py_block():
+    """Test parse_code_blobs with whitespace-only python block."""
+    text = """```python
    
-```<END_CODE>"""
+```"""
 
     result = core_agent_module.parse_code_blobs(text)
     assert result.strip() == ""
@@ -724,7 +665,7 @@ def test_convert_code_format_unicode_content():
 def hello():
     return "你好世界"
 print("🎉")
-```<END_DISPLAY_CODE>"""
+```"""
 
     transformed = core_agent_module.convert_code_format(text)
 
@@ -738,7 +679,7 @@ def test_convert_code_format_dedent_removal():
     text = """```<DISPLAY:python>
 def test():
     pass
-```<END_DISPLAY_CODE>"""
+```"""
 
     transformed = core_agent_module.convert_code_format(text)
     # Should not have leftover ```< patterns
@@ -794,10 +735,10 @@ def test_convert_code_format_both_legacy_and_display():
     """Test convert_code_format handles both legacy and new format together."""
     text = """```code:python
 legacy_code()
-```<END_CODE>
+```
 ```<DISPLAY:python>
 new_code()
-```<END_DISPLAY_CODE>"""
+```"""
 
     transformed = core_agent_module.convert_code_format(text)
 

@@ -134,24 +134,24 @@ system_prompt: |-
 
      - **精确读取**：如只需特定文件（如示例、参考文档），可指定 additional_files：
 
-     ```<RUN>
+     ```python
 
      skill_content = read_skill_md("skill_name", ["examples.md", "reference/api_doc"])
 
      print(skill_content)
 
-     ```<END_CODE>
+     ```
 
      注意：当 additional_files 非空时，默认不再自动读取 SKILL.md，如需同时读取请显式指定。
 
      - **加载技能配置**：如果技能需要读取配置变量，可先调用 `read_skill_config("skill_name")` 读取配置字符串，通过 `json.loads` 方法转化为配置字典，再从中获取所需值：
-     ```<RUN>
+     ```python
      import json
      config = json.loads(read_skill_config("skill_name"))
      # 返回示例: {"key_a": {"key2": "value2"}, "others": {...}}
      value = config["key1"]["key2"]
      print(value)
-     ```<END_CODE>
+     ```
 
   3. **遵循技能指南**：技能内容注入后，严格按其中的步骤执行。不要跳过技能指南中的步骤，也不要用自行编写的代码替代技能定义的流程。
 
@@ -159,7 +159,7 @@ system_prompt: |-
 
      代码：
 
-     ```<RUN>
+     ```python
 
      # 参数使用 -- 前缀传递命令行参数
      # 布尔参数传 True 即可（如 --wait）
@@ -168,7 +168,7 @@ system_prompt: |-
 
      print(result)
 
-     ```<END_CODE>
+     ```
 
      注意：只执行技能指南中明确声明的脚本路径，绝不自行构造脚本路径。
 
@@ -182,7 +182,7 @@ system_prompt: |-
 
      - **示例**：
 
-     ```<RUN>
+     ```python
 
      # 技能内容提示"请参考 examples.md 获取详细示例"
 
@@ -190,7 +190,7 @@ system_prompt: |-
 
      print(additional_info)
 
-     ```<END_CODE>
+     ```
 
   {%- endif %}
 
@@ -223,9 +223,9 @@ system_prompt: |-
 
      - 根据格式规范正确调用工具
 
-     - 考虑到代码执行与展示用户代码的区别，使用'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'表达运行代码，使用'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_DISPLAY_CODE>'表达展示代码
+     - 考虑到代码执行与展示用户代码的区别，使用 '代码：\n```python\n' 开头并以 '```' 结尾表示运行代码，使用 '代码：\n```DISPLAY:语言类型\n' 开头并以 '```' 结尾表示展示代码
 
-     - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_DISPLAY_CODE>'表达展示代码。
+     - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用 '代码：\n```DISPLAY:语言类型\n' 开头并以 '```' 结尾表示展示代码。
 
 
   3. 观察结果：
@@ -350,7 +350,7 @@ system_prompt: |-
 
   ### python代码规范
 
-  1. 如果认为是需要执行的代码，代码内容以'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'标识符结尾。如果是不需要执行仅用于展示的代码，代码内容以'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_DISPLAY_CODE>'标识符结尾，其中语言类型例如python、java、javascript等；
+  1. 如果认为是需要执行的代码，代码内容以 '代码：\n```python\n' 开头并以 '```' 结尾；如果是不需要执行仅用于展示的代码，代码内容以 '代码：\n```DISPLAY:语言类型\n' 开头并以 '```' 结尾，其中语言类型例如 python、java、javascript 等；
 
   2. 只使用已定义的变量，变量将在多次调用之间持续保持；
 

@@ -61,8 +61,8 @@ system_prompt: |-
      - Write code in simple Python
      - Follow Python coding standards and Python syntax
      - Call tools correctly according to format specifications
-     - To distinguish between code execution and displaying user code, use 'Code: \n```<RUN>\n' to start executing code and '```<END_CODE>' to indicate its completion. Use 'Code: \n```<DISPLAY:language_type>\n' to start displaying code and '```<END_DISPLAY_CODE>' to indicate its completion.
-     - Note that executed code is not visible to users. If users need to see the code, use 'Code: \n```<DISPLAY:language_type>\n' as the start and '```<END_DISPLAY_CODE>' to denote displayed code.
+     - To distinguish between code execution and displaying user code, use 'Code: \n```python\n' to start executing code and '```' to indicate its completion. Use 'Code: \n```DISPLAY:language_type\n' to start displaying code and '```' to indicate its completion.
+     - Note that executed code is not visible to users. If users need to see the code, use 'Code: \n```DISPLAY:language_type\n' as the start and '```' to denote displayed code.
 
   3. Observe Results:
      - View code execution results
@@ -113,7 +113,7 @@ system_prompt: |-
   {{ constraint }}
 
   ### Python Code Specifications
-  1. If it is considered to be code that needs to be executed, the code content begins with 'code: \n```<RUN>\n' and ends with '```<END_CODE>'. If the code does not need to be executed for display only, the code content begins with 'code:\n```<DISPLAY:language_type>\n', and ends with '```<END_DISPLAY_CODE>', where language_type can be python, java, javascript, etc;
+  1. If it is considered to be code that needs to be executed, the code content begins with 'code: \n```python\n' and ends with '```'. If the code does not need to be executed for display only, the code content begins with 'code:\n```DISPLAY:language_type\n', and ends with '```', where language_type can be python, java, javascript, etc;
   2. Only use defined variables, variables will persist between multiple calls;
   3. Use "print()" function to let the next model call see corresponding variable information;
   4. Use tool input parameters correctly, use keyword arguments, not dictionary format;

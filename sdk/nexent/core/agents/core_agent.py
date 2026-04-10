@@ -27,10 +27,14 @@ if TYPE_CHECKING:
 
 
 def parse_code_blobs(text: str) -> str:
-    """Extract code blocs from the LLM's output for execution.
+    """Extract code blocks from the LLM's output for execution.
 
-    This function is used to parse code that needs to be executed, so it only handles
-    <RUN> format and legacy python formats.
+    Supports multiple formats:
+    1. Standard markdown: ```python ... ```
+    2. XML tool_call format: <tool_call>...<tool>...</tool>...</tool_call>
+    3. FunctionCall format: <FunctionCallBegin>...</FunctionCallEnd>
+    4. Invoke format: <invoke name="tool">...</invoke> (Anthropic/Claude style)
+    5. Direct Python code (fallback)
 
     Args:
         text (`str`): LLM's output text to parse.
@@ -41,19 +45,29 @@ def parse_code_blobs(text: str) -> str:
     Raises:
         ValueError: If no valid code block is found in the text.
     """
-    # First try to match the new <RUN> format for execution
-    # <END_CODE> is optional - match both with and without it
-    run_pattern = r"```<RUN>\s*\n(.*?)\n```(?:<END_CODE>)?"
-    run_matches = re.findall(run_pattern, text, re.DOTALL)
-
-    if run_matches:
-        return "\n\n".join(match.strip() for match in run_matches)
-
-    # Fallback to original patterns: py|python (for execution)
+    # Match standard python code blocks: ```python or ```py
     pattern = r"```(?:py|python)\s*\n(.*?)\n```"
     matches = re.findall(pattern, text, re.DOTALL)
     if matches:
         return "\n\n".join(match.strip() for match in matches)
+
+    # Handle XML tool_call format (for models like MiniMax with native agent support)
+    if "<tool_call>" in text and "</tool_call>" in text:
+        tool_code = _parse_xml_tool_call(text)
+        if tool_code:
+            return tool_code
+
+    # Handle FunctionCall format: <FunctionCallBegin>...<FunctionCallEnd>
+    if "<FunctionCallBegin>" in text and "<FunctionCallEnd>" in text:
+        tool_code = _parse_function_call(text)
+        if tool_code:
+            return tool_code
+
+    # Handle Invoke format: <invoke name="tool">...</invoke> (Anthropic/Claude style)
+    if "<invoke name=" in text and "</invoke>" in text:
+        tool_code = _parse_invoke_format(text)
+        if tool_code:
+            return tool_code
 
     # Maybe the LLM outputted a code blob directly
     try:
@@ -71,30 +85,226 @@ def parse_code_blobs(text: str) -> str:
             Make sure to include code with the correct pattern for execution:
             Thoughts: Your thoughts
             Code:
-            ```<RUN>
+            ```python
             # Your python code here (for execution)
-            ```<END_CODE>
+            ```
             """
         ).strip()
     )
+
+
+def _parse_xml_tool_call(text: str) -> str | None:
+    """Parse XML tool_call format and convert to Python code.
+
+    Supports multiple variants:
+    ```xml
+    <!-- Variant 1: with <param> tags -->
+    <tool_call>
+    <tool name="tool_name">
+    <param name="param1">value1</param>
+    </tool>
+    </tool_call>
+
+    <!-- Variant 2: direct attribute style -->
+    <tool_call>
+    <tool name="tool_name">
+    param1="value1"
+    </tool>
+    </tool_call>
+    ```
+    To:
+    ```python
+    tool_name(param1="value1")
+    ```
+
+    Args:
+        text: Input text containing tool_call XML format.
+
+    Returns:
+        Python code string if parsing succeeds, None otherwise.
+    """
+    code_lines = []
+
+    # Find all <tool name="..."> blocks
+    tool_pattern = r"<tool\s+name=\"([^\"]+)\">"
+    param_pattern = r"<param\s+name=\"([^\"]+)\">([^<]*)</param>"
+    direct_param_pattern = r"(\w+)=\"([^\"]*)\""
+
+    for tool_match in re.finditer(tool_pattern, text):
+        tool_name = tool_match.group(1)
+        tool_start = tool_match.start()
+
+        # Find the end of this tool block
+        remaining = text[tool_start:]
+        tool_end_match = re.search(r"</tool>", remaining)
+        if not tool_end_match:
+            continue
+
+        tool_content = remaining[:tool_end_match.end()]
+        params = []
+
+        # Try to extract params with <param name="...">...</param> format first
+        param_matches = list(re.finditer(param_pattern, tool_content))
+        if param_matches:
+            for param_match in param_matches:
+                param_name = param_match.group(1)
+                param_value = param_match.group(2).strip()
+                escaped = param_value.replace('\\', '\\\\').replace('"', '\\"')
+                params.append(f'{param_name}="{escaped}"')
+        else:
+            # Fallback: try direct attribute format: param_name="value"
+            for direct_match in re.finditer(direct_param_pattern, tool_content):
+                param_name = direct_match.group(1)
+                param_value = direct_match.group(2)
+                escaped = param_value.replace('\\', '\\\\').replace('"', '\\"')
+                params.append(f'{param_name}="{escaped}"')
+
+        # Build function call
+        if params:
+            code_lines.append(f"{tool_name}({', '.join(params)})")
+        else:
+            code_lines.append(f"{tool_name}()")
+
+    if code_lines:
+        return "\n".join(code_lines)
+
+    return None
+
+
+def _parse_function_call(text: str) -> str | None:
+    """Parse FunctionCall format and convert to Python code.
+
+    Converts:
+    ```json
+    <FunctionCallBegin>
+    {
+      tool => "tool_name",
+      args => {
+        param1="value1",
+        param2="value2"
+      }
+    }
+    <FunctionCallEnd>
+    ```
+    To:
+    ```python
+    tool_name(param1="value1", param2="value2")
+    ```
+
+    Args:
+        text: Input text containing FunctionCall format.
+
+    Returns:
+        Python code string if parsing succeeds, None otherwise.
+    """
+    code_lines = []
+
+    # Find all FunctionCall blocks
+    pattern = r"<FunctionCallBegin>\s*\{([^}]+)\}\s*<FunctionCallEnd>"
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    for match in matches:
+        # Extract tool name
+        tool_match = re.search(r'tool\s*=>\s*"([^"]+)"', match)
+        if not tool_match:
+            tool_match = re.search(r'tool\s*=\s*"([^"]+)"', match)
+
+        if not tool_match:
+            continue
+
+        tool_name = tool_match.group(1)
+
+        # Extract all parameters from args block
+        args_match = re.search(r'args\s*=>?\s*\{([^}]*)\}', match, re.DOTALL)
+        if not args_match:
+            # No args, just tool call
+            code_lines.append(f"{tool_name}()")
+            continue
+
+        args_content = args_match.group(1)
+        params = []
+
+        # Parse each parameter: param_name="value" or param_name="value"
+        # Handle both => and = operators
+        param_pattern = r'(\w+)\s*=>?\s*"([^"]*)"'
+        for param_match in re.finditer(param_pattern, args_content):
+            param_name = param_match.group(1)
+            param_value = param_match.group(2)
+            params.append(f'{param_name}="{param_value}"')
+
+        if params:
+            code_lines.append(f"{tool_name}({', '.join(params)})")
+        else:
+            code_lines.append(f"{tool_name}()")
+
+    if code_lines:
+        return "\n".join(code_lines)
+
+    return None
+
+
+def _parse_invoke_format(text: str) -> str | None:
+    """Parse Invoke format and convert to Python code.
+
+    Converts Anthropic/Claude style tool calls:
+    ```xml
+    <invoke name="read_skill_md">
+    <parameter name="skill_name">scientific-brainstorming</parameter>
+    </invoke>
+    ```
+    To:
+    ```python
+    read_skill_md(skill_name="scientific-brainstorming")
+    ```
+
+    Args:
+        text: Input text containing Invoke format.
+
+    Returns:
+        Python code string if parsing succeeds, None otherwise.
+    """
+    code_lines = []
+
+    # Find all <invoke name="..."> blocks
+    invoke_pattern = r'<invoke\s+name="([^"]+)"[^>]*>(.*?)</invoke>'
+    matches = re.findall(invoke_pattern, text, re.DOTALL)
+
+    for tool_name, tool_content in matches:
+        params = []
+
+        # Extract all <parameter name="...">...</parameter> blocks
+        param_pattern = r'<parameter\s+name="([^"]+)"[^>]*>([^<]*)</parameter>'
+        for param_match in re.finditer(param_pattern, tool_content):
+            param_name = param_match.group(1)
+            param_value = param_match.group(2).strip()
+
+            # Escape quotes in the value
+            escaped = param_value.replace('\\', '\\\\').replace('"', '\\"')
+            params.append(f'{param_name}="{escaped}"')
+
+        # Build function call
+        if params:
+            code_lines.append(f"{tool_name}({', '.join(params)})")
+        else:
+            code_lines.append(f"{tool_name}()")
+
+    if code_lines:
+        return "\n".join(code_lines)
+
+    return None
 
 
 def convert_code_format(text):
     """
     Convert code blocks to markdown format for display.
 
-    This function is used to convert code blocks in final answers to markdown format,
-    so it handles <DISPLAY:language> format and legacy formats.
+    This function converts <DISPLAY:language> format to standard markdown format.
     """
-    # Handle new format: ```<DISPLAY:language> to ```language
+    # Handle format: ```<DISPLAY:language> to ```language
     text = re.sub(r'```<DISPLAY:(\w+)>', r'```\1', text)
 
     # Handle legacy format: ```code:language to ```language
     text = re.sub(r'```code:(\w+)', r'```\1', text)
-
-    # Restore <END_CODE> if it was affected by the above replacement
-    text = text.replace("```<END_CODE>", "```")
-    text = text.replace("```<END_DISPLAY_CODE>", "```")
 
     # Clean up any remaining ```< patterns
     text = text.replace("```<", "```")
@@ -181,7 +391,7 @@ Additional Args:
 
         # Add new step in logs
         memory_step.model_input_messages = input_messages
-        stop_sequences = ["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"]
+        stop_sequences = ["Observation:", "Calling tools:"]
 
         # Prepare additional arguments
         additional_args: dict[str, Any] = {}
