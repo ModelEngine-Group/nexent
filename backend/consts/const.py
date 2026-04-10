@@ -332,9 +332,11 @@ DEFAULT_EN_TITLE = "New Conversation"
 # Model Engine Configuration
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
-# APP Version
-APP_VERSION = "v2.0.1"
 
 # Container Platform Configuration
 IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
+
+
+# APP Version
+APP_VERSION = "v2.0.1"
