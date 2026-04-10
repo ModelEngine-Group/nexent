@@ -1,5 +1,6 @@
 import os
 from enum import Enum
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -43,6 +44,11 @@ CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
 # Limit concurrent Office-to-PDF conversions
 MAX_CONCURRENT_CONVERSIONS = 5
+# LibreOffice profile directory
+LIBREOFFICE_PROFILE_DIR = os.getenv(
+    "LIBREOFFICE_PROFILE_DIR",
+    str(Path.home() / ".cache" / "nexent" / "libreoffice-profile"),
+)
 # Supported Office file MIME types
 OFFICE_MIME_TYPES = [
     'application/msword',  # .doc
@@ -205,6 +211,7 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
+MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 
 
 # Invite code
@@ -332,4 +339,4 @@ KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
 
 
 # APP Version
-APP_VERSION = "v2.0.0"
+APP_VERSION = "v2.0.1"

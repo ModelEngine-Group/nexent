@@ -14,6 +14,7 @@ from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model,
+    get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
 from services.memory_config_service import build_memory_context
@@ -296,8 +297,6 @@ async def create_agent_config(
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
-    _print_prompt_with_token_count(system_prompt, agent_id, "BEFORE_INJECTION")
-
     if agent_info.get("model_id") is not None:
         model_info = get_model_by_model_id(agent_info.get("model_id"))
         model_name = model_info["display_name"] if model_info is not None else "main_model"
@@ -350,11 +349,32 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                     tool_config.metadata = langchain_tool
                     break
 
-        # special logic for knowledge base search tool
+        # special logic for search tools that may use reranking models
         if tool_config.class_name == "KnowledgeBaseSearchTool":
-           tool_config.metadata = {
+            rerank = param_dict.get("rerank", False)
+            rerank_model_name = param_dict.get("rerank_model_name", "")
+            rerank_model = None
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(
+                    tenant_id=tenant_id, model_name=rerank_model_name
+                )
+
+            tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
+                "rerank_model": rerank_model,
+            }
+        elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
+            rerank = param_dict.get("rerank", False)
+            rerank_model_name = param_dict.get("rerank_model_name", "")
+            rerank_model = None
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(
+                    tenant_id=tenant_id, model_name=rerank_model_name
+                )
+
+            tool_config.metadata = {
+                "rerank_model": rerank_model,
             }
         elif tool_config.class_name == "AnalyzeTextFileTool":
             tool_config.metadata = {
@@ -430,23 +450,7 @@ async def prepare_prompt_templates(
     prompt_templates = get_agent_prompt_template(is_manager, language)
     prompt_templates["system_prompt"] = system_prompt
 
-    # Print final prompt with all injections
-    _print_prompt_with_token_count(prompt_templates["system_prompt"], agent_id, "FINAL_PROMPT")
-
     return prompt_templates
-
-
-def _print_prompt_with_token_count(prompt: str, agent_id: int = None, stage: str = "PROMPT"):
-    """Print prompt content and estimate token count using tiktoken."""
-    try:
-        import tiktoken
-        encoding = tiktoken.get_encoding("cl100k_base")
-        token_count = len(encoding.encode(prompt))
-        logger.info(f"[Skill Debug][{stage}] Agent {agent_id} token count: {token_count}")
-        logger.info(f"[Skill Debug][{stage}] Agent {agent_id} prompt:\n{prompt}")
-    except Exception as e:
-        logger.warning(f"[Skill Debug][{stage}] Failed to count tokens: {e}")
-        logger.info(f"[Skill Debug][{stage}] Agent {agent_id} prompt:\n{prompt}")
 
 
 async def join_minio_file_description_to_query(minio_files, query):
@@ -527,7 +531,7 @@ async def create_agent_run_info(
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
     remote_mcp_list.append({
-        "remote_mcp_server_name": "nexent",
+        "remote_mcp_server_name": "outer-apis",
         "remote_mcp_server": default_mcp_url,
         "status": True,
         "authorization_token": None

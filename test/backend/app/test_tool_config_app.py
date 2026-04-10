@@ -754,5 +754,417 @@ class TestConcurrency:
             assert data[0]["name"] == "Tool1"
 
 
+# ============================================================================
+# Outer API Tools Tests
+# ============================================================================
+
+class TestImportOpenAPIAPI:
+    """Test endpoint for importing OpenAPI JSON"""
+
+    @patch('apps.tool_config_app._refresh_outer_api_tools_in_mcp')
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.import_openapi_json')
+    def test_import_openapi_success(
+        self, mock_import_openapi, mock_get_user_id, mock_refresh_mcp
+    ):
+        """Test successful OpenAPI import"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_import_openapi.return_value = {
+            "tools_created": 5,
+            "tools_updated": 2,
+            "tools_deleted": 1
+        }
+        mock_refresh_mcp.return_value = {"status": "refreshed"}
+
+        response = client.post(
+            "/tool/import_openapi",
+            json={
+                "openapi": "3.0.0",
+                "info": {"title": "Test API", "version": "1.0.0"},
+                "paths": {}
+            }
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["message"] == "OpenAPI import successful"
+        assert data["data"]["tools_created"] == 5
+        assert data["data"]["tools_updated"] == 2
+        assert data["data"]["tools_deleted"] == 1
+        assert data["data"]["mcp_refresh"]["status"] == "refreshed"
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_import_openapi.assert_called_once()
+        mock_refresh_mcp.assert_called_once_with("tenant456")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.import_openapi_json')
+    def test_import_openapi_service_error(
+        self, mock_import_openapi, mock_get_user_id
+    ):
+        """Test service error during OpenAPI import"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_import_openapi.side_effect = Exception("Import failed")
+
+        response = client.post(
+            "/tool/import_openapi",
+            json={"openapi": "3.0.0", "info": {"title": "Test"}, "paths": {}}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to import OpenAPI" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_import_openapi.assert_called_once()
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_import_openapi_auth_error(self, mock_get_user_id):
+        """Test authentication error during OpenAPI import"""
+        mock_get_user_id.side_effect = Exception("Auth error")
+
+        response = client.post(
+            "/tool/import_openapi",
+            json={"openapi": "3.0.0", "info": {"title": "Test"}, "paths": {}}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Auth error" in data["detail"]
+
+    @patch('apps.tool_config_app._refresh_outer_api_tools_in_mcp')
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.import_openapi_json')
+    def test_import_openapi_with_authorization_header(
+        self, mock_import_openapi, mock_get_user_id, mock_refresh_mcp
+    ):
+        """Test OpenAPI import with authorization header"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_import_openapi.return_value = {"tools_created": 1}
+        mock_refresh_mcp.return_value = {}
+
+        response = client.post(
+            "/tool/import_openapi",
+            json={"openapi": "3.0.0", "info": {"title": "Test"}, "paths": {}},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_get_user_id.assert_called_with("Bearer test_token")
+
+
+class TestListOuterAPIToolsAPI:
+    """Test endpoint for listing outer API tools"""
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.list_outer_api_tools')
+    def test_list_outer_api_tools_success(
+        self, mock_list_tools, mock_get_user_id
+    ):
+        """Test successful listing of outer API tools"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_list_tools.return_value = [
+            {"id": 1, "name": "Tool1", "type": "openapi"},
+            {"id": 2, "name": "Tool2", "type": "openapi"}
+        ]
+
+        response = client.get("/tool/outer_api_tools")
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "success"
+        assert len(data["data"]) == 2
+        assert data["data"][0]["name"] == "Tool1"
+        assert data["data"][1]["name"] == "Tool2"
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_list_tools.assert_called_once_with("tenant456")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.list_outer_api_tools')
+    def test_list_outer_api_tools_empty(
+        self, mock_list_tools, mock_get_user_id
+    ):
+        """Test listing when no outer API tools exist"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_list_tools.return_value = []
+
+        response = client.get("/tool/outer_api_tools")
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "success"
+        assert data["data"] == []
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_list_tools.assert_called_once_with("tenant456")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.list_outer_api_tools')
+    def test_list_outer_api_tools_service_error(
+        self, mock_list_tools, mock_get_user_id
+    ):
+        """Test service error when listing outer API tools"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_list_tools.side_effect = Exception("Database error")
+
+        response = client.get("/tool/outer_api_tools")
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to list outer API tools" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_list_tools.assert_called_once_with("tenant456")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_list_outer_api_tools_auth_error(self, mock_get_user_id):
+        """Test authentication error when listing outer API tools"""
+        mock_get_user_id.side_effect = Exception("Auth error")
+
+        response = client.get("/tool/outer_api_tools")
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to list outer API tools" in data["detail"]
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.list_outer_api_tools')
+    def test_list_outer_api_tools_with_authorization_header(
+        self, mock_list_tools, mock_get_user_id
+    ):
+        """Test listing outer API tools with authorization header"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_list_tools.return_value = [{"id": 1, "name": "Tool1"}]
+
+        response = client.get(
+            "/tool/outer_api_tools",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_get_user_id.assert_called_with("Bearer test_token")
+
+
+class TestGetOuterAPIToolAPI:
+    """Test endpoint for getting a specific outer API tool"""
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.get_outer_api_tool')
+    def test_get_outer_api_tool_success(
+        self, mock_get_tool, mock_get_user_id
+    ):
+        """Test successful retrieval of outer API tool"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_tool.return_value = {
+            "id": 1,
+            "name": "TestTool",
+            "type": "openapi",
+            "config": {"url": "https://api.example.com"}
+        }
+
+        response = client.get("/tool/outer_api_tools/1")
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "success"
+        assert data["data"]["id"] == 1
+        assert data["data"]["name"] == "TestTool"
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_get_tool.assert_called_once_with(1, "tenant456")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.get_outer_api_tool')
+    def test_get_outer_api_tool_not_found(
+        self, mock_get_tool, mock_get_user_id
+    ):
+        """Test getting non-existent outer API tool"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_tool.return_value = None
+
+        response = client.get("/tool/outer_api_tools/999")
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        data = response.json()
+        assert "Tool not found" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_get_tool.assert_called_once_with(999, "tenant456")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.get_outer_api_tool')
+    def test_get_outer_api_tool_http_exception_reraised(
+        self, mock_get_tool, mock_get_user_id
+    ):
+        """Test HTTPException is re-raised correctly"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        from fastapi import HTTPException
+        mock_get_tool.side_effect = HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Access denied"
+        )
+
+        response = client.get("/tool/outer_api_tools/1")
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        data = response.json()
+        assert "Access denied" in data["detail"]
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.get_outer_api_tool')
+    def test_get_outer_api_tool_service_error(
+        self, mock_get_tool, mock_get_user_id
+    ):
+        """Test service error when getting outer API tool"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_tool.side_effect = Exception("Database error")
+
+        response = client.get("/tool/outer_api_tools/1")
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to get outer API tool" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_get_tool.assert_called_once_with(1, "tenant456")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_get_outer_api_tool_auth_error(self, mock_get_user_id):
+        """Test authentication error when getting outer API tool"""
+        mock_get_user_id.side_effect = Exception("Auth error")
+
+        response = client.get("/tool/outer_api_tools/1")
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to get outer API tool" in data["detail"]
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.get_outer_api_tool')
+    def test_get_outer_api_tool_with_authorization_header(
+        self, mock_get_tool, mock_get_user_id
+    ):
+        """Test getting outer API tool with authorization header"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_tool.return_value = {"id": 1, "name": "TestTool"}
+
+        response = client.get(
+            "/tool/outer_api_tools/1",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_get_user_id.assert_called_with("Bearer test_token")
+
+
+class TestDeleteOuterAPIToolAPI:
+    """Test endpoint for deleting an outer API tool"""
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.delete_outer_api_tool')
+    def test_delete_outer_api_tool_success(
+        self, mock_delete_tool, mock_get_user_id
+    ):
+        """Test successful deletion of outer API tool"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_delete_tool.return_value = True
+
+        response = client.delete("/tool/outer_api_tools/1")
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "Tool deleted successfully"
+        assert data["status"] == "success"
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_delete_tool.assert_called_once_with(1, "tenant456", "user123")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.delete_outer_api_tool')
+    def test_delete_outer_api_tool_not_found(
+        self, mock_delete_tool, mock_get_user_id
+    ):
+        """Test deleting non-existent outer API tool"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_delete_tool.return_value = False
+
+        response = client.delete("/tool/outer_api_tools/999")
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        data = response.json()
+        assert "Tool not found" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_delete_tool.assert_called_once_with(999, "tenant456", "user123")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.delete_outer_api_tool')
+    def test_delete_outer_api_tool_http_exception_reraised(
+        self, mock_delete_tool, mock_get_user_id
+    ):
+        """Test HTTPException is re-raised correctly"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        from fastapi import HTTPException
+        mock_delete_tool.side_effect = HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Access denied"
+        )
+
+        response = client.delete("/tool/outer_api_tools/1")
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        data = response.json()
+        assert "Access denied" in data["detail"]
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.delete_outer_api_tool')
+    def test_delete_outer_api_tool_service_error(
+        self, mock_delete_tool, mock_get_user_id
+    ):
+        """Test service error when deleting outer API tool"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_delete_tool.side_effect = Exception("Database error")
+
+        response = client.delete("/tool/outer_api_tools/1")
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to delete outer API tool" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_delete_tool.assert_called_once_with(1, "tenant456", "user123")
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_delete_outer_api_tool_auth_error(self, mock_get_user_id):
+        """Test authentication error when deleting outer API tool"""
+        mock_get_user_id.side_effect = Exception("Auth error")
+
+        response = client.delete("/tool/outer_api_tools/1")
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to delete outer API tool" in data["detail"]
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.delete_outer_api_tool')
+    def test_delete_outer_api_tool_with_authorization_header(
+        self, mock_delete_tool, mock_get_user_id
+    ):
+        """Test deleting outer API tool with authorization header"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_delete_tool.return_value = True
+
+        response = client.delete(
+            "/tool/outer_api_tools/1",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_get_user_id.assert_called_with("Bearer test_token")
+        mock_delete_tool.assert_called_once_with(1, "tenant456", "user123")
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

@@ -567,3 +567,24 @@ class SkillInstance(TableBase):
     tenant_id = Column(String(100), doc="Tenant ID")
     enabled = Column(Boolean, default=True, doc="Whether this skill is enabled for the agent")
     version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+
+
+class OuterApiTool(TableBase):
+    """
+    Outer API tools table - stores converted OpenAPI tools as MCP tools.
+    """
+    __tablename__ = "ag_outer_api_tools"
+    __table_args__ = {"schema": SCHEMA}
+
+    id = Column(BigInteger, Sequence("ag_outer_api_tools_id_seq", schema=SCHEMA),
+                primary_key=True, nullable=False, doc="Tool ID, unique primary key")
+    name = Column(String(100), nullable=False, doc="Tool name (unique identifier)")
+    description = Column(Text, doc="Tool description")
+    method = Column(String(10), doc="HTTP method: GET/POST/PUT/DELETE")
+    url = Column(Text, nullable=False, doc="API endpoint URL")
+    headers_template = Column(JSONB, doc="Headers template as JSON")
+    query_template = Column(JSONB, doc="Query parameters template as JSON")
+    body_template = Column(JSONB, doc="Request body template as JSON")
+    input_schema = Column(JSONB, doc="MCP input schema as JSON")
+    tenant_id = Column(String(100), doc="Tenant ID for multi-tenancy")
+    is_available = Column(Boolean, default=True, doc="Whether the tool is available")

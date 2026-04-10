@@ -73,7 +73,7 @@ class NexentAgent:
                 # These parameters have exclude=True and cannot be passed to __init__
                 # due to smolagents.tools.Tool wrapper restrictions
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -83,9 +83,16 @@ class NexentAgent:
                     "vdb_core", None) if tool_config.metadata else None
                 tools_obj.embedding_model = tool_config.metadata.get(
                     "embedding_model", None) if tool_config.metadata else None
-            elif class_name == "DataMateSearchTool":
-                tools_obj = tool_class(**params)
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
+            elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
+                # These parameters have exclude=True and cannot be passed to __init__
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "rerank_model"]}
+                tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
             elif class_name == "AnalyzeTextFileTool":
                 tools_obj = tool_class(observer=self.observer,
                                        llm_model=tool_config.metadata.get("llm_model", []),
@@ -232,6 +239,7 @@ class NexentAgent:
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=["*"],
+                instructions=agent_config.instructions,
             )
             agent.stop_event = self.stop_event
 

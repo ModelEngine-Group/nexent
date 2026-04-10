@@ -42,6 +42,7 @@ class AgentConfig(BaseModel):
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
     managed_agents: List[AgentConfig] = Field(description="Managed Agents", default=[])
+    instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
 
 
 class AgentHistory(BaseModel):

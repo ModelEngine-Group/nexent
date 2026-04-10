@@ -70,6 +70,10 @@ export const API_ENDPOINTS = {
     validate: `${API_BASE_URL}/tool/validate`,
     loadConfig: (toolId: number) =>
       `${API_BASE_URL}/tool/load_config/${toolId}`,
+    importOpenapi: `${API_BASE_URL}/tool/import_openapi`,
+    outerApiTools: `${API_BASE_URL}/tool/outer_api_tools`,
+    deleteOuterApiTool: (toolId: number) =>
+      `${API_BASE_URL}/tool/outer_api_tools/${toolId}`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
@@ -92,6 +96,13 @@ export const API_ENDPOINTS = {
       queryParams.append("download", download);
       if (filename) queryParams.append("filename", filename);
       return `${API_BASE_URL}/file/download/${objectName}?${queryParams.toString()}`;
+    },
+    preview: (objectName: string, filename?: string) => {
+      const queryParams = new URLSearchParams();
+      if (filename) queryParams.append("filename", filename);
+      const queryString = queryParams.toString();
+      const suffix = queryString ? `?${queryString}` : "";
+      return `${API_BASE_URL}/file/preview/${objectName}${suffix}`;
     },
     datamateDownload: (params: {
       url?: string;
@@ -237,6 +248,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
     instanceList: `${API_BASE_URL}/skills/instance/list`,
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
+    createSimple: `${API_BASE_URL}/skills/create-simple`,
   },
   memory: {
     // ---------------- Memory configuration ----------------

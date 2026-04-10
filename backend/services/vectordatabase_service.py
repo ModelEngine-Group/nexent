@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
 from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, BaseEmbedding
+from nexent.core.models.rerank_model import OpenAICompatibleRerank, BaseRerank
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
@@ -235,6 +236,52 @@ def get_embedding_model(tenant_id: str, model_name: Optional[str] = None):
             base_url=model_config.get("base_url", ""),
             model_name=get_model_name_from_config(model_config) or "",
             embedding_dim=model_config.get("max_tokens", 1024),
+            ssl_verify=model_config.get("ssl_verify", True),
+        )
+    else:
+        return None
+
+
+def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
+    """
+    Get the rerank model for the tenant, optionally using a specific model name.
+
+    Args:
+        tenant_id: Tenant ID
+        model_name: Optional specific model name to use (format: "model_repo/model_name" or just "model_name")
+                   If provided, will try to find the model in the tenant's model list.
+
+    Returns:
+        Rerank model instance or None
+    """
+    # If model_name is provided, try to find it in the tenant's models
+    if model_name:
+        try:
+            models = get_model_records({"model_type": "rerank"}, tenant_id)
+            for model in models:
+                model_display_name = model.get("model_repo") + "/" + model["model_name"] if model.get("model_repo") else model["model_name"]
+                if model_display_name == model_name:
+                    # Found the model, create rerank model instance
+                    return OpenAICompatibleRerank(
+                        model_name=get_model_name_from_config(model) or "",
+                        base_url=model.get("base_url", ""),
+                        api_key=model.get("api_key", ""),
+                        ssl_verify=model.get("ssl_verify", True),
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to get rerank model by name {model_name}: {e}")
+
+    # Fall back to default rerank model
+    model_config = tenant_config_manager.get_model_config(
+        key="RERANK_ID", tenant_id=tenant_id)
+
+    model_type = model_config.get("model_type", "")
+
+    if model_type == "rerank":
+        return OpenAICompatibleRerank(
+            model_name=get_model_name_from_config(model_config) or "",
+            base_url=model_config.get("base_url", ""),
+            api_key=model_config.get("api_key", ""),
             ssl_verify=model_config.get("ssl_verify", True),
         )
     else:

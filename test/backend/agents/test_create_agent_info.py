@@ -182,7 +182,6 @@ from backend.agents.create_agent_info import (
     prepare_prompt_templates,
     _get_skills_for_template,
     _get_skill_script_tools,
-    _print_prompt_with_token_count,
 )
 
 # Import constants for testing
@@ -431,88 +430,6 @@ class TestGetSkillScriptTools:
                 desc = call[1]['description']
                 assert len(desc) > 0
                 assert "skill" in desc.lower()
-
-
-class TestPrintPromptWithTokenCount:
-    """Tests for the _print_prompt_with_token_count function"""
-
-    def test_print_prompt_with_token_count_success(self):
-        """Test successful token counting with tiktoken available"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = ["token1", "token2", "token3"]
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("test prompt content", agent_id=123, stage="TEST")
-
-                mock_encoding.encode.assert_called_once_with("test prompt content")
-                mock_logger.info.assert_called()
-
-                # Check that log messages contain expected content
-                log_calls = mock_logger.info.call_args_list
-                log_text = " ".join([str(call) for call in log_calls])
-                assert "TEST" in log_text
-                assert "123" in log_text
-                assert "3" in log_text  # Token count
-
-    def test_print_prompt_with_token_count_tiktoken_failure(self):
-        """Test graceful handling when tiktoken fails"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            with patch.object(tiktoken, 'get_encoding', side_effect=Exception("tiktoken not available")):
-                _print_prompt_with_token_count("test prompt", agent_id=456, stage="FALLBACK")
-
-                # Should log a warning and then log the prompt
-                mock_logger.warning.assert_called_once()
-                assert "Failed to count tokens: tiktoken not available" in mock_logger.warning.call_args[0][0]
-
-                # Should still log the prompt
-                mock_logger.info.assert_called()
-
-    def test_print_prompt_with_token_count_default_stage(self):
-        """Test with default stage parameter"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = ["a", "b"]
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("short prompt")
-
-                log_calls = mock_logger.info.call_args_list
-                log_text = " ".join([str(call) for call in log_calls])
-                assert "PROMPT" in log_text  # Default stage
-
-    def test_print_prompt_with_token_count_empty_prompt(self):
-        """Test with empty prompt"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = []
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("", agent_id=1, stage="EMPTY")
-
-                mock_encoding.encode.assert_called_once_with("")
-                # Should log token count of 0
-                log_calls = mock_logger.info.call_args_list
-                log_text = " ".join([str(call) for call in log_calls])
-                assert "0" in log_text
-
-    def test_print_prompt_with_token_count_none_agent_id(self):
-        """Test with None agent_id"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = ["token"]
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("prompt", agent_id=None, stage="NO_ID")
-
-                # Should not raise an error
-                mock_encoding.encode.assert_called_once_with("prompt")
 
 
 class TestDiscoverLangchainTools:
@@ -779,7 +696,8 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
                 {
@@ -788,15 +706,21 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [{"name": "index_names", "default": []}],
+                    "params": [
+                        {"name": "index_names", "default": []},
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 }
             ]
             mock_vdb_core = "mock_elastic_core"
             mock_embedding_model = "mock_embedding_model"
+            mock_rerank_model = "mock_rerank_model"
             mock_get_vector_db_core.return_value = mock_vdb_core
             mock_embedding.return_value = mock_embedding_model
+            mock_rerank.return_value = mock_rerank_model
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -807,10 +731,11 @@ class TestCreateToolConfigList:
             mock_get_vector_db_core.assert_called_once()
             mock_embedding.assert_called_once_with(tenant_id="tenant_1")
 
-            # Verify metadata contains ONLY vdb_core and embedding_model (no index_names or name_resolver)
+            # Verify metadata contains vdb_core, embedding_model and rerank_model
             expected_metadata = {
                 "vdb_core": mock_vdb_core,
                 "embedding_model": mock_embedding_model,
+                "rerank_model": mock_rerank.return_value,
             }
             assert mock_tool_instance.metadata == expected_metadata
 
@@ -834,7 +759,8 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.side_effect = [mock_tool_kb, mock_tool_other]
 
@@ -845,7 +771,11 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "index_names", "default": []},
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 },
@@ -862,6 +792,7 @@ class TestCreateToolConfigList:
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
             mock_embedding.return_value = "embedding_instance"
+            mock_rerank.return_value = "rerank_instance"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -871,6 +802,7 @@ class TestCreateToolConfigList:
             assert mock_tool_kb.metadata == {
                 "vdb_core": "vdb_core_instance",
                 "embedding_model": "embedding_instance",
+                "rerank_model": mock_rerank.return_value,
             }
 
             # Verify OtherTool has no special metadata (should not have metadata attribute set)
@@ -891,7 +823,8 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -902,13 +835,17 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "mcp",
                     "usage": "mcp_server_1"
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
             mock_embedding.return_value = "embedding"
+            mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -917,6 +854,7 @@ class TestCreateToolConfigList:
             assert mock_tool_instance.metadata == {
                 "vdb_core": "vdb_core",
                 "embedding_model": "embedding",
+                "rerank_model": mock_rerank.return_value,
             }
 
     @pytest.mark.asyncio
@@ -1023,7 +961,8 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
                 {
@@ -1032,7 +971,10 @@ class TestCreateToolConfigList:
                     "description": "First knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 },
@@ -1042,13 +984,17 @@ class TestCreateToolConfigList:
                     "description": "Second knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
             mock_embedding.return_value = "embedding"
+            mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -1058,9 +1004,172 @@ class TestCreateToolConfigList:
             expected_metadata = {
                 "vdb_core": "vdb_core",
                 "embedding_model": "embedding",
+                "rerank_model": mock_rerank.return_value,
             }
             assert mock_tool_1.metadata == expected_metadata
             assert mock_tool_2.metadata == expected_metadata
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_dify_tool(self):
+        """Test that DifySearchTool gets correct metadata including rerank model."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DifySearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+            mock_rerank.return_value = "mock_rerank_model"
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DifySearchTool",
+                    "name": "dify_search",
+                    "description": "Dify knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was fetched
+            mock_rerank.assert_called_once_with(
+                tenant_id="tenant_1", model_name="gte-rerank-v2"
+            )
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_dify_tool_no_rerank(self):
+        """Test that DifySearchTool without rerank gets None metadata."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DifySearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DifySearchTool",
+                    "name": "dify_search",
+                    "description": "Dify knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": False},
+                        {"name": "rerank_model_name", "default": ""},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was NOT fetched
+            mock_rerank.assert_not_called()
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool(self):
+        """Test that DataMateSearchTool gets correct metadata including rerank model."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DataMateSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+            mock_rerank.return_value = "mock_datamate_rerank_model"
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateSearchTool",
+                    "name": "datamate_search",
+                    "description": "DataMate knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "jina-rerank-v2"},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was fetched
+            mock_rerank.assert_called_once_with(
+                tenant_id="tenant_1", model_name="jina-rerank-v2"
+            )
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool_no_rerank(self):
+        """Test that DataMateSearchTool without rerank gets None metadata."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DataMateSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateSearchTool",
+                    "name": "datamate_search",
+                    "description": "DataMate knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": False},
+                        {"name": "rerank_model_name", "default": ""},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was NOT fetched
+            mock_rerank.assert_not_called()
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
 
 
 class TestCreateAgentConfig:
@@ -1958,7 +2067,7 @@ class TestCreateAgentConfig:
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
-            
+
             # Create a tool that raises exception when accessing class_name
             mock_tool = MagicMock()
             type(mock_tool).class_name = PropertyMock(side_effect=Exception("Test Error"))
@@ -2319,8 +2428,8 @@ class TestCreateAgentRunInfo:
                     "status": True,
                     "authorization_token": None
                 },
-                "nexent": {
-                    "remote_mcp_server_name": "nexent",
+                "outer-apis": {
+                    "remote_mcp_server_name": "outer-apis",
                     "remote_mcp_server": "http://nexent.mcp/sse",
                     "status": True,
                     "authorization_token": None
@@ -2785,7 +2894,7 @@ class TestCreateAgentRunInfo:
 
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
-            
+
             # Verify that the returned data includes authorization_token (used in mcp_host construction)
             assert mock_get_mcp.return_value[0]["authorization_token"] == "secret_token_123"
 

@@ -37,8 +37,6 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
     Returns:
         dict: Loaded prompt template
     """
-    logger.info(
-        f"Getting prompt template for type: {template_type}, language: {language}, kwargs: {kwargs}")
 
     if template_type not in template_paths:
         raise ValueError(f"Unsupported template type: {template_type}")
