@@ -9,15 +9,17 @@ from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedEr
 from services.oauth_service import (
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
+    exchange_code_for_provider_token,
     get_authorize_url,
     get_enabled_providers,
+    get_provider_user_info,
     list_linked_accounts,
     unlink_account,
 )
 from utils.auth_utils import (
     calculate_expires_at,
+    generate_session_jwt,
     get_current_user_id,
-    get_jwt_expiry_seconds,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,13 +57,6 @@ async def callback(
     error: Optional[str] = None,
     error_description: Optional[str] = None,
 ):
-    """
-    OAuth callback endpoint.
-
-    Returns JSON with session data (same format as /signin) so that
-    server.js forwardAuthRequest can set HttpOnly cookies and the
-    frontend can handle the redirect client-side.
-    """
     if error:
         return JSONResponse(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -99,56 +94,74 @@ async def callback(
         )
 
     try:
+        token_data = exchange_code_for_provider_token(provider, code)
+        provider_access_token = token_data["access_token"]
+
+        user_info = get_provider_user_info(
+            provider,
+            provider_access_token,
+            openid=token_data.get("openid", ""),
+        )
+
+        provider_user_id = user_info["id"]
+        email = user_info["email"]
+        username = user_info["username"]
+        avatar_url = user_info["avatar_url"]
+
         from utils.auth_utils import get_supabase_admin_client
 
         admin_client = get_supabase_admin_client()
         if not admin_client:
             raise RuntimeError("Supabase admin client not available")
 
-        auth_response = admin_client.auth.admin.exchange_code_for_session(code)
+        supabase_user_id = None
+        page = 1
+        while True:
+            users_resp = admin_client.auth.admin.list_users(page=page, per_page=100)
+            users = users_resp.users if hasattr(users_resp, "users") else []
+            if not users:
+                break
+            for u in users:
+                if u.email and u.email.lower() == email.lower():
+                    supabase_user_id = u.id
+                    break
+            if supabase_user_id:
+                break
+            if len(users) < 100:
+                break
+            page += 1
 
-        if not auth_response or not auth_response.user:
-            return JSONResponse(
-                status_code=HTTPStatus.UNAUTHORIZED,
-                content={
-                    "message": "Failed to get user from OAuth provider",
-                    "data": {
-                        "oauth_error": "no_user",
-                        "oauth_error_description": "Failed to get user from OAuth provider",
+        if not supabase_user_id:
+            if not email:
+                email = f"{provider}_{provider_user_id}@oauth.nexent"
+            create_resp = admin_client.auth.admin.create_user(
+                {
+                    "email": email,
+                    "email_confirm": True,
+                    "user_metadata": {
+                        "full_name": username,
+                        "avatar_url": avatar_url,
+                        "provider": provider,
                     },
-                },
+                }
             )
+            supabase_user_id = create_resp.user.id
 
-        user = auth_response.user
-        session = auth_response.session
-        user_id = user.id
-        email = user.email or user.user_metadata.get("email", "")
-        username = (
-            user.user_metadata.get("user_name") or user.user_metadata.get("name") or ""
-        )
-        avatar_url = (
-            user.user_metadata.get("avatar_url")
-            or user.user_metadata.get("picture")
-            or ""
-        )
-
-        ensure_user_tenant_exists(user_id=user_id, email=email)
+        ensure_user_tenant_exists(user_id=supabase_user_id, email=email)
 
         create_or_update_oauth_account(
-            user_id=user_id,
+            user_id=supabase_user_id,
             provider=provider,
-            provider_user_id=user.id,
+            provider_user_id=provider_user_id,
             email=email,
             username=username,
             avatar_url=avatar_url,
-            access_token=session.access_token if session else None,
-            refresh_token=session.refresh_token if session else None,
+            access_token=provider_access_token,
         )
 
-        expiry_seconds = (
-            get_jwt_expiry_seconds(session.access_token) if session else 3600
-        )
-        expires_at = calculate_expires_at(session.access_token) if session else 0
+        expiry_seconds = 3600
+        jwt_token = generate_session_jwt(supabase_user_id, expires_in=expiry_seconds)
+        expires_at = calculate_expires_at(jwt_token)
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -156,12 +169,12 @@ async def callback(
                 "message": "OAuth login successful",
                 "data": {
                     "user": {
-                        "id": str(user_id),
+                        "id": str(supabase_user_id),
                         "email": email,
                     },
                     "session": {
-                        "access_token": session.access_token if session else "",
-                        "refresh_token": session.refresh_token if session else "",
+                        "access_token": jwt_token,
+                        "refresh_token": "",
                         "expires_at": expires_at,
                         "expires_in_seconds": expiry_seconds,
                     },

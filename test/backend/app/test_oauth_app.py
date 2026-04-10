@@ -54,6 +54,7 @@ auth_utils_mock.get_current_user_id = MagicMock(return_value=("user-1", "t-1"))
 auth_utils_mock.get_jwt_expiry_seconds = MagicMock(return_value=3600)
 auth_utils_mock.calculate_expires_at = MagicMock(return_value=1735689600)
 auth_utils_mock.get_supabase_admin_client = MagicMock()
+auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.token")
 sys.modules["utils.auth_utils"] = auth_utils_mock
 
 oauth_service_mock = MagicMock()
@@ -121,9 +122,9 @@ class TestGetProviders(unittest.TestCase):
 
 
 class TestAuthorize(unittest.TestCase):
-    def test_redirects_to_supabase(self):
+    def test_redirects_to_provider(self):
         oauth_service_mock.get_authorize_url.return_value = (
-            "http://supabase.test/auth/v1/authorize?provider=github"
+            "https://github.com/login/oauth/authorize?client_id=test_id"
         )
 
         response = client.get(
@@ -131,7 +132,7 @@ class TestAuthorize(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, HTTPStatus.FOUND)
-        self.assertIn("supabase.test", response.headers["location"])
+        self.assertIn("github.com", response.headers["location"])
 
     def test_returns_400_for_unsupported_provider(self):
         oauth_service_mock.get_authorize_url.side_effect = _OAuthProviderError(
@@ -179,33 +180,28 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(data["data"]["oauth_error"], "unsupported_provider")
 
     def test_success_returns_session_data(self):
-        mock_user = MagicMock()
-        mock_user.id = "user-uuid-123"
-        mock_user.email = "octocat@github.com"
-        mock_user.user_metadata = {
-            "user_name": "octocat",
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {
+            "access_token": "ghu_provider_token_123",
+        }
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "12345",
+            "email": "octocat@github.com",
+            "username": "octocat",
             "avatar_url": "https://avatar.url",
         }
 
-        mock_session_obj = MagicMock()
-        mock_session_obj.access_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test"
-        mock_session_obj.refresh_token = "refresh_tok"
+        mock_existing_user = MagicMock()
+        mock_existing_user.id = "user-uuid-123"
+        mock_existing_user.email = "octocat@github.com"
 
-        mock_auth_response = MagicMock()
-        mock_auth_response.user = mock_user
-        mock_auth_response.session = mock_session_obj
+        mock_users_resp = MagicMock()
+        mock_users_resp.users = [mock_existing_user]
 
         mock_admin_client = MagicMock()
-        mock_admin_client.auth.admin.exchange_code_for_session.return_value = (
-            mock_auth_response
-        )
+        mock_admin_client.auth.admin.list_users.return_value = mock_users_resp
 
-        # Directly set return_value on the module-level mock because
-        # @patch cannot reliably patch attributes on MagicMock objects
-        # that are used as sys.modules substitutes. The callback does
-        # an inline import from utils.auth_utils, which resolves to
-        # the mock already registered in sys.modules.
         auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
+        auth_utils_mock.generate_session_jwt.return_value = "eyJ.mock.jwt.token"
 
         response = client.get("/user/oauth/callback?provider=github&code=valid_code")
 
@@ -217,35 +213,65 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(data["data"]["user"]["email"], "octocat@github.com")
         self.assertEqual(
             data["data"]["session"]["access_token"],
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test",
+            "eyJ.mock.jwt.token",
         )
         self.assertEqual(data["data"]["session"]["expires_in_seconds"], 3600)
 
-        # Restore default return value
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
-    def test_returns_401_when_no_user(self):
-        mock_auth_response = MagicMock()
-        mock_auth_response.user = None
-        mock_auth_response.session = None
+    def test_success_creates_new_user_when_not_found(self):
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {
+            "access_token": "ghu_provider_token_456",
+        }
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "67890",
+            "email": "newuser@github.com",
+            "username": "newuser",
+            "avatar_url": "https://avatar2.url",
+        }
+
+        mock_empty_resp = MagicMock()
+        mock_empty_resp.users = []
+
+        mock_new_user = MagicMock()
+        mock_new_user.id = "new-uuid-456"
 
         mock_admin_client = MagicMock()
-        mock_admin_client.auth.admin.exchange_code_for_session.return_value = (
-            mock_auth_response
+        mock_admin_client.auth.admin.list_users.return_value = mock_empty_resp
+        mock_admin_client.auth.admin.create_user.return_value = MagicMock(
+            user=mock_new_user
         )
+
         auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
+        auth_utils_mock.generate_session_jwt.return_value = "eyJ.new.jwt.token"
+
+        response = client.get("/user/oauth/callback?provider=github&code=new_code")
+
+        if response.status_code != HTTPStatus.OK:
+            print("Response:", response.json())
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        data = response.json()
+        self.assertEqual(data["data"]["user"]["email"], "newuser@github.com")
+        mock_admin_client.auth.admin.create_user.assert_called_once()
+
+        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+
+    def test_returns_500_on_token_exchange_failure(self):
+        oauth_service_mock.exchange_code_for_provider_token.side_effect = Exception(
+            "Token exchange failed"
+        )
 
         response = client.get("/user/oauth/callback?provider=github&code=bad_code")
 
-        self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+        self.assertEqual(response.status_code, HTTPStatus.INTERNAL_SERVER_ERROR)
         data = response.json()
-        self.assertEqual(data["data"]["oauth_error"], "no_user")
+        self.assertEqual(data["data"]["oauth_error"], "callback_failed")
 
-        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+        oauth_service_mock.exchange_code_for_provider_token.side_effect = None
 
     def test_returns_500_on_exception(self):
-        auth_utils_mock.get_supabase_admin_client.side_effect = Exception(
-            "Supabase down"
+        oauth_service_mock.exchange_code_for_provider_token.side_effect = Exception(
+            "Network error"
         )
 
         response = client.get("/user/oauth/callback?provider=github&code=crash_code")
@@ -254,7 +280,7 @@ class TestCallback(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["data"]["oauth_error"], "callback_failed")
 
-        auth_utils_mock.get_supabase_admin_client.side_effect = None
+        oauth_service_mock.exchange_code_for_provider_token.side_effect = None
 
 
 class TestGetAccounts(unittest.TestCase):

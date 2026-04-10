@@ -120,20 +120,22 @@ class TestGetEnabledProviders(unittest.TestCase):
 
 
 class TestGetAuthorizeUrl(unittest.TestCase):
-    def test_returns_supabase_authorize_url(self):
+    def test_returns_github_authorize_url(self):
         with (
-            patch.object(oauth_service_module, "GITHUB_OAUTH_CLIENT_ID", "id"),
-            patch.object(oauth_service_module, "GITHUB_OAUTH_CLIENT_SECRET", "secret"),
+            patch.object(oauth_service_module, "GITHUB_OAUTH_CLIENT_ID", "gh_test_id"),
+            patch.object(
+                oauth_service_module, "GITHUB_OAUTH_CLIENT_SECRET", "gh_test_secret"
+            ),
             patch.object(
                 oauth_service_module, "OAUTH_CALLBACK_BASE_URL", "http://localhost:3000"
             ),
-            patch.object(oauth_service_module, "SUPABASE_URL", "http://localhost:8000"),
         ):
             url = get_authorize_url("github")
 
-        self.assertIn("http://localhost:8000/auth/v1/authorize", url)
-        self.assertIn("provider=github", url)
-        self.assertIn("redirect_to=", url)
+        self.assertIn("github.com/login/oauth/authorize", url)
+        self.assertIn("client_id=gh_test_id", url)
+        self.assertIn("redirect_uri=", url)
+        self.assertIn("state=github", url)
 
     def test_unsupported_provider_raises(self):
         with self.assertRaises(_OAuthProviderError):
