@@ -46,7 +46,9 @@ def parse_code_blobs(text: str) -> str:
         ValueError: If no valid code block is found in the text.
     """
     # Match standard python code blocks: ```python or ```py
-    pattern = r"```(?:py|python)\s*\n(.*?)\n```"
+    # Allow the closing fence to appear either on its own line or immediately
+    # after the final code token.
+    pattern = r"```(?:py|python)\s*\n(.*?)\n?```"
     matches = re.findall(pattern, text, re.DOTALL)
     if matches:
         return "\n\n".join(match.strip() for match in matches)
