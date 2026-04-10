@@ -990,7 +990,7 @@ description: Python script
             result = manager.run_skill_script(
                 "py-script-skill",
                 "scripts/hello.py",
-                params={"--name": "test"},
+                params="--name test",
             )
 
             assert result == '{"result": "success"}'
@@ -1076,46 +1076,79 @@ description: Unsupported
                 manager.run_skill_script("unsupported-skill", "scripts/script.js")
 
 
-class TestSkillManagerBuildCommandArgs:
-    """Test SkillManager._build_command_args method."""
+class TestSkillManagerStringParams:
+    """Test SkillManager string-based parameter handling."""
 
-    def test_build_command_string_param(self):
-        """Test building command with string parameter."""
-        manager = SkillManager()
-        args = manager._build_command_args({"--name": "value"})
+    def test_string_params_simple(self, mocker):
+        """Test string params are parsed correctly with shlex."""
+        with TempSkillDir() as temp:
+            temp.create_skill(
+                "str-params-skill",
+                """---
+name: str-params-skill
+description: String params test
+---
+# Content
+""",
+                subdirs={
+                    "scripts": [{"name": "test.py", "content": "print('Hello')"}],
+                },
+            )
 
-        assert "--name" in args
-        assert "value" in args
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = '{"result": "success"}'
+            mock_result.stderr = ""
 
-    def test_build_command_boolean_true(self):
-        """Test building command with boolean True parameter."""
-        manager = SkillManager()
-        args = manager._build_command_args({"--verbose": True})
+            mocker.patch("subprocess.run", return_value=mock_result)
 
-        assert "--verbose" in args
-        assert len(args) == 1
+            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            result = manager.run_skill_script(
+                "str-params-skill",
+                "scripts/test.py",
+                params='--target -c --code "SELECT 1"',
+            )
 
-    def test_build_command_boolean_false(self):
-        """Test building command with boolean False parameter (excluded)."""
-        manager = SkillManager()
-        args = manager._build_command_args({"--quiet": False})
+            assert result == '{"result": "success"}'
+            call_args = subprocess.run.call_args[0][0]
+            assert "--target" in call_args
+            assert "-c" in call_args
+            assert "--code" in call_args
+            assert "SELECT 1" in call_args
 
-        assert "--quiet" not in args
-        assert len(args) == 0
+    def test_string_params_empty(self, mocker):
+        """Test empty string params work correctly."""
+        with TempSkillDir() as temp:
+            temp.create_skill(
+                "empty-params-skill",
+                """---
+name: empty-params-skill
+description: Empty params test
+---
+# Content
+""",
+                subdirs={
+                    "scripts": [{"name": "test.py", "content": "print('Hello')"}],
+                },
+            )
 
-    def test_build_command_list_param(self):
-        """Test building command with list parameter."""
-        manager = SkillManager()
-        args = manager._build_command_args({"-i": ["a", "b", "c"]})
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = '{"result": "success"}'
+            mock_result.stderr = ""
 
-        assert args == ["-i", "a", "-i", "b", "-i", "c"]
+            mocker.patch("subprocess.run", return_value=mock_result)
 
-    def test_build_command_none_value(self):
-        """Test that None values are excluded."""
-        manager = SkillManager()
-        args = manager._build_command_args({"--opt": None})
+            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            result = manager.run_skill_script(
+                "empty-params-skill",
+                "scripts/test.py",
+                params="",
+            )
 
-        assert len(args) == 0
+            assert result == '{"result": "success"}'
+            call_args = subprocess.run.call_args[0][0]
+            assert len(call_args) == 2  # Only script path and "python"
 
 
 class TestSkillManagerEdgeCases:
