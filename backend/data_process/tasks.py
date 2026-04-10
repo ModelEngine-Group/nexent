@@ -653,6 +653,11 @@ def forward(
             logger.warning(
                 f"[{self.request.id}] FORWARD TASK: Empty chunks list received for source {original_source}")
         formatted_chunks = []
+        # Compute once per file to avoid repeated IO/MinIO calls inside loop
+        file_size = get_file_size(source_type, original_source) if isinstance(
+            original_source, str) else 0
+        filename_resolved = filename or (os.path.basename(original_source) if original_source and isinstance(
+            original_source, str) else "")
         for i, chunk in enumerate(chunks):
             # Extract text and metadata
             content = chunk.get("content", "")
@@ -664,13 +669,10 @@ def forward(
                     f"[{self.request.id}] FORWARD TASK: Chunk {i+1} has empty text content, skipping")
                 continue
 
-            file_size = get_file_size(source_type, original_source) if isinstance(
-                original_source, str) else 0
-
             # Format as expected by the Elasticsearch API
             formatted_chunk = {
                 "metadata": metadata,
-                "filename": filename or (os.path.basename(original_source) if original_source and isinstance(original_source, str) else ""),
+                "filename": filename_resolved,
                 "path_or_url": original_source,
                 "content": content,
                 "process_source": "Unstructured",
