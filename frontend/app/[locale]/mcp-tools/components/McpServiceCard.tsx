@@ -59,7 +59,7 @@ export default function McpServiceCard({
             ? t("mcpTools.serverType.http")
             : service.transportType === MCP_TRANSPORT_TYPE.SSE
             ? t("mcpTools.serverType.sse")
-            : t("mcpTools.serverType.stdio")}
+            : t("mcpTools.serverType.container")}
         </span>
         {service.tags.map((tag) => (
           <span

@@ -46,8 +46,8 @@ class AddMcpServiceRequest(BaseModel):
     name: str = Field(min_length=1)
     server_url: str = Field(min_length=1)
     description: Optional[str] = None
-    source: Literal["local", "mcp_registry", "community", "market"] = "local"
-    transport_type: Literal["http", "sse", "stdio", "container"] = "http"
+    source: Literal["local", "mcp_registry", "community"] = "local"
+    transport_type: Literal["http", "sse", "container"] = "http"
     tags: list[str] = Field(default_factory=list)
     authorization_token: Optional[str] = None
     container_config: Optional[dict[str, Any]] = None
@@ -73,7 +73,7 @@ class AddMcpServiceRequest(BaseModel):
 class AddContainerMcpServiceRequest(BaseModel):
     name: str = Field(min_length=1)
     description: Optional[str] = None
-    source: Literal["local", "community", "market"] = "local"
+    source: Literal["local", "mcp_registry", "community"] = "local"
     tags: list[str] = Field(default_factory=list)
     authorization_token: Optional[str] = None
     registry_json: Optional[dict[str, Any]] = None
@@ -133,7 +133,7 @@ class ListMcpToolsByIdRequest(BaseModel):
 class CommunityListRequest(BaseModel):
     search: Optional[str] = None
     tag: Optional[str] = None
-    transport_type: Optional[Literal["http", "sse", "stdio"]] = None
+    transport_type: Optional[Literal["http", "sse", "container"]] = None
     cursor: Optional[str] = None
     limit: int = Field(default=30, ge=1, le=100)
 

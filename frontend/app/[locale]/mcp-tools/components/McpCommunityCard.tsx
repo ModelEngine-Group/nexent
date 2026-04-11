@@ -56,7 +56,7 @@ export default function McpCommunityCard({
             ? t("mcpTools.serverType.http")
             : service.transportType === MCP_TRANSPORT_TYPE.SSE
             ? t("mcpTools.serverType.sse")
-            : t("mcpTools.serverType.stdio")}
+            : t("mcpTools.serverType.container")}
         </span>
         {(service.tags || []).map((tag) => (
           <span key={`${service.name}-${tag}`} className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">

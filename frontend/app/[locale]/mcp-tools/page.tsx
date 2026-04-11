@@ -140,7 +140,7 @@ export default function McpToolsPage() {
                 { value: "all", label: t("mcpTools.page.transportFilter.all") },
                 { value: "http", label: t("mcpTools.serverType.http") },
                 { value: "sse", label: t("mcpTools.serverType.sse") },
-                { value: "stdio", label: t("mcpTools.serverType.stdio") },
+                { value: "container", label: t("mcpTools.serverType.container") },
               ]}
             />
             <Select

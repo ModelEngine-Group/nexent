@@ -95,7 +95,7 @@ export const fetchRegistryMcpCards = async (params: {
 export const fetchCommunityMcpCards = async (params: {
   search?: string;
   cursor?: string | null;
-  transportType?: "http" | "sse" | "stdio";
+  transportType?: "http" | "sse" | "container";
   tag?: string;
   limit?: number;
 }) => {
@@ -178,7 +178,7 @@ export const resolveContainerServerInfo = async (params: {
     mcpConfig?: AddMcpRuntimeFromConfigPayload;
   }>
 > => {
-  if (params.transportType !== MCP_TRANSPORT_TYPE.STDIO) {
+  if (params.transportType !== MCP_TRANSPORT_TYPE.CONTAINER) {
     return {
       success: true,
       data: {
@@ -295,7 +295,7 @@ export const listRegistryMcpTools = async (query: URLSearchParams) => {
 export const listCommunityMcpTools = async (payload: {
   search?: string;
   tag?: string;
-  transport_type?: "http" | "sse" | "stdio";
+  transport_type?: "http" | "sse" | "container";
   cursor?: string;
   limit?: number;
 }) => {

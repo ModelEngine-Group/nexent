@@ -277,7 +277,7 @@ export default function McpServiceDetailModal({
                   ? t("mcpTools.serverType.http")
                   : draftService.transportType === MCP_TRANSPORT_TYPE.SSE
                   ? t("mcpTools.serverType.sse")
-                  : t("mcpTools.serverType.stdio")}
+                  : t("mcpTools.serverType.container")}
               </span>
             </div>
             {draftService.version ? (
@@ -337,7 +337,7 @@ export default function McpServiceDetailModal({
                 </Button>
               </div>
             </div>
-            {draftService.transportType === MCP_TRANSPORT_TYPE.STDIO ? (
+            {draftService.transportType === MCP_TRANSPORT_TYPE.CONTAINER ? (
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">{t("mcpTools.detail.containerStatus")}</span>
                 <span className="font-medium text-slate-800">{getContainerStatusLabel(draftService.containerStatus)}</span>
@@ -349,7 +349,7 @@ export default function McpServiceDetailModal({
             <div className="flex items-center justify-between gap-3">
               <span className="text-slate-500">{t("mcpTools.detail.tools")}</span>
               <div className="flex items-center gap-2">
-                {draftService.transportType === MCP_TRANSPORT_TYPE.STDIO && draftService.containerId ? (
+                {draftService.transportType === MCP_TRANSPORT_TYPE.CONTAINER && draftService.containerId ? (
                   <Button
                     size="small"
                     className="rounded-full"
@@ -516,7 +516,7 @@ export default function McpServiceDetailModal({
         </Modal>
       ) : null}
 
-      {draftService.transportType === MCP_TRANSPORT_TYPE.STDIO && draftService.containerId ? (
+      {draftService.transportType === MCP_TRANSPORT_TYPE.CONTAINER && draftService.containerId ? (
         <McpContainerLogsModal
           open={logsModalOpen}
           onCancel={() => setLogsModalOpen(false)}

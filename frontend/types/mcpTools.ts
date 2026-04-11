@@ -9,7 +9,7 @@ export enum McpTab {
 export enum McpTransportType {
   HTTP = "http",
   SSE = "sse",
-  STDIO = "stdio",
+  CONTAINER = "container",
 }
 
 export enum McpServiceStatus {
@@ -119,13 +119,11 @@ export interface RegistryQuickAddOption {
   key: string;
   sourceType: "remote" | "package";
   sourceLabel: string;
-  transportType: "http" | "sse" | "stdio";
+  transportType: "http" | "sse" | "container";
   serverUrl?: string;
-  serverUrlTemplate?: string;
   remoteVariables?: RegistryRemoteVariable[];
   remoteHeaders?: RegistryRemoteVariable[];
   unsupportedRequiredHeaders?: string[];
-  packageIndex?: number;
   packageRuntimeHint?: string;
   packageEnvironmentVariables?: RegistryRemoteVariable[];
   packageTransportHeaders?: RegistryRemoteVariable[];
@@ -148,7 +146,7 @@ export interface CommunityMcpCard {
   remotes: Array<{ type: string; url: string }>;
   packages: Array<Record<string, unknown>>;
   source?: "community";
-  transportType: "http" | "sse" | "stdio";
+  transportType: "http" | "sse" | "container";
   serverUrl: string;
   configJson?: Record<string, unknown> | null;
   registryJson?: Record<string, unknown> | null;

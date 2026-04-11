@@ -65,7 +65,7 @@ export function useMcpToolsAddCommunity({
   onClose,
 }: UseMcpToolsAddCommunityParams) {
   const [communitySearchValue, setCommunitySearchValue] = useState("");
-  const [communityTransportTypeFilter, setCommunityTransportTypeFilter] = useState<"all" | "http" | "sse" | "stdio">("all");
+  const [communityTransportTypeFilter, setCommunityTransportTypeFilter] = useState<"all" | "http" | "sse" | "container">("all");
   const [communityTagFilter, setCommunityTagFilter] = useState<string>("all");
   const [selectedCommunityService, setSelectedCommunityService] = useState<CommunityMcpCard | null>(null);
   const [communityCurrentCursor, setCommunityCurrentCursor] = useState<string | null>(null);
@@ -235,7 +235,7 @@ export function useMcpToolsAddCommunity({
 
     setAddingService(true);
     try {
-      if (transportType === MCP_TRANSPORT_TYPE.STDIO) {
+      if (transportType === MCP_TRANSPORT_TYPE.CONTAINER) {
         let parsedConfig: unknown;
         try {
           parsedConfig = JSON.parse(draft.containerConfigJson);

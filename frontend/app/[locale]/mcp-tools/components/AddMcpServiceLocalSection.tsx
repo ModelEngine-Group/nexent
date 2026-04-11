@@ -173,7 +173,7 @@ export default function AddMcpServiceLocalSection({
             options={[
               { label: t("mcpTools.serverType.http"), value: MCP_TRANSPORT_TYPE.HTTP },
               { label: t("mcpTools.serverType.sse"), value: MCP_TRANSPORT_TYPE.SSE },
-              { label: t("mcpTools.serverType.stdio"), value: MCP_TRANSPORT_TYPE.STDIO },
+              { label: t("mcpTools.serverType.container"), value: MCP_TRANSPORT_TYPE.CONTAINER },
             ]}
           />
         </Form.Item>
