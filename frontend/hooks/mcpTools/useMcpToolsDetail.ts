@@ -104,7 +104,7 @@ export function useMcpToolsDetail({
             containerStatus: selectedService.containerStatus,
             updatedAt: selectedService.updatedAt,
             version: selectedService.version,
-            mcpRegistryJson: selectedService.mcpRegistryJson,
+            registryJson: selectedService.registryJson,
             configJson: selectedService.configJson,
           };
         });

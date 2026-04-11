@@ -25,10 +25,10 @@ export default function McpCommunityDetailModal({
 }: Props) {
   const [showServerJsonModal, setShowServerJsonModal] = useState(false);
   const [showConfigJsonModal, setShowConfigJsonModal] = useState(false);
-  const { websiteUrl, repositoryUrl } = extractRegistryLinks(service.serverJson as Record<string, unknown>);
-  const serverJsonPretty = toPrettyRegistryJson(service.serverJson as Record<string, unknown>);
+  const { websiteUrl, repositoryUrl } = extractRegistryLinks(service.registryJson as Record<string, unknown>);
+  const serverJsonPretty = toPrettyRegistryJson(service.registryJson as Record<string, unknown>);
   const configJsonPretty = toPrettyRegistryJson((service.configJson || undefined) as Record<string, unknown> | undefined);
-  const hasServerJson = Boolean(service.serverJson && Object.keys(service.serverJson).length > 0);
+  const hasServerJson = Boolean(service.registryJson && Object.keys(service.registryJson).length > 0);
   const hasConfigJson = Boolean(service.configJson && Object.keys(service.configJson).length > 0);
   const serverTypeText =
     service.transportType === "sse"
