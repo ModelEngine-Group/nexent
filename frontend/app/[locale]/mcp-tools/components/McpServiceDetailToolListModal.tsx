@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Modal, Button, Table } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 import { Maximize, Minimize } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpTool } from "@/types/agentConfig";
@@ -10,14 +11,16 @@ interface McpToolListModalProps {
   loading: boolean;
   tools: McpTool[];
   serverName: string;
+  onRefresh?: () => void;
 }
 
-export default function McpToolListModal({
+export default function McpServiceDetailToolListModal({
   open,
   onCancel,
   loading,
   tools,
   serverName,
+  onRefresh,
 }: McpToolListModalProps) {
   const { t } = useTranslation("common");
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set());
@@ -71,7 +74,18 @@ export default function McpToolListModal({
       open={open}
       onCancel={onCancel}
       width={800}
-      footer={[<Button key="close" onClick={onCancel}>{t("mcpConfig.modal.close")}</Button>]}
+      footer={[
+        <Button
+          key="refresh"
+          icon={<ReloadOutlined />}
+          onClick={onRefresh}
+          loading={loading}
+          disabled={!onRefresh}
+        >
+          {t("common.refresh")}
+        </Button>,
+        <Button key="close" onClick={onCancel}>{t("mcpConfig.modal.close")}</Button>,
+      ]}
     >
       <Table
         loading={{ spinning: loading, description: t("mcpConfig.toolsList.loading") }}
@@ -86,4 +100,3 @@ export default function McpToolListModal({
     </Modal>
   );
 }
-

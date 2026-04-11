@@ -13,6 +13,7 @@ from apps.knowledge_summary_app import router as summary_router
 from apps.mock_user_management_app import router as mock_user_management_router
 from apps.model_managment_app import router as model_manager_router
 from apps.prompt_app import router as prompt_router
+from apps.mcp_management_app import router as mcp_management_router
 from apps.remote_mcp_app import router as remote_mcp_router
 from apps.skill_app import router as skill_router
 from apps.tenant_config_app import router as tenant_config_router
@@ -55,6 +56,7 @@ app.include_router(summary_router)
 app.include_router(prompt_router)
 app.include_router(skill_router)
 app.include_router(tenant_config_router)
+app.include_router(mcp_management_router)
 app.include_router(remote_mcp_router)
 app.include_router(tenant_router)
 app.include_router(group_router)

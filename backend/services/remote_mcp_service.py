@@ -1,6 +1,7 @@
 import logging
 import os
 import tempfile
+import asyncio
 
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
@@ -22,8 +23,6 @@ from database.user_tenant_db import get_user_tenant_by_user_id
 from services.mcp_container_service import MCPContainerManager
 
 logger = logging.getLogger("remote_mcp_service")
-
-
 async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None) -> bool:
     try:
         # Select transport based on URL ending
@@ -55,7 +54,10 @@ async def mcp_server_health(remote_mcp_server: str, authorization_token: str | N
         logger.error(
             f"Remote MCP server health check failed: {e}", exc_info=True)
         # Prevent library-level exits (e.g., SystemExit) from crashing the service
-        raise MCPConnectionError("MCP connection failed")
+        error_message = str(e).strip() or repr(e)
+        if isinstance(e, (asyncio.TimeoutError, TimeoutError)) or "timeout" in error_message.lower():
+            raise MCPConnectionError("MCP_HEALTH_TIMEOUT")
+        raise MCPConnectionError(error_message)
 
 
 async def add_remote_mcp_server_list(

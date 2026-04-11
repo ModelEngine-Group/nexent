@@ -1,5 +1,5 @@
 from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -329,12 +329,51 @@ class McpRecord(TableBase):
         String(200),
         doc="Docker container ID for MCP service, None for non-containerized MCP",
     )
+    container_port = Column(
+        Integer,
+        doc="Host port bound for containerized MCP service",
+    )
     authorization_token = Column(
         String(500),
         doc="Authorization token for MCP server authentication (e.g., Bearer token)",
         default=None,
     )
+    source = Column(String(30), doc="Source type: local/mcp_registry/community")
+    version = Column(String(50), doc="MCP version")
+    registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
+    transport_type = Column(String(30), doc="Transport type: streamable-http/sse/container")
+    config_json = Column(JSON, doc="MCP config data")
+    enabled = Column(Boolean, default=True, doc="Enabled")
+    tags = Column(ARRAY(Text), doc="Tags")
+    description = Column(Text, doc="Description")
+    last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 
+
+class McpCommunityRecord(TableBase):
+    """Community MCP market records table."""
+
+    __tablename__ = "mcp_community_record_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    community_id = Column(
+        Integer,
+        Sequence("mcp_community_record_t_community_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Community record ID, unique primary key",
+    )
+    tenant_id = Column(String(100), doc="Publisher tenant ID")
+    user_id = Column(String(100), doc="Publisher user ID")
+    mcp_name = Column(String(100), doc="MCP name")
+    mcp_server = Column(String(500), doc="MCP server URL")
+    source = Column(String(30), doc="Source type, fixed to community")
+    version = Column(String(50), doc="MCP version")
+    registry_json = Column(JSONB, doc="Full MCP metadata JSON")
+    transport_type = Column(String(30), doc="Transport type: http/sse/container")
+    config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
+    tags = Column(ARRAY(Text), doc="Tags")
+    description = Column(Text, doc="Description")
+    last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 
 class UserTenant(TableBase):
     """
