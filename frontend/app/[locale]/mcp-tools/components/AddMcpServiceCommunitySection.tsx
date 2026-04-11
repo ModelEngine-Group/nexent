@@ -54,10 +54,6 @@ interface Props {
   handleCloseQuickAddConfirm: () => void;
   handleConfirmQuickAddFromCommunity: () => void;
   quickAddSubmitting: boolean;
-  handleSuggestContainerPort: () => void;
-  containerPortCheckLoading: boolean;
-  containerPortSuggesting: boolean;
-  containerPortAvailable: boolean;
   t: (key: string, params?: Record<string, unknown>) => string;
 }
 
@@ -88,10 +84,6 @@ export default function AddMcpServiceCommunitySection({
   handleCloseQuickAddConfirm,
   handleConfirmQuickAddFromCommunity,
   quickAddSubmitting,
-  handleSuggestContainerPort,
-  containerPortCheckLoading,
-  containerPortSuggesting,
-  containerPortAvailable,
   t,
 }: Props) {
   const [form] = Form.useForm();
@@ -330,15 +322,12 @@ export default function AddMcpServiceCommunitySection({
               >
                 <div>
                   <ContainerPortField
+                    scope="community"
                     containerPort={quickAddDraft.containerPort}
-                    containerPortCheckLoading={containerPortCheckLoading}
-                    containerPortSuggesting={containerPortSuggesting}
-                    containerPortAvailable={containerPortAvailable}
                     setContainerPort={(value) => {
                       updateQuickAddDraft({ containerPort: value });
                       form.setFieldValue("containerPort", value);
                     }}
-                    handleSuggestContainerPort={handleSuggestContainerPort}
                     t={t}
                   />
                 </div>

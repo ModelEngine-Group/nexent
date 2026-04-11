@@ -37,7 +37,7 @@ export default function McpToolsPage() {
     loadServerList,
     filteredServices,
     toggleServiceStatus,
-    togglingServiceId,
+    isServiceToggling,
     detail,
   } = useMcpToolsPage({
     t: translate,
@@ -175,7 +175,7 @@ export default function McpToolsPage() {
                     service={service}
                     t={t}
                     onSelectService={setSelectedService}
-                    toggleLoading={togglingServiceId === service.mcpId}
+                    toggleLoading={isServiceToggling(service.mcpId)}
                     onToggleEnable={(item) => {
                       toggleServiceStatus(item).catch((error) => {
                         log.error("[McpToolsPage] Failed to toggle service status from card", {
@@ -206,7 +206,7 @@ export default function McpToolsPage() {
               toolsModalVisible={detail.toolsModalVisible}
               currentServerTools={detail.currentServerTools}
               publishLoading={detail.publishLoading}
-              toggleLoading={togglingServiceId === detail.selectedService?.mcpId}
+              toggleLoading={isServiceToggling(detail.selectedService?.mcpId)}
               setDraftService={detail.setDraftService}
               setTagInputValue={detail.setTagInputValue}
               addDetailTag={detail.addDetailTag}

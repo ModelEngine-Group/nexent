@@ -1832,6 +1832,7 @@
   "mcpTools.delete.confirmOk": "确认",
   "mcpTools.delete.confirmCancel": "取消",
   "mcpTools.add.failed": "添加 MCP 服务失败",
+  "mcpTools.add.enableNameConflict": "已存在同名已启用服务",
   "mcpTools.add.success": "MCP 服务添加成功",
   "mcpTools.add.validate.nameRequired": "请填写 MCP 名称",
   "mcpTools.add.validate.nameMaxLength": "MCP 名称不能超过 100 个字符",

@@ -98,11 +98,6 @@ class AddContainerMcpServiceRequest(BaseModel):
 class PortConflictCheckRequest(BaseModel):
     port: int = Field(..., ge=1, le=65535)
 
-
-class PortSuggestionRequest(BaseModel):
-    start_port: int = Field(default=5500, ge=1, le=65535)
-
-
 class UpdateMcpServiceByIdRequest(BaseModel):
     mcp_id: int = Field(gt=0)
     name: str = Field(min_length=1)
@@ -371,13 +366,12 @@ async def check_mcp_container_port_api(
 
 @router.post("/port/suggest")
 async def suggest_mcp_container_port_api(
-    payload: PortSuggestionRequest,
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
     try:
         get_current_user_info(authorization, http_request)
-        port = suggest_container_port(start_port=payload.start_port)
+        port = suggest_container_port()
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": {"port": port}},

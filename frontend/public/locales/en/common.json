@@ -1674,6 +1674,7 @@
   "mcpTools.delete.confirmOk": "OK",
   "mcpTools.delete.confirmCancel": "Cancel",
   "mcpTools.add.failed": "Failed to add MCP service",
+  "mcpTools.add.enableNameConflict": "An enabled service with the same name already exists",
   "mcpTools.add.success": "MCP service added successfully",
   "mcpTools.add.validate.nameRequired": "Please enter an MCP service name",
   "mcpTools.add.validate.nameMaxLength": "MCP service name cannot exceed 100 characters",
