@@ -1,25 +1,38 @@
-import { Button, InputNumber } from "antd";
+import { App, Button, InputNumber } from "antd";
 import { LoadingOutlined } from "@ant-design/icons";
+import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortAvailability";
 
 type ContainerPortFieldProps = {
+  scope: string;
+  enabled?: boolean;
   containerPort: number | undefined;
-  containerPortCheckLoading: boolean;
-  containerPortSuggesting: boolean;
-  containerPortAvailable: boolean;
   setContainerPort: (value: number | undefined) => void;
-  handleSuggestContainerPort: () => void;
   t: (key: string, params?: Record<string, unknown>) => string;
 };
 
 export default function ContainerPortField({
+  scope,
+  enabled = true,
   containerPort,
-  containerPortCheckLoading,
-  containerPortSuggesting,
-  containerPortAvailable,
   setContainerPort,
-  handleSuggestContainerPort,
   t,
 }: ContainerPortFieldProps) {
+  const { message } = App.useApp();
+  const {
+    containerPortCheckLoading,
+    containerPortAvailable,
+    containerPortSuggesting,
+    handleSuggestContainerPort,
+  } = useContainerPortAvailability({
+    scope,
+    enabled,
+    containerPort,
+    setContainerPort,
+    t,
+    message,
+    logTag: `ContainerPortField:${scope}`,
+  });
+
   return (
     <label className="block text-sm text-slate-500">
       {t("mcpTools.addModal.containerPort")}

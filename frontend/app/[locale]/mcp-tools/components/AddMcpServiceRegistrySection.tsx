@@ -37,10 +37,6 @@ interface Props {
   handleQuickAddFromRegistry: (service: RegistryMcpCard) => void;
   handleCloseQuickAddPicker: () => void;
   handleConfirmQuickAddOption: () => Promise<void>;
-  handleSuggestContainerPort: () => void;
-  containerPortCheckLoading: boolean;
-  containerPortSuggesting: boolean;
-  containerPortAvailable: boolean;
   t: (key: string, params?: Record<string, unknown>) => string;
 }
 
@@ -75,10 +71,6 @@ export default function AddMcpServiceRegistrySection({
   handleQuickAddFromRegistry,
   handleCloseQuickAddPicker,
   handleConfirmQuickAddOption,
-  handleSuggestContainerPort,
-  containerPortCheckLoading,
-  containerPortSuggesting,
-  containerPortAvailable,
   t,
 }: Props) {
   const [form] = Form.useForm();
@@ -330,15 +322,12 @@ export default function AddMcpServiceRegistrySection({
                   >
                     <div>
                       <ContainerPortField
+                        scope="registry"
                         containerPort={quickAddContainerPort}
-                        containerPortCheckLoading={containerPortCheckLoading}
-                        containerPortSuggesting={containerPortSuggesting}
-                        containerPortAvailable={containerPortAvailable}
                         setContainerPort={(value) => {
                           setQuickAddContainerPort(value);
                           form.setFieldValue("quickAddContainerPort", value);
                         }}
-                        handleSuggestContainerPort={handleSuggestContainerPort}
                         t={t}
                       />
                     </div>

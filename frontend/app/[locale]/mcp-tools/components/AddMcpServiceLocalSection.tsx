@@ -27,10 +27,6 @@ interface Props {
   removeNewTag: (index: number) => void;
   setNewTagInputValue: (value: string) => void;
   handleAddService: () => void;
-  handleSuggestContainerPort: () => void;
-  containerPortCheckLoading: boolean;
-  containerPortSuggesting: boolean;
-  containerPortAvailable: boolean;
   t: (key: string, params?: Record<string, unknown>) => string;
 }
 
@@ -56,10 +52,6 @@ export default function AddMcpServiceLocalSection({
   removeNewTag,
   setNewTagInputValue,
   handleAddService,
-  handleSuggestContainerPort,
-  containerPortCheckLoading,
-  containerPortSuggesting,
-  containerPortAvailable,
   t,
 }: Props) {
   const [form] = Form.useForm();
@@ -289,15 +281,12 @@ export default function AddMcpServiceLocalSection({
             >
               <div>
                 <ContainerPortField
+                  scope="local"
                   containerPort={containerPort}
-                  containerPortCheckLoading={containerPortCheckLoading}
-                  containerPortSuggesting={containerPortSuggesting}
-                  containerPortAvailable={containerPortAvailable}
                   setContainerPort={(value) => {
                     setContainerPort(value);
                     form.setFieldValue("containerPort", value);
                   }}
-                  handleSuggestContainerPort={handleSuggestContainerPort}
                   t={t}
                 />
               </div>

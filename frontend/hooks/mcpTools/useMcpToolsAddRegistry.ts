@@ -3,14 +3,14 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import type { MessageInstance } from "antd/es/message/interface";
 import log from "@/lib/logger";
 import { MCP_TRANSPORT_TYPE, MCP_TAB } from "@/const/mcpTools";
+import { ApiError } from "@/services/api";
 import {
-  checkMcpContainerPortConflictService,
   addContainerMcpToolService,
   addMcpToolService,
   fetchRegistryMcpCards,
-  suggestMcpContainerPortService,
   type RegistryMcpCard,
 } from "@/services/mcpToolsService";
+import { ensureContainerPortAvailableOnce } from "./useContainerPortAvailability";
 import {
   type RegistryQuickAddOption,
   type RegistryRemoteVariable,
@@ -54,7 +54,6 @@ const inferStdioCommand = (registryType?: string): string | null => {
   const normalized = (registryType || "").trim().toLowerCase();
   if (normalized === "npm") return "npx";
   if (normalized === "pypi") return "uvx";
-  //if (normalized === "oci") return "docker";
   return null;
 };
 
@@ -63,7 +62,6 @@ const inferStdioArgs = (registryType?: string, identifier?: string): string[] =>
   const normalized = (registryType || "").trim().toLowerCase();
   if (!packageId) return [];
   if (normalized === "npm") return ["-y", packageId];
-  //if (normalized === "oci") return ["run", packageId];
   return [packageId];
 };
 
@@ -428,8 +426,6 @@ export function useMcpToolsAddRegistry({
   const [selectedQuickAddOptionKey, setSelectedQuickAddOptionKey] = useState("");
   const [quickAddVariableValues, setQuickAddVariableValues] = useState<Record<string, string>>({});
   const [quickAddContainerPort, setQuickAddContainerPort] = useState<number | undefined>(undefined);
-  const [debouncedQuickAddContainerPort, setDebouncedQuickAddContainerPort] = useState<number | undefined>(undefined);
-  const [suggestingContainerPort, setSuggestingContainerPort] = useState(false);
   const [addingService, setAddingService] = useState(false);
 
   const addMutation = useMutation({ mutationFn: addMcpToolService });
@@ -449,8 +445,6 @@ export function useMcpToolsAddRegistry({
     setSelectedQuickAddOptionKey("");
     setQuickAddVariableValues({});
     setQuickAddContainerPort(undefined);
-    setDebouncedQuickAddContainerPort(undefined);
-    setSuggestingContainerPort(false);
     setAddingService(false);
   }, []);
 
@@ -509,6 +503,7 @@ export function useMcpToolsAddRegistry({
 
   const registryServices = registryQuery.data?.items ?? [];
   const registryNextCursor = registryQuery.data?.nextCursor ?? null;
+  const selectedQuickAddOption = quickAddOptions.find((option) => option.key === selectedQuickAddOptionKey) || null;
 
   useEffect(() => {
     if (!(registryQuery.error instanceof Error)) return;
@@ -554,68 +549,11 @@ export function useMcpToolsAddRegistry({
     setSelectedQuickAddOptionKey("");
     setQuickAddVariableValues({});
     setQuickAddContainerPort(undefined);
-    setDebouncedQuickAddContainerPort(undefined);
-    setSuggestingContainerPort(false);
   }, []);
 
   useEffect(() => {
-    const selectedOption = quickAddOptions.find((option) => option.key === selectedQuickAddOptionKey) || null;
-    if (!(quickAddPickerVisible && selectedOption?.transportType === "stdio" && typeof quickAddContainerPort === "number")) {
-      setDebouncedQuickAddContainerPort(undefined);
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setDebouncedQuickAddContainerPort(quickAddContainerPort);
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [quickAddPickerVisible, quickAddOptions, selectedQuickAddOptionKey, quickAddContainerPort]);
-
-  const registryContainerPortCheckQuery = useQuery({
-    queryKey: ["mcp-tools", "registry-container-port-check", debouncedQuickAddContainerPort],
-    enabled: quickAddPickerVisible && typeof debouncedQuickAddContainerPort === "number",
-    retry: false,
-    staleTime: 10_000,
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    queryFn: async () => {
-      const result = await checkMcpContainerPortConflictService({
-        port: debouncedQuickAddContainerPort as number,
-      });
-      return result.data;
-    },
-  });
-
-  const isCurrentPortChecked =
-    typeof quickAddContainerPort === "number" &&
-    debouncedQuickAddContainerPort === quickAddContainerPort &&
-    typeof registryContainerPortCheckQuery.data?.available === "boolean";
-  const containerPortCheckLoading =
-    quickAddPickerVisible &&
-    typeof quickAddContainerPort === "number" &&
-    !isCurrentPortChecked &&
-    !registryContainerPortCheckQuery.isError;
-  const containerPortAvailable = registryContainerPortCheckQuery.data?.available === true;
-
-  const handleSuggestContainerPort = useCallback(async () => {
-    setSuggestingContainerPort(true);
-    try {
-      const startPort = Math.max((quickAddContainerPort || 5500) + 1, 1);
-      const result = await suggestMcpContainerPortService({ start_port: startPort });
-      setQuickAddContainerPort(result.data.port);
-      message.success(t("mcpTools.addModal.portSuggested", { port: result.data.port }));
-    } catch (error) {
-      log.error("[useMcpToolsAddRegistry] Failed to suggest container port", { error });
-      message.error(t("mcpTools.addModal.portSuggestFailed"));
-    } finally {
-      setSuggestingContainerPort(false);
-    }
-  }, [message, quickAddContainerPort, t]);
-
-  useEffect(() => {
-    const selectedOption = quickAddOptions.find((option) => option.key === selectedQuickAddOptionKey) || null;
-    setQuickAddVariableValues(buildInitialVariableValues(selectedOption));
-  }, [quickAddOptions, selectedQuickAddOptionKey]);
+    setQuickAddVariableValues(buildInitialVariableValues(selectedQuickAddOption));
+  }, [selectedQuickAddOption]);
 
   const handleQuickAddVariableValueChange = useCallback((key: string, value: string) => {
     setQuickAddVariableValues((prev) => ({ ...prev, [key]: value }));
@@ -637,7 +575,6 @@ export function useMcpToolsAddRegistry({
     setQuickAddOptions(quickAddOptionsForService);
     setSelectedQuickAddOptionKey(quickAddOptionsForService[0]?.key || "");
     setQuickAddContainerPort(undefined);
-    setDebouncedQuickAddContainerPort(undefined);
     setQuickAddPickerVisible(true);
   }, [message, t]);
 
@@ -692,11 +629,12 @@ export function useMcpToolsAddRegistry({
           }
         }
 
-        const portCheck = await checkMcpContainerPortConflictService({
-          port: quickAddContainerPort,
+        const available = await ensureContainerPortAvailableOnce({
+          containerPort: quickAddContainerPort,
+          message,
+          t,
         });
-        if (!portCheck.data.available) {
-          message.error(t("mcpTools.addModal.portOccupied", { port: quickAddContainerPort }));
+        if (!available) {
           return;
         }
 
@@ -794,7 +732,11 @@ export function useMcpToolsAddRegistry({
         packages: quickAddCandidateService.server?.packages,
         quickAddOption: selectedOption,
       });
-      message.error(t("mcpTools.add.failed"));
+      if (error instanceof ApiError && Number(error.code) === 409) {
+        message.error(t("mcpTools.add.enableNameConflict"));
+      } else {
+        message.error(t("mcpTools.add.failed"));
+      }
     } finally {
       setAddingService(false);
     }
@@ -831,10 +773,6 @@ export function useMcpToolsAddRegistry({
     quickAddContainerPort,
     quickAddSubmitting: addingService,
     setQuickAddContainerPort,
-    handleSuggestContainerPort,
-    containerPortCheckLoading,
-    containerPortSuggesting: suggestingContainerPort,
-    containerPortAvailable,
     setRegistrySearchValue,
     setSelectedRegistryService,
     setRegistryVersion,

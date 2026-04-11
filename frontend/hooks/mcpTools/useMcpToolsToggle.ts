@@ -19,7 +19,7 @@ export function useMcpToolsToggle({
   t,
   message,
 }: UseMcpToolsToggleParams) {
-  const [togglingServiceId, setTogglingServiceId] = useState<number | null>(null);
+  const [togglingServiceIds, setTogglingServiceIds] = useState<Set<number>>(new Set());
 
   const resolveToggleErrorMessage = (error: unknown, nextEnabled: boolean) => {
     if (!nextEnabled) {
@@ -42,14 +42,18 @@ export function useMcpToolsToggle({
   };
 
   const toggleServiceStatus = async (service: McpServiceItem) => {
-    if (togglingServiceId === service.mcpId) {
+    if (togglingServiceIds.has(service.mcpId)) {
       return;
     }
 
     const nextEnabled = service.status !== MCP_SERVICE_STATUS.ENABLED;
     const toastKey = `mcp-tools-toggle-${service.mcpId}`;
 
-    setTogglingServiceId(service.mcpId);
+    setTogglingServiceIds((prev) => {
+      const next = new Set(prev);
+      next.add(service.mcpId);
+      return next;
+    });
     message.open({
       key: toastKey,
       type: "loading",
@@ -91,12 +95,17 @@ export function useMcpToolsToggle({
       });
       throw error;
     } finally {
-      setTogglingServiceId(null);
+      setTogglingServiceIds((prev) => {
+        const next = new Set(prev);
+        next.delete(service.mcpId);
+        return next;
+      });
     }
   };
 
   return {
     toggleServiceStatus,
-    togglingServiceId,
+    isServiceToggling: (mcpId: number | null | undefined) =>
+      typeof mcpId === "number" && togglingServiceIds.has(mcpId),
   };
 }

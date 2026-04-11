@@ -149,13 +149,10 @@ export const checkMcpContainerPortConflictService = async (payload: {
   }
 };
 
-export const suggestMcpContainerPortService = async (payload: {
-  start_port?: number;
-}) => {
+export const suggestMcpContainerPortService = async () => {
   try {
     const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.portSuggest, {
       method: "POST",
-      body: JSON.stringify(payload),
     });
     const data = await parseJson<ApiEnvelope<{ port: number }>>(response);
     if (data.status !== "success") {

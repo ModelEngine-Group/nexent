@@ -124,10 +124,6 @@ export default function AddMcpServiceModal({
             removeNewTag={local.removeNewTag}
             setNewTagInputValue={local.setNewTagInputValue}
             handleAddService={local.handleAddService}
-            handleSuggestContainerPort={local.handleSuggestContainerPort}
-            containerPortCheckLoading={local.containerPortCheckLoading}
-            containerPortSuggesting={local.containerPortSuggesting}
-            containerPortAvailable={local.containerPortAvailable}
             t={(key, params) => String(t(key, params))}
           />
         ) : addModalTab === MCP_TAB.MCP_REGISTRY ? (
@@ -162,10 +158,6 @@ export default function AddMcpServiceModal({
             handleQuickAddFromRegistry={registry.handleQuickAddFromRegistry}
             handleCloseQuickAddPicker={registry.handleCloseQuickAddPicker}
             handleConfirmQuickAddOption={registry.handleConfirmQuickAddOption}
-            handleSuggestContainerPort={registry.handleSuggestContainerPort}
-            containerPortCheckLoading={registry.containerPortCheckLoading}
-            containerPortSuggesting={registry.containerPortSuggesting}
-            containerPortAvailable={registry.containerPortAvailable}
             t={(key, params) => String(t(key, params))}
           />
         ) : (
@@ -196,10 +188,6 @@ export default function AddMcpServiceModal({
             handleCloseQuickAddConfirm={community.handleCloseQuickAddConfirm}
             handleConfirmQuickAddFromCommunity={community.handleConfirmQuickAddFromCommunity}
             quickAddSubmitting={community.quickAddSubmitting}
-            handleSuggestContainerPort={community.handleSuggestContainerPort}
-            containerPortCheckLoading={community.containerPortCheckLoading}
-            containerPortSuggesting={community.containerPortSuggesting}
-            containerPortAvailable={community.containerPortAvailable}
             t={(key, params) => String(t(key, params))}
           />
         )}

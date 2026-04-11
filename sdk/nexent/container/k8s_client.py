@@ -8,6 +8,7 @@ for network access.
 import asyncio
 import logging
 import socket
+import uuid
 import kubernetes
 from typing import Any, Dict, List, Optional
 
@@ -78,7 +79,8 @@ class KubernetesContainerClient(ContainerClient):
         safe_name = "".join(c if c.isalnum() or c == "-" else "-" for c in service_name)
         tenant_part = (tenant_id or "")[:8]
         user_part = (user_id or "")[:8]
-        return f"mcp-{safe_name}-{tenant_part}-{user_part}"
+        uuid_part = uuid.uuid4().hex[:8]
+        return f"mcp-{safe_name}-{tenant_part}-{user_part}-{uuid_part}"
 
     def _get_labels(self, service_name: str, tenant_id: str, user_id: str) -> Dict[str, str]:
         """Generate labels for pod and service."""

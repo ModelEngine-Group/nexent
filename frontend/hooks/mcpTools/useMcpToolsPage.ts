@@ -117,7 +117,7 @@ export function useMcpToolsPage({ t, message }: UseMcpToolsPageParams) {
     });
   }, []);
 
-  const { toggleServiceStatus, togglingServiceId } = useMcpToolsToggle({
+  const { toggleServiceStatus, isServiceToggling } = useMcpToolsToggle({
     loadServerList,
     setSelectedService,
     t,
@@ -152,7 +152,7 @@ export function useMcpToolsPage({ t, message }: UseMcpToolsPageParams) {
     loadServerList,
     filteredServices,
     toggleServiceStatus,
-    togglingServiceId,
+    isServiceToggling,
     detail,
   };
 }

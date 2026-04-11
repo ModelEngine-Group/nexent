@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import socket
+import random
 from datetime import datetime
 from typing import Any, Dict, List
 from urllib.parse import urlencode
@@ -107,15 +108,15 @@ def check_container_port_conflict(
     return no_conflict_records and runtime_available
 
 
-def suggest_container_port(
-    *,
-    start_port: int = 5500,
-) -> int:
-    port = start_port
-    while port <= 65535:
+def suggest_container_port() -> int:
+    min_port = 2000
+    max_port = 50000
+    count = 0
+    while count < 1000:
+        port = random.randint(min_port, max_port)
         if check_container_port_conflict(port=port):
             return port
-        port += 1
+        count += 1
 
     raise McpPortConflictError("No available port found")
 
@@ -628,7 +629,7 @@ async def update_mcp_service_enabled(
             next_container_port = container_info.get("host_port") or next_container_port
 
             health_ok = False
-            MCP_CONTAINER_HEALTH_CHECK_ATTEMPTS = 4
+            MCP_CONTAINER_HEALTH_CHECK_ATTEMPTS = 10
             MCP_CONTAINER_HEALTH_CHECK_DELAY_SECONDS = 0.5
             for attempt in range(MCP_CONTAINER_HEALTH_CHECK_ATTEMPTS):
                 try:
