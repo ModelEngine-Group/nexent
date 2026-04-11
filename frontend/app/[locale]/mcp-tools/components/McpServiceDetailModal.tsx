@@ -84,14 +84,14 @@ export default function McpServiceDetailModal({
   const { t } = useTranslation("common");
   const [logsModalOpen, setLogsModalOpen] = useState(false);
   const [showServerJsonModal, setShowServerJsonModal] = useState(false);
-  const hasRegistryJson = Boolean(draftService?.mcpRegistryJson);
+  const hasRegistryJson = Boolean(draftService?.registryJson);
   const [showConfigJsonModal, setShowConfigJsonModal] = useState(false);
   const hasConfigJson = Boolean(draftService?.configJson);
 
   const { websiteUrl: registryWebsiteUrl, repositoryUrl: registryRepositoryUrl } = extractRegistryLinks(
-    draftService?.mcpRegistryJson
+    draftService?.registryJson
   );
-  const registryJsonPretty = toPrettyRegistryJson(draftService?.mcpRegistryJson);
+  const registryJsonPretty = toPrettyRegistryJson(draftService?.registryJson);
   const configJsonPretty = toPrettyRegistryJson(draftService?.configJson);
 
   const isHttpUrl = (value: string): boolean => {

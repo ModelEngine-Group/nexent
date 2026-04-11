@@ -147,12 +147,11 @@ export interface CommunityMcpCard {
   updatedAt?: string;
   remotes: Array<{ type: string; url: string }>;
   packages: Array<Record<string, unknown>>;
-  serverJson: Record<string, unknown>;
   source?: "community";
   transportType: "http" | "sse" | "stdio";
   serverUrl: string;
   configJson?: Record<string, unknown> | null;
-  mcpRegistryJson?: Record<string, unknown> | null;
+  registryJson?: Record<string, unknown> | null;
   tags?: string[];
 }
 
@@ -169,7 +168,7 @@ export interface McpServiceItem {
   transportType: McpTransportType;
   serverUrl: string;
   version?: string | null;
-  mcpRegistryJson?: Record<string, unknown> | null;
+  registryJson?: Record<string, unknown> | null;
   configJson?: Record<string, unknown> | null;
   tools: string[];
   healthStatus: McpHealthStatus;
