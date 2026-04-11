@@ -338,10 +338,10 @@ class McpRecord(TableBase):
         doc="Authorization token for MCP server authentication (e.g., Bearer token)",
         default=None,
     )
-    source = Column(String(30), doc="Source type: local/mcp_registry")
+    source = Column(String(30), doc="Source type: local/mcp_registry/community")
     version = Column(String(50), doc="MCP version")
     registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
-    transport_type = Column(String(30), doc="Transport type: streamable-http/sse/stdio")
+    transport_type = Column(String(30), doc="Transport type: streamable-http/sse/container")
     config_json = Column(JSON, doc="MCP config data")
     enabled = Column(Boolean, default=True, doc="Enabled")
     tags = Column(ARRAY(Text), doc="Tags")
@@ -369,35 +369,10 @@ class McpCommunityRecord(TableBase):
     source = Column(String(30), doc="Source type, fixed to community")
     version = Column(String(50), doc="MCP version")
     registry_json = Column(JSONB, doc="Full MCP metadata JSON")
-    transport_type = Column(String(30), doc="Transport type: http/sse/stdio")
+    transport_type = Column(String(30), doc="Transport type: http/sse/container")
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
-    last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
-
-
-class McpServiceManage(TableBase):
-    """
-    MCP service management table
-    """
-
-    __tablename__ = "mcp_service_manage_t"
-    __table_args__ = {"schema": SCHEMA}
-
-    manage_id = Column(Integer, Sequence("mcp_service_manage_t_manage_id_seq", schema=SCHEMA),
-                       primary_key=True, nullable=False, doc="Management record ID")
-    tenant_id = Column(String(100), doc="Tenant ID")
-    user_id = Column(String(100), doc="User ID")
-    mcp_name = Column(String(100), doc="MCP name")
-    mcp_server = Column(String(500), doc="MCP server address")
-    source_type = Column(String(30), doc="Source type: local/registry")
-    market_name = Column(String(200), doc="Market identifier")
-    transport_type = Column(String(30), doc="Transport type: streamable-http/sse/stdio")
-    config_json = Column(JSON, doc="MCP config data")
-    status = Column(Boolean, default=None, doc="Health status")
-    enabled = Column(Boolean, default=True, doc="Enabled")
-    tags = Column(String(200), doc="Tags")
-    category = Column(String(100), doc="Category")
     last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 
 class UserTenant(TableBase):

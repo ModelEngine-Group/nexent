@@ -2,13 +2,13 @@ import { Input, Select } from "antd";
 
 interface Props {
   communitySearchValue: string;
-  communityTransportTypeFilter: "all" | "http" | "sse" | "stdio";
+  communityTransportTypeFilter: "all" | "http" | "sse" | "container";
   communityTagFilter: string;
   communityTagStats: Array<{ tag: string; count: number }>;
   communityPage: number;
   resultCount: number;
   onCommunitySearchChange: (value: string) => void;
-  onCommunityTransportTypeFilterChange: (value: "all" | "http" | "sse" | "stdio") => void;
+  onCommunityTransportTypeFilterChange: (value: "all" | "http" | "sse" | "container") => void;
   onCommunityTagFilterChange: (value: string) => void;
   t: (key: string, params?: Record<string, unknown>) => string;
 }
@@ -44,7 +44,7 @@ export default function McpCommunityToolbar({
             { value: "all", label: t("mcpTools.page.transportFilter.all") },
             { value: "http", label: t("mcpTools.serverType.http") },
             { value: "sse", label: t("mcpTools.serverType.sse") },
-            { value: "stdio", label: t("mcpTools.serverType.stdio") },
+            { value: "container", label: t("mcpTools.serverType.container") },
           ]}
         />
         <Select

@@ -7,7 +7,7 @@ import {
 } from "@/types/mcpTools";
 
 export const MCP_TAB = { LOCAL: McpTab.LOCAL, MCP_REGISTRY: McpTab.MCP_REGISTRY, COMMUNITY: McpTab.COMMUNITY } as const;
-export const MCP_TRANSPORT_TYPE = { HTTP: McpTransportType.HTTP, SSE: McpTransportType.SSE, STDIO: McpTransportType.STDIO } as const;
+export const MCP_TRANSPORT_TYPE = { HTTP: McpTransportType.HTTP, SSE: McpTransportType.SSE, CONTAINER: McpTransportType.CONTAINER } as const;
 export const MCP_SERVICE_STATUS = { ENABLED: McpServiceStatus.ENABLED, DISABLED: McpServiceStatus.DISABLED } as const;
 export const MCP_HEALTH_STATUS = {
 	HEALTHY: McpHealthStatus.HEALTHY,

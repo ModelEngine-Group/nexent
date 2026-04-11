@@ -10,7 +10,7 @@ import type { CommunityMcpCard, McpTransportType } from "@/types/mcpTools";
 
 interface Props {
   communitySearchValue: string;
-  communityTransportTypeFilter: "all" | "http" | "sse" | "stdio";
+  communityTransportTypeFilter: "all" | "http" | "sse" | "container";
   communityTagFilter: string;
   communityTagStats: Array<{ tag: string; count: number }>;
   selectedCommunityService: CommunityMcpCard | null;
@@ -33,7 +33,7 @@ interface Props {
     tagInputValue: string;
   };
   setCommunitySearchValue: (value: string) => void;
-  setCommunityTransportTypeFilter: (value: "all" | "http" | "sse" | "stdio") => void;
+  setCommunityTransportTypeFilter: (value: "all" | "http" | "sse" | "container") => void;
   setCommunityTagFilter: (value: string) => void;
   setSelectedCommunityService: (service: CommunityMcpCard | null) => void;
   updateQuickAddDraft: (next: {
@@ -215,7 +215,7 @@ export default function AddMcpServiceCommunitySection({
               options={[
                 { label: t("mcpTools.serverType.http"), value: MCP_TRANSPORT_TYPE.HTTP },
                 { label: t("mcpTools.serverType.sse"), value: MCP_TRANSPORT_TYPE.SSE },
-                { label: t("mcpTools.serverType.stdio"), value: MCP_TRANSPORT_TYPE.STDIO },
+                { label: t("mcpTools.serverType.container"), value: MCP_TRANSPORT_TYPE.CONTAINER },
               ]}
             />
           </Form.Item>

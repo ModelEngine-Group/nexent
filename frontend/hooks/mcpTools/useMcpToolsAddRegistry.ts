@@ -28,14 +28,14 @@ type UseMcpToolsAddRegistryParams = {
 };
 
 const resolveQuickAddTarget = (type?: string | null, url?: string | null): { transportType: "http" | "sse"; serverUrl: string } | null => {
-  const serverUrl = (url || "").trim();
+  const serverUrl = String(url || "").trim();
   if (!serverUrl) return null;
 
-  const normalizedType = (type || "").trim().toLowerCase();
-  if (normalizedType.includes("sse")) {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  if (normalizedType === "sse") {
     return { transportType: "sse", serverUrl };
   }
-  if (normalizedType.includes("http")) {
+  if (normalizedType === "streamable-http" || normalizedType === "http") {
     return { transportType: "http", serverUrl };
   }
   if (/^https?:\/\//i.test(serverUrl)) {
@@ -50,14 +50,14 @@ const normalizeServerKey = (raw: string): string => {
   return normalized || "market-mcp";
 };
 
-const inferStdioCommand = (registryType?: string): string | null => {
+const inferContainerRuntimeCommand = (registryType?: string): string | null => {
   const normalized = (registryType || "").trim().toLowerCase();
   if (normalized === "npm") return "npx";
   if (normalized === "pypi") return "uvx";
   return null;
 };
 
-const inferStdioArgs = (registryType?: string, identifier?: string): string[] => {
+const inferContainerRuntimeArgs = (registryType?: string, identifier?: string): string[] => {
   const packageId = (identifier || "").trim();
   const normalized = (registryType || "").trim().toLowerCase();
   if (!packageId) return [];
@@ -280,7 +280,7 @@ const collectUnsupportedRequiredHeaderNames = (headers: RegistryRemoteVariable[]
 const buildResolvedRuntimeArgs = (option: RegistryQuickAddOption, values: Record<string, string>): string[] => {
   const runtimeArgs = option.packageRuntimeArguments || [];
   if (runtimeArgs.length === 0) {
-    return inferStdioArgs(option.packageRegistryType, option.packageIdentifier);
+    return inferContainerRuntimeArgs(option.packageRegistryType, option.packageIdentifier);
   }
 
   const args: string[] = [];
@@ -311,9 +311,8 @@ const resolveAuthorizationFromHeaders = (
 
 const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOption[] => {
   const options: RegistryQuickAddOption[] = [];
-  const rawPackages = service.server?.packages;
-  const packageCandidates = Array.isArray(rawPackages)
-    ? rawPackages.filter((pkg): pkg is Record<string, unknown> => Boolean(pkg) && typeof pkg === "object")
+  const packageCandidates = Array.isArray(service.server?.packages)
+    ? service.server.packages.filter((pkg): pkg is Record<string, unknown> => Boolean(pkg) && typeof pkg === "object")
     : [];
 
   (service.server?.remotes || []).forEach((remote, index) => {
@@ -331,7 +330,6 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
       sourceLabel: `${remote.type || "remote"} - ${remote.url}`,
       transportType: remoteTarget.transportType,
       serverUrl: remoteTarget.serverUrl,
-      serverUrlTemplate: remote.url,
       remoteVariables,
       remoteHeaders,
       unsupportedRequiredHeaders,
@@ -344,7 +342,7 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
     const packageTransport = rawPackage.transport && typeof rawPackage.transport === "object"
       ? (rawPackage.transport as Record<string, unknown>)
       : undefined;
-    const transportType = toStringOrUndefined(packageTransport?.type) || "remote";
+    const transportType = toStringOrUndefined(packageTransport?.type) || "";
     const transportUrl = toStringOrUndefined(packageTransport?.url) || "";
 
     const packageTarget = resolveQuickAddTarget(transportType, transportUrl);
@@ -364,8 +362,6 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
         sourceLabel: `${packageIdentifier} - ${transportType} - ${transportUrl}`,
         transportType: packageTarget.transportType,
         serverUrl: packageTarget.serverUrl,
-        serverUrlTemplate: transportUrl || undefined,
-        packageIndex: index,
         packageRuntimeHint,
         packageEnvironmentVariables,
         packageTransportHeaders,
@@ -384,8 +380,7 @@ const resolveQuickAddOptions = (service: RegistryMcpCard): RegistryQuickAddOptio
         key: `package-${index}`,
         sourceType: "package",
         sourceLabel: `${packageIdentifier} - stdio`,
-        transportType: "stdio",
-        packageIndex: index,
+        transportType: "container",
         packageRuntimeHint,
         packageEnvironmentVariables,
         packageTransportHeaders,
@@ -567,7 +562,7 @@ export function useMcpToolsAddRegistry({
         remotes: service.server?.remotes,
         packages: service.server?.packages,
       });
-      message.warning(t("mcpTools.registry.quickAddUnsupported"));
+      message.warning(t("mcpTools.registry.quickAddUnsupported1"));
       return;
     }
 
@@ -599,11 +594,11 @@ export function useMcpToolsAddRegistry({
 
     setAddingService(true);
     try {
-      if (selectedOption.transportType === "stdio") {
+      if (selectedOption.transportType === "container") {
         const packageIdentifier = (selectedOption.packageIdentifier || "").trim();
         const packageRuntimeHint = (selectedOption.packageRuntimeHint || "").trim();
 
-        const command = packageRuntimeHint || inferStdioCommand(selectedOption.packageRegistryType);
+        const command = packageRuntimeHint || inferContainerRuntimeCommand(selectedOption.packageRegistryType);
         if (!packageIdentifier || !command) {
           message.warning(t("mcpTools.registry.quickAddUnsupported"));
           return;
@@ -697,7 +692,7 @@ export function useMcpToolsAddRegistry({
           }, {}),
         };
 
-        const templateUrl = selectedOption.serverUrlTemplate || selectedOption.serverUrl || "";
+        const templateUrl = selectedOption.serverUrl || "";
         const resolvedUrl = applyUrlTemplateVariables(templateUrl, mergedTemplateValues);
         if (/\{[^{}]+\}/.test(resolvedUrl)) {
           message.warning(t("mcpTools.registry.quickAddPicker.variableUnresolved"));

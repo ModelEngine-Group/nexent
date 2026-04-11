@@ -16,7 +16,7 @@ export const mapServersToServiceCards = (
   return (serverList ?? []).map((server) => {
     const normalizedUrl = typeof server.mcp_url === "string" ? server.mcp_url : "";
     const inferredType = normalizedUrl.startsWith("container://")
-      ? MCP_TRANSPORT_TYPE.STDIO
+      ? MCP_TRANSPORT_TYPE.CONTAINER
       : MCP_TRANSPORT_TYPE.HTTP;
 
     return {

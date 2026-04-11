@@ -50,7 +50,7 @@ MCP_REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io/v0.1/servers"
 
 
 def _is_container_record(record: Dict[str, Any] | None) -> bool:
-    return (record or {}).get("transport_type") == "stdio"
+    return (record or {}).get("transport_type") == "container"
 
 
 def check_container_port_conflict_records(port: int) -> bool:
@@ -399,7 +399,7 @@ async def add_container_mcp_service(
             name=service_name,
             description=description,
             source=source,
-            transport_type="stdio",
+            transport_type="container",
             server_url=container_info["mcp_url"],
             tags=tags,
             authorization_token=auth_token,
@@ -446,7 +446,7 @@ async def add_mcp_service(
     status: bool | None = None
 
     normalized_container_id = container_id if isinstance(container_id, str) and container_id else None
-    config_json = container_config if transport_type == "stdio" and isinstance(container_config, dict) else None
+    config_json = container_config if transport_type == "container" and isinstance(container_config, dict) else None
 
     create_mcp_record(
         mcp_data={
@@ -495,13 +495,13 @@ def list_mcp_services(tenant_id: str, tag: str | None = None) -> List[Dict[str, 
         enabled = bool(record.get("enabled"))
         status = record.get("status")
         registry_json = record.get("registry_json")
-        raw_config_json = record.get("config_json")
+        config_json = record.get("config_json")
 
         container_id = record.get("container_id")
         container_port = record.get("container_port")
-        record_config_json = raw_config_json if transport_type == "stdio" else None
+        record_config_json = config_json if transport_type == "container" else None
         container_status = None
-        if transport_type == "stdio":
+        if transport_type == "container":
             if container_id:
                 container_status = container_status_map.get(container_id, "stopped")
             else:
@@ -570,7 +570,7 @@ def update_mcp_service(
 
     current_transport_type = current_record.get("transport_type")
     config_json = None
-    if current_transport_type in {"stdio", "container"}:
+    if current_transport_type == "container":
         config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
 
     update_mcp_record_manage_fields_by_id(

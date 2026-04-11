@@ -33,8 +33,8 @@ export default function McpCommunityDetailModal({
   const serverTypeText =
     service.transportType === "sse"
       ? t("mcpTools.serverType.sse")
-      : service.transportType === "stdio"
-      ? t("mcpTools.serverType.stdio")
+      : service.transportType === "container"
+      ? t("mcpTools.serverType.container")
       : t("mcpTools.serverType.http");
   const sourceText = t("mcpTools.source.community");
 

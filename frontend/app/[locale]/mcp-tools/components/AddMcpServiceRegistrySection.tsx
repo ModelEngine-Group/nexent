@@ -297,11 +297,11 @@ export default function AddMcpServiceRegistrySection({
             <Alert
               type="warning"
               showIcon
-              message={t("mcpTools.registry.quickAddUnsupported")}
+              title={t("mcpTools.registry.quickAddUnsupported")}
             />
           ) : (
             <>
-              {selectedQuickAddOption?.transportType === "stdio" ? (
+              {selectedQuickAddOption?.transportType === "container" ? (
                 <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <Form.Item
                     name="quickAddContainerPort"

@@ -73,7 +73,7 @@ export function useMcpToolsAddLocal({
 
       const resolvedServiceName = newServiceName.trim();
 
-      if (newTransportType === MCP_TRANSPORT_TYPE.STDIO && resolvedServerInfo.data.mcpConfig) {
+      if (newTransportType === MCP_TRANSPORT_TYPE.CONTAINER && resolvedServerInfo.data.mcpConfig) {
         const available = await ensureContainerPortAvailableOnce({
           containerPort,
           message,
