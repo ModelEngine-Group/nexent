@@ -1624,7 +1624,7 @@
   "mcpTools.page.searchPlaceholder": "Search by MCP service name, description, or tags",
   "mcpTools.page.resultCount": "{{count}} results",
   "mcpTools.page.sourceFilter.all": "All Sources",
-  "mcpTools.page.transportFilter.all": "All Transports",
+  "mcpTools.page.transportFilter.all": "All Types",
   "mcpTools.page.tagFilter.all": "All Tags",
   "mcpTools.page.addService": "Add MCP Service",
   "mcpTools.page.myPublished": "My Published",

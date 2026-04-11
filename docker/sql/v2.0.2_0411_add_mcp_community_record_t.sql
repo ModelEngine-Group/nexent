@@ -38,7 +38,7 @@ COMMENT ON COLUMN nexent.mcp_community_record_t.mcp_server IS 'MCP server URL';
 COMMENT ON COLUMN nexent.mcp_community_record_t.source IS 'Source type, fixed to community for this table';
 COMMENT ON COLUMN nexent.mcp_community_record_t.version IS 'MCP version';
 COMMENT ON COLUMN nexent.mcp_community_record_t.registry_json IS 'Full MCP server metadata JSON for discovery and quick import';
-COMMENT ON COLUMN nexent.mcp_community_record_t.transport_type IS 'Transport type: http/sse/stdio';
+COMMENT ON COLUMN nexent.mcp_community_record_t.transport_type IS 'Transport type: http/sse/container';
 COMMENT ON COLUMN nexent.mcp_community_record_t.config_json IS 'Public-shareable MCP configuration JSON';
 COMMENT ON COLUMN nexent.mcp_community_record_t.tags IS 'Tags';
 COMMENT ON COLUMN nexent.mcp_community_record_t.description IS 'Description';

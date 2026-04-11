@@ -23,7 +23,7 @@ ALTER TABLE IF EXISTS nexent.mcp_record_t
 COMMENT ON COLUMN nexent.mcp_record_t.source IS 'Source type: local/mcp_registry';
 COMMENT ON COLUMN nexent.mcp_record_t.version IS 'MCP version';
 COMMENT ON COLUMN nexent.mcp_record_t.registry_json IS 'Full MCP registry server.json snapshot';
-COMMENT ON COLUMN nexent.mcp_record_t.transport_type IS 'Transport type: streamable-http/sse/stdio';
+COMMENT ON COLUMN nexent.mcp_record_t.transport_type IS 'Transport type: streamable-http/sse/container';
 COMMENT ON COLUMN nexent.mcp_record_t.config_json IS 'MCP config data';
 COMMENT ON COLUMN nexent.mcp_record_t.enabled IS 'Enabled';
 COMMENT ON COLUMN nexent.mcp_record_t.tags IS 'Tags';
