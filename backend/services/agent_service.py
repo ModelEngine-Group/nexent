@@ -1582,7 +1582,7 @@ async def prepare_agent_run(
         language=language,
         allow_memory_search=allow_memory_search,
         is_debug=agent_request.is_debug,
-        version_no_override=agent_request.version_no,
+        override_version_no=agent_request.version_no,
         override_model_id=agent_request.model_id,
     )
     agent_run_manager.register_agent_run(
@@ -1937,8 +1937,8 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
         return {"status": "success", "message": message}
     else:
         message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
-        logging.error(message)
-        return {"status": "error", "message": message}
+        logging.info(message)
+        return {"status": "success", "message": message, "already_stopped": True}
 
 
 async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:

@@ -3588,8 +3588,9 @@ def test_stop_agent_tasks(mock_preprocess_manager, mock_agent_run_manager):
     mock_agent_run_manager.stop_agent_run.return_value = False
     mock_preprocess_manager.stop_preprocess_tasks.return_value = False
     result = stop_agent_tasks(123, "test_user")
-    assert result["status"] == "error"
+    assert result["status"] == "success"
     assert "no running agent or preprocess tasks found" in result["message"]
+    assert result.get("already_stopped") is True
 
 
 @patch('backend.services.agent_service.search_agent_id_by_agent_name')

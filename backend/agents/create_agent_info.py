@@ -365,14 +365,14 @@ async def create_agent_run_info(
     language: str = "zh",
     allow_memory_search: bool = True,
     is_debug: bool = False,
-    version_no_override: int | None = None,
+    override_version_no: int | None = None,
     override_model_id: int | None = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
     # If is_debug=true, use version 0 (draft/editing state)
-    if version_no_override is not None:
-        version_no = version_no_override
+    if override_version_no is not None:
+        version_no = override_version_no
     elif is_debug:
         version_no = 0
     else:

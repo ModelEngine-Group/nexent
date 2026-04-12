@@ -70,11 +70,7 @@ async def agent_stop_api(conversation_id: int, authorization: Optional[str] = He
     stop agent run and preprocess tasks for specified conversation_id
     """
     user_id, _ = get_current_user_id(authorization)
-    if stop_agent_tasks(conversation_id, user_id).get("status") == "success":
-        return {"status": "success", "message": "agent run and preprocess tasks stopped successfully"}
-    else:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
-                            detail=f"no running agent or preprocess tasks found for conversation_id {conversation_id}")
+    return stop_agent_tasks(conversation_id, user_id)
 
 
 @agent_config_router.post("/search_info")

@@ -109,25 +109,25 @@ update_env_file() {
   # Main Services
   # CONFIG_SERVICE_URL
   if grep -q "^CONFIG_SERVICE_URL=" ../.env; then
-    sed -i.bak "s~^CONFIG_SERVICE_URL=.*~CONFIG_SERVICE_URL=http://127.0.0.1:5010~" ../.env
+    sed -i.bak "s~^CONFIG_SERVICE_URL=.*~CONFIG_SERVICE_URL=http://localhost:5010~" ../.env
   else
     echo "" >> ../.env
     echo "# Main Services" >> ../.env
-    echo "CONFIG_SERVICE_URL=http://127.0.0.1:5010" >> ../.env
+    echo "CONFIG_SERVICE_URL=http://localhost:5010" >> ../.env
   fi
 
   # RUNTIME_SERVICE_URL
   if grep -q "^RUNTIME_SERVICE_URL=" ../.env; then
-    sed -i.bak "s~^RUNTIME_SERVICE_URL=.*~RUNTIME_SERVICE_URL=http://127.0.0.1:5014~" ../.env
+    sed -i.bak "s~^RUNTIME_SERVICE_URL=.*~RUNTIME_SERVICE_URL=http://localhost:5014~" ../.env
   else
-    echo "RUNTIME_SERVICE_URL=http://127.0.0.1:5014" >> ../.env
+    echo "RUNTIME_SERVICE_URL=http://localhost:5014" >> ../.env
   fi
 
   # ELASTICSEARCH_SERVICE
   if grep -q "^ELASTICSEARCH_SERVICE=" ../.env; then
-    sed -i.bak "s~^ELASTICSEARCH_SERVICE=.*~ELASTICSEARCH_SERVICE=http://127.0.0.1:5010/api~" ../.env
+    sed -i.bak "s~^ELASTICSEARCH_SERVICE=.*~ELASTICSEARCH_SERVICE=http://localhost:5010/api~" ../.env
   else
-    echo "ELASTICSEARCH_SERVICE=http://127.0.0.1:5010/api" >> ../.env
+    echo "ELASTICSEARCH_SERVICE=http://localhost:5010/api" >> ../.env
   fi
 
   # NEXENT_MCP_SERVER

@@ -22,10 +22,10 @@ const app = next({
 const handle = app.getRequestHandler();
 
 // Backend addresses
-const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://127.0.0.1:5010"; // config
-const WS_BACKEND = process.env.WS_BACKEND || "ws://127.0.0.1:5014"; // runtime
+const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // config
+const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
-  process.env.RUNTIME_HTTP_BACKEND || "http://127.0.0.1:5014"; // runtime
+  process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
 const MARKET_BACKEND =
   process.env.MARKET_BACKEND || "https://market.nexent.tech"; // market

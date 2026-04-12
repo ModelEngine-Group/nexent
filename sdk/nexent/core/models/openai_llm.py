@@ -106,13 +106,9 @@ class OpenAIModel(OpenAIServerModel):
 
         try:
             for chunk in current_request:
-                if not chunk.choices:
-                    chunk_list.append(chunk)
-                    continue
-
-                delta = chunk.choices[0].delta
-                new_token = getattr(delta, "content", None)
-                reasoning_content = getattr(delta, "reasoning_content", None)
+                new_token = chunk.choices[0].delta.content
+                reasoning_content = getattr(
+                    chunk.choices[0].delta, 'reasoning_content', None)
 
                 # Handle reasoning_content if it exists and is not null
                 if reasoning_content is not None:
@@ -134,7 +130,7 @@ class OpenAIModel(OpenAIServerModel):
 
                     self.observer.add_model_new_token(new_token)
                     token_join.append(new_token)
-                    role = getattr(delta, "role", role)
+                    role = chunk.choices[0].delta.role
 
                 chunk_list.append(chunk)
                 if self.stop_event.is_set():
@@ -144,9 +140,6 @@ class OpenAIModel(OpenAIServerModel):
                     raise RuntimeError(
                         "Model is interrupted by stop event")
 
-            if not chunk_list:
-                raise RuntimeError("Empty completion stream")
-
             # Send end marker
             self.observer.flush_remaining_tokens()
             model_output = "".join(token_join)
@@ -154,9 +147,8 @@ class OpenAIModel(OpenAIServerModel):
             # Extract token usage
             input_tokens = 0
             output_tokens = 0
-            usage_chunk = next((c for c in reversed(chunk_list) if getattr(c, "usage", None) is not None), None)
-            if usage_chunk is not None:
-                usage = usage_chunk.usage
+            if chunk_list and chunk_list[-1].usage is not None:
+                usage = chunk_list[-1].usage
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens if hasattr(
                     usage, 'completion_tokens') else usage.total_tokens
