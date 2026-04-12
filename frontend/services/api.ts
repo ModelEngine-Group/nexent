@@ -48,6 +48,7 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
+    byName: (agentName: string) => `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
     versions: {
@@ -69,6 +70,10 @@ export const API_ENDPOINTS = {
     validate: `${API_BASE_URL}/tool/validate`,
     loadConfig: (toolId: number) =>
       `${API_BASE_URL}/tool/load_config/${toolId}`,
+    importOpenapi: `${API_BASE_URL}/tool/import_openapi`,
+    outerApiTools: `${API_BASE_URL}/tool/outer_api_tools`,
+    deleteOuterApiTool: (toolId: number) =>
+      `${API_BASE_URL}/tool/outer_api_tools/${toolId}`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
@@ -91,6 +96,13 @@ export const API_ENDPOINTS = {
       queryParams.append("download", download);
       if (filename) queryParams.append("filename", filename);
       return `${API_BASE_URL}/file/download/${objectName}?${queryParams.toString()}`;
+    },
+    preview: (objectName: string, filename?: string) => {
+      const queryParams = new URLSearchParams();
+      if (filename) queryParams.append("filename", filename);
+      const queryString = queryParams.toString();
+      const suffix = queryString ? `?${queryString}` : "";
+      return `${API_BASE_URL}/file/preview/${objectName}${suffix}`;
     },
     datamateDownload: (params: {
       url?: string;
@@ -221,6 +233,22 @@ export const API_ENDPOINTS = {
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
+  },
+  skills: {
+    list: `${API_BASE_URL}/skills`,
+    create: `${API_BASE_URL}/skills`,
+    upload: `${API_BASE_URL}/skills/upload`,
+    get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    updateUpload: (skillName: string) => `${API_BASE_URL}/skills/${skillName}/upload`,
+    delete: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    deleteFile: (skillName: string, filePath: string) => `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
+    files: (skillName: string) => `${API_BASE_URL}/skills/${skillName}/files`,
+    fileContent: (skillName: string, filePath: string) =>
+      `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
+    instanceList: `${API_BASE_URL}/skills/instance/list`,
+    instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
+    createSimple: `${API_BASE_URL}/skills/create-simple`,
   },
   memory: {
     // ---------------- Memory configuration ----------------

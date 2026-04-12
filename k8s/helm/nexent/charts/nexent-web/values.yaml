@@ -1,0 +1,37 @@
+replicaCount: 1
+
+images:
+  web:
+    repository: nexent/nexent-web
+    tag: latest
+    pullPolicy: IfNotPresent
+
+resources:
+  web:
+    requests:
+      memory: 256Mi
+      cpu: 200m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+config:
+  marketBackend: "http://60.204.251.153:8010"
+  modelEngine:
+    enabled: "false"
+
+services:
+  web:
+    type: NodePort
+    nodePort: 30000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: nexent.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

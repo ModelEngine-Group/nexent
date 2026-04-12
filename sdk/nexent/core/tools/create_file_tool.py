@@ -21,10 +21,34 @@ class CreateFileTool(Tool):
                   "Supports custom encoding, defaults to utf-8. " \
                   "Will create parent directories if they don't exist."
 
+    description_zh = "在指定路径创建文件并写入内容。路径需为工作区相对路径（例如，'documents/file.txt'），父目录不存在时将自动创建。出于安全考虑，不支持绝对路径。若内容为空则创建空文件，支持自定义编码，默认为 utf-8 。"
+
     inputs = {
-        "file_path": {"type": "string", "description": "Relative path where the file should be created (e.g., 'documents/file.txt')"},
-        "content": {"type": "string", "description": "Content to write to the file. If empty, creates an empty file", "nullable": True},
-        "encoding": {"type": "string", "description": "File encoding, defaults to utf-8", "default": "utf-8", "nullable": True}
+        "file_path": {
+            "type": "string",
+            "description": "Relative path where the file should be created (e.g., 'documents/file.txt')",
+            "description_zh": "文件创建的相对路径（例如，'documents/file.txt'）"
+        },
+        "content": {
+            "type": "string",
+            "description": "Content to write to the file. If empty, creates an empty file",
+            "description_zh": "写入文件的内容。如果为空，创建空文件",
+            "nullable": True
+        },
+        "encoding": {
+            "type": "string",
+            "description": "File encoding, defaults to utf-8",
+            "description_zh": "文件编码，默认为 utf-8",
+            "default": "utf-8",
+            "nullable": True
+        }
+    }
+
+    init_param_descriptions = {
+        "init_path": {
+            "description": "Initial workspace path",
+            "description_zh": "初始工作区路径"
+        }
     }
     output_type = "string"
     category = ToolCategory.FILE.value

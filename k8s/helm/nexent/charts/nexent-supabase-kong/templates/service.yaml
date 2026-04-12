@@ -1,0 +1,19 @@
+{{- if eq .Values.global.deploymentVersion "full" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-supabase-kong
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: proxy
+    - port: 8443
+      targetPort: 8443
+      name: proxy-ssl
+  selector:
+    app: nexent-supabase-kong
+{{- end }}

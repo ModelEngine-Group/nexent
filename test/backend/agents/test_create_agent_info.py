@@ -179,11 +179,257 @@ from backend.agents.create_agent_info import (
     filter_mcp_servers_and_tools,
     create_agent_run_info,
     join_minio_file_description_to_query,
-    prepare_prompt_templates
+    prepare_prompt_templates,
+    _get_skills_for_template,
+    _get_skill_script_tools,
 )
 
 # Import constants for testing
 from consts.const import MODEL_CONFIG_MAPPING
+
+
+class TestGetSkillsForTemplate:
+    """Tests for the _get_skills_for_template function"""
+
+    def test_get_skills_for_template_success(self):
+        """Test case for successfully getting skills for template"""
+        mock_skill1 = {"name": "skill1", "description": "desc1"}
+        mock_skill2 = {"name": "skill2", "description": "desc2"}
+
+        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
+            mock_skill_service = sys.modules['services.skill_service'].SkillService
+            mock_instance = MagicMock()
+            mock_instance.get_enabled_skills_for_agent.return_value = [mock_skill1, mock_skill2]
+            mock_skill_service.return_value = mock_instance
+
+            result = _get_skills_for_template(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=0
+            )
+
+            assert result == [
+                {"name": "skill1", "description": "desc1"},
+                {"name": "skill2", "description": "desc2"}
+            ]
+            mock_instance.get_enabled_skills_for_agent.assert_called_once_with(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=0
+            )
+
+    def test_get_skills_for_template_with_missing_fields(self):
+        """Test case for skills with missing name or description fields"""
+        mock_skill1 = {"name": "skill1"}  # Missing description
+        mock_skill2 = {"description": "desc2"}  # Missing name
+        mock_skill3 = {}  # Missing both
+
+        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
+            mock_skill_service = sys.modules['services.skill_service'].SkillService
+            mock_instance = MagicMock()
+            mock_instance.get_enabled_skills_for_agent.return_value = [mock_skill1, mock_skill2, mock_skill3]
+            mock_skill_service.return_value = mock_instance
+
+            result = _get_skills_for_template(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=0
+            )
+
+            assert result == [
+                {"name": "skill1", "description": ""},
+                {"name": "", "description": "desc2"},
+                {"name": "", "description": ""}
+            ]
+
+    def test_get_skills_for_template_empty_list(self):
+        """Test case when no skills are enabled"""
+        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
+            mock_skill_service = sys.modules['services.skill_service'].SkillService
+            mock_instance = MagicMock()
+            mock_instance.get_enabled_skills_for_agent.return_value = []
+            mock_skill_service.return_value = mock_instance
+
+            result = _get_skills_for_template(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=0
+            )
+
+            assert result == []
+
+    def test_get_skills_for_template_exception_handling(self):
+        """Test case for exception handling when SkillService fails"""
+        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
+            mock_skill_service = sys.modules['services.skill_service'].SkillService
+            mock_skill_service.side_effect = Exception("Service unavailable")
+
+            with patch('backend.agents.create_agent_info.logger') as mock_logger:
+                result = _get_skills_for_template(
+                    agent_id=1,
+                    tenant_id="tenant_1",
+                    version_no=0
+                )
+
+                assert result == []
+                mock_logger.warning.assert_called_once()
+                assert "Failed to get skills for template: Service unavailable" in mock_logger.warning.call_args[0][0]
+
+    def test_get_skills_for_template_with_version_no(self):
+        """Test case with specific version number"""
+        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
+            mock_skill_service = sys.modules['services.skill_service'].SkillService
+            mock_instance = MagicMock()
+            mock_instance.get_enabled_skills_for_agent.return_value = [
+                {"name": "v2_skill", "description": "version 2 skill"}
+            ]
+            mock_skill_service.return_value = mock_instance
+
+            result = _get_skills_for_template(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=5
+            )
+
+            mock_instance.get_enabled_skills_for_agent.assert_called_once_with(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=5
+            )
+            assert result == [{"name": "v2_skill", "description": "version 2 skill"}]
+
+
+class TestGetSkillScriptTools:
+    """Tests for the _get_skill_script_tools function"""
+
+    def test_get_skill_script_tools_success(self):
+        """Test case for successfully getting skill script tools"""
+        mock_tool_config.reset_mock()
+        with patch('consts.const.CONTAINER_SKILLS_PATH', "/container/skills"):
+            result = _get_skill_script_tools(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=0
+            )
+
+            assert len(result) == 4
+            assert mock_tool_config.call_count == 4
+
+            # Verify the calls made to ToolConfig
+            calls = mock_tool_config.call_args_list
+
+            # First call: RunSkillScriptTool
+            assert calls[0][1]['class_name'] == "RunSkillScriptTool"
+            assert calls[0][1]['name'] == "run_skill_script"
+            assert calls[0][1]['params']["local_skills_dir"] == "/container/skills"
+            assert calls[0][1]['metadata'] == {"agent_id": 1, "tenant_id": "tenant_1", "version_no": 0}
+
+            # Second call: ReadSkillMdTool
+            assert calls[1][1]['class_name'] == "ReadSkillMdTool"
+            assert calls[1][1]['name'] == "read_skill_md"
+
+            # Third call: ReadSkillConfigTool
+            assert calls[2][1]['class_name'] == "ReadSkillConfigTool"
+            assert calls[2][1]['name'] == "read_skill_config"
+
+            # Fourth call: WriteSkillFileTool
+            assert calls[3][1]['class_name'] == "WriteSkillFileTool"
+            assert calls[3][1]['name'] == "write_skill_file"
+
+    def test_get_skill_script_tools_metadata_context(self):
+        """Test that skill context metadata is correctly set for all tools"""
+        mock_tool_config.reset_mock()
+        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+            result = _get_skill_script_tools(
+                agent_id=123,
+                tenant_id="test_tenant",
+                version_no=7
+            )
+
+            assert len(result) == 4
+            # Verify all tools have the correct metadata
+            calls = mock_tool_config.call_args_list
+            for call in calls:
+                assert call[1]['metadata'] == {
+                    "agent_id": 123,
+                    "tenant_id": "test_tenant",
+                    "version_no": 7
+                }
+
+    def test_get_skill_script_tools_input_schemas(self):
+        """Test that input schemas are correctly defined for all tools"""
+        mock_tool_config.reset_mock()
+        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+            result = _get_skill_script_tools(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=0
+            )
+
+            calls = mock_tool_config.call_args_list
+
+            # RunSkillScriptTool
+            assert '"skill_name": "str"' in calls[0][1]['inputs']
+            assert '"script_path": "str"' in calls[0][1]['inputs']
+            assert '"params": "dict"' in calls[0][1]['inputs']
+
+            # ReadSkillMdTool
+            assert '"skill_name": "str"' in calls[1][1]['inputs']
+            assert '"additional_files": "list[str]"' in calls[1][1]['inputs']
+
+            # ReadSkillConfigTool
+            assert '"skill_name": "str"' in calls[2][1]['inputs']
+
+            # WriteSkillFileTool
+            assert '"skill_name": "str"' in calls[3][1]['inputs']
+            assert '"file_path": "str"' in calls[3][1]['inputs']
+            assert '"content": "str"' in calls[3][1]['inputs']
+
+    def test_get_skill_script_tools_output_types(self):
+        """Test that output types are correctly set for all tools"""
+        mock_tool_config.reset_mock()
+        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+            result = _get_skill_script_tools(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=0
+            )
+
+            calls = mock_tool_config.call_args_list
+            for call in calls:
+                assert call[1]['output_type'] == "string"
+
+    def test_get_skill_script_tools_source_and_usage(self):
+        """Test that source and usage are correctly set for all tools"""
+        mock_tool_config.reset_mock()
+        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+            result = _get_skill_script_tools(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=0
+            )
+
+            calls = mock_tool_config.call_args_list
+            for call in calls:
+                assert call[1]['source'] == "builtin"
+                assert call[1]['usage'] == "builtin"
+
+    def test_get_skill_script_tools_tool_descriptions(self):
+        """Test that tool descriptions are meaningful"""
+        mock_tool_config.reset_mock()
+        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+            result = _get_skill_script_tools(
+                agent_id=1,
+                tenant_id="tenant_1",
+                version_no=0
+            )
+
+            calls = mock_tool_config.call_args_list
+            # Each tool should have a non-empty description
+            for call in calls:
+                desc = call[1]['description']
+                assert len(desc) > 0
+                assert "skill" in desc.lower()
 
 
 class TestDiscoverLangchainTools:
@@ -450,7 +696,8 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
                 {
@@ -459,15 +706,21 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [{"name": "index_names", "default": []}],
+                    "params": [
+                        {"name": "index_names", "default": []},
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 }
             ]
             mock_vdb_core = "mock_elastic_core"
             mock_embedding_model = "mock_embedding_model"
+            mock_rerank_model = "mock_rerank_model"
             mock_get_vector_db_core.return_value = mock_vdb_core
             mock_embedding.return_value = mock_embedding_model
+            mock_rerank.return_value = mock_rerank_model
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -478,10 +731,11 @@ class TestCreateToolConfigList:
             mock_get_vector_db_core.assert_called_once()
             mock_embedding.assert_called_once_with(tenant_id="tenant_1")
 
-            # Verify metadata contains ONLY vdb_core and embedding_model (no index_names or name_resolver)
+            # Verify metadata contains vdb_core, embedding_model and rerank_model
             expected_metadata = {
                 "vdb_core": mock_vdb_core,
                 "embedding_model": mock_embedding_model,
+                "rerank_model": mock_rerank.return_value,
             }
             assert mock_tool_instance.metadata == expected_metadata
 
@@ -505,7 +759,8 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.side_effect = [mock_tool_kb, mock_tool_other]
 
@@ -516,7 +771,11 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "index_names", "default": []},
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 },
@@ -533,6 +792,7 @@ class TestCreateToolConfigList:
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
             mock_embedding.return_value = "embedding_instance"
+            mock_rerank.return_value = "rerank_instance"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -542,6 +802,7 @@ class TestCreateToolConfigList:
             assert mock_tool_kb.metadata == {
                 "vdb_core": "vdb_core_instance",
                 "embedding_model": "embedding_instance",
+                "rerank_model": mock_rerank.return_value,
             }
 
             # Verify OtherTool has no special metadata (should not have metadata attribute set)
@@ -562,7 +823,8 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -573,13 +835,17 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "mcp",
                     "usage": "mcp_server_1"
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
             mock_embedding.return_value = "embedding"
+            mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -588,6 +854,7 @@ class TestCreateToolConfigList:
             assert mock_tool_instance.metadata == {
                 "vdb_core": "vdb_core",
                 "embedding_model": "embedding",
+                "rerank_model": mock_rerank.return_value,
             }
 
     @pytest.mark.asyncio
@@ -694,7 +961,8 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
                 {
@@ -703,7 +971,10 @@ class TestCreateToolConfigList:
                     "description": "First knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 },
@@ -713,13 +984,17 @@ class TestCreateToolConfigList:
                     "description": "Second knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
             mock_embedding.return_value = "embedding"
+            mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -729,9 +1004,172 @@ class TestCreateToolConfigList:
             expected_metadata = {
                 "vdb_core": "vdb_core",
                 "embedding_model": "embedding",
+                "rerank_model": mock_rerank.return_value,
             }
             assert mock_tool_1.metadata == expected_metadata
             assert mock_tool_2.metadata == expected_metadata
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_dify_tool(self):
+        """Test that DifySearchTool gets correct metadata including rerank model."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DifySearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+            mock_rerank.return_value = "mock_rerank_model"
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DifySearchTool",
+                    "name": "dify_search",
+                    "description": "Dify knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was fetched
+            mock_rerank.assert_called_once_with(
+                tenant_id="tenant_1", model_name="gte-rerank-v2"
+            )
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_dify_tool_no_rerank(self):
+        """Test that DifySearchTool without rerank gets None metadata."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DifySearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DifySearchTool",
+                    "name": "dify_search",
+                    "description": "Dify knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": False},
+                        {"name": "rerank_model_name", "default": ""},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was NOT fetched
+            mock_rerank.assert_not_called()
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool(self):
+        """Test that DataMateSearchTool gets correct metadata including rerank model."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DataMateSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+            mock_rerank.return_value = "mock_datamate_rerank_model"
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateSearchTool",
+                    "name": "datamate_search",
+                    "description": "DataMate knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "jina-rerank-v2"},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was fetched
+            mock_rerank.assert_called_once_with(
+                tenant_id="tenant_1", model_name="jina-rerank-v2"
+            )
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool_no_rerank(self):
+        """Test that DataMateSearchTool without rerank gets None metadata."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DataMateSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateSearchTool",
+                    "name": "datamate_search",
+                    "description": "DataMate knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": False},
+                        {"name": "rerank_model_name", "default": ""},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was NOT fetched
+            mock_rerank.assert_not_called()
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
 
 
 class TestCreateAgentConfig:
@@ -1138,6 +1576,291 @@ class TestCreateAgentConfig:
             assert "Failed to retrieve memory list: boom" in str(excinfo.value)
 
     @pytest.mark.asyncio
+    async def test_create_agent_config_memory_levels_agent_share_never(self):
+        """Test that agent level is removed when agent_share_option is 'never'"""
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+            ) as mock_search_agent,
+            patch(
+                "backend.agents.create_agent_info.query_sub_agents_id_list"
+            ) as mock_query_sub,
+            patch(
+                "backend.agents.create_agent_info.create_tool_config_list"
+            ) as mock_create_tools,
+            patch(
+                "backend.agents.create_agent_info.get_agent_prompt_template"
+            ) as mock_get_template,
+            patch(
+                "backend.agents.create_agent_info.tenant_config_manager"
+            ) as mock_tenant_config,
+            patch(
+                "backend.agents.create_agent_info.build_memory_context"
+            ) as mock_build_memory,
+            patch(
+                "backend.agents.create_agent_info.search_memory_in_levels",
+                new_callable=AsyncMock,
+            ) as mock_search_memory,
+            patch(
+                "backend.agents.create_agent_info.prepare_prompt_templates"
+            ) as mock_prepare_templates,
+            patch(
+                "backend.agents.create_agent_info.get_model_by_model_id"
+            ) as mock_get_model_by_id,
+            patch(
+                "backend.agents.create_agent_info._get_skills_for_template"
+            ) as mock_get_skills,
+            patch(
+                "backend.agents.create_agent_info._get_skill_script_tools"
+            ) as mock_get_skill_tools,
+        ):
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True,
+            }
+            mock_query_sub.return_value = []
+            mock_create_tools.return_value = []
+            mock_get_template.return_value = {
+                "system_prompt": "{{duty}} {{constraint}} {{few_shots}}"
+            }
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+
+            # Set agent_share_option to "never"
+            mock_user_config = Mock()
+            mock_user_config.memory_switch = True
+            mock_user_config.agent_share_option = "never"
+            mock_user_config.disable_agent_ids = []
+            mock_user_config.disable_user_agent_ids = []
+
+            mock_build_memory.return_value = Mock(
+                user_config=mock_user_config,
+                memory_config={"test": "config"},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_search_memory.return_value = {"results": []}
+            mock_prepare_templates.return_value = {
+                "system_prompt": "populated_system_prompt"
+            }
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+            mock_get_skills.return_value = []
+            mock_get_skill_tools.return_value = []
+
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                allow_memory_search=True,
+            )
+
+            # Verify agent level is removed from memory_levels
+            mock_search_memory.assert_called_once()
+            memory_levels = mock_search_memory.call_args[1]["memory_levels"]
+            assert "agent" not in memory_levels
+            assert "tenant" in memory_levels
+            assert "user" in memory_levels
+            assert "user_agent" in memory_levels
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_memory_levels_disable_agent(self):
+        """Test that agent level is removed when agent_id is in disable_agent_ids"""
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+            ) as mock_search_agent,
+            patch(
+                "backend.agents.create_agent_info.query_sub_agents_id_list"
+            ) as mock_query_sub,
+            patch(
+                "backend.agents.create_agent_info.create_tool_config_list"
+            ) as mock_create_tools,
+            patch(
+                "backend.agents.create_agent_info.get_agent_prompt_template"
+            ) as mock_get_template,
+            patch(
+                "backend.agents.create_agent_info.tenant_config_manager"
+            ) as mock_tenant_config,
+            patch(
+                "backend.agents.create_agent_info.build_memory_context"
+            ) as mock_build_memory,
+            patch(
+                "backend.agents.create_agent_info.search_memory_in_levels",
+                new_callable=AsyncMock,
+            ) as mock_search_memory,
+            patch(
+                "backend.agents.create_agent_info.prepare_prompt_templates"
+            ) as mock_prepare_templates,
+            patch(
+                "backend.agents.create_agent_info.get_model_by_model_id"
+            ) as mock_get_model_by_id,
+            patch(
+                "backend.agents.create_agent_info._get_skills_for_template"
+            ) as mock_get_skills,
+            patch(
+                "backend.agents.create_agent_info._get_skill_script_tools"
+            ) as mock_get_skill_tools,
+        ):
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True,
+            }
+            mock_query_sub.return_value = []
+            mock_create_tools.return_value = []
+            mock_get_template.return_value = {
+                "system_prompt": "{{duty}} {{constraint}} {{few_shots}}"
+            }
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+
+            # Set disable_agent_ids to include the agent
+            mock_user_config = Mock()
+            mock_user_config.memory_switch = True
+            mock_user_config.agent_share_option = "always"
+            mock_user_config.disable_agent_ids = ["agent_1"]
+            mock_user_config.disable_user_agent_ids = []
+
+            mock_build_memory.return_value = Mock(
+                user_config=mock_user_config,
+                memory_config={"test": "config"},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_search_memory.return_value = {"results": []}
+            mock_prepare_templates.return_value = {
+                "system_prompt": "populated_system_prompt"
+            }
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+            mock_get_skills.return_value = []
+            mock_get_skill_tools.return_value = []
+
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                allow_memory_search=True,
+            )
+
+            # Verify agent level is removed from memory_levels
+            mock_search_memory.assert_called_once()
+            memory_levels = mock_search_memory.call_args[1]["memory_levels"]
+            assert "agent" not in memory_levels
+            assert "tenant" in memory_levels
+            assert "user" in memory_levels
+            assert "user_agent" in memory_levels
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_memory_levels_disable_user_agent(self):
+        """Test that user_agent level is removed when agent_id is in disable_user_agent_ids"""
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+            ) as mock_search_agent,
+            patch(
+                "backend.agents.create_agent_info.query_sub_agents_id_list"
+            ) as mock_query_sub,
+            patch(
+                "backend.agents.create_agent_info.create_tool_config_list"
+            ) as mock_create_tools,
+            patch(
+                "backend.agents.create_agent_info.get_agent_prompt_template"
+            ) as mock_get_template,
+            patch(
+                "backend.agents.create_agent_info.tenant_config_manager"
+            ) as mock_tenant_config,
+            patch(
+                "backend.agents.create_agent_info.build_memory_context"
+            ) as mock_build_memory,
+            patch(
+                "backend.agents.create_agent_info.search_memory_in_levels",
+                new_callable=AsyncMock,
+            ) as mock_search_memory,
+            patch(
+                "backend.agents.create_agent_info.prepare_prompt_templates"
+            ) as mock_prepare_templates,
+            patch(
+                "backend.agents.create_agent_info.get_model_by_model_id"
+            ) as mock_get_model_by_id,
+            patch(
+                "backend.agents.create_agent_info._get_skills_for_template"
+            ) as mock_get_skills,
+            patch(
+                "backend.agents.create_agent_info._get_skill_script_tools"
+            ) as mock_get_skill_tools,
+        ):
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True,
+            }
+            mock_query_sub.return_value = []
+            mock_create_tools.return_value = []
+            mock_get_template.return_value = {
+                "system_prompt": "{{duty}} {{constraint}} {{few_shots}}"
+            }
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+
+            # Set disable_user_agent_ids to include the agent
+            mock_user_config = Mock()
+            mock_user_config.memory_switch = True
+            mock_user_config.agent_share_option = "always"
+            mock_user_config.disable_agent_ids = []
+            mock_user_config.disable_user_agent_ids = ["agent_1"]
+
+            mock_build_memory.return_value = Mock(
+                user_config=mock_user_config,
+                memory_config={"test": "config"},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_search_memory.return_value = {"results": []}
+            mock_prepare_templates.return_value = {
+                "system_prompt": "populated_system_prompt"
+            }
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+            mock_get_skills.return_value = []
+            mock_get_skill_tools.return_value = []
+
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                allow_memory_search=True,
+            )
+
+            # Verify user_agent level is removed from memory_levels
+            mock_search_memory.assert_called_once()
+            memory_levels = mock_search_memory.call_args[1]["memory_levels"]
+            assert "agent" in memory_levels
+            assert "tenant" in memory_levels
+            assert "user" in memory_levels
+            assert "user_agent" not in memory_levels
+
+    @pytest.mark.asyncio
     async def test_create_agent_config_with_knowledge_base_summary_filtering(self):
         with (
             patch(
@@ -1170,6 +1893,12 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info.get_model_by_model_id"
             ) as mock_get_model_by_id,
+            patch(
+                "backend.agents.create_agent_info._get_skills_for_template"
+            ) as mock_get_skills,
+            patch(
+                "backend.agents.create_agent_info._get_skill_script_tools"
+            ) as mock_get_skill_tools,
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -1210,6 +1939,8 @@ class TestCreateAgentConfig:
             )
             mock_prepare_templates.return_value = {"system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
+            mock_get_skills.return_value = []
+            mock_get_skill_tools.return_value = []
 
             mock_es_instance = Mock()
             mock_es_instance.get_summary.side_effect = [
@@ -1336,7 +2067,7 @@ class TestCreateAgentConfig:
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
-            
+
             # Create a tool that raises exception when accessing class_name
             mock_tool = MagicMock()
             type(mock_tool).class_name = PropertyMock(side_effect=Exception("Test Error"))
@@ -1697,8 +2428,8 @@ class TestCreateAgentRunInfo:
                     "status": True,
                     "authorization_token": None
                 },
-                "nexent": {
-                    "remote_mcp_server_name": "nexent",
+                "outer-apis": {
+                    "remote_mcp_server_name": "outer-apis",
                     "remote_mcp_server": "http://nexent.mcp/sse",
                     "status": True,
                     "authorization_token": None
@@ -2163,7 +2894,7 @@ class TestCreateAgentRunInfo:
 
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
-            
+
             # Verify that the returned data includes authorization_token (used in mcp_host construction)
             assert mock_get_mcp.return_value[0]["authorization_token"] == "secret_token_123"
 

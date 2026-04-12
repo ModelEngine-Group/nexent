@@ -512,3 +512,79 @@ class UserTokenUsageLog(TableBase):
     call_function_name = Column(String(100), doc="API function name being called")
     related_id = Column(Integer, doc="Related resource ID (e.g., conversation_id)")
     meta_data = Column(JSONB, doc="Additional metadata for this usage log entry, stored as JSON")
+
+
+class SkillInfo(TableBase):
+    """
+    Skill information table - stores skill metadata and content.
+    """
+    __tablename__ = "ag_skill_info_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
+                      primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
+    skill_name = Column(String(100), nullable=False, unique=True, doc="Unique skill name")
+    skill_description = Column(String(1000), doc="Skill description")
+    skill_tags = Column(JSON, doc="Skill tags as JSON array")
+    skill_content = Column(Text, doc="Skill content in markdown format")
+    params = Column(JSON, doc="Skill configuration parameters as JSON object")
+    source = Column(String(30), nullable=False, default="official",
+                    doc="Skill source: official, custom, etc.")
+
+
+class SkillToolRelation(TableBase):
+    """
+    Skill-Tool relation table - many-to-many relationship between skills and tools.
+    """
+    __tablename__ = "ag_skill_tools_rel_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    rel_id = Column(Integer, Sequence("ag_skill_tools_rel_t_rel_id_seq", schema=SCHEMA),
+                    primary_key=True, nullable=False, autoincrement=True, doc="Relation ID")
+    skill_id = Column(Integer, nullable=False, doc="Foreign key to ag_skill_info_t.skill_id")
+    tool_id = Column(Integer, nullable=False, doc="Foreign key to ag_tool_info_t.tool_id")
+
+
+class SkillInstance(TableBase):
+    """
+    Skill instance table - stores per-agent skill configuration.
+    Similar to ToolInstance, stores skill settings for each agent version.
+    Note: skill_description and skill_content removed - these are now retrieved from ag_skill_info_t.
+    """
+    __tablename__ = "ag_skill_instance_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    skill_instance_id = Column(
+        Integer,
+        Sequence("ag_skill_instance_t_skill_instance_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Skill instance ID"
+    )
+    skill_id = Column(Integer, nullable=False, doc="Foreign key to ag_skill_info_t.skill_id")
+    agent_id = Column(Integer, nullable=False, doc="Agent ID")
+    user_id = Column(String(100), doc="User ID")
+    tenant_id = Column(String(100), doc="Tenant ID")
+    enabled = Column(Boolean, default=True, doc="Whether this skill is enabled for the agent")
+    version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+
+
+class OuterApiTool(TableBase):
+    """
+    Outer API tools table - stores converted OpenAPI tools as MCP tools.
+    """
+    __tablename__ = "ag_outer_api_tools"
+    __table_args__ = {"schema": SCHEMA}
+
+    id = Column(BigInteger, Sequence("ag_outer_api_tools_id_seq", schema=SCHEMA),
+                primary_key=True, nullable=False, doc="Tool ID, unique primary key")
+    name = Column(String(100), nullable=False, doc="Tool name (unique identifier)")
+    description = Column(Text, doc="Tool description")
+    method = Column(String(10), doc="HTTP method: GET/POST/PUT/DELETE")
+    url = Column(Text, nullable=False, doc="API endpoint URL")
+    headers_template = Column(JSONB, doc="Headers template as JSON")
+    query_template = Column(JSONB, doc="Query parameters template as JSON")
+    body_template = Column(JSONB, doc="Request body template as JSON")
+    input_schema = Column(JSONB, doc="MCP input schema as JSON")
+    tenant_id = Column(String(100), doc="Tenant ID for multi-tenancy")
+    is_available = Column(Boolean, default=True, doc="Whether the tool is available")

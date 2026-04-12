@@ -634,6 +634,7 @@ async def test_create_index_documents_success(vdb_core_mock, auth_data):
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
             patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
 
@@ -669,6 +670,7 @@ async def test_create_index_documents_exception(vdb_core_mock, auth_data):
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
             patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
 
@@ -734,6 +736,7 @@ async def test_create_index_documents_embedding_model_exception(vdb_core_mock, a
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
             patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
 
         index_name = "test_index"
@@ -767,6 +770,7 @@ async def test_create_index_documents_validation_exception(vdb_core_mock, auth_d
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
             patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
 
@@ -943,13 +947,15 @@ async def test_get_index_files_permission_exception(vdb_core_mock):
 
 
 @pytest.mark.asyncio
-async def test_get_index_chunks_success(vdb_core_mock):
+async def test_get_index_chunks_success(vdb_core_mock, auth_data):
     """
     Test retrieving index chunks successfully.
     Verifies that the endpoint forwards query params and returns the service payload.
     """
     index_name = "test_index"
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value="resolved_index"), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.get_index_chunks") as mock_get_chunks:
 
@@ -965,7 +971,8 @@ async def test_get_index_chunks_success(vdb_core_mock):
 
         response = client.post(
             f"/indices/{index_name}/chunks",
-            params={"page": 2, "page_size": 50, "path_or_url": "/foo"}
+            params={"page": 2, "page_size": 50, "path_or_url": "/foo"},
+            headers=auth_data["auth_header"]
         )
 
         assert response.status_code == 200
@@ -980,19 +987,24 @@ async def test_get_index_chunks_success(vdb_core_mock):
 
 
 @pytest.mark.asyncio
-async def test_get_index_chunks_error(vdb_core_mock):
+async def test_get_index_chunks_error(vdb_core_mock, auth_data):
     """
     Test retrieving index chunks with service error.
     Ensures the endpoint maps the exception to HTTP 500.
     """
     index_name = "test_index"
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value="resolved_index"), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.get_index_chunks") as mock_get_chunks:
 
         mock_get_chunks.side_effect = Exception("Chunk failure")
 
-        response = client.post(f"/indices/{index_name}/chunks")
+        response = client.post(
+            f"/indices/{index_name}/chunks",
+            headers=auth_data["auth_header"]
+        )
 
         assert response.status_code == 500
         assert response.json() == {
@@ -2135,18 +2147,23 @@ async def test_hybrid_search_value_error(vdb_core_mock, auth_data):
 
 
 @pytest.mark.asyncio
-async def test_get_index_chunks_value_error(vdb_core_mock):
+async def test_get_index_chunks_value_error(vdb_core_mock, auth_data):
     """
     Test get_index_chunks maps ValueError to 404.
     """
     index_name = "test_index"
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+        patch("backend.apps.vectordatabase_app.get_current_user_id",
+              return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
         patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value="resolved_index"), \
         patch("backend.apps.vectordatabase_app.ElasticSearchService.get_index_chunks") as mock_get_chunks:
 
         mock_get_chunks.side_effect = ValueError("Unknown index")
 
-        response = client.post(f"/indices/{index_name}/chunks")
+        response = client.post(
+            f"/indices/{index_name}/chunks",
+            headers=auth_data["auth_header"]
+        )
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Unknown index"}
@@ -2213,6 +2230,208 @@ async def test_hybrid_search_exception(vdb_core_mock, auth_data):
             headers=auth_data["auth_header"]
         )
 
+    # Verify
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Error executing hybrid search: Search execution failed"}
+
+
+# =============================================================================
+# Tests for new embedding model retrieval from knowledge record
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_create_index_documents_gets_saved_embedding_model_from_knowledge_record(vdb_core_mock, auth_data):
+    """
+    Test that create_index_documents retrieves the saved embedding model name from knowledge record.
+    Verifies that the endpoint calls get_knowledge_record to get the embedding_model_name.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_knowledge_record, \
+            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
+
+        index_name = "test_index"
+        documents = [{"id": 1, "text": "test doc"}]
+        
+        # Mock knowledge record with saved embedding model name
+        saved_model_name = "text-embedding-3-small"
+        mock_get_knowledge_record.return_value = {
+            "index_name": index_name,
+            "embedding_model_name": saved_model_name,
+            "tenant_id": auth_data["tenant_id"]
+        }
+        
+        # Mock embedding model
+        mock_embedding = MagicMock()
+        mock_get_embedding.return_value = mock_embedding
+        
+        # Mock index response
+        expected_response = {
+            "success": True,
+            "message": "Documents indexed successfully",
+            "total_indexed": 1,
+            "total_submitted": 1
+        }
+        mock_index.return_value = expected_response
+
+        # Execute request
+        response = client.post(
+            f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
+
         # Verify
-        assert response.status_code == 500
-        assert response.json() == {"detail": "Error executing hybrid search: Search execution failed"}
+        assert response.status_code == 200
+        
+        # Verify get_knowledge_record was called with correct index_name
+        mock_get_knowledge_record.assert_called_once_with({'index_name': index_name})
+        
+        # Verify get_embedding_model was called with the saved model name
+        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], saved_model_name)
+        
+        # Verify index_documents was called with the embedding model
+        mock_index.assert_called_once()
+        call_kwargs = mock_index.call_args[1]
+        assert call_kwargs["embedding_model"] == mock_embedding
+
+
+@pytest.mark.asyncio
+async def test_create_index_documents_fallback_to_default_when_no_saved_model(vdb_core_mock, auth_data):
+    """
+    Test that create_index_documents falls back to tenant default when knowledge record has no saved model.
+    Verifies that get_embedding_model is called with None as model_name.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_knowledge_record, \
+            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
+
+        index_name = "test_index"
+        documents = [{"id": 1, "text": "test doc"}]
+        
+        # Mock knowledge record with no embedding_model_name (None)
+        mock_get_knowledge_record.return_value = {
+            "index_name": index_name,
+            "embedding_model_name": None,
+            "tenant_id": auth_data["tenant_id"]
+        }
+        
+        # Mock embedding model (tenant default)
+        mock_embedding = MagicMock()
+        mock_get_embedding.return_value = mock_embedding
+        
+        # Mock index response
+        expected_response = {
+            "success": True,
+            "message": "Documents indexed successfully",
+            "total_indexed": 1,
+            "total_submitted": 1
+        }
+        mock_index.return_value = expected_response
+
+        # Execute request
+        response = client.post(
+            f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
+
+        # Verify
+        assert response.status_code == 200
+        
+        # Verify get_embedding_model was called with None as model_name (fallback to default)
+        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], None)
+
+
+@pytest.mark.asyncio
+async def test_create_index_documents_fallback_when_knowledge_record_not_found(vdb_core_mock, auth_data):
+    """
+    Test that create_index_documents falls back to tenant default when knowledge record is not found.
+    Verifies that get_embedding_model is called with None as model_name.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_knowledge_record, \
+            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
+
+        index_name = "test_index"
+        documents = [{"id": 1, "text": "test doc"}]
+        
+        # Mock knowledge record not found (returns None)
+        mock_get_knowledge_record.return_value = None
+        
+        # Mock embedding model (tenant default)
+        mock_embedding = MagicMock()
+        mock_get_embedding.return_value = mock_embedding
+        
+        # Mock index response
+        expected_response = {
+            "success": True,
+            "message": "Documents indexed successfully",
+            "total_indexed": 1,
+            "total_submitted": 1
+        }
+        mock_index.return_value = expected_response
+
+        # Execute request
+        response = client.post(
+            f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
+
+        # Verify
+        assert response.status_code == 200
+        
+        # Verify get_embedding_model was called with None as model_name (fallback to default)
+        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], None)
+
+
+@pytest.mark.asyncio
+async def test_create_index_documents_with_empty_string_model_name(vdb_core_mock, auth_data):
+    """
+    Test that create_index_documents handles empty string embedding_model_name correctly.
+    Empty string should be treated as no model specified (fallback to default).
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_knowledge_record, \
+            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
+
+        index_name = "test_index"
+        documents = [{"id": 1, "text": "test doc"}]
+        
+        # Mock knowledge record with empty string embedding_model_name
+        mock_get_knowledge_record.return_value = {
+            "index_name": index_name,
+            "embedding_model_name": "",  # Empty string
+            "tenant_id": auth_data["tenant_id"]
+        }
+        
+        # Mock embedding model (tenant default)
+        mock_embedding = MagicMock()
+        mock_get_embedding.return_value = mock_embedding
+        
+        # Mock index response
+        expected_response = {
+            "success": True,
+            "message": "Documents indexed successfully",
+            "total_indexed": 1,
+            "total_submitted": 1
+        }
+        mock_index.return_value = expected_response
+
+        # Execute request
+        response = client.post(
+            f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
+
+        # Verify
+        assert response.status_code == 200
+        
+        # Verify get_embedding_model was called with empty string (will be treated as falsy in the function)
+        # The code checks `if knowledge_record:` and `saved_embedding_model_name = knowledge_record.get('embedding_model_name')`
+        # So empty string will be passed, but the service layer will handle it appropriately
+        mock_get_embedding.assert_called_once()
+        args = mock_get_embedding.call_args[0]
+        assert args[0] == auth_data["tenant_id"]
+        assert args[1] == ""  # Empty string is passed

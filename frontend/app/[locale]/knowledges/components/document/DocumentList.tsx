@@ -12,6 +12,7 @@ const { TextArea } = Input;
 import { InfoCircleFilled } from "@ant-design/icons";
 import { BookText, Pilcrow, PencilRuler, Eye, Glasses, CircleOff } from "lucide-react";
 import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
+import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
 
 import {
   UI_CONFIG,
@@ -23,6 +24,7 @@ import {
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
+import { extractObjectNameFromUrl } from "@/services/storageService";
 import { Document } from "@/types/knowledgeBase";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
@@ -73,6 +75,10 @@ interface DocumentListProps {
   onIngroupPermissionChange?: (value: string) => void;
   selectedGroupIds?: number[];
   onSelectedGroupIdsChange?: (values: number[]) => void;
+  // Embedding model for create mode
+  availableEmbeddingModels?: ModelOption[];
+  selectedEmbeddingModel?: string;
+  onEmbeddingModelChange?: (value: string) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
 
   // Upload related props
@@ -112,6 +118,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onIngroupPermissionChange,
       selectedGroupIds,
       onSelectedGroupIdsChange,
+      // Embedding model for create mode
+      availableEmbeddingModels,
+      selectedEmbeddingModel,
+      onEmbeddingModelChange,
       permission,
 
       // Upload related props
@@ -141,6 +151,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       label: group.group_name,
       value: group.group_id,
     }));
+
+    // Preview drawer state
+    const [selectedFile, setSelectedFile] = useState<{
+      objectName: string;
+      fileName: string;
+      fileType?: string;
+      fileSize?: number;
+    } | null>(null);
 
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
@@ -478,7 +496,21 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                   />
                   {/* Right-aligned container for dropdowns */}
                   <div className="flex items-center ml-auto justify-end" style={{ gap: "12px", justifyContent: "flex-end", alignItems: "flex-end", width: "100%" }}>
-                    {/* User groups multi-select - first position */}
+                    {/* Embedding model selection - first position in create mode */}
+                    {isCreatingMode && onEmbeddingModelChange && (
+                      <Select
+                        value={selectedEmbeddingModel}
+                        onChange={onEmbeddingModelChange}
+                        style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
+                        placeholder={t("knowledgeBase.create.embeddingModelPlaceholder") || "Select embedding model"}
+                        options={(availableEmbeddingModels || []).map((model) => ({
+                          value: model.displayName,
+                          label: model.displayName,
+                          disabled: model.connect_status === "unavailable",
+                        }))}
+                      />
+                    )}
+                    {/* User groups multi-select */}
                     <Can permission="kb.groups:update">
                       <Select
                         mode="multiple"
@@ -492,7 +524,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         disabled={isGroupSelectDisabled}
                       />
                     </Can>
-                    {/* Group permission dropdown - second position */}
+                    {/* Group permission dropdown */}
                     <Can permission="kb.groups:update">
                       <Select
                         value={ingroupPermission}
@@ -812,18 +844,40 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       </td>
                       {!isDataMate && (
                         <td className={LAYOUT.CELL_PADDING}>
-                          <button
-                            onClick={() => onDelete(doc.id)}
-                            className={LAYOUT.ACTION_TEXT}
-                            title={
-                              doc.status === DOCUMENT_STATUS.PROCESSING ||
-                              doc.status === DOCUMENT_STATUS.FORWARDING
-                                ? t("document.delete.terminateTask")
-                                : undefined
-                            }
-                          >
-                            {t("common.delete")}
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                const objectName =  extractObjectNameFromUrl(doc.id) || undefined;
+                                if (!objectName) {
+                                  message.warning(t("filePreview.previewFailed"));
+                                  return;
+                                }
+
+                                setSelectedFile({
+                                  objectName,
+                                  fileName: doc.name,
+                                  fileType: doc.type,
+                                  fileSize: doc.size,
+                                });
+                              }}
+                              className={LAYOUT.ACTION_TEXT}
+                              title={t("common.preview")}
+                            >
+                              {t("common.preview")}
+                            </button>
+                            <button
+                              onClick={() => onDelete(doc.id)}
+                              className={LAYOUT.ACTION_TEXT}
+                              title={
+                                doc.status === DOCUMENT_STATUS.PROCESSING ||
+                                doc.status === DOCUMENT_STATUS.FORWARDING
+                                  ? t("document.delete.terminateTask")
+                                  : undefined
+                              }
+                            >
+                              {t("common.delete")}
+                            </button>
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -871,6 +925,18 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               modelMismatch={modelMismatch}
             />
           ))}
+
+        {/* File preview drawer */}
+        {selectedFile && (
+          <FilePreviewDrawer
+            open={!!selectedFile}
+            objectName={selectedFile.objectName}
+            fileName={selectedFile.fileName}
+            fileType={selectedFile.fileType}
+            fileSize={selectedFile.fileSize}
+            onClose={() => setSelectedFile(null)}
+          />
+        )}
       </div>
     );
   }

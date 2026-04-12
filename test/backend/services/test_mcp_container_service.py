@@ -45,6 +45,7 @@ class TestMCPContainerManagerInit:
 
     @patch('services.mcp_container_service.create_container_client_from_config')
     @patch('services.mcp_container_service.DockerContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', False)
     def test_init_success(self, mock_config_class, mock_create_client):
         """Test successful initialization"""
         mock_config = MagicMock()
@@ -64,6 +65,7 @@ class TestMCPContainerManagerInit:
 
     @patch('services.mcp_container_service.create_container_client_from_config')
     @patch('services.mcp_container_service.DockerContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', False)
     def test_init_container_error(self, mock_config_class, mock_create_client):
         """Test initialization failure when container client creation fails"""
         mock_config = MagicMock()
@@ -77,6 +79,7 @@ class TestMCPContainerManagerInit:
 
     @patch('services.mcp_container_service.create_container_client_from_config')
     @patch('services.mcp_container_service.DockerContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', False)
     def test_init_default_socket_path(self, mock_config_class, mock_create_client):
         """Test initialization with default socket path"""
         mock_config = MagicMock()
@@ -90,6 +93,42 @@ class TestMCPContainerManagerInit:
         mock_config_class.assert_called_once_with(
             docker_socket_path=None
         )
+
+    @patch('services.mcp_container_service.create_container_client_from_config')
+    @patch('services.mcp_container_service.KubernetesContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', True)
+    @patch('services.mcp_container_service.KUBERNETES_NAMESPACE', 'test-namespace')
+    def test_init_kubernetes_mode_success(self, mock_k8s_config_class, mock_create_client):
+        """Test successful initialization in Kubernetes mode"""
+        mock_config = MagicMock()
+        mock_k8s_config_class.return_value = mock_config
+
+        mock_client = MagicMock()
+        mock_create_client.return_value = mock_client
+
+        manager = MCPContainerManager()
+
+        assert manager.client == mock_client
+        mock_k8s_config_class.assert_called_once_with(
+            namespace='test-namespace',
+            in_cluster=True,
+        )
+        mock_create_client.assert_called_once_with(mock_config)
+
+    @patch('services.mcp_container_service.create_container_client_from_config')
+    @patch('services.mcp_container_service.KubernetesContainerConfig')
+    @patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', True)
+    @patch('services.mcp_container_service.KUBERNETES_NAMESPACE', 'test-namespace')
+    def test_init_kubernetes_mode_container_error(self, mock_k8s_config_class, mock_create_client):
+        """Test initialization failure in Kubernetes mode"""
+        mock_config = MagicMock()
+        mock_k8s_config_class.return_value = mock_config
+
+        mock_create_client.side_effect = ContainerError(
+            "Cannot connect to Kubernetes")
+
+        with pytest.raises(MCPContainerError, match="Cannot connect to Kubernetes"):
+            MCPContainerManager()
 
 
 # ---------------------------------------------------------------------------
@@ -1065,6 +1104,275 @@ class TestStreamContainerLogs:
 
 
 # ---------------------------------------------------------------------------
+# Test stream_container_logs (Kubernetes Mode)
+# ---------------------------------------------------------------------------
+
+
+class TestStreamContainerLogsKubernetes:
+    """Test stream_container_logs method in Kubernetes mode"""
+
+    @pytest.fixture(autouse=True)
+    def setup_k8s_patches(self):
+        """Setup patches for Kubernetes mode - runs for each test"""
+        self._patches = [
+            patch('services.mcp_container_service.IS_DEPLOYED_BY_KUBERNETES', True),
+            patch('services.mcp_container_service.KUBERNETES_NAMESPACE', 'test-namespace'),
+        ]
+        for p in self._patches:
+            p.start()
+        yield
+        for p in self._patches:
+            p.stop()
+
+    @pytest.fixture
+    def mock_manager_k8s(self):
+        """Create MCPContainerManager instance with mocked Kubernetes client"""
+        with patch('services.mcp_container_service.create_container_client_from_config'), \
+                patch('services.mcp_container_service.KubernetesContainerConfig'):
+            manager = MCPContainerManager()
+            manager.client = MagicMock()
+            manager.client.core_v1 = MagicMock()
+            yield manager
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_initial_logs_only(self, mock_manager_k8s):
+        """Test streaming Kubernetes container logs with initial logs only (follow=False)"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+
+        # Mock get_container_logs for initial logs
+        mock_manager_k8s.client.get_container_logs.return_value = "K8s log line 1\nK8s log line 2\n"
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 2
+        assert logs[0] == "K8s log line 1"
+        assert logs[1] == "K8s log line 2"
+        mock_manager_k8s.client._resolve_pod_name.assert_called_once_with("container-uid-123")
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_pod_not_found(self, mock_manager_k8s):
+        """Test streaming logs when Kubernetes pod is not found"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = None
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "non-existent-uid", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        # Should yield no logs when pod is not found
+        assert len(logs) == 0
+        mock_manager_k8s.client._resolve_pod_name.assert_called_once_with("non-existent-uid")
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_empty_initial_logs(self, mock_manager_k8s):
+        """Test streaming when initial Kubernetes logs are empty"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = ""
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_filters_empty_lines(self, mock_manager_k8s):
+        """Test that empty lines are filtered out in Kubernetes mode"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+
+        # Mock initial logs with empty lines
+        mock_manager_k8s.client.get_container_logs.return_value = "Log 1\n\nLog 2\n   \nLog 3\n"
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 3
+        assert "Log 1" in logs
+        assert "Log 2" in logs
+        assert "Log 3" in logs
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_with_follow(self, mock_manager_k8s):
+        """Test streaming Kubernetes container logs with follow=True"""
+        import asyncio
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Initial K8s log\n"
+
+        # Mock Kubernetes log stream
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = iter([
+            b"New K8s log 1\n",
+            b"New K8s log 2\n",
+        ])
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            if len(logs) >= 3:
+                break
+            await asyncio.sleep(0.1)
+
+        assert len(logs) >= 1
+        assert "Initial K8s log" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_follow_stream_exception(self, mock_manager_k8s):
+        """Test exception handling during Kubernetes log stream"""
+        import asyncio
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Log line\n"
+
+        # Mock Kubernetes log stream to raise exception
+        def raise_exception_stream():
+            yield b"Chunk 1\n"
+            raise Exception("K8s stream error")
+
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = raise_exception_stream()
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            await asyncio.sleep(0.2)
+            break
+
+        assert len(logs) >= 1
+        assert "Log line" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_bytes_decoding(self, mock_manager_k8s):
+        """Test Kubernetes log stream handles bytes decoding"""
+        import asyncio
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Initial log\n"
+
+        # Mock Kubernetes log stream returning bytes
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = iter([
+            b"Decoded log 1\n",
+            b"\xff\xfeInvalid UTF-8\n",  # Invalid UTF-8
+            b"Valid log 2\n",
+        ])
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            await asyncio.sleep(0.1)
+            if len(logs) >= 5:
+                break
+
+        assert len(logs) >= 1
+        # Should handle decode errors gracefully
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_stop_flag(self, mock_manager_k8s):
+        """Test stop_flag stops Kubernetes log stream"""
+        import asyncio
+        import time
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Initial\n"
+
+        # Mock slow stream to allow stop_flag to be set
+        def slow_stream():
+            for i in range(5):
+                yield f"Log {i}\n".encode()
+                time.sleep(0.05)
+
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = slow_stream()
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            if len(logs) >= 2:
+                break
+            await asyncio.sleep(0.05)
+
+        await asyncio.sleep(0.2)
+
+        assert len(logs) >= 1
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_custom_namespace(self, mock_manager_k8s):
+        """Test streaming logs with custom Kubernetes namespace"""
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = "Log\n"
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        assert len(logs) == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_outer_exception(self, mock_manager_k8s):
+        """Test outer exception handler in Kubernetes stream_container_logs (lines 426-428)"""
+        mock_manager_k8s.client._resolve_pod_name.side_effect = Exception(
+            "Unexpected error in K8s mode")
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=False
+        ):
+            logs.append(log_line)
+
+        # Should yield error message from outer exception handler
+        assert len(logs) == 1
+        assert "Error retrieving logs" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_k8s_read_pod_log_params(self, mock_manager_k8s):
+        """Test that read_namespaced_pod_log is called with correct parameters"""
+        import asyncio
+
+        mock_manager_k8s.client._resolve_pod_name.return_value = "test-pod"
+        mock_manager_k8s.client.get_container_logs.return_value = ""
+
+        # Mock stream that ends immediately
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.return_value = iter([])
+
+        logs = []
+        async for log_line in mock_manager_k8s.stream_container_logs(
+            "container-uid-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            await asyncio.sleep(0.1)
+            if len(logs) >= 2:
+                break
+
+        # Verify read_namespaced_pod_log was called with correct parameters
+        mock_manager_k8s.client.core_v1.read_namespaced_pod_log.assert_called_once()
+        call_kwargs = mock_manager_k8s.client.core_v1.read_namespaced_pod_log.call_args[1]
+        assert call_kwargs['name'] == 'test-pod'
+        assert call_kwargs['namespace'] == 'test-namespace'
+        assert call_kwargs['container'] == 'mcp-server'
+        assert call_kwargs['follow'] is True
+        assert call_kwargs['timestamps'] is False
+        assert call_kwargs['_preload_content'] is False
+        assert call_kwargs['tail_lines'] == 0
+
+
+# ---------------------------------------------------------------------------
 # Test load_image_from_tar_file
 # ---------------------------------------------------------------------------
 
@@ -1104,7 +1412,7 @@ class TestLoadImageFromTarFile:
             # Clean up
             try:
                 os.unlink(temp_file_path)
-            except:
+            except Exception:
                 pass
 
     @pytest.mark.asyncio
@@ -1130,7 +1438,7 @@ class TestLoadImageFromTarFile:
             # Clean up
             try:
                 os.unlink(temp_file_path)
-            except:
+            except Exception:
                 pass
 
     @pytest.mark.asyncio
@@ -1150,7 +1458,7 @@ class TestLoadImageFromTarFile:
             # Clean up
             try:
                 os.unlink(temp_file_path)
-            except:
+            except Exception:
                 pass
 
     @pytest.mark.asyncio
@@ -1171,7 +1479,7 @@ class TestLoadImageFromTarFile:
             # Clean up
             try:
                 os.unlink(temp_file_path)
-            except:
+            except Exception:
                 pass
 
 

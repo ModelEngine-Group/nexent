@@ -19,6 +19,7 @@ export type AgentProfileInfo = Partial<
     | "model"
     | "model_id"
     | "max_step"
+    | "provide_run_summary"
     | "description"
     | "duty_prompt"
     | "constraint_prompt"
@@ -66,7 +67,8 @@ export interface Tool {
   name: string;
   origin_name?: string;
   description: string;
-  source: "local" | "mcp" | "langchain";
+  description_zh?: string;
+  source?: string;
   initParams: ToolParam[];
   is_available?: boolean;
   create_time?: string;
@@ -81,6 +83,7 @@ export interface ToolParam {
   required: boolean;
   value?: any;
   description?: string;
+  description_zh?: string;
 }
 
 
@@ -105,6 +108,25 @@ export interface ToolSubGroup {
   key: string;
   label: string;
   tools: Tool[];
+}
+
+// Skill interface for skill management
+export interface Skill {
+  skill_id: string;
+  name: string;
+  description: string;
+  source: string;
+  tags?: string[];
+  content?: string;
+  update_time?: string;
+  create_time?: string;
+}
+
+// Skill group interface for tab organization
+export interface SkillGroup {
+  key: string;
+  label: string;
+  skills: Skill[];
 }
 
 // Tree structure node type

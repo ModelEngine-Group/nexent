@@ -420,6 +420,9 @@ export const ModelAddDialog = ({
         isValidVectorDimension(form.vectorDimension)
       );
     }
+    if (form.type === MODEL_TYPES.RERANK) {
+      return form.name.trim() !== "" && form.url.trim() !== "";
+    }
     return (
       form.name.trim() !== "" &&
       form.url.trim() !== "" &&
@@ -476,7 +479,9 @@ export const ModelAddDialog = ({
           maxTokens:
             form.type === MODEL_TYPES.EMBEDDING
               ? parseInt(form.vectorDimension)
-              : parseInt(form.maxTokens),
+              : form.type === MODEL_TYPES.RERANK
+                ? 0
+                : parseInt(form.maxTokens),
           embeddingDim:
             form.type === MODEL_TYPES.EMBEDDING
               ? parseInt(form.vectorDimension)
@@ -659,9 +664,10 @@ export const ModelAddDialog = ({
       let maxTokensValue = parseInt(form.maxTokens);
       if (
         form.type === MODEL_TYPES.EMBEDDING ||
-        form.type === MODEL_TYPES.MULTI_EMBEDDING
+        form.type === MODEL_TYPES.MULTI_EMBEDDING ||
+        form.type === MODEL_TYPES.RERANK
       ) {
-        // For embedding models, use the vector dimension as maxTokens
+        // For embedding/rerank models, the backend does not rely on max_tokens in the same way as LLM.
         maxTokensValue = 0;
       }
 
@@ -778,6 +784,7 @@ export const ModelAddDialog = ({
   };
 
   const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
+  const isRerankModel = form.type === MODEL_TYPES.RERANK;
 
   return (
     <Modal
@@ -859,7 +866,7 @@ export const ModelAddDialog = ({
               {t("model.type.embedding")}
             </Option>
             <Option value={MODEL_TYPES.VLM}>{t("model.type.vlm")}</Option>
-            <Option value={MODEL_TYPES.RERANK} disabled>
+            <Option value={MODEL_TYPES.RERANK}>
               {t("model.type.rerank")}
             </Option>
             <Option value={MODEL_TYPES.STT} disabled>
@@ -1022,7 +1029,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* Max Tokens */}
-        {!isEmbeddingModel && !form.isBatchImport && (
+        {!isEmbeddingModel && !isRerankModel && !form.isBatchImport && (
           <div>
             <label
               htmlFor="maxTokens"
@@ -1300,19 +1307,47 @@ export const ModelAddDialog = ({
                 </a>
               </Tooltip>
               {form.isBatchImport && (
-                <Tooltip title="SiliconFlow">
-                  <a
-                    href={PROVIDER_LINKS.siliconflow}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <img
-                      src="/siliconflow.png"
-                      alt="SiliconFlow"
-                      className="h-4 ml-1.5 cursor-pointer"
-                    />
-                  </a>
-                </Tooltip>
+                <>
+                  <Tooltip title="SiliconFlow">
+                    <a
+                      href={PROVIDER_LINKS.siliconflow}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/siliconflow.png"
+                        alt="SiliconFlow"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                  <Tooltip title={t("model.provider.dashscope")}>
+                    <a
+                      href={PROVIDER_LINKS.dashscope}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/aliyuncs.png"
+                        alt="DashScope"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                  <Tooltip title={t("model.provider.tokenpony")}>
+                    <a
+                      href={PROVIDER_LINKS.tokenpony}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/tokenpony.png"
+                        alt="TokenPony"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                </>
               )}
               {form.type === "llm" && !form.isBatchImport && (
                 <>

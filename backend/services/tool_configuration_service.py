@@ -2,35 +2,48 @@ import importlib
 import inspect
 import json
 import logging
+import time
 from typing import Any, List, Optional, Dict
 from urllib.parse import urljoin
 
-from pydantic_core import PydanticUndefined
-from fastmcp import Client
-from fastmcp.client.transports import StreamableHttpTransport, SSETransport
 import jsonref
-from mcpadapt.smolagents_adapter import _sanitize_function_name
+import requests
+from fastmcp import Client
+from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from pydantic_core import PydanticUndefined
 
-from consts.const import LOCAL_MCP_SERVER, DATA_PROCESS_SERVICE
-from consts.exceptions import MCPConnectionError, ToolExecutionException, NotFoundException
+from consts.const import DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API
+from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
+from database.client import minio_client
+from database.outer_api_tool_db import (
+    delete_outer_api_tool as db_delete_outer_api_tool,
+    query_outer_api_tool_by_id,
+    query_outer_api_tools_by_tenant,
+    query_available_outer_api_tools,
+    sync_outer_api_tools,
+)
 from database.remote_mcp_db import (
+    get_mcp_authorization_token_by_name_and_url,
     get_mcp_records_by_tenant,
     get_mcp_server_by_name_and_tenant,
-    get_mcp_authorization_token_by_name_and_url,
 )
 from database.tool_db import (
+    check_tool_list_initialized,
     create_or_update_tool_by_tool_info,
     query_all_tools,
     query_tool_instances_by_id,
-    update_tool_table_from_scan_tool_list,
     search_last_tool_instance_by_tool_id,
-    check_tool_list_initialized,
+    update_tool_table_from_scan_tool_list,
 )
+from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model
-from services.vectordatabase_service import get_embedding_model, get_vector_db_core
+from services.vectordatabase_service import get_embedding_model, get_rerank_model, get_vector_db_core
 from database.client import minio_client
 from services.image_service import get_vlm_model
+from services.vectordatabase_service import get_embedding_model, get_vector_db_core
+from utils.langchain_utils import discover_langchain_modules
+from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
 
@@ -104,16 +117,35 @@ def get_local_tools() -> List[ToolInfo]:
     tools_info = []
     tools_classes = get_local_tools_classes()
     for tool_class in tools_classes:
+        # Get class-level init_param_descriptions for fallback
+        init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
+
         init_params_list = []
         sig = inspect.signature(tool_class.__init__)
         for param_name, param in sig.parameters.items():
-            if param_name == "self" or param.default.exclude:
+            if param_name == "self":
                 continue
+
+            # Check if parameter has a default value and if it should be excluded
+            if param.default != inspect.Parameter.empty:
+                if hasattr(param.default, 'exclude') and param.default.exclude:
+                    continue
+
+            # Get description in both languages
+            param_description = param.default.description if hasattr(param.default, 'description') else ""
+
+            # First try to get from param.default.description_zh (FieldInfo)
+            param_description_zh = param.default.description_zh if hasattr(param.default, 'description_zh') else None
+
+            # Fallback to init_param_descriptions if not found
+            if param_description_zh is None and param_name in init_param_descriptions:
+                param_description_zh = init_param_descriptions[param_name].get('description_zh')
 
             param_info = {
                 "type": python_type_to_json_schema(param.annotation),
                 "name": param_name,
-                "description": param.default.description
+                "description": param_description,
+                "description_zh": param_description_zh
             }
             if param.default.default is PydanticUndefined:
                 param_info["optional"] = False
@@ -123,14 +155,29 @@ def get_local_tools() -> List[ToolInfo]:
 
             init_params_list.append(param_info)
 
-        # get tool fixed attributes
+        # Get tool fixed attributes with bilingual support
+        tool_description_zh = getattr(tool_class, 'description_zh', None)
+        tool_inputs = getattr(tool_class, 'inputs', {})
+
+        # Process inputs to add bilingual descriptions
+        processed_inputs = {}
+        if isinstance(tool_inputs, dict):
+            for key, value in tool_inputs.items():
+                if isinstance(value, dict):
+                    processed_inputs[key] = {
+                        **value,
+                        "description_zh": value.get("description_zh")
+                    }
+                else:
+                    processed_inputs[key] = value
+
         tool_info = ToolInfo(
             name=getattr(tool_class, 'name'),
             description=getattr(tool_class, 'description'),
+            description_zh=tool_description_zh,
             params=init_params_list,
             source=ToolSourceEnum.LOCAL.value,
-            inputs=json.dumps(getattr(tool_class, 'inputs'),
-                              ensure_ascii=False),
+            inputs=json.dumps(processed_inputs, ensure_ascii=False),
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
             class_name=tool_class.__name__,
@@ -139,22 +186,6 @@ def get_local_tools() -> List[ToolInfo]:
         )
         tools_info.append(tool_info)
     return tools_info
-
-
-def get_local_tools_classes() -> List[type]:
-    """
-    Get all tool classes from the nexent.core.tools package
-
-    Returns:
-        List of tool class objects
-    """
-    tools_package = importlib.import_module('nexent.core.tools')
-    tools_classes = []
-    for name in dir(tools_package):
-        obj = getattr(tools_package, name)
-        if inspect.isclass(obj):
-            tools_classes.append(obj)
-    return tools_classes
 
 
 # --------------------------------------------------
@@ -206,8 +237,6 @@ def get_langchain_tools() -> List[ToolInfo]:
     LangChain tools (based on presence of `name` & `description`).  Any valid
     tool is converted to ToolInfo with source = "langchain".
     """
-    from utils.langchain_utils import discover_langchain_modules
-
     tools_info: List[ToolInfo] = []
     # Discover all objects that look like LangChain tools
     discovered_tools = discover_langchain_modules()
@@ -247,7 +276,7 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
 
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
     tools_info.extend(await get_tool_from_remote_mcp_server(
-        mcp_server_name="nexent",
+        mcp_server_name="outer-apis",
         remote_mcp_server=default_mcp_url,
         tenant_id=None
     ))
@@ -398,7 +427,8 @@ async def init_tool_list_for_tenant(tenant_id: str, user_id: str):
 
 async def update_tool_list(tenant_id: str, user_id: str):
     """
-        Scan and gather all available tools from both local and MCP sources
+        Scan and gather all available tools from local, MCP, and outer API sources.
+        Also refreshes dynamic outer API tools in MCP server.
 
         Args:
             tenant_id: Tenant ID for MCP tools (required for MCP tools)
@@ -408,8 +438,9 @@ async def update_tool_list(tenant_id: str, user_id: str):
             List of ToolInfo objects containing tool metadata
         """
     local_tools = get_local_tools()
-    # Discover LangChain tools (decorated functions) and include them in the
     langchain_tools = get_langchain_tools()
+
+    _refresh_outer_api_tools_in_mcp(tenant_id)
 
     try:
         mcp_tools = await get_all_mcp_tools(tenant_id)
@@ -427,20 +458,61 @@ async def list_all_tools(tenant_id: str):
     List all tools for a given tenant
     """
     tools_info = query_all_tools(tenant_id)
+
+    # Get description_zh from SDK for local tools (not persisted to DB)
+    local_tool_descriptions = get_local_tools_description_zh()
+
     # only return the fields needed
     formatted_tools = []
     for tool in tools_info:
+        tool_name = tool.get("name")
+
+        # Merge description_zh from SDK for local tools
+        if tool.get("source") == "local" and tool_name in local_tool_descriptions:
+            sdk_info = local_tool_descriptions[tool_name]
+            description_zh = sdk_info.get("description_zh")
+
+            # Merge params description_zh from SDK (independent of tool-level description_zh)
+            params = tool.get("params", [])
+            if params:
+                for param in params:
+                    if not param.get("description_zh"):
+                        # Find matching param in SDK
+                        for sdk_param in sdk_info.get("params", []):
+                            if sdk_param.get("name") == param.get("name"):
+                                param["description_zh"] = sdk_param.get("description_zh")
+                                break
+
+            # Merge inputs description_zh from SDK
+            inputs_str = tool.get("inputs", "{}")
+            try:
+                inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+                if isinstance(inputs, dict):
+                    for key, value in inputs.items():
+                        if isinstance(value, dict) and not value.get("description_zh"):
+                            # Find matching input in SDK
+                            sdk_inputs = sdk_info.get("inputs", {})
+                            if key in sdk_inputs:
+                                value["description_zh"] = sdk_inputs[key].get("description_zh")
+                    inputs_str = json.dumps(inputs, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        else:
+            description_zh = tool.get("description_zh")
+            inputs_str = tool.get("inputs", "{}")
+
         formatted_tool = {
             "tool_id": tool.get("tool_id"),
-            "name": tool.get("name"),
+            "name": tool_name,
             "origin_name": tool.get("origin_name"),
             "description": tool.get("description"),
+            "description_zh": description_zh,
             "source": tool.get("source"),
             "is_available": tool.get("is_available"),
             "create_time": tool.get("create_time"),
             "usage": tool.get("usage"),
             "params": tool.get("params", []),
-            "inputs": tool.get("inputs", {}),
+            "inputs": inputs_str,
             "category": tool.get("category")
         }
         formatted_tools.append(formatted_tool)
@@ -634,10 +706,32 @@ def _validate_local_tool(
         if tool_name == "knowledge_base_search":
             embedding_model = get_embedding_model(tenant_id=tenant_id)
             vdb_core = get_vector_db_core()
+
+            # Get rerank configuration
+            rerank = instantiation_params.get("rerank", False)
+            rerank_model_name = instantiation_params.get("rerank_model_name", "")
+            rerank_model = None
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
+
             params = {
                 **instantiation_params,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
+                'rerank_model': rerank_model,
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name in ["dify_search", "datamate_search"]:
+            # Get rerank configuration for dify and datamate search tools
+            rerank = instantiation_params.get("rerank", False)
+            rerank_model_name = instantiation_params.get("rerank_model_name", "")
+            rerank_model = None
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
+
+            params = {
+                **instantiation_params,
+                'rerank_model': rerank_model,
             }
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_image":
@@ -693,7 +787,6 @@ def _validate_langchain_tool(
         ToolExecutionException: If tool execution fails
     """
     try:
-        from utils.langchain_utils import discover_langchain_modules
 
         # Discover all LangChain tools
         discovered_tools = discover_langchain_modules()
@@ -744,7 +837,7 @@ async def validate_tool_impl(
         tool_name, inputs, source, usage, params = (
             request.name, request.inputs, request.source, request.usage, request.params)
         if source == ToolSourceEnum.MCP.value:
-            if usage == "nexent":
+            if usage == "outer-apis":
                 return await _validate_mcp_tool_nexent(tool_name, inputs)
             else:
                 return await _validate_mcp_tool_remote(tool_name, inputs, usage, tenant_id)
@@ -764,3 +857,396 @@ async def validate_tool_impl(
     except Exception as e:
         logger.error(f"Validate Tool failed: {e}")
         raise ToolExecutionException(str(e))
+
+
+# --------------------------------------------------
+# Outer API Tools (OpenAPI to MCP Conversion)
+# --------------------------------------------------
+
+def parse_openapi_to_mcp_tools(openapi_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Parse OpenAPI JSON and convert it to a list of MCP tool definitions.
+
+    Args:
+        openapi_json: OpenAPI 3.x specification as dictionary
+
+    Returns:
+        List of tool definition dictionaries suitable for storage and MCP registration
+    """
+    tools = []
+    paths = openapi_json.get("paths", {})
+
+    servers = openapi_json.get("servers", [])
+    base_url = servers[0].get("url", "") if servers else ""
+
+    components = openapi_json.get("components", {})
+    schemas = components.get("schemas", {})
+
+    for path, path_item in paths.items():
+        if not isinstance(path_item, dict):
+            continue
+
+        for method, operation in path_item.items():
+            if method.upper() not in ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]:
+                continue
+
+            if not isinstance(operation, dict):
+                continue
+
+            operation_id = operation.get("operationId") or _generate_operation_id(method.upper(), path)
+            tool_name = _sanitize_function_name(operation_id)
+
+            summary = operation.get("summary", "")
+            description = operation.get("description", summary)
+            if not description:
+                description = f"{method.upper()} {path}"
+
+            input_schema = _parse_request_body(operation, schemas)
+
+            full_url = base_url.rstrip("/") + "/" + path.lstrip("/") if base_url else path
+
+            tool_def = {
+                "name": tool_name,
+                "description": description,
+                "method": method.upper(),
+                "url": full_url,
+                "headers_template": {},
+                "query_template": _parse_parameters(operation.get("parameters", []), "query"),
+                "body_template": _parse_request_body_template(operation, schemas),
+                "input_schema": input_schema
+            }
+            tools.append(tool_def)
+
+    return tools
+
+
+def _generate_operation_id(method: str, path: str) -> str:
+    """Generate operation ID from method and path."""
+    path_clean = path.strip("/").replace("/", "_").replace("-", "_").replace("{", "").replace("}", "")
+    return f"{method.lower()}_{path_clean}"
+
+
+def _resolve_ref(ref: str, schemas: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Resolve a $ref reference to its actual schema.
+
+    Args:
+        ref: Reference string like "#/components/schemas/CountOutput"
+        schemas: Dictionary of schemas from components (already extracted from components/schemas)
+
+    Returns:
+        Resolved schema dictionary
+    """
+    if not ref.startswith("#/"):
+        return {}
+
+    parts = ref.lstrip("#/").split("/")
+
+    if len(parts) >= 2 and parts[-2] == "schemas":
+        schema_name = parts[-1]
+        if schema_name in schemas:
+            return schemas[schema_name]
+        return {}
+
+    if len(parts) == 1:
+        schema_name = parts[0]
+        if schema_name in schemas:
+            return schemas[schema_name]
+        return {}
+
+    return {}
+
+
+def _resolve_schema(schema: Dict[str, Any], schemas: Dict[str, Any], depth: int = 0) -> Dict[str, Any]:
+    """
+    Recursively resolve schema, handling $ref and nested schemas.
+
+    Args:
+        schema: Schema dictionary, possibly containing $ref
+        schemas: Dictionary of schemas from components
+        depth: Current recursion depth to prevent infinite loops
+
+    Returns:
+        Fully resolved schema dictionary
+    """
+    if depth > 10:
+        return schema
+
+    if "$ref" in schema:
+        resolved = _resolve_ref(schema["$ref"], schemas)
+        return _resolve_schema(resolved, schemas, depth + 1)
+
+    result = schema.copy()
+
+    if "items" in result:
+        result["items"] = _resolve_schema(result["items"], schemas, depth + 1)
+
+    if "properties" in result:
+        resolved_properties = {}
+        for prop_name, prop_schema in result["properties"].items():
+            resolved_properties[prop_name] = _resolve_schema(prop_schema, schemas, depth + 1)
+        result["properties"] = resolved_properties
+
+    if "allOf" in result:
+        resolved_allof = []
+        for sub_schema in result["allOf"]:
+            resolved_allof.append(_resolve_schema(sub_schema, schemas, depth + 1))
+        result["allOf"] = resolved_allof
+
+    if "anyOf" in result:
+        resolved_anyof = []
+        for sub_schema in result["anyOf"]:
+            resolved_anyof.append(_resolve_schema(sub_schema, schemas, depth + 1))
+        result["anyOf"] = resolved_anyof
+
+    if "oneOf" in result:
+        resolved_oneof = []
+        for sub_schema in result["oneOf"]:
+            resolved_oneof.append(_resolve_schema(sub_schema, schemas, depth + 1))
+        result["oneOf"] = resolved_oneof
+
+    return result
+
+
+def _parse_parameters(parameters: List[Dict], param_type: str) -> Dict[str, Any]:
+    """Parse OpenAPI parameters of specified type."""
+    result = {}
+    for param in parameters:
+        if param.get("in") == param_type:
+            param_name = param.get("name", "")
+            schema = param.get("schema", {"type": "string"})
+            result[param_name] = {
+                "required": param.get("required", False),
+                "description": param.get("description", ""),
+                "schema": schema
+            }
+    return result
+
+
+def _parse_request_body(operation: Dict[str, Any], schemas: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Parse OpenAPI requestBody to MCP input schema.
+    Handles $ref references and nested schemas.
+
+    Args:
+        operation: OpenAPI operation dictionary
+        schemas: Dictionary of schemas from components
+
+    Returns:
+        MCP-compatible input schema
+    """
+    input_schema = {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+
+    parameters = operation.get("parameters", [])
+    for param in parameters:
+        if param.get("in") == "query":
+            param_name = param.get("name", "")
+            schema = param.get("schema", {"type": "string"})
+            resolved_schema = _resolve_schema(schema, schemas)
+            input_schema["properties"][param_name] = {
+                "type": resolved_schema.get("type", "string"),
+                "description": param.get("description", "")
+            }
+            if param.get("required"):
+                input_schema["required"].append(param_name)
+
+    request_body = operation.get("requestBody", {})
+    if request_body:
+        content = request_body.get("content", {})
+        json_content = content.get("application/json", {})
+        json_schema = json_content.get("schema", {})
+
+        resolved_schema = _resolve_schema(json_schema, schemas)
+
+        if resolved_schema.get("type") == "object" and "properties" in resolved_schema:
+            for prop_name, prop_schema in resolved_schema["properties"].items():
+                if prop_name not in input_schema["properties"]:
+                    input_schema["properties"][prop_name] = {
+                        "type": prop_schema.get("type", "string"),
+                        "description": prop_schema.get("description", "")
+                    }
+
+            required_props = resolved_schema.get("required", [])
+            for req in required_props:
+                if req not in input_schema["required"]:
+                    input_schema["required"].append(req)
+
+    return input_schema
+
+
+def _parse_request_body_template(operation: Dict[str, Any], schemas: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Parse OpenAPI requestBody to extract template for request body.
+    Handles $ref references.
+
+    Args:
+        operation: OpenAPI operation dictionary
+        schemas: Dictionary of schemas from components
+
+    Returns:
+        Template dictionary with default values
+    """
+    request_body = operation.get("requestBody", {})
+    if not request_body:
+        return {}
+
+    content = request_body.get("content", {})
+    json_content = content.get("application/json", {})
+    json_schema = json_content.get("schema", {})
+
+    resolved_schema = _resolve_schema(json_schema, schemas)
+
+    if resolved_schema.get("type") == "object" and "properties" in resolved_schema:
+        template = {}
+        for prop_name, prop_schema in resolved_schema["properties"].items():
+            default_value = prop_schema.get("example") or prop_schema.get("default")
+            if default_value is not None:
+                template[prop_name] = default_value
+        return template
+
+    return {}
+
+
+def import_openapi_json(openapi_json: Dict[str, Any], tenant_id: str, user_id: str) -> Dict[str, Any]:
+    """
+    Import OpenAPI JSON and convert/sync tools to database.
+
+    Args:
+        openapi_json: OpenAPI 3.x specification as dictionary
+        tenant_id: Tenant ID for multi-tenancy
+        user_id: User ID for audit
+
+    Returns:
+        Dictionary with import result (created, updated, deleted counts)
+    """
+    tools = parse_openapi_to_mcp_tools(openapi_json)
+    result = sync_outer_api_tools(tools, tenant_id, user_id)
+    result["total_tools"] = len(tools)
+    logger.info(f"Imported {len(tools)} tools from OpenAPI JSON for tenant {tenant_id}")
+    return result
+
+
+def list_outer_api_tools(tenant_id: str) -> List[Dict[str, Any]]:
+    """
+    List all outer API tools for a tenant.
+
+    Args:
+        tenant_id: Tenant ID
+
+    Returns:
+        List of tool dictionaries
+    """
+    return query_outer_api_tools_by_tenant(tenant_id)
+
+
+def get_outer_api_tool(tool_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get a specific outer API tool by ID.
+
+    Args:
+        tool_id: Tool ID
+        tenant_id: Tenant ID
+
+    Returns:
+        Tool dictionary or None
+    """
+    return query_outer_api_tool_by_id(tool_id, tenant_id)
+
+
+def delete_outer_api_tool(tool_id: int, tenant_id: str, user_id: str) -> bool:
+    """
+    Delete an outer API tool.
+
+    Args:
+        tool_id: Tool ID
+        tenant_id: Tenant ID
+        user_id: User ID for audit
+
+    Returns:
+        True if deleted, False if not found
+    """
+    # Get tool info before deletion to get the tool name
+    tool_info = query_outer_api_tool_by_id(tool_id, tenant_id)
+    tool_name = tool_info.get("name") if tool_info else None
+
+    # Delete from database
+    deleted = db_delete_outer_api_tool(tool_id, tenant_id, user_id)
+
+    if deleted and tool_name:
+        # Also remove from MCP server
+        _remove_outer_api_tool_from_mcp(tool_name, tenant_id)
+
+    return deleted
+
+
+def _remove_outer_api_tool_from_mcp(tool_name: str, tenant_id: str) -> bool:
+    """
+    Remove a specific outer API tool from the MCP server via HTTP API.
+
+    Args:
+        tool_name: Name of the tool to remove
+        tenant_id: Tenant ID
+
+    Returns:
+        True if removed successfully, False otherwise
+    """
+    remove_url = f"{MCP_MANAGEMENT_API}/tools/outer_api/{tool_name}"
+    try:
+        response = requests.delete(remove_url, timeout=10)
+        if response.ok:
+            logger.info(f"Removed outer API tool '{tool_name}' from MCP server")
+            return True
+        else:
+            logger.warning(f"Failed to remove tool '{tool_name}' from MCP: {response.status_code}")
+            return False
+    except requests.RequestException as e:
+        logger.warning(f"Failed to remove tool '{tool_name}' from MCP: {e}")
+        return False
+
+
+def _refresh_outer_api_tools_in_mcp(tenant_id: str) -> Dict[str, Any]:
+    """
+    Refresh outer API tools in MCP server via HTTP API.
+
+    Includes retry logic to handle cases where the MCP Server's management API
+    might not be fully ready immediately after a restart.
+
+    Args:
+        tenant_id: Tenant ID
+
+    Returns:
+        Dictionary with refresh result
+    """
+    refresh_url = f"{MCP_MANAGEMENT_API}/tools/outer_api/refresh"
+    max_retries = 3
+    retry_delay = 1.0
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                refresh_url,
+                params={"tenant_id": tenant_id},
+                timeout=30
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Refreshed outer API tools for tenant {tenant_id}: {result}")
+            return result.get("data", {})
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                logger.warning(
+                    f"Failed to refresh outer API tools (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {retry_delay}s..."
+                )
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                logger.error(f"Failed to refresh outer API tools after {max_retries} attempts: {e}")
+                return {"error": str(e)}
+        except Exception as e:
+            logger.warning(f"Failed to refresh outer API tools in MCP: {e}")
+            return {"error": str(e)}

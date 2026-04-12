@@ -1,4 +1,6 @@
+import asyncio
 import base64
+import logging
 import os
 from typing import List, Dict, Any, Union, BinaryIO
 
@@ -6,6 +8,8 @@ from smolagents.models import ChatMessage
 
 from ..models import OpenAIModel
 from ..utils.observer import MessageObserver
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIVLModel(OpenAIModel):
@@ -32,17 +36,48 @@ class OpenAIVLModel(OpenAIModel):
 
     async def check_connectivity(self) -> bool:
         """
-        Check the connectivity of the VLM model.
+        Check the connectivity of the VLM model by sending a test request with
+        a text prompt and an image. VLM APIs (especially DashScope qwen-vl)
+        require specific format: content as a list with 'type': 'image' and
+        'type': 'text' objects.
 
         Returns:
-            bool: Returns True if the model can respond normally, otherwise returns False.
+            bool: True if the model responds successfully, otherwise False.
         """
+        # Use local test image from images folder - use absolute path based on module location
+        module_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        test_image_path = os.path.join(module_dir, "assets", "git-flow.png")
+        if os.path.exists(test_image_path):
+            base64_image = self.encode_image(test_image_path)
+            # Detect image format for proper MIME type
+            _, ext = os.path.splitext(test_image_path)
+            image_format = ext.lower()[1:] if ext else "png"
+            if image_format == "jpg":
+                image_format = "jpeg"
+
+            content_parts: List[Dict[str, Any]] = [
+                {"type": "image_url", "image_url": {"url": f"data:image/{image_format};base64,{base64_image}"}},
+                {"type": "text", "text": "Hello"},
+            ]
+        else:
+            # Fallback to remote URL if local image not found
+            test_image_url = "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250925/thtclx/input1.png"
+            content_parts = [
+                {"type": "image_url", "image_url": {"url": test_image_url}},
+                {"type": "text", "text": "Hello"},
+            ]
+
         try:
-            # Directly reuse the parent class's check_connectivity method
-            return await super().check_connectivity()
+            await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=self.model_id,
+                messages=[{"role": "user", "content": content_parts}],
+                max_tokens=5,
+                stream=False,
+            )
+            return True
         except Exception as e:
-            import logging
-            logging.error(f"VLM connectivity check failed: {str(e)}")
+            logger.error("VLM connectivity check failed: %s", e)
             return False
 
     def encode_image(self, image_input: Union[str, BinaryIO]) -> str:
@@ -87,7 +122,7 @@ class OpenAIVLModel(OpenAIModel):
 
         messages = [{"role": "system", "content": [{"text": system_prompt, "type": "text"}]}, {"role": "user",
             "content": [{"type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "auto"}}]}]
+                "image_url": {"url": f"data:image/{image_format};base64,{base64_image}", "detail": "auto"}}]}]
 
         return messages
 

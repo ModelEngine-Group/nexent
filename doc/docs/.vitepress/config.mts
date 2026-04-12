@@ -1,15 +1,25 @@
-﻿// https://vitepress.dev/reference/site-config
+// https://vitepress.dev/reference/site-config
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
   // Set base path for GitHub Pages deployment
-  base: (globalThis as any).process?.env?.GITHUB_PAGES ? '/nexent/' : '/',
+  base: (globalThis as any).process?.env?.GITHUB_PAGES ? "/nexent/" : "/",
   title: "Nexent Doc",
   description:
-    "A zero-code platform for auto-generating agents  no orchestration, no complex drag-and-drop required.",
+    "A zero-code platform for auto-generating production-grade AI agents using Harness Engineering principles.",
 
   // Add favicon to head
-  head: [["link", { rel: "icon", href: (globalThis as any).process?.env?.GITHUB_PAGES ? "/nexent/favicon.ico" : "/doc/favicon.ico" }]],
+  head: [
+    [
+      "link",
+      {
+        rel: "icon",
+        href: (globalThis as any).process?.env?.GITHUB_PAGES
+          ? "/nexent/favicon.ico"
+          : "/doc/favicon.ico",
+      },
+    ],
+  ],
 
   // Ignore localhost links as they are meant for local deployment access
   ignoreDeadLinks: [
@@ -51,8 +61,16 @@ export default defineConfig({
                 link: "/en/quick-start/installation",
               },
               {
+                text: "Kubernetes Installation & Deployment",
+                link: "/en/quick-start/kubernetes-installation",
+              },
+              {
                 text: "Upgrade Guide",
                 link: "/en/quick-start/upgrade-guide",
+              },
+              {
+                text: "Kubernetes Upgrade Guide",
+                link: "/en/quick-start/kubernetes-upgrade-guide",
               },
               { text: "FAQ", link: "/en/quick-start/faq" },
             ],
@@ -99,16 +117,40 @@ export default defineConfig({
                 text: "Memory Management",
                 link: "/en/user-guide/memory-management",
               },
-              { text: "User Management", link: "/en/user-guide/user-management" },
+              {
+                text: "User Management",
+                link: "/en/user-guide/user-management",
+              },
+              {
+                text: "Third-party Platform Integrations",
+                items: [
+                  { text: "ModelEngine", link: "/en/user-guide/modelengine" },
+                ],
+              },
               {
                 text: "Local Tools",
                 items: [
                   { text: "Overview", link: "/en/user-guide/local-tools/" },
-                  { text: "File Tools", link: "/en/user-guide/local-tools/file-tools" },
-                  { text: "Email Tools", link: "/en/user-guide/local-tools/email-tools" },
-                  { text: "Search Tools", link: "/en/user-guide/local-tools/search-tools" },
-                  { text: "Multimodal Tools", link: "/en/user-guide/local-tools/multimodal-tools" },
-                  { text: "Terminal Tool", link: "/en/user-guide/local-tools/terminal-tool" },
+                  {
+                    text: "File Tools",
+                    link: "/en/user-guide/local-tools/file-tools",
+                  },
+                  {
+                    text: "Email Tools",
+                    link: "/en/user-guide/local-tools/email-tools",
+                  },
+                  {
+                    text: "Search Tools",
+                    link: "/en/user-guide/local-tools/search-tools",
+                  },
+                  {
+                    text: "Multimodal Tools",
+                    link: "/en/user-guide/local-tools/multimodal-tools",
+                  },
+                  {
+                    text: "Terminal Tool",
+                    link: "/en/user-guide/local-tools/terminal-tool",
+                  },
                 ],
               },
             ],
@@ -134,9 +176,7 @@ export default defineConfig({
           },
           {
             text: "Frontend Development",
-            items: [
-              { text: "Overview", link: "/en/frontend/overview" },
-            ],
+            items: [{ text: "Overview", link: "/en/frontend/overview" }],
           },
           {
             text: "Backend Development",
@@ -184,7 +224,10 @@ export default defineConfig({
             text: "MCP Ecosystem",
             items: [
               { text: "Overview", link: "/en/mcp-ecosystem/overview" },
-              { text: "MCP Recommendations", link: "/en/mcp-ecosystem/mcp-recommendations" },
+              {
+                text: "MCP Recommendations",
+                link: "/en/mcp-ecosystem/mcp-recommendations",
+              },
               { text: "Use Cases", link: "/en/mcp-ecosystem/use-cases" },
             ],
           },
@@ -245,8 +288,16 @@ export default defineConfig({
             items: [
               { text: "安装部署", link: "/zh/quick-start/installation" },
               {
+                text: "Kubernetes 安装与部署",
+                link: "/zh/quick-start/kubernetes-installation",
+              },
+              {
                 text: "升级指导",
                 link: "/zh/quick-start/upgrade-guide",
+              },
+              {
+                text: "Kubernetes 升级指南",
+                link: "/zh/quick-start/kubernetes-upgrade-guide",
               },
               { text: "常见问题", link: "/zh/quick-start/faq" },
             ],
@@ -289,11 +340,32 @@ export default defineConfig({
                 text: "本地工具",
                 items: [
                   { text: "概览", link: "/zh/user-guide/local-tools/" },
-                  { text: "文件工具", link: "/zh/user-guide/local-tools/file-tools" },
-                  { text: "邮件工具", link: "/zh/user-guide/local-tools/email-tools" },
-                  { text: "搜索工具", link: "/zh/user-guide/local-tools/search-tools" },
-                  { text: "多模态工具", link: "/zh/user-guide/local-tools/multimodal-tools" },
-                  { text: "终端工具", link: "/zh/user-guide/local-tools/terminal-tool" },
+                  {
+                    text: "文件工具",
+                    link: "/zh/user-guide/local-tools/file-tools",
+                  },
+                  {
+                    text: "邮件工具",
+                    link: "/zh/user-guide/local-tools/email-tools",
+                  },
+                  {
+                    text: "搜索工具",
+                    link: "/zh/user-guide/local-tools/search-tools",
+                  },
+                  {
+                    text: "多模态工具",
+                    link: "/zh/user-guide/local-tools/multimodal-tools",
+                  },
+                  {
+                    text: "终端工具",
+                    link: "/zh/user-guide/local-tools/terminal-tool",
+                  },
+                ],
+              },
+              {
+                text: "对接第三方平台",
+                items: [
+                  { text: "ModelEngine", link: "/zh/user-guide/modelengine" },
                 ],
               },
             ],
@@ -359,7 +431,10 @@ export default defineConfig({
             text: "MCP 生态系统",
             items: [
               { text: "概览", link: "/zh/mcp-ecosystem/overview" },
-              { text: "MCP 推荐", link: "/zh/mcp-ecosystem/mcp-recommendations" },
+              {
+                text: "MCP 推荐",
+                link: "/zh/mcp-ecosystem/mcp-recommendations",
+              },
               { text: "用例场景", link: "/zh/mcp-ecosystem/use-cases" },
             ],
           },

@@ -651,47 +651,6 @@ BEFORE UPDATE ON "nexent"."memory_user_config_t"
 FOR EACH ROW
 EXECUTE FUNCTION "update_memory_user_config_update_time"();
 
--- Create partner mapping id table
-CREATE TABLE IF NOT EXISTS "nexent"."partner_mapping_id_t" (
-  "mapping_id" serial PRIMARY KEY NOT NULL,
-  "external_id" varchar(100) COLLATE "pg_catalog"."default",
-  "internal_id" int4,
-  "mapping_type" varchar(30) COLLATE "pg_catalog"."default",
-  "tenant_id" varchar(100) COLLATE "pg_catalog"."default",
-  "user_id" varchar(100) COLLATE "pg_catalog"."default",
-  "create_time" timestamp(6) DEFAULT CURRENT_TIMESTAMP,
-  "update_time" timestamp(6) DEFAULT CURRENT_TIMESTAMP,
-  "created_by" varchar(100) COLLATE "pg_catalog"."default",
-  "updated_by" varchar(100) COLLATE "pg_catalog"."default",
-  "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying
-);
-
-ALTER TABLE "nexent"."partner_mapping_id_t" OWNER TO "root";
-
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."mapping_id" IS 'ID';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."external_id" IS 'The external id given by the outer partner';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."internal_id" IS 'The internal id of the other database table';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."mapping_type" IS 'Type of the external - internal mapping, value set: CONVERSATION';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."tenant_id" IS 'Tenant ID';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."user_id" IS 'User ID';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."create_time" IS 'Creation time';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."update_time" IS 'Update time';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."created_by" IS 'Creator';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."updated_by" IS 'Updater';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."delete_flag" IS 'Whether it is deleted. Optional values: Y/N';
-
-CREATE OR REPLACE FUNCTION "update_partner_mapping_update_time"()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.update_time = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER "update_partner_mapping_update_time_trigger"
-BEFORE UPDATE ON "nexent"."partner_mapping_id_t"
-FOR EACH ROW
-EXECUTE FUNCTION "update_partner_mapping_update_time"();
 
 -- 1. Create tenant_invitation_code_t table for invitation codes
 CREATE TABLE IF NOT EXISTS nexent.tenant_invitation_code_t (
@@ -1049,3 +1008,230 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.create_time IS 'Version creat
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.updated_by IS 'Last user who updated this version';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.update_time IS 'Last update timestamp';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.delete_flag IS 'Soft delete flag: Y/N';
+
+-- Create the user_token_info_t table in the nexent schema
+CREATE TABLE IF NOT EXISTS nexent.user_token_info_t (
+    token_id SERIAL4 PRIMARY KEY NOT NULL,
+    access_key VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "user_token_info_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.user_token_info_t IS 'User token (AK/SK) information table';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.user_token_info_t.token_id IS 'Token ID, unique primary key';
+COMMENT ON COLUMN nexent.user_token_info_t.access_key IS 'Access Key (AK)';
+COMMENT ON COLUMN nexent.user_token_info_t.user_id IS 'User ID who owns this token';
+COMMENT ON COLUMN nexent.user_token_info_t.create_time IS 'Creation time, audit field';
+COMMENT ON COLUMN nexent.user_token_info_t.update_time IS 'Update time, audit field';
+COMMENT ON COLUMN nexent.user_token_info_t.created_by IS 'Creator ID, audit field';
+COMMENT ON COLUMN nexent.user_token_info_t.updated_by IS 'Last updater ID, audit field';
+COMMENT ON COLUMN nexent.user_token_info_t.delete_flag IS 'Soft delete flag, Y means deleted';
+
+
+-- Create the user_token_usage_log_t table in the nexent schema
+CREATE TABLE IF NOT EXISTS nexent.user_token_usage_log_t (
+    token_usage_id SERIAL4 PRIMARY KEY NOT NULL,
+    token_id INT4 NOT NULL,
+    call_function_name VARCHAR(100),
+    related_id INT4,
+    meta_data JSONB,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "user_token_usage_log_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.user_token_usage_log_t IS 'User token usage log table';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.user_token_usage_log_t.token_usage_id IS 'Token usage log ID, unique primary key';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.token_id IS 'Foreign key to user_token_info_t.token_id';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.call_function_name IS 'API function name being called';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.related_id IS 'Related resource ID (e.g., conversation_id)';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.meta_data IS 'Additional metadata for this usage log entry, stored as JSON';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.create_time IS 'Creation time, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.update_time IS 'Update time, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.created_by IS 'Creator ID, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.updated_by IS 'Last updater ID, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.delete_flag IS 'Soft delete flag, Y means deleted';
+
+-- Create the ag_skill_info_t table in the nexent schema
+CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
+    skill_id SERIAL4 PRIMARY KEY NOT NULL,
+    skill_name VARCHAR(100) NOT NULL,
+    skill_description VARCHAR(1000),
+    skill_tags JSON,
+    skill_content TEXT,
+    params JSON,
+    source VARCHAR(30) DEFAULT 'official',
+    created_by VARCHAR(100),
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "ag_skill_info_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.ag_skill_info_t IS 'Skill information table for managing custom skills';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_id IS 'Skill ID, unique primary key';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_name IS 'Skill name, globally unique';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_description IS 'Skill description text';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_tags IS 'Skill tags stored as JSON array';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_content IS 'Skill content or prompt text';
+COMMENT ON COLUMN nexent.ag_skill_info_t.params IS 'Skill configuration parameters stored as JSON object';
+COMMENT ON COLUMN nexent.ag_skill_info_t.source IS 'Skill source: official, custom, or partner';
+COMMENT ON COLUMN nexent.ag_skill_info_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.ag_skill_info_t.create_time IS 'Creation timestamp';
+COMMENT ON COLUMN nexent.ag_skill_info_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.ag_skill_info_t.update_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_skill_info_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+-- Create the ag_skill_tools_rel_t table in the nexent schema
+CREATE TABLE IF NOT EXISTS nexent.ag_skill_tools_rel_t (
+    rel_id SERIAL4 PRIMARY KEY NOT NULL,
+    skill_id INTEGER,
+    tool_id INTEGER,
+    created_by VARCHAR(100),
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "ag_skill_tools_rel_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.ag_skill_tools_rel_t IS 'Skill-tool relationship table for many-to-many mapping';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.rel_id IS 'Relationship ID, unique primary key';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.skill_id IS 'Foreign key to ag_skill_info_t.skill_id';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.tool_id IS 'Tool ID from ag_tool_info_t';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.create_time IS 'Creation timestamp';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.update_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+-- Create the ag_skill_instance_t table in the nexent schema
+-- Stores skill instance configuration per agent version
+-- Note: skill_description and skill_content fields removed, now retrieved from ag_skill_info_t
+CREATE TABLE IF NOT EXISTS nexent.ag_skill_instance_t (
+    skill_instance_id SERIAL4 NOT NULL,
+    skill_id INTEGER NOT NULL,
+    agent_id INTEGER NOT NULL,
+    user_id VARCHAR(100),
+    tenant_id VARCHAR(100),
+    enabled BOOLEAN DEFAULT TRUE,
+    version_no INTEGER DEFAULT 0 NOT NULL,
+    created_by VARCHAR(100),
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    CONSTRAINT ag_skill_instance_t_pkey PRIMARY KEY (skill_instance_id, version_no)
+);
+
+ALTER TABLE "ag_skill_instance_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.ag_skill_instance_t IS 'Skill instance configuration table - stores per-agent skill settings';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.ag_skill_instance_t.skill_instance_id IS 'Skill instance ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.skill_id IS 'Foreign key to ag_skill_info_t.skill_id';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.agent_id IS 'Agent ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.user_id IS 'User ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.enabled IS 'Whether this skill is enabled for the agent';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.create_time IS 'Creation timestamp';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.update_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+-- Create the ag_outer_api_tools table for outer API tools (OpenAPI to MCP conversion)
+CREATE TABLE IF NOT EXISTS nexent.ag_outer_api_tools (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    method VARCHAR(10),
+    url TEXT NOT NULL,
+    headers_template JSONB DEFAULT '{}',
+    query_template JSONB DEFAULT '{}',
+    body_template JSONB DEFAULT '{}',
+    input_schema JSONB DEFAULT '{}',
+    tenant_id VARCHAR(100),
+    is_available BOOLEAN DEFAULT TRUE,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.ag_outer_api_tools OWNER TO "root";
+
+-- Create a function to update the update_time column
+CREATE OR REPLACE FUNCTION update_ag_outer_api_tools_update_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.update_time = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create a trigger to call the function before each update
+CREATE TRIGGER update_ag_outer_api_tools_update_time_trigger
+BEFORE UPDATE ON nexent.ag_outer_api_tools
+FOR EACH ROW
+EXECUTE FUNCTION update_ag_outer_api_tools_update_time();
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.ag_outer_api_tools IS 'Outer API tools table - stores converted OpenAPI tools as MCP tools';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.ag_outer_api_tools.id IS 'Tool ID, unique primary key';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.name IS 'Tool name (unique identifier)';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.description IS 'Tool description';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.method IS 'HTTP method: GET/POST/PUT/DELETE/PATCH';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.url IS 'API endpoint URL (full path with base URL)';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.headers_template IS 'Headers template as JSONB';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.query_template IS 'Query parameters template as JSONB';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.body_template IS 'Request body template as JSONB';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.input_schema IS 'MCP input schema as JSONB';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.tenant_id IS 'Tenant ID for multi-tenancy';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.is_available IS 'Whether the tool is available';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.ag_outer_api_tools.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+-- Create index for tenant_id queries
+CREATE INDEX IF NOT EXISTS idx_ag_outer_api_tools_tenant_id
+ON nexent.ag_outer_api_tools (tenant_id)
+WHERE delete_flag = 'N';
+
+-- Create index for name queries
+CREATE INDEX IF NOT EXISTS idx_ag_outer_api_tools_name
+ON nexent.ag_outer_api_tools (name)
+WHERE delete_flag = 'N';

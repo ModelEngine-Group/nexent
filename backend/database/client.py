@@ -213,6 +213,21 @@ class MinioClient:
         """
         return self._storage_client.get_file_stream(object_name, bucket)
 
+    def get_file_range(self, object_name: str, start: int, end: int, bucket: Optional[str] = None) -> Tuple[bool, Any]:
+        """
+        Get a byte-range slice of a file from MinIO.
+
+        Args:
+            object_name: Object name
+            start: Start byte offset (inclusive)
+            end: End byte offset (inclusive), matching HTTP Range semantics
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, Any]: (True, raw_body_stream) on success, (False, error_str) on failure
+        """
+        return self._storage_client.get_file_range(object_name, start, end, bucket)
+
     def file_exists(self, object_name: str, bucket: Optional[str] = None) -> bool:
         """
         Check if file exists in MinIO
@@ -268,10 +283,19 @@ def get_db_session(db_session=None):
 
 
 def as_dict(obj):
+    from datetime import datetime
 
     # Handle SQLAlchemy ORM objects (both TableBase and other DeclarativeBase subclasses)
     if hasattr(obj, '__class__') and hasattr(obj.__class__, '__mapper__'):
-        return {c.key: getattr(obj, c.key) for c in class_mapper(obj.__class__).columns}
+        result = {}
+        for c in class_mapper(obj.__class__).columns:
+            value = getattr(obj, c.key)
+            # Convert datetime to ISO format string for JSON serialization
+            if isinstance(value, datetime):
+                result[c.key] = value.isoformat()
+            else:
+                result[c.key] = value
+        return result
 
     # noinspection PyProtectedMember
     return dict(obj._mapping)

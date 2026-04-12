@@ -18,7 +18,7 @@ from services.vectordatabase_service import (
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
-from database.knowledge_db import get_index_name_by_knowledge_name
+from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -54,7 +54,7 @@ def create_new_index(
         embedding_dim: Optional[int] = Query(
             None, description="Dimension of the embedding vectors"),
         request: Dict[str, Any] = Body(
-            None, description="Request body with optional fields (ingroup_permission, group_ids)"),
+            None, description="Request body with optional fields (ingroup_permission, group_ids, embedding_model_name)"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
 ):
@@ -65,9 +65,11 @@ def create_new_index(
         # Extract optional fields from request body
         ingroup_permission = None
         group_ids = None
+        embedding_model_name = None
         if request:
             ingroup_permission = request.get("ingroup_permission")
             group_ids = request.get("group_ids")
+            embedding_model_name = request.get("embedding_model_name")
 
         # Treat path parameter as user-facing knowledge base name for new creations
         return ElasticSearchService.create_knowledge_base(
@@ -78,6 +80,7 @@ def create_new_index(
             tenant_id=tenant_id,
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
+            embedding_model_name=embedding_model_name,
         )
     except Exception as e:
         raise HTTPException(
@@ -195,7 +198,16 @@ def create_index_documents(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        embedding_model = get_embedding_model(tenant_id)
+        
+        # Get the knowledge base record to retrieve the saved embedding model
+        knowledge_record = get_knowledge_record({'index_name': index_name})
+        saved_embedding_model_name = None
+        if knowledge_record:
+            saved_embedding_model_name = knowledge_record.get('embedding_model_name')
+        
+        # Use the saved model from knowledge base, fallback to tenant default if not set
+        embedding_model = get_embedding_model(tenant_id, saved_embedding_model_name)
+        
         return ElasticSearchService.index_documents(
             embedding_model=embedding_model,
             index_name=index_name,

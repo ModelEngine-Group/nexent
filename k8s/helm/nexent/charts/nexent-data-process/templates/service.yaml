@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-data-process
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5012
+      targetPort: 5012
+      name: http
+    - port: 5555
+      targetPort: 5555
+      name: flower
+    - port: 8265
+      targetPort: 8265
+      name: ray-dashboard
+  selector:
+    app: nexent-data-process

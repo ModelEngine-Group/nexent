@@ -264,10 +264,6 @@ Additional Args:
                     self.logger.log(
                         Group(*execution_outputs_console), level=LogLevel.INFO)
             error_msg = str(e)
-            if "Import of " in error_msg and " is not allowed" in error_msg:
-                self.logger.log(
-                    "[bold red]Warning to user: Code execution failed due to an unauthorized import - Consider passing said import under `additional_authorized_imports` when initializing your CodeAgent.",
-                    level=LogLevel.INFO, )
             raise AgentExecutionError(error_msg, self.logger)
 
         truncated_output = None
@@ -399,7 +395,7 @@ You have been provided with these additional arguments, that you can access usin
         try:
             self.observer.add_message(
                 self.name, ProcessType.AGENT_FINISH, str(report))
-        except:
+        except Exception:
             self.observer.add_message(self.name, ProcessType.AGENT_FINISH, "")
 
         answer = Template(self.prompt_templates["managed_agent"]["report"], undefined=StrictUndefined).render({

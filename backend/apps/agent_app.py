@@ -20,7 +20,8 @@ from services.agent_service import (
     run_agent_stream,
     stop_agent_tasks,
     get_agent_call_relationship_impl,
-    clear_agent_new_mark_impl
+    clear_agent_new_mark_impl,
+    get_agent_by_name_impl,
 )
 from services.agent_version_service import (
     publish_version_impl,
@@ -94,6 +95,27 @@ async def search_agent_info_api(
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent search info error.")
+
+
+@agent_config_router.get("/by-name/{agent_name}")
+async def get_agent_by_name_api(
+    agent_name: str,
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Look up an agent by name and return its agent_id and highest published version_no.
+    """
+    try:
+        _, auth_tenant_id = get_current_user_id(authorization)
+        effective_tenant_id = tenant_id or auth_tenant_id
+        result = get_agent_by_name_impl(agent_name, effective_tenant_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except Exception as e:
+        logger.error(f"Agent by name lookup error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent not found.")
 
 
 @agent_config_router.get("/get_creating_sub_agent_id")

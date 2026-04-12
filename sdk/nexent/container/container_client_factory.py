@@ -14,6 +14,8 @@ from typing import Dict, Optional, Tuple, Type
 from .container_client_base import ContainerClient, ContainerConfig
 from .docker_client import DockerContainerClient
 from .docker_config import DockerContainerConfig
+from .k8s_client import KubernetesContainerClient
+from .k8s_config import KubernetesContainerConfig
 
 # Registry mapping container_type to (config_class, client_class)
 _CONTAINER_CLIENT_REGISTRY: Dict[str, Tuple[Type[ContainerConfig], Type[ContainerClient]]] = {}
@@ -80,4 +82,7 @@ def create_container_client_from_config(
 
 # Register Docker implementation
 register_container_client(DockerContainerConfig, DockerContainerClient)
+
+# Register Kubernetes implementation
+register_container_client(KubernetesContainerConfig, KubernetesContainerClient)
 
