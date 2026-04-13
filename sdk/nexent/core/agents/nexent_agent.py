@@ -247,11 +247,6 @@ class NexentAgent:
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
-            # Debug logging
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"[create_single_agent] agent={agent_config.name}, managed_agents_list={[(m.name if hasattr(m, 'name') else str(m)) for m in managed_agents_list]}")
-
             # Create the agent
             agent = CoreAgent(
                 observer=self.observer,
