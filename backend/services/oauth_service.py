@@ -288,9 +288,11 @@ def list_linked_accounts(user_id: str) -> List[Dict[str, Any]]:
     return result
 
 
-def unlink_account(user_id: str, provider: str) -> bool:
+def unlink_account(
+    user_id: str, provider: str, has_password_auth: bool = False
+) -> bool:
     oauth_count = count_oauth_accounts_by_user_id(user_id)
-    if oauth_count <= 1:
+    if oauth_count <= 1 and not has_password_auth:
         raise OAuthLinkError("Cannot unlink the last authentication method")
 
     success = soft_delete_oauth_account(user_id, provider)

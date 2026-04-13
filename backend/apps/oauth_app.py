@@ -224,7 +224,22 @@ async def delete_account(provider: str, authorization: Optional[str] = Header(No
 
     try:
         user_id, _ = get_current_user_id(authorization)
-        unlink_account(user_id, provider)
+
+        has_password_auth = False
+        from utils.auth_utils import get_supabase_admin_client
+
+        admin_client = get_supabase_admin_client()
+        if admin_client:
+            try:
+                user_resp = admin_client.auth.admin.get_user_by_id(user_id)
+                identities = getattr(user_resp.user, "identities", None) or []
+                has_password_auth = any(
+                    getattr(ident, "provider", "") == "email" for ident in identities
+                )
+            except Exception:
+                logger.warning(f"Failed to check user identities for {user_id}")
+
+        unlink_account(user_id, provider, has_password_auth=has_password_auth)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

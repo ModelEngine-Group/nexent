@@ -418,11 +418,19 @@ class TestUnlinkAccount(unittest.TestCase):
 
         self.assertTrue(result)
 
-    def test_raises_when_last_account(self):
+    def test_raises_when_last_account_no_password(self):
         oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 1
 
         with self.assertRaises(_OAuthLinkError):
             unlink_account("user-1", "github")
+
+    def test_allows_last_unlink_when_has_password(self):
+        oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 1
+        oauth_account_db_mock.soft_delete_oauth_account.return_value = True
+
+        result = unlink_account("user-1", "github", has_password_auth=True)
+
+        self.assertTrue(result)
 
     def test_raises_when_account_not_found(self):
         oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 2
