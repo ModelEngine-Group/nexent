@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { a2aClientService, A2AExternalAgent } from "@/services/a2aService";
+import { a2aClientService } from "@/services/a2aService";
 
 export function useExternalAgents() {
 	const queryClient = useQueryClient();

@@ -7,7 +7,7 @@ for external callers.
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
@@ -269,7 +269,7 @@ class A2AServerService:
                 return {**current, "is_enabled": False}
 
         # Update card overrides without changing enabled state
-        from datetime import datetime
+        from datetime import datetime, timezone
         with get_db_session() as session:
             from database.db_models import A2AServerAgent
             agent = session.query(A2AServerAgent).filter(
@@ -609,14 +609,14 @@ class A2AServerService:
             # Determine response format based on request type
             if is_complex_request:
                 # Complex request → return Task format with full details
-                from datetime import datetime
+                from datetime import datetime, timezone
 
                 return self.adapter.build_a2a_task_response(
                     task_id=task_id,
                     status=final_status,
                     parts=agent_parts if accumulated_text else None,
                     context_id=context_id,
-                    timestamp=datetime.utcnow().isoformat() + "Z"
+                    timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 )
             else:
                 # Simple request → return Message format
@@ -890,14 +890,14 @@ class A2AServerService:
             )
 
             # Yield final statusUpdate
-            from datetime import datetime
+            from datetime import datetime, timezone
             yield self.adapter.build_a2a_task_event(
                 task_id=task_id or "simple",
                 event_type="taskStatusUpdate",
                 data={
                     "status": {
                         "state": "TASK_STATE_COMPLETED",
-                        "timestamp": datetime.utcnow().isoformat() + "Z"
+                        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     }
                 },
                 context_id=context_id
@@ -972,7 +972,7 @@ class A2AServerService:
         }
         a2a_state = state_map.get(task_state, task_state)
 
-        current_time = task.get("update_time") or datetime.utcnow().isoformat() + "Z"
+        current_time = task.get("update_time") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         # Build task object
         task_obj = {

@@ -34,8 +34,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
   const [showA2ADiscovery, setShowA2ADiscovery] = useState(false);
-  const [isRefreshingA2A, setIsRefreshingA2A] = useState(false);
-
   const { groupedTools, invalidate } = useToolList();
   const { groupedSkills, invalidate: invalidateSkills } = useSkillList();
   const { skillInstances, invalidate: invalidateSkillInstances } = useAgentSkillInstances(

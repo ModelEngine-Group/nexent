@@ -5,6 +5,9 @@ from sqlalchemy.sql import func
 
 SCHEMA = "nexent"
 
+# Shared doc strings for primary key columns
+_PRIMARY_KEY_DOC = "Primary key, auto-increment"
+
 # Base class for tables without audit fields
 class SimpleTableBase(DeclarativeBase):
     pass
@@ -475,7 +478,7 @@ class AgentVersion(TableBase):
     __table_args__ = {"schema": SCHEMA}
 
     id = Column(BigInteger, Sequence("ag_tenant_agent_version_t_id_seq", schema=SCHEMA),
-                primary_key=True, nullable=False, doc="Primary key, auto-increment")
+                primary_key=True, nullable=False, doc=_PRIMARY_KEY_DOC)
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
     agent_id = Column(Integer, nullable=False, doc="Agent ID")
     version_no = Column(Integer, nullable=False, doc="Version number, starts from 1. Does not include 0 (draft)")
@@ -598,7 +601,7 @@ class A2ANacosConfig(TableBase):
     __tablename__ = "ag_a2a_nacos_config_t"
     __table_args__ = {"schema": SCHEMA}
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True, doc="Primary key, auto-increment")
+    id = Column(BigInteger, primary_key=True, autoincrement=True, doc=_PRIMARY_KEY_DOC)
     config_id = Column(String(64), unique=True, nullable=False, doc="Unique config identifier for API reference")
 
     # Nacos connection
@@ -629,7 +632,7 @@ class A2AExternalAgent(TableBase):
     __tablename__ = "ag_a2a_external_agent_t"
     __table_args__ = {"schema": SCHEMA}
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True, doc="Primary key, auto-increment")
+    id = Column(BigInteger, primary_key=True, autoincrement=True, doc=_PRIMARY_KEY_DOC)
 
     # Agent metadata (cached from Agent Card)
     name = Column(String(255), nullable=False, doc="Agent name from Agent Card")
@@ -697,7 +700,7 @@ class A2AExternalAgentRelation(TableBase):
         {"schema": SCHEMA},
     )
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True, doc="Primary key, auto-increment")
+    id = Column(BigInteger, primary_key=True, autoincrement=True, doc=_PRIMARY_KEY_DOC)
 
     # Local agent (parent)
     local_agent_id = Column(Integer, nullable=False, doc="Local parent agent ID")
@@ -720,7 +723,7 @@ class A2AServerAgent(TableBase):
     __tablename__ = "ag_a2a_server_agent_t"
     __table_args__ = {"schema": SCHEMA}
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True, doc="Primary key, auto-increment")
+    id = Column(BigInteger, primary_key=True, autoincrement=True, doc=_PRIMARY_KEY_DOC)
 
     # Link to local agent
     agent_id = Column(Integer, nullable=False, doc="Local agent ID")

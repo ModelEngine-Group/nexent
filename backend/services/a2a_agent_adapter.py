@@ -4,6 +4,7 @@ A2A Agent Adapter.
 This adapter layer converts between A2A protocol format and internal Nexent agent format.
 """
 import logging
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 from dataclasses import dataclass, field
 from uuid import uuid4
@@ -192,7 +193,7 @@ class A2AAgentAdapter:
 
         # Generate timestamp if not provided
         if not timestamp:
-            timestamp = datetime.utcnow().isoformat() + "Z"
+            timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         task = {
             "id": task_id,

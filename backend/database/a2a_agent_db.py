@@ -4,7 +4,7 @@ Includes external agent discovery, server agent registration, and task managemen
 """
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -161,7 +161,7 @@ def create_external_agent_from_url(
     Returns:
         Created agent information dict.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=DEFAULT_CACHE_TTL_HOURS)
     protocol_type = _extract_protocol_type(supported_interfaces)
 
@@ -258,7 +258,7 @@ def create_external_agent_from_nacos(
     Returns:
         Created agent information dict.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=DEFAULT_CACHE_TTL_HOURS)
     protocol_type = _extract_protocol_type(supported_interfaces)
 
@@ -522,7 +522,7 @@ def update_external_agent_protocol(
         if interface:
             agent.agent_url = interface.get("url", agent.agent_url)
 
-        agent.updated_time = datetime.utcnow()
+        agent.updated_time = datetime.now(timezone.utc)
 
         return {
             "id": agent.id,
@@ -579,7 +579,7 @@ def refresh_external_agent_cache(
     Returns:
         Updated agent information dict or None if not found.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=DEFAULT_CACHE_TTL_HOURS)
 
     with get_db_session() as session:
@@ -663,7 +663,7 @@ def update_agent_availability(
             return False
 
         agent.is_available = is_available
-        agent.last_check_at = datetime.utcnow()
+        agent.last_check_at = datetime.now(timezone.utc)
         if check_result:
             agent.last_check_result = check_result
 
@@ -901,7 +901,7 @@ def create_server_agent(
         Created server agent information dict.
     """
     from datetime import datetime
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     with get_db_session() as session:
         # Check if already exists
@@ -1086,7 +1086,7 @@ def enable_server_agent(
     Returns:
         Updated server agent information dict or None.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     with get_db_session() as session:
         agent = session.query(A2AServerAgent).filter(
@@ -1165,7 +1165,7 @@ def disable_server_agent(agent_id: int, tenant_id: str, user_id: str) -> bool:
     Returns:
         True if disabled, False if not found.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     with get_db_session() as session:
         agent = session.query(A2AServerAgent).filter(
@@ -1269,7 +1269,7 @@ def create_task(
     if not task_id:
         task_id = _generate_task_id()
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     with get_db_session() as session:
         task = A2ATask(
@@ -1344,7 +1344,7 @@ def update_task_state(
     Returns:
         True if updated, False if not found.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     with get_db_session() as session:
         task = session.query(A2ATask).filter(A2ATask.id == task_id).first()
@@ -1494,7 +1494,7 @@ def cancel_task(task_id: str) -> bool:
     Returns:
         True if canceled, False if not found or already completed.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     with get_db_session() as session:
         task = session.query(A2ATask).filter(A2ATask.id == task_id).first()
@@ -1543,7 +1543,7 @@ def create_message(
         Created message information dict.
     """
     message_id = _generate_message_id()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     with get_db_session() as session:
         # Auto-generate message_index if not provided
@@ -1795,7 +1795,7 @@ def update_nacos_config_last_scan(config_id: str, tenant_id: str) -> bool:
         if not config:
             return False
 
-        config.last_scan_at = datetime.utcnow()
+        config.last_scan_at = datetime.now(timezone.utc)
         return True
 
 
@@ -1859,7 +1859,7 @@ def create_artifact(
         artifact_id = _generate_artifact_id()
 
     artifact_pk = _generate_artifact_id()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     with get_db_session() as session:
         artifact = A2AArtifact(

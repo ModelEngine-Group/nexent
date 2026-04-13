@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Tag, App, Flex, Dropdown, Col, Button, Card } from "antd";
+import { Tag, App, Flex, Dropdown, Col, Button } from "antd";
 import { Plus, Globe } from "lucide-react";
 import { Agent } from "@/types/agentConfig";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";

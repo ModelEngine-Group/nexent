@@ -281,50 +281,51 @@ class A2AClientService:
         Returns:
             A2A endpoint URL string.
         """
-        # Priority 1: Extract from supportedInterfaces array (A2A v1.0 standard)
-        supported_interfaces = card.get("supportedInterfaces", [])
-        if supported_interfaces:
-            # Prefer http-json-rpc protocol
-            for iface in supported_interfaces:
-                protocol_binding = iface.get("protocolBinding", "").lower()
-                if protocol_binding in ("http-json-rpc", "jsonrpc", "httpjsonrpc"):
-                    url = iface.get("url", "")
-                    if url:
-                        return url
-            # Fallback to first interface with a URL
-            for iface in supported_interfaces:
-                url = iface.get("url", "")
-                if url:
-                    return url
+        url = self._find_url_in_interfaces(card.get("supportedInterfaces", []))
+        if url:
+            return url
 
-        # Priority 2: Extract from endpoints dict (legacy format)
-        endpoints = card.get("endpoints", {})
-        if endpoints:
-            # Prefer http-streaming then http-polling
-            for transport in ("http-streaming", "http-polling"):
-                if transport in endpoints:
-                    url = endpoints[transport]
-                    if url:
-                        return url
-            # Fallback to first endpoint
-            first_key = next(iter(endpoints.keys()), None)
-            if first_key:
-                return endpoints[first_key]
+        url = self._find_url_in_endpoints(card.get("endpoints", {}))
+        if url:
+            return url
 
-        # Priority 3: Check provider URL
         provider = card.get("provider", {})
         if isinstance(provider, dict):
             url = provider.get("url", "")
             if url:
                 return url
 
-        # Priority 4: Fallback to base URL field
         url = card.get("url", "")
         if url:
             return url
 
-        # No URL found
         logger.warning("_extract_agent_url: No URL found in Agent Card")
+        return ""
+
+    def _find_url_in_interfaces(self, interfaces: List[Any]) -> str:
+        """Find URL from supportedInterfaces array, preferring http-json-rpc."""
+        json_rpc_protocols = ("http-json-rpc", "jsonrpc", "httpjsonrpc")
+        for iface in interfaces:
+            if iface.get("protocolBinding", "").lower() in json_rpc_protocols:
+                url = iface.get("url", "")
+                if url:
+                    return url
+        for iface in interfaces:
+            url = iface.get("url", "")
+            if url:
+                return url
+        return ""
+
+    def _find_url_in_endpoints(self, endpoints: Dict[str, Any]) -> str:
+        """Find URL from endpoints dict, preferring streaming then polling."""
+        transport_preference = ("http-streaming", "http-polling")
+        for transport in transport_preference:
+            url = endpoints.get(transport, "")
+            if url:
+                return url
+        first_key = next(iter(endpoints.keys()), None)
+        if first_key:
+            return endpoints[first_key]
         return ""
 
     # =============================================================================
@@ -485,40 +486,28 @@ class A2AClientService:
 
     def _build_endpoint_url(self, agent_url: str, protocol_type: str, streaming: bool = False) -> str:
         """Build the complete endpoint URL by appending protocol-specific path.
-        
+
         Args:
             agent_url: Base agent URL from database.
             protocol_type: Protocol type (JSONRPC, HTTP+JSON, GRPC).
             streaming: Whether this is a streaming request.
-            
+
         Returns:
             Complete endpoint URL with protocol path appended.
         """
         base_url = agent_url.rstrip("/")
-        
-        if protocol_type == "HTTP+JSON":
-            if streaming:
-                if "/message:stream" not in base_url:
-                    return f"{base_url}/message:stream"
-                return base_url
-            else:
-                if "/message:send" not in base_url:
-                    return f"{base_url}/message:send"
-                return base_url
-        
-        # JSONRPC uses /v1 path
-        if protocol_type == "JSONRPC":
-            if streaming:
-                if "/v1" not in base_url:
-                    return f"{base_url}/v1"
-                return base_url
-            else:
-                if "/v1" not in base_url:
-                    return f"{base_url}/v1"
-                return base_url
-        
-        # Default: use base URL directly
+        path_suffix = self._get_protocol_path(protocol_type, streaming)
+        if path_suffix and path_suffix not in base_url:
+            return f"{base_url}{path_suffix}"
         return base_url
+
+    def _get_protocol_path(self, protocol_type: str, streaming: bool) -> str:
+        """Get the path suffix for a given protocol type and streaming mode."""
+        if protocol_type == "HTTP+JSON":
+            return "/message:stream" if streaming else "/message:send"
+        if protocol_type == "JSONRPC":
+            return "/v1"
+        return ""
 
     async def call_agent(
         self,
