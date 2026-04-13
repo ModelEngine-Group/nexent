@@ -337,7 +337,7 @@ async def rest_message_stream(
                     yield f"data: {json.dumps(event)}\n\n"
             except Exception as e:
                 logger.error(f"SSE stream error: {e}", exc_info=True)
-                yield f"data: {json.dumps({'kind': 'taskStatusUpdate', 'taskId': '', 'status': {'state': 'failed', 'message': str(e)}})}\n\n"
+                yield f"data: {json.dumps({'kind': 'taskStatusUpdate', 'taskId': '', 'status': {'state': 'failed', 'message': 'An internal error occurred while processing the stream.'}})}\n\n"
 
         return StreamingResponse(
             generate_sse(),
