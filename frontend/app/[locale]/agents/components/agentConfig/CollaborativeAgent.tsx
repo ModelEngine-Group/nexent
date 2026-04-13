@@ -177,44 +177,40 @@ export default function CollaborativeAgent() {
             </div>
           </Dropdown>
           <div className="ml-4">
-            {editable && (
-              <>
-                {/* Internal Agents List */}
-                <div className={relatedInternalAgents.length > 0 && displayExternalAgents.length > 0 ? "mb-3" : ""}>
-                  <Flex className="flex flex-wrap items-center gap-2">
-                  {relatedInternalAgents.map((agent: Agent) => (
-                    <Tag
-                      key={`internal-${agent.id}`}
-                      closable
-                      onClose={() => handleRemoveInternalAgent(Number(agent.id))}
-                      className="bg-blue-50 text-blue-700 border-blue-200"
-                    >
-                      {agent.display_name || agent.name}
-                    </Tag>
-                  ))}
-                  </Flex>
-                </div>
-                
-                {/* External Agents List */}
-                <div >
-                  <Flex className="flex flex-wrap items-center gap-2">  
-                  {displayExternalAgents.map((agent) => (
-                    <Tag
-                      key={`external-${agent.id}`}
-                      closable
-                      onClose={() => handleRemoveExternalAgent(agent.id)}
-                      className="bg-green-50 text-green-700 border-green-200"
-                    >
-                      <span className="inline-flex items-center gap-1">
-                        <Globe size={12} />
-                        {agent.name}
-                      </span>
-                    </Tag>
-                  ))}
-                  </Flex>
-                </div>
-              </>
-            )}
+            {/* Internal Agents List */}
+            <div className={relatedInternalAgents.length > 0 && displayExternalAgents.length > 0 ? "mb-3" : ""}>
+              <Flex className="flex flex-wrap items-center gap-2">
+              {relatedInternalAgents.map((agent: Agent) => (
+                <Tag
+                  key={`internal-${agent.id}`}
+                  closable={editable}
+                  onClose={editable ? () => handleRemoveInternalAgent(Number(agent.id)) : undefined}
+                  className="bg-blue-50 text-blue-700 border-blue-200"
+                >
+                  {agent.display_name || agent.name}
+                </Tag>
+              ))}
+              </Flex>
+            </div>
+            
+            {/* External Agents List */}
+            <div >
+              <Flex className="flex flex-wrap items-center gap-2">  
+              {displayExternalAgents.map((agent) => (
+                <Tag
+                  key={`external-${agent.id}`}
+                  closable={editable}
+                  onClose={editable ? () => handleRemoveExternalAgent(agent.id) : undefined}
+                  className="bg-green-50 text-green-700 border-green-200"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <Globe size={12} />
+                    {agent.name}
+                  </span>
+                </Tag>
+              ))}
+              </Flex>
+            </div>
           </div>
         </Flex>
       </Col>
