@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Button, Typography, Space, Divider, Alert } from "antd";
-import { UserRound, LockKeyhole, Github } from "lucide-react";
+import { UserRound, LockKeyhole, Github, Link2 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
@@ -13,6 +13,10 @@ import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
 
 const { Text } = Typography;
+
+const providerIconMap: Record<string, React.ReactNode> = {
+  github: <Github size={18} />,
+};
 
 function OAuthLoginButtons() {
   const { t } = useTranslation("common");
@@ -33,7 +37,7 @@ function OAuthLoginButtons() {
             key={provider.name}
             block
             size="large"
-            icon={<Github size={18} />}
+            icon={providerIconMap[provider.icon] || <Link2 size={18} />}
             onClick={() => oauthService.startOAuthLogin(provider.name)}
           >
             {t("auth.oauthLogin", { provider: provider.display_name }) || `${provider.display_name} Login`}
