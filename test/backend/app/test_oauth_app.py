@@ -18,6 +18,15 @@ consts_mock.const.DEFAULT_TENANT_ID = "default"
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 
+sys.modules["consts.model"] = MagicMock()
+
+oauth_providers_mock = MagicMock()
+oauth_providers_mock.get_all_provider_definitions.return_value = {
+    "github": MagicMock(),
+    "wechat": MagicMock(),
+}
+sys.modules["consts.oauth_providers"] = oauth_providers_mock
+
 
 class _OAuthProviderError(Exception):
     pass

@@ -1,25 +1,19 @@
-"""
-OAuth service - provider configuration, token exchange, account linking.
-"""
-
 import json
 import logging
+import os
 import secrets
 import urllib.request
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, quote
 
-from consts.const import (
-    DEFAULT_TENANT_ID,
-    ENABLE_WECHAT_OAUTH,
-    GITHUB_OAUTH_CLIENT_ID,
-    GITHUB_OAUTH_CLIENT_SECRET,
-    OAUTH_CALLBACK_BASE_URL,
-    WECHAT_OAUTH_APP_ID,
-    WECHAT_OAUTH_APP_SECRET,
-)
+from consts.const import DEFAULT_TENANT_ID, OAUTH_CALLBACK_BASE_URL
 from consts.exceptions import OAuthLinkError, OAuthProviderError
+from consts.oauth_providers import (
+    get_all_provider_definitions,
+    get_provider_definition,
+    is_provider_enabled,
+)
 from database.oauth_account_db import (
     count_oauth_accounts_by_user_id,
     get_oauth_account_by_provider,
@@ -33,44 +27,48 @@ from database.user_tenant_db import get_user_tenant_by_user_id, insert_user_tena
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_PROVIDERS = {"github", "wechat"}
-
-# In-memory state store for CSRF protection (single-instance deployment)
 _state_store: Dict[str, float] = {}
+
+
+def _resolve_field(data: dict, field_path: str) -> Any:
+    if "." not in field_path:
+        return data.get(field_path)
+    parts = field_path.split(".")
+    current = data
+    for part in parts:
+        if isinstance(current, dict):
+            current = current.get(part)
+        else:
+            return None
+    return current
+
+
+def get_supported_providers() -> set:
+    return set(get_all_provider_definitions().keys())
 
 
 def get_enabled_providers() -> List[Dict[str, str]]:
     providers = []
-
-    if GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET:
-        providers.append(
-            {
-                "name": "github",
-                "display_name": "GitHub",
-                "icon": "github",
-                "enabled": True,
-            }
-        )
-
-    if ENABLE_WECHAT_OAUTH and WECHAT_OAUTH_APP_ID and WECHAT_OAUTH_APP_SECRET:
-        providers.append(
-            {
-                "name": "wechat",
-                "display_name": "WeChat",
-                "icon": "wechat",
-                "enabled": True,
-            }
-        )
-
+    for name, definition in get_all_provider_definitions().items():
+        if is_provider_enabled(definition):
+            providers.append(
+                {
+                    "name": definition.name,
+                    "display_name": definition.display_name,
+                    "icon": definition.icon,
+                    "enabled": True,
+                }
+            )
     return providers
 
 
 def get_authorize_url(provider: str) -> str:
-    if provider not in SUPPORTED_PROVIDERS:
+    try:
+        definition = get_provider_definition(provider)
+    except KeyError:
         raise OAuthProviderError(f"Unsupported OAuth provider: {provider}")
 
-    enabled = get_enabled_providers()
-    if not any(p["name"] == provider for p in enabled):
+    if not is_provider_enabled(definition):
         raise OAuthProviderError(f"OAuth provider '{provider}' is not configured")
 
     callback_url = (
@@ -79,26 +77,21 @@ def get_authorize_url(provider: str) -> str:
     state = f"{provider}:{secrets.token_urlsafe(32)}"
     _state_store[state] = datetime.now().timestamp()
 
-    if provider == "github":
-        params = {
-            "client_id": GITHUB_OAUTH_CLIENT_ID,
-            "redirect_uri": callback_url,
-            "scope": "read:user user:email",
-            "state": state,
-        }
-        return f"https://github.com/login/oauth/authorize?{urlencode(params)}"
+    client_id = os.getenv(definition.client_id_env, "")
+    redirect_uri = (
+        quote(callback_url, safe="") if definition.encode_redirect_uri else callback_url
+    )
 
-    if provider == "wechat":
-        params = {
-            "appid": WECHAT_OAUTH_APP_ID,
-            "redirect_uri": quote(callback_url, safe=""),
-            "response_type": "code",
-            "scope": "snsapi_login",
-            "state": state,
-        }
-        return f"https://open.weixin.qq.com/connect/qrconnect?{urlencode(params)}#wechat_redirect"
+    params = dict(definition.authorize_params)
+    param_map = definition.authorize_param_map
+    params[param_map.get("client_id", "client_id")] = client_id
+    params[param_map.get("redirect_uri", "redirect_uri")] = redirect_uri
+    params[param_map.get("state", "state")] = state
 
-    raise OAuthProviderError(f"Unsupported OAuth provider: {provider}")
+    url = f"{definition.authorize_url}?{urlencode(params)}"
+    if definition.authorize_fragment:
+        url += definition.authorize_fragment
+    return url
 
 
 def _http_post_json(url: str, data: dict, headers: Optional[dict] = None) -> dict:
@@ -118,91 +111,99 @@ def _http_get_json(url: str, headers: Optional[dict] = None) -> dict:
 
 
 def exchange_code_for_provider_token(provider: str, code: str) -> Dict[str, Any]:
-    if provider == "github":
-        resp = _http_post_json(
-            "https://github.com/login/oauth/access_token",
-            data={
-                "client_id": GITHUB_OAUTH_CLIENT_ID,
-                "client_secret": GITHUB_OAUTH_CLIENT_SECRET,
-                "code": code,
-            },
-        )
-        if "error" in resp:
-            raise OAuthProviderError(
-                f"GitHub token exchange failed: {resp.get('error_description', resp['error'])}"
-            )
-        return {"access_token": resp["access_token"]}
+    try:
+        definition = get_provider_definition(provider)
+    except KeyError:
+        raise OAuthProviderError(f"Unsupported provider: {provider}")
 
-    if provider == "wechat":
-        params = urlencode(
-            {
-                "appid": WECHAT_OAUTH_APP_ID,
-                "secret": WECHAT_OAUTH_APP_SECRET,
-                "code": code,
-                "grant_type": "authorization_code",
-            }
-        )
-        resp = _http_get_json(
-            f"https://api.weixin.qq.com/sns/oauth2/access_token?{params}"
-        )
-        if "errcode" in resp:
-            raise OAuthProviderError(
-                f"WeChat token exchange failed: {resp.get('errmsg', str(resp['errcode']))}"
-            )
-        return {
-            "access_token": resp["access_token"],
-            "openid": resp["openid"],
-        }
+    client_id = os.getenv(definition.client_id_env, "")
+    client_secret = os.getenv(definition.client_secret_env, "")
+    param_map = definition.token_params_map
 
-    raise OAuthProviderError(f"Unsupported provider: {provider}")
+    result: Dict[str, Any] = {"access_token": ""}
+
+    if definition.token_method.upper() == "POST":
+        body = dict(definition.token_extra_params)
+        body[param_map.get("client_id", "client_id")] = client_id
+        body[param_map.get("client_secret", "client_secret")] = client_secret
+        body[param_map.get("code", "code")] = code
+        body.setdefault(param_map.get("grant_type", "grant_type"), "authorization_code")
+
+        resp = _http_post_json(definition.token_url, data=body)
+    else:
+        params = dict(definition.token_extra_params)
+        params[param_map.get("client_id", "client_id")] = client_id
+        params[param_map.get("client_secret", "client_secret")] = client_secret
+        params[param_map.get("code", "code")] = code
+        params[param_map.get("grant_type", "grant_type")] = "authorization_code"
+
+        resp = _http_get_json(f"{definition.token_url}?{urlencode(params)}")
+
+    if definition.token_error_key and definition.token_error_key in resp:
+        err_msg = resp.get(
+            definition.token_error_message_key, str(resp[definition.token_error_key])
+        )
+        raise OAuthProviderError(f"{provider} token exchange failed: {err_msg}")
+
+    result["access_token"] = resp["access_token"]
+    if definition.token_response_id_key:
+        result["openid"] = resp.get(definition.token_response_id_key, "")
+
+    return result
 
 
 def get_provider_user_info(
     provider: str, access_token: str, **kwargs: Any
 ) -> Dict[str, Any]:
-    if provider == "github":
-        user_resp = _http_get_json(
-            "https://api.github.com/user",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Accept": "application/json",
-            },
+    try:
+        definition = get_provider_definition(provider)
+    except KeyError:
+        raise OAuthProviderError(f"Unsupported provider: {provider}")
+
+    headers: Dict[str, str] = {"Accept": "application/json"}
+    if definition.userinfo_auth_scheme and access_token:
+        headers["Authorization"] = f"{definition.userinfo_auth_scheme} {access_token}"
+
+    url_params = {}
+    for key, value in definition.userinfo_params.items():
+        resolved = value.format(
+            openid=kwargs.get("openid", ""), access_token=access_token
         )
-        email = user_resp.get("email")
-        if not email:
-            try:
-                emails_resp = _http_get_json(
-                    "https://api.github.com/user/emails",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                )
+        url_params[key] = resolved
+
+    query = urlencode(url_params) if url_params else ""
+    separator = (
+        "&" if "?" in definition.userinfo_url and query else ("?" if query else "")
+    )
+    url = f"{definition.userinfo_url}{separator}{query}"
+
+    user_resp = _http_get_json(url, headers=headers)
+
+    field_map = definition.userinfo_field_map
+    result = {}
+    for our_key, provider_key in field_map.items():
+        if provider_key:
+            result[our_key] = _resolve_field(user_resp, provider_key) or ""
+        else:
+            result[our_key] = ""
+    result["id"] = str(result.get("id", ""))
+
+    if definition.userinfo_needs_email_fetch and not result.get("email"):
+        try:
+            emails_resp = _http_get_json(
+                definition.userinfo_email_url,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if isinstance(emails_resp, list) and emails_resp:
                 primary = next(
                     (e for e in emails_resp if e.get("primary")),
-                    emails_resp[0] if emails_resp else {},
+                    emails_resp[0],
                 )
-                email = primary.get("email")
-            except Exception:
-                logger.warning("Failed to fetch GitHub user emails")
+                result["email"] = primary.get("email", "")
+        except Exception:
+            logger.warning(f"Failed to fetch {provider} user emails")
 
-        return {
-            "id": str(user_resp["id"]),
-            "email": email or "",
-            "username": user_resp.get("login", ""),
-            "avatar_url": user_resp.get("avatar_url", ""),
-        }
-
-    if provider == "wechat":
-        openid = kwargs.get("openid", "")
-        resp = _http_get_json(
-            f"https://api.weixin.qq.com/sns/userinfo?access_token={access_token}&openid={openid}",
-        )
-        return {
-            "id": resp.get("openid", openid),
-            "email": "",
-            "username": resp.get("nickname", ""),
-            "avatar_url": resp.get("headimgurl", ""),
-        }
-
-    raise OAuthProviderError(f"Unsupported provider: {provider}")
+    return result
 
 
 def create_or_update_oauth_account(
@@ -217,7 +218,6 @@ def create_or_update_oauth_account(
 
     if existing:
         if existing.get("user_id") != user_id:
-            # Previous user was deleted; re-link to the new user
             rebind_oauth_account(
                 provider=provider,
                 provider_user_id=provider_user_id,

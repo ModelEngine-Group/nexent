@@ -6,6 +6,7 @@ from http import HTTPStatus
 from typing import Optional
 
 from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedError
+from consts.oauth_providers import get_all_provider_definitions
 from services.oauth_service import (
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
@@ -81,7 +82,7 @@ async def callback(
             },
         )
 
-    if provider not in ("github", "wechat"):
+    if provider not in get_all_provider_definitions():
         return JSONResponse(
             status_code=HTTPStatus.BAD_REQUEST,
             content={

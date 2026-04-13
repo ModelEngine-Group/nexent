@@ -64,6 +64,53 @@ class OAuthProviderInfo(BaseModel):
     enabled: bool
 
 
+class OAuthProviderDefinition(BaseModel):
+    name: str
+    display_name: str
+    icon: str
+
+    authorize_url: str
+    authorize_method: str = "GET"
+    authorize_params: Dict[str, str] = {}
+    authorize_fragment: str = ""
+    authorize_param_map: Dict[str, str] = {
+        "client_id": "client_id",
+        "redirect_uri": "redirect_uri",
+        "scope": "scope",
+        "state": "state",
+    }
+    encode_redirect_uri: bool = False
+
+    token_url: str
+    token_method: str = "POST"
+    token_params_map: Dict[str, str] = {
+        "client_id": "client_id",
+        "client_secret": "client_secret",
+        "code": "code",
+        "grant_type": "grant_type",
+    }
+    token_extra_params: Dict[str, str] = {}
+    token_error_key: Optional[str] = None
+    token_error_message_key: Optional[str] = None
+    token_response_id_key: Optional[str] = None
+
+    userinfo_url: str
+    userinfo_auth_scheme: str = "Bearer"
+    userinfo_params: Dict[str, str] = {}
+    userinfo_field_map: Dict[str, str] = {
+        "id": "id",
+        "email": "email",
+        "username": "login",
+        "avatar_url": "avatar_url",
+    }
+    userinfo_needs_email_fetch: bool = False
+    userinfo_email_url: Optional[str] = None
+
+    client_id_env: str
+    client_secret_env: str
+    enabled_check: Optional[str] = None
+
+
 class OAuthAccountInfo(BaseModel):
     provider: str
     provider_username: Optional[str] = None
