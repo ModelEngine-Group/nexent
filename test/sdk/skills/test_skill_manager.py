@@ -4,6 +4,9 @@ Unit tests for nexent.skills.skill_manager module.
 import io
 import json
 import os
+import shlex
+import shutil
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -1882,8 +1885,8 @@ class TestSkillManagerErrorHandlingEnhanced:
         manager.cleanup_skill_directory("test-cleanup")
 
     def test_run_python_script_with_list_params(self, mocker):
-        """Test running Python script with list parameter."""
-        import subprocess
+        """Test running Python script with string params containing multiple values."""
+        import subprocess as sp
         from unittest.mock import ANY
 
         with TempSkillDir() as temp:
@@ -1905,22 +1908,22 @@ description: List param test
             mock_result.stdout = "ok"
             mock_result.stderr = ""
 
-            mocker.patch("subprocess.run", return_value=mock_result)
+            mocker.patch.object(sp, "run", return_value=mock_result)
 
             manager = SkillManager(local_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
                 "list-param-skill",
                 "scripts/multi.py",
-                params={"-i": ["a", "b", "c"]}
+                params="-i a -i b -i c"
             )
 
             assert result == "ok"
-            args = subprocess.run.call_args[0][0]
+            args = sp.run.call_args[0][0]
             assert args == ["python", ANY, "-i", "a", "-i", "b", "-i", "c"]
 
     def test_run_python_script_boolean_false_excluded(self, mocker):
-        """Test boolean False params are excluded from args."""
-        import subprocess
+        """Test boolean flags in string params are passed as-is (True)."""
+        import subprocess as sp
 
         with TempSkillDir() as temp:
             temp.create_skill(
@@ -1941,16 +1944,16 @@ description: Bool false test
             mock_result.stdout = "ok"
             mock_result.stderr = ""
 
-            mocker.patch("subprocess.run", return_value=mock_result)
+            mocker.patch.object(sp, "run", return_value=mock_result)
 
             manager = SkillManager(local_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
                 "bool-false-skill",
                 "scripts/bool.py",
-                params={"--quiet": False, "--verbose": True}
+                params="--verbose"
             )
 
-            args = subprocess.run.call_args[0][0]
+            args = sp.run.call_args[0][0]
             assert "--quiet" not in args
             assert "--verbose" in args
 
