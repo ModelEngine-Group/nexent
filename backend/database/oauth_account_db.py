@@ -64,6 +64,39 @@ def list_oauth_accounts_by_user_id(user_id: str) -> List[Dict[str, Any]]:
         return [as_dict(r) for r in results]
 
 
+def rebind_oauth_account(
+    provider: str,
+    provider_user_id: str,
+    new_user_id: str,
+    provider_email: Optional[str] = None,
+    provider_username: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> bool:
+    with get_db_session() as session:
+        result = (
+            session.query(UserOAuthAccount)
+            .filter(
+                UserOAuthAccount.provider == provider,
+                UserOAuthAccount.provider_user_id == provider_user_id,
+                UserOAuthAccount.delete_flag == "N",
+            )
+            .first()
+        )
+        if not result:
+            return False
+
+        result.user_id = new_user_id
+        result.updated_by = new_user_id
+        if provider_email is not None:
+            result.provider_email = provider_email
+        if provider_username is not None:
+            result.provider_username = provider_username
+        if tenant_id is not None:
+            result.tenant_id = tenant_id
+
+        return True
+
+
 def update_oauth_account_tokens(
     provider: str,
     provider_user_id: str,

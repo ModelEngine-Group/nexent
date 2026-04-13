@@ -25,6 +25,7 @@ from database.oauth_account_db import (
     get_oauth_account_by_provider,
     insert_oauth_account,
     list_oauth_accounts_by_user_id,
+    rebind_oauth_account,
     soft_delete_oauth_account,
     update_oauth_account_tokens,
 )
@@ -215,11 +216,22 @@ def create_or_update_oauth_account(
     existing = get_oauth_account_by_provider(provider, provider_user_id)
 
     if existing:
-        update_oauth_account_tokens(
-            provider=provider,
-            provider_user_id=provider_user_id,
-            provider_username=username,
-        )
+        if existing.get("user_id") != user_id:
+            # Previous user was deleted; re-link to the new user
+            rebind_oauth_account(
+                provider=provider,
+                provider_user_id=provider_user_id,
+                new_user_id=user_id,
+                provider_email=email,
+                provider_username=username,
+                tenant_id=tenant_id or DEFAULT_TENANT_ID,
+            )
+        else:
+            update_oauth_account_tokens(
+                provider=provider,
+                provider_user_id=provider_user_id,
+                provider_username=username,
+            )
         updated = get_oauth_account_by_provider(provider, provider_user_id)
         return updated if updated else existing
     else:
