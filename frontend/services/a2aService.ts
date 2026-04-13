@@ -294,29 +294,6 @@ export const a2aClientService = {
     }
   },
 
-  /**
-   * Check agent health
-   */
-  async checkAgentHealth(agentId: number): Promise<{
-    success: boolean;
-    data?: { status: string; agent_id: number; message?: string };
-    message?: string;
-  }> {
-    try {
-      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.agentHealth(agentId));
-      const data = await response.json();
-
-      if (response.ok && data.status === 'success') {
-        return { success: true, data: data.data };
-      }
-
-      return { success: false, message: data.detail || t('a2a.service.healthCheckFailed') };
-    } catch (error) {
-      log.error('Failed to check agent health:', error);
-      return { success: false, message: t('a2a.service.healthCheckFailed') };
-    }
-  },
-
   // ---------------------------------------------------------------------------
   // External Agent Relations
   // ---------------------------------------------------------------------------

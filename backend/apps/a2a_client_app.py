@@ -9,13 +9,12 @@ from typing import List, Optional
 from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from services.a2a_client_service import (
     a2a_client_service,
     AgentDiscoveryError,
-    AgentCallError,
 )
 from services.a2a_server_service import a2a_server_service
 from database import a2a_agent_db
@@ -36,13 +35,6 @@ class DiscoverFromNacosRequest(BaseModel):
     nacos_config_id: str
     agent_names: List[str]
     namespace: Optional[str] = "public"
-
-
-class CallExternalAgentRequest(BaseModel):
-    """Request to call an external A2A agent."""
-    agent_id: int
-    message: dict
-    stream: Optional[bool] = False
 
 
 class UpdateAgentProtocolRequest(BaseModel):
@@ -323,79 +315,6 @@ async def update_agent_protocol(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to update agent protocol"
-        )
-
-
-@router.get("/agents/{external_agent_id}/health")
-async def check_agent_health(
-    external_agent_id: int,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None
-):
-    """Check the health of an external A2A agent."""
-    try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-
-        result = await a2a_client_service.check_agent_health(external_agent_id, tenant_id)
-
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"status": "success", "data": result}
-        )
-
-    except Exception as e:
-        logger.error(f"Health check failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to check agent health"
-        )
-
-
-@router.post("/agents/{external_agent_id}/test")
-async def test_agent(
-    external_agent_id: int,
-    request: CallExternalAgentRequest,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None
-):
-    """Test connection to an external A2A agent."""
-    try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-
-        if request.stream:
-            return StreamingResponse(
-                a2a_client_service.call_agent_streaming(
-                    external_agent_id=external_agent_id,
-                    tenant_id=tenant_id,
-                    message=request.message
-                ),
-                media_type="text/event-stream"
-            )
-        else:
-            result = await a2a_client_service.call_agent(
-                external_agent_id=external_agent_id,
-                tenant_id=tenant_id,
-                message=request.message
-            )
-
-            return JSONResponse(
-                status_code=HTTPStatus.OK,
-                content={"status": "success", "data": result}
-            )
-
-    except AgentCallError as e:
-        logger.error(f"Test call failed: {e}")
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=str(e)
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Test agent failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to test agent"
         )
 
 

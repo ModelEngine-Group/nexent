@@ -158,7 +158,7 @@ class A2AHttpClient:
         if headers:
             request_headers.update(headers)
 
-        logger.info(f"A2A GET request: url={url}")
+        logger.debug(f"A2A GET request: url={url}")
 
         try:
             status, body = await self._request_with_retry(

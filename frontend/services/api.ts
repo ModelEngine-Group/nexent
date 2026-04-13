@@ -243,8 +243,6 @@ export const API_ENDPOINTS = {
     agents: `${API_BASE_URL}/a2a/client/agents`,
     agent: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}`,
     agentRefresh: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}/refresh`,
-    agentHealth: (agentId: number) => `${API_BASE_URL}/a2a/client/agents/${agentId}/health`,
-    agentTest: (agentId: number) => `${API_BASE_URL}/a2a/client/agents/${agentId}/test`,
     agentProtocol: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}/protocol`,
     // External agent relations
     relations: `${API_BASE_URL}/a2a/client/relations`,
