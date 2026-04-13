@@ -3,7 +3,6 @@ Database operations for OAuth account management
 """
 
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from database.client import as_dict, get_db_session
@@ -18,10 +17,6 @@ def insert_oauth_account(
     provider_user_id: str,
     provider_email: Optional[str] = None,
     provider_username: Optional[str] = None,
-    provider_avatar_url: Optional[str] = None,
-    access_token: Optional[str] = None,
-    refresh_token: Optional[str] = None,
-    token_expires_at: Optional[datetime] = None,
     tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     with get_db_session() as session:
@@ -31,10 +26,6 @@ def insert_oauth_account(
             provider_user_id=provider_user_id,
             provider_email=provider_email,
             provider_username=provider_username,
-            provider_avatar_url=provider_avatar_url,
-            access_token=access_token,
-            refresh_token=refresh_token,
-            token_expires_at=token_expires_at,
             tenant_id=tenant_id,
             created_by=user_id,
             updated_by=user_id,
@@ -76,11 +67,7 @@ def list_oauth_accounts_by_user_id(user_id: str) -> List[Dict[str, Any]]:
 def update_oauth_account_tokens(
     provider: str,
     provider_user_id: str,
-    access_token: Optional[str] = None,
-    refresh_token: Optional[str] = None,
-    token_expires_at: Optional[datetime] = None,
     provider_username: Optional[str] = None,
-    provider_avatar_url: Optional[str] = None,
 ) -> bool:
     with get_db_session() as session:
         result = (
@@ -95,16 +82,8 @@ def update_oauth_account_tokens(
         if not result:
             return False
 
-        if access_token is not None:
-            result.access_token = access_token
-        if refresh_token is not None:
-            result.refresh_token = refresh_token
-        if token_expires_at is not None:
-            result.token_expires_at = token_expires_at
         if provider_username is not None:
             result.provider_username = provider_username
-        if provider_avatar_url is not None:
-            result.provider_avatar_url = provider_avatar_url
 
         return True
 

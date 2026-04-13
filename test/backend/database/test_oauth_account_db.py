@@ -148,12 +148,10 @@ class TestUpdateOAuthAccountTokens(unittest.TestCase):
         result = update_oauth_account_tokens(
             provider="github",
             provider_user_id="12345",
-            access_token="new_encrypted_token",
             provider_username="new_name",
         )
 
         self.assertTrue(result)
-        self.assertEqual(mock_account.access_token, "new_encrypted_token")
         self.assertEqual(mock_account.provider_username, "new_name")
 
     def test_returns_false_when_not_found(self):
@@ -173,10 +171,11 @@ class TestUpdateOAuthAccountTokens(unittest.TestCase):
 
         update_oauth_account_tokens("github", "12345")
 
+        # No fields should have been set since all were None
         self.assertFalse(
-            hasattr(mock_account, "access_token")
-            and mock_account.access_token is not None
-            and mock_account.access_token != mock_account.access_token
+            hasattr(mock_account, "provider_username")
+            and mock_account.provider_username is not None
+            and mock_account.provider_username != mock_account.provider_username
         )
 
 

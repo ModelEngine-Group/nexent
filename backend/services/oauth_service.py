@@ -29,7 +29,6 @@ from database.oauth_account_db import (
     update_oauth_account_tokens,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id, insert_user_tenant
-from utils.token_encryption import encrypt_token
 
 logger = logging.getLogger(__name__)
 
@@ -211,26 +210,15 @@ def create_or_update_oauth_account(
     provider_user_id: str,
     email: Optional[str] = None,
     username: Optional[str] = None,
-    avatar_url: Optional[str] = None,
-    access_token: Optional[str] = None,
-    refresh_token: Optional[str] = None,
-    token_expires_at: Optional[datetime] = None,
     tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     existing = get_oauth_account_by_provider(provider, provider_user_id)
-
-    encrypted_access = encrypt_token(access_token) if access_token else None
-    encrypted_refresh = encrypt_token(refresh_token) if refresh_token else None
 
     if existing:
         update_oauth_account_tokens(
             provider=provider,
             provider_user_id=provider_user_id,
-            access_token=encrypted_access,
-            refresh_token=encrypted_refresh,
-            token_expires_at=token_expires_at,
             provider_username=username,
-            provider_avatar_url=avatar_url,
         )
         updated = get_oauth_account_by_provider(provider, provider_user_id)
         return updated if updated else existing
@@ -241,10 +229,6 @@ def create_or_update_oauth_account(
             provider_user_id=provider_user_id,
             provider_email=email,
             provider_username=username,
-            provider_avatar_url=avatar_url,
-            access_token=encrypted_access,
-            refresh_token=encrypted_refresh,
-            token_expires_at=token_expires_at,
             tenant_id=tenant_id or DEFAULT_TENANT_ID,
         )
 
@@ -274,7 +258,6 @@ def list_linked_accounts(user_id: str) -> List[Dict[str, Any]]:
                 "provider": acct["provider"],
                 "provider_username": acct.get("provider_username"),
                 "provider_email": acct.get("provider_email"),
-                "provider_avatar_url": acct.get("provider_avatar_url"),
                 "linked_at": str(acct.get("create_time", "")),
             }
         )

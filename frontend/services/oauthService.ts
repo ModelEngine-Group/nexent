@@ -13,7 +13,6 @@ export interface OAuthAccount {
   provider: string;
   provider_username: string | null;
   provider_email: string | null;
-  provider_avatar_url: string | null;
   linked_at: string | null;
 }
 

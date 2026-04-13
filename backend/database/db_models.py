@@ -807,12 +807,6 @@ class UserOAuthAccount(TableBase):
     )
     provider_email = Column(String(255), doc="Email address from the OAuth provider")
     provider_username = Column(String(200), doc="Display name from the OAuth provider")
-    provider_avatar_url = Column(String(500), doc="Avatar URL from the OAuth provider")
-    access_token = Column(Text, doc="Encrypted OAuth provider access token")
-    refresh_token = Column(Text, doc="Encrypted OAuth provider refresh token")
-    token_expires_at = Column(
-        TIMESTAMP(timezone=False), doc="OAuth token expiration time"
-    )
     tenant_id = Column(String(100), doc="Tenant ID at time of linking")
 
 
@@ -910,11 +904,17 @@ class OuterApiTool(TableBase):
     """
     Outer API tools table - stores converted OpenAPI tools as MCP tools.
     """
+
     __tablename__ = "ag_outer_api_tools"
     __table_args__ = {"schema": SCHEMA}
 
-    id = Column(BigInteger, Sequence("ag_outer_api_tools_id_seq", schema=SCHEMA),
-                primary_key=True, nullable=False, doc="Tool ID, unique primary key")
+    id = Column(
+        BigInteger,
+        Sequence("ag_outer_api_tools_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Tool ID, unique primary key",
+    )
     name = Column(String(100), nullable=False, doc="Tool name (unique identifier)")
     description = Column(Text, doc="Tool description")
     method = Column(String(10), doc="HTTP method: GET/POST/PUT/DELETE")

@@ -118,7 +118,7 @@ async def callback(
         page = 1
         while True:
             users_resp = admin_client.auth.admin.list_users(page=page, per_page=100)
-            users = users_resp.users if hasattr(users_resp, "users") else []
+            users = users_resp if len(users_resp) > 0 else []
             if not users:
                 break
             for u in users:
@@ -155,8 +155,6 @@ async def callback(
             provider_user_id=provider_user_id,
             email=email,
             username=username,
-            avatar_url=avatar_url,
-            access_token=provider_access_token,
         )
 
         expiry_seconds = 3600

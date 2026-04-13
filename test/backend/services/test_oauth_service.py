@@ -162,7 +162,7 @@ class TestCreateOrUpdateOAuthAccount(unittest.TestCase):
             user_id="user-1",
             provider="github",
             provider_user_id="12345",
-            access_token="ghp_token",
+            email="octo@github.com",
         )
 
         oauth_account_db_mock.insert_oauth_account.assert_called_once()
@@ -183,7 +183,7 @@ class TestCreateOrUpdateOAuthAccount(unittest.TestCase):
             user_id="user-1",
             provider="github",
             provider_user_id="12345",
-            access_token="new_token",
+            username="new_name",
         )
 
         oauth_account_db_mock.update_oauth_account_tokens.assert_called_once()
