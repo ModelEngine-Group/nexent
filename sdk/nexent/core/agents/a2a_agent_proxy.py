@@ -395,6 +395,8 @@ class ExternalA2AAgentProxy:
     def extract_text_from_events(self, events) -> str:
         """Extract accumulated text from streaming events.
 
+        A2A 1.0 format: events are keyed by type (artifactUpdate, statusUpdate).
+
         Args:
             events: Async iterator of A2A task events.
 
@@ -405,36 +407,30 @@ class ExternalA2AAgentProxy:
 
         async def process():
             async for event in events:
-                kind = event.get("kind", "")
+                if "artifactUpdate" in event:
+                    artifact_data = event["artifactUpdate"]
+                    artifact = artifact_data.get("artifact", {})
+                    parts = artifact.get("parts", [])
+                    for part in parts:
+                        if part.get("type") == "text":
+                            text = part.get("text", "")
+                            if text:
+                                accumulated.append(text)
+                                yield text
 
-                if kind == "taskProgress":
-                    # Extract from parts if present
-                    content = event.get("content", "")
-                    if isinstance(content, dict):
-                        parts = content.get("parts", [])
-                        for part in parts:
-                            if "text" in part:
-                                text = part["text"]
-                                if text:
-                                    accumulated.append(text)
-                                    yield text
-                    elif content:
-                        accumulated.append(content)
-                        yield content
-
-                elif kind == "taskStatusUpdate":
-                    status = event.get("status", {})
+                elif "statusUpdate" in event:
+                    status_data = event["statusUpdate"]
+                    status = status_data.get("status", {})
                     state = status.get("state", "")
 
-                    if state == "completed":
-                        # Try to get final message
+                    if state == "TASK_STATE_COMPLETED":
                         if "message" in status:
                             message = status["message"]
                             if isinstance(message, dict):
                                 parts = message.get("parts", [])
                                 for part in parts:
-                                    if "text" in part:
-                                        text = part["text"]
+                                    if part.get("type") == "text":
+                                        text = part.get("text", "")
                                         if text and text not in accumulated:
                                             yield text
                             else:
@@ -443,7 +439,7 @@ class ExternalA2AAgentProxy:
                                     yield text
                         break
 
-                    elif state in ("failed", "canceled"):
+                    elif state in ("TASK_STATE_FAILED", "TASK_STATE_CANCELED"):
                         message = status.get("message", "")
                         if message:
                             error_text = f"[Error: {message}]"
