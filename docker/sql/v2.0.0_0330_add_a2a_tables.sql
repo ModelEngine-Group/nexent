@@ -394,7 +394,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_artifact_t (
     name VARCHAR(255),                               -- Human-readable name
     description TEXT,                               -- Description
     parts JSONB NOT NULL,                           -- Part array (following A2A spec)
-    metadata JSONB,                                  -- Metadata
+    meta_data JSONB,                                -- Metadata
     extensions JSONB,                                -- Extension URI list
 
     -- Timestamp
@@ -415,6 +415,6 @@ COMMENT ON COLUMN nexent.ag_a2a_artifact_t.task_id IS 'Task ID this artifact bel
 COMMENT ON COLUMN nexent.ag_a2a_artifact_t.name IS 'Human-readable artifact name';
 COMMENT ON COLUMN nexent.ag_a2a_artifact_t.description IS 'Artifact description';
 COMMENT ON COLUMN nexent.ag_a2a_artifact_t.parts IS 'Artifact parts following A2A Part structure: [{"type": "text", "text": "..."}]';
-COMMENT ON COLUMN nexent.ag_a2a_artifact_t.metadata IS 'Artifact metadata';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.meta_data IS 'Artifact metadata';
 COMMENT ON COLUMN nexent.ag_a2a_artifact_t.extensions IS 'Extension URI list';
 COMMENT ON COLUMN nexent.ag_a2a_artifact_t.create_time IS 'Artifact creation timestamp';
