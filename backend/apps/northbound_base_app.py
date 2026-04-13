@@ -157,26 +157,26 @@ async def jsonrpc_handler(
     except EndpointNotFoundError as e:
         return JSONResponse({
             "jsonrpc": "2.0",
-            "error": {"code": -32601, "message": str(e)},
+            "error": {"code": -32601, "message": "Endpoint not found"},
             "id": payload.id
         })
     except TaskNotFoundError as e:
         return JSONResponse({
             "jsonrpc": "2.0",
-            "error": {"code": -32001, "message": str(e)},
+            "error": {"code": -32001, "message": "Task not found"},
             "id": payload.id
         })
     except UnsupportedOperationError as e:
         return JSONResponse({
             "jsonrpc": "2.0",
-            "error": {"code": -32004, "message": str(e)},
+            "error": {"code": -32004, "message": "Unsupported operation"},
             "id": payload.id
         })
     except Exception as e:
         logger.error(f"JSON-RPC handler error for endpoint {endpoint_id}: {e}", exc_info=True)
         return JSONResponse({
             "jsonrpc": "2.0",
-            "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
+            "error": {"code": -32603, "message": "Internal error"},
             "id": payload.id
         })
 
