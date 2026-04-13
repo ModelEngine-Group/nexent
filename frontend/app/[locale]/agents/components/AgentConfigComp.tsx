@@ -13,9 +13,11 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useAgentSkillInstances } from "@/hooks/agent/useAgentSkillInstances";
+import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import McpConfigModal from "./agentConfig/McpConfigModal";
+import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
 
-import { RefreshCw, Lightbulb, Plug, BlocksIcon } from "lucide-react";
+import { RefreshCw, Lightbulb, Plug, BlocksIcon, Globe } from "lucide-react";
 
 interface AgentConfigCompProps {}
 
@@ -31,12 +33,15 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
+  const [showA2ADiscovery, setShowA2ADiscovery] = useState(false);
+  const [isRefreshingA2A, setIsRefreshingA2A] = useState(false);
 
   const { groupedTools, invalidate } = useToolList();
   const { groupedSkills, invalidate: invalidateSkills } = useSkillList();
   const { skillInstances, invalidate: invalidateSkillInstances } = useAgentSkillInstances(
     currentAgentId ?? null
   );
+  const { invalidate: invalidateExternalAgents } = useExternalAgents();
   const setInitialSkills = useAgentConfigStore((state) => state.setInitialSkills);
 
   // Load skill instances when agent changes
@@ -101,7 +106,32 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
         <Divider style={{ margin: "10px 0" }} />
 
         <Row gutter={[12, 12]} className="mb-2">
-          <CollaborativeAgent />
+          <Col xs={12}>
+            <Flex justify="flex-start" align="center">
+              <h4 className="text-md font-medium text-gray-700">{t("collaborativeAgent.title")}</h4>
+            </Flex>
+          </Col>
+          <Col xs={12}>
+            <Flex justify="flex-end" align="center">
+              <Button
+                type="text"
+                size="small"
+                icon={<Globe size={16} />}
+                onClick={() => setShowA2ADiscovery(true)}
+                loading={isRefreshingA2A}
+                className="text-green-500 hover:!text-green-600 hover:!bg-green-50"
+                title={t("toolManagement.refresh.title")}
+              >
+                {t("collaborativeAgent.addExternal")}
+              </Button>
+            </Flex>
+          </Col>
+        </Row>
+
+        <Row className="mb-4">
+          <Col xs={24} className="h-full">
+            <CollaborativeAgent />
+          </Col>
         </Row>
 
         <Row gutter={[12, 12]}>
@@ -218,6 +248,13 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
         isOpen={isSkillModalOpen}
         onCancel={() => setIsSkillModalOpen(false)}
         onSuccess={handleSkillBuildSuccess}
+      />
+
+      {/* A2A Discovery Modal */}
+      <A2AAgentDiscoveryModal
+        open={showA2ADiscovery}
+        onClose={() => setShowA2ADiscovery(false)}
+        onDiscoverSuccess={invalidateExternalAgents}
       />
     </>
   );

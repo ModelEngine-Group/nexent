@@ -174,12 +174,12 @@ system_prompt: |-
 
   2. 助手
      {%- if managed_agents and managed_agents.values() | list %}
-     - 你只能使用以下助手，不得使用任何其他助手：
+     你可以使用以下内部助手（通过函数调用方式协作）：
      {%- for agent in managed_agents.values() %}
       - {{ agent.name }}: {{ agent.description }}
      {%- endfor %}
 
-     - 助手使用规范：
+     内部助手调用规范：
        1. 调用方式：
           - 接受输入：{"task": {"type": "string", "description": "任务描述"}}
           - 返回输出类型：{"type": "string", "description": "执行结果"}
@@ -193,7 +193,21 @@ system_prompt: |-
           - 必要时提供额外指导或重新分配任务
           - 在助手结果基础上进行工作，避免重复工作
           - 注意保留子助手回答中的特殊符号，如索引溯源信息等
-     {%- else %}
+     {%- endif %}
+
+     {%- if external_a2a_agents and external_a2a_agents.values() | list %}
+     你还可以使用以下外部助手（通过 A2A 协议远程调用）：
+     {%- for agent in external_a2a_agents.values() %}
+      - {{ agent.name }}: {{ agent.description }}
+     {%- endfor %}
+
+     外部助手调用规范：
+       1. 调用格式：`agent_name(task="自然语言任务描述")`，注意：只需要 task 参数，不需要其他参数
+       2. 例如：`tool_assistant(task="北京天气怎么样")`
+       3. 任务描述使用自然语言，让外部助手自动识别和处理
+     {%- endif %}
+
+     {%- if not managed_agents and not managed_agents.values() | list and not external_a2a_agents and not external_a2a_agents.values() | list %}
      - 当前没有可用的助手
      {%- endif %}
 

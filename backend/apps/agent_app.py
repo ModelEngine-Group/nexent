@@ -305,6 +305,7 @@ async def publish_version_api(
             user_id=user_id,
             version_name=request.version_name,
             release_note=request.release_note,
+            publish_as_a2a=request.publish_as_a2a,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:

@@ -223,11 +223,36 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                managed_agents_list = [self.create_single_agent(sub_agent_config) for sub_agent_config in agent_config.managed_agents]
+                # Create internal managed agents recursively
+                managed_agents_list = [
+                    self.create_single_agent(sub_agent_config) 
+                    for sub_agent_config in agent_config.managed_agents
+                ]
             except Exception as e:
                 raise ValueError(f"Error in creating managed agent: {e}")
 
-            # create the agent
+            # Create wrapper agents for external A2A agents - add them to managed_agents
+            # so model can call them like: external_agent_name(task="...")
+            if agent_config.external_a2a_agents:
+                try:
+                    from .a2a_agent_proxy import ExternalA2AAgentWrapper
+                    for ext_agent_config in agent_config.external_a2a_agents:
+                        a2a_agent_info = ext_agent_config.to_a2a_agent_info()
+                        wrapper = ExternalA2AAgentWrapper(
+                            agent_info=a2a_agent_info,
+                            stop_event=self.stop_event,
+                            observer=self.observer
+                        )
+                        managed_agents_list.append(wrapper)
+                except Exception as e:
+                    raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
+
+            # Debug logging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"[create_single_agent] agent={agent_config.name}, managed_agents_list={[(m.name if hasattr(m, 'name') else str(m)) for m in managed_agents_list]}")
+
+            # Create the agent
             agent = CoreAgent(
                 observer=self.observer,
                 tools=tool_list,

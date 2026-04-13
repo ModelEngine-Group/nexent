@@ -756,6 +756,7 @@ class VersionPublishRequest(BaseModel):
     """Request model for publishing a new version"""
     version_name: Optional[str] = Field(None, description="User-defined version name for display")
     release_note: Optional[str] = Field(None, description="Release notes / publish remarks")
+    publish_as_a2a: bool = Field(False, description="Whether to publish this agent as an A2A Server agent")
 
 
 class VersionListItemResponse(BaseModel):

@@ -3,14 +3,16 @@
 import React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Col, Flex, Tooltip, Divider, Table, theme, App } from "antd";
+import { Button, Col, Flex, Tooltip, Divider, Table, theme, App, Modal } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { Copy, FileOutput, Network, Trash2 } from "lucide-react";
+import { Copy, FileOutput, Network, Trash2, Globe } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Agent } from "@/types/agentConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
+import A2AServerSettingsPanel from "../a2a/A2AServerSettingsPanel";
+import { a2aClientService } from "@/services/a2aService";
 import {
   searchAgentInfo,
   updateAgentInfo,
@@ -42,6 +44,29 @@ export default function AgentList({
   const [selectedAgentForRelationship, setSelectedAgentForRelationship] =
     useState<Agent | null>(null);
 
+  // A2A settings modal state
+  const [showA2ASettings, setShowA2ASettings] = useState(false);
+  const [selectedAgentForA2A, setSelectedAgentForA2A] = useState<Agent | null>(null);
+  const [a2aAgentInfo, setA2aAgentInfo] = useState<{
+    endpoint_id: string;
+    agent_id: number;
+  } | null>(null);
+  const [a2aAgentCard, setA2aAgentCard] = useState<{
+    endpoint_id: string;
+    name: string;
+    description?: string;
+    version?: string;
+    streaming?: boolean;
+    agent_card_url: string | null;
+    rest_endpoints: {
+      message_send: string;
+      message_stream: string;
+      tasks_get: string;
+    };
+    jsonrpc_url: string;
+    jsonrpc_methods: string[];
+  } | null>(null);
+
   // Get state from store
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const setCurrentAgent = useAgentConfigStore((state) => state.setCurrentAgent);
@@ -68,6 +93,58 @@ export default function AgentList({
   const handleCloseCallRelationshipModal = () => {
     setCallRelationshipModalVisible(false);
     setSelectedAgentForRelationship(null);
+  };
+
+  // Handle view A2A agent settings
+  const handleViewA2AAgentSettings = async (agent: Agent) => {
+    setSelectedAgentForA2A(agent);
+    setA2aAgentInfo(null);
+    setA2aAgentCard(null);
+    try {
+      const result = await a2aClientService.getServerSettings(Number(agent.id));
+      if (result.success && result.data) {
+        setA2aAgentInfo({
+          endpoint_id: result.data.endpoint_id,
+          agent_id: result.data.agent_id,
+        });
+
+        // Build agent card from supported_interfaces
+        const supportedInterfaces = result.data.supported_interfaces || [];
+        const restInterface = supportedInterfaces.find(
+          (iface: any) => iface.protocolBinding === "HTTP+JSON"
+        );
+        const jsonrpcInterface = supportedInterfaces.find(
+          (iface: any) => iface.protocolBinding === "JSONRPC"
+        );
+
+        const basePath = `/nb/a2a/${result.data.endpoint_id}`;
+        setA2aAgentCard({
+          endpoint_id: result.data.endpoint_id,
+          name: result.data.name || "",
+          description: result.data.description,
+          version: result.data.version,
+          streaming: result.data.streaming,
+          agent_card_url: `${basePath}/.well-known/agent-card.json`,
+          rest_endpoints: {
+            message_send: `${basePath}/message:send`,
+            message_stream: `${basePath}/message:stream`,
+            tasks_get: `${basePath}/tasks/{task_id}`,
+          },
+          jsonrpc_url: restInterface?.url || `${basePath}/v1`,
+          jsonrpc_methods: ["SendMessage", "SendStreamingMessage", "GetTask"],
+        });
+      }
+    } catch (error) {
+      log.error("Failed to fetch A2A server settings:", error);
+    }
+    setShowA2ASettings(true);
+  };
+
+  const handleCloseA2ASettingsModal = () => {
+    setShowA2ASettings(false);
+    setSelectedAgentForA2A(null);
+    setA2aAgentInfo(null);
+    setA2aAgentCard(null);
   };
 
   // Handle select agent
@@ -439,9 +516,31 @@ export default function AgentList({
                       display: "flex",
                       alignItems: "center",
                       gap: 8,
-                      justifyContent: "flex-center",
+                      justifyContent: "flex-end",
                     }}
-                  >
+                  > 
+                    {agent.is_a2a_server && (
+                      <Tooltip title={t("a2a.agent.viewA2ASettings")}>
+                        <span>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={
+                              <Globe
+                                className="w-4 h-4"
+                                style={{ color: token.colorPrimary }}
+                              />
+                            }
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleViewA2AAgentSettings(agent);
+                            }}
+                            className="agent-action-button agent-action-button-blue"
+                          />
+                        </span>
+                      </Tooltip>
+                    )}
                     <Tooltip title={t("agent.contextMenu.copy")}>
                       <span>
                         <Button
@@ -540,6 +639,8 @@ export default function AgentList({
                         />
                       </span>
                     </Tooltip>
+
+
                   </div>
                 ),
               },
@@ -560,6 +661,26 @@ export default function AgentList({
           }
         />
       )}
+
+      {/* A2A Server Settings Modal */}
+      <Modal
+        centered
+        width={640}
+        title={t("a2a.server.previewTitle")}
+        open={showA2ASettings}
+        onCancel={handleCloseA2ASettingsModal}
+        footer={null}
+        destroyOnHidden
+      >
+        {showA2ASettings && a2aAgentInfo && (
+          <A2AServerSettingsPanel
+            agentId={a2aAgentInfo.agent_id}
+            agentName={selectedAgentForA2A?.display_name || selectedAgentForA2A?.name || ""}
+            endpointId={a2aAgentInfo.endpoint_id}
+            a2aAgentCard={a2aAgentCard ?? undefined}
+          />
+        )}
+      </Modal>
     </Col>
   );
 }
