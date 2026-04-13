@@ -23,6 +23,7 @@ from apps.tenant_app import router as tenant_router
 from apps.group_app import router as group_router
 from apps.user_app import router as user_router
 from apps.invitation_app import router as invitation_router
+from apps.monitoring_app import router as monitoring_router
 from consts.const import IS_SPEED_MODE
 
 # Create logger instance
@@ -60,3 +61,4 @@ app.include_router(tenant_router)
 app.include_router(group_router)
 app.include_router(user_router)
 app.include_router(invitation_router)
+app.include_router(monitoring_router)
