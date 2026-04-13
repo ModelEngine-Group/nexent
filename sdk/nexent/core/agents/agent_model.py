@@ -46,7 +46,7 @@ class AgentConfig(BaseModel):
         description="Internal managed sub-agents created locally",
         default=[]
     )
-    external_a2a_agents: List[ExternalA2AAgentConfig] = Field(
+    external_a2a_agents: List["ExternalA2AAgentConfig"] = Field(
         description="External A2A agents called via HTTP requests",
         default=[]
     )
