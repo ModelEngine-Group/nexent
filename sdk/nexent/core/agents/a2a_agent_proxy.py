@@ -212,15 +212,9 @@ class ExternalA2AAgentProxy:
 
         headers = self._build_headers()
 
-        logger.info(f"[A2A-SDK] === Calling external A2A agent (sync) === name={self.agent_info.name}, protocol={protocol_type}, url={endpoint_url}")
-        logger.info(f"[A2A-SDK] Headers: {headers}")
-        logger.info(f"[A2A-SDK] Request body: {request_body}")
-
         try:
             parsed_url = urlparse(endpoint_url)
             logger.info(f"[A2A-SDK] Connecting to host={parsed_url.hostname}, port={parsed_url.port or 80}")
-            logger.info(f"[A2A-SDK] Client HTTP/2: {self._client._transport._pool._http2}")
-            logger.info(f"[A2A-SDK] Client timeout: {self._client.timeout}")
 
             response = await self._client.post(
                 endpoint_url,
