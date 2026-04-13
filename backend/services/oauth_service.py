@@ -118,6 +118,13 @@ def exchange_code_for_provider_token(provider: str, code: str) -> Dict[str, Any]
 
     client_id = os.getenv(definition.client_id_env, "")
     client_secret = os.getenv(definition.client_secret_env, "")
+    callback_url = (
+        f"{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider={provider}"
+    )
+    redirect_uri = (
+        quote(callback_url, safe="") if definition.encode_redirect_uri else callback_url
+    )
+
     param_map = definition.token_params_map
 
     result: Dict[str, Any] = {"access_token": ""}
@@ -128,6 +135,8 @@ def exchange_code_for_provider_token(provider: str, code: str) -> Dict[str, Any]
         body[param_map.get("client_secret", "client_secret")] = client_secret
         body[param_map.get("code", "code")] = code
         body.setdefault(param_map.get("grant_type", "grant_type"), "authorization_code")
+        if param_map.get("redirect_uri", "") == "redirect_uri":
+            body["redirect_uri"] = redirect_uri
 
         resp = _http_post_json(definition.token_url, data=body)
     else:
@@ -136,6 +145,8 @@ def exchange_code_for_provider_token(provider: str, code: str) -> Dict[str, Any]
         params[param_map.get("client_secret", "client_secret")] = client_secret
         params[param_map.get("code", "code")] = code
         params[param_map.get("grant_type", "grant_type")] = "authorization_code"
+        if param_map.get("redirect_uri", "") == "redirect_uri":
+            params["redirect_uri"] = redirect_uri
 
         resp = _http_get_json(f"{definition.token_url}?{urlencode(params)}")
 
@@ -202,6 +213,7 @@ def get_provider_user_info(
                 result["email"] = primary.get("email", "")
         except Exception:
             logger.warning(f"Failed to fetch {provider} user emails")
+            result["email"] = f"{result['id']}@nexent.com"
 
     return result
 

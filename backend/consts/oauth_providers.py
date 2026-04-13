@@ -25,6 +25,33 @@ GITHUB_PROVIDER = OAuthProviderDefinition(
     client_secret_env="GITHUB_OAUTH_CLIENT_SECRET",
 )
 
+GDE_PROVIDER = OAuthProviderDefinition(
+    name="gde",
+    display_name="gde",
+    icon="gde",
+    authorize_url=f"https://{os.getenv('GDE_URL')}/dspcas/oauth2.0/authorize",
+    authorize_param_map={
+        "client_id": "appid",
+        "redirect_uri": "redirect_uri"
+    },
+    token_url=f"https://{os.getenv('GDE_URL')}/dspcas/v2/oauth2.0/accessToken",
+    token_params_map={
+        "client_id": "appid",
+        "client_secret": "secret",
+        "code": "code",
+        "grant_type": "grant_type",
+        "redirect_uri": "redirect_uri",
+    },
+    token_error_key="errorCode",
+    token_error_message_key="errorMessage",
+    userinfo_url=f"https://{os.getenv('GDE_URL')}/dspcas/v2/oauth2.0/profile",
+    userinfo_field_map={
+        "id": "id",
+    },
+    client_id_env="GDE_OAUTH_CLIENT_ID",
+    client_secret_env="GDE_OAUTH_CLIENT_SECRET",
+)
+
 WECHAT_PROVIDER = OAuthProviderDefinition(
     name="wechat",
     display_name="WeChat",
@@ -67,6 +94,7 @@ WECHAT_PROVIDER = OAuthProviderDefinition(
 OAUTH_PROVIDER_REGISTRY: Dict[str, OAuthProviderDefinition] = {
     "github": GITHUB_PROVIDER,
     "wechat": WECHAT_PROVIDER,
+    "gde": GDE_PROVIDER
 }
 
 
