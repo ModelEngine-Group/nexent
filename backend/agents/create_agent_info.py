@@ -1,6 +1,6 @@
 import threading
 import logging
-from typing import List
+from typing import List, Optional
 from urllib.parse import urljoin
 from datetime import datetime
 
@@ -66,6 +66,48 @@ def _get_skills_for_template(
         return []
 
 
+def _extract_url_from_card(raw_card: Optional[dict]) -> str:
+    """Extract http-json-rpc URL from Agent Card supportedInterfaces."""
+    if not raw_card:
+        return ""
+
+    supported_interfaces = raw_card.get("supportedInterfaces", [])
+    if not supported_interfaces:
+        return raw_card.get("url", "")
+
+    # Prefer http-json-rpc protocol
+    for iface in supported_interfaces:
+        protocol_binding = iface.get("protocolBinding", "").lower()
+        if protocol_binding in ("http-json-rpc", "jsonrpc", "httpjsonrpc"):
+            url = iface.get("url", "")
+            if url:
+                return url
+
+    # Fallback to first interface with a URL
+    for iface in supported_interfaces:
+        url = iface.get("url", "")
+        if url:
+            return url
+
+    return raw_card.get("url", "")
+
+
+def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgentConfig:
+    """Build an ExternalA2AAgentConfig from agent data."""
+    return ExternalA2AAgentConfig(
+        agent_id=str(agent.get("external_agent_id", "")),
+        name=agent.get("name", "Unknown"),
+        description=agent.get("description", "External A2A agent"),
+        url=agent_url,
+        api_key=None,
+        transport_type=agent.get("transport_type", "http-streaming"),
+        protocol_version=agent.get("protocol_version", "1.0"),
+        protocol_type=agent.get("protocol_type", "JSONRPC"),
+        timeout=300.0,
+        raw_card=agent.get("raw_card"),
+    )
+
+
 def _get_external_a2a_agents(
     agent_id: int,
     tenant_id: str,
@@ -84,65 +126,26 @@ def _get_external_a2a_agents(
     logger.info(f"[_get_external_a2a_agents] START - agent_id={agent_id}, tenant_id={tenant_id}")
     try:
         from database import a2a_agent_db
+
         external_agents = a2a_agent_db.query_external_sub_agents(
             local_agent_id=agent_id,
             tenant_id=tenant_id,
-            version_no=version_no
+            version_no=version_no,
         )
-        
         logger.info(f"[_get_external_a2a_agents] DB query returned {len(external_agents)} agents")
         logger.debug(f"[_get_external_a2a_agents] agent details: {external_agents}")
 
-        def extract_url_from_card(raw_card: dict) -> str:
-            """Extract http-json-rpc URL from Agent Card supportedInterfaces."""
-            if not raw_card:
-                return ""
-            supported_interfaces = raw_card.get("supportedInterfaces", [])
-            if supported_interfaces:
-                # Prefer http-json-rpc protocol
-                for iface in supported_interfaces:
-                    protocol_binding = iface.get("protocolBinding", "").lower()
-                    if protocol_binding in ("http-json-rpc", "jsonrpc", "httpjsonrpc"):
-                        url = iface.get("url", "")
-                        if url:
-                            return url
-                # Fallback to first interface with a URL
-                for iface in supported_interfaces:
-                    url = iface.get("url", "")
-                    if url:
-                        return url
-            # Fallback to url field
-            return raw_card.get("url", "")
-
         result = []
         for agent in external_agents:
-            agent_url = agent.get("agent_url", "")
-            # If agent_url is empty, try to extract from raw_card
+            agent_url = agent.get("agent_url", "") or _extract_url_from_card(agent.get("raw_card"))
             if not agent_url:
-                raw_card = agent.get("raw_card")
-                agent_url = extract_url_from_card(raw_card)
-                logger.info(f"[_get_external_a2a_agents] agent '{agent.get('name')}' had empty agent_url, extracted: {agent_url}")
-
-            # Skip if still no URL
-            if not agent_url:
-                logger.warning(f"[_get_external_a2a_agents] Skipping agent '{agent.get('name')}' - no URL available")
+                logger.warning(
+                    f"[_get_external_a2a_agents] Skipping agent '{agent.get('name')}' - no URL available"
+                )
                 continue
 
-            result.append(
-                ExternalA2AAgentConfig(
-                    agent_id=str(agent.get("external_agent_id", "")),
-                    name=agent.get("name", "Unknown"),
-                    description=agent.get("description", "External A2A agent"),
-                    url=agent_url,
-                    api_key=None,
-                    transport_type=agent.get("transport_type", "http-streaming"),
-                    protocol_version=agent.get("protocol_version", "1.0"),
-                    protocol_type=agent.get("protocol_type", "JSONRPC"),
-                    timeout=300.0,
-                    raw_card=agent.get("raw_card")
-                )
-            )
-        
+            result.append(_build_external_agent_config(agent, agent_url))
+
         logger.info(f"[_get_external_a2a_agents] returning {len(result)} ExternalA2AAgentConfig")
         for i, config in enumerate(result):
             logger.info(f"  [{i}] name={config.name}, description={config.description}")
