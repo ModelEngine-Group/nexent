@@ -130,7 +130,7 @@ export default function AgentList({
             message_stream: `${basePath}/message:stream`,
             tasks_get: `${basePath}/tasks/{task_id}`,
           },
-          jsonrpc_url: restInterface?.url || `${basePath}/v1`,
+          jsonrpc_url: jsonrpcInterface?.url || `${basePath}/v1`,
           jsonrpc_methods: ["SendMessage", "SendStreamingMessage", "GetTask"],
         });
       }
