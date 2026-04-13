@@ -804,7 +804,7 @@ class A2AMessage(SimpleTableBase):
 
     # Core identifiers (following A2A spec)
     message_id = Column(String(64), primary_key=True, doc="Message ID (A2A spec: messageId)")
-    task_id = Column(String(64), ForeignKey(f"{SCHEMA}.ag_a2a_task_t.id", ondelete="CASCADE"), nullable=False, doc="Task ID this message belongs to")
+    task_id = Column(String(64), ForeignKey(f"{SCHEMA}.ag_a2a_task_t.id", ondelete="CASCADE"), nullable=True, doc="Task ID this message belongs to (nullable for standalone/simple requests)")
 
     # Message attributes
     message_index = Column(Integer, nullable=False, doc="Order of message in the conversation")
