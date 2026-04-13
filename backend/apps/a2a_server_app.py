@@ -6,6 +6,8 @@ They are NOT registered to any FastAPI app - only used by internal code.
 """
 import logging
 from typing import Any, Dict, Optional
+from typing_extensions import Annotated
+
 from http import HTTPStatus
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -30,8 +32,8 @@ class A2AServerSettings(BaseModel):
 async def enable_a2a_server(
     agent_id: int,
     settings: A2AServerSettings,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Annotated[Request, Request] = None
 ):
     """Enable A2A Server for an agent.
 
@@ -68,8 +70,8 @@ async def enable_a2a_server(
 @router.post("/management/agents/{agent_id}/disable")
 async def disable_a2a_server(
     agent_id: int,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Annotated[Request, Request] = None
 ):
     """Disable A2A Server for an agent.
 
@@ -105,8 +107,8 @@ async def disable_a2a_server(
 @router.get("/management/agents/{agent_id}/settings")
 async def get_a2a_settings(
     agent_id: int,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Annotated[Request, Request] = None
 ):
     """Get A2A Server settings for an agent.
 
@@ -142,8 +144,8 @@ async def get_a2a_settings(
 async def update_a2a_settings(
     agent_id: int,
     settings: A2AServerSettings,
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Annotated[Request, Request] = None
 ):
     """Update A2A Server settings for an agent.
 
@@ -180,8 +182,8 @@ async def update_a2a_settings(
 
 @router.get("/management/agents")
 async def list_a2a_agents(
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Annotated[Request, Request] = None
 ):
     """List all A2A Server agents for the current tenant.
 
