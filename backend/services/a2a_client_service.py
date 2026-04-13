@@ -707,16 +707,16 @@ class A2AClientService:
 
         except aiohttp.ClientError as e:
             a2a_agent_db.update_agent_availability(
-                agent_id=agent_id,
+                external_agent_id=external_agent_id,
                 tenant_id=tenant_id,
                 is_available=False,
                 check_result="ERROR"
             )
-            return {"status": "error", "agent_id": agent_id, "message": str(e)}
+            return {"status": "error", "agent_id": external_agent_id, "message": str(e)}
 
         except Exception as e:
-            logger.error(f"Health check failed for agent {agent_id}: {e}")
-            return {"status": "error", "agent_id": agent_id, "message": str(e)}
+            logger.error(f"Health check failed for agent {external_agent_id}: {e}")
+            return {"status": "error", "agent_id": external_agent_id, "message": str(e)}
 
 
 # Singleton instance
