@@ -325,11 +325,12 @@ class ExternalA2AAgentProxy:
                                 event = json.loads(data_str)
                                 yield event
 
-                                # Check for terminal state
-                                if event.get("kind") == "taskStatusUpdate":
-                                    status = event.get("status", {})
+                                # Check for terminal state using A2A 1.0 envelope format
+                                # Event shape: {"statusUpdate": {"taskId": "...", "status": {"state": "TASK_STATE_COMPLETED"}}}
+                                if "statusUpdate" in event:
+                                    status = event["statusUpdate"].get("status", {})
                                     state = status.get("state", "")
-                                    if state in ("completed", "failed", "canceled"):
+                                    if "COMPLETED" in state or "FAILED" in state or "CANCELED" in state:
                                         break
 
                             except json.JSONDecodeError:
