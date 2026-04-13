@@ -90,7 +90,8 @@ def _get_external_a2a_agents(
             version_no=version_no
         )
         
-        logger.info(f"[_get_external_a2a_agents] DB query returned {len(external_agents)} agents: {external_agents}")
+        logger.info(f"[_get_external_a2a_agents] DB query returned {len(external_agents)} agents")
+        logger.debug(f"[_get_external_a2a_agents] agent details: {external_agents}")
 
         def extract_url_from_card(raw_card: dict) -> str:
             """Extract http-json-rpc URL from Agent Card supportedInterfaces."""
