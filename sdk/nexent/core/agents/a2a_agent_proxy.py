@@ -216,15 +216,16 @@ class ExternalA2AAgentProxy:
             parsed_url = urlparse(endpoint_url)
             logger.info(f"[A2A-SDK] Connecting to host={parsed_url.hostname}, port={parsed_url.port or 80}")
 
-            response = await self._client.post(
+            async with self._client.post(
                 endpoint_url,
                 json=request_body,
                 headers=headers,
-            )
-            logger.info(f"[A2A-SDK] Response status: {response.status_code}")
-            logger.info(f"[A2A-SDK] Response headers: {dict(response.headers)}")
-            response.raise_for_status()
-            return response.json()
+                timeout=self.agent_info.timeout
+            ) as response:
+                logger.info(f"[A2A-SDK] Response status: {response.status_code}")
+                logger.info(f"[A2A-SDK] Response headers: {dict(response.headers)}")
+                response.raise_for_status()
+                return await response.json()
 
         except httpx.TimeoutException as e:
             logger.error(f"A2A request timeout for {self.agent_info.name}: {e}")
