@@ -42,7 +42,7 @@ const { Text, Title } = Typography;
 const PROTOCOL_TYPES = [
   { value: "JSONRPC", label: "JSONRPC" },
   { value: "HTTP+JSON", label: "HTTP+JSON" },
-  { value: "GRPC", label: "GRPC" },
+  { value: "GRPC", label: "GRPC", disabled: true },
 ];
 
 // Protocol binding to protocol type mapping
@@ -130,7 +130,7 @@ function AgentProtocolSetting({ agent, onProtocolChange }: AgentProtocolSettingP
                 <Radio
                   key={protocol.value}
                   value={protocol.value}
-                  disabled={!isAvailable}
+                  disabled={!isAvailable || protocol.disabled}
                   style={{ opacity: isAvailable ? 1 : 0.5 }}
                 >
                   <Space>
