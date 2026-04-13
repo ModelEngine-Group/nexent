@@ -319,6 +319,16 @@ export const API_ENDPOINTS = {
     check: (invitationCode: string) =>
       `${API_BASE_URL}/invitations/${invitationCode}/check`,
   },
+  monitoring: {
+    models: `${API_BASE_URL}/monitoring/models`,
+    trend: `${API_BASE_URL}/monitoring/trend`,
+    modelSummary: (modelId: string) => `${API_BASE_URL}/monitoring/models/${modelId}/summary`,
+    modelTrend: (modelId: string) => `${API_BASE_URL}/monitoring/models/${modelId}/trend`,
+    modelFailures: (modelId: string) => `${API_BASE_URL}/monitoring/models/${modelId}/failures`,
+    alerts: `${API_BASE_URL}/monitoring/alerts`,
+    acknowledgeAlert: (alertId: string) => `${API_BASE_URL}/monitoring/alerts/${alertId}/acknowledge`,
+    resolveAlert: (alertId: string) => `${API_BASE_URL}/monitoring/alerts/${alertId}/resolve`,
+  },
 };
 
 // Common error handling
