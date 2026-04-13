@@ -5,7 +5,7 @@ These endpoints allow users to discover and manage external A2A agents.
 Used internally for configuring A2A sub-agents.
 """
 import logging
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -51,7 +51,7 @@ class UpdateAgentProtocolRequest(BaseModel):
 @router.post("/discover/url")
 async def discover_from_url(
     request: DiscoverFromUrlRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Discover an external A2A agent from URL.
@@ -59,7 +59,7 @@ async def discover_from_url(
     Fetches the Agent Card from the URL and caches it.
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = await a2a_client_service.discover_from_url(
             url=request.url,
@@ -89,7 +89,7 @@ async def discover_from_url(
 @router.post("/discover/nacos")
 async def discover_from_nacos(
     request: DiscoverFromNacosRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Discover external A2A agents from Nacos service registry.
@@ -97,7 +97,7 @@ async def discover_from_nacos(
     Uses the specified Nacos config to discover agents by name.
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         results = await a2a_client_service.discover_from_nacos(
             nacos_config_id=request.nacos_config_id,
@@ -132,14 +132,14 @@ async def discover_from_nacos(
 
 @router.get("/agents")
 async def list_external_agents(
-    source_type: Optional[str] = Query(None, description="Filter by source type: url or nacos"),
-    is_available: Optional[bool] = Query(None, description="Filter by availability"),
-    authorization: Optional[str] = Header(None),
+    source_type: Annotated[Optional[str], Query(description="Filter by source type: url or nacos")] = None,
+    is_available: Annotated[Optional[bool], Query(description="Filter by availability")] = None,
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """List all discovered external A2A agents for the current tenant."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         agents = a2a_client_service.list_external_agents(
             tenant_id=tenant_id,
@@ -163,12 +163,12 @@ async def list_external_agents(
 @router.get("/agents/{external_agent_id}")
 async def get_external_agent(
     external_agent_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Get details of a specific external A2A agent."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         agent = a2a_client_service.get_external_agent(external_agent_id, tenant_id)
 
@@ -196,12 +196,12 @@ async def get_external_agent(
 @router.post("/agents/{external_agent_id}/refresh")
 async def refresh_agent_card(
     external_agent_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Refresh the cached Agent Card for an external agent."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = await a2a_client_service.refresh_agent_card(
             external_agent_id=external_agent_id,
@@ -239,12 +239,12 @@ async def refresh_agent_card(
 @router.delete("/agents/{external_agent_id}")
 async def delete_external_agent(
     external_agent_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Delete a discovered external A2A agent."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_client_service.delete_external_agent(external_agent_id, tenant_id)
 
@@ -273,7 +273,7 @@ async def delete_external_agent(
 async def update_agent_protocol(
     external_agent_id: int,
     request: UpdateAgentProtocolRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Update the protocol type for an external A2A agent.
@@ -283,7 +283,7 @@ async def update_agent_protocol(
         request: Request containing the new protocol type.
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_client_service.update_agent_protocol(
             external_agent_id=external_agent_id,
@@ -334,7 +334,7 @@ class AddRelationRequest(BaseModel):
 @router.post("/relations")
 async def add_external_agent_relation(
     request_body: AddRelationRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Add a relation between a local agent and an external A2A agent.
@@ -342,7 +342,7 @@ async def add_external_agent_relation(
     This allows the local agent to call the external agent as a sub-agent.
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_agent_db.add_external_agent_relation(
             local_agent_id=request_body.local_agent_id,
@@ -372,14 +372,14 @@ async def add_external_agent_relation(
 
 @router.delete("/relations")
 async def remove_external_agent_relation(
-    local_agent_id: int = Query(..., description="Local agent ID"),
-    external_agent_id: int = Query(..., description="External agent ID"),
-    authorization: Optional[str] = Header(None),
+    local_agent_id: Annotated[int, Query(description="Local agent ID")],
+    external_agent_id: Annotated[int, Query(description="External agent ID")],
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Remove a relation between a local agent and an external A2A agent."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_agent_db.remove_external_agent_relation(
             local_agent_id=local_agent_id,
@@ -411,12 +411,12 @@ async def remove_external_agent_relation(
 @router.get("/relations/{local_agent_id}")
 async def list_external_relations(
     local_agent_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """List all external A2A agent relations for a local agent."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         relations = a2a_agent_db.list_external_relations_by_local_agent(
             local_agent_id=local_agent_id,
@@ -439,7 +439,7 @@ async def list_external_relations(
 @router.get("/sub-agents/{local_agent_id}")
 async def get_external_sub_agents(
     local_agent_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Get external A2A agents configured as sub-agents for a local agent.
@@ -447,7 +447,7 @@ async def get_external_sub_agents(
     Returns agent details including URL and cached Agent Card.
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         agents = a2a_agent_db.query_external_sub_agents(
             local_agent_id=local_agent_id,
@@ -484,12 +484,12 @@ class CreateNacosConfigRequest(BaseModel):
 @router.post("/nacos-configs")
 async def create_nacos_config(
     request: CreateNacosConfigRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Create a Nacos configuration for external A2A agent discovery."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_agent_db.create_nacos_config(
             name=request.name,
@@ -517,13 +517,13 @@ async def create_nacos_config(
 
 @router.get("/nacos-configs")
 async def list_nacos_configs(
-    is_active: Optional[bool] = Query(None),
-    authorization: Optional[str] = Header(None),
+    is_active: Annotated[Optional[bool], Query()] = None,
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """List all Nacos configurations for the current tenant."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         configs = a2a_agent_db.list_nacos_configs(
             tenant_id=tenant_id,
@@ -546,12 +546,12 @@ async def list_nacos_configs(
 @router.get("/nacos-configs/{config_id}")
 async def get_nacos_config(
     config_id: str,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Get a specific Nacos configuration."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         config = a2a_agent_db.get_nacos_config_by_id(config_id, tenant_id)
 
@@ -579,12 +579,12 @@ async def get_nacos_config(
 @router.delete("/nacos-configs/{config_id}")
 async def delete_nacos_config(
     config_id: str,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
     http_request: Request = None
 ):
     """Delete a Nacos configuration."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_agent_db.delete_nacos_config(config_id, tenant_id)
 

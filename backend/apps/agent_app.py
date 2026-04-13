@@ -210,7 +210,7 @@ async def clear_agent_new_mark_api(agent_id: int, authorization: Optional[str] =
     Clear the NEW mark for an agent
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization)
+        _, tenant_id, _ = get_current_user_info(authorization)
         affected_rows = await clear_agent_new_mark_impl(agent_id, tenant_id, user_id)
         return {"message": "Agent NEW mark cleared successfully", "affected_rows": affected_rows}
     except Exception as e:
@@ -551,7 +551,7 @@ async def list_published_agents_api(
     List all published agents with their current published version information.
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, request)
+        _, tenant_id, _ = get_current_user_info(authorization, request)
         return await list_published_agents_impl(tenant_id=tenant_id, user_id=user_id)
     except Exception as e:
         logger.error(f"Published agents list error: {str(e)}")

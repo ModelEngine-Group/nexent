@@ -116,7 +116,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                 size="small"
                 icon={<Globe size={16} />}
                 onClick={() => setShowA2ADiscovery(true)}
-                loading={isRefreshingA2A}
+                loading={isRefreshing}
                 className="text-green-500 hover:!text-green-600 hover:!bg-green-50"
                 title={t("toolManagement.refresh.title")}
               >
