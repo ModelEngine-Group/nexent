@@ -51,10 +51,32 @@ async def authorize(provider: str):
         )
 
 
+@router.get("/link")
+async def link(provider: str, authorization: Optional[str] = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
+
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        url = get_authorize_url(provider, link_user_id=user_id)
+        return RedirectResponse(url=url, status_code=HTTPStatus.FOUND)
+    except UnauthorizedError:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
+    except OAuthProviderError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"OAuth link failed: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="OAuth link failed",
+        )
+
+
 @router.get("/callback")
 async def callback(
     provider: str,
     code: str = "",
+    state: str = "",
     error: Optional[str] = None,
     error_description: Optional[str] = None,
 ):
@@ -94,6 +116,11 @@ async def callback(
             },
         )
 
+    from services.oauth_service import parse_state
+
+    state_info = parse_state(state)
+    link_user_id = state_info.get("link_user_id", "")
+
     try:
         token_data = exchange_code_for_provider_token(provider, code)
         provider_access_token = token_data["access_token"]
@@ -111,42 +138,45 @@ async def callback(
 
         from utils.auth_utils import get_supabase_admin_client
 
-        admin_client = get_supabase_admin_client()
-        if not admin_client:
-            raise RuntimeError("Supabase admin client not available")
+        if link_user_id:
+            supabase_user_id = link_user_id
+        else:
+            admin_client = get_supabase_admin_client()
+            if not admin_client:
+                raise RuntimeError("Supabase admin client not available")
 
-        supabase_user_id = None
-        page = 1
-        while True:
-            users_resp = admin_client.auth.admin.list_users(page=page, per_page=100)
-            users = users_resp if len(users_resp) > 0 else []
-            if not users:
-                break
-            for u in users:
-                if u.email and u.email.lower() == email.lower():
-                    supabase_user_id = u.id
+            supabase_user_id = None
+            page = 1
+            while True:
+                users_resp = admin_client.auth.admin.list_users(page=page, per_page=100)
+                users = users_resp if len(users_resp) > 0 else []
+                if not users:
                     break
-            if supabase_user_id:
-                break
-            if len(users) < 100:
-                break
-            page += 1
+                for u in users:
+                    if u.email and u.email.lower() == email.lower():
+                        supabase_user_id = u.id
+                        break
+                if supabase_user_id:
+                    break
+                if len(users) < 100:
+                    break
+                page += 1
 
-        if not supabase_user_id:
-            if not email:
-                email = f"{provider}_{provider_user_id}@oauth.nexent"
-            create_resp = admin_client.auth.admin.create_user(
-                {
-                    "email": email,
-                    "email_confirm": True,
-                    "user_metadata": {
-                        "full_name": username,
-                        "avatar_url": avatar_url,
-                        "provider": provider,
-                    },
-                }
-            )
-            supabase_user_id = create_resp.user.id
+            if not supabase_user_id:
+                if not email:
+                    email = f"{provider}_{provider_user_id}@oauth.nexent"
+                create_resp = admin_client.auth.admin.create_user(
+                    {
+                        "email": email,
+                        "email_confirm": True,
+                        "user_metadata": {
+                            "full_name": username,
+                            "avatar_url": avatar_url,
+                            "provider": provider,
+                        },
+                    }
+                )
+                supabase_user_id = create_resp.user.id
 
         ensure_user_tenant_exists(user_id=supabase_user_id, email=email)
 

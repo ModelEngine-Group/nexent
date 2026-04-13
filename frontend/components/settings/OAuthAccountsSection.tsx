@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Card, List, Modal, Space, Divider, message } from "antd";
+import { Button, Card, Modal, message } from "antd";
 import { Github, Unlink, Link2, Plus } from "lucide-react";
 
 import {
@@ -14,6 +14,13 @@ import {
 const providerIcons: Record<string, React.ReactNode> = {
   github: <Github size={20} />,
 };
+
+interface ProviderRow {
+  name: string;
+  display_name: string;
+  linked: boolean;
+  account?: OAuthAccount;
+}
 
 export function OAuthAccountsSection() {
   const { t } = useTranslation("common");
@@ -53,78 +60,73 @@ export function OAuthAccountsSection() {
     }
   };
 
-  const linkedProviders = new Set(accounts.map((a) => a.provider));
-  const unlinkedProviders = enabledProviders.filter(
-    (p) => !linkedProviders.has(p.name)
-  );
+  const accountMap = new Map(accounts.map((a) => [a.provider, a]));
+  const rows: ProviderRow[] = enabledProviders.map((p) => {
+    const account = accountMap.get(p.name);
+    return {
+      name: p.name,
+      display_name: p.display_name,
+      linked: !!account,
+      account: account,
+    };
+  });
 
   return (
     <Card
-      title={
-        <Space>
-          <span>{t("auth.linkedAccounts")}</span>
-        </Space>
-      }
+      title={<span>{t("auth.linkedAccounts")}</span>}
       loading={loading}
       className="mt-4"
     >
-      {accounts.length === 0 && unlinkedProviders.length === 0 ? (
+      {rows.length === 0 ? (
         <div className="text-center py-6 text-gray-400">
           {t("auth.noLinkedAccounts")}
         </div>
       ) : (
-        <>
-          {accounts.length > 0 && (
-            <List
-              dataSource={accounts}
-              renderItem={(item) => (
-                <List.Item
-                  actions={[
-                    <Button
-                      key="unlink"
-                      type="link"
-                      danger
-                      size="small"
-                      icon={<Unlink size={14} />}
-                      onClick={() => setUnlinkTarget(item)}
-                    >
-                      {t("auth.unlinkAccount")}
-                    </Button>,
-                  ]}
-                >
-                  <List.Item.Meta
-                    avatar={
-                      <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-                        {providerIcons[item.provider] || <Link2 size={20} />}
-                      </div>
-                    }
-                    title={item.provider_username || item.provider}
-                    description={item.provider_email || "-"}
-                  />
-                </List.Item>
-              )}
-            />
-          )}
-
-          {unlinkedProviders.length > 0 && (
-            <>
-              <Divider style={{ margin: "12px 0" }} />
-              <div className="flex flex-wrap gap-2">
-                {unlinkedProviders.map((provider) => (
-                  <Button
-                    key={provider.name}
-                    icon={<Plus size={14} />}
-                    onClick={() =>
-                      oauthService.startOAuthLogin(provider.name)
-                    }
-                  >
-                    {t("auth.linkAccount")} {provider.display_name}
-                  </Button>
-                ))}
+        <div className="flex flex-col">
+          {rows.map((row) => (
+            <div
+              key={row.name}
+              className="flex items-center justify-between py-3 border-b last:border-b-0"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
+                  {providerIcons[row.name] || <Link2 size={20} />}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-medium truncate">
+                    {row.linked
+                      ? row.account!.provider_username || row.display_name
+                      : row.display_name}
+                  </div>
+                  <div className="text-sm text-gray-400 truncate">
+                    {row.linked
+                      ? row.account!.provider_email || "-"
+                      : t("auth.noLinkedAccounts")}
+                  </div>
+                </div>
               </div>
-            </>
-          )}
-        </>
+              {row.linked ? (
+                <Button
+                  type="link"
+                  danger
+                  size="small"
+                  icon={<Unlink size={14} />}
+                  onClick={() => setUnlinkTarget(row.account!)}
+                >
+                  {t("auth.unlinkAccount")}
+                </Button>
+              ) : (
+                <Button
+                  size="small"
+                  icon={<Plus size={14} />}
+                  onClick={() => oauthService.startOAuthLink(row.name)}
+                >
+                  {t("auth.linkAccount")}
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
       <Modal

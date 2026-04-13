@@ -36,6 +36,10 @@ export const oauthService = {
     window.location.href = `${API_ENDPOINTS.oauth.authorize}?provider=${provider}`;
   },
 
+  startOAuthLink: (provider: string): void => {
+    window.location.href = `${API_ENDPOINTS.oauth.link}?provider=${provider}`;
+  },
+
   getLinkedAccounts: async (): Promise<OAuthAccount[]> => {
     try {
       const response = await fetchWithAuth(API_ENDPOINTS.oauth.accounts);

@@ -67,6 +67,9 @@ auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.toke
 sys.modules["utils.auth_utils"] = auth_utils_mock
 
 oauth_service_mock = MagicMock()
+oauth_service_mock.parse_state = MagicMock(
+    return_value={"provider": "github", "token": "tok", "link_user_id": ""}
+)
 sys.modules["services"] = MagicMock()
 sys.modules["services.oauth_service"] = oauth_service_mock
 

@@ -119,6 +119,7 @@ const AUTH_INTERCEPT_ENDPOINTS = new Set([
   "/api/user/logout",
   "/api/user/revoke",
   "/api/user/oauth/callback",
+  "/api/user/oauth/link",
 ]);
 
 function collectRequestBody(req) {

@@ -30,6 +30,17 @@ logger = logging.getLogger(__name__)
 _state_store: Dict[str, float] = {}
 
 
+def parse_state(state: str) -> Dict[str, str]:
+    parts = state.split(":", 2)
+    if len(parts) >= 2:
+        return {
+            "provider": parts[0],
+            "token": parts[1],
+            "link_user_id": parts[2] if len(parts) > 2 else "",
+        }
+    return {"provider": state, "token": "", "link_user_id": ""}
+
+
 def _resolve_field(data: dict, field_path: str) -> Any:
     if "." not in field_path:
         return data.get(field_path)
@@ -62,7 +73,7 @@ def get_enabled_providers() -> List[Dict[str, str]]:
     return providers
 
 
-def get_authorize_url(provider: str) -> str:
+def get_authorize_url(provider: str, link_user_id: str = "") -> str:
     try:
         definition = get_provider_definition(provider)
     except KeyError:
@@ -74,7 +85,11 @@ def get_authorize_url(provider: str) -> str:
     callback_url = (
         f"{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider={provider}"
     )
-    state = f"{provider}:{secrets.token_urlsafe(32)}"
+    random_token = secrets.token_urlsafe(32)
+    if link_user_id:
+        state = f"{provider}:{random_token}:{link_user_id}"
+    else:
+        state = f"{provider}:{random_token}"
     _state_store[state] = datetime.now().timestamp()
 
     client_id = os.getenv(definition.client_id_env, "")

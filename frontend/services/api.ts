@@ -23,6 +23,7 @@ export const API_ENDPOINTS = {
   oauth: {
     providers: `${API_BASE_URL}/user/oauth/providers`,
     authorize: `${API_BASE_URL}/user/oauth/authorize`,
+    link: `${API_BASE_URL}/user/oauth/link`,
     accounts: `${API_BASE_URL}/user/oauth/accounts`,
     unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
   },
