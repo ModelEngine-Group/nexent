@@ -275,6 +275,31 @@ second_block()
     assert result == expected
 
 
+def test_parse_code_blobs_incomplete_code_tag():
+    """Test parse_code_blobs when <code> tag has no closing </code>."""
+    text = """Here is some code:
+<code>
+incomplete code without closing tag"""
+
+    # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
+    with pytest.raises(ValueError):
+        core_agent_module.parse_code_blobs(text)
+
+
+def test_parse_code_blobs_multiple_code_blocks_one_incomplete():
+    """Test parse_code_blobs with multiple <code> blocks where one has no closing tag."""
+    text = """<code>
+first_block()
+</code>
+<code>
+second_block"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    # Only complete blocks are extracted
+    expected = "first_block()"
+    assert result == expected
+
+
 def test_parse_code_blobs_run_format_without_end_code():
     """Test parse_code_blobs with ```<RUN>\\ncontent\\n``` pattern (without END_CODE)."""
     text = """Here is some code:
@@ -285,6 +310,31 @@ And some more text."""
 
     result = core_agent_module.parse_code_blobs(text)
     expected = "print(\"Hello World\")"
+    assert result == expected
+
+
+def test_parse_code_blobs_run_incomplete_no_closing_backticks():
+    """Test parse_code_blobs when ```<RUN> tag has no closing ```."""
+    text = """Here is some code:
+```<RUN>
+incomplete code without closing backticks"""
+
+    # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
+    with pytest.raises(ValueError):
+        core_agent_module.parse_code_blobs(text)
+
+
+def test_parse_code_blobs_multiple_run_blocks_one_incomplete():
+    """Test parse_code_blobs with multiple ```<RUN> blocks where one has no closing ```."""
+    text = """```<RUN>
+first_block()
+```
+```<RUN>
+second_block"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    # Only complete blocks are extracted
+    expected = "first_block()"
     assert result == expected
 
 
@@ -398,6 +448,48 @@ But this should not match."""
         core_agent_module.parse_code_blobs(text)
 
     assert "executable code block pattern" in str(exc_info.value)
+
+
+def test_parse_code_blobs_py_block_no_closing_backticks():
+    """Test parse_code_blobs when ```py block has no closing ```."""
+    text = """```py
+incomplete code without closing backticks"""
+
+    # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
+    with pytest.raises(ValueError):
+        core_agent_module.parse_code_blobs(text)
+
+
+def test_parse_code_blobs_python_block_no_closing_backticks():
+    """Test parse_code_blobs when ```python block has no closing ```."""
+    text = """```python
+incomplete code without closing backticks"""
+
+    # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
+    with pytest.raises(ValueError):
+        core_agent_module.parse_code_blobs(text)
+
+
+def test_parse_code_blobs_py_with_newline_after_fence():
+    """Test parse_code_blobs skips newline after ```py\\n."""
+    text = """```py
+print("hello")
+```"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = 'print("hello")'
+    assert result == expected
+
+
+def test_parse_code_blobs_python_with_newline_after_fence():
+    """Test parse_code_blobs skips newline after ```python\\n."""
+    text = """```python
+print("hello")
+```"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = 'print("hello")'
+    assert result == expected
 
 
 def test_parse_code_blobs_single_line():

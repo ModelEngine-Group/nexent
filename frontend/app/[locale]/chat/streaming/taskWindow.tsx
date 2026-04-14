@@ -82,75 +82,168 @@ const extractCodeInfo = (
   let processed = content;
 
   // Remove "代码：" or "Code:" prefix if present (handle both full-width and half-width colon)
-  processed = processed.replace(/^(代码|Code)[：:]\s*/i, "");
+  if (processed.startsWith("代码：") || processed.startsWith("代码:")) {
+    processed = processed.substring(4);
+  } else if (processed.toLowerCase().startsWith("code：") || processed.toLowerCase().startsWith("code:")) {
+    processed = processed.substring(4);
+  }
 
   // 1. Detect and process NEW <code>...</code> format (executable code, default to python)
-  const codeMatch = processed.match(/<code>/);
-  if (codeMatch) {
-    // Remove the opening marker
-    processed = processed.replace(/<code>\s*\n?/, "");
-    // Remove closing marker if present
-    // Use non-greedy quantifier to prevent catastrophic backtracking
-    processed = processed.replace(/\n?\s*<\/code>[\s\S]*?$/, "");
+  // Use string operations instead of regex to prevent catastrophic backtracking
+  const codeStart = processed.indexOf("<code>");
+  if (codeStart !== -1) {
+    const contentStart = codeStart + "<code>".length;
+    const codeEnd = processed.indexOf("</code>", contentStart);
+    if (codeEnd !== -1) {
+      // Complete tag found - extract content
+      processed = processed.substring(contentStart, codeEnd);
+    } else {
+      // Streaming - no closing tag yet, remove the opening tag only
+      processed = processed.substring(contentStart);
+    }
     // Clean up any remaining incomplete markers (for streaming)
-    processed = processed.replace(/\n?```<END[\s\S]*$/, "");
-    processed = processed.replace(/<END[\s\S]*$/, "");
+    const endIdx = processed.indexOf("```<END");
+    if (endIdx !== -1) {
+      processed = processed.substring(0, endIdx);
+    }
+    const endTagIdx = processed.indexOf("<END");
+    if (endTagIdx !== -1) {
+      processed = processed.substring(0, endTagIdx);
+    }
     // Remove trailing backticks that might be part of incomplete end marker
-    processed = processed.replace(/\n?```$/, "");
+    while (processed.endsWith("```") || processed.endsWith("\n")) {
+      if (processed.endsWith("```")) {
+        processed = processed.substring(0, processed.length - 3);
+      } else {
+        processed = processed.substring(0, processed.length - 1);
+      }
+    }
     return { codeContent: processed.trim(), language: "python" };
   }
 
   // 2. Detect and process NEW <DISPLAY:language>...</DISPLAY> format (display only)
-  const displayMatch = processed.match(/<DISPLAY:(\w+)>/);
-  if (displayMatch) {
-    const language = displayMatch[1];
-    // Remove the opening marker
-    processed = processed.replace(/<DISPLAY:\w+>\s*\n?/, "");
-    // Remove closing marker if present
-    // Use non-greedy quantifier to prevent catastrophic backtracking
-    processed = processed.replace(/\n?\s*<\/DISPLAY>[\s\S]*?$/, "");
-    // Clean up any remaining incomplete markers (for streaming)
-    processed = processed.replace(/\n?```<END[\s\S]*$/, "");
-    processed = processed.replace(/<END[\s\S]*$/, "");
-    // Remove trailing backticks that might be part of incomplete end marker
-    processed = processed.replace(/\n?```$/, "");
-    // Remove trailing "[已展示给用户]" or similar text
-    processed = processed.replace(/\[已展示给用户\][\s\S]*$/, "");
-    return { codeContent: processed.trim(), language };
+  // Use string operations instead of regex to prevent catastrophic backtracking
+  const displayStart = processed.indexOf("<DISPLAY:");
+  if (displayStart !== -1) {
+    const langEnd = processed.indexOf(">", displayStart);
+    if (langEnd !== -1) {
+      const language = processed.substring(displayStart + "<DISPLAY:".length, langEnd);
+      const contentStart = langEnd + 1;
+      const displayEnd = processed.indexOf("</DISPLAY>", contentStart);
+      if (displayEnd !== -1) {
+        // Complete tag found - extract content
+        processed = processed.substring(contentStart, displayEnd);
+      } else {
+        // Streaming - no closing tag yet
+        processed = processed.substring(contentStart);
+      }
+      // Clean up any remaining incomplete markers (for streaming)
+      const endIdx = processed.indexOf("```<END");
+      if (endIdx !== -1) {
+        processed = processed.substring(0, endIdx);
+      }
+      const endTagIdx = processed.indexOf("<END");
+      if (endTagIdx !== -1) {
+        processed = processed.substring(0, endTagIdx);
+      }
+      // Remove trailing backticks
+      while (processed.endsWith("```") || processed.endsWith("\n")) {
+        if (processed.endsWith("```")) {
+          processed = processed.substring(0, processed.length - 3);
+        } else {
+          processed = processed.substring(0, processed.length - 1);
+        }
+      }
+      // Remove trailing "[已展示给用户]" or similar text
+      const displayUserIdx = processed.indexOf("[已展示给用户]");
+      if (displayUserIdx !== -1) {
+        processed = processed.substring(0, displayUserIdx);
+      }
+      return { codeContent: processed.trim(), language };
+    }
   }
 
   // 3. Detect and process COMPLETE legacy <DISPLAY:language> format with backticks
-  const legacyDisplayMatch = processed.match(/```\s*<DISPLAY:(\w+)>/);
-  if (legacyDisplayMatch) {
-    const language = legacyDisplayMatch[1];
-    // Remove the opening marker (handle optional whitespace and newline)
-    processed = processed.replace(/```\s*<DISPLAY:\w+>\s*\n?/, "");
-    // Remove closing marker if present: ```<END_DISPLAY_CODE> or just <END_DISPLAY_CODE>
-    processed = processed.replace(/\n?```<END_DISPLAY_CODE>[\s\S]*$/, "");
-    processed = processed.replace(/<END_DISPLAY_CODE>[\s\S]*$/, "");
-    // Remove trailing "[已展示给用户]" or similar text
-    processed = processed.replace(/\[已展示给用户\][\s\S]*$/, "");
-    // Clean up any remaining incomplete markers (for streaming)
-    processed = processed.replace(/\n?```<END[\s\S]*$/, "");
-    processed = processed.replace(/<END[\s\S]*$/, "");
-    // Remove trailing backticks that might be part of incomplete end marker
-    processed = processed.replace(/\n?```$/, "");
-    return { codeContent: processed.trim(), language };
+  const legacyDisplayStart = processed.indexOf("```<DISPLAY:");
+  if (legacyDisplayStart !== -1) {
+    const langEnd = processed.indexOf(">", legacyDisplayStart + "```<DISPLAY:".length);
+    if (langEnd !== -1) {
+      const language = processed.substring(legacyDisplayStart + "```<DISPLAY:".length, langEnd);
+      const contentStart = langEnd + 1;
+      // Find closing marker
+      const endCodeIdx = processed.indexOf("```<END_DISPLAY_CODE>");
+      const endCodeIdx2 = processed.indexOf("<END_DISPLAY_CODE>");
+      let endPos = -1;
+      if (endCodeIdx !== -1) {
+        endPos = endCodeIdx;
+      } else if (endCodeIdx2 !== -1) {
+        endPos = endCodeIdx2;
+      }
+      if (endPos !== -1) {
+        processed = processed.substring(contentStart, endPos);
+      } else {
+        processed = processed.substring(contentStart);
+      }
+      // Clean up markers
+      const endIdx = processed.indexOf("```<END");
+      if (endIdx !== -1) {
+        processed = processed.substring(0, endIdx);
+      }
+      const endTagIdx = processed.indexOf("<END");
+      if (endTagIdx !== -1) {
+        processed = processed.substring(0, endTagIdx);
+      }
+      while (processed.endsWith("```") || processed.endsWith("\n")) {
+        if (processed.endsWith("```")) {
+          processed = processed.substring(0, processed.length - 3);
+        } else {
+          processed = processed.substring(0, processed.length - 1);
+        }
+      }
+      const displayUserIdx = processed.indexOf("[已展示给用户]");
+      if (displayUserIdx !== -1) {
+        processed = processed.substring(0, displayUserIdx);
+      }
+      return { codeContent: processed.trim(), language };
+    }
   }
 
   // 4. Detect and process COMPLETE legacy <RUN> format (executable code, default to python)
-  const runMatch = processed.match(/```\s*<RUN>/);
-  if (runMatch) {
-    // Remove the opening marker
-    processed = processed.replace(/```\s*<RUN>\s*\n?/, "");
-    // Remove closing marker if present
-    processed = processed.replace(/\n?```<END_CODE>[\s\S]*$/, "");
-    processed = processed.replace(/<END_CODE>[\s\S]*$/, "");
-    // Clean up any remaining incomplete markers (for streaming)
-    processed = processed.replace(/\n?```<END[\s\S]*$/, "");
-    processed = processed.replace(/<END[\s\S]*$/, "");
-    // Remove trailing backticks
-    processed = processed.replace(/\n?```$/, "");
+  const runStart = processed.indexOf("```<RUN>");
+  if (runStart !== -1) {
+    const contentStart = runStart + "```<RUN>".length;
+    // Skip optional newline
+    if (contentStart < processed.length && processed.charAt(contentStart) === "\n") {
+      // skip
+    }
+    const endCodeIdx = processed.indexOf("```<END_CODE>");
+    const endCodeIdx2 = processed.indexOf("<END_CODE>");
+    let endPos = -1;
+    if (endCodeIdx !== -1) {
+      endPos = endCodeIdx;
+    } else if (endCodeIdx2 !== -1) {
+      endPos = endCodeIdx2;
+    }
+    if (endPos !== -1) {
+      processed = processed.substring(contentStart, endPos);
+    } else {
+      processed = processed.substring(contentStart);
+    }
+    const endIdx = processed.indexOf("```<END");
+    if (endIdx !== -1) {
+      processed = processed.substring(0, endIdx);
+    }
+    const endTagIdx = processed.indexOf("<END");
+    if (endTagIdx !== -1) {
+      processed = processed.substring(0, endTagIdx);
+    }
+    while (processed.endsWith("```") || processed.endsWith("\n")) {
+      if (processed.endsWith("```")) {
+        processed = processed.substring(0, processed.length - 3);
+      } else {
+        processed = processed.substring(0, processed.length - 1);
+      }
+    }
     return { codeContent: processed.trim(), language: "python" };
   }
 
@@ -158,76 +251,148 @@ const extractCodeInfo = (
   // This is critical for preventing the user from seeing raw tags like "<DISPLAY:py" or "<code"
 
   // Case: <code (Incomplete tag, no closing >)
-  if (/^<code$/.test(processed)) {
+  if (processed === "<code") {
     return { codeContent: "", language: "python" };
   }
 
   // Case: <DISPLAY:py... (Incomplete tag, no closing >)
   // Or: <RUN (Incomplete tag)
-  if (/^<(DISPLAY:[a-z0-9]*|RUN)$/i.test(processed)) {
-    // We are strictly inside the header tag. Content is empty.
-    // Try to guess language if possible
-    const langMatch = processed.match(/:(\w+)$/);
-    return { codeContent: "", language: langMatch ? langMatch[1] : "python" };
+  const incompleteDisplayRun = /^<(DISPLAY:[a-z0-9]*|RUN)$/i.test(processed);
+  if (incompleteDisplayRun) {
+    const colonIdx = processed.lastIndexOf(":");
+    if (colonIdx !== -1) {
+      const lang = processed.substring(colonIdx + 1);
+      if (lang) {
+        return { codeContent: "", language: lang };
+      }
+    }
+    return { codeContent: "", language: "python" };
   }
 
   // Case: ```<DISPLAY:py... or ```<RUN (Incomplete tag with backticks)
-  if (/^```\s*<[A-Z]*(:[a-z0-9]*)?$/.test(processed)) {
-    // We are strictly inside the header tag. Content is empty.
-    // Try to guess language if possible
-    const langMatch = processed.match(/:(\w+)$/);
-    return { codeContent: "", language: langMatch ? langMatch[1] : "python" };
+  const incompleteWithBackticks = /^```\s*<[A-Z]*(:[a-z0-9]*)?$/.test(processed);
+  if (incompleteWithBackticks) {
+    const colonIdx = processed.lastIndexOf(":");
+    if (colonIdx !== -1) {
+      const lang = processed.substring(colonIdx + 1).replace(/[`\s<>]/g, "");
+      if (lang) {
+        return { codeContent: "", language: lang };
+      }
+    }
+    return { codeContent: "", language: "python" };
   }
 
   // If content contains incomplete markers somewhere else (not at start), try to detect them
   // This handles cases where backticks might have been stripped or came separately
-  if (processed.includes("<DISPLAY:") || processed.includes("<RUN>")) {
-    const partialDisplayMatch = processed.match(/<DISPLAY:(\w+)>/);
-    if (partialDisplayMatch) {
-      const language = partialDisplayMatch[1];
+  const hasDisplay = processed.indexOf("<DISPLAY:") !== -1;
+  const hasRun = processed.indexOf("<RUN>") !== -1;
+
+  if (hasDisplay) {
+    const partialDisplayStart = processed.indexOf("<DISPLAY:");
+    const langEnd = processed.indexOf(">", partialDisplayStart);
+    if (langEnd !== -1) {
+      const language = processed.substring(partialDisplayStart + "<DISPLAY:".length, langEnd);
       // Remove all variations of the display marker
-      processed = processed.replace(/```\s*<DISPLAY:\w+>\s*\n?/g, "");
-      processed = processed.replace(/<DISPLAY:\w+>\s*\n?/g, "");
+      while (true) {
+        const idx1 = processed.indexOf("```<DISPLAY:");
+        const idx2 = processed.indexOf("<DISPLAY:");
+        if (idx1 !== -1) {
+          const afterTag = idx1 + "```<DISPLAY:".length;
+          const langEnd2 = processed.indexOf(">", afterTag);
+          processed = processed.substring(langEnd2 !== -1 ? langEnd2 + 1 : processed.length);
+        } else if (idx2 !== -1) {
+          const afterTag = idx2 + "<DISPLAY:".length;
+          const langEnd2 = processed.indexOf(">", afterTag);
+          processed = processed.substring(langEnd2 !== -1 ? langEnd2 + 1 : processed.length);
+        } else {
+          break;
+        }
+      }
       // Clean up end markers
-      processed = processed.replace(/\n?```<END[\s\S]*$/, "");
-      processed = processed.replace(/<END[\s\S]*$/, "");
-      processed = processed.replace(/\n?```$/, "");
+      const endIdx = processed.indexOf("```<END");
+      if (endIdx !== -1) {
+        processed = processed.substring(0, endIdx);
+      }
+      const endTagIdx = processed.indexOf("<END");
+      if (endTagIdx !== -1) {
+        processed = processed.substring(0, endTagIdx);
+      }
+      while (processed.endsWith("```") || processed.endsWith("\n")) {
+        if (processed.endsWith("```")) {
+          processed = processed.substring(0, processed.length - 3);
+        } else {
+          processed = processed.substring(0, processed.length - 1);
+        }
+      }
       return { codeContent: processed.trim(), language };
     }
+  }
 
-    if (processed.includes("<RUN>")) {
-      // Remove all variations of the RUN marker
-      processed = processed.replace(/```\s*<RUN>\s*\n?/g, "");
-      processed = processed.replace(/<RUN>\s*\n?/g, "");
-      // Clean up end markers
-      processed = processed.replace(/\n?```<END[\s\S]*$/, "");
-      processed = processed.replace(/<END[\s\S]*$/, "");
-      processed = processed.replace(/\n?```$/, "");
-      return { codeContent: processed.trim(), language: "python" };
+  if (hasRun) {
+    // Remove all variations of the RUN marker
+    while (true) {
+      const idx1 = processed.indexOf("```<RUN>");
+      const idx2 = processed.indexOf("<RUN>");
+      if (idx1 !== -1) {
+        processed = processed.substring(idx1 + "```<RUN>".length);
+      } else if (idx2 !== -1) {
+        processed = processed.substring(idx2 + "<RUN>".length);
+      } else {
+        break;
+      }
     }
+    // Clean up end markers
+    const endIdx = processed.indexOf("```<END");
+    if (endIdx !== -1) {
+      processed = processed.substring(0, endIdx);
+    }
+    const endTagIdx = processed.indexOf("<END");
+    if (endTagIdx !== -1) {
+      processed = processed.substring(0, endTagIdx);
+    }
+    while (processed.endsWith("```") || processed.endsWith("\n")) {
+      if (processed.endsWith("```")) {
+        processed = processed.substring(0, processed.length - 3);
+      } else {
+        processed = processed.substring(0, processed.length - 1);
+      }
+    }
+    return { codeContent: processed.trim(), language: "python" };
   }
 
   // 6. Handle standard markdown block start or ambiguous start
   // Case: Just ``` or ```\n
   // Hide the backticks until we know what's coming, to avoid flashing raw markdown
-  if (/^```\s*$/.test(processed)) {
+  const stripped = processed.replace(/^```\s*/, "");
+  if (stripped !== processed && stripped.length === 0) {
     return { codeContent: "", language: "python" };
   }
 
   // 7. Fallback: Treat as standard markdown code block
   if (processed.startsWith("```")) {
     // Check for standard language tag: ```python
-    const standardMatch = processed.match(/^```(\w+)\s/);
     let lang = "python";
-    if (standardMatch) {
-      lang = standardMatch[1];
-      processed = processed.replace(/^```\w+\s*/, "");
+    let contentStart = 3; // Skip ```
+    if (processed.charAt(3) !== "\n") {
+      // There's a language tag
+      const spaceIdx = processed.indexOf(" ");
+      const newlineIdx = processed.indexOf("\n");
+      if (spaceIdx !== -1 && (newlineIdx === -1 || spaceIdx < newlineIdx)) {
+        lang = processed.substring(3, spaceIdx);
+        contentStart = spaceIdx + 1;
+      } else if (newlineIdx !== -1) {
+        lang = processed.substring(3, newlineIdx);
+        contentStart = newlineIdx + 1;
+      }
     } else {
-      processed = processed.replace(/^```\s*/, "");
+      contentStart = 4; // Skip ```\n
     }
-
+    processed = processed.substring(contentStart);
     // Clean tails
-    processed = processed.replace(/\n?```$/, "");
+    const closingIdx = processed.lastIndexOf("```");
+    if (closingIdx !== -1) {
+      processed = processed.substring(0, closingIdx);
+    }
     return { codeContent: processed.trim(), language: lang };
   }
 
