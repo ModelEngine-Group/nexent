@@ -22,7 +22,7 @@ from database.db_models import (
 # of db_models.client, which would cause circular dependency at import time.
 def _get_db_session():
     from database.client import get_db_session as _gds
-    return _gds
+    return _gds()
 
 logger = logging.getLogger("a2a_agent_db")
 

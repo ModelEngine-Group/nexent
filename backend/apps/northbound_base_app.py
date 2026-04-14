@@ -7,7 +7,7 @@ import base64
 import hashlib
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict
 from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
@@ -20,8 +20,8 @@ from .northbound_app import router as northbound_router
 
 class A2AServerSettings(BaseModel):
     """A2A Server settings for an agent."""
-    is_enabled: Optional[bool] = False
-    card_overrides: Optional[Dict[str, Any]] = None
+    is_enabled: bool | None = False
+    card_overrides: Dict[str, Any] | None = None
 
 
 from services.northbound_service import NorthboundContext
@@ -61,15 +61,15 @@ class JSONRPCRequest(BaseModel):
     """JSON-RPC 2.0 request payload."""
     jsonrpc: str = "2.0"
     method: str
-    params: Optional[Dict[str, Any]] = {}
-    id: Optional[Any] = None
+    params: Dict[str, Any] | None = {}
+    id: Any | None = None
 
 
 @a2a_router.get("/{endpoint_id}/.well-known/agent-card.json")
 async def get_agent_card(
     endpoint_id: str,
     request: Request,
-    if_none_match: Optional[str] = Header(None, alias="If-None-Match")
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None
 ):
     """Get Agent Card for A2A discovery.
 
@@ -118,8 +118,8 @@ async def jsonrpc_handler(
     endpoint_id: str,
     payload: JSONRPCRequest,
     request: Request,
-    a2a_version: Optional[str] = Header(None, alias="A2A-Version"),
-    a2a_extensions: Optional[str] = Header(None, alias="A2A-Extensions"),
+    a2a_version: Annotated[str | None, Header(alias="A2A-Version")] = None,
+    a2a_extensions: Annotated[str | None, Header(alias="A2A-Extensions")] = None,
 ):
     """JSON-RPC 2.0 endpoint for A2A protocol.
 
@@ -284,7 +284,7 @@ async def rest_message_send(
     endpoint_id: str,
     message: Dict[str, Any],
     request: Request,
-    a2a_version: Optional[str] = Header(None, alias="A2A-Version"),
+    a2a_version: Annotated[str | None, Header(alias="A2A-Version")] = None,
 ):
     """REST endpoint - send message synchronously.
 
@@ -318,7 +318,7 @@ async def rest_message_stream(
     endpoint_id: str,
     message: Dict[str, Any],
     request: Request,
-    a2a_version: Optional[str] = Header(None, alias="A2A-Version"),
+    a2a_version: Annotated[str | None, Header(alias="A2A-Version")] = None,
 ):
     """REST endpoint - send message with streaming response (SSE).
 
@@ -379,7 +379,7 @@ async def rest_get_task(
     endpoint_id: str,
     task_id: str,
     request: Request,
-    historyLength: Optional[int] = Query(None, ge=-1, description="Number of history messages to include"),
+    historyLength: Annotated[int | None, Query(ge=-1, description="Number of history messages to include")] = None,
 ):
     """REST endpoint - get task details in A2A standard format.
 

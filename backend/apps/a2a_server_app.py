@@ -40,7 +40,7 @@ async def enable_a2a_server(
     Authentication: User Bearer Token (internal use only)
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_server_service.enable_a2a(
             agent_id=agent_id,
@@ -78,7 +78,7 @@ async def disable_a2a_server(
     Authentication: User Bearer Token (internal use only)
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         a2a_server_service.disable_a2a(
             agent_id=agent_id,
@@ -152,7 +152,7 @@ async def update_a2a_settings(
     Authentication: User Bearer Token (internal use only)
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_server_service.update_settings(
             agent_id=agent_id,
@@ -190,7 +190,7 @@ async def list_a2a_agents(
     Authentication: User Bearer Token (internal use only)
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         registrations = a2a_server_service.list_registrations(
             tenant_id=tenant_id,

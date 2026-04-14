@@ -59,7 +59,7 @@ async def discover_from_url(
     Fetches the Agent Card from the URL and caches it.
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = await a2a_client_service.discover_from_url(
             url=request.url,
@@ -97,7 +97,7 @@ async def discover_from_nacos(
     Uses the specified Nacos config to discover agents by name.
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         results = await a2a_client_service.discover_from_nacos(
             nacos_config_id=request.nacos_config_id,
@@ -201,7 +201,7 @@ async def refresh_agent_card(
 ):
     """Refresh the cached Agent Card for an external agent."""
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = await a2a_client_service.refresh_agent_card(
             external_agent_id=external_agent_id,
@@ -342,7 +342,7 @@ async def add_external_agent_relation(
     This allows the local agent to call the external agent as a sub-agent.
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_agent_db.add_external_agent_relation(
             local_agent_id=request_body.local_agent_id,
@@ -489,7 +489,7 @@ async def create_nacos_config(
 ):
     """Create a Nacos configuration for external A2A agent discovery."""
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
         result = a2a_agent_db.create_nacos_config(
             name=request.name,
