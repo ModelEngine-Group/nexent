@@ -210,7 +210,7 @@ async def clear_agent_new_mark_api(agent_id: int, authorization: Optional[str] =
     Clear the NEW mark for an agent
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization)
+        user_id, tenant_id, _ = get_current_user_info(authorization)
         affected_rows = await clear_agent_new_mark_impl(agent_id, tenant_id, user_id)
         return {"message": "Agent NEW mark cleared successfully", "affected_rows": affected_rows}
     except Exception as e:
