@@ -13,7 +13,6 @@ import {
   Space,
   Typography,
   Card,
-  Divider,
   Tooltip,
   message,
   Select,
@@ -89,7 +88,7 @@ interface AgentProtocolSettingProps {
   onProtocolChange: (agentId: string, protocolType: string) => void;
 }
 
-function AgentProtocolSetting({ agent, onProtocolChange }: AgentProtocolSettingProps) {
+function AgentProtocolSetting({ agent, onProtocolChange }: Readonly<AgentProtocolSettingProps>) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState(
@@ -103,9 +102,9 @@ function AgentProtocolSetting({ agent, onProtocolChange }: AgentProtocolSettingP
     setSelectedProtocol((agent as any).protocol_type || "JSONRPC");
   }, [(agent as any).protocol_type]);
 
-  const handleSave = async () => {
+  const handleSave = () => {
     setSaving(true);
-    await onProtocolChange(String(agent.id), selectedProtocol);
+    onProtocolChange(String(agent.id), selectedProtocol);
     setSaving(false);
     setOpen(false);
   };
@@ -185,7 +184,7 @@ export default function A2AAgentDiscoveryModal({
   onDiscoverSuccess,
   nacosConfigId,
   localAgentId,
-}: A2AAgentDiscoveryModalProps) {
+}: Readonly<A2AAgentDiscoveryModalProps>) {
   const { t } = useTranslation("common");
   const [messageApi, contextHolder] = message.useMessage();
 
@@ -916,7 +915,7 @@ interface AgentDetailCardProps {
   onAddToLocalAgent?: () => void;
 }
 
-function AgentDetailCard({ agent, onAddToLocalAgent }: AgentDetailCardProps) {
+function AgentDetailCard({ agent, onAddToLocalAgent }: Readonly<AgentDetailCardProps>) {
   const { t } = useTranslation("common");
 
   return (

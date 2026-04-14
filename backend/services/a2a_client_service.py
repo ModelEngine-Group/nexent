@@ -10,7 +10,7 @@ import aiohttp
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from database import a2a_agent_db
-from database.a2a_agent_db import _extract_protocol_type
+from database.a2a_agent_db import _extract_protocol_type, PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 from utils.a2a_http_client import A2AHttpClient, build_a2a_headers
 
 logger = logging.getLogger(__name__)
@@ -503,9 +503,9 @@ class A2AClientService:
 
     def _get_protocol_path(self, protocol_type: str, streaming: bool) -> str:
         """Get the path suffix for a given protocol type and streaming mode."""
-        if protocol_type == "HTTP+JSON":
+        if protocol_type == PROTOCOL_HTTP_JSON:
             return "/message:stream" if streaming else "/message:send"
-        if protocol_type == "JSONRPC":
+        if protocol_type == PROTOCOL_JSONRPC:
             return "/v1"
         return ""
 
@@ -540,7 +540,7 @@ class A2AClientService:
 
         agent_url = agent["agent_url"]
         transport_type = agent.get("transport_type", "http-streaming")
-        protocol_type = agent.get("protocol_type", "JSONRPC")
+        protocol_type = agent.get("protocol_type", PROTOCOL_JSONRPC)
 
         # Build complete endpoint URL with protocol path
         endpoint_url = self._build_endpoint_url(agent_url, protocol_type, streaming=False)
@@ -549,7 +549,7 @@ class A2AClientService:
 
         try:
             # Build request based on protocol type
-            if protocol_type == "JSONRPC":
+            if protocol_type == PROTOCOL_JSONRPC:
                 # JSON-RPC 2.0 format
                 payload = {
                     "jsonrpc": "2.0",
@@ -566,8 +566,6 @@ class A2AClientService:
                 }
 
             logger.info(f"Calling external A2A agent {external_agent_id}: url={endpoint_url}, protocol={protocol_type}, payload={payload}")
-
-            headers = build_a2a_headers(api_key)
 
             async with A2AHttpClient() as client:
                 response = await client.post_json(endpoint_url, payload, headers)
@@ -613,13 +611,13 @@ class A2AClientService:
             raise AgentCallError(f"Agent {external_agent_id} is not available")
 
         agent_url = agent["agent_url"]
-        protocol_type = agent.get("protocol_type", "JSONRPC")
+        protocol_type = agent.get("protocol_type", PROTOCOL_JSONRPC)
 
         # Build complete endpoint URL with protocol path
         endpoint_url = self._build_endpoint_url(agent_url, protocol_type, streaming=True)
 
         # Build request based on protocol type
-        if protocol_type == "JSONRPC":
+        if protocol_type == PROTOCOL_JSONRPC:
             # JSON-RPC 2.0 format
             payload = {
                 "jsonrpc": "2.0",

@@ -3,10 +3,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
+from database.a2a_agent_db import PROTOCOL_JSONRPC
+
 SCHEMA = "nexent"
 
 # Shared doc strings for primary key columns
 _PRIMARY_KEY_DOC = "Primary key, auto-increment"
+_TENANT_ID_DOC = "Tenant ID for multi-tenancy isolation"
 
 # Base class for tables without audit fields
 class SimpleTableBase(DeclarativeBase):
@@ -644,7 +647,7 @@ class A2AExternalAgent(TableBase):
     agent_url = Column(String(512), nullable=False, doc="Primary A2A endpoint URL (http-json-rpc by default)")
 
     # Protocol type for calling this agent: JSONRPC, HTTP+JSON, GRPC
-    protocol_type = Column(String(20), default="JSONRPC", doc="Protocol type for calling this agent")
+    protocol_type = Column(String(20), default=PROTOCOL_JSONRPC, doc="Protocol type for calling this agent")
 
     # Capabilities
     streaming = Column(Boolean, default=False, doc="Whether this agent supports SSE streaming")
@@ -664,7 +667,7 @@ class A2AExternalAgent(TableBase):
     nacos_agent_name = Column(String(255), doc="Original name used for Nacos query")
 
     # Tenant isolation
-    tenant_id = Column(String(100), nullable=False, doc="Tenant ID for multi-tenancy isolation")
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
 
     # Full original Agent Card
     raw_card = Column(JSON, doc="Full original Agent Card JSON from discovery")
@@ -709,7 +712,7 @@ class A2AExternalAgentRelation(TableBase):
     external_agent_id = Column(BigInteger, nullable=False, doc="External A2A agent ID (FK to ag_a2a_external_agent_t.id)")
 
     # Tenant isolation
-    tenant_id = Column(String(100), nullable=False, doc="Tenant ID for multi-tenancy isolation")
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
 
     # Status
     is_enabled = Column(Boolean, default=True, doc="Whether this relation is active")
@@ -730,7 +733,7 @@ class A2AServerAgent(TableBase):
 
     # Ownership
     user_id = Column(String(100), nullable=False, doc="Owner user ID")
-    tenant_id = Column(String(100), nullable=False, doc="Tenant ID for multi-tenancy isolation")
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
 
     # Generated endpoint ID
     endpoint_id = Column(String(64), unique=True, nullable=False, doc="Generated endpoint ID")

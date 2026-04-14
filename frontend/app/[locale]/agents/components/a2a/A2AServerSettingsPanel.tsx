@@ -7,7 +7,7 @@ import {
   Tag,
   message,
 } from "antd";
-import { ExternalLink, Copy, CheckCircle, Info } from "lucide-react";
+import { Copy, CheckCircle, Info } from "lucide-react";
 
 interface A2AServerSettingsPanelProps {
   agentId: number;

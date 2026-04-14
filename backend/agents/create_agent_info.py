@@ -17,6 +17,8 @@ from services.vectordatabase_service import (
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
+
+from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
 from services.image_service import get_vlm_model
 from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
@@ -102,7 +104,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
         api_key=None,
         transport_type=agent.get("transport_type", "http-streaming"),
         protocol_version=agent.get("protocol_version", "1.0"),
-        protocol_type=agent.get("protocol_type", "JSONRPC"),
+        protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
         timeout=300.0,
         raw_card=agent.get("raw_card"),
     )

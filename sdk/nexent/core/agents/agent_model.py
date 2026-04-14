@@ -3,6 +3,11 @@ from __future__ import annotations
 from threading import Event
 from typing import Any, Dict, List, Optional, Union
 
+# Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
+PROTOCOL_JSONRPC = "JSONRPC"
+PROTOCOL_HTTP_JSON = "HTTP+JSON"
+PROTOCOL_GRPC = "GRPC"
+
 from pydantic import BaseModel, Field
 
 from ..utils.observer import MessageObserver
@@ -111,7 +116,7 @@ class ExternalA2AAgentConfig(BaseModel):
     protocol_version: str = Field(description="A2A protocol version", default="1.0")
     protocol_type: str = Field(
         description="Protocol type: JSONRPC, HTTP+JSON, or GRPC",
-        default="JSONRPC"
+        default=PROTOCOL_JSONRPC
     )
     timeout: float = Field(description="Request timeout in seconds", default=300.0)
     raw_card: Optional[Dict[str, Any]] = Field(

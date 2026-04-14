@@ -24,10 +24,10 @@ logger = logging.getLogger("a2a_agent_db")
 # Default cache TTL in seconds (24 hours)
 DEFAULT_CACHE_TTL_HOURS = 24
 
-# Supported protocol bindings
-PROTOCOL_HTTP_JSON_RPC = "http-json-rpc"
-PROTOCOL_REST = "rest"
-PROTOCOL_GRPC = "grpc"
+# Standard human-readable protocol label
+PROTOCOL_HTTP_JSON = "HTTP+JSON"
+PROTOCOL_JSONRPC = "JSONRPC"
+PROTOCOL_GRPC = "GRPC"
 
 
 def _generate_task_id() -> str:
@@ -60,7 +60,7 @@ def _extract_primary_interface(supported_interfaces: List[Dict[str, Any]]) -> tu
 
     # Prefer HTTP+JSON
     for iface in supported_interfaces:
-        if iface.get("protocolBinding", "").upper() in ("HTTP+JSON", "HTTPJSONRPC", "REST"):
+        if iface.get("protocolBinding", "").upper() in (PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC, PROTOCOL_GRPC):
             return (
                 iface.get("url", ""),
                 iface.get("protocolVersion", "1.0")
@@ -112,24 +112,24 @@ def _extract_protocol_type(supported_interfaces: Optional[List[Dict[str, Any]]])
         Defaults to JSONRPC if not found.
     """
     if not supported_interfaces:
-        return "JSONRPC"
+        return PROTOCOL_JSONRPC
 
     # Map protocol bindings to standard values
     protocol_map = {
-        "http-json-rpc": "JSONRPC",
-        "jsonrpc": "JSONRPC",
-        "httpjsonrpc": "JSONRPC",
-        "http+json": "HTTP+JSON",
-        "httprest": "HTTP+JSON",
-        "rest": "HTTP+JSON",
-        "grpc": "GRPC",
+        "http-json-rpc": PROTOCOL_JSONRPC,
+        "jsonrpc": PROTOCOL_JSONRPC,
+        "httpjsonrpc": PROTOCOL_JSONRPC,
+        "http+json": PROTOCOL_HTTP_JSON,
+        "httprest": PROTOCOL_HTTP_JSON,
+        "rest": PROTOCOL_HTTP_JSON,
+        "grpc": PROTOCOL_GRPC,
     }
 
     for iface in supported_interfaces:
         protocol_binding = iface.get("protocolBinding", "").lower()
-        return protocol_map.get(protocol_binding, "JSONRPC")
+        return protocol_map.get(protocol_binding, PROTOCOL_JSONRPC)
 
-    return "JSONRPC"
+    return PROTOCOL_JSONRPC
 
 
 def create_external_agent_from_url(
@@ -450,9 +450,9 @@ def _get_protocol_binding_mapping() -> Dict[str, List[str]]:
         Dict mapping protocol type to list of possible bindings.
     """
     return {
-        "JSONRPC": ["http-json-rpc", "jsonrpc", "httpjsonrpc"],
-        "HTTP+JSON": ["httprest", "rest", "http+json"],
-        "GRPC": ["grpc"],
+        PROTOCOL_JSONRPC: ["http-json-rpc", "jsonrpc", "httpjsonrpc"],
+        PROTOCOL_HTTP_JSON: ["httprest", "rest", "http+json"],
+        PROTOCOL_GRPC: ["grpc"],
     }
 
 
@@ -498,7 +498,7 @@ def update_external_agent_protocol(
     Returns:
         Updated agent information dict or None if not found.
     """
-    valid_protocols = ["JSONRPC", "HTTP+JSON", "GRPC"]
+    valid_protocols = [PROTOCOL_JSONRPC, PROTOCOL_HTTP_JSON, PROTOCOL_GRPC]
     if protocol_type not in valid_protocols:
         raise ValueError(f"Invalid protocol type: {protocol_type}. Must be one of {valid_protocols}")
 
@@ -871,6 +871,68 @@ def list_external_relations_by_local_agent(
 # A2A Server Agent Operations
 # =============================================================================
 
+def _make_default_interfaces(endpoint_id: str) -> List[Dict[str, Any]]:
+    """Build default supportedInterfaces with correct A2A 1.0 format."""
+    return [
+        {"protocolBinding": PROTOCOL_JSONRPC, "url": f"/nb/a2a/{endpoint_id}/v1", "protocolVersion": "1.0"},
+        {"protocolBinding": PROTOCOL_HTTP_JSON, "url": f"/nb/a2a/{endpoint_id}", "protocolVersion": "1.0"},
+    ]
+
+
+def _apply_server_agent_fields(
+    agent,
+    name: Optional[str],
+    description: Optional[str],
+    version: Optional[str],
+    agent_url: Optional[str],
+    streaming: bool,
+    supported_interfaces: Optional[List[Dict[str, Any]]],
+    card_overrides: Optional[Dict[str, Any]],
+) -> None:
+    """Apply optional fields to an existing A2AServerAgent instance."""
+    if name is not None:
+        agent.name = name
+    if description is not None:
+        agent.description = description
+    if version is not None:
+        agent.version = version
+    if agent_url is not None:
+        agent.agent_url = agent_url
+    agent.streaming = streaming
+    if supported_interfaces is not None:
+        agent.supported_interfaces = supported_interfaces
+    if card_overrides is not None:
+        agent.card_overrides = card_overrides
+
+
+def _serialize_server_agent(
+    agent,
+    include_unpublished: bool = False,
+    include_user_info: bool = False,
+) -> Dict[str, Any]:
+    """Serialize an A2AServerAgent model to dict."""
+    result = {
+        "id": agent.id,
+        "agent_id": agent.agent_id,
+        "endpoint_id": agent.endpoint_id,
+        "name": agent.name,
+        "description": agent.description,
+        "version": agent.version,
+        "agent_url": agent.agent_url,
+        "streaming": agent.streaming,
+        "supported_interfaces": agent.supported_interfaces,
+        "card_overrides": agent.card_overrides,
+        "is_enabled": agent.is_enabled,
+        "published_at": agent.published_at.isoformat() if agent.published_at else None,
+    }
+    if include_unpublished:
+        result["unpublished_at"] = agent.unpublished_at.isoformat() if agent.unpublished_at else None
+    if include_user_info:
+        result["user_id"] = agent.user_id
+        result["tenant_id"] = agent.tenant_id
+    return result
+
+
 def create_server_agent(
     agent_id: int,
     user_id: str,
@@ -904,7 +966,6 @@ def create_server_agent(
     now = datetime.now(timezone.utc)
 
     with get_db_session() as session:
-        # Check if already exists
         existing = session.query(A2AServerAgent).filter(
             A2AServerAgent.agent_id == agent_id,
             A2AServerAgent.tenant_id == tenant_id,
@@ -912,37 +973,21 @@ def create_server_agent(
         ).first()
 
         if existing:
-            # Use existing endpoint_id
             endpoint_id = existing.endpoint_id
-            # Auto-generate supported_interfaces with correct A2A 1.0 format
             if supported_interfaces is None:
-                supported_interfaces = [
-                    {"protocolBinding": "JSONRPC", "url": f"/nb/a2a/{endpoint_id}/v1", "protocolVersion": "1.0"},
-                    {"protocolBinding": "HTTP+JSON", "url": f"/nb/a2a/{endpoint_id}", "protocolVersion": "1.0"},
-                ]
-            existing.name = name
-            existing.description = description
-            existing.version = version
-            if agent_url is not None:
-                existing.agent_url = agent_url
-            existing.streaming = streaming
-            existing.supported_interfaces = supported_interfaces
-            if card_overrides is not None:
-                existing.card_overrides = card_overrides
-            # Enable and update published_at when re-publishing
+                supported_interfaces = _make_default_interfaces(endpoint_id)
+            _apply_server_agent_fields(
+                existing, name, description, version, agent_url,
+                streaming, supported_interfaces, card_overrides
+            )
             existing.is_enabled = True
             existing.published_at = now
             existing.updated_by = user_id
             agent = existing
         else:
-            # Generate new endpoint_id for new agent
             endpoint_id = _generate_endpoint_id(agent_id)
-            # Auto-generate supported_interfaces with correct A2A 1.0 format
             if supported_interfaces is None:
-                supported_interfaces = [
-                    {"protocolBinding": "JSONRPC", "url": f"/nb/a2a/{endpoint_id}/v1", "protocolVersion": "1.0"},
-                    {"protocolBinding": "HTTP+JSON", "url": f"/nb/a2a/{endpoint_id}", "protocolVersion": "1.0"},
-                ]
+                supported_interfaces = _make_default_interfaces(endpoint_id)
             agent = A2AServerAgent(
                 agent_id=agent_id,
                 user_id=user_id,
@@ -964,23 +1009,7 @@ def create_server_agent(
             session.add(agent)
 
         session.flush()
-
-        return {
-            "id": agent.id,
-            "agent_id": agent.agent_id,
-            "endpoint_id": agent.endpoint_id,
-            "user_id": agent.user_id,
-            "tenant_id": agent.tenant_id,
-            "name": agent.name,
-            "description": agent.description,
-            "version": agent.version,
-            "agent_url": agent.agent_url,
-            "streaming": agent.streaming,
-            "supported_interfaces": agent.supported_interfaces,
-            "card_overrides": agent.card_overrides,
-            "is_enabled": agent.is_enabled,
-            "published_at": agent.published_at.isoformat() if agent.published_at else None,
-        }
+        return _serialize_server_agent(agent, include_user_info=True)
 
 def get_server_agent_by_endpoint(endpoint_id: str) -> Optional[Dict[str, Any]]:
     """Get an A2A Server agent by endpoint_id.
@@ -1000,23 +1029,7 @@ def get_server_agent_by_endpoint(endpoint_id: str) -> Optional[Dict[str, Any]]:
         if not agent:
             return None
 
-        return {
-            "id": agent.id,
-            "agent_id": agent.agent_id,
-            "endpoint_id": agent.endpoint_id,
-            "user_id": agent.user_id,
-            "tenant_id": agent.tenant_id,
-            "name": agent.name,
-            "description": agent.description,
-            "version": agent.version,
-            "agent_url": agent.agent_url,
-            "streaming": agent.streaming,
-            "supported_interfaces": agent.supported_interfaces,
-            "card_overrides": agent.card_overrides,
-            "is_enabled": agent.is_enabled,
-            "published_at": agent.published_at.isoformat() if agent.published_at else None,
-            "unpublished_at": agent.unpublished_at.isoformat() if agent.unpublished_at else None,
-        }
+        return _serialize_server_agent(agent, include_unpublished=True, include_user_info=True)
 
 
 def get_server_agent_by_agent_id(agent_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
@@ -1039,22 +1052,7 @@ def get_server_agent_by_agent_id(agent_id: int, tenant_id: str) -> Optional[Dict
         if not agent:
             return None
 
-        return {
-            "id": agent.id,
-            "agent_id": agent.agent_id,
-            "endpoint_id": agent.endpoint_id,
-            "user_id": agent.user_id,
-            "tenant_id": agent.tenant_id,
-            "name": agent.name,
-            "description": agent.description,
-            "version": agent.version,
-            "agent_url": agent.agent_url,
-            "streaming": agent.streaming,
-            "supported_interfaces": agent.supported_interfaces,
-            "card_overrides": agent.card_overrides,
-            "is_enabled": agent.is_enabled,
-            "published_at": agent.published_at.isoformat() if agent.published_at else None,
-        }
+        return _serialize_server_agent(agent, include_user_info=True)
 
 
 def enable_server_agent(
@@ -1096,8 +1094,9 @@ def enable_server_agent(
         ).first()
 
         if not agent:
-            # Create new if not exists
             endpoint_id = _generate_endpoint_id(agent_id)
+            if supported_interfaces is None:
+                supported_interfaces = _make_default_interfaces(endpoint_id)
             agent = A2AServerAgent(
                 agent_id=agent_id,
                 user_id=user_id,
@@ -1118,40 +1117,17 @@ def enable_server_agent(
             )
             session.add(agent)
         else:
+            _apply_server_agent_fields(
+                agent, name, description, version, agent_url,
+                streaming, supported_interfaces, card_overrides
+            )
             agent.is_enabled = True
-            if name is not None:
-                agent.name = name
-            if description is not None:
-                agent.description = description
-            if version is not None:
-                agent.version = version
-            if agent_url is not None:
-                agent.agent_url = agent_url
-            agent.streaming = streaming
-            if supported_interfaces is not None:
-                agent.supported_interfaces = supported_interfaces
-            if card_overrides is not None:
-                agent.card_overrides = card_overrides
             agent.published_at = now
             agent.unpublished_at = None
             agent.updated_by = user_id
 
         session.flush()
-
-        return {
-            "id": agent.id,
-            "agent_id": agent.agent_id,
-            "endpoint_id": agent.endpoint_id,
-            "name": agent.name,
-            "description": agent.description,
-            "version": agent.version,
-            "agent_url": agent.agent_url,
-            "streaming": agent.streaming,
-            "supported_interfaces": agent.supported_interfaces,
-            "card_overrides": agent.card_overrides,
-            "is_enabled": agent.is_enabled,
-            "published_at": agent.published_at.isoformat() if agent.published_at else None,
-        }
+        return _serialize_server_agent(agent)
 
 
 def disable_server_agent(agent_id: int, tenant_id: str, user_id: str) -> bool:

@@ -16,6 +16,11 @@ AGENT_CARD_TIMEOUT = 10.0
 DEFAULT_MAX_RETRIES = 3
 RETRY_BACKOFF_FACTOR = 0.5
 
+# Runtime error message
+ERR_CLIENT_NOT_INITIALIZED = "Client not initialized. Use async context manager."
+# Content type / accept header for JSON payloads
+CONTENT_TYPE_JSON = "application/json"
+
 
 class A2AHttpClient:
     """HTTP client for A2A protocol communication."""
@@ -147,12 +152,12 @@ class A2AHttpClient:
     ) -> Dict[str, Any]:
         """Send a GET request and return JSON response."""
         if not self._session:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+            raise RuntimeError(ERR_CLIENT_NOT_INITIALIZED)
 
         # Add default headers if not provided
         request_headers = {
             "User-Agent": "Nexent-A2A-Client/1.0",
-            "Accept": "application/json",
+            "Accept": CONTENT_TYPE_JSON,
             "Connection": "close",
         }
         if headers:
@@ -161,7 +166,7 @@ class A2AHttpClient:
         logger.debug(f"A2A GET request: url={url}")
 
         try:
-            status, body = await self._request_with_retry(
+            _, body = await self._request_with_retry(
                 "GET",
                 url,
                 headers=request_headers
@@ -189,12 +194,12 @@ class A2AHttpClient:
     ) -> Dict[str, Any]:
         """Send a POST request and return JSON response."""
         if not self._session:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+            raise RuntimeError(ERR_CLIENT_NOT_INITIALIZED)
 
         # Add default headers if not provided
         request_headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Content-Type": CONTENT_TYPE_JSON,
+            "Accept": CONTENT_TYPE_JSON,
             "Connection": "close",
         }
         if headers:
@@ -203,7 +208,7 @@ class A2AHttpClient:
         logger.info(f"A2A POST request: url={url}, payload={payload}")
 
         try:
-            status, body = await self._request_with_retry(
+            _, body = await self._request_with_retry(
                 "POST",
                 url,
                 json=payload,
@@ -232,7 +237,7 @@ class A2AHttpClient:
     ) -> AsyncIterator[Dict[str, Any]]:
         """Send a streaming POST request and yield SSE events."""
         if not self._session:
-            raise RuntimeError("Client not initialized. Use async context manager.")
+            raise RuntimeError(ERR_CLIENT_NOT_INITIALIZED)
 
         try:
             response = await self._session.post(
@@ -263,8 +268,8 @@ class A2AHttpClient:
 def build_a2a_headers(api_key: Optional[str] = None) -> Dict[str, str]:
     """Build HTTP headers for A2A requests."""
     headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
+        "Content-Type": CONTENT_TYPE_JSON,
+        "Accept": CONTENT_TYPE_JSON,
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

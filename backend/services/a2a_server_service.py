@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
 from database import a2a_agent_db
+from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 from services.a2a_agent_adapter import A2AAgentAdapter, A2AExecutionContext
 from consts.a2a_models import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvider
 from consts.const import NORTHBOUND_EXTERNAL_URL
@@ -289,72 +290,34 @@ class A2AServerService:
     # Agent Card
     # =============================================================================
 
-    def get_agent_card(
+    def _resolve_base_url(self, use_northbound: bool, base_url: Optional[str]) -> str:
+        """Resolve effective base URL with priority: NORTHBOUND_EXTERNAL_URL > base_url > empty."""
+        if use_northbound:
+            return NORTHBOUND_EXTERNAL_URL
+        if base_url:
+            return base_url
+        logger.warning("A2A Agent Card: no base URL available")
+        return ""
+
+    def _resolve_agent_url(self, stored_url: Optional[str], effective_base: str) -> str:
+        """Resolve the primary agent URL: stored URL > constructed from base."""
+        if stored_url:
+            return stored_url
+        return effective_base.rstrip("/") if effective_base else ""
+
+    def _build_agent_card_base(
         self,
-        endpoint_id: str,
-        base_url: Optional[str] = None,
-        use_northbound: bool = True
+        name: str,
+        description: str,
+        version: str,
+        streaming: bool,
+        effective_base_url: str,
+        supported_interfaces: List[Dict[str, Any]],
+        agent_url: str,
+        agent_info: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Generate Agent Card for an endpoint.
-
-        Args:
-            endpoint_id: The endpoint ID.
-            base_url: Optional base URL override for constructing endpoint URLs.
-
-        Returns:
-            Agent Card dict.
-
-        Raises:
-            EndpointNotFoundError: If endpoint not found or disabled.
-        """
-        server_agent = a2a_agent_db.get_server_agent_by_endpoint(endpoint_id)
-        if not server_agent:
-            raise EndpointNotFoundError(f"Endpoint {endpoint_id} not found")
-
-        if not server_agent.get("is_enabled"):
-            raise EndpointNotFoundError(f"Endpoint {endpoint_id} is not enabled")
-
-        from database.agent_db import search_agent_info_by_agent_id
-        agent_info = search_agent_info_by_agent_id(
-            agent_id=server_agent["agent_id"],
-            tenant_id=server_agent["tenant_id"]
-        )
-
-        # Use stored values or fall back to agent info
-        name = server_agent.get("name") or agent_info.get("name", "Nexent Agent")
-        description = server_agent.get("description") or agent_info.get("description", "")
-        version = server_agent.get("version") or "1.0.0"
-        streaming = server_agent.get("streaming", False)
-
-        # Determine effective base URL for constructing endpoints
-        # Priority: 1. NORTHBOUND_EXTERNAL_URL (default: http://localhost:5013),
-        #          2. provided base_url (request.base_url)
-        use_nb = use_northbound
-
-        if use_nb:
-            # Use NORTHBOUND_EXTERNAL_URL with fallback to base_url or localhost
-            effective_base_url = NORTHBOUND_EXTERNAL_URL
-        elif base_url:
-            effective_base_url = base_url
-        else:
-            effective_base_url = ""
-            logger.warning(f"A2A Agent Card: no base URL available")
-
-        # Build supported interfaces from base URL
-        # Always regenerate to ensure absolute URLs with current base URL
-        prefix = "/nb/a2a" if use_nb else "/a2a"
-        if effective_base_url:
-            supported_interfaces = self._build_supported_interfaces(effective_base_url, endpoint_id, prefix)
-        else:
-            supported_interfaces = []
-
-        # Get primary agent_url - prefer stored URL, otherwise use external URL
-        if server_agent.get("agent_url"):
-            agent_url = server_agent["agent_url"]
-        else:
-            agent_url = effective_base_url.rstrip("/") if effective_base_url else ""
-
-        agent_card = {
+        """Build the base Agent Card dict before applying overrides."""
+        return {
             "name": name,
             "description": description,
             "version": version,
@@ -377,6 +340,62 @@ class A2AServerService:
             "security": [],
         }
 
+    def get_agent_card(
+        self,
+        endpoint_id: str,
+        base_url: Optional[str] = None,
+        use_northbound: bool = True
+    ) -> Dict[str, Any]:
+        """Generate Agent Card for an endpoint.
+
+        Args:
+            endpoint_id: The endpoint ID.
+            base_url: Optional base URL override for constructing endpoint URLs.
+
+        Returns:
+            Agent Card dict.
+
+        Raises:
+            EndpointNotFoundError: If endpoint not found or disabled.
+        """
+        server_agent = a2a_agent_db.get_server_agent_by_endpoint(endpoint_id)
+        if not server_agent:
+            raise EndpointNotFoundError(f"Endpoint {endpoint_id} not found")
+        if not server_agent.get("is_enabled"):
+            raise EndpointNotFoundError(f"Endpoint {endpoint_id} is not enabled")
+
+        from database.agent_db import search_agent_info_by_agent_id
+        agent_info = search_agent_info_by_agent_id(
+            agent_id=server_agent["agent_id"],
+            tenant_id=server_agent["tenant_id"]
+        )
+
+        name = server_agent.get("name") or agent_info.get("name", "Nexent Agent")
+        description = server_agent.get("description") or agent_info.get("description", "")
+        version = server_agent.get("version") or "1.0.0"
+        streaming = server_agent.get("streaming", False)
+
+        effective_base_url = self._resolve_base_url(use_northbound, base_url)
+        prefix = "/nb/a2a" if use_northbound else "/a2a"
+
+        if effective_base_url:
+            supported_interfaces = self._build_supported_interfaces(effective_base_url, endpoint_id, prefix)
+        else:
+            supported_interfaces = []
+
+        agent_url = self._resolve_agent_url(server_agent.get("agent_url"), effective_base_url)
+
+        agent_card = self._build_agent_card_base(
+            name=name,
+            description=description,
+            version=version,
+            streaming=streaming,
+            effective_base_url=effective_base_url,
+            supported_interfaces=supported_interfaces,
+            agent_url=agent_url,
+            agent_info=agent_info
+        )
+
         card_overrides = server_agent.get("card_overrides", {})
         if card_overrides:
             agent_card.update(card_overrides)
@@ -396,8 +415,8 @@ class A2AServerService:
         """
         base = base_url.rstrip("/") if base_url else ""
         return [
-            {"protocolBinding": "JSONRPC", "url": f"{base}{prefix}/{endpoint_id}/v1", "protocolVersion": "1.0"},
-            {"protocolBinding": "HTTP+JSON", "url": f"{base}{prefix}/{endpoint_id}", "protocolVersion": "1.0"},
+            {"protocolBinding": PROTOCOL_JSONRPC, "url": f"{base}{prefix}/{endpoint_id}/v1", "protocolVersion": "1.0"},
+            {"protocolBinding": PROTOCOL_HTTP_JSON, "url": f"{base}{prefix}/{endpoint_id}", "protocolVersion": "1.0"},
         ]
 
     def _build_skills_from_agent(self, agent_info: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -415,6 +434,124 @@ class A2AServerService:
     # =============================================================================
     # Task Management
     # =============================================================================
+
+    TERMINAL_STATES = frozenset(("TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"))
+
+    def _validate_endpoint(self, endpoint_id: str) -> Dict[str, Any]:
+        """Validate endpoint exists and is enabled. Returns server_agent dict."""
+        server_agent = a2a_agent_db.get_server_agent_by_endpoint(endpoint_id)
+        if not server_agent:
+            raise EndpointNotFoundError(f"Endpoint {endpoint_id} not found")
+        if not server_agent.get("is_enabled"):
+            raise AgentNotEnabledError(f"A2A Server not enabled for endpoint {endpoint_id}")
+        return server_agent
+
+    def _resolve_task_id(
+        self,
+        parsed_message: Dict[str, Any],
+        endpoint_id: str,
+        user_id: Optional[str],
+        tenant_id: Optional[str],
+        server_agent: Dict[str, Any],
+    ) -> tuple[Optional[str], Optional[str], bool]:
+        """Resolve task_id, context_id, and is_complex flag from parsed A2A message.
+
+        Returns:
+            Tuple of (task_id, context_id, is_complex_request).
+        Raises TaskNotFoundError or UnsupportedOperationError on invalid client taskId.
+        """
+        message_obj = parsed_message.get("message", {})
+        client_task_id = message_obj.get("taskId")
+        context_id = message_obj.get("contextId")
+        has_history = bool(parsed_message.get("history"))
+        is_complex_request = bool(context_id or has_history or client_task_id)
+
+        if client_task_id:
+            existing_task = a2a_agent_db.get_task(client_task_id)
+            if not existing_task:
+                raise TaskNotFoundError(f"Task {client_task_id} not found")
+            if existing_task.get("task_state") in self.TERMINAL_STATES:
+                raise UnsupportedOperationError(f"Task {client_task_id} is already terminated")
+            task_id = client_task_id
+        elif is_complex_request:
+            task_id = _generate_task_id()
+        else:
+            task_id = None
+
+        if is_complex_request and not client_task_id:
+            a2a_agent_db.create_task(
+                task_id=task_id,
+                endpoint_id=endpoint_id,
+                caller_user_id=user_id,
+                caller_tenant_id=tenant_id,
+                raw_request=parsed_message.get("raw_request", {}),
+                context_id=context_id
+            )
+
+        return task_id, context_id, is_complex_request
+
+    async def _collect_stream_text(self, stream_response) -> str:
+        """Collect and accumulate text from a streaming response."""
+        accumulated = []
+        async for chunk in stream_response.body_iterator:
+            if isinstance(chunk, bytes):
+                chunk = chunk.decode("utf-8")
+            if chunk.startswith("data: "):
+                data_str = chunk[6:].strip()
+                if not data_str:
+                    continue
+                try:
+                    chunk_data = json.loads(data_str)
+                    text = self.adapter.extract_stream_chunk(chunk_data)
+                    if text:
+                        accumulated.append(text)
+                except json.JSONDecodeError:
+                    pass
+        return "".join(accumulated)
+
+    def _store_user_message(self, task_id: Optional[str], message_obj: Dict[str, Any], endpoint_id: str) -> None:
+        """Extract and store user message parts."""
+        user_parts = message_obj.get("parts", [])
+        if not user_parts and message_obj.get("text"):
+            user_parts = [{"type": "text", "text": message_obj.get("text")}]
+        a2a_agent_db.create_message(
+            task_id=task_id,
+            role="ROLE_USER",
+            parts=user_parts,
+            metadata={"endpoint_id": endpoint_id}
+        )
+
+    def _store_agent_response(self, task_id: Optional[str], accumulated_text: str, endpoint_id: str) -> None:
+        """Store agent response and update task state."""
+        agent_parts = [{"type": "text", "text": accumulated_text, "mediaType": "text/plain"}] if accumulated_text else []
+        a2a_agent_db.create_message(
+            task_id=task_id,
+            role="ROLE_AGENT",
+            parts=agent_parts,
+            metadata={"endpoint_id": endpoint_id}
+        )
+        if task_id:
+            a2a_agent_db.update_task_state(
+                task_id=task_id,
+                task_state="TASK_STATE_COMPLETED",
+                result_data={"message": accumulated_text}
+            )
+
+    def _store_error_response(self, task_id: Optional[str], error: str, endpoint_id: str) -> None:
+        """Store error message and update task state on failure."""
+        error_parts = [{"type": "text", "text": f"Error: {error}", "mediaType": "text/plain"}]
+        a2a_agent_db.create_message(
+            task_id=task_id,
+            role="ROLE_AGENT",
+            parts=error_parts,
+            metadata={"endpoint_id": endpoint_id, "error": True}
+        )
+        if task_id:
+            a2a_agent_db.update_task_state(
+                task_id=task_id,
+                task_state="TASK_STATE_FAILED",
+                result_data={"error": error}
+            )
 
     async def handle_message_send(
         self,
@@ -444,50 +581,14 @@ class A2AServerService:
             EndpointNotFoundError: If endpoint not found.
             AgentNotEnabledError: If agent is not enabled.
         """
-        # Validate endpoint
-        server_agent = a2a_agent_db.get_server_agent_by_endpoint(endpoint_id)
-        if not server_agent:
-            raise EndpointNotFoundError(f"Endpoint {endpoint_id} not found")
-
-        if not server_agent.get("is_enabled"):
-            raise AgentNotEnabledError(f"A2A Server not enabled for endpoint {endpoint_id}")
-
-        # Parse A2A message first to check for client-provided taskId
+        server_agent = self._validate_endpoint(endpoint_id)
         parsed_message = self.adapter.parse_a2a_message(message)
-
-        # Extract client-provided taskId (A2A spec: client should not provide taskId for new tasks)
-        # but we handle it according to spec:
-        # - If taskId provided but task doesn't exist: TaskNotFoundError
-        # - If taskId provided but task is terminated: UnsupportedOperationError
         message_obj = parsed_message.get("message", {})
-        client_task_id = message_obj.get("taskId")
 
-        # Extract contextId and history from message object (A2A spec)
-        context_id = message_obj.get("contextId")
-        has_history = bool(parsed_message.get("history"))
+        task_id, context_id, _ = self._resolve_task_id(
+            parsed_message, endpoint_id, user_id, tenant_id, server_agent
+        )
 
-        # Determine if this is a complex request (needs Task) or simple request
-        # Complex request: has contextId or history or client_task_id
-        is_complex_request = bool(context_id or has_history or client_task_id)
-
-        # Handle task_id based on request type
-        if client_task_id:
-            # Client provided taskId - check if it exists and is valid
-            existing_task = a2a_agent_db.get_task(client_task_id)
-            if not existing_task:
-                raise TaskNotFoundError(f"Task {client_task_id} not found")
-            # Check if task is in terminal state
-            if existing_task.get("task_state") in ("TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"):
-                raise UnsupportedOperationError(f"Task {client_task_id} is already terminated")
-            task_id = client_task_id
-        elif is_complex_request:
-            # Complex request without taskId - generate new task
-            task_id = _generate_task_id()
-        else:
-            # Simple request - no task needed
-            task_id = None
-
-        # Create execution context
         context = A2AExecutionContext(
             task_id=task_id or "simple",
             endpoint_id=endpoint_id,
@@ -499,55 +600,28 @@ class A2AServerService:
             is_debug=True
         )
 
-        # Create task in database only for complex requests
-        if is_complex_request and not client_task_id:
-            a2a_agent_db.create_task(
-                task_id=task_id,
-                endpoint_id=endpoint_id,
-                caller_user_id=user_id,
-                caller_tenant_id=tenant_id,
-                raw_request=message,
-                context_id=context_id
-            )
+        self._store_user_message(task_id, message_obj, endpoint_id)
 
-        # Extract user message parts for storage
-        user_parts = message_obj.get("parts", [])
-        if not user_parts and message_obj.get("text"):
-            user_parts = [{"type": "text", "text": message_obj.get("text")}]
-
-        # Store user message (always, even for simple requests)
-        a2a_agent_db.create_message(
-            task_id=task_id,
-            role="ROLE_USER",
-            parts=user_parts,
-            metadata={"endpoint_id": endpoint_id}
-        )
-
-        # Build internal request
         internal_request = self.adapter.build_agent_request(
             parsed_message,
             context,
             server_agent["agent_id"]
         )
 
-        # Execute agent and wait for completion
         try:
-            # Import and call agent service
             from services.agent_service import run_agent_stream
             from consts.model import AgentRequest
             from starlette.requests import Request
 
-            # Build AgentRequest
             agent_request = AgentRequest(
-                conversation_id=None,  # A2A creates new conversation internally
+                conversation_id=None,
                 agent_id=internal_request["agent_id"],
                 query=internal_request["query"],
                 history=internal_request.get("history", []),
                 minio_files=None,
-                is_debug=internal_request.get("is_debug", True)  # Use context is_debug flag
+                is_debug=internal_request.get("is_debug", True)
             )
 
-            # Create a mock Request for the agent
             mock_request = Request({
                 "type": "http",
                 "method": "POST",
@@ -555,11 +629,6 @@ class A2AServerService:
                 "headers": [],
                 "query_string": b""
             })
-
-            # Collect streaming response
-            accumulated_text = ""
-            final_status = "working"
-            final_error = None
 
             stream_response = await run_agent_stream(
                 agent_request=agent_request,
@@ -569,57 +638,19 @@ class A2AServerService:
                 tenant_id=tenant_id or server_agent.get("tenant_id")
             )
 
-            async for chunk in stream_response.body_iterator:
-                if isinstance(chunk, bytes):
-                    chunk = chunk.decode("utf-8")
-                if chunk.startswith("data: "):
-                    data_str = chunk[6:].strip()
-                    if data_str:
-                        try:
-                            chunk_data = json.loads(data_str)
-                            text = self.adapter.extract_stream_chunk(chunk_data)
-                            if text:
-                                accumulated_text += text
-                        except json.JSONDecodeError:
-                            pass
+            accumulated_text = await self._collect_stream_text(stream_response)
+            self._store_agent_response(task_id, accumulated_text, endpoint_id)
 
-            # Determine final status
-            if accumulated_text:
-                final_status = "TASK_STATE_COMPLETED"
-            else:
-                final_status = "TASK_STATE_COMPLETED"  # Default to completed
-
-            # Store agent response message
-            agent_parts = [{"type": "text", "text": accumulated_text, "mediaType": "text/plain"}] if accumulated_text else []
-            a2a_agent_db.create_message(
-                task_id=task_id,
-                role="ROLE_AGENT",
-                parts=agent_parts,
-                metadata={"endpoint_id": endpoint_id}
-            )
-
-            # Update task as completed (only for complex requests with task)
-            if task_id:
-                a2a_agent_db.update_task_state(
-                    task_id=task_id,
-                    task_state=final_status,
-                    result_data={"message": accumulated_text}
-                )
-
-            # Determine response format based on request type
             if is_complex_request:
-                # Complex request → return Task format with full details
                 from datetime import datetime, timezone
-
                 return self.adapter.build_a2a_task_response(
                     task_id=task_id,
-                    status=final_status,
-                    parts=agent_parts if accumulated_text else None,
+                    status="TASK_STATE_COMPLETED",
+                    parts=[{"type": "text", "text": accumulated_text, "mediaType": "text/plain"}] if accumulated_text else None,
                     context_id=context_id,
                     timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 )
             else:
-                # Simple request → return Message format
                 return self.adapter.build_a2a_message_response(
                     role="ROLE_AGENT",
                     text=accumulated_text,
@@ -629,25 +660,7 @@ class A2AServerService:
 
         except Exception as e:
             logger.error(f"A2A task execution failed: {e}")
-
-            # Store error message
-            error_parts = [{"type": "text", "text": f"Error: {str(e)}", "mediaType": "text/plain"}]
-            a2a_agent_db.create_message(
-                task_id=task_id,
-                role="ROLE_AGENT",
-                parts=error_parts,
-                metadata={"endpoint_id": endpoint_id, "error": True}
-            )
-
-            # Update task status to failed (only for complex requests with task)
-            if task_id:
-                a2a_agent_db.update_task_state(
-                    task_id=task_id,
-                    task_state="TASK_STATE_FAILED",
-                    result_data={"error": str(e)}
-                )
-
-            # Return error as Message format (errors are typically simple)
+            self._store_error_response(task_id, str(e), endpoint_id)
             return self.adapter.build_a2a_message_response(
                 role="ROLE_AGENT",
                 text=f"Error: {str(e)}",
@@ -683,50 +696,14 @@ class A2AServerService:
             EndpointNotFoundError: If endpoint not found.
             AgentNotEnabledError: If agent is not enabled.
         """
-        # Validate endpoint
-        server_agent = a2a_agent_db.get_server_agent_by_endpoint(endpoint_id)
-        if not server_agent:
-            raise EndpointNotFoundError(f"Endpoint {endpoint_id} not found")
-
-        if not server_agent.get("is_enabled"):
-            raise AgentNotEnabledError(f"A2A Server not enabled for endpoint {endpoint_id}")
-
-        # Parse A2A message first to check for client-provided taskId
+        server_agent = self._validate_endpoint(endpoint_id)
         parsed_message = self.adapter.parse_a2a_message(message)
-
-        # Extract client-provided taskId (A2A spec: client should not provide taskId for new tasks)
-        # but we handle it according to spec:
-        # - If taskId provided but task doesn't exist: TaskNotFoundError
-        # - If taskId provided but task is terminated: UnsupportedOperationError
         message_obj = parsed_message.get("message", {})
-        client_task_id = message_obj.get("taskId")
 
-        # Extract contextId and history from message object (A2A spec)
-        context_id = message_obj.get("contextId")
-        has_history = bool(parsed_message.get("history"))
+        task_id, context_id, _ = self._resolve_task_id(
+            parsed_message, endpoint_id, user_id, tenant_id, server_agent
+        )
 
-        # Determine if this is a complex request (needs Task) or simple request
-        # Complex request: has contextId or history or client_task_id
-        is_complex_request = bool(context_id or has_history or client_task_id)
-
-        # Handle task_id based on request type
-        if client_task_id:
-            # Client provided taskId - check if it exists and is valid
-            existing_task = a2a_agent_db.get_task(client_task_id)
-            if not existing_task:
-                raise TaskNotFoundError(f"Task {client_task_id} not found")
-            # Check if task is in terminal state
-            if existing_task.get("task_state") in ("TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"):
-                raise UnsupportedOperationError(f"Task {client_task_id} is already terminated")
-            task_id = client_task_id
-        elif is_complex_request:
-            # Complex request without taskId - generate new task
-            task_id = _generate_task_id()
-        else:
-            # Simple request - no task needed
-            task_id = None
-
-        # Create execution context
         context = A2AExecutionContext(
             task_id=task_id or "simple",
             endpoint_id=endpoint_id,
@@ -738,32 +715,9 @@ class A2AServerService:
             is_debug=True
         )
 
-        # Create task in database only for complex requests
-        if is_complex_request and not client_task_id:
-            a2a_agent_db.create_task(
-                task_id=task_id,
-                endpoint_id=endpoint_id,
-                caller_user_id=user_id,
-                caller_tenant_id=tenant_id,
-                raw_request=message,
-                context_id=context_id
-            )
+        self._store_user_message(task_id, message_obj, endpoint_id)
 
-        # Extract user message parts for storage
-        user_parts = message_obj.get("parts", [])
-        if not user_parts and message_obj.get("text"):
-            user_parts = [{"type": "text", "text": message_obj.get("text")}]
-
-        # Store user message (always, even for simple requests)
-        a2a_agent_db.create_message(
-            task_id=task_id,
-            role="ROLE_USER",
-            parts=user_parts,
-            metadata={"endpoint_id": endpoint_id}
-        )
-
-        # For streaming, always yield task events (A2A spec requires SSE for streaming)
-        # Yield initial status
+        # Yield initial working status
         yield self.adapter.build_a2a_task_event(
             task_id=task_id or "simple",
             event_type="taskStatusUpdate",
@@ -771,16 +725,15 @@ class A2AServerService:
             context_id=context_id
         )
 
-        # Build internal request
         internal_request = self.adapter.build_agent_request(
             parsed_message,
             context,
             server_agent["agent_id"]
         )
 
-        # Execute agent with streaming
         try:
             from consts.model import AgentRequest
+            from starlette.requests import Request
 
             agent_request = AgentRequest(
                 conversation_id=None,
@@ -788,108 +741,58 @@ class A2AServerService:
                 query=internal_request["query"],
                 history=internal_request.get("history", []),
                 minio_files=None,
-                is_debug=internal_request.get("is_debug", True)  # Use context is_debug flag
+                is_debug=internal_request.get("is_debug", True)
             )
 
-            # Stream from agent service
-            # Note: This requires integration with the actual agent execution
-            # For now, yield a placeholder response
+            mock_request = Request({
+                "type": "http",
+                "method": "POST",
+                "path": f"/a2a/{endpoint_id}/message:stream",
+                "headers": [],
+                "query_string": b""
+            })
+
+            from services.agent_service import run_agent_stream
+            stream_response = await run_agent_stream(
+                agent_request=agent_request,
+                http_request=mock_request,
+                authorization=None,
+                user_id=user_id,
+                tenant_id=tenant_id or server_agent.get("tenant_id")
+            )
+
             accumulated_text = ""
-
-            async def run_and_stream():
-                nonlocal accumulated_text
+            async for chunk in stream_response.body_iterator:
+                if isinstance(chunk, bytes):
+                    chunk = chunk.decode("utf-8")
+                if not chunk.startswith("data: "):
+                    continue
+                data_str = chunk[6:].strip()
+                if not data_str:
+                    continue
                 try:
-                    # Import the streaming function
-                    from services.agent_service import run_agent_stream
-                    from starlette.requests import Request
+                    chunk_data = json.loads(data_str)
+                    text = self.adapter.extract_stream_chunk(chunk_data)
+                    if text:
+                        accumulated_text += text
+                        yield self.adapter.build_a2a_task_event(
+                            task_id=task_id,
+                            event_type="taskProgress",
+                            data={"content": text, "lastChunk": False},
+                            context_id=context_id
+                        )
+                except json.JSONDecodeError:
+                    pass
 
-                    # Create a mock Request for the agent
-                    # In production, this would be the actual HTTP request
-                    mock_request = Request({
-                        "type": "http",
-                        "method": "POST",
-                        "path": f"/a2a/{endpoint_id}/message:stream",
-                        "headers": [],
-                        "query_string": b""
-                    })
+            self._store_agent_response(task_id, accumulated_text, endpoint_id)
 
-                    # Stream from agent
-                    stream_response = await run_agent_stream(
-                        agent_request=agent_request,
-                        http_request=mock_request,
-                        authorization=None,
-                        user_id=user_id,
-                        tenant_id=tenant_id or server_agent.get("tenant_id")
-                    )
-
-                    # Process streaming response
-                    async for chunk in stream_response.body_iterator:
-                        if isinstance(chunk, bytes):
-                            chunk = chunk.decode("utf-8")
-
-                        # Parse SSE chunk
-                        if chunk.startswith("data: "):
-                            data_str = chunk[6:].strip()
-                            if data_str:
-                                try:
-                                    chunk_data = json.loads(data_str)
-                                    text = self.adapter.extract_stream_chunk(chunk_data)
-                                    if text:
-                                        accumulated_text += text
-                                        yield self.adapter.build_a2a_task_event(
-                                            task_id=task_id,
-                                            event_type="taskProgress",
-                                            data={
-                                                "content": text,
-                                                "lastChunk": False
-                                            },
-                                            context_id=context_id
-                                        )
-                                except json.JSONDecodeError:
-                                    pass
-
-                except Exception as e:
-                    logger.error(f"Streaming execution failed: {e}")
-                    yield self.adapter.build_a2a_task_event(
-                        task_id=task_id,
-                        event_type="taskStatusUpdate",
-                        data={"status": {"state": "TASK_STATE_FAILED", "message": str(e)}},
-                        context_id=context_id
-                    )
-
-            # Run and stream
-            async for event in run_and_stream():
-                yield event
-
-            # Store agent response message
-            agent_parts = [{"type": "text", "text": accumulated_text, "mediaType": "text/plain"}] if accumulated_text else []
-            a2a_agent_db.create_message(
-                task_id=task_id,
-                role="ROLE_AGENT",
-                parts=agent_parts,
-                metadata={"endpoint_id": endpoint_id}
-            )
-
-            # Update task as completed (only for complex requests with task)
-            if task_id:
-                a2a_agent_db.update_task_state(
-                    task_id=task_id,
-                    task_state="TASK_STATE_COMPLETED",
-                    result_data={"message": accumulated_text}
-                )
-
-            # Yield final artifact with accumulated text
             yield self.adapter.build_a2a_task_event(
                 task_id=task_id or "simple",
                 event_type="taskProgress",
-                data={
-                    "content": accumulated_text,
-                    "lastChunk": True
-                },
+                data={"content": accumulated_text, "lastChunk": True},
                 context_id=context_id
             )
 
-            # Yield final statusUpdate
             from datetime import datetime, timezone
             yield self.adapter.build_a2a_task_event(
                 task_id=task_id or "simple",
@@ -905,24 +808,7 @@ class A2AServerService:
 
         except Exception as e:
             logger.error(f"A2A streaming task failed: {e}")
-
-            # Store error message
-            error_parts = [{"type": "text", "text": f"Error: {str(e)}", "mediaType": "text/plain"}]
-            a2a_agent_db.create_message(
-                task_id=task_id,
-                role="ROLE_AGENT",
-                parts=error_parts,
-                metadata={"endpoint_id": endpoint_id, "error": True}
-            )
-
-            # Update task status to failed (only for complex requests with task)
-            if task_id:
-                a2a_agent_db.update_task_state(
-                    task_id=task_id,
-                    task_state="TASK_STATE_FAILED",
-                    result_data={"error": str(e)}
-                )
-
+            self._store_error_response(task_id, str(e), endpoint_id)
             yield self.adapter.build_a2a_task_event(
                 task_id=task_id or "simple",
                 event_type="taskStatusUpdate",

@@ -11,6 +11,9 @@ from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
+# Shared A2A protocol constants
+_MEDIA_TYPE_TEXT = "text/plain"
+
 
 @dataclass
 class A2AExecutionContext:
@@ -35,6 +38,8 @@ class A2AAgentAdapter:
     """
 
     def __init__(self):
+        # This adapter is stateless; no instance attributes need initialization.
+        # All methods operate purely on input data without side effects.
         pass
 
     def build_agent_request(
@@ -222,7 +227,7 @@ class A2AAgentAdapter:
                 text_content = str(message)
             task["status"]["message"] = {
                 "role": message.get("role", "agent"),
-                "parts": [{"type": "text", "text": text_content, "mediaType": "text/plain"}]
+                "parts": [{"type": "text", "text": text_content, "mediaType": _MEDIA_TYPE_TEXT}]
             }
 
         # Handle artifacts
@@ -261,9 +266,9 @@ class A2AAgentAdapter:
         if parts:
             message_parts = parts
         elif text:
-            message_parts = [{"type": "text", "text": text, "mediaType": "text/plain"}]
+            message_parts = [{"type": "text", "text": text, "mediaType": _MEDIA_TYPE_TEXT}]
         else:
-            message_parts = [{"type": "text", "text": "", "mediaType": "text/plain"}]
+            message_parts = [{"type": "text", "text": "", "mediaType": _MEDIA_TYPE_TEXT}]
 
         message_obj = {
             "messageId": message_id,

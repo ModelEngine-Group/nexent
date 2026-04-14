@@ -6,12 +6,17 @@ It provides a unified interface for invoking remote A2A endpoints.
 """
 import json
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, AsyncIterator, Dict, List, Optional
 from dataclasses import dataclass
 from threading import Event
 from urllib.parse import urlparse
 
 import httpx
+
+# Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
+PROTOCOL_JSONRPC = "JSONRPC"
+PROTOCOL_HTTP_JSON = "HTTP+JSON"
+PROTOCOL_GRPC = "GRPC"
 
 logger = logging.getLogger("a2a_agent_proxy")
 
@@ -25,7 +30,7 @@ class A2AAgentInfo:
     api_key: Optional[str] = None
     transport_type: str = "http-streaming"
     protocol_version: str = "1.0"
-    protocol_type: str = "JSONRPC"  # Protocol type from database: JSONRPC, HTTP+JSON, GRPC
+    protocol_type: str = PROTOCOL_JSONRPC
     timeout: float = 300.0
     raw_card: Optional[Dict[str, Any]] = None
 
@@ -197,7 +202,7 @@ class ExternalA2AAgentProxy:
         protocol_type = self.agent_info.get_protocol_type()
         endpoint_url = self._get_endpoint_url(protocol_type)
 
-        if protocol_type == "JSONRPC":
+        if protocol_type == PROTOCOL_JSONRPC:
             # JSON-RPC 2.0 format
             payload = self._build_message_payload(query, history, context)
             request_body = {
@@ -269,6 +274,45 @@ class ExternalA2AAgentProxy:
         finally:
             loop.close()
 
+    TERMINAL_STATE_KEYWORDS = frozenset(("COMPLETED", "FAILED", "CANCELED"))
+
+    def _build_request_body(
+        self,
+        protocol_type: str,
+        query: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Build request body for streaming call based on protocol type."""
+        payload = self._build_message_payload(query, history, context)
+        if protocol_type == PROTOCOL_JSONRPC:
+            return {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "SendMessage",
+                "params": payload
+            }
+        return payload
+
+    async def _iter_sse_events(self, response) -> AsyncIterator[Dict[str, Any]]:
+        """Parse SSE lines from HTTP response and yield events until terminal state."""
+        async for line in response.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            data_str = line[6:].strip()
+            if not data_str:
+                continue
+            try:
+                event = json.loads(data_str)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse SSE data: {data_str}")
+                continue
+            yield event
+            if "statusUpdate" in event:
+                state = event["statusUpdate"].get("status", {}).get("state", "")
+                if any(kw in state for kw in self.TERMINAL_STATE_KEYWORDS):
+                    break
+
     async def call_streaming(
         self,
         query: str,
@@ -290,23 +334,14 @@ class ExternalA2AAgentProxy:
 
         protocol_type = self.agent_info.get_protocol_type()
         endpoint_url = self._get_endpoint_url(protocol_type, streaming=True)
-
-        if protocol_type == "JSONRPC":
-            # JSON-RPC 2.0 format
-            payload = self._build_message_payload(query, history, context)
-            request_body = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "SendMessage",
-                "params": payload
-            }
-        else:
-            # HTTP+JSON (REST) format - direct message payload
-            request_body = self._build_message_payload(query, history, context)
-
+        request_body = self._build_request_body(protocol_type, query, history, context)
         headers = self._build_headers()
 
-        logger.info(f"[A2A-SDK] === Calling external A2A agent (streaming) === name={self.agent_info.name}, protocol={protocol_type}, url={endpoint_url}, request_body={request_body}")
+        logger.info(
+            f"[A2A-SDK] === Calling external A2A agent (streaming) === "
+            f"name={self.agent_info.name}, protocol={protocol_type}, "
+            f"url={endpoint_url}, request_body={request_body}"
+        )
 
         try:
             async with self._client.stream(
@@ -317,38 +352,15 @@ class ExternalA2AAgentProxy:
                 timeout=self.agent_info.timeout
             ) as response:
                 response.raise_for_status()
-
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:].strip()
-                        if data_str:
-                            try:
-                                event = json.loads(data_str)
-                                yield event
-
-                                # Check for terminal state using A2A 1.0 envelope format
-                                # Event shape: {"statusUpdate": {"taskId": "...", "status": {"state": "TASK_STATE_COMPLETED"}}}
-                                if "statusUpdate" in event:
-                                    status = event["statusUpdate"].get("status", {})
-                                    state = status.get("state", "")
-                                    if "COMPLETED" in state or "FAILED" in state or "CANCELED" in state:
-                                        break
-
-                            except json.JSONDecodeError:
-                                logger.warning(f"Failed to parse SSE data: {data_str}")
+                async for event in self._iter_sse_events(response):
+                    yield event
 
         except httpx.TimeoutException as e:
             logger.error(f"A2A streaming timeout for {self.agent_info.name}: {e}")
-            yield {
-                "kind": "taskStatusUpdate",
-                "status": {"state": "failed", "message": f"Timeout: {str(e)}"}
-            }
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_FAILED", "message": f"Timeout: {str(e)}"}}}
         except httpx.HTTPStatusError as e:
             logger.error(f"A2A streaming HTTP error for {self.agent_info.name}: {e.response.status_code}")
-            yield {
-                "kind": "taskStatusUpdate",
-                "status": {"state": "failed", "message": f"HTTP {e.response.status_code}"}
-            }
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_FAILED", "message": f"HTTP {e.response.status_code}"}}}
 
     def extract_text_from_response(self, response: Dict[str, Any]) -> str:
         """Extract text content from A2A response.
@@ -393,6 +405,33 @@ class ExternalA2AAgentProxy:
         # Fallback: return whole result as string
         return json.dumps(result, ensure_ascii=False)
 
+    def _extract_text_from_parts(self, parts: List[Dict[str, Any]], accumulated: List[str]) -> Optional[str]:
+        """Extract text from parts list, appending only new text to accumulated list."""
+        for part in parts:
+            if part.get("type") == "text":
+                text = part.get("text", "")
+                if text and text not in accumulated:
+                    accumulated.append(text)
+                    return text
+        return None
+
+    def _extract_text_from_status_message(
+        self,
+        status: Dict[str, Any],
+        accumulated: List[str]
+    ) -> Optional[str]:
+        """Extract text from status.message field, appending only new text to accumulated."""
+        if "message" not in status:
+            return None
+        message = status["message"]
+        if isinstance(message, dict):
+            return self._extract_text_from_parts(message.get("parts", []), accumulated)
+        text = str(message)
+        if text and text not in accumulated:
+            accumulated.append(text)
+            return text
+        return None
+
     def extract_text_from_events(self, events) -> str:
         """Extract accumulated text from streaming events.
 
@@ -404,47 +443,31 @@ class ExternalA2AAgentProxy:
         Yields:
             Text chunks as they arrive.
         """
-        accumulated = []
+        accumulated: List[str] = []
 
         async def process():
             async for event in events:
                 if "artifactUpdate" in event:
-                    artifact_data = event["artifactUpdate"]
-                    artifact = artifact_data.get("artifact", {})
+                    artifact = event["artifactUpdate"].get("artifact", {})
                     parts = artifact.get("parts", [])
-                    for part in parts:
-                        if part.get("type") == "text":
-                            text = part.get("text", "")
-                            if text:
-                                accumulated.append(text)
-                                yield text
+                    text = self._extract_text_from_parts(parts, accumulated)
+                    if text:
+                        yield text
 
                 elif "statusUpdate" in event:
-                    status_data = event["statusUpdate"]
-                    status = status_data.get("status", {})
+                    status = event["statusUpdate"].get("status", {})
                     state = status.get("state", "")
 
                     if state == "TASK_STATE_COMPLETED":
-                        if "message" in status:
-                            message = status["message"]
-                            if isinstance(message, dict):
-                                parts = message.get("parts", [])
-                                for part in parts:
-                                    if part.get("type") == "text":
-                                        text = part.get("text", "")
-                                        if text and text not in accumulated:
-                                            yield text
-                            else:
-                                text = str(message)
-                                if text and text not in accumulated:
-                                    yield text
+                        self._extract_text_from_status_message(status, accumulated)
                         break
 
-                    elif state in ("TASK_STATE_FAILED", "TASK_STATE_CANCELED"):
+                    if state in ("TASK_STATE_FAILED", "TASK_STATE_CANCELED"):
                         message = status.get("message", "")
                         if message:
                             error_text = f"[Error: {message}]"
                             if error_text not in accumulated:
+                                accumulated.append(error_text)
                                 yield error_text
                         break
 
@@ -485,6 +508,56 @@ Returns the external agent's response."""
         self.stop_event = stop_event or Event()
         self.observer = observer
 
+    def _parse_forward_input(self, input_str: str) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Parse and validate input JSON. Returns (input_data, error_json_string)."""
+        try:
+            if isinstance(input_str, str):
+                input_data = json.loads(input_str)
+            else:
+                input_data = input_str
+            return input_data, None
+        except json.JSONDecodeError as e:
+            return None, json.dumps({"error": f"Invalid JSON: {str(e)}"})
+
+    def _validate_forward_args(
+        self,
+        input_data: Dict[str, Any]
+    ) -> tuple[Optional[str], Optional[str], Optional[List], Optional[bool], Optional[str]]:
+        """Validate required fields. Returns (agent_id, query, history, use_stream, error_json_string)."""
+        agent_id = input_data.get("agent_id")
+        query = input_data.get("query")
+        history = input_data.get("history", [])
+        use_stream = input_data.get("stream", False)
+
+        if not agent_id:
+            return None, None, None, None, json.dumps({"error": "agent_id is required"})
+        if not query:
+            return None, None, None, None, json.dumps({"error": "query is required"})
+        agent_info = self.agent_configs.get(agent_id)
+        if not agent_info:
+            return None, None, None, None, json.dumps({"error": f"Agent {agent_id} not found"})
+        return agent_id, query, history, use_stream, None
+
+    async def _execute_forward(
+        self,
+        agent_info: A2AAgentInfo,
+        query: str,
+        history: Optional[List],
+        use_stream: bool
+    ) -> str:
+        """Execute A2A call and return accumulated text response."""
+        async with ExternalA2AAgentProxy(agent_info, self.stop_event) as proxy:
+            if use_stream:
+                result_parts = []
+                async for text in proxy.extract_text_from_events(proxy.call_streaming(query, history)):
+                    result_parts.append(text)
+                    if self.observer:
+                        self.observer.append_message(text)
+                return "".join(result_parts) if result_parts else "No response received"
+            else:
+                response = await proxy.call(query, history)
+                return proxy.extract_text_from_response(response)
+
     def forward(self, input_str: str) -> str:
         """Execute the tool with the given input.
 
@@ -496,57 +569,26 @@ Returns the external agent's response."""
         """
         import asyncio
 
+        input_data, err = self._parse_forward_input(input_str)
+        if err:
+            logger.error(f"Failed to parse input JSON: {err}")
+            return err
+
+        _, query, history, use_stream, err = self._validate_forward_args(input_data)
+        if err:
+            return err
+
+        agent_info = self.agent_configs.get(input_data["agent_id"])
+
         try:
-            # Parse input
-            if isinstance(input_str, str):
-                input_data = json.loads(input_str)
-            else:
-                input_data = input_str
-
-            agent_id = input_data.get("agent_id")
-            query = input_data.get("query")
-            history = input_data.get("history", [])
-            use_stream = input_data.get("stream", False)
-
-            if not agent_id:
-                return json.dumps({"error": "agent_id is required"})
-            if not query:
-                return json.dumps({"error": "query is required"})
-
-            # Get agent config
-            agent_info = self.agent_configs.get(agent_id)
-            if not agent_info:
-                return json.dumps({"error": f"Agent {agent_id} not found"})
-
-            # Execute call
-            async def execute():
-                async with ExternalA2AAgentProxy(agent_info, self.stop_event) as proxy:
-                    if use_stream:
-                        events = proxy.call_streaming(query, history)
-                        result_parts = []
-                        async for text in proxy.extract_text_from_events(events):
-                            result_parts.append(text)
-                            # Log progress if observer available
-                            if self.observer:
-                                self.observer.append_message(text)
-                        return "".join(result_parts) if result_parts else "No response received"
-                    else:
-                        response = await proxy.call(query, history)
-                        return proxy.extract_text_from_response(response)
-
-            # Run async code
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                result = loop.run_until_complete(execute())
+                return loop.run_until_complete(
+                    self._execute_forward(agent_info, query, history, use_stream)
+                )
             finally:
                 loop.close()
-
-            return result
-
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse input JSON: {e}")
-            return json.dumps({"error": f"Invalid JSON: {str(e)}"})
         except Exception as e:
             logger.error(f"A2A agent call failed: {e}", exc_info=True)
             return json.dumps({"error": f"Call failed: {str(e)}"})
