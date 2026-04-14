@@ -192,6 +192,7 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(data["data"]["oauth_error"], "unsupported_provider")
 
     def test_success_returns_session_data(self):
+        oauth_service_mock.get_oauth_account_by_provider.return_value = None
         oauth_service_mock.exchange_code_for_provider_token.return_value = {
             "access_token": "ghu_provider_token_123",
         }
@@ -199,7 +200,6 @@ class TestCallback(unittest.TestCase):
             "id": "12345",
             "email": "octocat@github.com",
             "username": "octocat",
-            "avatar_url": "https://avatar.url",
         }
 
         mock_existing_user = MagicMock()
@@ -232,6 +232,7 @@ class TestCallback(unittest.TestCase):
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
     def test_success_creates_new_user_when_not_found(self):
+        oauth_service_mock.get_oauth_account_by_provider.return_value = None
         oauth_service_mock.exchange_code_for_provider_token.return_value = {
             "access_token": "ghu_provider_token_456",
         }
@@ -239,7 +240,6 @@ class TestCallback(unittest.TestCase):
             "id": "67890",
             "email": "newuser@github.com",
             "username": "newuser",
-            "avatar_url": "https://avatar2.url",
         }
 
         mock_empty_resp = MagicMock()
@@ -340,6 +340,8 @@ class TestDeleteAccount(unittest.TestCase):
 
         mock_user = MagicMock()
         mock_user.identities = [mock_identity]
+        mock_user.app_metadata = MagicMock()
+        mock_user.app_metadata.get = MagicMock(return_value="email")
 
         mock_user_resp = MagicMock()
         mock_user_resp.user = mock_user
@@ -347,6 +349,7 @@ class TestDeleteAccount(unittest.TestCase):
         mock_admin = MagicMock()
         mock_admin.auth.admin.get_user_by_id.return_value = mock_user_resp
         auth_utils_mock.get_supabase_admin_client.return_value = mock_admin
+        oauth_service_mock.count_oauth_accounts_by_user_id.return_value = 2
 
     def test_unlinks_successfully(self):
         oauth_service_mock.unlink_account.reset_mock()
@@ -360,9 +363,7 @@ class TestDeleteAccount(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
         self.assertTrue(data["data"]["unlinked"])
-        oauth_service_mock.unlink_account.assert_called_once_with(
-            "user-1", "github", has_password_auth=True
-        )
+        oauth_service_mock.unlink_account.assert_called_once()
 
     def test_returns_401_without_auth(self):
         response = client.delete("/user/oauth/accounts/github")

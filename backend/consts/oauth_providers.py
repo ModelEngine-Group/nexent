@@ -26,7 +26,7 @@ GITHUB_PROVIDER = OAuthProviderDefinition(
 
 GDE_PROVIDER = OAuthProviderDefinition(
     name="gde",
-    display_name="gde",
+    display_name="Gde",
     icon="gde",
     authorize_url=f"{os.getenv('GDE_URL')}/dspcas/oauth2.0/authorize",
     authorize_param_map={"client_id": "client_id", "redirect_uri": "redirect_uri"},

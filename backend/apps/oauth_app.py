@@ -136,45 +136,54 @@ async def callback(
         username = user_info["username"]
 
         from utils.auth_utils import get_supabase_admin_client
+        from services.oauth_service import get_oauth_account_by_provider
 
         if link_user_id:
             supabase_user_id = link_user_id
         else:
-            admin_client = get_supabase_admin_client()
-            if not admin_client:
-                raise RuntimeError("Supabase admin client not available")
+            # First check if this OAuth account is already bound to a user
+            existing_binding = get_oauth_account_by_provider(provider, provider_user_id)
+            if existing_binding:
+                supabase_user_id = existing_binding["user_id"]
+            else:
+                # No binding found, search/create user by email in Supabase
+                admin_client = get_supabase_admin_client()
+                if not admin_client:
+                    raise RuntimeError("Supabase admin client not available")
 
-            supabase_user_id = None
-            page = 1
-            while True:
-                users_resp = admin_client.auth.admin.list_users(page=page, per_page=100)
-                users = users_resp if len(users_resp) > 0 else []
-                if not users:
-                    break
-                for u in users:
-                    if u.email and u.email.lower() == email.lower():
-                        supabase_user_id = u.id
+                supabase_user_id = None
+                page = 1
+                while True:
+                    users_resp = admin_client.auth.admin.list_users(
+                        page=page, per_page=100
+                    )
+                    users = users_resp if len(users_resp) > 0 else []
+                    if not users:
                         break
-                if supabase_user_id:
-                    break
-                if len(users) < 100:
-                    break
-                page += 1
+                    for u in users:
+                        if u.email and u.email.lower() == email.lower():
+                            supabase_user_id = u.id
+                            break
+                    if supabase_user_id:
+                        break
+                    if len(users) < 100:
+                        break
+                    page += 1
 
-            if not supabase_user_id:
-                if not email:
-                    email = f"{provider}_{provider_user_id}@oauth.nexent"
-                create_resp = admin_client.auth.admin.create_user(
-                    {
-                        "email": email,
-                        "email_confirm": True,
-                        "user_metadata": {
-                            "full_name": username,
-                            "provider": provider,
-                        },
-                    }
-                )
-                supabase_user_id = create_resp.user.id
+                if not supabase_user_id:
+                    if not email:
+                        email = f"{provider}_{provider_user_id}@oauth.nexent"
+                    create_resp = admin_client.auth.admin.create_user(
+                        {
+                            "email": email,
+                            "email_confirm": True,
+                            "user_metadata": {
+                                "full_name": username,
+                                "provider": provider,
+                            },
+                        }
+                    )
+                    supabase_user_id = create_resp.user.id
 
         ensure_user_tenant_exists(user_id=supabase_user_id, email=email)
 
