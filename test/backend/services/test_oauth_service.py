@@ -9,6 +9,8 @@ consts_mock = MagicMock()
 consts_mock.const = MagicMock()
 consts_mock.const.DEFAULT_TENANT_ID = "default-tenant-id"
 consts_mock.const.OAUTH_CALLBACK_BASE_URL = "http://localhost:3000"
+consts_mock.const.OAUTH_SSL_VERIFY = True
+consts_mock.const.OAUTH_CA_BUNDLE = ""
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 

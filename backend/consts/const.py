@@ -78,6 +78,8 @@ WECHAT_OAUTH_APP_ID = os.getenv("WECHAT_OAUTH_APP_ID", "")
 WECHAT_OAUTH_APP_SECRET = os.getenv("WECHAT_OAUTH_APP_SECRET", "")
 OAUTH_TOKEN_ENCRYPTION_KEY = os.getenv("OAUTH_TOKEN_ENCRYPTION_KEY", "")
 OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
+OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 
 
 # ===== To be migrated to frontend configuration =====

@@ -2,12 +2,18 @@ import json
 import logging
 import os
 import secrets
+import ssl
 import urllib.request
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, quote
 
-from consts.const import DEFAULT_TENANT_ID, OAUTH_CALLBACK_BASE_URL
+from consts.const import (
+    DEFAULT_TENANT_ID,
+    OAUTH_CALLBACK_BASE_URL,
+    OAUTH_SSL_VERIFY,
+    OAUTH_CA_BUNDLE,
+)
 from consts.exceptions import OAuthLinkError, OAuthProviderError
 from consts.oauth_providers import (
     get_all_provider_definitions,
@@ -28,6 +34,20 @@ from database.user_tenant_db import get_user_tenant_by_user_id, insert_user_tena
 logger = logging.getLogger(__name__)
 
 _state_store: Dict[str, float] = {}
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    if OAUTH_CA_BUNDLE and os.path.isfile(OAUTH_CA_BUNDLE):
+        return ssl.create_default_context(cafile=OAUTH_CA_BUNDLE)
+    if not OAUTH_SSL_VERIFY:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    return ssl.create_default_context()
+
+
+_SSL_CTX = _build_ssl_context()
 
 
 def parse_state(state: str) -> Dict[str, str]:
@@ -115,13 +135,13 @@ def _http_post_json(url: str, data: dict, headers: Optional[dict] = None) -> dic
     if headers:
         req_headers.update(headers)
     req = urllib.request.Request(url, data=req_data, headers=req_headers, method="POST")
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def _http_get_json(url: str, headers: Optional[dict] = None) -> dict:
     req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
