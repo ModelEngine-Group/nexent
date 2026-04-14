@@ -3,7 +3,9 @@ import os
 import unittest
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+test_dir = os.path.dirname(__file__)
+backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
+sys.path.insert(0, backend_dir)
 
 sys.modules["boto3"] = MagicMock()
 
