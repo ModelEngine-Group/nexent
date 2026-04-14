@@ -94,13 +94,11 @@ export function OAuthAccountsSection() {
                 </div>
                 <div className="min-w-0">
                   <div className="font-medium truncate">
-                    {row.linked
-                      ? row.account!.provider_username || row.display_name
-                      : row.display_name}
+                    {row.display_name}
                   </div>
-                  <div className="text-sm text-gray-400 truncate">
+                  <div className="text-sm text-gray-500 truncate">
                     {row.linked
-                      ? row.account!.provider_email || "-"
+                      ? row.account!.provider_username || row.account!.provider_email || "-"
                       : t("auth.noLinkedAccounts")}
                   </div>
                 </div>
