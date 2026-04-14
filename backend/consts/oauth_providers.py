@@ -29,14 +29,14 @@ GDE_PROVIDER = OAuthProviderDefinition(
     name="gde",
     display_name="gde",
     icon="gde",
-    authorize_url=f"https://{os.getenv('GDE_URL')}/dspcas/oauth2.0/authorize",
+    authorize_url=f"{os.getenv('GDE_URL')}/dspcas/oauth2.0/authorize",
     authorize_param_map={
-        "client_id": "appid",
+        "client_id": "client_id",
         "redirect_uri": "redirect_uri"
     },
-    token_url=f"https://{os.getenv('GDE_URL')}/dspcas/v2/oauth2.0/accessToken",
+    token_url=f"{os.getenv('GDE_URL')}/dspcas/v2/oauth2.0/accessToken",
     token_params_map={
-        "client_id": "appid",
+        "client_id": "client_id",
         "client_secret": "secret",
         "code": "code",
         "grant_type": "grant_type",
@@ -44,7 +44,7 @@ GDE_PROVIDER = OAuthProviderDefinition(
     },
     token_error_key="errorCode",
     token_error_message_key="errorMessage",
-    userinfo_url=f"https://{os.getenv('GDE_URL')}/dspcas/v2/oauth2.0/profile",
+    userinfo_url=f"{os.getenv('GDE_URL')}/dspcas/v2/oauth2.0/profile",
     userinfo_field_map={
         "id": "id",
     },
