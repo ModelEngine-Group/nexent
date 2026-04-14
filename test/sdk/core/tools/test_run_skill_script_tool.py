@@ -211,25 +211,37 @@ class TestExecute:
         mock_manager.run_skill_script.return_value = "Result"
         run_skill_script_tool.skill_manager = mock_manager
 
-        params = {"--name": "test", "--count": 5}
+        params = "--name test --count 5"
         result = run_skill_script_tool.execute("test-skill", "script.py", params)
 
         call_args = mock_manager.run_skill_script.call_args
         assert call_args[0][2] == params
 
-    @pytest.mark.skip(reason="Exception class identity issue - covered by other error handling tests")
     def test_execute_handles_skill_not_found(self, run_skill_script_tool, temp_skills_dir):
         """Test execute handles SkillNotFoundError."""
-        # This test is skipped due to complex exception class identity
-        # The FileNotFoundError, TimeoutError, and RuntimeError tests cover error handling
-        pass
+        mock_manager = MagicMock()
+        # Import actual exception class and use it for side_effect
+        from nexent.skills.skill_manager import SkillNotFoundError
+        mock_manager.run_skill_script.side_effect = SkillNotFoundError("Skill 'test-skill' not found.")
+        run_skill_script_tool.skill_manager = mock_manager
 
-    @pytest.mark.skip(reason="Exception class identity issue - covered by other error handling tests")
+        result = run_skill_script_tool.execute("test-skill", "script.py")
+
+        assert "[SkillNotFoundError]" in result
+        assert "test-skill" in result
+
     def test_execute_handles_script_not_found(self, run_skill_script_tool, temp_skills_dir):
         """Test execute handles SkillScriptNotFoundError."""
-        # This test is skipped due to complex exception class identity
-        # The FileNotFoundError, TimeoutError, and RuntimeError tests cover error handling
-        pass
+        mock_manager = MagicMock()
+        # Import actual exception class and use it for side_effect
+        from nexent.skills.skill_manager import SkillScriptNotFoundError
+        mock_manager.run_skill_script.side_effect = SkillScriptNotFoundError("Script 'script.py' not found in skill 'test-skill'.")
+        run_skill_script_tool.skill_manager = mock_manager
+
+        result = run_skill_script_tool.execute("test-skill", "script.py")
+
+        assert "[ScriptNotFoundError]" in result
+        assert "script.py" in result
 
     def test_execute_handles_file_not_found(self, run_skill_script_tool, temp_skills_dir):
         """Test execute handles FileNotFoundError."""
@@ -278,16 +290,16 @@ class TestExecute:
         assert "ok" in result
 
     def test_execute_with_none_params(self, run_skill_script_tool, temp_skills_dir):
-        """Test execute handles None params."""
+        """Test execute handles None params correctly."""
         mock_manager = MagicMock()
         mock_manager.run_skill_script.return_value = "OK"
         run_skill_script_tool.skill_manager = mock_manager
 
         result = run_skill_script_tool.execute("test-skill", "script.py", None)
 
-        # Should pass empty dict for None params
+        # Should pass None for params (not converted to {})
         call_args = mock_manager.run_skill_script.call_args
-        assert call_args[0][2] == {}
+        assert call_args[0][2] is None
 
 
 class TestGetRunSkillScriptTool:
