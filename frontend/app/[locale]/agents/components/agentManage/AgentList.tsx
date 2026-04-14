@@ -11,7 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Agent } from "@/types/agentConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
-import { useA2AServerAgents } from "@/hooks/agent/useA2AServerAgents";
+import { useA2AServerAgents, isAgentA2AServer } from "@/hooks/agent/useA2AServerAgents";
 import {
   searchAgentInfo,
   updateAgentInfo,
