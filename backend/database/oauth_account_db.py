@@ -44,7 +44,6 @@ def get_oauth_account_by_provider(
             .filter(
                 UserOAuthAccount.provider == provider,
                 UserOAuthAccount.provider_user_id == provider_user_id,
-                UserOAuthAccount.delete_flag == "N",
             )
             .first()
         )
@@ -55,10 +54,7 @@ def list_oauth_accounts_by_user_id(user_id: str) -> List[Dict[str, Any]]:
     with get_db_session() as session:
         results = (
             session.query(UserOAuthAccount)
-            .filter(
-                UserOAuthAccount.user_id == user_id,
-                UserOAuthAccount.delete_flag == "N",
-            )
+            .filter(UserOAuthAccount.user_id == user_id)
             .all()
         )
         return [as_dict(r) for r in results]
@@ -78,7 +74,6 @@ def rebind_oauth_account(
             .filter(
                 UserOAuthAccount.provider == provider,
                 UserOAuthAccount.provider_user_id == provider_user_id,
-                UserOAuthAccount.delete_flag == "N",
             )
             .first()
         )
@@ -108,7 +103,6 @@ def update_oauth_account_tokens(
             .filter(
                 UserOAuthAccount.provider == provider,
                 UserOAuthAccount.provider_user_id == provider_user_id,
-                UserOAuthAccount.delete_flag == "N",
             )
             .first()
         )
@@ -121,21 +115,20 @@ def update_oauth_account_tokens(
         return True
 
 
-def soft_delete_oauth_account(user_id: str, provider: str) -> bool:
+def delete_oauth_account(user_id: str, provider: str) -> bool:
     with get_db_session() as session:
         result = (
             session.query(UserOAuthAccount)
             .filter(
                 UserOAuthAccount.user_id == user_id,
                 UserOAuthAccount.provider == provider,
-                UserOAuthAccount.delete_flag == "N",
             )
             .first()
         )
         if not result:
             return False
 
-        result.delete_flag = "Y"
+        session.delete(result)
         return True
 
 
@@ -143,9 +136,6 @@ def count_oauth_accounts_by_user_id(user_id: str) -> int:
     with get_db_session() as session:
         return (
             session.query(UserOAuthAccount)
-            .filter(
-                UserOAuthAccount.user_id == user_id,
-                UserOAuthAccount.delete_flag == "N",
-            )
+            .filter(UserOAuthAccount.user_id == user_id)
             .count()
         )

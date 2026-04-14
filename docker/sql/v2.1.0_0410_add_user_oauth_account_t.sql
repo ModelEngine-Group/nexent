@@ -49,5 +49,4 @@ COMMENT ON COLUMN nexent.user_oauth_account_t.delete_flag IS 'Whether it is dele
 
 -- Create index for user_id queries
 CREATE INDEX IF NOT EXISTS idx_user_oauth_account_t_user_id
-ON nexent.user_oauth_account_t (user_id)
-WHERE delete_flag = 'N';
+ON nexent.user_oauth_account_t (user_id);

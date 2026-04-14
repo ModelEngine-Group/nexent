@@ -50,10 +50,10 @@ sys.modules["database.db_models"] = db_models_mock
 
 from database.oauth_account_db import (
     count_oauth_accounts_by_user_id,
+    delete_oauth_account,
     get_oauth_account_by_provider,
     insert_oauth_account,
     list_oauth_accounts_by_user_id,
-    soft_delete_oauth_account,
     update_oauth_account_tokens,
 )
 
@@ -179,24 +179,24 @@ class TestUpdateOAuthAccountTokens(unittest.TestCase):
         )
 
 
-class TestSoftDeleteOAuthAccount(unittest.TestCase):
-    def test_soft_deletes_and_returns_true(self):
+class TestDeleteOAuthAccount(unittest.TestCase):
+    def test_deletes_and_returns_true(self):
         mock_session = _make_mock_session()
         mock_account = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = (
             mock_account
         )
 
-        result = soft_delete_oauth_account("user-1", "github")
+        result = delete_oauth_account("user-1", "github")
 
         self.assertTrue(result)
-        self.assertEqual(mock_account.delete_flag, "Y")
+        mock_session.delete.assert_called_once_with(mock_account)
 
     def test_returns_false_when_not_found(self):
         mock_session = _make_mock_session()
         mock_session.query.return_value.filter.return_value.first.return_value = None
 
-        result = soft_delete_oauth_account("user-1", "github")
+        result = delete_oauth_account("user-1", "github")
 
         self.assertFalse(result)
 

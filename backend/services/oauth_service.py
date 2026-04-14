@@ -16,11 +16,11 @@ from consts.oauth_providers import (
 )
 from database.oauth_account_db import (
     count_oauth_accounts_by_user_id,
+    delete_oauth_account,
     get_oauth_account_by_provider,
     insert_oauth_account,
     list_oauth_accounts_by_user_id,
     rebind_oauth_account,
-    soft_delete_oauth_account,
     update_oauth_account_tokens,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id, insert_user_tenant
@@ -261,15 +261,15 @@ def create_or_update_oauth_account(
             )
         updated = get_oauth_account_by_provider(provider, provider_user_id)
         return updated if updated else existing
-    else:
-        return insert_oauth_account(
-            user_id=user_id,
-            provider=provider,
-            provider_user_id=provider_user_id,
-            provider_email=email,
-            provider_username=username,
-            tenant_id=tenant_id or DEFAULT_TENANT_ID,
-        )
+
+    return insert_oauth_account(
+        user_id=user_id,
+        provider=provider,
+        provider_user_id=provider_user_id,
+        provider_email=email,
+        provider_username=username,
+        tenant_id=tenant_id or DEFAULT_TENANT_ID,
+    )
 
 
 def ensure_user_tenant_exists(user_id: str, email: str) -> Dict[str, Any]:
@@ -310,7 +310,7 @@ def unlink_account(
     if oauth_count <= 1 and not has_password_auth:
         raise OAuthLinkError("Cannot unlink the last authentication method")
 
-    success = soft_delete_oauth_account(user_id, provider)
+    success = delete_oauth_account(user_id, provider)
     if not success:
         raise OAuthLinkError(f"No linked {provider} account found")
     return True

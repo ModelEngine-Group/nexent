@@ -412,7 +412,7 @@ class TestListLinkedAccounts(unittest.TestCase):
 class TestUnlinkAccount(unittest.TestCase):
     def test_success_with_multiple_accounts(self):
         oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 2
-        oauth_account_db_mock.soft_delete_oauth_account.return_value = True
+        oauth_account_db_mock.delete_oauth_account.return_value = True
 
         result = unlink_account("user-1", "github")
 
@@ -426,7 +426,7 @@ class TestUnlinkAccount(unittest.TestCase):
 
     def test_allows_last_unlink_when_has_password(self):
         oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 1
-        oauth_account_db_mock.soft_delete_oauth_account.return_value = True
+        oauth_account_db_mock.delete_oauth_account.return_value = True
 
         result = unlink_account("user-1", "github", has_password_auth=True)
 
@@ -434,7 +434,7 @@ class TestUnlinkAccount(unittest.TestCase):
 
     def test_raises_when_account_not_found(self):
         oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 2
-        oauth_account_db_mock.soft_delete_oauth_account.return_value = False
+        oauth_account_db_mock.delete_oauth_account.return_value = False
 
         with self.assertRaises(_OAuthLinkError):
             unlink_account("user-1", "github")
