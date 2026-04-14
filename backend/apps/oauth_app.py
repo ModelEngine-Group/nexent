@@ -260,12 +260,11 @@ async def delete_account(provider: str, authorization: Optional[str] = Header(No
         if admin_client:
             try:
                 user_resp = admin_client.auth.admin.get_user_by_id(user_id)
-                identities = getattr(user_resp.user, "identities", None) or []
-                has_password_auth = any(
-                    getattr(ident, "provider", "") == "email" for ident in identities
-                )
-            except Exception:
-                logger.warning(f"Failed to check user identities for {user_id}")
+                user_metadata = getattr(user_resp.user, "user_metadata", {}) or {}
+                signup_provider = user_metadata.get("provider", "email")
+                has_password_auth = signup_provider == "email"
+            except Exception as e:
+                logger.warning(f"Failed to check user identities for {user_id}: {e}")
 
         unlink_account(user_id, provider, has_password_auth=has_password_auth)
         return JSONResponse(
