@@ -3,7 +3,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
-from database.a2a_agent_db import PROTOCOL_JSONRPC
+# Standard protocol labels used across A2A models
+PROTOCOL_HTTP_JSON = "HTTP+JSON"
+PROTOCOL_JSONRPC = "JSONRPC"
+PROTOCOL_GRPC = "GRPC"
 
 SCHEMA = "nexent"
 

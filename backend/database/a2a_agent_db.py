@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from database.client import get_db_session
 from database.db_models import (
     A2AExternalAgent,
     A2AExternalAgentRelation,
@@ -18,6 +17,12 @@ from database.db_models import (
     A2AMessage,
     A2AArtifact,
 )
+
+# Import session factory - kept at function level to avoid triggering module-level import
+# of db_models.client, which would cause circular dependency at import time.
+def _get_db_session():
+    from database.client import get_db_session as _gds
+    return _gds
 
 logger = logging.getLogger("a2a_agent_db")
 
@@ -165,7 +170,7 @@ def create_external_agent_from_url(
     expires_at = now + timedelta(hours=DEFAULT_CACHE_TTL_HOURS)
     protocol_type = _extract_protocol_type(supported_interfaces)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         # Check if agent already exists by source_url
         existing = session.query(A2AExternalAgent).filter(
             A2AExternalAgent.source_url == source_url,
@@ -262,7 +267,7 @@ def create_external_agent_from_nacos(
     expires_at = now + timedelta(hours=DEFAULT_CACHE_TTL_HOURS)
     protocol_type = _extract_protocol_type(supported_interfaces)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         # Check if agent already exists by nacos_config_id + nacos_agent_name
         existing = session.query(A2AExternalAgent).filter(
             A2AExternalAgent.nacos_config_id == nacos_config_id,
@@ -334,7 +339,7 @@ def get_external_agent_by_id(external_agent_id: int, tenant_id: str) -> Optional
     Returns:
         Agent information dict or None if not found.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent = session.query(A2AExternalAgent).filter(
             A2AExternalAgent.id == external_agent_id,
             A2AExternalAgent.tenant_id == tenant_id,
@@ -386,7 +391,7 @@ def list_external_agents(
     Returns:
         List of agent information dicts.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         query = session.query(A2AExternalAgent).filter(
             A2AExternalAgent.tenant_id == tenant_id,
             A2AExternalAgent.delete_flag != 'Y'
@@ -429,7 +434,7 @@ def delete_external_agent(external_agent_id: int, tenant_id: str) -> bool:
     Returns:
         True if deleted, False if not found.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent = session.query(A2AExternalAgent).filter(
             A2AExternalAgent.id == external_agent_id,
             A2AExternalAgent.tenant_id == tenant_id,
@@ -502,7 +507,7 @@ def update_external_agent_protocol(
     if protocol_type not in valid_protocols:
         raise ValueError(f"Invalid protocol type: {protocol_type}. Must be one of {valid_protocols}")
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent = session.query(A2AExternalAgent).filter(
             A2AExternalAgent.id == external_agent_id,
             A2AExternalAgent.tenant_id == tenant_id,
@@ -582,7 +587,7 @@ def refresh_external_agent_cache(
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=DEFAULT_CACHE_TTL_HOURS)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent = session.query(A2AExternalAgent).filter(
             A2AExternalAgent.id == external_agent_id,
             A2AExternalAgent.tenant_id == tenant_id,
@@ -652,7 +657,7 @@ def update_agent_availability(
     Returns:
         True if updated, False if not found.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent = session.query(A2AExternalAgent).filter(
             A2AExternalAgent.id == external_agent_id,
             A2AExternalAgent.tenant_id == tenant_id,
@@ -694,7 +699,7 @@ def add_external_agent_relation(
     Raises:
         ValueError: If relation already exists.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         # Check if relation already exists (not soft-deleted)
         existing = session.query(A2AExternalAgentRelation).filter(
             A2AExternalAgentRelation.local_agent_id == local_agent_id,
@@ -760,7 +765,7 @@ def remove_external_agent_relation(
     Returns:
         True if removed, False if not found.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         relation = session.query(A2AExternalAgentRelation).filter(
             A2AExternalAgentRelation.local_agent_id == local_agent_id,
             A2AExternalAgentRelation.external_agent_id == external_agent_id,
@@ -790,7 +795,7 @@ def query_external_sub_agents(
     Returns:
         List of external agent details with relation metadata.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         results = session.query(
             A2AExternalAgentRelation,
             A2AExternalAgent
@@ -838,7 +843,7 @@ def list_external_relations_by_local_agent(
     Returns:
         List of relation information dicts.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         relations = session.query(
             A2AExternalAgentRelation,
             A2AExternalAgent
@@ -965,7 +970,7 @@ def create_server_agent(
     from datetime import datetime
     now = datetime.now(timezone.utc)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         existing = session.query(A2AServerAgent).filter(
             A2AServerAgent.agent_id == agent_id,
             A2AServerAgent.tenant_id == tenant_id,
@@ -1020,7 +1025,7 @@ def get_server_agent_by_endpoint(endpoint_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Server agent information dict or None.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent = session.query(A2AServerAgent).filter(
             A2AServerAgent.endpoint_id == endpoint_id,
             A2AServerAgent.delete_flag != 'Y'
@@ -1042,7 +1047,7 @@ def get_server_agent_by_agent_id(agent_id: int, tenant_id: str) -> Optional[Dict
     Returns:
         Server agent information dict or None.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent = session.query(A2AServerAgent).filter(
             A2AServerAgent.agent_id == agent_id,
             A2AServerAgent.tenant_id == tenant_id,
@@ -1086,7 +1091,7 @@ def enable_server_agent(
     """
     now = datetime.now(timezone.utc)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent = session.query(A2AServerAgent).filter(
             A2AServerAgent.agent_id == agent_id,
             A2AServerAgent.tenant_id == tenant_id,
@@ -1143,7 +1148,7 @@ def disable_server_agent(agent_id: int, tenant_id: str, user_id: str) -> bool:
     """
     now = datetime.now(timezone.utc)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent = session.query(A2AServerAgent).filter(
             A2AServerAgent.agent_id == agent_id,
             A2AServerAgent.tenant_id == tenant_id,
@@ -1169,7 +1174,7 @@ def list_server_agents(tenant_id: str, user_id: Optional[str] = None) -> List[Di
     Returns:
         List of server agent information dicts.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         query = session.query(A2AServerAgent).filter(
             A2AServerAgent.tenant_id == tenant_id,
             A2AServerAgent.delete_flag != 'Y'
@@ -1209,7 +1214,7 @@ def get_server_agent_ids(tenant_id: str) -> set[int]:
     Returns:
         Set of agent IDs that have A2A Server registration.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         agent_ids = session.query(A2AServerAgent.agent_id).filter(
             A2AServerAgent.tenant_id == tenant_id,
             A2AServerAgent.delete_flag != 'Y'
@@ -1247,7 +1252,7 @@ def create_task(
 
     now = datetime.now(timezone.utc)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         task = A2ATask(
             id=task_id,
             endpoint_id=endpoint_id,
@@ -1283,7 +1288,7 @@ def get_task(task_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Task information dict or None.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         task = session.query(A2ATask).filter(A2ATask.id == task_id).first()
 
         if not task:
@@ -1322,7 +1327,7 @@ def update_task_state(
     """
     now = datetime.now(timezone.utc)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         task = session.query(A2ATask).filter(A2ATask.id == task_id).first()
 
         if not task:
@@ -1363,7 +1368,7 @@ def list_tasks(
     Returns:
         List of task information dicts.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         query = session.query(A2ATask)
 
         if endpoint_id:
@@ -1415,7 +1420,7 @@ def list_tasks_paginated(
         Tuple of (tasks list, next_page_token or None).
     """
     import base64
-    with get_db_session() as session:
+    with _get_db_session() as session:
         query = session.query(A2ATask)
 
         if endpoint_id:
@@ -1472,7 +1477,7 @@ def cancel_task(task_id: str) -> bool:
     """
     now = datetime.now(timezone.utc)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         task = session.query(A2ATask).filter(A2ATask.id == task_id).first()
 
         if not task:
@@ -1521,7 +1526,7 @@ def create_message(
     message_id = _generate_message_id()
     now = datetime.now(timezone.utc)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         # Auto-generate message_index if not provided
         if message_index is None:
             if task_id:
@@ -1573,7 +1578,7 @@ def get_messages_by_task(task_id: str) -> List[Dict[str, Any]]:
     Returns:
         List of message information dicts.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         messages = session.query(A2AMessage).filter(
             A2AMessage.task_id == task_id
         ).order_by(A2AMessage.message_index).all()
@@ -1603,7 +1608,7 @@ def get_message(message_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Message information dict or None.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         message = session.query(A2AMessage).filter(
             A2AMessage.message_id == message_id
         ).first()
@@ -1656,7 +1661,7 @@ def create_nacos_config(
     import uuid
     config_id = f"nacos_{uuid.uuid4().hex[:16]}"
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         config = A2ANacosConfig(
             config_id=config_id,
             name=name,
@@ -1693,7 +1698,7 @@ def get_nacos_config_by_id(config_id: str, tenant_id: str) -> Optional[Dict[str,
     Returns:
         Config information dict or None.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         config = session.query(A2ANacosConfig).filter(
             A2ANacosConfig.config_id == config_id,
             A2ANacosConfig.tenant_id == tenant_id,
@@ -1726,7 +1731,7 @@ def list_nacos_configs(tenant_id: str, is_active: Optional[bool] = None) -> List
     Returns:
         List of config information dicts.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         query = session.query(A2ANacosConfig).filter(
             A2ANacosConfig.tenant_id == tenant_id,
             A2ANacosConfig.delete_flag != 'Y'
@@ -1761,7 +1766,7 @@ def update_nacos_config_last_scan(config_id: str, tenant_id: str) -> bool:
     Returns:
         True if updated, False if not found.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         config = session.query(A2ANacosConfig).filter(
             A2ANacosConfig.config_id == config_id,
             A2ANacosConfig.tenant_id == tenant_id,
@@ -1785,7 +1790,7 @@ def delete_nacos_config(config_id: str, tenant_id: str) -> bool:
     Returns:
         True if deleted, False if not found.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         config = session.query(A2ANacosConfig).filter(
             A2ANacosConfig.config_id == config_id,
             A2ANacosConfig.tenant_id == tenant_id,
@@ -1837,7 +1842,7 @@ def create_artifact(
     artifact_pk = _generate_artifact_id()
     now = datetime.now(timezone.utc)
 
-    with get_db_session() as session:
+    with _get_db_session() as session:
         artifact = A2AArtifact(
             id=artifact_pk,
             artifact_id=artifact_id,
@@ -1874,7 +1879,7 @@ def get_artifacts_by_task(task_id: str) -> List[Dict[str, Any]]:
     Returns:
         List of artifact information dicts.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         artifacts = session.query(A2AArtifact).filter(
             A2AArtifact.task_id == task_id
         ).order_by(A2AArtifact.create_time).all()
@@ -1904,7 +1909,7 @@ def get_artifact(artifact_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Artifact information dict or None.
     """
-    with get_db_session() as session:
+    with _get_db_session() as session:
         artifact = session.query(A2AArtifact).filter(
             A2AArtifact.artifact_id == artifact_id
         ).first()
