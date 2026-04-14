@@ -90,6 +90,11 @@ sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.agent_version_db'] = MagicMock()
+sys.modules['database.a2a_agent_db'] = _create_stub_module(
+    "database.a2a_agent_db",
+    PROTOCOL_JSONRPC="JSONRPC",
+    query_external_sub_agents=MagicMock(return_value=[]),
+)
 sys.modules['services.vectordatabase_service'] = MagicMock()
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
@@ -1227,7 +1232,8 @@ class TestCreateAgentConfig:
                 max_steps=5,
                 model_name="test_model",
                 provide_run_summary=True,
-                managed_agents=[]
+                managed_agents=[],
+                external_a2a_agents=[]
             )
 
     @pytest.mark.asyncio
@@ -1293,7 +1299,8 @@ class TestCreateAgentConfig:
                     max_steps=5,
                     model_name="test_model",
                     provide_run_summary=True,
-                    managed_agents=[mock_sub_agent_config]
+                    managed_agents=[mock_sub_agent_config],
+                    external_a2a_agents=[]
                 )
 
     @pytest.mark.asyncio
@@ -1492,7 +1499,8 @@ class TestCreateAgentConfig:
                 max_steps=5,
                 model_name="main_model",  # Should fallback to "main_model"
                 provide_run_summary=True,
-                managed_agents=[]
+                managed_agents=[],
+                external_a2a_agents=[]
             )
 
     @pytest.mark.asyncio

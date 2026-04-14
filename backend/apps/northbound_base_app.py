@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from apps.app_factory import create_app
-from .northbound_app import router as northbound_router, _get_northbound_context
+from .northbound_app import router as northbound_router
 
 
 class A2AServerSettings(BaseModel):
@@ -129,6 +129,7 @@ async def jsonrpc_handler(
     - GetTask: Retrieve task information
     """
     try:
+        from .northbound_app import _get_northbound_context
         ctx = await _get_northbound_context(request)
 
         if payload.method == "SendMessage":
@@ -290,6 +291,7 @@ async def rest_message_send(
     Requires authentication via Authorization header.
     """
     try:
+        from .northbound_app import _get_northbound_context
         ctx = await _get_northbound_context(request)
 
         result = await a2a_server_service.handle_message_send(
@@ -323,6 +325,7 @@ async def rest_message_stream(
     Returns SSE stream. Requires authentication.
     """
     try:
+        from .northbound_app import _get_northbound_context
         ctx = await _get_northbound_context(request)
 
         async def generate_sse():
@@ -384,6 +387,7 @@ async def rest_get_task(
     - historyLength: Number of history messages to include (-1 for all, 0 for none)
     """
     try:
+        from .northbound_app import _get_northbound_context
         ctx: NorthboundContext = await _get_northbound_context(request)
 
         task = a2a_server_service.get_task(

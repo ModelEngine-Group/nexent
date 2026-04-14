@@ -551,7 +551,7 @@ async def list_published_agents_api(
     List all published agents with their current published version information.
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, request)
         return await list_published_agents_impl(tenant_id=tenant_id, user_id=user_id)
     except Exception as e:
         logger.error(f"Published agents list error: {str(e)}")

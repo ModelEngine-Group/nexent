@@ -177,3 +177,8 @@ class ExternalA2AAgentConfig(BaseModel):
             timeout=self.timeout,
             raw_card=self.raw_card
         )
+
+
+# Rebuild models to resolve forward references
+AgentConfig.model_rebuild()
+AgentRunInfo.model_rebuild()
