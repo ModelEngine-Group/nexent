@@ -134,7 +134,6 @@ async def callback(
         provider_user_id = user_info["id"]
         email = user_info["email"]
         username = user_info["username"]
-        avatar_url = user_info["avatar_url"]
 
         from utils.auth_utils import get_supabase_admin_client
 
@@ -171,7 +170,6 @@ async def callback(
                         "email_confirm": True,
                         "user_metadata": {
                             "full_name": username,
-                            "avatar_url": avatar_url,
                             "provider": provider,
                         },
                     }

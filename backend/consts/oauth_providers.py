@@ -17,7 +17,6 @@ GITHUB_PROVIDER = OAuthProviderDefinition(
         "id": "id",
         "email": "email",
         "username": "login",
-        "avatar_url": "avatar_url",
     },
     userinfo_needs_email_fetch=True,
     userinfo_email_url="https://api.github.com/user/emails",
@@ -30,10 +29,7 @@ GDE_PROVIDER = OAuthProviderDefinition(
     display_name="gde",
     icon="gde",
     authorize_url=f"{os.getenv('GDE_URL')}/dspcas/oauth2.0/authorize",
-    authorize_param_map={
-        "client_id": "client_id",
-        "redirect_uri": "redirect_uri"
-    },
+    authorize_param_map={"client_id": "client_id", "redirect_uri": "redirect_uri"},
     token_url=f"{os.getenv('GDE_URL')}/dspcas/v2/oauth2.0/accessToken",
     token_params_map={
         "client_id": "client_id",
@@ -44,10 +40,9 @@ GDE_PROVIDER = OAuthProviderDefinition(
     },
     token_error_key="errorCode",
     token_error_message_key="errorMessage",
-    userinfo_url=f"{os.getenv('GDE_URL')}/dspcas/v2/oauth2.0/profile",
-    userinfo_field_map={
-        "id": "id",
-    },
+    userinfo_url=f"{os.getenv('GDE_URL')}/dspcas/oauth2.0/profile",
+    userinfo_params={"access_token": "{access_token}"},
+    userinfo_field_map={"id": "attributes.userId", "username": "id"},
     client_id_env="GDE_OAUTH_CLIENT_ID",
     client_secret_env="GDE_OAUTH_CLIENT_SECRET",
 )
@@ -84,7 +79,6 @@ WECHAT_PROVIDER = OAuthProviderDefinition(
         "id": "openid",
         "email": "",
         "username": "nickname",
-        "avatar_url": "headimgurl",
     },
     client_id_env="WECHAT_OAUTH_APP_ID",
     client_secret_env="WECHAT_OAUTH_APP_SECRET",
@@ -94,7 +88,7 @@ WECHAT_PROVIDER = OAuthProviderDefinition(
 OAUTH_PROVIDER_REGISTRY: Dict[str, OAuthProviderDefinition] = {
     "github": GITHUB_PROVIDER,
     "wechat": WECHAT_PROVIDER,
-    "gde": GDE_PROVIDER
+    "gde": GDE_PROVIDER,
 }
 
 

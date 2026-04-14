@@ -248,7 +248,9 @@ def get_provider_user_info(
                 result["email"] = primary.get("email", "")
         except Exception:
             logger.warning(f"Failed to fetch {provider} user emails")
-            result["email"] = f"{result['id']}@nexent.com"
+
+    if result.get("email", "") == "":
+        result["email"] = f"{result['username']}@nexent.com"
 
     return result
 

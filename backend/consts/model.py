@@ -101,7 +101,6 @@ class OAuthProviderDefinition(BaseModel):
         "id": "id",
         "email": "email",
         "username": "login",
-        "avatar_url": "avatar_url",
     }
     userinfo_needs_email_fetch: bool = False
     userinfo_email_url: Optional[str] = None
@@ -115,7 +114,6 @@ class OAuthAccountInfo(BaseModel):
     provider: str
     provider_username: Optional[str] = None
     provider_email: Optional[str] = None
-    provider_avatar_url: Optional[str] = None
     linked_at: Optional[str] = None
 
 
