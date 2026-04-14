@@ -52,6 +52,26 @@ class A2AHttpClient:
         if self._session:
             await self._session.close()
 
+    async def _handle_retryable(
+        self,
+        exc: Exception,
+        attempt: int,
+        url: str,
+        context: str
+    ) -> None:
+        """Handle a retryable exception. Raises if all retries exhausted."""
+        if attempt < self.max_retries - 1:
+            wait_time = RETRY_BACKOFF_FACTOR * (2 ** attempt)
+            error_type = type(exc).__name__
+            logger.warning(
+                f"{context} for {url}: [{error_type}] {exc}, "
+                f"retrying in {wait_time}s (attempt {attempt + 1}/{self.max_retries})"
+            )
+            await asyncio.sleep(wait_time)
+        else:
+            logger.error(f"All retries exhausted for {url}: {context} - {exc}")
+            raise
+
     async def _request_with_retry(
         self,
         method: str,
@@ -60,7 +80,7 @@ class A2AHttpClient:
         **kwargs
     ) -> aiohttp.ClientResponse:
         """Execute HTTP request with automatic retry on transient failures.
-        
+
         Args:
             method: HTTP method
             url: Target URL
@@ -74,11 +94,9 @@ class A2AHttpClient:
                 async with self._session.request(method, url, **kwargs) as response:
                     if response.status < 500 and not read_response:
                         return response
-                    # Read content while connection is still open
                     body = await response.read()
                     if response.status < 500:
                         return (response.status, body)
-                    # Server error (5xx) - retry
                     if attempt < self.max_retries - 1:
                         wait_time = RETRY_BACKOFF_FACTOR * (2 ** attempt)
                         logger.warning(
@@ -88,58 +106,15 @@ class A2AHttpClient:
                         await asyncio.sleep(wait_time)
                         continue
                     return (response.status, body)
-            except aiohttp.ClientConnectionResetError as e:
+            except (aiohttp.ClientConnectionResetError, aiohttp.ServerDisconnectedError) as e:
                 last_exception = e
-                logger.warning(
-                    f"Connection reset for {url}: {e}, "
-                    f"retrying (attempt {attempt + 1}/{self.max_retries})"
-                )
-                if attempt < self.max_retries - 1:
-                    await asyncio.sleep(RETRY_BACKOFF_FACTOR * (2 ** attempt))
-                else:
-                    logger.error(f"All retries exhausted for {url}: connection reset")
-                    raise
-            except aiohttp.ServerDisconnectedError as e:
-                last_exception = e
-                logger.warning(
-                    f"Server disconnected for {url}: {e}, "
-                    f"retrying (attempt {attempt + 1}/{self.max_retries})"
-                )
-                if attempt < self.max_retries - 1:
-                    await asyncio.sleep(RETRY_BACKOFF_FACTOR * (2 ** attempt))
-                else:
-                    logger.error(
-                        f"All retries exhausted for {url}: server disconnected. "
-                        f"Last exception type: {type(e).__name__}, message: {e}"
-                    )
-                    raise
+                await self._handle_retryable(e, attempt, url, type(e).__name__)
             except aiohttp.ClientError as e:
                 last_exception = e
-                error_type = type(e).__name__
-                if attempt < self.max_retries - 1:
-                    wait_time = RETRY_BACKOFF_FACTOR * (2 ** attempt)
-                    logger.warning(
-                        f"Request failed for {url}: [{error_type}] {e}, "
-                        f"retrying in {wait_time}s (attempt {attempt + 1}/{self.max_retries})"
-                    )
-                    await asyncio.sleep(wait_time)
-                else:
-                    logger.error(
-                        f"All retries exhausted for {url}: [{error_type}] {e}"
-                    )
-                    raise
+                await self._handle_retryable(e, attempt, url, "Request failed")
             except asyncio.TimeoutError as e:
                 last_exception = e
-                if attempt < self.max_retries - 1:
-                    wait_time = RETRY_BACKOFF_FACTOR * (2 ** attempt)
-                    logger.warning(
-                        f"Request timeout for {url}: {e}, "
-                        f"retrying in {wait_time}s (attempt {attempt + 1}/{self.max_retries})"
-                    )
-                    await asyncio.sleep(wait_time)
-                else:
-                    logger.error(f"All retries exhausted for {url}: timeout")
-                    raise
+                await self._handle_retryable(e, attempt, url, "Request timeout")
 
         if last_exception:
             raise last_exception

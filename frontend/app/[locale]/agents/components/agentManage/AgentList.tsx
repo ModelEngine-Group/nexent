@@ -3,7 +3,7 @@
 import React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Col, Flex, Tooltip, Divider, Table, theme, App, Modal } from "antd";
+import { Button, Col, Flex, Tooltip, Divider, Table, theme, App } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { Copy, FileOutput, Network, Trash2, Globe } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -11,7 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Agent } from "@/types/agentConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
-import A2AServerSettingsPanel from "../a2a/A2AServerSettingsPanel";
+import { useA2AServerAgents } from "@/hooks/agent/useA2AServerAgents";
 import {
   searchAgentInfo,
   updateAgentInfo,
@@ -82,11 +82,6 @@ export default function AgentList({
   const handleViewA2AAgentSettings = (agent: Agent) => {
     setSelectedAgentForA2A(agent);
     setShowA2ASettings(true);
-  };
-
-  const handleCloseA2ASettingsModal = () => {
-    setShowA2ASettings(false);
-    setSelectedAgentForA2A(null);
   };
 
   // Handle select agent

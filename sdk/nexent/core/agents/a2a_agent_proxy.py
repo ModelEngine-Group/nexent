@@ -123,14 +123,12 @@ class ExternalA2AAgentProxy:
     def _build_message_payload(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Build A2A message payload.
 
         Args:
             query: The user query.
-            history: Optional conversation history.
             context: Optional context metadata.
 
         Returns:
@@ -362,6 +360,28 @@ class ExternalA2AAgentProxy:
             logger.error(f"A2A streaming HTTP error for {self.agent_info.name}: {e.response.status_code}")
             yield {"statusUpdate": {"status": {"state": "TASK_STATE_FAILED", "message": f"HTTP {e.response.status_code}"}}}
 
+    def _find_agent_text_in_messages(self, result: Dict[str, Any]) -> Optional[str]:
+        """Extract text from result.messages where role is agent."""
+        messages = result.get("messages", [])
+        for msg in messages:
+            if msg.get("role") == "agent":
+                for part in msg.get("parts", []):
+                    if "text" in part:
+                        return part["text"]
+        return None
+
+    def _find_text_in_status_message(self, result: Dict[str, Any]) -> Optional[str]:
+        """Extract text from result.status.message."""
+        status = result.get("status", {})
+        message = status.get("message")
+        if not message:
+            return None
+        if isinstance(message, dict):
+            for part in message.get("parts", []):
+                if "text" in part:
+                    return part["text"]
+        return str(message)
+
     def extract_text_from_response(self, response: Dict[str, Any]) -> str:
         """Extract text content from A2A response.
 
@@ -371,38 +391,20 @@ class ExternalA2AAgentProxy:
         Returns:
             Extracted text string.
         """
-        # Check for error
         if "error" in response:
             error = response["error"]
             message = error.get("message", "Unknown error")
             raise RuntimeError(f"A2A agent error: {message}")
 
-        # Extract from result
         result = response.get("result", response)
+        text = self._find_agent_text_in_messages(result)
+        if text is not None:
+            return text
 
-        # Try to extract from messages array (A2A spec format)
-        if "messages" in result:
-            messages = result["messages"]
-            for msg in messages:
-                if msg.get("role") == "agent":
-                    parts = msg.get("parts", [])
-                    for part in parts:
-                        if "text" in part:
-                            return part["text"]
+        text = self._find_text_in_status_message(result)
+        if text is not None:
+            return text
 
-        # Fallback: try status.message format
-        if "status" in result:
-            status = result["status"]
-            if "message" in status:
-                message = status["message"]
-                if isinstance(message, dict):
-                    parts = message.get("parts", [])
-                    for part in parts:
-                        if "text" in part:
-                            return part["text"]
-                return str(message)
-
-        # Fallback: return whole result as string
         return json.dumps(result, ensure_ascii=False)
 
     def _extract_text_from_parts(self, parts: List[Dict[str, Any]], accumulated: List[str]) -> Optional[str]:
@@ -432,6 +434,25 @@ class ExternalA2AAgentProxy:
             return text
         return None
 
+    def _handle_completed_state(self, status: Dict[str, Any], accumulated: List[str]) -> None:
+        """Handle TASK_STATE_COMPLETED: extract final message and stop."""
+        self._extract_text_from_status_message(status, accumulated)
+
+    def _handle_error_state(
+        self,
+        status: Dict[str, Any],
+        accumulated: List[str]
+    ) -> Optional[str]:
+        """Handle FAILED/CANCELED state: yield error text and return break signal."""
+        message = status.get("message", "")
+        if not message:
+            return None
+        error_text = f"[Error: {message}]"
+        if error_text not in accumulated:
+            accumulated.append(error_text)
+            return error_text
+        return None
+
     def extract_text_from_events(self, events) -> str:
         """Extract accumulated text from streaming events.
 
@@ -449,26 +470,20 @@ class ExternalA2AAgentProxy:
             async for event in events:
                 if "artifactUpdate" in event:
                     artifact = event["artifactUpdate"].get("artifact", {})
-                    parts = artifact.get("parts", [])
-                    text = self._extract_text_from_parts(parts, accumulated)
+                    text = self._extract_text_from_parts(artifact.get("parts", []), accumulated)
                     if text:
                         yield text
 
                 elif "statusUpdate" in event:
                     status = event["statusUpdate"].get("status", {})
                     state = status.get("state", "")
-
                     if state == "TASK_STATE_COMPLETED":
-                        self._extract_text_from_status_message(status, accumulated)
+                        self._handle_completed_state(status, accumulated)
                         break
-
                     if state in ("TASK_STATE_FAILED", "TASK_STATE_CANCELED"):
-                        message = status.get("message", "")
-                        if message:
-                            error_text = f"[Error: {message}]"
-                            if error_text not in accumulated:
-                                accumulated.append(error_text)
-                                yield error_text
+                        error_text = self._handle_error_state(status, accumulated)
+                        if error_text:
+                            yield error_text
                         break
 
         return process()

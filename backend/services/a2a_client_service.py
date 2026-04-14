@@ -513,8 +513,7 @@ class A2AClientService:
         self,
         external_agent_id: int,
         tenant_id: str,
-        message: Dict[str, Any],
-        api_key: Optional[str] = None
+        message: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Call an external A2A agent (non-streaming).
 
@@ -539,7 +538,6 @@ class A2AClientService:
             raise AgentCallError(f"Agent {external_agent_id} is not available")
 
         agent_url = agent["agent_url"]
-        transport_type = agent.get("transport_type", "http-streaming")
         protocol_type = agent.get("protocol_type", PROTOCOL_JSONRPC)
 
         # Build complete endpoint URL with protocol path

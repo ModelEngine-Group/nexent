@@ -284,6 +284,85 @@ class A2AAgentAdapter:
 
         return {"message": message_obj}
 
+    def _content_to_artifact_parts(
+        self,
+        content: Any,
+        parts: Optional[List[Dict[str, Any]]] = None
+    ) -> List[Dict[str, Any]]:
+        """Convert content/parts into artifact parts format."""
+        if parts:
+            return parts
+        if isinstance(content, dict):
+            if content.get("type") == "text":
+                return [{"type": "text", "text": content.get("text", "")}]
+        return [{"type": "text", "text": str(content)}]
+
+    def _map_task_state(self, state: str) -> str:
+        """Map shorthand state to TASK_STATE constant."""
+        if state.startswith("TASK_STATE_"):
+            return state
+        _MAP = {
+            "working": "TASK_STATE_WORKING",
+            "completed": "TASK_STATE_COMPLETED",
+            "failed": "TASK_STATE_FAILED",
+            "canceled": "TASK_STATE_CANCELED",
+            "input_required": "TASK_STATE_INPUT_REQUIRED",
+            "rejected": "TASK_STATE_REJECTED",
+            "auth_required": "TASK_STATE_AUTH_REQUIRED",
+        }
+        return _MAP.get(state, f"TASK_STATE_{state.upper()}")
+
+    def _build_status_obj(
+        self,
+        status_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Build A2A status object from status data."""
+        state = status_data.get("state", "TASK_STATE_WORKING")
+        status_obj = {"state": self._map_task_state(state)}
+        ts = status_data.get("timestamp")
+        if ts:
+            status_obj["timestamp"] = ts
+        msg = status_data.get("message")
+        if msg:
+            status_obj["message"] = self._message_to_parts_format(msg)
+        return status_obj
+
+    def _message_to_parts_format(self, message: Any) -> Dict[str, Any]:
+        """Convert message to A2A parts format."""
+        if isinstance(message, dict) and "parts" in message:
+            return message
+        if isinstance(message, dict):
+            role = message.get("role", "agent")
+            content = message.get("content", {})
+            if isinstance(content, dict) and content.get("type") == "text":
+                text = content.get("text", "")
+            else:
+                text = str(message)
+        else:
+            role = "agent"
+            text = str(message)
+        return {
+            "role": role,
+            "parts": [{"type": "text", "text": text}]
+        }
+
+    def _build_artifact_update_event(
+        self,
+        common_fields: Dict[str, Any],
+        artifact: Dict[str, Any],
+        last_chunk: bool,
+        append: bool = True
+    ) -> Dict[str, Any]:
+        """Build artifactUpdate event."""
+        return {
+            "artifactUpdate": {
+                **common_fields,
+                "artifact": {"parts": artifact, "lastChunk": last_chunk},
+                "append": append,
+                "lastChunk": last_chunk
+            }
+        }
+
     def build_a2a_task_event(
         self,
         task_id: str,
@@ -307,93 +386,23 @@ class A2AAgentAdapter:
         Returns:
             A2A Task event dict for SSE.
         """
-        # Common fields for all events
         common_fields = {"taskId": task_id}
         if context_id:
             common_fields["contextId"] = context_id
 
         if event_type == "taskProgress":
-            # Use artifactUpdate format with append=true for streaming content
-            content = data.get("content", "")
-            is_last = data.get("lastChunk", False)
-            parts = data.get("parts", [])
+            parts = self._content_to_artifact_parts(data.get("content", ""), data.get("parts", []))
+            return self._build_artifact_update_event(common_fields, parts, data.get("lastChunk", False))
 
-            if parts:
-                artifact_parts = parts
-            else:
-                # Convert content to parts format
-                if isinstance(content, dict):
-                    if content.get("type") == "text":
-                        text_content = content.get("text", "")
-                    else:
-                        text_content = str(content)
-                else:
-                    text_content = str(content)
-                artifact_parts = [{"type": "text", "text": text_content}]
-
-            event = {
-                "artifactUpdate": {
-                    **common_fields,
-                    "artifact": {
-                        "parts": artifact_parts,
-                        "lastChunk": is_last
-                    },
-                    "append": True,
-                    "lastChunk": is_last
-                }
-            }
-            return event
-
-        elif event_type == "taskStatusUpdate":
-            # Use statusUpdate format
-            status_data = data.get("status", {})
-            state = status_data.get("state", "TASK_STATE_WORKING")
-            message = status_data.get("message")
-            timestamp = status_data.get("timestamp")
-
-            # Map state if not already in TASK_STATE format
-            state_map = {
-                "working": "TASK_STATE_WORKING",
-                "completed": "TASK_STATE_COMPLETED",
-                "failed": "TASK_STATE_FAILED",
-                "canceled": "TASK_STATE_CANCELED",
-                "input_required": "TASK_STATE_INPUT_REQUIRED",
-                "rejected": "TASK_STATE_REJECTED",
-                "auth_required": "TASK_STATE_AUTH_REQUIRED",
-            }
-            if state.startswith("TASK_STATE_"):
-                status_obj = {"state": state}
-            else:
-                status_obj = {"state": state_map.get(state, f"TASK_STATE_{state.upper()}")}
-            if timestamp:
-                status_obj["timestamp"] = timestamp
-
-            # Add message if present
-            if message:
-                if isinstance(message, dict) and "parts" in message:
-                    status_obj["message"] = message
-                else:
-                    # Convert to parts format
-                    role = message.get("role", "agent") if isinstance(message, dict) else "agent"
-                    content = message.get("content", {}) if isinstance(message, dict) else message
-                    if isinstance(content, dict) and content.get("type") == "text":
-                        text_content = content.get("text", "")
-                    else:
-                        text_content = str(message)
-                    status_obj["message"] = {
-                        "role": role,
-                        "parts": [{"type": "text", "text": text_content}]
-                    }
-
-            event = {
+        if event_type == "taskStatusUpdate":
+            return {
                 "statusUpdate": {
                     **common_fields,
-                    "status": status_obj
+                    "status": self._build_status_obj(data.get("status", {}))
                 }
             }
-            return event
 
-        elif event_type == "taskArtifact":
+        if event_type == "taskArtifact":
             return {
                 "artifactUpdate": {
                     **common_fields,
@@ -403,7 +412,6 @@ class A2AAgentAdapter:
                 }
             }
 
-        # Fallback for unknown event types
         return {
             "task": {
                 "id": task_id,
