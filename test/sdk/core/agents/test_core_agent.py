@@ -861,3 +861,168 @@ new_code()
     assert "```python" in transformed
     assert "code:python" not in transformed
     assert "<DISPLAY:" not in transformed
+
+
+# ----------------------------------------------------------------------------
+# Additional edge case tests for convert_code_format to improve coverage
+# ----------------------------------------------------------------------------
+
+def test_convert_code_format_single_backtick_display():
+    """Test convert_code_format with single backtick prefix."""
+    text = """` <DISPLAY:python>
+print('hello')
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "<DISPLAY:" not in transformed
+
+
+def test_convert_code_format_double_backtick_display():
+    """Test convert_code_format with double backtick prefix."""
+    text = """`` <DISPLAY:python>
+print('hello')
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "``python" in transformed
+    assert "<DISPLAY:" not in transformed
+
+
+def test_convert_code_format_multiple_displays_mixed():
+    """Test convert_code_format with mixed display formats."""
+    text = """<DISPLAY:python>
+first()
+</DISPLAY>
+```<DISPLAY:javascript>
+second()
+```<END_DISPLAY_CODE>
+```code:ruby
+third()
+```"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "```javascript" in transformed
+    assert "```ruby" in transformed
+
+
+def test_convert_code_format_code_colon_format():
+    """Test convert_code_format with code:language format."""
+    text = """```code:python
+print('hello')
+```"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "code:" not in transformed
+
+
+def test_convert_code_format_empty_content():
+    """Test convert_code_format with empty content."""
+    text = """<DISPLAY:python>
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "</DISPLAY>" not in transformed
+
+
+def test_convert_code_format_unicode_in_display():
+    """Test convert_code_format preserves unicode in display blocks."""
+    text = """<DISPLAY:python>
+def hello():
+    return "你好世界"
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "你好世界" in transformed
+
+
+def test_convert_code_format_special_chars_in_display():
+    """Test convert_code_format preserves special characters."""
+    text = '''<DISPLAY:python>
+x = "!@#$%^&*()"
+y = 'single quotes'
+z = "double quotes"
+</DISPLAY>'''
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "!@#$%^&*()" in transformed
+
+
+def test_convert_code_format_nested_display():
+    """Test convert_code_format with nested-like content."""
+    text = """<DISPLAY:python>
+def foo():
+    return "<DISPLAY:text>" * 5
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "<DISPLAY:" not in transformed
+
+
+def test_convert_code_format_closing_tag_only():
+    """Test convert_code_format with orphaned closing tags."""
+    text = """Some text
+</DISPLAY>
+More text"""
+    transformed = core_agent_module.convert_code_format(text)
+    # Should not replace orphan closing tag
+    assert "</DISPLAY>" not in transformed
+
+
+def test_convert_code_format_mixed_backtick_counts():
+    """Test convert_code_format with different backtick counts in opening."""
+    text1 = """` <DISPLAY:python>
+print('one')
+</DISPLAY>"""
+    text2 = """`` <DISPLAY:python>
+print('two')
+</DISPLAY>"""
+    text3 = """```<DISPLAY:python>
+print('three')
+</DISPLAY>"""
+
+    t1 = core_agent_module.convert_code_format(text1)
+    t2 = core_agent_module.convert_code_format(text2)
+    t3 = core_agent_module.convert_code_format(text3)
+
+    assert "`python" in t1
+    assert "``python" in t2
+    assert "```python" in t3
+
+
+def test_convert_code_format_end_display_code_only():
+    """Test convert_code_format with orphaned END_DISPLAY_CODE."""
+    text = """Some text
+```<END_DISPLAY_CODE>
+More text"""
+    transformed = core_agent_module.convert_code_format(text)
+    # Should replace the orphaned END_DISPLAY_CODE
+    assert "```<END_DISPLAY_CODE>" not in transformed
+
+
+def test_convert_code_format_end_code_only():
+    """Test convert_code_format with orphaned END_CODE."""
+    text = """Some text
+```<END_CODE>
+More text"""
+    transformed = core_agent_module.convert_code_format(text)
+    # Should replace the orphaned END_CODE
+    assert "```<END_CODE>" not in transformed
+
+
+def test_convert_code_format_complex_real_world():
+    """Test convert_code_format with complex real-world output."""
+    text = """Here is the result of my analysis:
+
+```<DISPLAY:python>
+import json
+data = {"result": "success", "value": 42}
+print(json.dumps(data, indent=2))
+```<END_DISPLAY_CODE>
+
+This code demonstrates how to work with JSON in Python."""
+
+    transformed = core_agent_module.convert_code_format(text)
+
+    assert "```python" in transformed
+    assert "import json" in transformed
+    assert "```<END_DISPLAY_CODE>" not in transformed
+    assert "<DISPLAY:" not in transformed

@@ -42,7 +42,8 @@ def parse_code_blobs(text: str) -> str:
         ValueError: If no valid code block is found in the text.
     """
     # First try to match the new <code>...</code> format for execution
-    code_pattern = r"<code>\s*\n?(.*?)\n?\s*</code>"
+    # Use [^<]* instead of .*? to prevent catastrophic backtracking
+    code_pattern = r"<code>\s*\n?([^<]*(?:<(?!/code>)[^<]*)*)\s*\n?</code>"
     code_matches = re.findall(code_pattern, text, re.DOTALL)
 
     if code_matches:
@@ -92,22 +93,26 @@ def convert_code_format(text):
     This function is used to convert code blocks in final answers to markdown format,
     so it handles <DISPLAY:language>...</DISPLAY> format and legacy formats.
     """
-    # Handle new format: <DISPLAY:language>...</DISPLAY> - convert to ```language
-    text = re.sub(r'<DISPLAY:(\w+)>', r'```\1', text)
-    text = text.replace("</DISPLAY>", "```")
-
-    # Handle legacy format: ```<DISPLAY:language> to ```language
-    text = re.sub(r'```<DISPLAY:(\w+)>', r'```\1', text)
+    # Handle legacy format first: ```<DISPLAY:language> to ```language
+    # Pattern captures: (1-3 backticks) + <DISPLAY: + (language) + >
+    # Replacement: (captured backticks) + (captured language)
+    # This converts ```<DISPLAY:python> to ```python
+    backtick = chr(96)
+    text = re.sub(rf'({backtick}{{1,3}})<DISPLAY:(\w+)>', r'\1\2', text)
 
     # Handle legacy format: ```code:language to ```language
-    text = re.sub(r'```code:(\w+)', r'```\1', text)
+    # Pattern captures: (1-3 backticks) + code: + (language)
+    # Replacement: (captured backticks) + (captured language)
+    # This converts ```code:python to ```python
+    text = re.sub(rf'({backtick}{{1,3}})code:(\w+)', r'\1\2', text)
 
-    # Restore <END_CODE> if it was affected by the above replacement
-    text = text.replace("```<END_CODE>", "```")
-    text = text.replace("```<END_DISPLAY_CODE>", "```")
+    # Handle new format: <DISPLAY:language>...</DISPLAY> - convert to ```language
+    text = re.sub(r'<DISPLAY:(\w+)>', rf'{backtick}{backtick}{backtick}\1', text)
+    text = text.replace("</DISPLAY>", f"{backtick}{backtick}{backtick}")
 
-    # Clean up any remaining ```< patterns
-    text = text.replace("```<", "```")
+    # Handle closing tags - restore closing backticks
+    text = re.sub(rf'{backtick}{backtick}{backtick}<END_DISPLAY_CODE>', backtick * 3, text)
+    text = re.sub(rf'{backtick}{backtick}{backtick}<END_CODE>', backtick * 3, text)
 
     return text
 

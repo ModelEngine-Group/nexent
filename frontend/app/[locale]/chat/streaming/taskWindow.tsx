@@ -90,7 +90,8 @@ const extractCodeInfo = (
     // Remove the opening marker
     processed = processed.replace(/<code>\s*\n?/, "");
     // Remove closing marker if present
-    processed = processed.replace(/\n?\s*<\/code>[\s\S]*$/, "");
+    // Use non-greedy quantifier to prevent catastrophic backtracking
+    processed = processed.replace(/\n?\s*<\/code>[\s\S]*?$/, "");
     // Clean up any remaining incomplete markers (for streaming)
     processed = processed.replace(/\n?```<END[\s\S]*$/, "");
     processed = processed.replace(/<END[\s\S]*$/, "");
@@ -106,7 +107,8 @@ const extractCodeInfo = (
     // Remove the opening marker
     processed = processed.replace(/<DISPLAY:\w+>\s*\n?/, "");
     // Remove closing marker if present
-    processed = processed.replace(/\n?\s*<\/DISPLAY>[\s\S]*$/, "");
+    // Use non-greedy quantifier to prevent catastrophic backtracking
+    processed = processed.replace(/\n?\s*<\/DISPLAY>[\s\S]*?$/, "");
     // Clean up any remaining incomplete markers (for streaming)
     processed = processed.replace(/\n?```<END[\s\S]*$/, "");
     processed = processed.replace(/<END[\s\S]*$/, "");
