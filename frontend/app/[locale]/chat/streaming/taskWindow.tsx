@@ -72,6 +72,36 @@ const convertToMarkdownCodeFences = (content: string): string => {
  * @param content - Raw code content from stream
  * @returns Object with codeContent and language
  */
+/**
+ * Strip trailing backticks and newlines from code content.
+ * Used during streaming when closing markers may not be fully received.
+ */
+const stripTrailingMarkers = (content: string): string => {
+  while (content.endsWith("```") || content.endsWith("\n")) {
+    if (content.endsWith("```")) {
+      content = content.substring(0, content.length - 3);
+    } else {
+      content = content.substring(0, content.length - 1);
+    }
+  }
+  return content;
+};
+
+/**
+ * Remove incomplete end markers that may appear during streaming.
+ */
+const stripIncompleteEndMarkers = (content: string): string => {
+  const endIdx = content.indexOf("```<END");
+  if (endIdx !== -1) {
+    content = content.substring(0, endIdx);
+  }
+  const endTagIdx = content.indexOf("<END");
+  if (endTagIdx !== -1) {
+    content = content.substring(0, endTagIdx);
+  }
+  return content;
+};
+
 const extractCodeInfo = (
   content: string
 ): { codeContent: string; language: string } => {
@@ -81,48 +111,27 @@ const extractCodeInfo = (
 
   let processed = content;
 
-  // Remove "代码：" or "Code:" prefix if present (handle both full-width and half-width colon)
+  // Remove "代码：" or "Code:" prefix if present
   if (processed.startsWith("代码：") || processed.startsWith("代码:")) {
     processed = processed.substring(4);
   } else if (processed.toLowerCase().startsWith("code：") || processed.toLowerCase().startsWith("code:")) {
     processed = processed.substring(4);
   }
 
-  // 1. Detect and process NEW <code>...</code> format (executable code, default to python)
-  // Use string operations instead of regex to prevent catastrophic backtracking
+  // 1. NEW <code>...</code> format (executable, default python)
   const codeStart = processed.indexOf("<code>");
   if (codeStart !== -1) {
     const contentStart = codeStart + "<code>".length;
     const codeEnd = processed.indexOf("</code>", contentStart);
-    if (codeEnd !== -1) {
-      // Complete tag found - extract content
-      processed = processed.substring(contentStart, codeEnd);
-    } else {
-      // Streaming - no closing tag yet, remove the opening tag only
-      processed = processed.substring(contentStart);
-    }
-    // Clean up any remaining incomplete markers (for streaming)
-    const endIdx = processed.indexOf("```<END");
-    if (endIdx !== -1) {
-      processed = processed.substring(0, endIdx);
-    }
-    const endTagIdx = processed.indexOf("<END");
-    if (endTagIdx !== -1) {
-      processed = processed.substring(0, endTagIdx);
-    }
-    // Remove trailing backticks that might be part of incomplete end marker
-    while (processed.endsWith("```") || processed.endsWith("\n")) {
-      if (processed.endsWith("```")) {
-        processed = processed.substring(0, processed.length - 3);
-      } else {
-        processed = processed.substring(0, processed.length - 1);
-      }
-    }
+    processed = codeEnd !== -1
+      ? processed.substring(contentStart, codeEnd)
+      : processed.substring(contentStart);
+    processed = stripIncompleteEndMarkers(processed);
+    processed = stripTrailingMarkers(processed);
     return { codeContent: processed.trim(), language: "python" };
   }
 
-  // 2. Detect and process NEW <DISPLAY:language>...</DISPLAY> format (display only)
-  // Use string operations instead of regex to prevent catastrophic backtracking
+  // 2. NEW <DISPLAY:language>...</DISPLAY> format (display only)
   const displayStart = processed.indexOf("<DISPLAY:");
   if (displayStart !== -1) {
     const langEnd = processed.indexOf(">", displayStart);
@@ -130,31 +139,11 @@ const extractCodeInfo = (
       const language = processed.substring(displayStart + "<DISPLAY:".length, langEnd);
       const contentStart = langEnd + 1;
       const displayEnd = processed.indexOf("</DISPLAY>", contentStart);
-      if (displayEnd !== -1) {
-        // Complete tag found - extract content
-        processed = processed.substring(contentStart, displayEnd);
-      } else {
-        // Streaming - no closing tag yet
-        processed = processed.substring(contentStart);
-      }
-      // Clean up any remaining incomplete markers (for streaming)
-      const endIdx = processed.indexOf("```<END");
-      if (endIdx !== -1) {
-        processed = processed.substring(0, endIdx);
-      }
-      const endTagIdx = processed.indexOf("<END");
-      if (endTagIdx !== -1) {
-        processed = processed.substring(0, endTagIdx);
-      }
-      // Remove trailing backticks
-      while (processed.endsWith("```") || processed.endsWith("\n")) {
-        if (processed.endsWith("```")) {
-          processed = processed.substring(0, processed.length - 3);
-        } else {
-          processed = processed.substring(0, processed.length - 1);
-        }
-      }
-      // Remove trailing "[已展示给用户]" or similar text
+      processed = displayEnd !== -1
+        ? processed.substring(contentStart, displayEnd)
+        : processed.substring(contentStart);
+      processed = stripIncompleteEndMarkers(processed);
+      processed = stripTrailingMarkers(processed);
       const displayUserIdx = processed.indexOf("[已展示给用户]");
       if (displayUserIdx !== -1) {
         processed = processed.substring(0, displayUserIdx);
@@ -163,43 +152,21 @@ const extractCodeInfo = (
     }
   }
 
-  // 3. Detect and process COMPLETE legacy <DISPLAY:language> format with backticks
+  // 3. LEGACY ```<DISPLAY:language> format with backticks
   const legacyDisplayStart = processed.indexOf("```<DISPLAY:");
   if (legacyDisplayStart !== -1) {
     const langEnd = processed.indexOf(">", legacyDisplayStart + "```<DISPLAY:".length);
     if (langEnd !== -1) {
       const language = processed.substring(legacyDisplayStart + "```<DISPLAY:".length, langEnd);
       const contentStart = langEnd + 1;
-      // Find closing marker
-      const endCodeIdx = processed.indexOf("```<END_DISPLAY_CODE>");
-      const endCodeIdx2 = processed.indexOf("<END_DISPLAY_CODE>");
-      let endPos = -1;
-      if (endCodeIdx !== -1) {
-        endPos = endCodeIdx;
-      } else if (endCodeIdx2 !== -1) {
-        endPos = endCodeIdx2;
-      }
-      if (endPos !== -1) {
-        processed = processed.substring(contentStart, endPos);
-      } else {
-        processed = processed.substring(contentStart);
-      }
-      // Clean up markers
-      const endIdx = processed.indexOf("```<END");
-      if (endIdx !== -1) {
-        processed = processed.substring(0, endIdx);
-      }
-      const endTagIdx = processed.indexOf("<END");
-      if (endTagIdx !== -1) {
-        processed = processed.substring(0, endTagIdx);
-      }
-      while (processed.endsWith("```") || processed.endsWith("\n")) {
-        if (processed.endsWith("```")) {
-          processed = processed.substring(0, processed.length - 3);
-        } else {
-          processed = processed.substring(0, processed.length - 1);
-        }
-      }
+      const endCodeIdx = processed.indexOf("```<END_DISPLAY_CODE>", contentStart);
+      const endCodeIdx2 = processed.indexOf("<END_DISPLAY_CODE>", contentStart);
+      const endPos = endCodeIdx !== -1 ? endCodeIdx : endCodeIdx2;
+      processed = endPos !== -1
+        ? processed.substring(contentStart, endPos)
+        : processed.substring(contentStart);
+      processed = stripIncompleteEndMarkers(processed);
+      processed = stripTrailingMarkers(processed);
       const displayUserIdx = processed.indexOf("[已展示给用户]");
       if (displayUserIdx !== -1) {
         processed = processed.substring(0, displayUserIdx);
@@ -208,173 +175,78 @@ const extractCodeInfo = (
     }
   }
 
-  // 4. Detect and process COMPLETE legacy <RUN> format (executable code, default to python)
+  // 4. LEGACY ```<RUN> format (executable, default python)
   const runStart = processed.indexOf("```<RUN>");
   if (runStart !== -1) {
     const contentStart = runStart + "```<RUN>".length;
-    // Skip optional newline
-    if (contentStart < processed.length && processed.charAt(contentStart) === "\n") {
-      // skip
-    }
-    const endCodeIdx = processed.indexOf("```<END_CODE>");
-    const endCodeIdx2 = processed.indexOf("<END_CODE>");
-    let endPos = -1;
-    if (endCodeIdx !== -1) {
-      endPos = endCodeIdx;
-    } else if (endCodeIdx2 !== -1) {
-      endPos = endCodeIdx2;
-    }
-    if (endPos !== -1) {
-      processed = processed.substring(contentStart, endPos);
-    } else {
-      processed = processed.substring(contentStart);
-    }
-    const endIdx = processed.indexOf("```<END");
-    if (endIdx !== -1) {
-      processed = processed.substring(0, endIdx);
-    }
-    const endTagIdx = processed.indexOf("<END");
-    if (endTagIdx !== -1) {
-      processed = processed.substring(0, endTagIdx);
-    }
-    while (processed.endsWith("```") || processed.endsWith("\n")) {
-      if (processed.endsWith("```")) {
-        processed = processed.substring(0, processed.length - 3);
-      } else {
-        processed = processed.substring(0, processed.length - 1);
-      }
-    }
+    const endCodeIdx = processed.indexOf("```<END_CODE>", contentStart);
+    const endCodeIdx2 = processed.indexOf("<END_CODE>", contentStart);
+    const endPos = endCodeIdx !== -1 ? endCodeIdx : endCodeIdx2;
+    processed = endPos !== -1
+      ? processed.substring(contentStart, endPos)
+      : processed.substring(contentStart);
+    processed = stripIncompleteEndMarkers(processed);
+    processed = stripTrailingMarkers(processed);
     return { codeContent: processed.trim(), language: "python" };
   }
 
   // 5. Handle PARTIAL/INCOMPLETE headers (Streaming)
-  // This is critical for preventing the user from seeing raw tags like "<DISPLAY:py" or "<code"
+  // Prevent raw incomplete tags from being shown to users
 
-  // Case: <code (Incomplete tag, no closing >)
   if (processed === "<code") {
     return { codeContent: "", language: "python" };
   }
 
-  // Case: <DISPLAY:py... (Incomplete tag, no closing >)
-  // Or: <RUN (Incomplete tag)
   const incompleteDisplayRun = /^<(DISPLAY:[a-z0-9]*|RUN)$/i.test(processed);
   if (incompleteDisplayRun) {
     const colonIdx = processed.lastIndexOf(":");
-    if (colonIdx !== -1) {
-      const lang = processed.substring(colonIdx + 1);
-      if (lang) {
-        return { codeContent: "", language: lang };
-      }
-    }
-    return { codeContent: "", language: "python" };
+    return {
+      codeContent: "",
+      language: colonIdx !== -1 ? (processed.substring(colonIdx + 1) || "python") : "python",
+    };
   }
 
-  // Case: ```<DISPLAY:py... or ```<RUN (Incomplete tag with backticks)
   const incompleteWithBackticks = /^```\s*<[A-Z]*(:[a-z0-9]*)?$/.test(processed);
   if (incompleteWithBackticks) {
     const colonIdx = processed.lastIndexOf(":");
-    if (colonIdx !== -1) {
-      const lang = processed.substring(colonIdx + 1).replace(/[`\s<>]/g, "");
-      if (lang) {
-        return { codeContent: "", language: lang };
-      }
-    }
-    return { codeContent: "", language: "python" };
+    const lang = colonIdx !== -1 ? processed.substring(colonIdx + 1).replace(/[`\s<>]/g, "") : "";
+    return { codeContent: "", language: lang || "python" };
   }
 
-  // If content contains incomplete markers somewhere else (not at start), try to detect them
-  // This handles cases where backticks might have been stripped or came separately
-  const hasDisplay = processed.indexOf("<DISPLAY:") !== -1;
-  const hasRun = processed.indexOf("<RUN>") !== -1;
-
-  if (hasDisplay) {
-    const partialDisplayStart = processed.indexOf("<DISPLAY:");
-    const langEnd = processed.indexOf(">", partialDisplayStart);
+  // 6. Inline DISPLAY/RUN detection (handles case where backticks may have been stripped)
+  const inlineDisplayIdx = processed.indexOf("<DISPLAY:");
+  if (inlineDisplayIdx !== -1) {
+    const langEnd = processed.indexOf(">", inlineDisplayIdx);
     if (langEnd !== -1) {
-      const language = processed.substring(partialDisplayStart + "<DISPLAY:".length, langEnd);
-      // Remove all variations of the display marker
-      while (true) {
-        const idx1 = processed.indexOf("```<DISPLAY:");
-        const idx2 = processed.indexOf("<DISPLAY:");
-        if (idx1 !== -1) {
-          const afterTag = idx1 + "```<DISPLAY:".length;
-          const langEnd2 = processed.indexOf(">", afterTag);
-          processed = processed.substring(langEnd2 !== -1 ? langEnd2 + 1 : processed.length);
-        } else if (idx2 !== -1) {
-          const afterTag = idx2 + "<DISPLAY:".length;
-          const langEnd2 = processed.indexOf(">", afterTag);
-          processed = processed.substring(langEnd2 !== -1 ? langEnd2 + 1 : processed.length);
-        } else {
-          break;
-        }
-      }
-      // Clean up end markers
-      const endIdx = processed.indexOf("```<END");
-      if (endIdx !== -1) {
-        processed = processed.substring(0, endIdx);
-      }
-      const endTagIdx = processed.indexOf("<END");
-      if (endTagIdx !== -1) {
-        processed = processed.substring(0, endTagIdx);
-      }
-      while (processed.endsWith("```") || processed.endsWith("\n")) {
-        if (processed.endsWith("```")) {
-          processed = processed.substring(0, processed.length - 3);
-        } else {
-          processed = processed.substring(0, processed.length - 1);
-        }
-      }
+      const language = processed.substring(inlineDisplayIdx + "<DISPLAY:".length, langEnd);
+      const contentStart = langEnd + 1;
+      processed = processed.substring(contentStart);
+      processed = stripIncompleteEndMarkers(processed);
+      processed = stripTrailingMarkers(processed);
       return { codeContent: processed.trim(), language };
     }
   }
 
-  if (hasRun) {
-    // Remove all variations of the RUN marker
-    while (true) {
-      const idx1 = processed.indexOf("```<RUN>");
-      const idx2 = processed.indexOf("<RUN>");
-      if (idx1 !== -1) {
-        processed = processed.substring(idx1 + "```<RUN>".length);
-      } else if (idx2 !== -1) {
-        processed = processed.substring(idx2 + "<RUN>".length);
-      } else {
-        break;
-      }
-    }
-    // Clean up end markers
-    const endIdx = processed.indexOf("```<END");
-    if (endIdx !== -1) {
-      processed = processed.substring(0, endIdx);
-    }
-    const endTagIdx = processed.indexOf("<END");
-    if (endTagIdx !== -1) {
-      processed = processed.substring(0, endTagIdx);
-    }
-    while (processed.endsWith("```") || processed.endsWith("\n")) {
-      if (processed.endsWith("```")) {
-        processed = processed.substring(0, processed.length - 3);
-      } else {
-        processed = processed.substring(0, processed.length - 1);
-      }
-    }
+  const inlineRunIdx = processed.indexOf("<RUN>");
+  if (inlineRunIdx !== -1) {
+    const contentStart = inlineRunIdx + "<RUN>".length;
+    processed = processed.substring(contentStart);
+    processed = stripIncompleteEndMarkers(processed);
+    processed = stripTrailingMarkers(processed);
     return { codeContent: processed.trim(), language: "python" };
   }
 
-  // 6. Handle standard markdown block start or ambiguous start
-  // Case: Just ``` or ```\n
-  // Hide the backticks until we know what's coming, to avoid flashing raw markdown
+  // 7. Handle standard markdown block start
   const stripped = processed.replace(/^```\s*/, "");
   if (stripped !== processed && stripped.length === 0) {
     return { codeContent: "", language: "python" };
   }
 
-  // 7. Fallback: Treat as standard markdown code block
+  // 8. Fallback: standard markdown code block
   if (processed.startsWith("```")) {
-    // Check for standard language tag: ```python
     let lang = "python";
-    let contentStart = 3; // Skip ```
+    let contentStart = processed.charAt(3) === "\n" ? 4 : 3;
     if (processed.charAt(3) !== "\n") {
-      // There's a language tag
       const spaceIdx = processed.indexOf(" ");
       const newlineIdx = processed.indexOf("\n");
       if (spaceIdx !== -1 && (newlineIdx === -1 || spaceIdx < newlineIdx)) {
@@ -384,11 +256,8 @@ const extractCodeInfo = (
         lang = processed.substring(3, newlineIdx);
         contentStart = newlineIdx + 1;
       }
-    } else {
-      contentStart = 4; // Skip ```\n
     }
     processed = processed.substring(contentStart);
-    // Clean tails
     const closingIdx = processed.lastIndexOf("```");
     if (closingIdx !== -1) {
       processed = processed.substring(0, closingIdx);
