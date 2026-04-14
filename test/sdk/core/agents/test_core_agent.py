@@ -223,16 +223,55 @@ MessageObserver = _module_mocks["sdk.nexent.core.utils.observer"].MessageObserve
 # ----------------------------------------------------------------------------
 
 def test_parse_code_blobs_run_format():
-    """Test parse_code_blobs with ```<RUN>\\ncontent\\n```<END_CODE> pattern."""
+    """Test parse_code_blobs with <code>...</code> pattern (new format)."""
     text = """Here is some code:
-```<RUN>
+<code>
 print("Hello World")
 x = 42
-```<END_CODE>
+</code>
 And some more text."""
 
     result = core_agent_module.parse_code_blobs(text)
     expected = "print(\"Hello World\")\nx = 42"
+    assert result == expected
+
+
+def test_parse_code_blobs_run_format_with_newline():
+    """Test parse_code_blobs with <code>\\ncontent\\n</code> pattern."""
+    text = """Here is some code:
+<code>
+print("Hello World")
+x = 42
+</code>
+And some more text."""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "print(\"Hello World\")\nx = 42"
+    assert result == expected
+
+
+def test_parse_code_blobs_run_format_without_newline():
+    """Test parse_code_blobs with <code>content</code> pattern (no newlines)."""
+    text = """Here is some code:
+<code>print("Hello")</code>
+And some more text."""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = 'print("Hello")'
+    assert result == expected
+
+
+def test_parse_code_blobs_multiple_code_blocks():
+    """Test parse_code_blobs with multiple <code> blocks."""
+    text = """<code>
+first_block()
+</code>
+<code>
+second_block()
+</code>"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "first_block()\n\nsecond_block()"
     assert result == expected
 
 
@@ -394,8 +433,26 @@ The result is 8."""
 # Tests for convert_code_format function
 # ----------------------------------------------------------------------------
 
+def test_convert_code_format_display_new_format():
+    """Validate convert_code_format correctly transforms new <DISPLAY:language>...</DISPLAY> format to standard markdown."""
+    original_text = """Here is code:
+<DISPLAY:python>
+print('hello')
+</DISPLAY>
+And some more text."""
+
+    expected_text = """Here is code:
+```python
+print('hello')
+```
+And some more text."""
+
+    transformed = core_agent_module.convert_code_format(original_text)
+    assert transformed == expected_text
+
+
 def test_convert_code_format_display_replacements():
-    """Validate convert_code_format correctly transforms <DISPLAY:language> format to standard markdown."""
+    """Validate convert_code_format correctly transforms legacy <DISPLAY:language> format to standard markdown."""
     original_text = """Here is code:
 ```<DISPLAY:python>
 print('hello')
@@ -473,13 +530,13 @@ print('hello')
 
 
 def test_convert_code_format_multiple_displays():
-    """Test convert_code_format with multiple DISPLAY blocks."""
-    original_text = """```<DISPLAY:python>
+    """Test convert_code_format with multiple DISPLAY blocks (both new and legacy format)."""
+    original_text = """<DISPLAY:python>
 first()
-```<END_DISPLAY_CODE>
-```<DISPLAY:javascript>
+</DISPLAY>
+<DISPLAY:javascript>
 second()
-```<END_DISPLAY_CODE>"""
+</DISPLAY>"""
 
     expected_text = """```python
 first()
@@ -528,8 +585,8 @@ def test_final_answer_error_creation():
 
 def test_parse_code_blobs_whitespace_variation():
     """Test parse_code_blobs with different whitespace patterns."""
-    text = """```python   
-print("hello")   
+    text = """```python
+print("hello")
 ```"""
     result = core_agent_module.parse_code_blobs(text)
     expected = 'print("hello")'
@@ -696,7 +753,7 @@ More text."""
 def test_parse_code_blobs_whitespace_only_run_block():
     """Test parse_code_blobs with whitespace-only RUN block."""
     text = """```<RUN>
-   
+
 ```<END_CODE>"""
 
     result = core_agent_module.parse_code_blobs(text)

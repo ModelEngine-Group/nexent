@@ -30,7 +30,7 @@ def parse_code_blobs(text: str) -> str:
     """Extract code blocs from the LLM's output for execution.
 
     This function is used to parse code that needs to be executed, so it only handles
-    <RUN> format and legacy python formats.
+    <code> format and legacy python formats.
 
     Args:
         text (`str`): LLM's output text to parse.
@@ -41,8 +41,14 @@ def parse_code_blobs(text: str) -> str:
     Raises:
         ValueError: If no valid code block is found in the text.
     """
-    # First try to match the new <RUN> format for execution
-    # <END_CODE> is optional - match both with and without it
+    # First try to match the new <code>...</code> format for execution
+    code_pattern = r"<code>\s*\n?(.*?)\n?\s*</code>"
+    code_matches = re.findall(code_pattern, text, re.DOTALL)
+
+    if code_matches:
+        return "\n\n".join(match.strip() for match in code_matches)
+
+    # Fallback to legacy <RUN> format for backward compatibility
     run_pattern = r"```<RUN>\s*\n(.*?)\n```(?:<END_CODE>)?"
     run_matches = re.findall(run_pattern, text, re.DOTALL)
 
@@ -71,9 +77,9 @@ def parse_code_blobs(text: str) -> str:
             Make sure to include code with the correct pattern for execution:
             Thoughts: Your thoughts
             Code:
-            ```<RUN>
+            <code>
             # Your python code here (for execution)
-            ```<END_CODE>
+            </code>
             """
         ).strip()
     )
@@ -84,9 +90,13 @@ def convert_code_format(text):
     Convert code blocks to markdown format for display.
 
     This function is used to convert code blocks in final answers to markdown format,
-    so it handles <DISPLAY:language> format and legacy formats.
+    so it handles <DISPLAY:language>...</DISPLAY> format and legacy formats.
     """
-    # Handle new format: ```<DISPLAY:language> to ```language
+    # Handle new format: <DISPLAY:language>...</DISPLAY> - convert to ```language
+    text = re.sub(r'<DISPLAY:(\w+)>', r'```\1', text)
+    text = text.replace("</DISPLAY>", "```")
+
+    # Handle legacy format: ```<DISPLAY:language> to ```language
     text = re.sub(r'```<DISPLAY:(\w+)>', r'```\1', text)
 
     # Handle legacy format: ```code:language to ```language
@@ -181,7 +191,7 @@ Additional Args:
 
         # Add new step in logs
         memory_step.model_input_messages = input_messages
-        stop_sequences = ["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"]
+        stop_sequences = ["Observation:", "Calling tools:"]
 
         # Prepare additional arguments
         additional_args: dict[str, Any] = {}

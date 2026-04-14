@@ -30,8 +30,44 @@ import log from "@/lib/logger";
 import { useConfig } from "@/hooks/useConfig";
 
 /**
+ * Convert custom code tags to standard markdown code fences
+ * This should be called BEFORE passing content to MarkdownRenderer
+ * Handles streaming cases where closing tags may not be present yet
+ * - <code>...</code> → ```python ... ```
+ * - <code>... (incomplete) → ```python (open code fence, no content yet)
+ * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
+ * - <DISPLAY:language>... (incomplete) → ```language (open code fence, no content yet)
+ */
+const convertToMarkdownCodeFences = (content: string): string => {
+  // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
+  content = content.replace(/<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g, (_match, language, code) => {
+    return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+  });
+
+  // Step 2: Handle complete <code>...</code> blocks
+  content = content.replace(/<code>([\s\S]*?)<\/code>/g, (_match, code) => {
+    return `\`\`\`python\n${code.trim()}\n\`\`\``;
+  });
+
+  // Step 3: Handle incomplete tags during streaming
+  // <DISPLAY:language> without closing </DISPLAY> → ```language\n (open fence)
+  // Only match if there's no closing tag later in the content
+  content = content.replace(/<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g, (_match, language) => {
+    return `\`\`\`${language}\n`;
+  });
+
+  // <code> without closing </code> → ```python\n (open fence)
+  // Only match if there's no closing tag later in the content
+  content = content.replace(/<code>(?![\s\S]*<\/code>)/g, () => {
+    return `\`\`\`python\n`;
+  });
+
+  return content;
+};
+
+/**
  * Extract code content and language from model_output_code content
- * Handles both <RUN> and <DISPLAY:language> formats
+ * Handles both <code> and legacy <RUN> / <DISPLAY:language> formats
  * Supports streaming mode where end markers may not be present yet
  * @param content - Raw code content from stream
  * @returns Object with codeContent and language
@@ -48,11 +84,43 @@ const extractCodeInfo = (
   // Remove "代码：" or "Code:" prefix if present (handle both full-width and half-width colon)
   processed = processed.replace(/^(代码|Code)[：:]\s*/i, "");
 
-  // 1. Detect and process COMPLETE <DISPLAY:language> format
-  // Match: ```<DISPLAY:python> or ``` <DISPLAY:python>
-  const displayMatch = processed.match(/```\s*<DISPLAY:(\w+)>/);
+  // 1. Detect and process NEW <code>...</code> format (executable code, default to python)
+  const codeMatch = processed.match(/<code>/);
+  if (codeMatch) {
+    // Remove the opening marker
+    processed = processed.replace(/<code>\s*\n?/, "");
+    // Remove closing marker if present
+    processed = processed.replace(/\n?\s*<\/code>[\s\S]*$/, "");
+    // Clean up any remaining incomplete markers (for streaming)
+    processed = processed.replace(/\n?```<END[\s\S]*$/, "");
+    processed = processed.replace(/<END[\s\S]*$/, "");
+    // Remove trailing backticks that might be part of incomplete end marker
+    processed = processed.replace(/\n?```$/, "");
+    return { codeContent: processed.trim(), language: "python" };
+  }
+
+  // 2. Detect and process NEW <DISPLAY:language>...</DISPLAY> format (display only)
+  const displayMatch = processed.match(/<DISPLAY:(\w+)>/);
   if (displayMatch) {
     const language = displayMatch[1];
+    // Remove the opening marker
+    processed = processed.replace(/<DISPLAY:\w+>\s*\n?/, "");
+    // Remove closing marker if present
+    processed = processed.replace(/\n?\s*<\/DISPLAY>[\s\S]*$/, "");
+    // Clean up any remaining incomplete markers (for streaming)
+    processed = processed.replace(/\n?```<END[\s\S]*$/, "");
+    processed = processed.replace(/<END[\s\S]*$/, "");
+    // Remove trailing backticks that might be part of incomplete end marker
+    processed = processed.replace(/\n?```$/, "");
+    // Remove trailing "[已展示给用户]" or similar text
+    processed = processed.replace(/\[已展示给用户\][\s\S]*$/, "");
+    return { codeContent: processed.trim(), language };
+  }
+
+  // 3. Detect and process COMPLETE legacy <DISPLAY:language> format with backticks
+  const legacyDisplayMatch = processed.match(/```\s*<DISPLAY:(\w+)>/);
+  if (legacyDisplayMatch) {
+    const language = legacyDisplayMatch[1];
     // Remove the opening marker (handle optional whitespace and newline)
     processed = processed.replace(/```\s*<DISPLAY:\w+>\s*\n?/, "");
     // Remove closing marker if present: ```<END_DISPLAY_CODE> or just <END_DISPLAY_CODE>
@@ -68,7 +136,7 @@ const extractCodeInfo = (
     return { codeContent: processed.trim(), language };
   }
 
-  // 2. Detect and process COMPLETE <RUN> format (executable code, default to python)
+  // 4. Detect and process COMPLETE legacy <RUN> format (executable code, default to python)
   const runMatch = processed.match(/```\s*<RUN>/);
   if (runMatch) {
     // Remove the opening marker
@@ -84,12 +152,24 @@ const extractCodeInfo = (
     return { codeContent: processed.trim(), language: "python" };
   }
 
-  // 3. Handle PARTIAL/INCOMPLETE headers (Streaming)
-  // This is critical for preventing the user from seeing raw tags like "```<DISPLAY:py"
+  // 5. Handle PARTIAL/INCOMPLETE headers (Streaming)
+  // This is critical for preventing the user from seeing raw tags like "<DISPLAY:py" or "<code"
 
-  // Case: ```<DISPLAY:py... (Incomplete tag, no closing >)
-  // Or: ```<RUN (Incomplete tag)
-  // Or: ```< (Just started special tag)
+  // Case: <code (Incomplete tag, no closing >)
+  if (/^<code$/.test(processed)) {
+    return { codeContent: "", language: "python" };
+  }
+
+  // Case: <DISPLAY:py... (Incomplete tag, no closing >)
+  // Or: <RUN (Incomplete tag)
+  if (/^<(DISPLAY:[a-z0-9]*|RUN)$/i.test(processed)) {
+    // We are strictly inside the header tag. Content is empty.
+    // Try to guess language if possible
+    const langMatch = processed.match(/:(\w+)$/);
+    return { codeContent: "", language: langMatch ? langMatch[1] : "python" };
+  }
+
+  // Case: ```<DISPLAY:py... or ```<RUN (Incomplete tag with backticks)
   if (/^```\s*<[A-Z]*(:[a-z0-9]*)?$/.test(processed)) {
     // We are strictly inside the header tag. Content is empty.
     // Try to guess language if possible
@@ -125,14 +205,14 @@ const extractCodeInfo = (
     }
   }
 
-  // 4. Handle standard markdown block start or ambiguous start
+  // 6. Handle standard markdown block start or ambiguous start
   // Case: Just ``` or ```\n
   // Hide the backticks until we know what's coming, to avoid flashing raw markdown
   if (/^```\s*$/.test(processed)) {
     return { codeContent: "", language: "python" };
   }
 
-  // 5. Fallback: Treat as standard markdown code block
+  // 7. Fallback: Treat as standard markdown code block
   if (processed.startsWith("```")) {
     // Check for standard language tag: ```python
     const standardMatch = processed.match(/^```(\w+)\s/);
@@ -956,7 +1036,7 @@ const messageHandlers: MessageHandler[] = [
         }}
       >
         <MarkdownRenderer
-          content={message.content}
+          content={convertToMarkdownCodeFences(message.content)}
           className="task-message-content"
           showDiagramToggle={false}
           enableMultimodal={false}
@@ -1079,7 +1159,7 @@ const messageHandlers: MessageHandler[] = [
       if (typeof content === "string") {
         return (
           <MarkdownRenderer
-            content={content}
+            content={convertToMarkdownCodeFences(content)}
             className="task-message-content"
             showDiagramToggle={false}
             enableMultimodal={false}
