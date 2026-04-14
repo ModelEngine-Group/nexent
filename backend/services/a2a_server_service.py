@@ -675,7 +675,6 @@ class A2AServerService:
         token_id: Optional[int] = None,
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
-        base_url: Optional[str] = None
     ) -> AsyncIterator[Dict[str, Any]]:
         """Handle incoming message:stream request.
 

@@ -202,7 +202,7 @@ class ExternalA2AAgentProxy:
 
         if protocol_type == PROTOCOL_JSONRPC:
             # JSON-RPC 2.0 format
-            payload = self._build_message_payload(query, history, context)
+            payload = self._build_message_payload(query, context)
             request_body = {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -211,7 +211,7 @@ class ExternalA2AAgentProxy:
             }
         else:
             # HTTP+JSON (REST) format - direct message payload
-            request_body = self._build_message_payload(query, history, context)
+            request_body = self._build_message_payload(query, context)
 
         headers = self._build_headers()
 
@@ -282,7 +282,7 @@ class ExternalA2AAgentProxy:
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Build request body for streaming call based on protocol type."""
-        payload = self._build_message_payload(query, history, context)
+        payload = self._build_message_payload(query, context)
         if protocol_type == PROTOCOL_JSONRPC:
             return {
                 "jsonrpc": "2.0",
