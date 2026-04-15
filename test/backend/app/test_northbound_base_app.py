@@ -133,11 +133,14 @@ def register_exception_handlers(app):
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request, exc):
-        return JSONResponse(status_code=exc.status_code, content={"message": exc.detail})
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request, exc):
-        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+        # Re-raise HTTPException so FastAPI's own handler deals with it
+        if isinstance(exc, HTTPException):
+            raise exc
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 app_factory_module.register_exception_handlers = register_exception_handlers
 app_factory_module.create_app = None  # placeholder
@@ -184,9 +187,18 @@ auth_utils_module.validate_bearer_token = MagicMock(return_value=(True, {"user_i
 sys.modules['utils.auth_utils'] = auth_utils_module
 
 # ---------------------------------------------------------------------------
+# Helper to build async iterators without passing keyword args through mock
+# ---------------------------------------------------------------------------
+async def _async_iter(items):
+    """Yield items one by one; works as return_value for sync mock of async generator."""
+    for item in items:
+        yield item
+
+
+# ---------------------------------------------------------------------------
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
-from apps.northbound_base_app import northbound_app as app  # noqa: E402
+from apps.northbound_base_app import A2AServerSettings, northbound_app as app  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -300,7 +312,14 @@ class TestNorthboundBaseApp(unittest.TestCase):
     def test_jsonrpc_send_message_success(self):
         """POST /v1 with SendMessage method should invoke a2a_server_service and return JSON-RPC response."""
         # Arrange
-        expected_result = {"status": "ok", "task_id": "task-123"}
+        expected_result = {
+            "message": {
+                "messageId": "msg-001",
+                "role": "ROLE_AGENT",
+                "parts": [{"type": "text", "text": "Hello! How can I help you?", "mediaType": "text/plain"}]
+            }
+        }
+        a2a_service_module.a2a_server_service.handle_message_send.side_effect = None
         a2a_service_module.a2a_server_service.handle_message_send.return_value = expected_result
         payload = {
             "jsonrpc": "2.0",
@@ -322,7 +341,10 @@ class TestNorthboundBaseApp(unittest.TestCase):
         self.assertEqual(data["jsonrpc"], "2.0")
         self.assertEqual(data["id"], "req-1")
         self.assertEqual(data["result"], expected_result)
-        a2a_service_module.a2a_server_service.handle_message_send.assert_called_once()
+        a2a_service_module.a2a_server_service.handle_message_send.assert_called()
+        last_call = a2a_service_module.a2a_server_service.handle_message_send.call_args_list[-1]
+        self.assertEqual(last_call.kwargs["endpoint_id"], "test-endpoint")
+        self.assertIn("content", last_call.kwargs["message"]["message"])
 
     def test_jsonrpc_method_not_found(self):
         """POST /v1 with unknown method should return JSON-RPC method error."""
@@ -348,6 +370,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
         """POST /message:send should call a2a_server_service.handle_message_send."""
         # Arrange
         expected_result = {"status": "sent"}
+        a2a_service_module.a2a_server_service.handle_message_send.side_effect = None
         a2a_service_module.a2a_server_service.handle_message_send.return_value = expected_result
         message_payload = {
             "message": {"content": "test message"},
@@ -391,16 +414,368 @@ class TestNorthboundBaseApp(unittest.TestCase):
         # Assert
         self.assertEqual(response.status_code, 404)
 
-    def test_rest_message_stream_endpoint_exists(self):
-        """POST /message:stream endpoint should be registered (returns 200)."""
+    def test_get_agent_card_internal_error(self):
+        """GET /.well-known/agent-card.json returns 500 when the service raises unexpected exception."""
         # Arrange
-        a2a_service_module.a2a_server_service.handle_message_stream.return_value = iter([])
+        a2a_service_module.a2a_server_service.get_agent_card.side_effect = RuntimeError("unexpected db failure")
+
+        # Act
+        response = self.client.get("/nb/a2a/test-endpoint/.well-known/agent-card.json")
+
+        # Assert
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Failed to get agent card", response.json()["detail"])
+
+    def test_jsonrpc_get_task_success(self):
+        """POST /v1 with GetTask method should return JSON-RPC result with task info."""
+        # Arrange
+        expected_result = {"id": "task-xyz", "status": "completed"}
+        a2a_service_module.a2a_server_service.get_task.return_value = expected_result
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "GetTask",
+            "params": {"id": "task-xyz"},
+            "id": "req-task-1"
+        }
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/v1", json=payload)
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["jsonrpc"], "2.0")
+        self.assertEqual(data["id"], "req-task-1")
+        self.assertEqual(data["result"], expected_result)
+
+    def test_jsonrpc_get_task_missing_id(self):
+        """POST /v1 with GetTask but missing 'id' param should return internal JSON-RPC error."""
+        # Arrange
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "GetTask",
+            "params": {},
+            "id": "req-task-2"
+        }
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/v1", json=payload)
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], -32603)
+
+    def test_jsonrpc_endpoint_not_found_error(self):
+        """POST /v1 with SendMessage when endpoint does not exist should return JSON-RPC EndpointNotFound."""
+        # Arrange
+        a2a_service_module.a2a_server_service.handle_message_send.side_effect = (
+            a2a_service_module.EndpointNotFoundError("endpoint not registered")
+        )
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "SendMessage",
+            "params": {"message": {}},
+            "id": "req-err-ep"
+        }
+
+        # Act
+        response = self.client.post("/nb/a2a/bad-endpoint/v1", json=payload)
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], -32601)
+        self.assertIn("not found", data["error"]["message"].lower())
+
+    def test_jsonrpc_task_not_found_error(self):
+        """POST /v1 with GetTask when task does not exist should return JSON-RPC TaskNotFound."""
+        # Arrange
+        a2a_service_module.a2a_server_service.get_task.side_effect = (
+            a2a_service_module.TaskNotFoundError("task not found")
+        )
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "GetTask",
+            "params": {"id": "missing-task"},
+            "id": "req-err-task"
+        }
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/v1", json=payload)
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], -32001)
+
+    def test_jsonrpc_unsupported_operation_error(self):
+        """POST /v1 with unsupported operation should return JSON-RPC UnsupportedOperation."""
+        # Arrange
+        a2a_service_module.a2a_server_service.handle_message_send.side_effect = (
+            a2a_service_module.UnsupportedOperationError("operation not supported")
+        )
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "SendMessage",
+            "params": {"message": {}},
+            "id": "req-err-unsupported"
+        }
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/v1", json=payload)
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], -32004)
+
+    def test_jsonrpc_internal_error(self):
+        """POST /v1 with unexpected exception should return JSON-RPC internal error."""
+        # Arrange
+        a2a_service_module.a2a_server_service.handle_message_send.side_effect = RuntimeError("crash")
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "SendMessage",
+            "params": {"message": {}},
+            "id": "req-err-internal"
+        }
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/v1", json=payload)
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], -32603)
+
+    def test_jsonrpc_send_streaming_success(self):
+        """POST /v1 with SendStreamingMessage should return streaming response with SSE headers."""
+        # Arrange - use return_value to avoid generator-signature issues with keyword args
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = None
+        a2a_service_module.a2a_server_service.handle_message_stream.return_value = _async_iter([
+            {"statusUpdate": {"taskId": "stream-1", "status": {"state": "working"}}},
+            {"statusUpdate": {"taskId": "stream-1", "status": {"state": "completed"}}},
+        ])
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "SendStreamingMessage",
+            "params": {"message": {}},
+            "id": "req-stream"
+        }
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/v1", json=payload)
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "text/event-stream; charset=utf-8")
+        self.assertEqual(response.headers["Cache-Control"], "no-cache")
+        self.assertEqual(response.headers["X-Accel-Buffering"], "no")
+        lines = [ln for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
+        self.assertGreaterEqual(len(lines), 2)
+
+    def test_jsonrpc_send_streaming_internal_error(self):
+        """POST /v1 with SendStreamingMessage when stream throws should yield JSON-RPC error event."""
+        # Arrange
+        async def fake_stream_error():
+            raise RuntimeError("stream broken")
+            yield  # type: ignore
+
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = fake_stream_error
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "SendStreamingMessage",
+            "params": {"message": {}},
+            "id": "req-stream-err"
+        }
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/v1", json=payload)
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/event-stream", response.headers["content-type"])
+        import json
+        events = [json.loads(ln.replace("data: ", "")) for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
+        self.assertTrue(any(e.get("error", {}).get("code") == -32603 for e in events))
+
+    def test_rest_message_send_endpoint_not_found(self):
+        """POST /message:send returns 404 when endpoint is not registered."""
+        # Arrange
+        a2a_service_module.a2a_server_service.handle_message_send.side_effect = (
+            a2a_service_module.EndpointNotFoundError("not registered")
+        )
+
+        # Act
+        response = self.client.post("/nb/a2a/unknown-ep/message:send", json={"message": {}})
+
+        # Assert
+        self.assertEqual(response.status_code, 404)
+
+    def test_rest_message_send_agent_not_enabled(self):
+        """POST /message:send returns 503 when agent is not enabled."""
+        # Arrange
+        a2a_service_module.a2a_server_service.handle_message_send.side_effect = (
+            a2a_service_module.AgentNotEnabledError("agent disabled")
+        )
 
         # Act
         response = self.client.post("/nb/a2a/test-endpoint/message:send", json={"message": {}})
 
-        # Assert - endpoint exists and returns a response
-        self.assertIn(response.status_code, [200, 500])
+        # Assert
+        self.assertEqual(response.status_code, 503)
+
+    def test_rest_message_send_internal_error(self):
+        """POST /message:send returns 500 when unexpected error occurs."""
+        # Arrange
+        a2a_service_module.a2a_server_service.handle_message_send.side_effect = RuntimeError("crash")
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/message:send", json={"message": {}})
+
+        # Assert
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Failed to send message", response.json()["detail"])
+
+    def test_rest_message_stream_success(self):
+        """POST /message:stream should return SSE response with correct headers."""
+        # Arrange
+        async def fake_stream():
+            yield {"statusUpdate": {"taskId": "sse-task", "status": {"state": "working"}}}
+            yield {"statusUpdate": {"taskId": "sse-task", "status": {"state": "completed"}}}
+
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = None
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = fake_stream
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/message:stream", json={"message": {}})
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "text/event-stream; charset=utf-8")
+        self.assertEqual(response.headers["Cache-Control"], "no-cache")
+        self.assertEqual(response.headers["X-Accel-Buffering"], "no")
+
+    def test_rest_message_stream_endpoint_not_found(self):
+        """POST /message:stream - EndpointNotFoundError is caught inside generate_sse and returns 200 with fail event."""
+        # Arrange
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = (
+            a2a_service_module.EndpointNotFoundError("not registered")
+        )
+
+        # Act
+        response = self.client.post("/nb/a2a/unknown-ep/message:stream", json={"message": {}})
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        import json
+        events = [json.loads(ln.replace("data: ", "")) for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
+        fail_events = [e for e in events if e.get("statusUpdate", {}).get("status", {}).get("state") == "TASK_STATE_FAILED"]
+        self.assertTrue(len(fail_events) > 0, "Failure event should appear in SSE when endpoint not found")
+
+    def test_rest_message_stream_agent_not_enabled(self):
+        """POST /message:stream - AgentNotEnabledError is caught inside generate_sse and returns 200 with fail event."""
+        # Arrange
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = (
+            a2a_service_module.AgentNotEnabledError("disabled")
+        )
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/message:stream", json={"message": {}})
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        import json
+        events = [json.loads(ln.replace("data: ", "")) for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
+        fail_events = [e for e in events if e.get("statusUpdate", {}).get("status", {}).get("state") == "TASK_STATE_FAILED"]
+        self.assertTrue(len(fail_events) > 0, "Failure event should appear in SSE when agent not enabled")
+
+    def test_rest_message_stream_internal_error(self):
+        """POST /message:stream - exception is caught inside generate_sse and returns 200 with fail event."""
+        # Arrange
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = RuntimeError("pre-stream crash")
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/message:stream", json={"message": {}})
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        import json
+        events = [json.loads(ln.replace("data: ", "")) for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
+        fail_events = [e for e in events if e.get("statusUpdate", {}).get("status", {}).get("state") == "TASK_STATE_FAILED"]
+        self.assertTrue(len(fail_events) > 0, "Failure event should appear in SSE on internal error")
+
+    def test_rest_message_stream_generator_error_yields_fail_event(self):
+        """POST /message:stream when stream generator throws should yield failure event in SSE."""
+        # Arrange
+        async def fake_stream():
+            yield {"statusUpdate": {"taskId": "ok-task", "status": {"state": "working"}}}
+            raise RuntimeError("stream broke mid-way")
+
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = fake_stream
+
+        # Act
+        response = self.client.post("/nb/a2a/test-endpoint/message:stream", json={"message": {}})
+
+        # Assert
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/event-stream", response.headers["content-type"])
+        import json
+        events = [json.loads(ln.replace("data: ", "")) for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
+        fail_events = [e for e in events if e.get("statusUpdate", {}).get("status", {}).get("state") == "TASK_STATE_FAILED"]
+        self.assertTrue(len(fail_events) > 0, "Failure event should appear after stream error")
+
+    def test_rest_get_task_internal_error(self):
+        """GET /tasks/{task_id} returns 500 when unexpected exception occurs."""
+        # Arrange
+        a2a_service_module.a2a_server_service.get_task.side_effect = RuntimeError("db failure")
+
+        # Act
+        response = self.client.get("/nb/a2a/test-endpoint/tasks/some-task")
+
+        # Assert
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Failed to get task", response.json()["detail"])
+
+
+class TestA2AServerSettings(unittest.TestCase):
+    """Unit tests for the A2AServerSettings Pydantic model."""
+
+    def test_defaults(self):
+        """Default values should be is_enabled=False and card_overrides=None."""
+        settings = A2AServerSettings()
+        self.assertEqual(settings.is_enabled, False)
+        self.assertIsNone(settings.card_overrides)
+
+    def test_is_enabled_true(self):
+        """is_enabled can be set to True."""
+        settings = A2AServerSettings(is_enabled=True)
+        self.assertTrue(settings.is_enabled)
+
+    def test_card_overrides_with_values(self):
+        """card_overrides accepts arbitrary dict values."""
+        overrides = {"name": "CustomAgent", "version": "2.0"}
+        settings = A2AServerSettings(card_overrides=overrides)
+        self.assertEqual(settings.card_overrides, overrides)
+
+    def test_both_fields_set(self):
+        """Both fields can be set simultaneously."""
+        settings = A2AServerSettings(is_enabled=True, card_overrides={"label": "my-agent"})
+        self.assertTrue(settings.is_enabled)
+        self.assertEqual(settings.card_overrides["label"], "my-agent")
+
+    def test_extra_fields_forbidden(self):
+        """Pydantic raises ValidationError for unexpected fields."""
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            A2AServerSettings(foo="bar")
+
+    def test_is_enabled_rejects_non_bool(self):
+        """is_enabled must be a bool or None; strings are rejected."""
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            A2AServerSettings(is_enabled="yes")
 
 
 if __name__ == "__main__":
