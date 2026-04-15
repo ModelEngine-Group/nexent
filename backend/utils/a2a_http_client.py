@@ -70,7 +70,7 @@ class A2AHttpClient:
             await asyncio.sleep(wait_time)
         else:
             logger.error(f"All retries exhausted for {url}: {context} - {exc}")
-            raise
+            raise exc
 
     async def _request_with_retry(
         self,
@@ -91,7 +91,7 @@ class A2AHttpClient:
 
         for attempt in range(self.max_retries):
             try:
-                async with self._session.request(method, url, **kwargs) as response:
+                async with await self._session.request(method, url, **kwargs) as response:
                     if response.status < 500 and not read_response:
                         return response
                     body = await response.read()

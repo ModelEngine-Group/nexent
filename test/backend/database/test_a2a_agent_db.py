@@ -619,6 +619,33 @@ class TestCreateExternalAgentFromUrl:
             )
             assert result['name'] == 'Updated Agent'
 
+    def test_updates_all_fields_on_existing_agent(self):
+        agent = factory_external_agent(
+            id=1, name='Old Name', description='Old description',
+            version='1.0', agent_url='http://old.example.com',
+            protocol_type='JSONRPC', streaming=False,
+            cached_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            cache_expires_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            source_url='http://example.com/card.json',
+        )
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.create_external_agent_from_url(
+                source_url='http://example.com/card.json',
+                name='New Name', description='New description',
+                version='2.0', agent_url='http://new.example.com',
+                tenant_id='tenant-1', user_id='user-2',
+                streaming=True,
+                supported_interfaces=[{"protocolBinding": "httprest", "url": "http://rest.example.com"}],
+            )
+            assert result['name'] == 'New Name'
+            assert result['description'] == 'New description'
+            assert result['version'] == '2.0'
+            assert result['agent_url'] == 'http://new.example.com'
+            assert result['streaming'] is True
+            assert result['cached_at'] is not None
+            assert result['cache_expires_at'] is not None
+
 
 class TestCreateExternalAgentFromNacos:
     def test_creates_new_nacos_agent(self):
@@ -643,6 +670,35 @@ class TestCreateExternalAgentFromNacos:
                 tenant_id='tenant-1', user_id='user-1',
             )
             assert result['name'] == 'Updated Nacos Agent'
+
+    def test_updates_all_fields_on_existing_nacos_agent(self):
+        agent = factory_external_agent(
+            id=1, name='Old Nacos Agent', description='Old description',
+            version='1.0', agent_url='http://old.example.com',
+            protocol_type='JSONRPC', streaming=False,
+            nacos_config_id='cfg_001', nacos_agent_name='agent-from-nacos',
+            cached_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            cache_expires_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            source_type='nacos',
+        )
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.create_external_agent_from_nacos(
+                name='New Nacos Agent', description='New description',
+                version='3.0', agent_url='http://new.example.com',
+                nacos_config_id='cfg_001', nacos_agent_name='agent-from-nacos',
+                tenant_id='tenant-1', user_id='user-2',
+                streaming=True,
+                supported_interfaces=[
+                    {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com:8000", "protocolVersion": "1.0"},
+                ],
+            )
+            assert result['name'] == 'New Nacos Agent'
+            assert result['description'] == 'New description'
+            assert result['version'] == '3.0'
+            assert result['agent_url'] == 'http://new.example.com'
+            assert result['streaming'] is True
+            assert result['source_type'] == 'nacos'
 
 
 class TestGetExternalAgentById:
@@ -673,6 +729,33 @@ class TestListExternalAgents:
             mk.return_value = MockSession()
             result = a2a_db.list_external_agents('tenant-1')
             assert result == []
+
+    def test_filters_by_source_type(self):
+        url_agent = factory_external_agent(id=1, source_type='url', source_url='http://example.com/1')
+        nacos_agent = factory_external_agent(id=2, source_type='nacos', nacos_config_id='cfg1', nacos_agent_name='agent1')
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [url_agent, nacos_agent]})
+            result = a2a_db.list_external_agents('tenant-1', source_type='url')
+            assert len(result) == 1
+            assert result[0]['source_type'] == 'url'
+
+    def test_filters_by_is_available(self):
+        available_agent = factory_external_agent(id=1, name='Available', is_available=True)
+        unavailable_agent = factory_external_agent(id=2, name='Unavailable', is_available=False)
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [available_agent, unavailable_agent]})
+            result = a2a_db.list_external_agents('tenant-1', is_available=True)
+            assert len(result) == 1
+            assert result[0]['is_available'] is True
+
+    def test_filters_by_both_source_type_and_is_available(self):
+        available_url_agent = factory_external_agent(id=1, name='Available URL', source_type='url', is_available=True)
+        unavailable_nacos_agent = factory_external_agent(id=2, name='Unavailable Nacos', source_type='nacos', is_available=False)
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [available_url_agent, unavailable_nacos_agent]})
+            result = a2a_db.list_external_agents('tenant-1', source_type='url', is_available=True)
+            assert len(result) == 1
+            assert result[0]['name'] == 'Available URL'
 
 
 class TestDeleteExternalAgent:
@@ -709,6 +792,36 @@ class TestUpdateExternalAgentProtocol:
             with pytest.raises(ValueError, match="Invalid protocol type"):
                 a2a_db.update_external_agent_protocol(1, 'tenant-1', 'INVALID')
 
+    def test_updates_agent_url_based_on_protocol_interface(self):
+        agent = factory_external_agent(
+            id=1,
+            supported_interfaces=[
+                {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com:8000/a2a", "protocolVersion": "1.0"},
+                {"protocolBinding": "httprest", "url": "http://rest.example.com:8000/agent", "protocolVersion": "1.0"},
+                {"protocolBinding": "grpc", "url": "http://grpc.example.com:9090", "protocolVersion": "1.0"},
+            ],
+            agent_url='http://original.example.com',
+        )
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.update_external_agent_protocol(1, 'tenant-1', 'GRPC')
+            assert result['protocol_type'] == 'GRPC'
+            assert result['agent_url'] == 'http://grpc.example.com:9090'
+
+    def test_keeps_original_url_when_no_matching_interface(self):
+        agent = factory_external_agent(
+            id=1,
+            supported_interfaces=[
+                {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com", "protocolVersion": "1.0"},
+            ],
+            agent_url='http://original.example.com',
+        )
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.update_external_agent_protocol(1, 'tenant-1', 'GRPC')
+            assert result['protocol_type'] == 'GRPC'
+            assert result['agent_url'] == 'http://original.example.com'
+
 
 class TestRefreshExternalAgentCache:
     def test_refreshes_fields(self, external_agent):
@@ -725,6 +838,78 @@ class TestRefreshExternalAgentCache:
             mk.return_value = MockSession()
             result = a2a_db.refresh_external_agent_cache(999, 'tenant-1', 'user-1')
             assert result is None
+
+    def test_refreshes_raw_card_field(self):
+        agent = factory_external_agent(id=1, raw_card=None)
+        new_card = {"name": "Updated Agent", "version": "2.0"}
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.refresh_external_agent_cache(1, 'tenant-1', 'user-1', new_raw_card=new_card)
+            assert result is not None
+
+    def test_refreshes_agent_url_field(self):
+        agent = factory_external_agent(id=1, agent_url='http://old.example.com')
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.refresh_external_agent_cache(1, 'tenant-1', 'user-1', new_agent_url='http://new.example.com')
+            assert result is not None
+
+    def test_refreshes_description_field(self):
+        agent = factory_external_agent(id=1, description='Old description')
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.refresh_external_agent_cache(1, 'tenant-1', 'user-1', new_description='New description')
+            assert result is not None
+
+    def test_refreshes_streaming_field(self):
+        agent = factory_external_agent(id=1, streaming=False)
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.refresh_external_agent_cache(1, 'tenant-1', 'user-1', new_streaming=True)
+            assert result is not None
+
+    def test_refreshes_supported_interfaces_field(self):
+        agent = factory_external_agent(id=1, supported_interfaces=[])
+        new_interfaces = [
+            {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com:8000", "protocolVersion": "1.0"},
+            {"protocolBinding": "httprest", "url": "http://rest.example.com:8000", "protocolVersion": "1.0"},
+        ]
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.refresh_external_agent_cache(1, 'tenant-1', 'user-1', new_supported_interfaces=new_interfaces)
+            assert result is not None
+
+    def test_refreshes_protocol_type_and_updates_url_from_interface(self):
+        agent = factory_external_agent(
+            id=1,
+            protocol_type='JSONRPC',
+            agent_url='http://original.example.com',
+            supported_interfaces=[
+                {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com:8000", "protocolVersion": "1.0"},
+                {"protocolBinding": "httprest", "url": "http://rest.example.com:8000", "protocolVersion": "1.0"},
+            ],
+        )
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.refresh_external_agent_cache(1, 'tenant-1', 'user-1', new_protocol_type='HTTP+JSON')
+            assert result is not None
+
+    def test_refreshes_all_fields_at_once(self):
+        agent = factory_external_agent(id=1)
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.refresh_external_agent_cache(
+                1, 'tenant-1', 'user-1',
+                new_raw_card={"name": "Full Update"},
+                new_agent_url='http://new.example.com',
+                new_name='Updated Agent',
+                new_description='Updated description',
+                new_version='5.0',
+                new_streaming=True,
+                new_supported_interfaces=[{"protocolBinding": "grpc", "url": "http://grpc:9090"}],
+                new_protocol_type='GRPC',
+            )
+            assert result is not None
 
 
 class TestUpdateAgentAvailability:

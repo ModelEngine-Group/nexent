@@ -90,11 +90,13 @@ sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.agent_version_db'] = MagicMock()
-sys.modules['database.a2a_agent_db'] = _create_stub_module(
+a2a_agent_db_stub = _create_stub_module(
     "database.a2a_agent_db",
     PROTOCOL_JSONRPC="JSONRPC",
     query_external_sub_agents=MagicMock(return_value=[]),
 )
+sys.modules['database.a2a_agent_db'] = a2a_agent_db_stub
+database_module.a2a_agent_db = a2a_agent_db_stub
 sys.modules['services.vectordatabase_service'] = MagicMock()
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
@@ -187,6 +189,9 @@ from backend.agents.create_agent_info import (
     prepare_prompt_templates,
     _get_skills_for_template,
     _get_skill_script_tools,
+    _extract_url_from_card,
+    _build_external_agent_config,
+    _get_external_a2a_agents,
 )
 
 # Import constants for testing
@@ -2987,6 +2992,320 @@ class TestPreparePromptTemplates:
             mock_get_template.assert_called_once_with(False, "en")
             assert result["system_prompt"] == "test system prompt"
             assert result["test"] == "template"
+
+
+class TestExtractUrlFromCard:
+    """Tests for the _extract_url_from_card function"""
+
+    def test_extract_url_from_card_none(self):
+        """Test case for None raw_card"""
+        result = _extract_url_from_card(None)
+        assert result == ""
+
+    def test_extract_url_from_card_empty_dict(self):
+        """Test case for empty dict raw_card"""
+        result = _extract_url_from_card({})
+        assert result == ""
+
+    def test_extract_url_from_card_no_interfaces(self):
+        """Test case for card with url but no supportedInterfaces"""
+        raw_card = {"name": "test_agent", "url": "http://example.com/agent"}
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://example.com/agent"
+
+    def test_extract_url_from_card_empty_interfaces(self):
+        """Test case for card with empty supportedInterfaces"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://example.com/agent",
+            "supportedInterfaces": []
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://example.com/agent"
+
+    def test_extract_url_from_card_prefers_http_json_rpc(self):
+        """Test case for preferring http-json-rpc protocol"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "http-streaming", "url": "http://streaming.com"},
+                {"protocolBinding": "http-json-rpc", "url": "http://jsonrpc.com/agent"},
+                {"protocolBinding": "sse", "url": "http://sse.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://jsonrpc.com/agent"
+
+    def test_extract_url_from_card_jsonrpc_variant(self):
+        """Test case for jsonrpc protocol variant"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "jsonrpc", "url": "http://jsonrpc.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://jsonrpc.com/agent"
+
+    def test_extract_url_from_card_httpjsonrpc_variant(self):
+        """Test case for httpjsonrpc protocol variant"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "httpjsonrpc", "url": "http://httpjsonrpc.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://httpjsonrpc.com/agent"
+
+    def test_extract_url_from_card_case_insensitive(self):
+        """Test case for case-insensitive protocol matching"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "HTTP-JSON-RPC", "url": "http://uppercase.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://uppercase.com/agent"
+
+    def test_extract_url_from_card_fallback_to_first_interface(self):
+        """Test case for fallback to first interface when no http-json-rpc"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "sse", "url": "http://sse.com/agent"},
+                {"protocolBinding": "http-streaming", "url": "http://streaming.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://sse.com/agent"
+
+    def test_extract_url_from_card_fallback_skips_empty_url(self):
+        """Test case for skipping interfaces with empty URL"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "sse", "url": ""},
+                {"protocolBinding": "http-streaming", "url": "http://streaming.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://streaming.com/agent"
+
+    def test_extract_url_from_card_fallback_to_root_url(self):
+        """Test case for fallback to root url when all interfaces have empty URL"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "sse", "url": ""},
+                {"protocolBinding": "http-streaming", "url": ""},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://fallback.com/agent"
+
+
+class TestBuildExternalAgentConfig:
+    """Tests for the _build_external_agent_config function"""
+
+    def test_build_external_agent_config_basic(self):
+        """Test case for building basic external agent config"""
+        agent = {
+            "external_agent_id": "ext_123",
+            "name": "External Agent",
+            "description": "An external A2A agent",
+            "transport_type": "http-streaming",
+            "protocol_version": "1.0",
+            "protocol_type": "JSONRPC",
+        }
+        agent_url = "http://external.com/a2a"
+
+        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+            result = _build_external_agent_config(agent, agent_url)
+
+            MockConfig.assert_called_once_with(
+                agent_id="ext_123",
+                name="External Agent",
+                description="An external A2A agent",
+                url="http://external.com/a2a",
+                api_key=None,
+                transport_type="http-streaming",
+                protocol_version="1.0",
+                protocol_type="JSONRPC",
+                timeout=300.0,
+                raw_card=None,
+            )
+            assert result == MockConfig.return_value
+
+    def test_build_external_agent_config_defaults(self):
+        """Test case for building config with missing fields"""
+        agent = {
+            "external_agent_id": "ext_456",
+        }
+        agent_url = "http://default.com/agent"
+
+        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+            result = _build_external_agent_config(agent, agent_url)
+
+            MockConfig.assert_called_once_with(
+                agent_id="ext_456",
+                name="Unknown",
+                description="External A2A agent",
+                url="http://default.com/agent",
+                api_key=None,
+                transport_type="http-streaming",
+                protocol_version="1.0",
+                protocol_type="JSONRPC",
+                timeout=300.0,
+                raw_card=None,
+            )
+            assert result == MockConfig.return_value
+
+    def test_build_external_agent_config_with_raw_card(self):
+        """Test case for building config with raw_card"""
+        agent = {
+            "external_agent_id": "ext_789",
+            "name": "Agent with Card",
+            "description": "Agent with raw card",
+            "raw_card": {"name": "raw_card_agent", "url": "http://raw.com"},
+        }
+        agent_url = "http://raw.com"
+
+        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+            result = _build_external_agent_config(agent, agent_url)
+
+            call_kwargs = MockConfig.call_args[1]
+            assert call_kwargs["agent_id"] == "ext_789"
+            assert call_kwargs["raw_card"] == {"name": "raw_card_agent", "url": "http://raw.com"}
+            assert result == MockConfig.return_value
+
+
+class TestGetExternalA2AAgents:
+    """Tests for the _get_external_a2a_agents function"""
+
+    def test_get_external_a2a_agents_success(self):
+        """Test case for successfully getting external A2A agents"""
+        mock_query_result = [
+            {
+                "external_agent_id": "ext_1",
+                "name": "Agent 1",
+                "description": "First external agent",
+                "agent_url": "http://agent1.com/a2a",
+            },
+            {
+                "external_agent_id": "ext_2",
+                "name": "Agent 2",
+                "description": "Second external agent",
+                "agent_url": "http://agent2.com/a2a",
+            },
+        ]
+
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+            with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1", version_no=1)
+
+                assert len(result) == 2
+                from database.a2a_agent_db import query_external_sub_agents
+                query_external_sub_agents.assert_called_once_with(
+                    local_agent_id=1, tenant_id="tenant_1", version_no=1
+                )
+                assert mock_build.call_count == 2
+                mock_build.assert_any_call(mock_query_result[0], "http://agent1.com/a2a")
+                mock_build.assert_any_call(mock_query_result[1], "http://agent2.com/a2a")
+
+    def test_get_external_a2a_agents_skips_missing_url(self):
+        """Test case for skipping agents without URL"""
+        mock_query_result = [
+            {
+                "external_agent_id": "ext_1",
+                "name": "Valid Agent",
+                "agent_url": "http://valid.com/a2a",
+            },
+            {
+                "external_agent_id": "ext_2",
+                "name": "Invalid Agent",
+                "description": "No URL available",
+            },
+        ]
+
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+            with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                assert len(result) == 1
+                mock_build.assert_called_once_with(mock_query_result[0], "http://valid.com/a2a")
+
+    def test_get_external_a2a_agents_empty_db_response(self):
+        """Test case for empty database response"""
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=[]):
+            with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                assert result == []
+                mock_build.assert_not_called()
+
+    def test_get_external_a2a_agents_uses_explicit_url_first(self):
+        """Test case for preferring explicit agent_url over raw_card"""
+        mock_query_result = [
+            {
+                "external_agent_id": "ext_1",
+                "name": "Agent with both URLs",
+                "agent_url": "http://explicit.com/a2a",
+                "raw_card": {"url": "http://card.com/a2a"},
+            },
+        ]
+
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+            with patch('backend.agents.create_agent_info._extract_url_from_card') as mock_extract:
+                with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                    result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                    assert len(result) == 1
+                    mock_extract.assert_not_called()
+                    mock_build.assert_called_once_with(mock_query_result[0], "http://explicit.com/a2a")
+
+    def test_get_external_a2a_agents_extracts_url_from_raw_card(self):
+        """Test case for extracting URL from raw_card when no explicit URL"""
+        mock_query_result = [
+            {
+                "external_agent_id": "ext_1",
+                "name": "Agent without explicit URL",
+                "raw_card": {
+                    "url": "http://card-url.com/a2a",
+                    "supportedInterfaces": [
+                        {"protocolBinding": "http-json-rpc", "url": "http://card-jsonrpc.com"}
+                    ]
+                },
+            },
+        ]
+
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+            with patch('backend.agents.create_agent_info._extract_url_from_card', return_value="http://card-jsonrpc.com") as mock_extract:
+                with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                    result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                    assert len(result) == 1
+                    mock_extract.assert_called_once_with(mock_query_result[0]["raw_card"])
+                    mock_build.assert_called_once_with(mock_query_result[0], "http://card-jsonrpc.com")
+
+    def test_get_external_a2a_agents_exception_handling(self):
+        """Test case for exception handling"""
+        with patch('database.a2a_agent_db.query_external_sub_agents', side_effect=Exception("Database error")):
+            with patch('backend.agents.create_agent_info.logger') as mock_logger:
+                result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                assert result == []
+                mock_logger.error.assert_called_once()
+                assert "FAILED" in mock_logger.error.call_args[0][0]
+                assert "Database error" in mock_logger.error.call_args[0][0]
 
 
 if __name__ == "__main__":
