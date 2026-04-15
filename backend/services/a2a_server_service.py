@@ -585,7 +585,7 @@ class A2AServerService:
         parsed_message = self.adapter.parse_a2a_message(message)
         message_obj = parsed_message.get("message", {})
 
-        task_id, context_id, _ = self._resolve_task_id(
+        task_id, context_id, is_complex_request = self._resolve_task_id(
             parsed_message, endpoint_id, user_id, tenant_id, server_agent
         )
 

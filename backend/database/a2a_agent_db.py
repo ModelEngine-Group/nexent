@@ -1892,7 +1892,7 @@ def get_artifacts_by_task(task_id: str) -> List[Dict[str, Any]]:
                 "name": art.name,
                 "description": art.description,
                 "parts": art.parts,
-                "metadata": art.metadata,
+                "metadata": art.meta_data,
                 "extensions": art.extensions,
                 "create_time": art.create_time.isoformat() if art.create_time else None,
             }

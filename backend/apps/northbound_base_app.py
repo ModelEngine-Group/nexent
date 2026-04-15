@@ -12,7 +12,7 @@ from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from apps.app_factory import create_app
 from .northbound_app import router as northbound_router
@@ -20,7 +20,9 @@ from .northbound_app import router as northbound_router
 
 class A2AServerSettings(BaseModel):
     """A2A Server settings for an agent."""
-    is_enabled: bool | None = False
+    model_config = {"extra": "forbid"}
+
+    is_enabled: Annotated[bool | None, Field(strict=True)] = False
     card_overrides: Dict[str, Any] | None = None
 
 

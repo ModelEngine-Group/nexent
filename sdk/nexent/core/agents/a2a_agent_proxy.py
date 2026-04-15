@@ -217,8 +217,8 @@ class ExternalA2AAgentProxy:
 
         try:
             parsed_url = urlparse(endpoint_url)
-            logger.info(f"[A2A-SDK] Connecting to host={parsed_url.hostname}, port={parsed_url.port or 80}")
-
+            logger.info(f"[A2A-SDK] Connecting to host={parsed_url}, port={parsed_url.port or 80}")
+            logger.info(f"[A2A-SDK] Requst body ={request_body}, headers={headers}")
             response = await self._client.post(
                 endpoint_url,
                 json=request_body,
@@ -361,12 +361,12 @@ class ExternalA2AAgentProxy:
             yield {"statusUpdate": {"status": {"state": "TASK_STATE_FAILED", "message": f"HTTP {e.response.status_code}"}}}
 
     def _find_agent_text_in_messages(self, result: Dict[str, Any]) -> Optional[str]:
-        """Extract text from result.messages where role is agent."""
+        """Extract text from result.messages where role is ROLE_AGENT."""
         messages = result.get("messages", [])
         for msg in messages:
-            if msg.get("role") == "agent":
+            if msg.get("role") == "ROLE_AGENT":
                 for part in msg.get("parts", []):
-                    if "text" in part:
+                    if part.get("type") == "text" and part.get("text"):
                         return part["text"]
         return None
 
@@ -378,9 +378,21 @@ class ExternalA2AAgentProxy:
             return None
         if isinstance(message, dict):
             for part in message.get("parts", []):
-                if "text" in part:
+                if part.get("type") == "text" and part.get("text"):
                     return part["text"]
         return str(message)
+
+    def _extract_text_from_message_object(self, message_obj: Dict[str, Any]) -> Optional[str]:
+        """Extract text from a message object (common in JSON-RPC responses).
+
+        A2A JSON-RPC Message response:
+            {"messageId": "...", "role": "ROLE_AGENT", "parts": [{"type": "text", "text": "...", "mediaType": "..."}]}
+        """
+        if message_obj.get("role") == "ROLE_AGENT":
+            for part in message_obj.get("parts", []):
+                if part.get("type") == "text" and part.get("text"):
+                    return part["text"]
+        return None
 
     def extract_text_from_response(self, response: Dict[str, Any]) -> str:
         """Extract text content from A2A response.
@@ -397,6 +409,15 @@ class ExternalA2AAgentProxy:
             raise RuntimeError(f"A2A agent error: {message}")
 
         result = response.get("result", response)
+
+        # JSON-RPC SendMessage response: result = {"message": {...}}
+        msg_obj = result.get("message")
+        if msg_obj and isinstance(msg_obj, dict):
+            text = self._extract_text_from_message_object(msg_obj)
+            if text:
+                return text
+
+        # A2A Task response: result = {"messages": [...], "status": {...}}
         text = self._find_agent_text_in_messages(result)
         if text is not None:
             return text
@@ -410,8 +431,8 @@ class ExternalA2AAgentProxy:
     def _extract_text_from_parts(self, parts: List[Dict[str, Any]], accumulated: List[str]) -> Optional[str]:
         """Extract text from parts list, appending only new text to accumulated list."""
         for part in parts:
-            if part.get("type") == "text":
-                text = part.get("text", "")
+            if part.get("type") == "text" and part.get("text"):
+                text = part["text"]
                 if text and text not in accumulated:
                     accumulated.append(text)
                     return text
