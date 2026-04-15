@@ -3,15 +3,14 @@
 import React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Col, Flex, Tooltip, Divider, Table, theme, App } from "antd";
+import { Button, Col, Flex, Tooltip, Divider, Table, theme, App, Modal, Spin, message } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { Copy, FileOutput, Network, Trash2, Globe } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 
 import { Agent } from "@/types/agentConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
-import { useA2AServerAgents, isAgentA2AServer } from "@/hooks/agent/useA2AServerAgents";
 import {
   searchAgentInfo,
   updateAgentInfo,
@@ -22,6 +21,8 @@ import {
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { clearAgentNewMark } from "@/services/agentConfigService";
+import { a2aClientService } from "@/services/a2aService";
+import A2AServerSettingsPanel from "../a2a/A2AServerSettingsPanel";
 import log from "@/lib/logger";
 
 interface AgentListProps {
@@ -47,10 +48,7 @@ export default function AgentList({
   const [showA2ASettings, setShowA2ASettings] = useState(false);
   const [selectedAgentForA2A, setSelectedAgentForA2A] = useState<Agent | null>(null);
 
-  // A2A server agents data
-  const { agents: a2aServerAgents } = useA2AServerAgents();
-
-  // Get state from store
+  // A2A settings modal state
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const setCurrentAgent = useAgentConfigStore((state) => state.setCurrentAgent);
   const hasUnsavedChanges = useAgentConfigStore((state) => state.hasUnsavedChanges);
@@ -66,6 +64,47 @@ export default function AgentList({
 
     // Unsaved changes guard
   const checkUnsavedChanges = useSaveGuard();
+
+  // Fetch A2A Server Settings when modal opens
+  const { data: a2aSettingsData, isLoading: isLoadingA2ASettings } = useQuery({
+    queryKey: ["a2aServerSettings", selectedAgentForA2A?.id],
+    queryFn: () => a2aClientService.getServerSettings(Number(selectedAgentForA2A!.id)),
+    enabled: showA2ASettings && !!selectedAgentForA2A,
+  });
+
+  // Construct a2aAgentCard from supported_interfaces
+  const constructedA2AAgentCard = (() => {
+    const data = a2aSettingsData?.data;
+    if (!data?.supported_interfaces) return undefined;
+
+    const interfaces = data.supported_interfaces;
+    const endpointId = data.endpoint_id;
+    const restEndpoints = interfaces.filter(
+      (iface: any) => iface.protocolBinding.toLowerCase() === "http+json" || iface.protocolBinding.toLowerCase() === "httprest"
+    );
+    const jsonrpcEndpoints = interfaces.filter(
+      (iface: any) =>
+        iface.protocolBinding.toLowerCase() === "http-json-rpc" ||
+        iface.protocolBinding.toLowerCase() === "jsonrpc" ||
+        iface.protocolBinding.toLowerCase() === "httpjsonrpc"
+    );
+
+    return {
+      endpoint_id: endpointId,
+      name: data.name || "",
+      description: data.description,
+      version: data.version,
+      streaming: data.streaming,
+      agent_card_url: `/nb/a2a/${endpointId}/.well-known/agent-card.json`,
+      rest_endpoints: {
+        message_send: `${restEndpoints[0]?.url}/message:send`,
+        message_stream: `${restEndpoints[0]?.url}/message:stream`,
+        tasks_get: `${restEndpoints[0]?.url}/tasks/{task_id}`,
+      },
+      jsonrpc_url: jsonrpcEndpoints[0]?.url || "",
+      jsonrpc_methods: ["SendMessage", "SendStreamingMessage", "GetTask"],
+    };
+  })();
 
   // Handle view call relationship
   const handleViewCallRelationship = (agent: Agent) => {
@@ -453,9 +492,31 @@ export default function AgentList({
                       display: "flex",
                       alignItems: "center",
                       gap: 8,
-                      justifyContent: "flex-center",
+                      justifyContent: "flex-end",
                     }}
                   >
+                        {agent.is_a2a_server && (
+                          <Tooltip title={t("a2a.agent.viewA2ASettings")}>
+                            <span>
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={
+                                  <Globe
+                                    className="w-4 h-4"
+                                    style={{ color: token.colorPrimary }}
+                                  />
+                                }
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleViewA2AAgentSettings(agent);
+                                }}
+                                className="agent-action-button agent-action-button-blue"
+                              />
+                            </span>
+                          </Tooltip>
+                        )}
                     <Tooltip title={t("agent.contextMenu.copy")}>
                       <span>
                         <Button
@@ -554,28 +615,6 @@ export default function AgentList({
                         />
                       </span>
                     </Tooltip>
-
-                    <Tooltip title={t("a2a.agent.viewA2ASettings")}>
-                      <span>
-                        <Button
-                          type="text"
-                          size="small"
-                          icon={
-                            <Globe
-                              className="w-4 h-4"
-                              style={{ color: token.colorPrimary }}
-                            />
-                          }
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleViewA2AAgentSettings(agent);
-                          }}
-                          disabled={!isAgentA2AServer(agent.id, a2aServerAgents)}
-                          className="agent-action-button agent-action-button-blue"
-                        />
-                      </span>
-                    </Tooltip>
                   </div>
                 ),
               },
@@ -596,6 +635,36 @@ export default function AgentList({
           }
         />
       )}
+
+      {/* A2A Server Settings modal */}
+      <Modal
+        centered
+        width={640}
+        title={t("a2a.server.previewTitle")}
+        open={showA2ASettings}
+        onCancel={() => {
+          setShowA2ASettings(false);
+          setSelectedAgentForA2A(null);
+        }}
+        footer={null}
+      >
+        {isLoadingA2ASettings ? (
+          <div style={{ textAlign: "center", padding: "40px 0" }}>
+            <Spin />
+          </div>
+        ) : selectedAgentForA2A && constructedA2AAgentCard ? (
+          <A2AServerSettingsPanel
+            agentId={Number(selectedAgentForA2A.id)}
+            agentName={selectedAgentForA2A.display_name || selectedAgentForA2A.name}
+            endpointId={constructedA2AAgentCard.endpoint_id}
+            a2aAgentCard={constructedA2AAgentCard}
+          />
+        ) : (
+          <div style={{ textAlign: "center", padding: "40px 0", color: "#999" }}>
+            {t("a2a.service.getServerSettingsFailed", "Failed to load A2A settings")}
+          </div>
+        )}
+      </Modal>
     </Col>
   );
 }

@@ -2165,6 +2165,7 @@
   "a2a.agent.description": "Description",
   "a2a.agent.source": "Source",
   "a2a.agent.url": "Agent URL",
+  "a2a.agent.supportedInterfaces": "Supported Interfaces",
   "a2a.agent.agentId": "Agent ID",
   "a2a.agent.viewA2ASettings": "View A2A Agent Settings",
 

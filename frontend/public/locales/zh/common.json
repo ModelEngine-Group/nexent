@@ -2182,6 +2182,7 @@
   "a2a.agent.description": "描述",
   "a2a.agent.source": "来源",
   "a2a.agent.url": "Agent URL",
+  "a2a.agent.supportedInterfaces": "支持的接口",
   "a2a.agent.agentId": "Agent ID",
   "a2a.agent.viewA2ASettings": "查看 A2A Agent 设置",
 
@@ -2200,7 +2201,7 @@
   "a2a.server.endpointId": "端点 ID",
   "a2a.server.agentCardUrl": "Agent Card URL",
   "a2a.server.protocolVersion": "协议版本",
-  "a2a.server.restEndpoints": "REST 端点",
+  "a2a.server.restEndpoints": "HTTP+JSON (REST)",
   "a2a.server.usageTitle": "如何使用这些端点",
   "a2a.server.localDevHint": "本地开发：在上述路径前加上 localhost:5013/api",
   "a2a.server.productionHint": "生产环境：将 localhost:5013 替换为您的服务器域名或公网 IP 及端口 5013",

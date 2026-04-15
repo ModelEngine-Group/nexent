@@ -939,21 +939,20 @@ function AgentDetailCard({ agent, onAddToLocalAgent }: Readonly<AgentDetailCardP
           )}
 
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Text type="secondary" className="text-xs">{t("a2a.agent.agentId")}:</Text>
-              <Text code copyable className="text-xs">{String(agent.id)}</Text>
-            </div>
-            <div className="flex items-center gap-2">
-              <Text type="secondary" className="text-xs">{t("a2a.agent.url")}:</Text>
-              <a
-                href={agent.agent_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs"
-              >
-                {agent.agent_url} <ExternalLink size={10} />
-              </a>
-            </div>
+            {agent.supported_interfaces && agent.supported_interfaces.length > 0 && (
+              <div className="mt-2">
+                <Text type="secondary" className="text-xs">{t("a2a.agent.supportedInterfaces")}:</Text>
+                <div className="mt-1 space-y-1 pl-4">
+                  {agent.supported_interfaces.map((iface: any, idx: number) => (
+                    <div key={idx} className="flex items-center gap-2 text-xs">
+                      <Tag color="blue" className="text-xs px-1 py-0">{iface.protocolBinding}</Tag>
+                      <span className="text-gray-500">{iface.url}</span>
+                      <span className="text-gray-400 text-[10px]">v{iface.protocolVersion}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
