@@ -894,6 +894,311 @@ class TestExternalA2AAgentProxy:
         assert len(events) == 1, f"Expected 1 event, got {len(events)}"
         assert "TASK_STATE_FAILED" in str(events[0])
 
+    @pytest.mark.asyncio
+    async def test_call_raises_timeout_exception(self):
+        """Test call() re-raises TimeoutException after logging error."""
+        info = self._make_info()
+        proxy = ExternalA2AAgentProxy(info)
+
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(side_effect=_mock_httpx.TimeoutException("timed out"))
+        mock_client.aclose = AsyncMock()
+        proxy._client = mock_client
+
+        with pytest.raises(_mock_httpx.TimeoutException):
+            await proxy.call("test query")
+
+    @pytest.mark.asyncio
+    async def test_call_raises_http_status_error(self):
+        """Test call() re-raises HTTPStatusError after logging error."""
+        info = self._make_info()
+        proxy = ExternalA2AAgentProxy(info)
+
+        mock_err_response = MagicMock()
+        mock_err_response.status_code = 503
+        mock_err_response.text = "Service Unavailable"
+
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(
+            side_effect=_mock_httpx.HTTPStatusError(mock_err_response)
+        )
+        mock_client.aclose = AsyncMock()
+        proxy._client = mock_client
+
+        with pytest.raises(_mock_httpx.HTTPStatusError):
+            await proxy.call("test query")
+
+    @pytest.mark.asyncio
+    async def test_call_raises_generic_exception(self):
+        """Test call() re-raises unexpected exceptions after logging error."""
+        info = self._make_info()
+        proxy = ExternalA2AAgentProxy(info)
+
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(side_effect=ConnectionResetError("connection reset"))
+        mock_client.aclose = AsyncMock()
+        proxy._client = mock_client
+
+        with pytest.raises(ConnectionResetError):
+            await proxy.call("test query")
+
+    def test_sync_call_returns_extracted_text(self):
+        """Test sync_call() creates a new event loop, calls the agent, and extracts text."""
+        info = self._make_info()
+        proxy = ExternalA2AAgentProxy(info)
+
+        expected_text = "sync response text"
+        response_data = {
+            "result": {
+                "message": {
+                    "role": "ROLE_AGENT",
+                    "parts": [{"type": "text", "text": expected_text}]
+                }
+            }
+        }
+
+        mock_response = MagicMock(
+            status_code=200,
+            headers={},
+            json=MagicMock(return_value=response_data),
+        )
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(_mock_httpx, "AsyncClient") as MockClient:
+            instance = MagicMock()
+            instance.post = AsyncMock(return_value=mock_response)
+            instance.__aenter__ = AsyncMock(return_value=instance)
+            instance.__aexit__ = AsyncMock()
+            instance.aclose = AsyncMock()
+            MockClient.return_value = instance
+
+            result = proxy.sync_call("hello")
+
+        assert result == expected_text
+
+    def test_sync_call_propagates_exception(self):
+        """Test sync_call() propagates exceptions raised during the async execution."""
+        info = self._make_info()
+        proxy = ExternalA2AAgentProxy(info)
+
+        with patch.object(_mock_httpx, "AsyncClient") as MockClient:
+            instance = MagicMock()
+            instance.post = AsyncMock(side_effect=RuntimeError("network error"))
+            instance.__aenter__ = AsyncMock(return_value=instance)
+            instance.__aexit__ = AsyncMock()
+            instance.aclose = AsyncMock()
+            MockClient.return_value = instance
+
+            with pytest.raises(RuntimeError, match="network error"):
+                proxy.sync_call("hello")
+
+    @pytest.mark.asyncio
+    async def test_extract_text_from_events_artifact_update(self):
+        """Test extract_text_from_events yields text from artifactUpdate events."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+
+        async def _events():
+            yield {"artifactUpdate": {"artifact": {"parts": [{"type": "text", "text": "chunk1"}]}}}
+            yield {"artifactUpdate": {"artifact": {"parts": [{"type": "text", "text": "chunk2"}]}}}
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}
+
+        results = []
+        async for text in proxy.extract_text_from_events(_events()):
+            results.append(text)
+
+        assert results == ["chunk1", "chunk2"]
+
+    @pytest.mark.asyncio
+    async def test_extract_text_from_events_status_completed_stops(self):
+        """Test extract_text_from_events stops iteration on TASK_STATE_COMPLETED."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+
+        async def _events():
+            yield {"artifactUpdate": {"artifact": {"parts": [{"type": "text", "text": "before"}]}}}
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}
+            yield {"artifactUpdate": {"artifact": {"parts": [{"type": "text", "text": "after"}]}}}
+
+        results = []
+        async for text in proxy.extract_text_from_events(_events()):
+            results.append(text)
+
+        assert "before" in results
+        assert "after" not in results
+
+    @pytest.mark.asyncio
+    async def test_extract_text_from_events_status_failed(self):
+        """Test extract_text_from_events yields error text and stops on TASK_STATE_FAILED."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+
+        async def _events():
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_FAILED", "message": "agent failed"}}}
+            yield {"artifactUpdate": {"artifact": {"parts": [{"type": "text", "text": "should not appear"}]}}}
+
+        results = []
+        async for text in proxy.extract_text_from_events(_events()):
+            results.append(text)
+
+        assert len(results) == 1
+        assert "[Error: agent failed]" in results[0]
+
+    @pytest.mark.asyncio
+    async def test_extract_text_from_events_status_canceled(self):
+        """Test extract_text_from_events yields error text and stops on TASK_STATE_CANCELED."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+
+        async def _events():
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_CANCELED", "message": "cancelled by user"}}}
+
+        results = []
+        async for text in proxy.extract_text_from_events(_events()):
+            results.append(text)
+
+        assert len(results) == 1
+        assert "[Error: cancelled by user]" in results[0]
+
+    @pytest.mark.asyncio
+    async def test_extract_text_from_events_no_text_in_artifact(self):
+        """Test extract_text_from_events skips artifactUpdate with no extractable text."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+
+        async def _events():
+            yield {"artifactUpdate": {"artifact": {"parts": [{"type": "image", "data": "xyz"}]}}}
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}
+
+        results = []
+        async for text in proxy.extract_text_from_events(_events()):
+            results.append(text)
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_execute_forward_non_streaming(self):
+        """Test _execute_forward calls proxy.call() and extracts text when use_stream=False."""
+        info = self._make_info()
+        tool = A2AAgentProxyTool([info])
+
+        expected_response = {
+            "result": {
+                "message": {
+                    "role": "ROLE_AGENT",
+                    "parts": [{"type": "text", "text": "non-stream answer"}]
+                }
+            }
+        }
+
+        mock_response = MagicMock(
+            status_code=200,
+            headers={},
+            json=MagicMock(return_value=expected_response),
+        )
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(_mock_httpx, "AsyncClient") as MockClient:
+            instance = MagicMock()
+            instance.post = AsyncMock(return_value=mock_response)
+            instance.__aenter__ = AsyncMock(return_value=instance)
+            instance.__aexit__ = AsyncMock()
+            instance.aclose = AsyncMock()
+            MockClient.return_value = instance
+
+            result = await tool._execute_forward(info, "test query", [], use_stream=False)
+
+        assert result == "non-stream answer"
+
+    @pytest.mark.asyncio
+    async def test_execute_forward_streaming_collects_all_chunks(self):
+        """Test _execute_forward collects all text chunks from streaming mode."""
+        info = self._make_info()
+        observer = MagicMock()
+        tool = A2AAgentProxyTool([info], observer=observer)
+
+        sse_lines = [
+            'data: {"artifactUpdate": {"artifact": {"parts": [{"type": "text", "text": "part1"}]}}}',
+            'data: {"artifactUpdate": {"artifact": {"parts": [{"type": "text", "text": "part2"}]}}}',
+            'data: {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}',
+        ]
+        mock_response = _make_mock_response_with_aiter_lines(sse_lines)
+
+        mock_stream_cm = MagicMock()
+        mock_stream_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_stream_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(return_value=mock_stream_cm)
+        mock_client.aclose = AsyncMock()
+
+        with patch.object(_mock_httpx, "AsyncClient") as MockClient:
+            instance = MagicMock()
+            instance.__aenter__ = AsyncMock(return_value=mock_client)
+            instance.__aexit__ = AsyncMock()
+            instance.aclose = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock()
+            MockClient.return_value = mock_client
+
+            result = await tool._execute_forward(info, "test query", [], use_stream=True)
+
+        assert "part1" in result
+        assert "part2" in result
+
+    @pytest.mark.asyncio
+    async def test_execute_forward_streaming_empty_returns_fallback(self):
+        """Test _execute_forward returns 'No response received' when streaming yields nothing."""
+        info = self._make_info()
+        tool = A2AAgentProxyTool([info])
+
+        sse_lines = [
+            'data: {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}',
+        ]
+        mock_response = _make_mock_response_with_aiter_lines(sse_lines)
+
+        mock_stream_cm = MagicMock()
+        mock_stream_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_stream_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(return_value=mock_stream_cm)
+        mock_client.aclose = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        with patch.object(_mock_httpx, "AsyncClient") as MockClient:
+            MockClient.return_value = mock_client
+
+            result = await tool._execute_forward(info, "test query", [], use_stream=True)
+
+        assert result == "No response received"
+
+    @pytest.mark.asyncio
+    async def test_execute_forward_streaming_observer_called(self):
+        """Test _execute_forward calls observer.append_message for each text chunk."""
+        info = self._make_info()
+        observer = MagicMock()
+        tool = A2AAgentProxyTool([info], observer=observer)
+
+        sse_lines = [
+            'data: {"artifactUpdate": {"artifact": {"parts": [{"type": "text", "text": "hello"}]}}}',
+            'data: {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}',
+        ]
+        mock_response = _make_mock_response_with_aiter_lines(sse_lines)
+
+        mock_stream_cm = MagicMock()
+        mock_stream_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_stream_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(return_value=mock_stream_cm)
+        mock_client.aclose = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        with patch.object(_mock_httpx, "AsyncClient") as MockClient:
+            MockClient.return_value = mock_client
+
+            await tool._execute_forward(info, "test query", [], use_stream=True)
+
+        observer.append_message.assert_called_once_with("hello")
+
 
 # ---------------------------------------------------------------------------
 # Tests for A2AAgentProxyTool

@@ -565,6 +565,7 @@ class A2AClientService:
 
             logger.info(f"Calling external A2A agent {external_agent_id}: url={endpoint_url}, protocol={protocol_type}, payload={payload}")
 
+            headers = build_a2a_headers()
             async with A2AHttpClient() as client:
                 response = await client.post_json(endpoint_url, payload, headers)
 

@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
@@ -110,6 +111,13 @@ database_mock.skill_db = skill_db_mock
 database_mock.agent_db = agent_db_mock
 sys.modules['database'] = database_mock
 sys.modules['backend.database'] = database_mock
+
+# Mock database.a2a_agent_db
+a2a_agent_db_mock = MagicMock()
+a2a_agent_db_mock.create_server_agent = MagicMock()
+a2a_agent_db_mock.get_server_agent_by_agent_id = MagicMock()
+sys.modules['database.a2a_agent_db'] = a2a_agent_db_mock
+sys.modules['backend.database.a2a_agent_db'] = a2a_agent_db_mock
 
 # Now import the service module
 import backend.services.agent_version_service as agent_version_service_module
@@ -1678,4 +1686,318 @@ async def test_list_published_agents_impl_exception_handling(monkeypatch):
         await list_published_agents_impl(tenant_id="tenant1", user_id="user1")
 
 
-import asyncio
+def test_publish_version_impl_with_a2a_new_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
+    """Test publishing version with publish_as_a2a=True for a new A2A agent"""
+    mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    mock_get_next = MagicMock(return_value=1)
+    monkeypatch.setattr(agent_version_service_module, "get_next_version_no", mock_get_next)
+    mock_insert_agent = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_agent_snapshot", mock_insert_agent)
+    mock_insert_tool = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_tool_snapshot", mock_insert_tool)
+    mock_insert_relation = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_relation_snapshot", mock_insert_relation)
+    mock_insert_skill = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_skill_snapshot", mock_insert_skill)
+    mock_insert_version = MagicMock(return_value=100)
+    monkeypatch.setattr(agent_version_service_module, "insert_version", mock_insert_version)
+    mock_update_current = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=mock_skills_draft))
+
+    # Mock A2A agent not existing
+    a2a_agent_db_mock.get_server_agent_by_agent_id = MagicMock(return_value=None)
+    # Mock create_server_agent returns a new agent
+    a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
+        "agent_id": 1,
+        "endpoint_id": "a2a_1_abc12345",
+        "name": "Test Agent",
+        "description": "Test Description",
+        "version": "1",
+        "streaming": False,
+    })
+
+    result = publish_version_impl(
+        agent_id=1,
+        tenant_id="tenant1",
+        user_id="user1",
+        publish_as_a2a=True,
+    )
+
+    assert result["version_no"] == 1
+    assert result["id"] == 100
+    assert "a2a_agent" in result
+    assert "a2a_agent_card" in result
+    assert result["a2a_agent"]["endpoint_id"] == "a2a_1_abc12345"
+    assert result["a2a_agent_card"]["endpoint_id"] == "a2a_1_abc12345"
+    assert result["a2a_agent_card"]["agent_card_url"] == "/nb/a2a/a2a_1_abc12345/.well-known/agent-card.json"
+    assert result["a2a_agent_card"]["rest_endpoints"]["message_send"] == "/nb/a2a/a2a_1_abc12345/message:send"
+    assert result["a2a_agent_card"]["rest_endpoints"]["message_stream"] == "/nb/a2a/a2a_1_abc12345/message:stream"
+    assert result["a2a_agent_card"]["rest_endpoints"]["tasks_get"] == "/nb/a2a/a2a_1_abc12345/tasks/{task_id}"
+    assert result["a2a_agent_card"]["jsonrpc_url"] == "/nb/a2a/a2a_1_abc12345/v1"
+    assert result["a2a_agent_card"]["jsonrpc_methods"] == ["SendMessage", "SendStreamingMessage", "GetTask"]
+
+    # Verify create_server_agent was called
+    a2a_agent_db_mock.create_server_agent.assert_called_once_with(
+        agent_id=1,
+        user_id="user1",
+        tenant_id="tenant1",
+        name="Test Agent",
+        description="Test Description",
+        version="1",
+    )
+
+
+def test_publish_version_impl_with_a2a_existing_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
+    """Test publishing version with publish_as_a2a=True for an existing A2A agent"""
+    mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    mock_get_next = MagicMock(return_value=2)
+    monkeypatch.setattr(agent_version_service_module, "get_next_version_no", mock_get_next)
+    mock_insert_agent = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_agent_snapshot", mock_insert_agent)
+    mock_insert_tool = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_tool_snapshot", mock_insert_tool)
+    mock_insert_relation = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_relation_snapshot", mock_insert_relation)
+    mock_insert_skill = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_skill_snapshot", mock_insert_skill)
+    mock_insert_version = MagicMock(return_value=101)
+    monkeypatch.setattr(agent_version_service_module, "insert_version", mock_insert_version)
+    mock_update_current = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=mock_skills_draft))
+
+    # Mock A2A agent already exists
+    existing_a2a = {
+        "agent_id": 1,
+        "endpoint_id": "a2a_1_existing",
+        "name": "Test Agent",
+        "description": "Test Description",
+        "version": "0",
+        "streaming": False,
+    }
+    a2a_agent_db_mock.get_server_agent_by_agent_id = MagicMock(return_value=existing_a2a)
+    # Mock create_server_agent returns updated agent
+    a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
+        "agent_id": 1,
+        "endpoint_id": "a2a_1_existing",
+        "name": "Test Agent",
+        "description": "Test Description",
+        "version": "2",
+        "streaming": False,
+    })
+
+    result = publish_version_impl(
+        agent_id=1,
+        tenant_id="tenant1",
+        user_id="user1",
+        publish_as_a2a=True,
+    )
+
+    assert result["version_no"] == 2
+    assert result["a2a_agent"]["endpoint_id"] == "a2a_1_existing"
+    assert result["a2a_agent"]["version"] == "2"
+    assert result["a2a_agent_card"]["endpoint_id"] == "a2a_1_existing"
+
+    # Verify get_server_agent_by_agent_id was called first
+    a2a_agent_db_mock.get_server_agent_by_agent_id.assert_called_once_with(1, "tenant1")
+    # Verify create_server_agent was called
+    a2a_agent_db_mock.create_server_agent.assert_called_once()
+
+
+def test_publish_version_impl_with_a2a_no_name_uses_default(monkeypatch, mock_tools_draft, mock_relations_draft, mock_skills_draft):
+    """Test publishing with A2A when agent has no name - uses default 'Agent-{agent_id}'"""
+    agent_draft_no_name = {
+        "agent_id": 42,
+        "tenant_id": "tenant1",
+        "version_no": 0,
+        "name": None,
+        "description": "Test Description",
+        "model_id": 1,
+        "business_logic_model_id": 0,
+        "max_steps": 10,
+        "duty_prompt": "Test prompt",
+        "group_ids": "1,2",
+    }
+
+    mock_query_draft = MagicMock(return_value=(agent_draft_no_name, mock_tools_draft, mock_relations_draft))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    mock_get_next = MagicMock(return_value=1)
+    monkeypatch.setattr(agent_version_service_module, "get_next_version_no", mock_get_next)
+    mock_insert_agent = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_agent_snapshot", mock_insert_agent)
+    mock_insert_tool = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_tool_snapshot", mock_insert_tool)
+    mock_insert_relation = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_relation_snapshot", mock_insert_relation)
+    mock_insert_skill = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_skill_snapshot", mock_insert_skill)
+    mock_insert_version = MagicMock(return_value=100)
+    monkeypatch.setattr(agent_version_service_module, "insert_version", mock_insert_version)
+    mock_update_current = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=mock_skills_draft))
+
+    a2a_agent_db_mock.get_server_agent_by_agent_id = MagicMock(return_value=None)
+    a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
+        "agent_id": 42,
+        "endpoint_id": "a2a_42_def678",
+        "name": "Agent-42",
+        "description": "Test Description",
+        "version": "1",
+        "streaming": False,
+    })
+
+    result = publish_version_impl(
+        agent_id=42,
+        tenant_id="tenant1",
+        user_id="user1",
+        publish_as_a2a=True,
+    )
+
+    assert result["a2a_agent"]["name"] == "Agent-42"
+    # Verify create_server_agent was called with default name
+    call_kwargs = a2a_agent_db_mock.create_server_agent.call_args[1]
+    assert call_kwargs["name"] == "Agent-42"
+
+
+def test_publish_version_impl_without_a2a(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
+    """Test publishing version without A2A (publish_as_a2a=False)"""
+    mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    mock_get_next = MagicMock(return_value=1)
+    monkeypatch.setattr(agent_version_service_module, "get_next_version_no", mock_get_next)
+    mock_insert_agent = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_agent_snapshot", mock_insert_agent)
+    mock_insert_tool = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_tool_snapshot", mock_insert_tool)
+    mock_insert_relation = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_relation_snapshot", mock_insert_relation)
+    mock_insert_skill = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_skill_snapshot", mock_insert_skill)
+    mock_insert_version = MagicMock(return_value=100)
+    monkeypatch.setattr(agent_version_service_module, "insert_version", mock_insert_version)
+    mock_update_current = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=mock_skills_draft))
+
+    # A2A functions should NOT be called
+    a2a_agent_db_mock.get_server_agent_by_agent_id = MagicMock(return_value=None)
+    a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
+        "agent_id": 1,
+        "endpoint_id": "a2a_1_abc",
+        "name": "Test Agent",
+        "description": "Test Description",
+        "version": "1",
+        "streaming": False,
+    })
+
+    result = publish_version_impl(
+        agent_id=1,
+        tenant_id="tenant1",
+        user_id="user1",
+        publish_as_a2a=False,
+    )
+
+    assert result["version_no"] == 1
+    assert "a2a_agent" not in result
+    assert "a2a_agent_card" not in result
+    # Verify A2A functions were NOT called
+    a2a_agent_db_mock.get_server_agent_by_agent_id.assert_not_called()
+    a2a_agent_db_mock.create_server_agent.assert_not_called()
+
+
+def test_publish_version_impl_with_a2a_streaming_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
+    """Test publishing A2A agent that supports streaming"""
+    mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    mock_get_next = MagicMock(return_value=1)
+    monkeypatch.setattr(agent_version_service_module, "get_next_version_no", mock_get_next)
+    mock_insert_agent = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_agent_snapshot", mock_insert_agent)
+    mock_insert_tool = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_tool_snapshot", mock_insert_tool)
+    mock_insert_relation = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_relation_snapshot", mock_insert_relation)
+    mock_insert_skill = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_skill_snapshot", mock_insert_skill)
+    mock_insert_version = MagicMock(return_value=100)
+    monkeypatch.setattr(agent_version_service_module, "insert_version", mock_insert_version)
+    mock_update_current = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=mock_skills_draft))
+
+    a2a_agent_db_mock.get_server_agent_by_agent_id = MagicMock(return_value=None)
+    a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
+        "agent_id": 1,
+        "endpoint_id": "a2a_1_stream",
+        "name": "Test Agent",
+        "description": "Test Description",
+        "version": "1",
+        "streaming": True,
+    })
+
+    result = publish_version_impl(
+        agent_id=1,
+        tenant_id="tenant1",
+        user_id="user1",
+        publish_as_a2a=True,
+    )
+
+    assert result["a2a_agent"]["streaming"] is True
+    assert result["a2a_agent_card"]["streaming"] is True
+
+
+def test_publish_version_impl_with_a2a_agent_card_endpoints(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
+    """Test A2A agent card contains correct REST and JSONRPC endpoints"""
+    mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    mock_get_next = MagicMock(return_value=1)
+    monkeypatch.setattr(agent_version_service_module, "get_next_version_no", mock_get_next)
+    mock_insert_agent = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_agent_snapshot", mock_insert_agent)
+    mock_insert_tool = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_tool_snapshot", mock_insert_tool)
+    mock_insert_relation = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_relation_snapshot", mock_insert_relation)
+    mock_insert_skill = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "insert_skill_snapshot", mock_insert_skill)
+    mock_insert_version = MagicMock(return_value=100)
+    monkeypatch.setattr(agent_version_service_module, "insert_version", mock_insert_version)
+    mock_update_current = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=mock_skills_draft))
+
+    endpoint_id = "a2a_1_test123"
+    a2a_agent_db_mock.get_server_agent_by_agent_id = MagicMock(return_value=None)
+    a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
+        "agent_id": 1,
+        "endpoint_id": endpoint_id,
+        "name": "Test Agent",
+        "description": "Test Description",
+        "version": "1",
+        "streaming": False,
+    })
+
+    result = publish_version_impl(
+        agent_id=1,
+        tenant_id="tenant1",
+        user_id="user1",
+        publish_as_a2a=True,
+    )
+
+    card = result["a2a_agent_card"]
+
+    # Verify agent card URL format
+    assert card["agent_card_url"] == f"/nb/a2a/{endpoint_id}/.well-known/agent-card.json"
+
+    # Verify REST endpoints
+    assert card["rest_endpoints"]["message_send"] == f"/nb/a2a/{endpoint_id}/message:send"
+    assert card["rest_endpoints"]["message_stream"] == f"/nb/a2a/{endpoint_id}/message:stream"
+    assert card["rest_endpoints"]["tasks_get"] == f"/nb/a2a/{endpoint_id}/tasks/{{task_id}}"
+
+    # Verify JSONRPC endpoint
+    assert card["jsonrpc_url"] == f"/nb/a2a/{endpoint_id}/v1"
+    assert card["jsonrpc_methods"] == ["SendMessage", "SendStreamingMessage", "GetTask"]

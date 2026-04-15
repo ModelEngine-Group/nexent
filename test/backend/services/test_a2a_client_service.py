@@ -616,6 +616,94 @@ class TestDiscoverFromUrl:
                 call_kwargs = mock_db.create_external_agent_from_url.call_args[1]
                 assert "source_url" in call_kwargs
 
+    @pytest.mark.asyncio
+    async def test_generates_hash_based_agent_id_when_no_id_field(self):
+        """Test name is used when no hash-based ID generation is triggered."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_card = {
+            "name": "Test Agent",
+            "description": "A test agent"
+            # No agent_id, id, endpoint_id
+        }
+
+        mock_result = {"id": 1, "name": "Test Agent"}
+
+        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            mock_client = MockClient.return_value.__aenter__.return_value
+            mock_client.get_json = AsyncMock(return_value=mock_card)
+
+            with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+                mock_db.create_external_agent_from_url.return_value = mock_result
+
+                await service.discover_from_url(
+                    url="https://example.com/agent.json",
+                    tenant_id="tenant-1",
+                    user_id="user-1"
+                )
+
+                call_kwargs = mock_db.create_external_agent_from_url.call_args[1]
+                # The name "Test Agent" is used as fallback for agent_id
+                assert call_kwargs["name"] == "Test Agent"
+
+    @pytest.mark.asyncio
+    async def test_raises_agent_discovery_error_on_http_error(self):
+        """Test AgentDiscoveryError is raised on HTTP error with traceback."""
+        from backend.services.a2a_client_service import (
+            A2AClientService,
+            AgentDiscoveryError
+        )
+        import aiohttp
+
+        service = A2AClientService()
+        test_url = "https://example.com/agent.json"
+
+        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            mock_client = MockClient.return_value.__aenter__.return_value
+            mock_client.get_json = AsyncMock(
+                side_effect=aiohttp.ClientError("Connection failed")
+            )
+
+            with pytest.raises(AgentDiscoveryError) as exc_info:
+                await service.discover_from_url(
+                    url=test_url,
+                    tenant_id="tenant-1",
+                    user_id="user-1"
+                )
+
+            error_msg = str(exc_info.value)
+            assert "Discovery failed" in error_msg
+            assert "ClientError" in error_msg
+            assert "Connection failed" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_raises_agent_discovery_error_on_generic_exception(self):
+        """Test AgentDiscoveryError is raised on generic exception."""
+        from backend.services.a2a_client_service import (
+            A2AClientService,
+            AgentDiscoveryError
+        )
+
+        service = A2AClientService()
+
+        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            mock_client = MockClient.return_value.__aenter__.return_value
+            mock_client.get_json = AsyncMock(side_effect=ValueError("Invalid JSON"))
+
+            with pytest.raises(AgentDiscoveryError) as exc_info:
+                await service.discover_from_url(
+                    url="https://example.com/agent.json",
+                    tenant_id="tenant-1",
+                    user_id="user-1"
+                )
+
+            error_msg = str(exc_info.value)
+            assert "Discovery failed" in error_msg
+            assert "ValueError" in error_msg
+            assert "Invalid JSON" in error_msg
+
 
 class TestDiscoverFromNacos:
     """Test class for discover_from_nacos async method."""
@@ -664,6 +752,314 @@ class TestDiscoverFromNacos:
                     tenant_id="tenant-1",
                     user_id="user-1"
                 )
+
+    @pytest.mark.asyncio
+    async def test_discovers_multiple_agents_from_nacos(self):
+        """Test discovering multiple agents from Nacos."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_nacos_config = {
+            "config_id": "config-1",
+            "is_active": True,
+            "namespace_id": "public"
+        }
+
+        mock_agent_info_1 = {"id": 1, "name": "Agent 1"}
+        mock_agent_info_2 = {"id": 2, "name": "Agent 2"}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
+            mock_db.update_nacos_config_last_scan.return_value = None
+
+            with patch.object(
+                service, "_discover_single_from_nacos"
+            ) as mock_discover:
+                mock_discover.side_effect = [mock_agent_info_1, mock_agent_info_2]
+
+                result = await service.discover_from_nacos(
+                    nacos_config_id="config-1",
+                    agent_names=["agent-1", "agent-2"],
+                    tenant_id="tenant-1",
+                    user_id="user-1"
+                )
+
+                assert len(result) == 2
+                assert result[0]["name"] == "Agent 1"
+                assert result[1]["name"] == "Agent 2"
+                mock_db.update_nacos_config_last_scan.assert_called_once_with(
+                    "config-1", "tenant-1"
+                )
+
+    @pytest.mark.asyncio
+    async def test_handles_partial_discoveries(self):
+        """Test handling partial discovery failures."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_nacos_config = {
+            "config_id": "config-1",
+            "is_active": True,
+            "namespace_id": "public"
+        }
+
+        mock_agent_info = {"id": 1, "name": "Agent 1"}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
+            mock_db.update_nacos_config_last_scan.return_value = None
+
+            with patch.object(
+                service, "_discover_single_from_nacos"
+            ) as mock_discover:
+                # First succeeds, second fails
+                mock_discover.side_effect = [
+                    mock_agent_info,
+                    Exception("Connection failed")
+                ]
+
+                result = await service.discover_from_nacos(
+                    nacos_config_id="config-1",
+                    agent_names=["agent-1", "agent-2"],
+                    tenant_id="tenant-1",
+                    user_id="user-1"
+                )
+
+                # Should return partial results
+                assert len(result) == 1
+                assert result[0]["name"] == "Agent 1"
+
+    @pytest.mark.asyncio
+    async def test_raises_error_when_all_discoveries_fail(self):
+        """Test raises AgentDiscoveryError when all agent discoveries fail."""
+        from backend.services.a2a_client_service import (
+            A2AClientService,
+            AgentDiscoveryError
+        )
+
+        service = A2AClientService()
+
+        mock_nacos_config = {
+            "config_id": "config-1",
+            "is_active": True,
+            "namespace_id": "public"
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
+            mock_db.update_nacos_config_last_scan.return_value = None
+
+            with patch.object(
+                service, "_discover_single_from_nacos"
+            ) as mock_discover:
+                mock_discover.side_effect = Exception("Connection failed")
+
+                with pytest.raises(AgentDiscoveryError) as exc_info:
+                    await service.discover_from_nacos(
+                        nacos_config_id="config-1",
+                        agent_names=["agent-1"],
+                        tenant_id="tenant-1",
+                        user_id="user-1"
+                    )
+
+                error_msg = str(exc_info.value)
+                assert "All agent discoveries failed" in error_msg
+                assert "Connection failed" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_uses_namespace_from_config(self):
+        """Test uses namespace from config when not provided."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_nacos_config = {
+            "config_id": "config-1",
+            "is_active": True,
+            "namespace_id": "custom-namespace"
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
+            mock_db.update_nacos_config_last_scan.return_value = None
+
+            with patch.object(
+                service, "_discover_single_from_nacos"
+            ) as mock_discover:
+                mock_discover.return_value = {"id": 1, "name": "Agent 1"}
+
+                await service.discover_from_nacos(
+                    nacos_config_id="config-1",
+                    agent_names=["agent-1"],
+                    tenant_id="tenant-1",
+                    user_id="user-1"
+                )
+
+                # Verify namespace is passed correctly
+                call_kwargs = mock_discover.call_args[1]
+                assert call_kwargs["namespace"] == "custom-namespace"
+
+    @pytest.mark.asyncio
+    async def test_overrides_namespace_when_provided(self):
+        """Test provided namespace overrides config namespace."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_nacos_config = {
+            "config_id": "config-1",
+            "is_active": True,
+            "namespace_id": "config-namespace"
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
+            mock_db.update_nacos_config_last_scan.return_value = None
+
+            with patch.object(
+                service, "_discover_single_from_nacos"
+            ) as mock_discover:
+                mock_discover.return_value = {"id": 1, "name": "Agent 1"}
+
+                await service.discover_from_nacos(
+                    nacos_config_id="config-1",
+                    agent_names=["agent-1"],
+                    tenant_id="tenant-1",
+                    user_id="user-1",
+                    namespace="override-namespace"
+                )
+
+                # Verify namespace is overridden
+                call_kwargs = mock_discover.call_args[1]
+                assert call_kwargs["namespace"] == "override-namespace"
+
+
+class TestDiscoverSingleFromNacos:
+    """Test class for _discover_single_from_nacos async method.
+
+    Note: NacosClient is lazily imported, so tests mock the entire method.
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_nacos_client_import_fails(self):
+        """Test returns None when NacosClient import fails."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_nacos_config = {
+            "config_id": "config-1",
+            "nacos_addr": "http://nacos:8848",
+            "nacos_username": "nacos",
+            "nacos_password": "nacos"
+        }
+
+        # Mock the import to fail
+        with patch("builtins.__import__", side_effect=ImportError("Module not found")):
+            result = await service._discover_single_from_nacos(
+                nacos_config=mock_nacos_config,
+                agent_name="test-agent",
+                namespace="public",
+                tenant_id="tenant-1",
+                user_id="user-1"
+            )
+
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_calls_nacos_client_with_correct_params(self):
+        """Test that Nacos client is initialized and called with correct parameters."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_nacos_config = {
+            "config_id": "config-1",
+            "nacos_addr": "http://nacos:8848",
+            "nacos_username": "testuser",
+            "nacos_password": "testpass"
+        }
+
+        mock_instance = {
+            "ip": "192.168.1.100",
+            "port": 8080,
+            "metadata": {"a2a_card_url": "https://example.com/agent.json"}
+        }
+
+        mock_card = {
+            "name": "Test Agent",
+            "description": "A test agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "http-json-rpc", "url": "https://agent.example.com/v1"}
+            ],
+            "capabilities": {"streaming": True}
+        }
+
+        mock_client = AsyncMock()
+        mock_client.query_service_instance = AsyncMock(return_value=mock_instance)
+        mock_client.close = AsyncMock()
+
+        # Create mock for nacos_client module
+        mock_nacos_module = MagicMock()
+        mock_nacos_module.NacosClient.return_value = mock_client
+
+        with patch.dict(sys.modules, {"utils.nacos_client": mock_nacos_module}):
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_http = MockClient.return_value.__aenter__.return_value
+                mock_http.get_json = AsyncMock(return_value=mock_card)
+
+                with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+                    mock_db.create_external_agent_from_nacos.return_value = {
+                        "id": 1,
+                        "name": "Test Agent"
+                    }
+
+                    result = await service._discover_single_from_nacos(
+                        nacos_config=mock_nacos_config,
+                        agent_name="test-agent",
+                        namespace="public",
+                        tenant_id="tenant-1",
+                        user_id="user-1"
+                    )
+
+                    assert result is not None
+                    # Verify NacosClient was instantiated with correct params
+                    mock_nacos_module.NacosClient.assert_called_once_with(
+                        "http://nacos:8848", "testuser", "testpass"
+                    )
+
+    @pytest.mark.asyncio
+    async def test_handles_missing_instance_gracefully(self):
+        """Test handles case when service instance is not found."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_nacos_config = {
+            "config_id": "config-1",
+            "nacos_addr": "http://nacos:8848"
+        }
+
+        mock_client = AsyncMock()
+        mock_client.query_service_instance = AsyncMock(return_value=None)
+        mock_client.close = AsyncMock()
+
+        # Create mock for nacos_client module
+        mock_nacos_module = MagicMock()
+        mock_nacos_module.NacosClient.return_value = mock_client
+
+        with patch.dict(sys.modules, {"utils.nacos_client": mock_nacos_module}):
+            result = await service._discover_single_from_nacos(
+                nacos_config=mock_nacos_config,
+                agent_name="test-agent",
+                namespace="public",
+                tenant_id="tenant-1",
+                user_id="user-1"
+            )
+
+            assert result is None
 
 
 class TestRefreshAgentCard:
@@ -779,6 +1175,521 @@ class TestCallAgent:
                     tenant_id="tenant-1",
                     message={"text": "test"}
                 )
+
+    @pytest.mark.asyncio
+    async def test_builds_json_rpc_payload_and_calls_agent(self):
+        """Test builds JSON-RPC payload and calls agent."""
+        from backend.services.a2a_client_service import (
+            A2AClientService,
+            AgentCallError
+        )
+        from database.a2a_agent_db import PROTOCOL_JSONRPC
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": PROTOCOL_JSONRPC,
+            "is_available": True
+        }
+
+        mock_response = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"status": "success"}
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(return_value=mock_response)
+                # Mock __aexit__ for context manager
+                MockClient.return_value.__aexit__ = AsyncMock()
+
+                result = await service.call_agent(
+                    external_agent_id=1,
+                    tenant_id="tenant-1",
+                    message={"text": "test message"}
+                )
+
+                assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_builds_http_json_payload(self):
+        """Test builds HTTP+JSON payload for non-JSONRPC protocol."""
+        from backend.services.a2a_client_service import A2AClientService
+        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": PROTOCOL_HTTP_JSON,
+            "is_available": True
+        }
+
+        mock_response = {"status": "success"}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(return_value=mock_response)
+                MockClient.return_value.__aexit__ = AsyncMock()
+
+                result = await service.call_agent(
+                    external_agent_id=1,
+                    tenant_id="tenant-1",
+                    message={"text": "test message"}
+                )
+
+                assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_agent_error_response(self):
+        """Test raises AgentCallError on agent error response."""
+        from backend.services.a2a_client_service import (
+            A2AClientService,
+            AgentCallError
+        )
+        from database.a2a_agent_db import PROTOCOL_JSONRPC
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": PROTOCOL_JSONRPC,
+            "is_available": True
+        }
+
+        mock_response = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {"code": -32600, "message": "Invalid Request"}
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(return_value=mock_response)
+                MockClient.return_value.__aexit__ = AsyncMock()
+
+                with pytest.raises(AgentCallError) as exc_info:
+                    await service.call_agent(
+                        external_agent_id=1,
+                        tenant_id="tenant-1",
+                        message={"text": "test"}
+                    )
+
+                error_msg = str(exc_info.value)
+                assert "Agent error" in error_msg
+                assert "Invalid Request" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_client_error(self):
+        """Test raises AgentCallError on client error."""
+        from backend.services.a2a_client_service import (
+            A2AClientService,
+            AgentCallError
+        )
+        import aiohttp
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "is_available": True
+        }
+
+        async def mock_post_json(*args, **kwargs):
+            raise aiohttp.ClientError("Connection refused")
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = mock_post_json
+
+                with pytest.raises(AgentCallError) as exc_info:
+                    await service.call_agent(
+                        external_agent_id=1,
+                        tenant_id="tenant-1",
+                        message={"text": "test"}
+                    )
+
+                error_msg = str(exc_info.value)
+                assert "Call failed" in error_msg
+                assert "Connection refused" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_returns_result_from_response(self):
+        """Test returns result from response when no error."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "is_available": True
+        }
+
+        mock_response = {
+            "result": {"task_id": "123", "status": "completed"}
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(return_value=mock_response)
+                MockClient.return_value.__aexit__ = AsyncMock()
+
+                result = await service.call_agent(
+                    external_agent_id=1,
+                    tenant_id="tenant-1",
+                    message={"text": "test"}
+                )
+
+                assert result["task_id"] == "123"
+                assert result["status"] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_uses_default_protocol_when_not_specified(self):
+        """Test uses JSON-RPC as default protocol when not specified."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": None,
+            "is_available": True
+        }
+
+        mock_response = {"result": {"status": "ok"}}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(return_value=mock_response)
+                MockClient.return_value.__aexit__ = AsyncMock()
+
+                await service.call_agent(
+                    external_agent_id=1,
+                    tenant_id="tenant-1",
+                    message={"text": "test"}
+                )
+
+                # Verify post_json was called
+                mock_client.post_json.assert_called_once()
+
+
+class TestCallAgentStreaming:
+    """Test class for call_agent_streaming async method."""
+
+    @pytest.mark.asyncio
+    async def test_raises_error_when_agent_not_found(self):
+        """Test raises error when agent not found."""
+        from backend.services.a2a_client_service import (
+            A2AClientService,
+            AgentCallError
+        )
+
+        service = A2AClientService()
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = None
+
+            with pytest.raises(AgentCallError, match="not found"):
+                # Must consume the async generator
+                result_gen = service.call_agent_streaming(
+                    external_agent_id=999,
+                    tenant_id="tenant-1",
+                    message={"text": "test"}
+                )
+                async for _ in result_gen:
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_raises_error_when_agent_unavailable(self):
+        """Test raises error when agent is unavailable."""
+        from backend.services.a2a_client_service import (
+            A2AClientService,
+            AgentCallError
+        )
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com",
+            "is_available": False
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with pytest.raises(AgentCallError, match="not available"):
+                result_gen = service.call_agent_streaming(
+                    external_agent_id=1,
+                    tenant_id="tenant-1",
+                    message={"text": "test"}
+                )
+                async for _ in result_gen:
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_builds_json_rpc_payload_for_streaming(self):
+        """Test builds JSON-RPC payload for streaming call."""
+        from backend.services.a2a_client_service import A2AClientService
+        from database.a2a_agent_db import PROTOCOL_JSONRPC
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": PROTOCOL_JSONRPC,
+            "is_available": True
+        }
+
+        async def mock_stream(*args, **kwargs):
+            yield {"type": "taskProgress", "data": {"status": "processing"}}
+            yield {"type": "taskCompleted", "data": {"result": "done"}}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_stream = mock_stream
+
+                events = []
+                result_gen = service.call_agent_streaming(
+                    external_agent_id=1,
+                    tenant_id="tenant-1",
+                    message={"text": "test"}
+                )
+                async for event in result_gen:
+                    events.append(event)
+
+                assert len(events) == 2
+                assert events[0]["type"] == "taskProgress"
+
+    @pytest.mark.asyncio
+    async def test_builds_http_json_payload_for_streaming(self):
+        """Test builds HTTP+JSON payload for streaming with HTTP+JSON protocol."""
+        from backend.services.a2a_client_service import A2AClientService
+        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": PROTOCOL_HTTP_JSON,
+            "is_available": True
+        }
+
+        async def mock_stream(*args, **kwargs):
+            yield {"data": "chunk1"}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_stream = mock_stream
+
+                events = []
+                result_gen = service.call_agent_streaming(
+                    external_agent_id=1,
+                    tenant_id="tenant-1",
+                    message={"text": "test"}
+                )
+                async for event in result_gen:
+                    events.append(event)
+
+                assert len(events) == 1
+
+    @pytest.mark.asyncio
+    async def test_uses_api_key_in_headers(self):
+        """Test uses API key in headers when provided."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "is_available": True
+        }
+
+        async def mock_stream(*args, **kwargs):
+            yield {"data": "done"}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_stream = mock_stream
+
+                with patch("backend.services.a2a_client_service.build_a2a_headers") as mock_headers:
+                    mock_headers.return_value = {"Authorization": "Bearer test-key"}
+
+                    result_gen = service.call_agent_streaming(
+                        external_agent_id=1,
+                        tenant_id="tenant-1",
+                        message={"text": "test"},
+                        api_key="test-key"
+                    )
+                    async for _ in result_gen:
+                        pass
+
+                    mock_headers.assert_called_once_with("test-key")
+
+    @pytest.mark.asyncio
+    async def test_raises_error_on_client_error(self):
+        """Test raises AgentCallError on client error during streaming."""
+        from backend.services.a2a_client_service import (
+            A2AClientService,
+            AgentCallError
+        )
+        import aiohttp
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "is_available": True
+        }
+
+        async def mock_stream(*args, **kwargs):
+            raise aiohttp.ClientError("Stream failed")
+            yield  # Make this an async generator
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_stream = mock_stream
+
+                with pytest.raises(AgentCallError) as exc_info:
+                    result_gen = service.call_agent_streaming(
+                        external_agent_id=1,
+                        tenant_id="tenant-1",
+                        message={"text": "test"}
+                    )
+                    async for _ in result_gen:
+                        pass
+
+                error_msg = str(exc_info.value)
+                assert "Streaming call failed" in error_msg
+                assert "Stream failed" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_builds_streaming_url_with_message_stream_path(self):
+        """Test builds streaming URL with /message:stream path."""
+        from backend.services.a2a_client_service import A2AClientService
+        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": PROTOCOL_HTTP_JSON,
+            "is_available": True
+        }
+
+        async def mock_stream(*args, **kwargs):
+            yield {"done": True}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_stream = mock_stream
+
+                result_gen = service.call_agent_streaming(
+                    external_agent_id=1,
+                    tenant_id="tenant-1",
+                    message={"text": "test"}
+                )
+                events = []
+                async for event in result_gen:
+                    events.append(event)
+
+                # Verify post_stream was called and yielded results
+                assert len(events) == 1
+
+    @pytest.mark.asyncio
+    async def test_uses_default_protocol_for_streaming(self):
+        """Test uses JSON-RPC as default protocol for streaming."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": None,
+            "is_available": True
+        }
+
+        async def mock_stream(*args, **kwargs):
+            yield {"done": True}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_stream = mock_stream
+
+                result_gen = service.call_agent_streaming(
+                    external_agent_id=1,
+                    tenant_id="tenant-1",
+                    message={"text": "test"}
+                )
+                events = []
+                async for event in result_gen:
+                    events.append(event)
+
+                # Verify post_stream was called and yielded results
+                assert len(events) == 1
 
 
 class TestSingletonInstance:

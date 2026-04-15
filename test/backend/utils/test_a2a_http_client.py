@@ -164,21 +164,6 @@ class TestA2AHttpClientGetJson:
                 call_kwargs = mock_request.call_args
                 assert "headers" in call_kwargs.kwargs or "headers" in call_kwargs[1]
 
-    @pytest.mark.asyncio
-    async def test_get_json_timeout(self):
-        """Test GET request timeout handling."""
-        from backend.utils.a2a_http_client import A2AHttpClient
-        import aiohttp
-
-        client = A2AHttpClient()
-        async with client:
-            with patch.object(client, '_request_with_retry', new_callable=AsyncMock) as mock_request:
-                mock_request.side_effect = asyncio.TimeoutError()
-
-                with pytest.raises(asyncio.TimeoutError):
-                    await client.get_json("https://example.com")
-
-
 class TestA2AHttpClientPostJson:
     """Test class for A2AHttpClient.post_json method."""
 
@@ -485,6 +470,219 @@ class TestA2AHttpClientErrorHandling:
 
         with pytest.raises(asyncio.TimeoutError):
             await client._request_with_retry("GET", "https://example.com")
+
+
+class TestA2AHttpClientGetJsonErrors:
+    """Test class for A2AHttpClient.get_json error handling."""
+
+    @pytest.mark.asyncio
+    async def test_get_json_timeout(self):
+        """Test GET request timeout is raised with proper error message."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+        import aiohttp
+
+        client = A2AHttpClient()
+        async with client:
+            with patch.object(client, '_request_with_retry', new_callable=AsyncMock) as mock_request:
+                mock_request.side_effect = asyncio.TimeoutError("Request timeout")
+
+                with pytest.raises(asyncio.TimeoutError):
+                    await client.get_json("https://example.com")
+
+    @pytest.mark.asyncio
+    async def test_get_json_http_error(self):
+        """Test GET request HTTP error (ClientResponseError) is raised."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+        import aiohttp
+
+        client = A2AHttpClient()
+        async with client:
+            with patch.object(client, '_request_with_retry', new_callable=AsyncMock) as mock_request:
+                mock_request.side_effect = aiohttp.ClientResponseError(
+                    request_info=MagicMock(),
+                    history=(),
+                    status=404,
+                    message="Not Found"
+                )
+
+                with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+                    await client.get_json("https://example.com")
+                assert exc_info.value.status == 404
+
+    @pytest.mark.asyncio
+    async def test_get_json_generic_exception(self):
+        """Test GET request generic exception is raised."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+
+        client = A2AHttpClient()
+        async with client:
+            with patch.object(client, '_request_with_retry', new_callable=AsyncMock) as mock_request:
+                mock_request.side_effect = ValueError("Unexpected error")
+
+                with pytest.raises(ValueError) as exc_info:
+                    await client.get_json("https://example.com")
+                assert "Unexpected error" in str(exc_info.value)
+
+
+class TestA2AHttpClientPostJsonErrors:
+    """Test class for A2AHttpClient.post_json error handling."""
+
+    @pytest.mark.asyncio
+    async def test_post_json_timeout(self):
+        """Test POST request timeout is raised with proper error message."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+        import aiohttp
+
+        client = A2AHttpClient()
+        async with client:
+            with patch.object(client, '_request_with_retry', new_callable=AsyncMock) as mock_request:
+                mock_request.side_effect = asyncio.TimeoutError("Request timeout")
+
+                with pytest.raises(asyncio.TimeoutError):
+                    await client.post_json(
+                        "https://example.com/message:send",
+                        payload={"message": "test"}
+                    )
+
+    @pytest.mark.asyncio
+    async def test_post_json_http_error(self):
+        """Test POST request HTTP error (ClientResponseError) is raised."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+        import aiohttp
+
+        client = A2AHttpClient()
+        async with client:
+            with patch.object(client, '_request_with_retry', new_callable=AsyncMock) as mock_request:
+                mock_request.side_effect = aiohttp.ClientResponseError(
+                    request_info=MagicMock(),
+                    history=(),
+                    status=500,
+                    message="Internal Server Error"
+                )
+
+                with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+                    await client.post_json(
+                        "https://example.com/message:send",
+                        payload={"message": "test"}
+                    )
+                assert exc_info.value.status == 500
+
+    @pytest.mark.asyncio
+    async def test_post_json_generic_exception(self):
+        """Test POST request generic exception is raised."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+
+        client = A2AHttpClient()
+        async with client:
+            with patch.object(client, '_request_with_retry', new_callable=AsyncMock) as mock_request:
+                mock_request.side_effect = RuntimeError("Unexpected runtime error")
+
+                with pytest.raises(RuntimeError) as exc_info:
+                    await client.post_json(
+                        "https://example.com/message:send",
+                        payload={"message": "test"}
+                    )
+                assert "Unexpected runtime error" in str(exc_info.value)
+
+
+class TestA2AHttpClientPostStreamErrors:
+    """Test class for A2AHttpClient.post_stream error handling."""
+
+    @pytest.mark.asyncio
+    async def test_post_stream_timeout(self):
+        """Test streaming request timeout is raised."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+        import aiohttp
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.post = AsyncMock(
+            side_effect=asyncio.TimeoutError("Stream timeout")
+        )
+
+        mock_session = MagicMock()
+        mock_session.post = AsyncMock(
+            side_effect=asyncio.TimeoutError("Stream timeout")
+        )
+        mock_session.close = AsyncMock()
+
+        client = A2AHttpClient()
+        async with client:
+            client._session = mock_session
+
+            with pytest.raises(asyncio.TimeoutError):
+                async for _ in client.post_stream(
+                    "https://example.com/message:stream",
+                    payload={"message": {"role": "user", "parts": [{"type": "text", "text": "Hi"}]}}
+                ):
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_post_stream_http_error(self):
+        """Test streaming HTTP error (ClientResponseError) is raised."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+        import aiohttp
+
+        mock_session = MagicMock()
+        mock_session.post = AsyncMock(
+            side_effect=aiohttp.ClientResponseError(
+                request_info=MagicMock(),
+                history=(),
+                status=502,
+                message="Bad Gateway"
+            )
+        )
+        mock_session.close = AsyncMock()
+
+        client = A2AHttpClient()
+        async with client:
+            client._session = mock_session
+
+            with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+                async for _ in client.post_stream(
+                    "https://example.com/message:stream",
+                    payload={"message": {"role": "user", "parts": [{"type": "text", "text": "Hi"}]}}
+                ):
+                    pass
+            assert exc_info.value.status == 502
+
+
+class TestA2AHttpClientRequestWithRetryErrors:
+    """Test class for A2AHttpClient._request_with_retry error handling."""
+
+    @pytest.mark.asyncio
+    async def test_request_with_retry_client_error(self):
+        """Test that aiohttp.ClientError triggers retry and raises after exhaustion."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+        import aiohttp
+
+        client = A2AHttpClient(max_retries=2)
+        mock_session = MagicMock()
+        mock_session.request = MagicMock(
+            side_effect=aiohttp.ClientError("Connection failed")
+        )
+        client._session = mock_session
+
+        with pytest.raises(aiohttp.ClientError) as exc_info:
+            await client._request_with_retry("GET", "https://example.com")
+        assert "Connection failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_request_with_retry_all_retries_exhausted_fallback_error(self):
+        """Test that ClientError is raised when all retries exhausted (not connection error)."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+        import aiohttp
+
+        client = A2AHttpClient(max_retries=3)
+        mock_session = MagicMock()
+        mock_session.request = MagicMock(
+            side_effect=aiohttp.ClientError("Generic client error")
+        )
+        client._session = mock_session
+
+        with pytest.raises(aiohttp.ClientError) as exc_info:
+            await client._request_with_retry("GET", "https://example.com")
+        assert "Generic client error" in str(exc_info.value)
 
 
 class TestConstants:
