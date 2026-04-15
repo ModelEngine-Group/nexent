@@ -51,7 +51,8 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         get_index_name_by_knowledge_name,
         get_knowledge_info_by_tenant_and_source,
         upsert_knowledge_record,
-        _generate_index_name
+        _generate_index_name,
+        get_knowledge_name_map_by_index_names,
     )
 
 
@@ -1948,3 +1949,140 @@ def test_get_knowledge_info_by_tenant_and_source_exception(monkeypatch, mock_ses
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
+
+
+def test_get_knowledge_name_map_by_index_names_success(monkeypatch, mock_session):
+    """Test successfully getting knowledge name map by index names"""
+    session, query = mock_session
+
+    # Create mock records with index_name and knowledge_name
+    class MockRow:
+        def __init__(self, index_name, knowledge_name):
+            self.index_name = index_name
+            self.knowledge_name = knowledge_name
+
+    mock_rows = [
+        MockRow("index1", "Knowledge Base 1"),
+        MockRow("index2", "Knowledge Base 2"),
+    ]
+
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = mock_rows
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    index_names = ["index1", "index2"]
+    result = get_knowledge_name_map_by_index_names(index_names)
+
+    expected = {
+        "index1": "Knowledge Base 1",
+        "index2": "Knowledge Base 2",
+    }
+    assert result == expected
+
+
+def test_get_knowledge_name_map_by_index_names_with_fallback(monkeypatch, mock_session):
+    """Test get_knowledge_name_map_by_index_names uses index_name as fallback when not found"""
+    session, query = mock_session
+
+    # Only return one of the two index names
+    class MockRow:
+        def __init__(self, index_name, knowledge_name):
+            self.index_name = index_name
+            self.knowledge_name = knowledge_name
+
+    mock_rows = [
+        MockRow("index1", "Knowledge Base 1"),
+        # index2 is not found in database
+    ]
+
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = mock_rows
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    index_names = ["index1", "index2"]
+    result = get_knowledge_name_map_by_index_names(index_names)
+
+    expected = {
+        "index1": "Knowledge Base 1",
+        "index2": "index2",  # Falls back to index_name
+    }
+    assert result == expected
+
+
+def test_get_knowledge_name_map_by_index_names_empty_list(monkeypatch):
+    """Test get_knowledge_name_map_by_index_names with empty list returns empty dict"""
+    result = get_knowledge_name_map_by_index_names([])
+
+    assert result == {}
+
+
+def test_get_knowledge_name_map_by_index_names_no_results(monkeypatch, mock_session):
+    """Test get_knowledge_name_map_by_index_names when no records found"""
+    session, query = mock_session
+
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = []
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    index_names = ["nonexistent1", "nonexistent2"]
+    result = get_knowledge_name_map_by_index_names(index_names)
+
+    # Should return index_names as fallback for all
+    expected = {
+        "nonexistent1": "nonexistent1",
+        "nonexistent2": "nonexistent2",
+    }
+    assert result == expected
+
+
+def test_get_knowledge_name_map_by_index_names_exception(monkeypatch, mock_session):
+    """Test exception during get_knowledge_name_map_by_index_names"""
+    session, query = mock_session
+    query.filter.side_effect = MockSQLAlchemyError("Database error")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    with pytest.raises(MockSQLAlchemyError, match="Database error"):
+        get_knowledge_name_map_by_index_names(["index1", "index2"])

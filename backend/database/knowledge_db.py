@@ -374,3 +374,42 @@ def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str
             )
     except SQLAlchemyError as e:
         raise e
+
+
+def get_knowledge_name_map_by_index_names(index_names: List[str]) -> Dict[str, str]:
+    """
+    Get a mapping from index_name to knowledge_name (display name) for the given index_names.
+    Used to build user-friendly knowledge base summaries in prompts.
+
+    Args:
+        index_names: List of internal index names
+
+    Returns:
+        Dict[str, str]: Mapping of index_name -> knowledge_name.
+                       If a knowledge base is not found in the database,
+                       the index_name itself is used as the fallback value.
+    """
+    if not index_names:
+        return {}
+
+    try:
+        with get_db_session() as session:
+            result = session.query(
+                KnowledgeRecord.index_name,
+                KnowledgeRecord.knowledge_name
+            ).filter(
+                KnowledgeRecord.index_name.in_(index_names),
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+
+            knowledge_name_map = {}
+            for row in result:
+                knowledge_name_map[row.index_name] = row.knowledge_name
+
+            for index_name in index_names:
+                if index_name not in knowledge_name_map:
+                    knowledge_name_map[index_name] = index_name
+
+            return knowledge_name_map
+    except SQLAlchemyError as e:
+        raise e

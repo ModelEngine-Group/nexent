@@ -36,6 +36,7 @@ from database.tool_db import (
     search_last_tool_instance_by_tool_id,
     update_tool_table_from_scan_tool_list,
 )
+from database.knowledge_db import get_knowledge_name_map_by_index_names
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model
 from services.vectordatabase_service import get_embedding_model, get_rerank_model, get_vector_db_core
@@ -714,11 +715,20 @@ def _validate_local_tool(
             if rerank and rerank_model_name:
                 rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
 
+            # Build display_name to index_name mapping for LLM parameter conversion
+            index_names = instantiation_params.get("index_names", [])
+            display_name_to_index_map = {}
+            if index_names:
+                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                for idx_name, kb_name in knowledge_name_map.items():
+                    display_name_to_index_map[kb_name] = idx_name
+
             params = {
                 **instantiation_params,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
                 'rerank_model': rerank_model,
+                'display_name_to_index_map': display_name_to_index_map,
             }
             tool_instance = tool_class(**params)
         elif tool_name in ["dify_search", "datamate_search"]:
