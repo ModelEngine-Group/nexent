@@ -40,6 +40,7 @@ def knowledge_base_search_tool(mock_observer, mock_vdb_core, mock_embedding_mode
         vdb_core=mock_vdb_core,
         search_mode="hybrid",
         rerank=False,
+        display_name_to_index_map={},
     )
     return tool
 
@@ -395,6 +396,7 @@ class TestKnowledgeBaseSearchToolRerank:
             vdb_core=mock_vdb_core,
             embedding_model=mock_embedding_model,
             observer=mock_observer,
+            display_name_to_index_map={},
         )
 
         result = tool.forward("test query")
@@ -433,6 +435,7 @@ class TestKnowledgeBaseSearchToolRerank:
             vdb_core=mock_vdb_core,
             embedding_model=mock_embedding_model,
             observer=mock_observer,
+            display_name_to_index_map={},
         )
 
         result = tool.forward("test query")
@@ -472,6 +475,7 @@ class TestKnowledgeBaseSearchToolRerank:
             vdb_core=mock_vdb_core,
             embedding_model=mock_embedding_model,
             observer=mock_observer,
+            display_name_to_index_map={},
         )
 
         # Should not raise, should continue with original results
@@ -536,3 +540,488 @@ class TestKnowledgeBaseSearchToolRerank:
             embedding_model=knowledge_base_search_tool.embedding_model,
             top_k=5
         )
+
+
+class TestConvertToIndexNames:
+    """Tests for _convert_to_index_names method."""
+
+    def test_convert_with_empty_map(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test conversion when display_name_to_index_map is empty."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["index1", "index2"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+
+        result = tool._convert_to_index_names(["index1", "index2"])
+
+        assert result == ["index1", "index2"]
+
+    def test_convert_with_matching_names(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test conversion when names are in the map."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=[],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={
+                "Knowledge A": "es_index_knowledge_a",
+                "Knowledge B": "es_index_knowledge_b",
+            },
+        )
+
+        result = tool._convert_to_index_names(["Knowledge A", "Knowledge B"])
+
+        assert result == ["es_index_knowledge_a", "es_index_knowledge_b"]
+
+    def test_convert_with_mixed_names(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test conversion when some names are in the map and some are not."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=[],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={
+                "Knowledge A": "es_index_knowledge_a",
+            },
+        )
+
+        result = tool._convert_to_index_names(["Knowledge A", "raw_index_name"])
+
+        assert result == ["es_index_knowledge_a", "raw_index_name"]
+
+    def test_convert_with_unmatched_names(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test conversion when no names are in the map."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=[],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={
+                "Knowledge A": "es_index_knowledge_a",
+            },
+        )
+
+        result = tool._convert_to_index_names(["raw_index1", "raw_index2"])
+
+        assert result == ["raw_index1", "raw_index2"]
+
+    def test_convert_forward_integration(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test that forward method uses _convert_to_index_names correctly."""
+        mock_results = create_mock_search_result(1)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=[],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={
+                "Knowledge A": "es_index_knowledge_a",
+            },
+        )
+
+        tool.forward("test query", index_names=["Knowledge A"])
+
+        mock_vdb_core.hybrid_search.assert_called_once_with(
+            index_names=["es_index_knowledge_a"],
+            query_text="test query",
+            embedding_model=mock_embedding_model,
+            top_k=3
+        )
+
+
+class TestEffectiveTopK:
+    """Tests for effective_top_k calculation with rerank."""
+
+    def test_effective_top_k_increases_with_rerank(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test that effective_top_k is multiplied when rerank is enabled."""
+        from sdk.nexent.core.utils.constants import RERANK_OVERSEARCH_MULTIPLIER
+
+        mock_results = create_mock_search_result(10)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            top_k=5,
+            rerank=True,
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+
+        tool.forward("test query")
+
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["top_k"] == 5 * RERANK_OVERSEARCH_MULTIPLIER
+
+    def test_effective_top_k_unchanged_without_rerank(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test that effective_top_k remains the same when rerank is disabled."""
+        mock_results = create_mock_search_result(5)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            top_k=5,
+            rerank=False,
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+
+        tool.forward("test query")
+
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["top_k"] == 5
+
+
+class TestSourceTypeConversion:
+    """Tests for source_type conversion (local/minio -> file)."""
+
+    def test_source_type_local_converted_to_file(self, knowledge_base_search_tool, mock_vdb_core):
+        """Test that source_type 'local' is converted to 'file'."""
+        mock_results = [
+            {
+                "document": {
+                    "title": "Local Doc",
+                    "content": "Content from local file",
+                    "filename": "local.txt",
+                    "path_or_url": "/path/local.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "local"
+                },
+                "score": 0.9,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.vdb_core = mock_vdb_core
+
+        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+
+        # Check the SEARCH_CONTENT message which contains full results via to_dict()
+        search_content_call = [
+            call for call in knowledge_base_search_tool.observer.add_message.call_args_list
+            if call[0][1] == ProcessType.SEARCH_CONTENT
+        ][0]
+        full_results = json.loads(search_content_call[0][2])
+
+        assert full_results[0]["source_type"] == "file"
+
+    def test_source_type_minio_converted_to_file(self, knowledge_base_search_tool, mock_vdb_core):
+        """Test that source_type 'minio' is converted to 'file'."""
+        mock_results = [
+            {
+                "document": {
+                    "title": "Minio Doc",
+                    "content": "Content from minio storage",
+                    "filename": "minio.txt",
+                    "path_or_url": "/minio/bucket/minio.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "minio"
+                },
+                "score": 0.9,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.vdb_core = mock_vdb_core
+
+        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+
+        # Check the SEARCH_CONTENT message
+        search_content_call = [
+            call for call in knowledge_base_search_tool.observer.add_message.call_args_list
+            if call[0][1] == ProcessType.SEARCH_CONTENT
+        ][0]
+        full_results = json.loads(search_content_call[0][2])
+
+        assert full_results[0]["source_type"] == "file"
+
+    def test_source_type_other_unchanged(self, knowledge_base_search_tool, mock_vdb_core):
+        """Test that source_type other than local/minio remains unchanged."""
+        mock_results = [
+            {
+                "document": {
+                    "title": "Web Doc",
+                    "content": "Content from web",
+                    "filename": "web.html",
+                    "path_or_url": "https://example.com/page.html",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "web"
+                },
+                "score": 0.9,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.vdb_core = mock_vdb_core
+
+        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+
+        # Check the SEARCH_CONTENT message
+        search_content_call = [
+            call for call in knowledge_base_search_tool.observer.add_message.call_args_list
+            if call[0][1] == ProcessType.SEARCH_CONTENT
+        ][0]
+        full_results = json.loads(search_content_call[0][2])
+
+        assert full_results[0]["source_type"] == "web"
+
+
+class TestRecordOps:
+    """Tests for record_ops counter functionality."""
+
+    def test_record_ops_increments_by_result_count(self, knowledge_base_search_tool):
+        """Test that record_ops increases by the number of results returned."""
+        mock_results = create_mock_search_result(2)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        initial_ops = knowledge_base_search_tool.record_ops
+
+        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+
+        assert knowledge_base_search_tool.record_ops == initial_ops + 2
+
+    def test_record_ops_accumulates_across_calls(self, knowledge_base_search_tool):
+        """Test that record_ops accumulates across multiple forward calls."""
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        knowledge_base_search_tool.record_ops = 0
+        knowledge_base_search_tool.forward("query1", index_names=["kb1"])
+        first_call_ops = knowledge_base_search_tool.record_ops
+
+        knowledge_base_search_tool.forward("query2", index_names=["kb1"])
+        second_call_ops = knowledge_base_search_tool.record_ops
+
+        # Each call with 1 result adds 1 to record_ops
+        assert first_call_ops == 1
+        assert second_call_ops == 2
+
+    def test_cite_index_in_results(self, knowledge_base_search_tool):
+        """Test that cite_index in results starts from record_ops + index + 1."""
+        mock_results = create_mock_search_result(2)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        # record_ops starts at 1, so cite_index should be 1+0+1=1, 1+1+1=2
+        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+
+        # Check the SEARCH_CONTENT message for cite_index values
+        search_content_call = [
+            call for call in knowledge_base_search_tool.observer.add_message.call_args_list
+            if call[0][1] == ProcessType.SEARCH_CONTENT
+        ][0]
+        full_results = json.loads(search_content_call[0][2])
+
+        assert full_results[0]["cite_index"] == 1
+        assert full_results[1]["cite_index"] == 2
+
+
+class TestSearchContentObserver:
+    """Tests for SEARCH_CONTENT observer message."""
+
+    def test_forward_sends_search_content_to_observer(self, knowledge_base_search_tool):
+        """Test that forward sends SEARCH_CONTENT message to observer."""
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+
+        search_content_calls = [
+            call for call in knowledge_base_search_tool.observer.add_message.call_args_list
+            if call[0][1] == ProcessType.SEARCH_CONTENT
+        ]
+
+        assert len(search_content_calls) == 1
+        message = search_content_calls[0][0][2]
+        parsed = json.loads(message)
+        assert isinstance(parsed, list)
+        assert len(parsed) == 1
+
+    def test_forward_no_search_content_without_observer(self, mock_vdb_core, mock_embedding_model):
+        """Test that forward works without observer and doesn't send SEARCH_CONTENT."""
+        mock_results = create_mock_search_result(1)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=None,
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+
+        assert result is not None
+
+
+class TestToolMetadata:
+    """Tests for tool metadata attributes."""
+
+    def test_tool_name(self, knowledge_base_search_tool):
+        """Test tool name is correctly set."""
+        assert knowledge_base_search_tool.name == "knowledge_base_search"
+
+    def test_tool_category(self, knowledge_base_search_tool):
+        """Test tool category is SEARCH."""
+        from sdk.nexent.core.utils.tools_common_message import ToolCategory
+        assert knowledge_base_search_tool.category == ToolCategory.SEARCH.value
+
+    def test_tool_sign(self, knowledge_base_search_tool):
+        """Test tool_sign is KNOWLEDGE_BASE."""
+        from sdk.nexent.core.utils.tools_common_message import ToolSign
+        assert knowledge_base_search_tool.tool_sign == ToolSign.KNOWLEDGE_BASE.value
+
+    def test_output_type(self, knowledge_base_search_tool):
+        """Test output_type is string."""
+        assert knowledge_base_search_tool.output_type == "string"
+
+    def test_inputs_contain_required_fields(self):
+        """Test that inputs dict contains required fields."""
+        assert "query" in KnowledgeBaseSearchTool.inputs
+        assert "index_names" in KnowledgeBaseSearchTool.inputs
+        assert KnowledgeBaseSearchTool.inputs["query"]["type"] == "string"
+        assert KnowledgeBaseSearchTool.inputs["index_names"]["type"] == "array"
+
+    def test_running_prompts(self, knowledge_base_search_tool):
+        """Test running prompts for both languages."""
+        assert knowledge_base_search_tool.running_prompt_zh == "知识库检索中..."
+        assert knowledge_base_search_tool.running_prompt_en == "Searching the knowledge base..."
+
+
+class TestEdgeCases:
+    """Tests for edge cases and boundary conditions."""
+
+    def test_forward_with_score_details(self, knowledge_base_search_tool, mock_vdb_core):
+        """Test forward includes score_details in results via SEARCH_CONTENT."""
+        mock_results = [
+            {
+                "document": {
+                    "title": "Doc",
+                    "content": "Content",
+                    "filename": "doc.txt",
+                    "path_or_url": "/path/doc.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file",
+                    "score_details": {"bm25": 0.5, "knn": 0.4}
+                },
+                "score": 0.9,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.vdb_core = mock_vdb_core
+
+        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+
+        # Check the SEARCH_CONTENT message which contains full results via to_dict()
+        search_content_call = [
+            call for call in knowledge_base_search_tool.observer.add_message.call_args_list
+            if call[0][1] == ProcessType.SEARCH_CONTENT
+        ][0]
+        full_results = json.loads(search_content_call[0][2])
+
+        assert "score_details" in full_results[0]
+        assert full_results[0]["score_details"]["bm25"] == 0.5
+
+    def test_forward_with_empty_content(self, knowledge_base_search_tool, mock_vdb_core):
+        """Test forward handles empty content gracefully."""
+        mock_results = [
+            {
+                "document": {
+                    "title": "Doc with no content",
+                    "content": "",
+                    "filename": "empty.txt",
+                    "path_or_url": "/path/empty.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file"
+                },
+                "score": 0.5,
+                "index": "kb1"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.vdb_core = mock_vdb_core
+
+        result = knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+        search_results = json.loads(result)
+
+        assert search_results[0]["text"] == ""
+
+    def test_forward_multiple_indices(self, knowledge_base_search_tool, mock_vdb_core):
+        """Test forward searches across multiple indices."""
+        mock_results = [
+            {
+                "document": {
+                    "title": "Doc from index1",
+                    "content": "Content",
+                    "filename": "doc1.txt",
+                    "path_or_url": "/path/doc1.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file",
+                },
+                "score": 0.9,
+                "index": "index1"
+            },
+            {
+                "document": {
+                    "title": "Doc from index2",
+                    "content": "Content",
+                    "filename": "doc2.txt",
+                    "path_or_url": "/path/doc2.txt",
+                    "create_time": "2024-01-01T12:00:00Z",
+                    "source_type": "file",
+                },
+                "score": 0.8,
+                "index": "index2"
+            }
+        ]
+        mock_vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.vdb_core = mock_vdb_core
+
+        result = knowledge_base_search_tool.forward("test query", index_names=["index1", "index2"])
+        search_results = json.loads(result)
+
+        assert len(search_results) == 2
+
+    def test_rerank_trims_to_top_k(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test that rerank results are trimmed to original top_k."""
+        mock_results = create_mock_search_result(10)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        mock_rerank_model = MagicMock()
+        mock_rerank_model.rerank.return_value = [
+            {"index": i, "relevance_score": 0.9 - i * 0.05}
+            for i in range(10)
+        ]
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            top_k=3,
+            rerank=True,
+            rerank_model=mock_rerank_model,
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+
+        result = tool.forward("test query")
+        search_results = json.loads(result)
+
+        assert len(search_results) == 3

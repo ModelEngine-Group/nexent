@@ -86,12 +86,18 @@ class KnowledgeBaseSearchTool(Tool):
             description="The rerank model to use", default=None, exclude=True),
         vdb_core: VectorDatabaseCore = Field(
             description="Vector database client", default=None, exclude=True),
+        display_name_to_index_map: dict = Field(
+            description="Mapping from display_name (knowledge_name) to index_name",
+            default_factory=dict, exclude=True),
     ):
         """Initialize the KBSearchTool.
 
         Args:
             top_k (int, optional): Number of results to return. Defaults to 3.
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
+            display_name_to_index_map (dict, optional): Mapping from display_name to index_name.
+                When LLM passes display_name as index_names parameter, it will be converted
+                to the actual index_name for ES queries.
 
         Raises:
             ValueError: If language is not supported
@@ -106,15 +112,48 @@ class KnowledgeBaseSearchTool(Tool):
         self.rerank = rerank
         self.rerank_model_name = rerank_model_name
         self.rerank_model = rerank_model
+        self.display_name_to_index_map = display_name_to_index_map
 
         self.record_ops = 1  # To record serial number
         self.running_prompt_zh = "知识库检索中..."
         self.running_prompt_en = "Searching the knowledge base..."
 
 
+    def _convert_to_index_names(self, names: List[str]) -> List[str]:
+        """Convert display names (knowledge_name) to index names if necessary.
+
+        When LLM passes display_name as the index_names parameter,
+        this method converts it to the actual index_name for ES queries.
+
+        Args:
+            names: List of names that could be either display_name or index_name
+
+        Returns:
+            List of actual index_names for ES queries
+        """
+        # Handle FieldInfo case (smolagents doesn't expand Field defaults)
+        display_map = self.display_name_to_index_map
+        if isinstance(display_map, FieldInfo):
+            display_map = display_map.default
+        if not display_map:
+            return names
+
+        converted_names = []
+        for name in names:
+            # If the name is in the map as a display_name, convert it to index_name
+            if name in display_map:
+                converted_names.append(display_map[name])
+            else:
+                # Otherwise, assume it's already an index_name
+                converted_names.append(name)
+        return converted_names
+
     def forward(self, query: str, index_names: Optional[List[str]] = None) -> str:
         # Parse index_names from string (always required)
         search_index_names = index_names if index_names is not None else self.index_names
+
+        # Convert display names to index names if necessary
+        search_index_names = self._convert_to_index_names(search_index_names)
 
         # Use the instance search_mode
         search_mode = self.search_mode
