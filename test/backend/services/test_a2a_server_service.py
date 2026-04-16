@@ -387,6 +387,26 @@ class TestValidateEndpoint:
             with pytest.raises(AgentNotEnabledError):
                 service._validate_endpoint("test-123")
 
+    def test_raises_error_when_is_enabled_none(self):
+        """Test raises error when is_enabled is None (missing key)."""
+        from backend.services.a2a_server_service import (
+            A2AServerService,
+            AgentNotEnabledError
+        )
+
+        service = A2AServerService()
+
+        mock_agent = {
+            "endpoint_id": "test-123"
+            # is_enabled key is missing
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.get_server_agent_by_endpoint.return_value = mock_agent
+
+            with pytest.raises(AgentNotEnabledError):
+                service._validate_endpoint("test-123")
+
 
 class TestResolveTaskId:
     """Test class for _resolve_task_id method."""
@@ -533,6 +553,101 @@ class TestResolveTaskId:
                     tenant_id="tenant-1",
                     server_agent={"agent_id": 1}
                 )
+
+    def test_terminated_states_all_raised(self):
+        """Test all terminal states raise UnsupportedOperationError."""
+        from backend.services.a2a_server_service import (
+            A2AServerService,
+            UnsupportedOperationError
+        )
+
+        service = A2AServerService()
+
+        for terminal_state in ["TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"]:
+            parsed_message = {
+                "message": {
+                    "taskId": f"task-{terminal_state}"
+                }
+            }
+
+            mock_task = {
+                "id": f"task-{terminal_state}",
+                "task_state": terminal_state
+            }
+
+            with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+                mock_db.get_task.return_value = mock_task
+
+                with pytest.raises(UnsupportedOperationError) as exc_info:
+                    service._resolve_task_id(
+                        parsed_message,
+                        endpoint_id="test-endpoint",
+                        user_id="user-1",
+                        tenant_id="tenant-1",
+                        server_agent={"agent_id": 1}
+                    )
+                assert "already terminated" in str(exc_info.value)
+
+    def test_create_task_passes_raw_request(self):
+        """Test _resolve_task_id passes raw_request to create_task for complex requests."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        parsed_message = {
+            "message": {
+                "contextId": "ctx-123"
+            },
+            "raw_request": {
+                "custom_field": "value"
+            }
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.create_task.return_value = {}
+
+            task_id, context_id, is_complex = service._resolve_task_id(
+                parsed_message,
+                endpoint_id="test-endpoint",
+                user_id="user-1",
+                tenant_id="tenant-1",
+                server_agent={"agent_id": 1}
+            )
+
+            mock_db.create_task.assert_called_once()
+            call_kwargs = mock_db.create_task.call_args[1]
+            assert call_kwargs["raw_request"] == {"custom_field": "value"}
+            assert call_kwargs["context_id"] == "ctx-123"
+
+    def test_complex_request_generates_new_task_id(self):
+        """Test complex request without taskId generates new task and creates it."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        parsed_message = {
+            "message": {
+                "contextId": "ctx-456"
+            }
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.create_task.return_value = {}
+
+            task_id, context_id, is_complex = service._resolve_task_id(
+                parsed_message,
+                endpoint_id="test-endpoint",
+                user_id="user-1",
+                tenant_id="tenant-1",
+                server_agent={"agent_id": 1}
+            )
+
+            assert task_id.startswith("task_")
+            assert is_complex is True
+            mock_db.create_task.assert_called_once()
+            call_kwargs = mock_db.create_task.call_args[1]
+            assert call_kwargs["task_id"] == task_id
+            assert call_kwargs["endpoint_id"] == "test-endpoint"
 
 
 class TestGetAgentCard:
@@ -2671,6 +2786,29 @@ class TestStoreMethods:
             call_kwargs = mock_db.create_message.call_args[1]
             assert call_kwargs["task_id"] is None
 
+    def test_store_user_message_empty_parts_fallback_to_text(self):
+        """Test _store_user_message falls back to text when parts is empty list."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        message_obj = {
+            "parts": [],  # Empty parts
+            "text": "Fallback text"
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            service._store_user_message(
+                task_id="task-123",
+                message_obj=message_obj,
+                endpoint_id="endpoint-1"
+            )
+
+            call_kwargs = mock_db.create_message.call_args[1]
+            # Should fall back to text when parts is empty
+            assert call_kwargs["parts"] == [{"type": "text", "text": "Fallback text"}]
+
+
     def test_store_agent_response_with_text(self):
         """Test _store_agent_response stores text correctly."""
         from backend.services.a2a_server_service import A2AServerService
@@ -2713,10 +2851,14 @@ class TestStoreMethods:
             # Should still create message but with empty parts
             call_args = mock_db.create_message.call_args
             assert call_args[1]["parts"] == []
-
-            # Should not call update_task_state because task_id might be None or handled differently
-            # In actual code, update_task_state is only called if task_id is truthy (line 534)
-            # Let's verify the behavior
+            assert call_args[1]["task_id"] == "task-123"
+            assert call_args[1]["role"] == "ROLE_AGENT"
+            # Should call update_task_state since task_id is truthy
+            mock_db.update_task_state.assert_called_once_with(
+                task_id="task-123",
+                task_state="TASK_STATE_COMPLETED",
+                result_data={"message": ""}
+            )
 
     def test_store_agent_response_without_task_id(self):
         """Test _store_agent_response when task_id is None (simple request)."""
