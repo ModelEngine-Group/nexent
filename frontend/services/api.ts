@@ -20,6 +20,13 @@ export const API_ENDPOINTS = {
     tokens: `${API_BASE_URL}/user/tokens`,
     deleteToken: (tokenId: number) => `${API_BASE_URL}/user/tokens/${tokenId}`,
   },
+  oauth: {
+    providers: `${API_BASE_URL}/user/oauth/providers`,
+    authorize: `${API_BASE_URL}/user/oauth/authorize`,
+    link: `${API_BASE_URL}/user/oauth/link`,
+    accounts: `${API_BASE_URL}/user/oauth/accounts`,
+    unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
+  },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
     create: `${API_BASE_URL}/conversation/create`,

@@ -42,7 +42,9 @@ MOCK_JWT_SECRET_KEY = "nexent-mock-jwt-secret"
 TIMESTAMP_VALIDITY_WINDOW = 5 * 60
 
 
-def calculate_hmac_signature(secret_key: str, access_key: str, timestamp: str, body: str) -> str:
+def calculate_hmac_signature(
+    secret_key: str, access_key: str, timestamp: str, body: str
+) -> str:
     """
     Calculate HMAC-SHA256 signature for AK/SK authentication.
 
@@ -84,7 +86,9 @@ def get_aksk_config(tenant_id: str) -> Tuple[str, str]:
     raise UnauthorizedError("AK/SK authentication is not configured")
 
 
-def verify_aksk_signature(access_key: str, timestamp: str, signature: str, body: str, tenant_id: str = None) -> bool:
+def verify_aksk_signature(
+    access_key: str, timestamp: str, signature: str, body: str, tenant_id: str = None
+) -> bool:
     """Verify AK/SK signature; returns False instead of raising on mismatch."""
     tenant = tenant_id or DEFAULT_TENANT_ID
     try:
@@ -99,13 +103,17 @@ def verify_aksk_signature(access_key: str, timestamp: str, signature: str, body:
     return hmac.compare_digest(expected_sig, signature)
 
 
-def validate_aksk_authentication(headers: Dict[str, str], body: str, tenant_id: str = None) -> bool:
+def validate_aksk_authentication(
+    headers: Dict[str, str], body: str, tenant_id: str = None
+) -> bool:
     """
     Validate AK/SK authentication.
 
     Returns True when valid, otherwise raises domain exceptions.
     """
-    from consts.exceptions import SignatureValidationError  # imported lazily for test-time stubbing
+    from consts.exceptions import (
+        SignatureValidationError,
+    )  # imported lazily for test-time stubbing
 
     try:
         access_key, ts, sig = extract_aksk_headers(headers)
@@ -129,6 +137,7 @@ def validate_aksk_authentication(headers: Dict[str, str], body: str, tenant_id: 
         logger.exception("Unexpected error during AK/SK authentication")
         raise UnauthorizedError("Authentication failed") from exc
 
+
 # ---------------------------------------------------------------------------
 # Bearer Token (API Key) authentication
 # ---------------------------------------------------------------------------
@@ -151,7 +160,11 @@ def validate_bearer_token(authorization: Optional[str]) -> Tuple[bool, Optional[
         return False, None
 
     # Extract token from "Bearer <token>" format
-    token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+    token = (
+        authorization.replace("Bearer ", "")
+        if authorization.startswith("Bearer ")
+        else authorization
+    )
 
     if not token:
         logger.warning("Empty bearer token")
@@ -161,7 +174,9 @@ def validate_bearer_token(authorization: Optional[str]) -> Tuple[bool, Optional[
     try:
         token_info = get_token_by_access_key(token)
         if token_info and token_info.get("delete_flag") != "Y":
-            logger.debug(f"Token validated successfully for user {token_info.get('user_id')}")
+            logger.debug(
+                f"Token validated successfully for user {token_info.get('user_id')}"
+            )
             return True, token_info
         else:
             logger.warning(f"Invalid or inactive token: {token[:20]}...")
@@ -202,12 +217,14 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
         tenant_id = user_tenant_record["tenant_id"]
     else:
         tenant_id = DEFAULT_TENANT_ID
-        logger.warning(f"No tenant relationship found for user {user_id}, using default tenant")
+        logger.warning(
+            f"No tenant relationship found for user {user_id}, using default tenant"
+        )
 
     return {
         "user_id": user_id,
         "tenant_id": tenant_id,
-        "token_id": token_info.get("token_id")
+        "token_id": token_info.get("token_id"),
     }
 
 
@@ -245,8 +262,9 @@ def get_jwt_expiry_seconds(token: str) -> int:
             # 10 years in seconds
             return 10 * 365 * 24 * 60 * 60
         # Ensure token is pure JWT, remove possible Bearer prefix
-        jwt_token = token.replace(
-            "Bearer ", "") if token.startswith("Bearer ") else token
+        jwt_token = (
+            token.replace("Bearer ", "") if token.startswith("Bearer ") else token
+        )
 
         # If debug expiration time is set, return directly for quick debugging
         if DEBUG_JWT_EXPIRE_SECONDS > 0:
@@ -300,13 +318,18 @@ def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
         UnauthorizedError: If token is invalid, expired, or signature verification fails
     """
     if not SUPABASE_JWT_SECRET:
-        logging.error("SUPABASE_JWT_SECRET (or JWT_SECRET) is not configured; cannot verify JWT")
+        logging.error(
+            "SUPABASE_JWT_SECRET (or JWT_SECRET) is not configured; cannot verify JWT"
+        )
         raise UnauthorizedError("JWT verification is not configured")
 
     try:
         # Format authorization header
-        token = authorization.replace("Bearer ", "") if authorization.startswith(
-            "Bearer ") else authorization
+        token = (
+            authorization.replace("Bearer ", "")
+            if authorization.startswith("Bearer ")
+            else authorization
+        )
 
         # Decode and verify JWT (signature + expiration)
         # verify_aud=False: allow tokens with aud claim (e.g. test JWT, Supabase) without strict audience check
@@ -349,12 +372,13 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     """
     # In speed mode, allow unauthenticated access with default user for demo/dev
     if IS_SPEED_MODE:
-        logging.debug(
-            "Speed mode detected - returning default user ID and tenant ID")
+        logging.debug("Speed mode detected - returning default user ID and tenant ID")
         return DEFAULT_USER_ID, DEFAULT_TENANT_ID
 
     # In normal mode, missing auth header means unauthorized - return 401, not default user
-    if authorization is None or (isinstance(authorization, str) and not authorization.strip()):
+    if authorization is None or (
+        isinstance(authorization, str) and not authorization.strip()
+    ):
         raise UnauthorizedError("No authorization header provided")
 
     try:
@@ -363,13 +387,14 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
             raise UnauthorizedError("Invalid or expired authentication token")
 
         user_tenant_record = get_user_tenant_by_user_id(user_id)
-        if user_tenant_record and user_tenant_record.get('tenant_id'):
-            tenant_id = user_tenant_record['tenant_id']
+        if user_tenant_record and user_tenant_record.get("tenant_id"):
+            tenant_id = user_tenant_record["tenant_id"]
             logging.debug(f"Found tenant ID for user {user_id}: {tenant_id}")
         else:
             tenant_id = DEFAULT_TENANT_ID
             logging.warning(
-                f"No tenant relationship found for user {user_id}, using default tenant")
+                f"No tenant relationship found for user {user_id}, using default tenant"
+            )
 
         return user_id, tenant_id
 
@@ -393,8 +418,8 @@ def get_user_language(request: Request = None) -> str:
     # Read language setting from cookie
     if request:
         try:
-            if hasattr(request, 'cookies') and request.cookies:
-                cookie_locale = request.cookies.get('NEXT_LOCALE')
+            if hasattr(request, "cookies") and request.cookies:
+                cookie_locale = request.cookies.get("NEXT_LOCALE")
                 if cookie_locale and cookie_locale in [LANGUAGE["ZH"], LANGUAGE["EN"]]:
                     return cookie_locale
         except (AttributeError, TypeError) as e:
@@ -406,6 +431,7 @@ def get_user_language(request: Request = None) -> str:
 # ---------------------------------------------------------------------------
 # Simple JWT helpers for tests and tooling
 # ---------------------------------------------------------------------------
+
 
 def generate_test_jwt(user_id: str, expires_in: int = 3600) -> str:
     """
@@ -423,7 +449,23 @@ def generate_test_jwt(user_id: str, expires_in: int = 3600) -> str:
     return jwt.encode(payload, MOCK_JWT_SECRET_KEY, algorithm="HS256")
 
 
-def get_current_user_info(authorization: Optional[str] = None, request: Request = None) -> tuple[str, str, str]:
+def generate_session_jwt(user_id: str, expires_in: int = 3600) -> str:
+    """Generate a signed JWT compatible with the existing auth verification flow."""
+    now = int(time.time())
+    payload = {
+        "sub": user_id,
+        "role": "authenticated",
+        "aud": "authenticated",
+        "iat": now,
+        "exp": now + expires_in,
+        "iss": SUPABASE_URL,
+    }
+    return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
+
+
+def get_current_user_info(
+    authorization: Optional[str] = None, request: Request = None
+) -> tuple[str, str, str]:
     """
     Get current user information, including user ID, tenant ID, and language preference
 

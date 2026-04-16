@@ -8,8 +8,9 @@ load_dotenv(override=True)
 
 # TODO: Analyze every variable if this is used
 # Test voice file path
-TEST_VOICE_PATH = os.path.join(os.path.dirname(
-    os.path.dirname(__file__)), 'assets', 'test.wav')
+TEST_VOICE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "assets", "test.wav"
+)
 
 
 # Vector database providers
@@ -33,7 +34,7 @@ CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
 # Upload Configuration
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 MAX_CONCURRENT_UPLOADS = 5
-UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
+UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
 ROOT_DIR = os.getenv("ROOT_DIR")
 
 # Container-internal skills storage path
@@ -51,36 +52,42 @@ LIBREOFFICE_PROFILE_DIR = os.getenv(
 )
 # Supported Office file MIME types
 OFFICE_MIME_TYPES = [
-    'application/msword',  # .doc
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  # .docx
-    'application/vnd.ms-excel',  # .xls
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
-    'application/vnd.ms-powerpoint',  # .ppt
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation'  # .pptx
+    "application/msword",  # .doc
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+    "application/vnd.ms-excel",  # .xls
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+    "application/vnd.ms-powerpoint",  # .ppt
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",  # .pptx
 ]
 
 
 # Supabase Configuration
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SERVICE_ROLE_KEY = os.getenv("SERVICE_ROLE_KEY", SUPABASE_KEY)
 # JWT secret for verifying Supabase-signed access tokens.
 # GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
-SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET") or os.getenv("JWT_SECRET", "")
+
+
+# OAuth Configuration
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
+OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 
 
 # ===== To be migrated to frontend configuration =====
 # Email Configuration
-IMAP_SERVER = os.getenv('IMAP_SERVER')
-IMAP_PORT = os.getenv('IMAP_PORT')
-SMTP_SERVER = os.getenv('SMTP_SERVER')
-SMTP_PORT = os.getenv('SMTP_PORT')
-MAIL_USERNAME = os.getenv('MAIL_USERNAME')
-MAIL_PASSWORD = os.getenv('MAIL_PASSWORD')
+IMAP_SERVER = os.getenv("IMAP_SERVER")
+IMAP_PORT = os.getenv("IMAP_PORT")
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = os.getenv("SMTP_PORT")
+MAIL_USERNAME = os.getenv("MAIL_USERNAME")
+MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
 
 
 # EXASearch Configuration
-EXA_SEARCH_API_KEY = os.getenv('EXA_SEARCH_API_KEY')
+EXA_SEARCH_API_KEY = os.getenv("EXA_SEARCH_API_KEY")
 
 
 # Image Filter Configuration
@@ -130,12 +137,11 @@ REDIS_URL = os.getenv("REDIS_URL")
 REDIS_BACKEND_URL = os.getenv("REDIS_BACKEND_URL")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 FLOWER_PORT = int(os.getenv("FLOWER_PORT", "5555"))
-DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(
-    os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "30"))
+DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "30"))
 DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(
-    os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200"))
-FORWARD_REDIS_RETRY_DELAY_S = int(
-    os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
+    os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200")
+)
+FORWARD_REDIS_RETRY_DELAY_S = int(os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
 FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
@@ -144,34 +150,30 @@ RAY_ACTOR_NUM_CPUS = int(os.getenv("RAY_ACTOR_NUM_CPUS", "2"))
 RAY_DASHBOARD_PORT = int(os.getenv("RAY_DASHBOARD_PORT", "8265"))
 RAY_DASHBOARD_HOST = os.getenv("RAY_DASHBOARD_HOST", "0.0.0.0")
 RAY_NUM_CPUS = os.getenv("RAY_NUM_CPUS")
-RAY_OBJECT_STORE_MEMORY_GB = float(
-    os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
+RAY_OBJECT_STORE_MEMORY_GB = float(os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
 RAY_TEMP_DIR = os.getenv("RAY_TEMP_DIR", "/tmp/ray")
 RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
 # Disable plasma preallocation to reduce idle memory usage
 # When set to false, Ray will allocate object store memory on-demand instead of preallocating
-RAY_preallocate_plasma = os.getenv(
-    "RAY_preallocate_plasma", "false").lower() == "true"
+RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
 
 
 # Service Control Flags
-DISABLE_RAY_DASHBOARD = os.getenv(
-    "DISABLE_RAY_DASHBOARD", "false").lower() == "true"
-DISABLE_CELERY_FLOWER = os.getenv(
-    "DISABLE_CELERY_FLOWER", "false").lower() == "true"
+DISABLE_RAY_DASHBOARD = os.getenv("DISABLE_RAY_DASHBOARD", "false").lower() == "true"
+DISABLE_CELERY_FLOWER = os.getenv("DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
 NEXENT_MCP_DOCKER_IMAGE = os.getenv(
-    "NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
-ENABLE_UPLOAD_IMAGE = os.getenv(
-    "ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
+    "NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest"
+)
+ENABLE_UPLOAD_IMAGE = os.getenv("ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
 
 
 # Celery Configuration
 CELERY_WORKER_PREFETCH_MULTIPLIER = int(
-    os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", "1"))
+    os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", "1")
+)
 CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "3600"))
-ELASTICSEARCH_REQUEST_TIMEOUT = int(
-    os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "30"))
+ELASTICSEARCH_REQUEST_TIMEOUT = int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "30"))
 
 
 # Worker Configuration
@@ -218,11 +220,10 @@ MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 INVITE_CODE = os.getenv("INVITE_CODE")
 
 # Debug JWT expiration time (seconds), not set or 0 means not effective
-DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
+DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv("DEBUG_JWT_EXPIRE_SECONDS", "0") or 0)
 
 # User info query source control: "supabase" or "pg" (default: "supabase" for backward compatibility)
-USER_INFO_QUERY_SOURCE = os.getenv(
-    'USER_INFO_QUERY_SOURCE', 'supabase').lower()
+USER_INFO_QUERY_SOURCE = os.getenv("USER_INFO_QUERY_SOURCE", "supabase").lower()
 
 # Memory Search Status Messages (for i18n placeholders)
 MEMORY_SEARCH_START_MSG = "<MEM_START>"
@@ -237,17 +238,10 @@ TOOL_TYPE_MAPPING = {
 }
 
 # Default Language Configuration
-LANGUAGE = {
-    "ZH": "zh",
-    "EN": "en"
-}
+LANGUAGE = {"ZH": "zh", "EN": "en"}
 
 # Message Role Constants
-MESSAGE_ROLE = {
-    "USER": "user",
-    "ASSISTANT": "assistant",
-    "SYSTEM": "system"
-}
+MESSAGE_ROLE = {"USER": "user", "ASSISTANT": "assistant", "SYSTEM": "system"}
 
 # Knowledge summary max token limits
 KNOWLEDGE_SUMMARY_MAX_TOKENS_ZH = 300
@@ -260,17 +254,13 @@ DOCKER_INTERNAL_HOST = "host.docker.internal"
 
 
 # Mock User Management Configuration (for speed mode)
-MOCK_USER = {
-    "id": DEFAULT_USER_ID,
-    "email": "mock@example.com",
-    "role": "admin"
-}
+MOCK_USER = {"id": DEFAULT_USER_ID, "email": "mock@example.com", "role": "admin"}
 
 MOCK_SESSION = {
     "access_token": "mock_access_token",
     "refresh_token": "mock_refresh_token",
     "expires_at": None,  # Will be set dynamically
-    "expires_in_seconds": 315360000  # 10 years
+    "expires_in_seconds": 315360000,  # 10 years
 }
 
 MODEL_CONFIG_MAPPING = {
@@ -280,7 +270,7 @@ MODEL_CONFIG_MAPPING = {
     "rerank": "RERANK_ID",
     "vlm": "VLM_ID",
     "stt": "STT_ID",
-    "tts": "TTS_ID"
+    "tts": "TTS_ID",
 }
 
 APP_NAME = "APP_NAME"
@@ -313,16 +303,17 @@ THINK_END_PATTERN = "</think>"
 # Telemetry and Monitoring Configuration
 ENABLE_TELEMETRY = os.getenv("ENABLE_TELEMETRY", "false").lower() == "true"
 SERVICE_NAME = os.getenv("SERVICE_NAME", "nexent-backend")
-JAEGER_ENDPOINT = os.getenv(
-    "JAEGER_ENDPOINT", "http://localhost:14268/api/traces")
+JAEGER_ENDPOINT = os.getenv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces")
 PROMETHEUS_PORT = int(os.getenv("PROMETHEUS_PORT", "8000"))
 TELEMETRY_SAMPLE_RATE = float(os.getenv("TELEMETRY_SAMPLE_RATE", "1.0"))
 
 # Performance monitoring thresholds
 LLM_SLOW_REQUEST_THRESHOLD_SECONDS = float(
-    os.getenv("LLM_SLOW_REQUEST_THRESHOLD_SECONDS", "5.0"))
+    os.getenv("LLM_SLOW_REQUEST_THRESHOLD_SECONDS", "5.0")
+)
 LLM_SLOW_TOKEN_RATE_THRESHOLD = float(
-    os.getenv("LLM_SLOW_TOKEN_RATE_THRESHOLD", "10.0"))  # tokens per second
+    os.getenv("LLM_SLOW_TOKEN_RATE_THRESHOLD", "10.0")
+)  # tokens per second
 
 
 DEFAULT_ZH_TITLE = "新对话"
@@ -334,7 +325,9 @@ MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 
 # Container Platform Configuration
-IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
+IS_DEPLOYED_BY_KUBERNETES = (
+    os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
+)
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
 
 
