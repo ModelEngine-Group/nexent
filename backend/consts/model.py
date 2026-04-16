@@ -57,13 +57,6 @@ class UserDeleteRequest(BaseModel):
     new_owner_id: Optional[str] = None
 
 
-class OAuthProviderInfo(BaseModel):
-    name: str
-    display_name: str
-    icon: str
-    enabled: bool
-
-
 class OAuthProviderDefinition(BaseModel):
     name: str
     display_name: str
@@ -108,17 +101,6 @@ class OAuthProviderDefinition(BaseModel):
     client_id_env: str
     client_secret_env: str
     enabled_check: Optional[str] = None
-
-
-class OAuthAccountInfo(BaseModel):
-    provider: str
-    provider_username: Optional[str] = None
-    provider_email: Optional[str] = None
-    linked_at: Optional[str] = None
-
-
-class OAuthUnlinkRequest(BaseModel):
-    provider: str
 
 
 # Response models for model management
