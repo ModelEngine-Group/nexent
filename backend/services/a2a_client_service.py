@@ -242,8 +242,13 @@ class A2AClientService:
                 return None
 
             # Fetch Agent Card
-            async with A2AHttpClient() as http_client:
-                card = await http_client.get_json(agent_card_url)
+            try:
+                async with A2AHttpClient() as http_client:
+                    card = await http_client.get_json(agent_card_url)
+            except aiohttp.ClientError:
+                # Network errors retrieving agent card should result in None
+                logger.warning(f"Failed to retrieve agent card from {agent_card_url}")
+                return None
 
             # Extract endpoint URL and supported interfaces
             agent_url = self._extract_agent_url(card)
@@ -267,7 +272,11 @@ class A2AClientService:
             return result
 
         finally:
-            await client.close()
+            try:
+                await client.close()
+            except Exception:
+                # Ignore errors during close
+                pass
 
     def _extract_agent_url(self, card: Dict[str, Any]) -> str:
         """Extract the A2A endpoint URL from an Agent Card.

@@ -123,13 +123,15 @@ class ExternalA2AAgentProxy:
     def _build_message_payload(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, Any]:
         """Build A2A message payload.
 
         Args:
             query: The user query.
             context: Optional context metadata.
+            history: Optional conversation history.
 
         Returns:
             A2A message payload dict.
@@ -139,12 +141,15 @@ class ExternalA2AAgentProxy:
             "parts": [{"text": query}]
         }
 
-        payload = {
+        payload: Dict[str, Any] = {
             "message": message
         }
 
         if context:
             payload["metadata"] = context
+
+        if history:
+            payload["history"] = history
 
         return payload
 
@@ -202,7 +207,7 @@ class ExternalA2AAgentProxy:
 
         if protocol_type == PROTOCOL_JSONRPC:
             # JSON-RPC 2.0 format
-            payload = self._build_message_payload(query, context)
+            payload = self._build_message_payload(query, context, history)
             request_body = {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -211,7 +216,7 @@ class ExternalA2AAgentProxy:
             }
         else:
             # HTTP+JSON (REST) format - direct message payload
-            request_body = self._build_message_payload(query, context)
+            request_body = self._build_message_payload(query, context, history)
 
         headers = self._build_headers()
 
@@ -259,18 +264,44 @@ class ExternalA2AAgentProxy:
             Extracted text response from the external agent.
         """
         import asyncio
+        import threading
 
         async def execute():
             async with self as proxy:
                 response = await proxy.call(query, history, context)
                 return proxy.extract_text_from_response(response)
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        def run_in_new_loop():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(execute())
+            finally:
+                loop.close()
+
         try:
-            return loop.run_until_complete(execute())
-        finally:
-            loop.close()
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop, create and use new one directly
+            return run_in_new_loop()
+        else:
+            # Already in async context, run in a separate thread
+            result_container = [None]
+            exception_container = [None]
+
+            def thread_target():
+                try:
+                    result_container[0] = run_in_new_loop()
+                except Exception as e:
+                    exception_container[0] = e
+
+            thread = threading.Thread(target=thread_target)
+            thread.start()
+            thread.join()
+
+            if exception_container[0]:
+                raise exception_container[0]
+            return result_container[0]
 
     TERMINAL_STATE_KEYWORDS = frozenset(("COMPLETED", "FAILED", "CANCELED"))
 
@@ -282,7 +313,7 @@ class ExternalA2AAgentProxy:
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Build request body for streaming call based on protocol type."""
-        payload = self._build_message_payload(query, context)
+        payload = self._build_message_payload(query, context, history)
         if protocol_type == PROTOCOL_JSONRPC:
             return {
                 "jsonrpc": "2.0",
@@ -455,9 +486,9 @@ class ExternalA2AAgentProxy:
             return text
         return None
 
-    def _handle_completed_state(self, status: Dict[str, Any], accumulated: List[str]) -> None:
-        """Handle TASK_STATE_COMPLETED: extract final message and stop."""
-        self._extract_text_from_status_message(status, accumulated)
+    def _handle_completed_state(self, status: Dict[str, Any], accumulated: List[str]) -> Optional[str]:
+        """Handle TASK_STATE_COMPLETED: extract final message and return it."""
+        return self._extract_text_from_status_message(status, accumulated)
 
     def _handle_error_state(
         self,
@@ -499,7 +530,9 @@ class ExternalA2AAgentProxy:
                     status = event["statusUpdate"].get("status", {})
                     state = status.get("state", "")
                     if state == "TASK_STATE_COMPLETED":
-                        self._handle_completed_state(status, accumulated)
+                        final_text = self._handle_completed_state(status, accumulated)
+                        if final_text:
+                            yield final_text
                         break
                     if state in ("TASK_STATE_FAILED", "TASK_STATE_CANCELED"):
                         error_text = self._handle_error_state(status, accumulated)

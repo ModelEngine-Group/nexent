@@ -683,3 +683,230 @@ class TestBuildHistory:
 
         result = adapter._build_history(a2a_message)
         assert result[0]["content"] == "string part"
+
+
+class TestContentToArtifactParts:
+    """Test class for _content_to_artifact_parts method."""
+
+    def test_returns_parts_when_provided(self):
+        """Test returns provided parts directly."""
+        adapter = A2AAgentAdapter()
+
+        parts = [{"type": "text", "text": "Custom part"}]
+        result = adapter._content_to_artifact_parts(None, parts)
+        assert result == parts
+
+    def test_converts_text_content_dict(self):
+        """Test converts text type content dict to parts."""
+        adapter = A2AAgentAdapter()
+
+        content = {"type": "text", "text": "Hello from content"}
+        result = adapter._content_to_artifact_parts(content, None)
+        assert result == [{"type": "text", "text": "Hello from content"}]
+
+    def test_converts_non_text_content_to_string(self):
+        """Test converts non-dict or non-text content to string."""
+        adapter = A2AAgentAdapter()
+
+        result = adapter._content_to_artifact_parts("Plain string", None)
+        assert result == [{"type": "text", "text": "Plain string"}]
+
+    def test_converts_non_text_dict_to_string(self):
+        """Test converts dict content without text type to string."""
+        adapter = A2AAgentAdapter()
+
+        content = {"type": "image", "data": "base64..."}
+        result = adapter._content_to_artifact_parts(content, None)
+        assert result == [{"type": "text", "text": str(content)}]
+
+
+class TestMessageToPartsFormat:
+    """Test class for _message_to_parts_format method."""
+
+    def test_returns_parts_format_directly(self):
+        """Test returns message with parts as-is."""
+        adapter = A2AAgentAdapter()
+
+        message = {
+            "role": "ROLE_AGENT",
+            "parts": [{"type": "text", "text": "Already formatted"}]
+        }
+        result = adapter._message_to_parts_format(message)
+        assert result == message
+
+    def test_converts_message_with_text_content(self):
+        """Test converts message with text content to parts format."""
+        adapter = A2AAgentAdapter()
+
+        message = {
+            "role": "user",
+            "content": {"type": "text", "text": "User message content"}
+        }
+        result = adapter._message_to_parts_format(message)
+        assert result["role"] == "user"
+        assert result["parts"][0]["type"] == "text"
+        assert result["parts"][0]["text"] == "User message content"
+
+    def test_converts_message_with_non_text_content(self):
+        """Test converts message with non-text content to string."""
+        adapter = A2AAgentAdapter()
+
+        message = {
+            "role": "agent",
+            "content": {"type": "image", "data": "base64data"}
+        }
+        result = adapter._message_to_parts_format(message)
+        assert result["role"] == "agent"
+        # For non-text content, it converts to str(message)
+        assert result["parts"][0]["text"] == str(message)
+
+    def test_converts_dict_message_without_content(self):
+        """Test converts dict message without content field."""
+        adapter = A2AAgentAdapter()
+
+        message = {"role": "assistant", "some_field": "value"}
+        result = adapter._message_to_parts_format(message)
+        assert result["role"] == "assistant"
+        assert "some_field" in result["parts"][0]["text"] or str(message) in result["parts"][0]["text"]
+
+    def test_converts_non_dict_message(self):
+        """Test converts non-dict message to parts format."""
+        adapter = A2AAgentAdapter()
+
+        result = adapter._message_to_parts_format("String message")
+        assert result["role"] == "agent"
+        assert result["parts"][0]["text"] == "String message"
+
+    def test_uses_default_role_when_missing(self):
+        """Test uses default 'agent' role when not provided."""
+        adapter = A2AAgentAdapter()
+
+        message = {"content": {"type": "text", "text": "Test"}}
+        result = adapter._message_to_parts_format(message)
+        assert result["role"] == "agent"
+
+
+class TestBuildA2ATaskResponseWithMessage:
+    """Test class for build_a2a_task_response with legacy message format."""
+
+    def test_response_with_text_content_dict(self):
+        """Test response converts text content dict to parts."""
+        adapter = A2AAgentAdapter()
+
+        message = {
+            "role": "agent",
+            "content": {"type": "text", "text": "Agent response text"}
+        }
+        result = adapter.build_a2a_task_response(
+            task_id="task-123",
+            status="completed",
+            message=message
+        )
+
+        assert result["task"]["status"]["message"]["role"] == "agent"
+        assert result["task"]["status"]["message"]["parts"][0]["type"] == "text"
+        assert result["task"]["status"]["message"]["parts"][0]["text"] == "Agent response text"
+        assert result["task"]["status"]["message"]["parts"][0]["mediaType"] == "text/plain"
+
+    def test_response_with_non_text_content(self):
+        """Test response converts non-text content to string."""
+        adapter = A2AAgentAdapter()
+
+        message = {
+            "role": "user",
+            "content": {"type": "image", "data": "base64..."}
+        }
+        result = adapter.build_a2a_task_response(
+            task_id="task-123",
+            status="working",
+            message=message
+        )
+
+        assert result["task"]["status"]["message"]["role"] == "user"
+        text = result["task"]["status"]["message"]["parts"][0]["text"]
+        assert str(message) in text or "type" in text
+
+    def test_response_with_default_role_when_missing(self):
+        """Test response uses default 'agent' role when not provided."""
+        adapter = A2AAgentAdapter()
+
+        message = {
+            "content": {"type": "text", "text": "Content only"}
+        }
+        result = adapter.build_a2a_task_response(
+            task_id="task-123",
+            status="completed",
+            message=message
+        )
+
+        assert result["task"]["status"]["message"]["role"] == "agent"
+
+    def test_response_with_plain_dict_message(self):
+        """Test response converts plain dict message to parts."""
+        adapter = A2AAgentAdapter()
+
+        message = {"text": "Plain message", "some_field": "value"}
+        result = adapter.build_a2a_task_response(
+            task_id="task-123",
+            status="failed",
+            message=message
+        )
+
+        assert result["task"]["status"]["message"]["role"] == "agent"
+        assert result["task"]["status"]["message"]["parts"][0]["mediaType"] == "text/plain"
+
+
+class TestBuildStatusObj:
+    """Test class for _build_status_obj method."""
+
+    def test_builds_status_with_explicit_state(self):
+        """Test builds status with explicit state."""
+        adapter = A2AAgentAdapter()
+
+        status_data = {
+            "state": "TASK_STATE_COMPLETED",
+            "timestamp": "2024-01-01T00:00:00Z"
+        }
+        result = adapter._build_status_obj(status_data)
+        assert result["state"] == "TASK_STATE_COMPLETED"
+        assert result["timestamp"] == "2024-01-01T00:00:00Z"
+
+    def test_builds_status_with_message(self):
+        """Test builds status with message in parts format."""
+        adapter = A2AAgentAdapter()
+
+        status_data = {
+            "state": "working",
+            "message": {
+                "role": "agent",
+                "content": {"type": "text", "text": "Working..."}
+            }
+        }
+        result = adapter._build_status_obj(status_data)
+        assert result["state"] == "TASK_STATE_WORKING"
+        assert "message" in result
+        assert result["message"]["role"] == "agent"
+
+    def test_builds_status_with_parts_message(self):
+        """Test builds status with message already in parts format."""
+        adapter = A2AAgentAdapter()
+
+        status_data = {
+            "state": "completed",
+            "message": {
+                "role": "ROLE_AGENT",
+                "parts": [{"type": "text", "text": "Done"}]
+            }
+        }
+        result = adapter._build_status_obj(status_data)
+        assert result["state"] == "TASK_STATE_COMPLETED"
+        assert result["message"]["role"] == "ROLE_AGENT"
+
+    def test_builds_status_without_timestamp(self):
+        """Test builds status without timestamp when not provided."""
+        adapter = A2AAgentAdapter()
+
+        status_data = {"state": "working"}
+        result = adapter._build_status_obj(status_data)
+        assert result["state"] == "TASK_STATE_WORKING"
+        assert "timestamp" not in result

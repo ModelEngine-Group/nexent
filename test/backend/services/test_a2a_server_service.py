@@ -670,6 +670,66 @@ class TestGetTask:
             with pytest.raises(A2AServerServiceError, match="Unauthorized"):
                 service.get_task("task-123", user_id="other-user")
 
+    def test_get_task_no_result_no_artifacts(self):
+        """Test get_task does not include artifacts when result is empty."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_task = {
+            "id": "task-456",
+            "task_state": "TASK_STATE_WORKING",
+            "caller_user_id": "user-1",
+            "result": {}
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.get_task.return_value = mock_task
+
+            result = service.get_task("task-456", user_id="user-1")
+
+            assert "artifacts" not in result
+
+    def test_get_task_result_without_message(self):
+        """Test get_task handles result without message field."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_task = {
+            "id": "task-789",
+            "task_state": "TASK_STATE_COMPLETED",
+            "caller_user_id": "user-1",
+            "result": {"other_field": "value"}
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.get_task.return_value = mock_task
+
+            result = service.get_task("task-789", user_id="user-1")
+
+            assert "artifacts" not in result
+
+    def test_get_task_uses_current_time_when_no_update_time(self):
+        """Test get_task uses current time when update_time is not set."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_task = {
+            "id": "task-no-time",
+            "task_state": "TASK_STATE_WORKING",
+            "caller_user_id": "user-1"
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.get_task.return_value = mock_task
+
+            result = service.get_task("task-no-time", user_id="user-1")
+
+            assert "status" in result
+            assert "timestamp" in result["status"]
+
 
 class TestListTasks:
     """Test class for list_tasks method."""
@@ -1939,3 +1999,785 @@ class TestHandleMessageStream:
 
                                 failed_events = [e for e in events if e.get("data", {}).get("status", {}).get("state") == "TASK_STATE_FAILED"]
                                 assert len(failed_events) >= 1
+
+
+class TestGetTask:
+    """Additional tests for get_task method to improve coverage."""
+
+    def test_get_task_returns_task_with_context_id(self):
+        """Test get_task includes contextId when available."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_task = {
+            "id": "task-123",
+            "task_state": "TASK_STATE_COMPLETED",
+            "context_id": "ctx-456",
+            "update_time": "2024-01-01T00:00:00Z",
+            "result": {"message": "Task completed"}
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.get_task.return_value = mock_task
+
+            result = service.get_task(task_id="task-123")
+
+            assert result["id"] == "task-123"
+            assert result["contextId"] == "ctx-456"
+            assert result["status"]["state"] == "TASK_STATE_COMPLETED"
+
+    def test_get_task_raises_for_unauthorized_user(self):
+        """Test get_task raises error when user doesn't own the task."""
+        from backend.services.a2a_server_service import (
+            A2AServerService,
+            A2AServerServiceError
+        )
+
+        service = A2AServerService()
+
+        mock_task = {
+            "id": "task-123",
+            "task_state": "TASK_STATE_WORKING",
+            "caller_user_id": "user-other"
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.get_task.return_value = mock_task
+
+            with pytest.raises(A2AServerServiceError) as exc_info:
+                service.get_task(task_id="task-123", user_id="user-1")
+
+            assert "Unauthorized" in str(exc_info.value)
+
+    def test_get_task_includes_artifacts_when_result_exists(self):
+        """Test get_task includes artifacts when task has a result."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_task = {
+            "id": "task-789",
+            "task_state": "TASK_STATE_COMPLETED",
+            "caller_user_id": "user-1",
+            "result": {"message": "Here is the answer"}
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.get_task.return_value = mock_task
+
+            result = service.get_task(task_id="task-789", user_id="user-1")
+
+            assert "artifacts" in result
+            assert len(result["artifacts"]) == 1
+            assert result["artifacts"][0]["parts"][0]["text"] == "Here is the answer"
+
+    def test_get_task_maps_all_terminal_states(self):
+        """Test get_task correctly maps all terminal states."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        terminal_states = [
+            "TASK_STATE_COMPLETED",
+            "TASK_STATE_FAILED",
+            "TASK_STATE_CANCELED"
+        ]
+
+        for state in terminal_states:
+            mock_task = {
+                "id": "task-xyz",
+                "task_state": state,
+                "caller_user_id": "user-1"
+            }
+
+            with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+                mock_db.get_task.return_value = mock_task
+
+                result = service.get_task(task_id="task-xyz", user_id="user-1")
+                assert result["status"]["state"] == state
+
+
+class TestUpdateSettingsCardOverrides:
+    """Test class for update_settings card_overrides database interaction."""
+
+    def test_update_settings_card_overrides_updates_database(self):
+        """Test update_settings updates card_overrides in database."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_current = {
+            "agent_id": 1,
+            "tenant_id": "tenant-1",
+            "is_enabled": True,
+            "card_overrides": {"old_key": "old_value"}
+        }
+
+        mock_updated = {
+            "agent_id": 1,
+            "tenant_id": "tenant-1",
+            "is_enabled": True,
+            "card_overrides": {"new_key": "new_value"}
+        }
+
+        # Mock the database session and A2AServerAgent model
+        with patch("backend.services.a2a_server_service.get_db_session") as mock_session_ctx:
+            mock_session = MagicMock()
+            mock_session_ctx.return_value.__enter__.return_value = mock_session
+
+            mock_query = MagicMock()
+            mock_session.query.return_value.filter.return_value.first.return_value = MagicMock(
+                card_overrides=mock_current["card_overrides"]
+            )
+            mock_session.query.return_value = mock_query
+
+            with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+                mock_db.get_server_agent_by_agent_id.return_value = mock_current
+                mock_db.get_server_agent_by_agent_id.side_effect = [mock_current, mock_updated]
+
+                result = service.update_settings(
+                    agent_id=1,
+                    tenant_id="tenant-1",
+                    user_id="user-1",
+                    card_overrides={"new_key": "new_value"}
+                )
+
+                mock_session.query.assert_called_once()
+                assert result["card_overrides"] == {"new_key": "new_value"}
+
+    def test_update_settings_card_overrides_with_none(self):
+        """Test update_settings with card_overrides=None does not update."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_current = {
+            "agent_id": 1,
+            "tenant_id": "tenant-1",
+            "is_enabled": True,
+            "card_overrides": {"key": "value"}
+        }
+
+        with patch("backend.services.a2a_server_service.get_db_session") as mock_session_ctx:
+            mock_session = MagicMock()
+            mock_session_ctx.return_value.__enter__.return_value = mock_session
+
+            mock_query = MagicMock()
+            mock_session.query.return_value.filter.return_value.first.return_value = MagicMock(
+                card_overrides=mock_current["card_overrides"]
+            )
+            mock_session.query.return_value = mock_query
+
+            with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+                mock_db.get_server_agent_by_agent_id.return_value = mock_current
+                mock_db.get_server_agent_by_agent_id.side_effect = [mock_current, mock_current]
+
+                result = service.update_settings(
+                    agent_id=1,
+                    tenant_id="tenant-1",
+                    user_id="user-1",
+                    card_overrides=None  # None should not trigger update
+                )
+
+                # Verify query was still made to fetch the current state
+                mock_session.query.assert_called_once()
+                assert result["card_overrides"] == {"key": "value"}
+
+
+class TestHandleMessageSendSimpleRequest:
+    """Test class for handle_message_send with simple (non-complex) requests."""
+
+    @pytest.mark.asyncio
+    async def test_handle_message_send_simple_request_returns_message_response(self):
+        """Test handle_message_send returns message response for simple request."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_server_agent = {
+            "endpoint_id": "test-endpoint",
+            "agent_id": 1,
+            "tenant_id": "tenant-1",
+            "is_enabled": True
+        }
+
+        # Simple message without contextId or history
+        mock_message = {
+            "message": {
+                "parts": [{"type": "text", "text": "Hello"}]
+            }
+        }
+
+        with patch.object(service, "_validate_endpoint", return_value=mock_server_agent):
+            with patch.object(service, "adapter") as mock_adapter:
+                mock_adapter.parse_a2a_message.return_value = mock_message
+                mock_adapter.build_agent_request.return_value = {
+                    "agent_id": 1,
+                    "query": "Hello"
+                }
+                mock_adapter.build_a2a_message_response.return_value = {
+                    "role": "ROLE_AGENT",
+                    "text": "Hello there!",
+                    "context_id": None,
+                    "task_id": None
+                }
+
+                with patch.object(service, "_store_user_message") as mock_store_user:
+                    with patch.object(service, "_store_agent_response") as mock_store_agent:
+                        with patch.object(service, "_collect_stream_text", new_callable=AsyncMock) as mock_collect:
+                            mock_collect.return_value = "Hello there!"
+
+                            result = await service.handle_message_send(
+                                endpoint_id="test-endpoint",
+                                message=mock_message,
+                                user_id="user-1",
+                                tenant_id="tenant-1"
+                            )
+
+                            # Verify it returns message response, not task response
+                            assert result["role"] == "ROLE_AGENT"
+                            assert result["text"] == "Hello there!"
+                            # Verify task_id is None for simple requests
+                            assert result.get("task_id") is None
+                            # Verify storage methods were called
+                            mock_store_user.assert_called_once()
+                            mock_store_agent.assert_called_once()
+
+
+class TestHandleMessageStreamEdgeCases:
+    """Additional tests for handle_message_stream edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_handle_message_stream_empty_chunk(self):
+        """Test handle_message_stream handles empty data chunks."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_server_agent = {
+            "endpoint_id": "test-endpoint",
+            "agent_id": 1,
+            "tenant_id": "tenant-1",
+            "is_enabled": True
+        }
+
+        mock_message = {
+            "message": {
+                "parts": [{"type": "text", "text": "Hello"}]
+            }
+        }
+
+        mock_stream_response = AsyncMock()
+        mock_stream_response.body_iterator = async_iter([
+            "data: \n",  # Empty data
+            "data: {\"text\": \"Valid\"}\n"
+        ])
+
+        with patch.object(service, "_validate_endpoint", return_value=mock_server_agent):
+            with patch.object(service, "adapter") as mock_adapter:
+                mock_adapter.parse_a2a_message.return_value = mock_message
+                mock_adapter.build_agent_request.return_value = {
+                    "agent_id": 1,
+                    "query": "Hello"
+                }
+                mock_adapter.extract_stream_chunk.side_effect = lambda x: x.get("text", "")
+                mock_adapter.build_a2a_task_event.side_effect = lambda task_id, event_type, data, context_id: {
+                    "type": event_type,
+                    "data": data
+                }
+
+                with patch.object(service, "_store_user_message"):
+                    with patch.object(service, "_store_agent_response"):
+                        mock_agent_request = MagicMock()
+                        mock_agent_service_module = MagicMock()
+                        mock_agent_service_module.run_agent_stream = AsyncMock(return_value=mock_stream_response)
+                        with patch.dict('sys.modules', {
+                            'services.agent_service': mock_agent_service_module,
+                            'consts.model': MagicMock(AgentRequest=lambda **kw: mock_agent_request)
+                        }):
+                            events = []
+                            async for event in service.handle_message_stream(
+                                endpoint_id="test-endpoint",
+                                message=mock_message,
+                                user_id="user-1",
+                                tenant_id="tenant-1"
+                            ):
+                                events.append(event)
+
+            # Should have progress for valid chunk (chunk event + final event)
+            progress_events = [e for e in events if e.get("type") == "taskProgress"]
+            assert len(progress_events) == 2
+            # First event has lastChunk=False, second has lastChunk=True
+            assert progress_events[0]["data"]["content"] == "Valid"
+            assert progress_events[0]["data"]["lastChunk"] is False
+            assert progress_events[1]["data"]["content"] == "Valid"
+            assert progress_events[1]["data"]["lastChunk"] is True
+
+    @pytest.mark.asyncio
+    async def test_handle_message_stream_non_sse_lines(self):
+        """Test handle_message_stream ignores non-SSE lines."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_server_agent = {
+            "endpoint_id": "test-endpoint",
+            "agent_id": 1,
+            "tenant_id": "tenant-1",
+            "is_enabled": True
+        }
+
+        mock_message = {
+            "message": {
+                "parts": [{"type": "text", "text": "Hello"}]
+            }
+        }
+
+        mock_stream_response = AsyncMock()
+        mock_stream_response.body_iterator = async_iter([
+            "some random line\n",  # Not SSE
+            "another line\n",
+            "data: {\"text\": \"Valid\"}\n"
+        ])
+
+        with patch.object(service, "_validate_endpoint", return_value=mock_server_agent):
+            with patch.object(service, "adapter") as mock_adapter:
+                mock_adapter.parse_a2a_message.return_value = mock_message
+                mock_adapter.build_agent_request.return_value = {
+                    "agent_id": 1,
+                    "query": "Hello"
+                }
+                mock_adapter.extract_stream_chunk.side_effect = lambda x: x.get("text", "")
+                mock_adapter.build_a2a_task_event.side_effect = lambda task_id, event_type, data, context_id: {
+                    "type": event_type,
+                    "data": data
+                }
+
+                with patch.object(service, "_store_user_message"):
+                    with patch.object(service, "_store_agent_response"):
+                        mock_agent_request = MagicMock()
+                        mock_agent_service_module = MagicMock()
+                        mock_agent_service_module.run_agent_stream = AsyncMock(return_value=mock_stream_response)
+                        with patch.dict('sys.modules', {
+                            'services.agent_service': mock_agent_service_module,
+                            'consts.model': MagicMock(AgentRequest=lambda **kw: mock_agent_request)
+                        }):
+                            events = []
+                            async for event in service.handle_message_stream(
+                                endpoint_id="test-endpoint",
+                                message=mock_message,
+                                user_id="user-1",
+                                tenant_id="tenant-1"
+                            ):
+                                events.append(event)
+
+                            # Should have progress for valid chunk (chunk event + final event)
+                            progress_events = [e for e in events if e.get("type") == "taskProgress"]
+                            assert len(progress_events) == 2
+                            assert progress_events[0]["data"]["content"] == "Valid"
+                            assert progress_events[0]["data"]["lastChunk"] is False
+                            assert progress_events[1]["data"]["content"] == "Valid"
+                            assert progress_events[1]["data"]["lastChunk"] is True
+
+
+class TestEnableA2AAdditional:
+    """Additional tests for enable_a2a method."""
+
+    def test_enable_a2a_logs_success_message(self):
+        """Test enable_a2a logs success message."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_result = {
+            "agent_id": 1,
+            "is_enabled": True
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.enable_server_agent.return_value = mock_result
+
+            with patch("backend.services.a2a_server_service.logger") as mock_logger:
+                result = service.enable_a2a(
+                    agent_id=1,
+                    tenant_id="tenant-1",
+                    user_id="user-1"
+                )
+
+                mock_logger.info.assert_called_once_with("Enabled A2A Server for agent 1")
+
+    def test_enable_a2a_with_all_parameters(self):
+        """Test enable_a2a passes all optional parameters correctly."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_result = {
+            "agent_id": 1,
+            "is_enabled": True
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.enable_server_agent.return_value = mock_result
+
+            result = service.enable_a2a(
+                agent_id=1,
+                tenant_id="tenant-1",
+                user_id="user-1",
+                name="Custom Name",
+                description="Custom description",
+                version="2.0.0",
+                agent_url="https://custom.com",
+                streaming=True,
+                supported_interfaces=[{"type": "test"}],
+                card_overrides={"custom": "value"}
+            )
+
+            # Verify all parameters were passed through
+            call_kwargs = mock_db.enable_server_agent.call_args[1]
+            assert call_kwargs["agent_id"] == 1
+            assert call_kwargs["name"] == "Custom Name"
+            assert call_kwargs["description"] == "Custom description"
+            assert call_kwargs["version"] == "2.0.0"
+            assert call_kwargs["agent_url"] == "https://custom.com"
+            assert call_kwargs["streaming"] is True
+            assert call_kwargs["supported_interfaces"] == [{"type": "test"}]
+            # Should not update task state
+            mock_db.update_task_state.assert_not_called()
+
+
+class TestHandleMessageStreamAdditional:
+    """Additional edge case tests for handle_message_stream."""
+
+    @pytest.mark.asyncio
+    async def test_handle_message_stream_with_unicode_content(self):
+        """Test handle_message_stream handles unicode characters."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_server_agent = {
+            "endpoint_id": "test-endpoint",
+            "agent_id": 1,
+            "tenant_id": "tenant-1",
+            "is_enabled": True
+        }
+
+        mock_message = {
+            "message": {
+                "parts": [{"type": "text", "text": "Hello"}]
+            }
+        }
+
+        mock_stream_response = AsyncMock()
+        mock_stream_response.body_iterator = async_iter([
+            "data: {\"text\": \"你好世界\"}\n",
+            "data: {\"text\": \"🌍\"}\n"
+        ])
+
+        with patch.object(service, "_validate_endpoint", return_value=mock_server_agent):
+            with patch.object(service, "adapter") as mock_adapter:
+                mock_adapter.parse_a2a_message.return_value = mock_message
+                mock_adapter.build_agent_request.return_value = {
+                    "agent_id": 1,
+                    "query": "Hello"
+                }
+                mock_adapter.extract_stream_chunk.side_effect = lambda x: x.get("text", "")
+                mock_adapter.build_a2a_task_event.side_effect = lambda task_id, event_type, data, context_id: {
+                    "type": event_type,
+                    "data": data
+                }
+
+                with patch.object(service, "_store_user_message"):
+                    with patch.object(service, "_store_agent_response"):
+                        mock_agent_request = MagicMock()
+                        mock_agent_service_module = MagicMock()
+                        mock_agent_service_module.run_agent_stream = AsyncMock(return_value=mock_stream_response)
+                        with patch.dict('sys.modules', {
+                            'services.agent_service': mock_agent_service_module,
+                            'consts.model': MagicMock(AgentRequest=lambda **kw: mock_agent_request)
+                        }):
+                            events = []
+                            async for event in service.handle_message_stream(
+                                endpoint_id="test-endpoint",
+                                message=mock_message,
+                                user_id="user-1",
+                                tenant_id="tenant-1"
+                            ):
+                                events.append(event)
+
+                            # Verify unicode content is preserved
+                            progress_events = [e for e in events if e.get("type") == "taskProgress"]
+                            all_text = "".join(e["data"]["content"] for e in progress_events)
+                            assert "你好世界" in all_text
+                            assert "🌍" in all_text
+
+    @pytest.mark.asyncio
+    async def test_handle_message_stream_json_decode_error_handling(self):
+        """Test handle_message_stream gracefully handles JSON decode errors."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        mock_server_agent = {
+            "endpoint_id": "test-endpoint",
+            "agent_id": 1,
+            "tenant_id": "tenant-1",
+            "is_enabled": True
+        }
+
+        mock_message = {
+            "message": {
+                "parts": [{"type": "text", "text": "Hello"}]
+            }
+        }
+
+        mock_stream_response = AsyncMock()
+        mock_stream_response.body_iterator = async_iter([
+            "data: {\"invalid json\n",
+            "data: {\"text\": \"Valid after error\"}\n"
+        ])
+
+        with patch.object(service, "_validate_endpoint", return_value=mock_server_agent):
+            with patch.object(service, "adapter") as mock_adapter:
+                mock_adapter.parse_a2a_message.return_value = mock_message
+                mock_adapter.build_agent_request.return_value = {
+                    "agent_id": 1,
+                    "query": "Hello"
+                }
+                mock_adapter.extract_stream_chunk.side_effect = lambda x: x.get("text", "")
+                mock_adapter.build_a2a_task_event.side_effect = lambda task_id, event_type, data, context_id: {
+                    "type": event_type,
+                    "data": data
+                }
+
+                with patch.object(service, "_store_user_message"):
+                    with patch.object(service, "_store_agent_response"):
+                        mock_agent_request = MagicMock()
+                        mock_agent_service_module = MagicMock()
+                        mock_agent_service_module.run_agent_stream = AsyncMock(return_value=mock_stream_response)
+                        with patch.dict('sys.modules', {
+                            'services.agent_service': mock_agent_service_module,
+                            'consts.model': MagicMock(AgentRequest=lambda **kw: mock_agent_request)
+                        }):
+                            events = []
+                            async for event in service.handle_message_stream(
+                                endpoint_id="test-endpoint",
+                                message=mock_message,
+                                user_id="user-1",
+                                tenant_id="tenant-1"
+                            ):
+                                events.append(event)
+
+                            # Should still complete successfully
+                            completed_events = [e for e in events if e.get("data", {}).get("status", {}).get("state") == "TASK_STATE_COMPLETED"]
+                            assert len(completed_events) >= 1
+                            # Should have processed valid chunk
+                            progress_events = [e for e in events if e.get("type") == "taskProgress"]
+                            assert any("Valid after error" in e["data"]["content"] for e in progress_events)
+
+
+class TestDisableA2AAdditional:
+    """Additional tests for disable_a2a method."""
+
+    def test_disable_a2a_logs_success_message(self):
+        """Test disable_a2a logs success message."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            mock_db.disable_server_agent.return_value = True
+
+            with patch("backend.services.a2a_server_service.logger") as mock_logger:
+                result = service.disable_a2a(
+                    agent_id=123,
+                    tenant_id="tenant-1",
+                    user_id="user-1"
+                )
+
+                mock_logger.info.assert_called_once_with("Disabled A2A Server for agent 123")
+                assert result is True
+
+
+class TestStoreMethods:
+    """Test class for _store_user_message, _store_agent_response, and _store_error_response methods."""
+
+    def test_store_user_message_stores_text_parts(self):
+        """Test _store_user_message stores message with text parts."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        message_obj = {
+            "parts": [
+                {"type": "text", "text": "Hello"},
+                {"type": "text", "text": "World"}
+            ]
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            service._store_user_message(
+                task_id="task-123",
+                message_obj=message_obj,
+                endpoint_id="endpoint-1"
+            )
+
+            mock_db.create_message.assert_called_once()
+            call_kwargs = mock_db.create_message.call_args[1]
+            assert call_kwargs["task_id"] == "task-123"
+            assert call_kwargs["role"] == "ROLE_USER"
+            assert call_kwargs["parts"] == message_obj["parts"]
+            assert call_kwargs["metadata"]["endpoint_id"] == "endpoint-1"
+
+    def test_store_user_message_fallback_to_text_field(self):
+        """Test _store_user_message falls back to text field when parts missing."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        message_obj = {
+            "text": "Hello directly"
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            service._store_user_message(
+                task_id="task-123",
+                message_obj=message_obj,
+                endpoint_id="endpoint-1"
+            )
+
+            call_kwargs = mock_db.create_message.call_args[1]
+            assert call_kwargs["parts"] == [{"type": "text", "text": "Hello directly"}]
+
+    def test_store_user_message_with_none_task_id(self):
+        """Test _store_user_message handles None task_id."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        message_obj = {
+            "parts": [{"type": "text", "text": "Hello"}]
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            service._store_user_message(
+                task_id=None,
+                message_obj=message_obj,
+                endpoint_id="endpoint-1"
+            )
+
+            call_kwargs = mock_db.create_message.call_args[1]
+            assert call_kwargs["task_id"] is None
+
+    def test_store_agent_response_with_text(self):
+        """Test _store_agent_response stores text correctly."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            service._store_agent_response(
+                task_id="task-123",
+                accumulated_text="Agent response here",
+                endpoint_id="endpoint-1"
+            )
+
+            # Should call create_message
+            call_args = mock_db.create_message.call_args
+            assert call_args[1]["task_id"] == "task-123"
+            assert call_args[1]["role"] == "ROLE_AGENT"
+            assert call_args[1]["parts"] == [{"type": "text", "text": "Agent response here", "mediaType": "text/plain"}]
+
+            # Should call update_task_state
+            mock_db.update_task_state.assert_called_once_with(
+                task_id="task-123",
+                task_state="TASK_STATE_COMPLETED",
+                result_data={"message": "Agent response here"}
+            )
+
+    def test_store_agent_response_with_empty_text(self):
+        """Test _store_agent_response handles empty text."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            service._store_agent_response(
+                task_id="task-123",
+                accumulated_text="",
+                endpoint_id="endpoint-1"
+            )
+
+            # Should still create message but with empty parts
+            call_args = mock_db.create_message.call_args
+            assert call_args[1]["parts"] == []
+
+            # Should not call update_task_state because task_id might be None or handled differently
+            # In actual code, update_task_state is only called if task_id is truthy (line 534)
+            # Let's verify the behavior
+
+    def test_store_agent_response_without_task_id(self):
+        """Test _store_agent_response when task_id is None (simple request)."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            service._store_agent_response(
+                task_id=None,
+                accumulated_text="Simple response",
+                endpoint_id="endpoint-1"
+            )
+
+            # Should still create the message
+            mock_db.create_message.assert_called_once()
+            # Should NOT call update_task_state since task_id is None
+            mock_db.update_task_state.assert_not_called()
+
+    def test_store_error_response(self):
+        """Test _store_error_response stores error and updates task state."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            service._store_error_response(
+                task_id="task-123",
+                error="Something went wrong",
+                endpoint_id="endpoint-1"
+            )
+
+            # Verify error message stored
+            mock_db.create_message.assert_called_once()
+            call_args = mock_db.create_message.call_args
+            assert call_args[1]["task_id"] == "task-123"
+            assert call_args[1]["role"] == "ROLE_AGENT"
+            assert call_args[1]["parts"] == [{"type": "text", "text": "Error: Something went wrong", "mediaType": "text/plain"}]
+            assert call_args[1]["metadata"]["error"] is True
+
+            # Verify task state updated
+            mock_db.update_task_state.assert_called_once_with(
+                task_id="task-123",
+                task_state="TASK_STATE_FAILED",
+                result_data={"error": "Something went wrong"}
+            )
+
+    def test_store_error_response_without_task_id(self):
+        """Test _store_error_response handles None task_id."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+            service._store_error_response(
+                task_id=None,
+                error="Error occurred",
+                endpoint_id="endpoint-1"
+            )
+
+            # Should still create message
+            mock_db.create_message.assert_called_once()
+            # Should not update task state
+            mock_db.update_task_state.assert_not_called()

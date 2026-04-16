@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from database import a2a_agent_db
 from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+from database.client import get_db_session
 from services.a2a_agent_adapter import A2AAgentAdapter, A2AExecutionContext
 from consts.a2a_models import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvider
 from consts.const import NORTHBOUND_EXTERNAL_URL

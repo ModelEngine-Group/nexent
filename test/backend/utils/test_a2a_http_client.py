@@ -646,6 +646,29 @@ class TestA2AHttpClientPostStreamErrors:
                     pass
             assert exc_info.value.status == 502
 
+    @pytest.mark.asyncio
+    async def test_post_stream_generic_exception(self):
+        """Test streaming request generic exception is raised."""
+        from backend.utils.a2a_http_client import A2AHttpClient
+
+        mock_session = MagicMock()
+        mock_session.post = AsyncMock(
+            side_effect=RuntimeError("Unexpected streaming error")
+        )
+        mock_session.close = AsyncMock()
+
+        client = A2AHttpClient()
+        async with client:
+            client._session = mock_session
+
+            with pytest.raises(RuntimeError) as exc_info:
+                async for _ in client.post_stream(
+                    "https://example.com/message:stream",
+                    payload={"message": {"role": "user", "parts": [{"type": "text", "text": "Hi"}]}}
+                ):
+                    pass
+            assert "Unexpected streaming error" in str(exc_info.value)
+
 
 class TestA2AHttpClientRequestWithRetryErrors:
     """Test class for A2AHttpClient._request_with_retry error handling."""

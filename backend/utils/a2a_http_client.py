@@ -238,6 +238,10 @@ class A2AHttpClient:
         except aiohttp.ClientResponseError as e:
             logger.error(f"A2A streaming HTTP error for {url}: {e.status}")
             raise
+        except Exception as e:
+            import traceback
+            logger.error(f"A2A streaming request failed for {url}: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+            raise
 
 
 def build_a2a_headers(api_key: Optional[str] = None) -> Dict[str, str]:
