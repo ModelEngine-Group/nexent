@@ -1050,18 +1050,16 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.updated_by IS 'Last user who 
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.update_time IS 'Last update timestamp';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.delete_flag IS 'Soft delete flag: Y/N';
 
--- Create the ag_outer_api_tools table for outer API tools (OpenAPI to MCP conversion)
-CREATE TABLE IF NOT EXISTS nexent.ag_outer_api_tools (
+-- Create the ag_outer_api_services table for OpenAPI services (MCP conversion)
+-- This table stores one record per MCP service instead of per tool
+CREATE TABLE IF NOT EXISTS nexent.ag_outer_api_services (
     id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
+    mcp_service_name VARCHAR(100) NOT NULL,
     description TEXT,
-    method VARCHAR(10),
-    url TEXT NOT NULL,
-    headers_template JSONB DEFAULT '{}',
-    query_template JSONB DEFAULT '{}',
-    body_template JSONB DEFAULT '{}',
-    input_schema JSONB DEFAULT '{}',
-    tenant_id VARCHAR(100),
+    openapi_json JSONB,
+    server_url VARCHAR(500),
+    headers_template JSONB,
+    tenant_id VARCHAR(100) NOT NULL,
     is_available BOOLEAN DEFAULT TRUE,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -1070,10 +1068,10 @@ CREATE TABLE IF NOT EXISTS nexent.ag_outer_api_tools (
     delete_flag VARCHAR(1) DEFAULT 'N'
 );
 
-ALTER TABLE nexent.ag_outer_api_tools OWNER TO "root";
+ALTER TABLE nexent.ag_outer_api_services OWNER TO "root";
 
 -- Create a function to update the update_time column
-CREATE OR REPLACE FUNCTION update_ag_outer_api_tools_update_time()
+CREATE OR REPLACE FUNCTION update_ag_outer_api_services_update_time()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.update_time = CURRENT_TIMESTAMP;
@@ -1082,38 +1080,35 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create a trigger to call the function before each update
-CREATE TRIGGER update_ag_outer_api_tools_update_time_trigger
-BEFORE UPDATE ON nexent.ag_outer_api_tools
+CREATE TRIGGER update_ag_outer_api_services_update_time_trigger
+BEFORE UPDATE ON nexent.ag_outer_api_services
 FOR EACH ROW
-EXECUTE FUNCTION update_ag_outer_api_tools_update_time();
+EXECUTE FUNCTION update_ag_outer_api_services_update_time();
 
 -- Add comment to the table
-COMMENT ON TABLE nexent.ag_outer_api_tools IS 'Outer API tools table - stores converted OpenAPI tools as MCP tools';
+COMMENT ON TABLE nexent.ag_outer_api_services IS 'OpenAPI services table - stores MCP service information converted from OpenAPI specs. One record per service.';
 
 -- Add comments to the columns
-COMMENT ON COLUMN nexent.ag_outer_api_tools.id IS 'Tool ID, unique primary key';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.name IS 'Tool name (unique identifier)';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.description IS 'Tool description';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.method IS 'HTTP method: GET/POST/PUT/DELETE/PATCH';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.url IS 'API endpoint URL (full path with base URL)';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.headers_template IS 'Headers template as JSONB';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.query_template IS 'Query parameters template as JSONB';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.body_template IS 'Request body template as JSONB';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.input_schema IS 'MCP input schema as JSONB';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.tenant_id IS 'Tenant ID for multi-tenancy';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.is_available IS 'Whether the tool is available';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.create_time IS 'Creation time';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.update_time IS 'Update time';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.created_by IS 'Creator';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.updated_by IS 'Updater';
-COMMENT ON COLUMN nexent.ag_outer_api_tools.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+COMMENT ON COLUMN nexent.ag_outer_api_services.id IS 'Service ID, unique primary key';
+COMMENT ON COLUMN nexent.ag_outer_api_services.mcp_service_name IS 'MCP service name (unique identifier per tenant)';
+COMMENT ON COLUMN nexent.ag_outer_api_services.description IS 'Service description from OpenAPI info';
+COMMENT ON COLUMN nexent.ag_outer_api_services.openapi_json IS 'Complete OpenAPI JSON specification';
+COMMENT ON COLUMN nexent.ag_outer_api_services.server_url IS 'Base URL of the REST API server';
+COMMENT ON COLUMN nexent.ag_outer_api_services.headers_template IS 'Default headers template as JSONB';
+COMMENT ON COLUMN nexent.ag_outer_api_services.tenant_id IS 'Tenant ID for multi-tenancy';
+COMMENT ON COLUMN nexent.ag_outer_api_services.is_available IS 'Whether the service is available';
+COMMENT ON COLUMN nexent.ag_outer_api_services.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.ag_outer_api_services.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.ag_outer_api_services.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.ag_outer_api_services.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.ag_outer_api_services.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
 
 -- Create index for tenant_id queries
-CREATE INDEX IF NOT EXISTS idx_ag_outer_api_tools_tenant_id
-ON nexent.ag_outer_api_tools (tenant_id)
+CREATE INDEX IF NOT EXISTS idx_ag_outer_api_services_tenant_id
+ON nexent.ag_outer_api_services (tenant_id)
 WHERE delete_flag = 'N';
 
--- Create index for name queries
-CREATE INDEX IF NOT EXISTS idx_ag_outer_api_tools_name
-ON nexent.ag_outer_api_tools (name)
+-- Create index for mcp_service_name queries
+CREATE INDEX IF NOT EXISTS idx_ag_outer_api_services_mcp_service_name
+ON nexent.ag_outer_api_services (mcp_service_name)
 WHERE delete_flag = 'N';
