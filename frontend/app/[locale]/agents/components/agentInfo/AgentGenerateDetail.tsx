@@ -26,6 +26,7 @@ import {
   setAgentGenerationStatus,
   saveGeneratedField,
   clearAgentGenerationCache,
+  clearExpiredGenerationCaches,
   AgentGenerationCache,
 } from "@/lib/agentGenerationCache";
 import { useAgentList } from "@/hooks/agent/useAgentList";
@@ -125,14 +126,10 @@ export default function AgentGenerateDetail({
 
   // Cleanup invalid cache on mount to prevent stuck "generating" state
   useEffect(() => {
-    // Clean up any generating caches on startup to prevent stuck states
-    // This handles edge cases where previous sessions left stale caches
-    for (let i = 0; i < 1000; i++) {
-      const cached = getAgentGenerationCache(i);
-      if (cached?.isGenerating) {
-        clearAgentGenerationCache(i);
-      }
-    }
+    // Clean up expired caches on startup to prevent stuck states
+    // Only removes entries that have exceeded their expiry time
+    // Does not interfere with legitimate in-progress caches
+    clearExpiredGenerationCaches();
   }, []);
 
   // Sync businessInfo local state with store when editedAgent changes

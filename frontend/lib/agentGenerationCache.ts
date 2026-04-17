@@ -137,9 +137,9 @@ export function saveAgentGenerationCache(
  * @param agentId - The agent ID (use 0 for create mode)
  * @param updates - The fields to update
  */
-export function updateAgentGenerationCache(
+export function updateAgentGenerationCache<K extends keyof AgentGenerationCache>(
   agentId: number,
-  updates: Partial<AgentGenerationCache>
+  updates: Pick<AgentGenerationCache, K>
 ): void {
   if (typeof window === 'undefined') {
     return;
@@ -176,10 +176,7 @@ export function setAgentGenerationStatus(
     businessLogicModelName: string;
   }
 ): void {
-  const updates: Partial<AgentGenerationCache> = { isGenerating };
-  if (businessInfo) {
-    Object.assign(updates, businessInfo);
-  }
+  const updates = { isGenerating, ...businessInfo };
   updateAgentGenerationCache(agentId, updates);
 }
 
@@ -191,10 +188,10 @@ export function setAgentGenerationStatus(
  */
 export function saveGeneratedField(
   agentId: number,
-  field: keyof Pick<AgentGenerationCache, 'dutyPrompt' | 'constraintPrompt' | 'fewShotsPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription'>,
+  field: 'dutyPrompt' | 'constraintPrompt' | 'fewShotsPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription',
   content: string
 ): void {
-  updateAgentGenerationCache(agentId, { [field]: content });
+  updateAgentGenerationCache(agentId, { [field]: content } as Pick<AgentGenerationCache, typeof field>);
 }
 
 /**
@@ -230,5 +227,37 @@ export function clearAllGenerationCaches(): void {
     keys.forEach((key) => localStorage.removeItem(key));
   } catch (error) {
     console.warn('Failed to clear all generation caches:', error);
+  }
+}
+
+/**
+ * Clear expired generation caches
+ * Call this on mount instead of blindly clearing all isGenerating caches
+ */
+export function clearExpiredGenerationCaches(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const keys = Object.keys(localStorage).filter((key) =>
+      key.startsWith(GENERATION_CACHE_PREFIX)
+    );
+
+    for (const key of keys) {
+      try {
+        const cached = localStorage.getItem(key);
+        if (!cached) continue;
+
+        const parsed: AgentGenerationCache = JSON.parse(cached);
+        if (isCacheExpired(parsed)) {
+          localStorage.removeItem(key);
+        }
+      } catch {
+        // Ignore parse errors for individual entries
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to clear expired generation caches:', error);
   }
 }
