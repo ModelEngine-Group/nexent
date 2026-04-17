@@ -746,6 +746,8 @@ export const conversationService = {
       description?: string; // Add file description field
     }>; // Update to complete attachment information object array
     agent_id?: number; // Add agent_id parameter
+    model_id?: number; // Optional model override
+    version_no?: number; // Optional version override
     is_debug?: boolean; // Add debug mode parameter
   }, signal?: AbortSignal) {
     try {
@@ -761,6 +763,12 @@ export const conversationService = {
       // Only include agent_id if it has a value
       if (params.agent_id !== undefined && params.agent_id !== null) {
         requestParams.agent_id = params.agent_id;
+      }
+      if (params.model_id !== undefined && params.model_id !== null) {
+        requestParams.model_id = params.model_id;
+      }
+      if (params.version_no !== undefined && params.version_no !== null) {
+        requestParams.version_no = params.version_no;
       }
 
       const response = await fetch(API_ENDPOINTS.agent.run, {
