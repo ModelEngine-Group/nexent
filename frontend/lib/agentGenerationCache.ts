@@ -186,12 +186,18 @@ export function setAgentGenerationStatus(
  * @param field - Which field is being updated
  * @param content - The content value
  */
-export function saveGeneratedField(
+export function saveGeneratedField<
+  K extends keyof Pick<
+    AgentGenerationCache,
+    'dutyPrompt' | 'constraintPrompt' | 'fewShotsPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription'
+  >
+>(
   agentId: number,
-  field: 'dutyPrompt' | 'constraintPrompt' | 'fewShotsPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription',
-  content: string
+  field: K,
+  content: AgentGenerationCache[K]
 ): void {
-  updateAgentGenerationCache(agentId, { [field]: content } as Pick<AgentGenerationCache, typeof field>);
+  const updates = { [field]: content } as Pick<AgentGenerationCache, K>;
+  updateAgentGenerationCache(agentId, updates);
 }
 
 /**
