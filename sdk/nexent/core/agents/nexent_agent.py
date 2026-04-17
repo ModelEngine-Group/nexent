@@ -15,10 +15,13 @@ from .core_agent import CoreAgent, convert_code_format
 
 
 class NexentAgent:
-    def __init__(self, observer: MessageObserver,
-                 model_config_list: List[ModelConfig],
-                 stop_event: Event,
-                 mcp_tool_collection=None):
+    def __init__(
+        self,
+        observer: MessageObserver,
+        model_config_list: List[ModelConfig],
+        stop_event: Event,
+        mcp_tool_collection=None,
+    ):
         """
         init the agent create factory
 
@@ -41,9 +44,12 @@ class NexentAgent:
         """create a model instance"""
         # Filter out None values and find matching model config
         model_config = next(
-            (model_config for model_config in self.model_config_list
-             if model_config is not None and model_config.cite_name == model_cite_name),
-            None
+            (
+                model_config
+                for model_config in self.model_config_list
+                if model_config is not None and model_config.cite_name == model_cite_name
+            ),
+            None,
         )
         if model_config is None:
             raise ValueError(f"Model {model_cite_name} not found")
@@ -55,11 +61,11 @@ class NexentAgent:
             temperature=model_config.temperature,
             top_p=model_config.top_p,
             ssl_verify=model_config.ssl_verify if model_config.ssl_verify is not None else True,
-            model_factory=model_config.model_factory
+            model_factory=model_config.model_factory,
+            display_name=model_config.cite_name,
         )
         model.stop_event = self.stop_event
         return model
-
 
     def create_local_tool(self, tool_config: ToolConfig):
         class_name = tool_config.class_name
@@ -72,34 +78,39 @@ class NexentAgent:
                 # Filter out conflicting parameters from params to avoid conflicts
                 # These parameters have exclude=True and cannot be passed to __init__
                 # due to smolagents.tools.Tool wrapper restrictions
-                filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer"]}
+                filtered_params = {
+                    k: v for k, v in params.items() if k not in ["vdb_core", "embedding_model", "observer"]
+                }
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
                 # This bypasses smolagents wrapper restrictions
                 tools_obj.observer = self.observer
-                tools_obj.vdb_core = tool_config.metadata.get(
-                    "vdb_core", None) if tool_config.metadata else None
-                tools_obj.embedding_model = tool_config.metadata.get(
-                    "embedding_model", None) if tool_config.metadata else None
+                tools_obj.vdb_core = tool_config.metadata.get("vdb_core", None) if tool_config.metadata else None
+                tools_obj.embedding_model = (
+                    tool_config.metadata.get("embedding_model", None) if tool_config.metadata else None
+                )
             elif class_name == "DataMateSearchTool":
                 tools_obj = tool_class(**params)
                 tools_obj.observer = self.observer
             elif class_name == "AnalyzeTextFileTool":
-                tools_obj = tool_class(observer=self.observer,
-                                       llm_model=tool_config.metadata.get("llm_model", []),
-                                       storage_client=tool_config.metadata.get("storage_client", []),
-                                       data_process_service_url=tool_config.metadata.get("data_process_service_url", []),
-                                       **params)
+                tools_obj = tool_class(
+                    observer=self.observer,
+                    llm_model=tool_config.metadata.get("llm_model", []),
+                    storage_client=tool_config.metadata.get("storage_client", []),
+                    data_process_service_url=tool_config.metadata.get("data_process_service_url", []),
+                    **params,
+                )
             elif class_name == "AnalyzeImageTool":
-                tools_obj = tool_class(observer=self.observer,
-                                       vlm_model=tool_config.metadata.get("vlm_model", []),
-                                       storage_client=tool_config.metadata.get("storage_client", []),
-                                       **params)
+                tools_obj = tool_class(
+                    observer=self.observer,
+                    vlm_model=tool_config.metadata.get("vlm_model", []),
+                    storage_client=tool_config.metadata.get("storage_client", []),
+                    **params,
+                )
             else:
                 tools_obj = tool_class(**params)
-                if hasattr(tools_obj, 'observer'):
+                if hasattr(tools_obj, "observer"):
                     tools_obj.observer = self.observer
             return tools_obj
 
@@ -110,10 +121,7 @@ class NexentAgent:
     def create_mcp_tool(self, class_name):
         if self.mcp_tool_collection is None:
             raise ValueError("MCP tool collection is not initialized")
-        tool_obj = next(
-            (tool for tool in self.mcp_tool_collection.tools if tool.name == class_name),
-            None
-        )
+        tool_obj = next((tool for tool in self.mcp_tool_collection.tools if tool.name == class_name), None)
         if tool_obj is None:
             raise ValueError(f"{class_name} not found in MCP server")
         return tool_obj
@@ -135,6 +143,7 @@ class NexentAgent:
 
         if class_name == "RunSkillScriptTool":
             from nexent.core.tools.run_skill_script_tool import get_run_skill_script_tool
+
             metadata = tool_config.metadata or {}
             get_run_skill_script_tool(
                 local_skills_dir=params.get("local_skills_dir"),
@@ -143,9 +152,11 @@ class NexentAgent:
                 version_no=metadata.get("version_no", 0),
             )
             from nexent.core.tools.run_skill_script_tool import run_skill_script
+
             return run_skill_script
         elif class_name == "ReadSkillMdTool":
             from nexent.core.tools.read_skill_md_tool import get_read_skill_md_tool
+
             metadata = tool_config.metadata or {}
             get_read_skill_md_tool(
                 local_skills_dir=params.get("local_skills_dir"),
@@ -154,9 +165,11 @@ class NexentAgent:
                 version_no=metadata.get("version_no", 0),
             )
             from nexent.core.tools.read_skill_md_tool import read_skill_md
+
             return read_skill_md
         elif class_name == "WriteSkillFileTool":
             from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool
+
             metadata = tool_config.metadata or {}
             get_write_skill_file_tool(
                 local_skills_dir=params.get("local_skills_dir"),
@@ -165,9 +178,11 @@ class NexentAgent:
                 version_no=metadata.get("version_no", 0),
             )
             from nexent.core.tools.write_skill_file_tool import write_skill_file
+
             return write_skill_file
         elif class_name == "ReadSkillConfigTool":
             from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool
+
             metadata = tool_config.metadata or {}
             get_read_skill_config_tool(
                 local_skills_dir=params.get("local_skills_dir"),
@@ -176,6 +191,7 @@ class NexentAgent:
                 version_no=metadata.get("version_no", 0),
             )
             from nexent.core.tools.read_skill_config_tool import read_skill_config
+
             return read_skill_config
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
@@ -216,7 +232,9 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                managed_agents_list = [self.create_single_agent(sub_agent_config) for sub_agent_config in agent_config.managed_agents]
+                managed_agents_list = [
+                    self.create_single_agent(sub_agent_config) for sub_agent_config in agent_config.managed_agents
+                ]
             except Exception as e:
                 raise ValueError(f"Error in creating managed agent: {e}")
 
@@ -258,13 +276,18 @@ class NexentAgent:
         self.agent.memory.reset()
         # Add conversation history to memory sequentially
         for msg in history:
-            if msg.role == 'user':
+            if msg.role == "user":
                 # Create task step for user message
                 self.agent.memory.steps.append(TaskStep(task=msg.content))
-            elif msg.role == 'assistant':
-                self.agent.memory.steps.append(ActionStep(step_number=len(self.agent.memory.steps) + 1,
-                                                          timing=Timing(start_time=time.time()),
-                                                          action_output=msg.content, model_output=msg.content))
+            elif msg.role == "assistant":
+                self.agent.memory.steps.append(
+                    ActionStep(
+                        step_number=len(self.agent.memory.steps) + 1,
+                        timing=Timing(start_time=time.time()),
+                        action_output=msg.content,
+                        model_output=msg.content,
+                    )
+                )
 
     def agent_run_with_observer(self, query: str, reset=True):
         if not isinstance(self.agent, CoreAgent):
@@ -290,21 +313,22 @@ class NexentAgent:
             else:
                 # prepare for multi-modal final_answer
                 final_answer_str = convert_code_format(str(final_answer))
-            final_answer_str = re.sub(
-                THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
+            final_answer_str = re.sub(THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
             # Remove "思考：" or "思考:" prefix content (until two newlines)
-            final_answer_str = re.sub(
-                THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
-            observer.add_message(self.agent.agent_name,
-                                 ProcessType.FINAL_ANSWER, final_answer_str)
+            final_answer_str = re.sub(THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+            observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, final_answer_str)
 
             # Check if we need to stop from external stop_event
             if self.agent.stop_event.is_set():
-                observer.add_message(self.agent.agent_name, ProcessType.ERROR,
-                                     "Agent execution interrupted by external stop signal")
+                observer.add_message(
+                    self.agent.agent_name, ProcessType.ERROR, "Agent execution interrupted by external stop signal"
+                )
         except Exception as e:
-            observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
-                                 content=f"Error in interaction: {str(e)}")
+            observer.add_message(
+                agent_name=self.agent.agent_name,
+                process_type=ProcessType.ERROR,
+                content=f"Error in interaction: {str(e)}",
+            )
             raise ValueError(f"Error in interaction: {str(e)}")
 
     def set_agent(self, agent: CoreAgent):

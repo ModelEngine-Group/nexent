@@ -19,14 +19,17 @@ from consts.const import (
     POSTGRES_USER,
 )
 from database.db_models import TableBase
-from nexent.storage.storage_client_factory import create_storage_client_from_config, MinIOStorageConfig
+from nexent.storage.storage_client_factory import (
+    create_storage_client_from_config,
+    MinIOStorageConfig,
+)
 
 
 logger = logging.getLogger("database.client")
 
 
 class PostgresClient:
-    _instance: Optional['PostgresClient'] = None
+    _instance: Optional["PostgresClient"] = None
     _conn: Optional[psycopg2.extensions.connection] = None
 
     def __new__(cls):
@@ -48,12 +51,12 @@ class PostgresClient:
                 "password": self.password,
                 "database": self.database,
                 "port": self.port,
-                "client_encoding": "utf8"
+                "client_encoding": "utf8",
             },
             echo=False,
             pool_size=10,
             pool_pre_ping=True,
-            pool_timeout=30
+            pool_timeout=30,
         )
         self.session_maker = sessionmaker(bind=self.engine)
 
@@ -63,8 +66,9 @@ class PostgresClient:
         cleaned_data = {}
         for key, value in data.items():
             if isinstance(value, str):
-                cleaned_data[key] = value.encode(
-                    'utf-8', errors='ignore').decode('utf-8')
+                cleaned_data[key] = value.encode("utf-8", errors="ignore").decode(
+                    "utf-8"
+                )
             else:
                 cleaned_data[key] = value
         return cleaned_data
@@ -77,7 +81,8 @@ class MinioClient:
     This class maintains backward compatibility with the existing MinioClient interface
     while using the new storage SDK under the hood.
     """
-    _instance: Optional['MinioClient'] = None
+
+    _instance: Optional["MinioClient"] = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -86,8 +91,7 @@ class MinioClient:
 
     def __init__(self):
         # Determine if endpoint uses HTTPS
-        secure = MINIO_ENDPOINT.startswith(
-            'https://') if MINIO_ENDPOINT else True
+        secure = MINIO_ENDPOINT.startswith("https://") if MINIO_ENDPOINT else True
         # Initialize storage client using SDK factory
         self.storage_config = MinIOStorageConfig(
             endpoint=MINIO_ENDPOINT,
@@ -95,16 +99,15 @@ class MinioClient:
             secret_key=MINIO_SECRET_KEY,
             region=MINIO_REGION,
             default_bucket=MINIO_DEFAULT_BUCKET,
-            secure=secure
+            secure=secure,
         )
-        self._storage_client = create_storage_client_from_config(
-            self.storage_config)
+        self._storage_client = create_storage_client_from_config(self.storage_config)
 
     def upload_file(
-            self,
-            file_path: str,
-            object_name: Optional[str] = None,
-            bucket: Optional[str] = None
+        self,
+        file_path: str,
+        object_name: Optional[str] = None,
+        bucket: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         Upload local file to MinIO
@@ -119,7 +122,9 @@ class MinioClient:
         """
         return self._storage_client.upload_file(file_path, object_name, bucket)
 
-    def upload_fileobj(self, file_obj: BinaryIO, object_name: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+    def upload_fileobj(
+        self, file_obj: BinaryIO, object_name: str, bucket: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """
         Upload file object to MinIO
 
@@ -133,7 +138,9 @@ class MinioClient:
         """
         return self._storage_client.upload_fileobj(file_obj, object_name, bucket)
 
-    def download_file(self, object_name: str, file_path: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+    def download_file(
+        self, object_name: str, file_path: str, bucket: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """
         Download file from MinIO to local
 
@@ -147,7 +154,9 @@ class MinioClient:
         """
         return self._storage_client.download_file(object_name, file_path, bucket)
 
-    def get_file_url(self, object_name: str, bucket: Optional[str] = None, expires: int = 3600) -> Tuple[bool, str]:
+    def get_file_url(
+        self, object_name: str, bucket: Optional[str] = None, expires: int = 3600
+    ) -> Tuple[bool, str]:
         """
         Get presigned URL for file
 
@@ -187,7 +196,9 @@ class MinioClient:
         """
         return self._storage_client.list_files(prefix, bucket)
 
-    def delete_file(self, object_name: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+    def delete_file(
+        self, object_name: str, bucket: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """
         Delete file
 
@@ -200,7 +211,9 @@ class MinioClient:
         """
         return self._storage_client.delete_file(object_name, bucket)
 
-    def get_file_stream(self, object_name: str, bucket: Optional[str] = None) -> Tuple[bool, Any]:
+    def get_file_stream(
+        self, object_name: str, bucket: Optional[str] = None
+    ) -> Tuple[bool, Any]:
         """
         Get file binary stream from MinIO
 
@@ -226,7 +239,9 @@ class MinioClient:
         """
         return self._storage_client.exists(object_name, bucket)
 
-    def copy_file(self, source_object: str, dest_object: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+    def copy_file(
+        self, source_object: str, dest_object: str, bucket: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """
         Copy a file within the same bucket (atomic operation)
 
@@ -267,11 +282,58 @@ def get_db_session(db_session=None):
             session.close()
 
 
+# ---------------------------------------------------------------------------
+# Independent engine for monitoring module (pool_size=3, isolated from business pool)
+# ---------------------------------------------------------------------------
+_monitoring_engine = None
+_monitoring_session_maker = None
+
+
+def _get_monitoring_engine():
+    global _monitoring_engine, _monitoring_session_maker
+    if _monitoring_engine is None:
+        _monitoring_engine = create_engine(
+            "postgresql://",
+            connect_args={
+                "host": POSTGRES_HOST,
+                "user": POSTGRES_USER,
+                "password": NEXENT_POSTGRES_PASSWORD,
+                "database": POSTGRES_DB,
+                "port": POSTGRES_PORT,
+                "client_encoding": "utf8",
+            },
+            echo=False,
+            pool_size=3,
+            pool_pre_ping=True,
+            pool_timeout=30,
+        )
+        _monitoring_session_maker = sessionmaker(bind=_monitoring_engine)
+    return _monitoring_engine
+
+
+@contextmanager
+def get_monitoring_db_session(db_session=None):
+    _get_monitoring_engine()
+    session = _monitoring_session_maker() if db_session is None else db_session
+    try:
+        yield session
+        if db_session is None:
+            session.commit()
+    except Exception as e:
+        if db_session is None:
+            session.rollback()
+        logger.error(f"Monitoring database operation failed: {str(e)}")
+        raise
+    finally:
+        if db_session is None:
+            session.close()
+
+
 def as_dict(obj):
     from datetime import datetime
 
     # Handle SQLAlchemy ORM objects (both TableBase and other DeclarativeBase subclasses)
-    if hasattr(obj, '__class__') and hasattr(obj.__class__, '__mapper__'):
+    if hasattr(obj, "__class__") and hasattr(obj.__class__, "__mapper__"):
         result = {}
         for c in class_mapper(obj.__class__).columns:
             value = getattr(obj, c.key)

@@ -15,11 +15,22 @@ from sdk.nexent.monitor.monitoring import (
     MonitoringConfig,
     MonitoringManager,
     LLMTokenTracker,
-    get_monitoring_manager
+    get_monitoring_manager,
+    _detect_model_type,
+    _enqueue_monitoring_record,
+    RecordModelCallContext,
+    MonitoringRecordBuffer,
+    get_monitoring_buffer,
+    set_monitoring_context,
+    get_monitoring_context,
+    _monitoring_buffer,
 )
 import pytest
 import asyncio
-from unittest.mock import Mock, MagicMock, patch
+import time
+import sys
+import threading
+from unittest.mock import Mock, MagicMock, patch, call
 
 
 class TestMonitoringConfig:
@@ -46,7 +57,7 @@ class TestMonitoringConfig:
             prometheus_port=9000,
             telemetry_sample_rate=0.5,
             llm_slow_request_threshold_seconds=10.0,
-            llm_slow_token_rate_threshold=20.0
+            llm_slow_token_rate_threshold=20.0,
         )
 
         assert config.enable_telemetry is True
@@ -87,7 +98,7 @@ class TestMonitoringManager:
         manager = MonitoringManager()
         config = MonitoringConfig(enable_telemetry=False)
 
-        with patch.object(manager, '_init_telemetry') as mock_init:
+        with patch.object(manager, "_init_telemetry") as mock_init:
             manager.configure(config)
 
             assert manager._config is config
@@ -98,7 +109,7 @@ class TestMonitoringManager:
         manager = MonitoringManager()
         config = MonitoringConfig(enable_telemetry=True)
 
-        with patch.object(manager, '_init_telemetry') as mock_init:
+        with patch.object(manager, "_init_telemetry") as mock_init:
             manager.configure(config)
 
             assert manager._config is config
@@ -121,25 +132,33 @@ class TestMonitoringManager:
         manager.configure(config_enabled)
         assert manager.is_enabled is True
 
-    @patch('sdk.nexent.monitor.monitoring.trace')
-    @patch('sdk.nexent.monitor.monitoring.metrics')
-    @patch('sdk.nexent.monitor.monitoring.TracerProvider')
-    @patch('sdk.nexent.monitor.monitoring.MeterProvider')
-    @patch('sdk.nexent.monitor.monitoring.JaegerExporter')
-    @patch('sdk.nexent.monitor.monitoring.BatchSpanProcessor')
-    @patch('sdk.nexent.monitor.monitoring.PrometheusMetricReader')
-    @patch('sdk.nexent.monitor.monitoring.Resource')
-    @patch('sdk.nexent.monitor.monitoring.RequestsInstrumentor')
-    def test_init_telemetry_success(self, mock_requests_instr, mock_resource,
-                                    mock_prometheus, mock_batch_processor,
-                                    mock_jaeger, mock_meter_provider,
-                                    mock_tracer_provider, mock_metrics, mock_trace):
+    @patch("sdk.nexent.monitor.monitoring.trace")
+    @patch("sdk.nexent.monitor.monitoring.metrics")
+    @patch("sdk.nexent.monitor.monitoring.TracerProvider")
+    @patch("sdk.nexent.monitor.monitoring.MeterProvider")
+    @patch("sdk.nexent.monitor.monitoring.JaegerExporter")
+    @patch("sdk.nexent.monitor.monitoring.BatchSpanProcessor")
+    @patch("sdk.nexent.monitor.monitoring.PrometheusMetricReader")
+    @patch("sdk.nexent.monitor.monitoring.Resource")
+    @patch("sdk.nexent.monitor.monitoring.RequestsInstrumentor")
+    def test_init_telemetry_success(
+        self,
+        mock_requests_instr,
+        mock_resource,
+        mock_prometheus,
+        mock_batch_processor,
+        mock_jaeger,
+        mock_meter_provider,
+        mock_tracer_provider,
+        mock_metrics,
+        mock_trace,
+    ):
         """Test successful telemetry initialization."""
         manager = MonitoringManager()
         config = MonitoringConfig(
             enable_telemetry=True,
             service_name="test-service",
-            jaeger_endpoint="http://test:14268/api/traces"
+            jaeger_endpoint="http://test:14268/api/traces",
         )
 
         # Mock return values
@@ -162,17 +181,19 @@ class TestMonitoringManager:
         manager.configure(config)
 
         # Verify resource creation (called once during configure)
-        mock_resource.create.assert_called_with({
-            "service.name": "test-service",
-            "service.version": "1.0.0",
-            "service.instance.id": "nexent-instance-1"
-        })
+        mock_resource.create.assert_called_with(
+            {
+                "service.name": "test-service",
+                "service.version": "1.0.0",
+                "service.instance.id": "nexent-instance-1",
+            }
+        )
 
         # Verify tracer provider setup
-        mock_tracer_provider.assert_called_once_with(
-            resource=mock_resource_instance)
+        mock_tracer_provider.assert_called_once_with(resource=mock_resource_instance)
         mock_trace.set_tracer_provider.assert_called_once_with(
-            mock_tracer_provider_instance)
+            mock_tracer_provider_instance
+        )
 
         # Verify metrics setup
         mock_meter_provider.assert_called_once()
@@ -187,7 +208,7 @@ class TestMonitoringManager:
         config = MonitoringConfig(enable_telemetry=False)
         manager.configure(config)
 
-        with patch('sdk.nexent.monitor.monitoring.trace') as mock_trace:
+        with patch("sdk.nexent.monitor.monitoring.trace") as mock_trace:
             manager._init_telemetry()
             mock_trace.set_tracer_provider.assert_not_called()
 
@@ -195,7 +216,7 @@ class TestMonitoringManager:
         """Test telemetry initialization with no config."""
         manager = MonitoringManager()
 
-        with patch('sdk.nexent.monitor.monitoring.trace') as mock_trace:
+        with patch("sdk.nexent.monitor.monitoring.trace") as mock_trace:
             manager._init_telemetry()
             mock_trace.set_tracer_provider.assert_not_called()
 
@@ -205,8 +226,11 @@ class TestMonitoringManager:
         config = MonitoringConfig(enable_telemetry=True)
         manager.configure(config)
 
-        with patch('sdk.nexent.monitor.monitoring.TracerProvider', side_effect=Exception("Test error")):
-            with patch('sdk.nexent.monitor.monitoring.logger') as mock_logger:
+        with patch(
+            "sdk.nexent.monitor.monitoring.TracerProvider",
+            side_effect=Exception("Test error"),
+        ):
+            with patch("sdk.nexent.monitor.monitoring.logger") as mock_logger:
                 manager._init_telemetry()
                 mock_logger.error.assert_called_once()
 
@@ -218,7 +242,9 @@ class TestMonitoringManager:
 
         mock_app = MagicMock()
 
-        with patch('sdk.nexent.monitor.monitoring.FastAPIInstrumentor') as mock_instrumentor:
+        with patch(
+            "sdk.nexent.monitor.monitoring.FastAPIInstrumentor"
+        ) as mock_instrumentor:
             result = manager.setup_fastapi_app(mock_app)
 
             assert result is True
@@ -252,14 +278,15 @@ class TestMonitoringManager:
 
         mock_app = MagicMock()
 
-        with patch('sdk.nexent.monitor.monitoring.FastAPIInstrumentor') as mock_instrumentor:
-            mock_instrumentor.instrument_app.side_effect = Exception(
-                "Test error")
+        with patch(
+            "sdk.nexent.monitor.monitoring.FastAPIInstrumentor"
+        ) as mock_instrumentor:
+            mock_instrumentor.instrument_app.side_effect = Exception("Test error")
 
             result = manager.setup_fastapi_app(mock_app)
             assert result is False
 
-    @patch('sdk.nexent.monitor.monitoring.trace')
+    @patch("sdk.nexent.monitor.monitoring.trace")
     def test_trace_llm_request_enabled(self, mock_trace):
         """Test LLM request tracing when enabled."""
         manager = MonitoringManager()
@@ -269,11 +296,15 @@ class TestMonitoringManager:
 
         mock_span = MagicMock()
         manager._tracer.start_as_current_span.return_value.__enter__ = Mock(
-            return_value=mock_span)
+            return_value=mock_span
+        )
         manager._tracer.start_as_current_span.return_value.__exit__ = Mock(
-            return_value=None)
+            return_value=None
+        )
 
-        with manager.trace_llm_request("test_op", "test_model", param1="value1") as span:
+        with manager.trace_llm_request(
+            "test_op", "test_model", param1="value1"
+        ) as span:
             assert span is mock_span
 
         manager._tracer.start_as_current_span.assert_called_once_with(
@@ -281,8 +312,8 @@ class TestMonitoringManager:
             attributes={
                 "llm.model_name": "test_model",
                 "llm.operation": "test_op",
-                "param1": "value1"
-            }
+                "param1": "value1",
+            },
         )
 
     def test_trace_llm_request_disabled(self):
@@ -304,7 +335,7 @@ class TestMonitoringManager:
         with manager.trace_llm_request("test_op", "test_model") as span:
             assert span is None
 
-    @patch('sdk.nexent.monitor.monitoring.trace')
+    @patch("sdk.nexent.monitor.monitoring.trace")
     def test_trace_llm_request_with_exception(self, mock_trace):
         """Test LLM request tracing with exception."""
         manager = MonitoringManager()
@@ -315,9 +346,11 @@ class TestMonitoringManager:
 
         mock_span = MagicMock()
         manager._tracer.start_as_current_span.return_value.__enter__ = Mock(
-            return_value=mock_span)
+            return_value=mock_span
+        )
         manager._tracer.start_as_current_span.return_value.__exit__ = Mock(
-            return_value=None)
+            return_value=None
+        )
 
         test_error = ValueError("Test error")
 
@@ -331,7 +364,7 @@ class TestMonitoringManager:
             1, {"model": "test_model", "operation": "test_op"}
         )
 
-    @patch('sdk.nexent.monitor.monitoring.trace')
+    @patch("sdk.nexent.monitor.monitoring.trace")
     def test_get_current_span_enabled(self, mock_trace):
         """Test getting current span when enabled."""
         manager = MonitoringManager()
@@ -354,7 +387,7 @@ class TestMonitoringManager:
         result = manager.get_current_span()
         assert result is None
 
-    @patch('sdk.nexent.monitor.monitoring.trace')
+    @patch("sdk.nexent.monitor.monitoring.trace")
     def test_add_span_event_enabled(self, mock_trace):
         """Test adding span event when enabled."""
         manager = MonitoringManager()
@@ -366,10 +399,9 @@ class TestMonitoringManager:
 
         manager.add_span_event("test_event", {"key": "value"})
 
-        mock_span.add_event.assert_called_once_with(
-            "test_event", {"key": "value"})
+        mock_span.add_event.assert_called_once_with("test_event", {"key": "value"})
 
-    @patch('sdk.nexent.monitor.monitoring.trace')
+    @patch("sdk.nexent.monitor.monitoring.trace")
     def test_add_span_event_no_attributes(self, mock_trace):
         """Test adding span event without attributes."""
         manager = MonitoringManager()
@@ -392,7 +424,7 @@ class TestMonitoringManager:
         # Should not raise any exception
         manager.add_span_event("test_event", {"key": "value"})
 
-    @patch('sdk.nexent.monitor.monitoring.trace')
+    @patch("sdk.nexent.monitor.monitoring.trace")
     def test_add_span_event_no_span(self, mock_trace):
         """Test adding span event when no current span."""
         manager = MonitoringManager()
@@ -404,7 +436,7 @@ class TestMonitoringManager:
         # Should not raise any exception
         manager.add_span_event("test_event", {"key": "value"})
 
-    @patch('sdk.nexent.monitor.monitoring.trace')
+    @patch("sdk.nexent.monitor.monitoring.trace")
     def test_set_span_attributes_enabled(self, mock_trace):
         """Test setting span attributes when enabled."""
         manager = MonitoringManager()
@@ -417,7 +449,8 @@ class TestMonitoringManager:
         manager.set_span_attributes(key1="value1", key2="value2")
 
         mock_span.set_attributes.assert_called_once_with(
-            {"key1": "value1", "key2": "value2"})
+            {"key1": "value1", "key2": "value2"}
+        )
 
     def test_set_span_attributes_disabled(self):
         """Test setting span attributes when disabled."""
@@ -459,7 +492,8 @@ class TestMonitoringManager:
         manager.record_llm_metrics("ttft", 0.5, {"model": "test"})
 
         manager._llm_ttft_duration.record.assert_called_once_with(
-            0.5, {"model": "test"})
+            0.5, {"model": "test"}
+        )
 
     def test_record_llm_metrics_token_rate(self):
         """Test recording token rate metrics."""
@@ -470,8 +504,9 @@ class TestMonitoringManager:
 
         manager.record_llm_metrics("token_rate", 10.5, {"model": "test"})
 
-        manager._llm_token_generation_rate.record.assert_called_once_with(10.5, {
-                                                                          "model": "test"})
+        manager._llm_token_generation_rate.record.assert_called_once_with(
+            10.5, {"model": "test"}
+        )
 
     def test_record_llm_metrics_tokens(self):
         """Test recording token count metrics."""
@@ -482,8 +517,7 @@ class TestMonitoringManager:
 
         manager.record_llm_metrics("tokens", 100, {"model": "test"})
 
-        manager._llm_total_tokens.add.assert_called_once_with(
-            100, {"model": "test"})
+        manager._llm_total_tokens.add.assert_called_once_with(100, {"model": "test"})
 
     def test_monitor_endpoint_decorator_async(self):
         """Test monitor_endpoint decorator with async function."""
@@ -491,7 +525,7 @@ class TestMonitoringManager:
         config = MonitoringConfig(enable_telemetry=True)
         manager.configure(config)
 
-        with patch.object(manager, 'trace_llm_request') as mock_trace:
+        with patch.object(manager, "trace_llm_request") as mock_trace:
             mock_context = MagicMock()
             mock_trace.return_value.__enter__ = Mock(return_value=MagicMock())
             mock_trace.return_value.__exit__ = Mock(return_value=None)
@@ -511,7 +545,7 @@ class TestMonitoringManager:
         config = MonitoringConfig(enable_telemetry=True)
         manager.configure(config)
 
-        with patch.object(manager, 'trace_llm_request') as mock_trace:
+        with patch.object(manager, "trace_llm_request") as mock_trace:
             mock_context = MagicMock()
             mock_trace.return_value.__enter__ = Mock(return_value=MagicMock())
             mock_trace.return_value.__exit__ = Mock(return_value=None)
@@ -531,7 +565,7 @@ class TestMonitoringManager:
         config = MonitoringConfig(enable_telemetry=True)
         manager.configure(config)
 
-        with patch.object(manager, 'trace_llm_request') as mock_trace:
+        with patch.object(manager, "trace_llm_request") as mock_trace:
             mock_context = MagicMock()
             mock_trace.return_value.__enter__ = Mock(return_value=MagicMock())
             mock_trace.return_value.__exit__ = Mock(return_value=None)
@@ -550,9 +584,10 @@ class TestMonitoringManager:
         config = MonitoringConfig(enable_telemetry=True)
         manager.configure(config)
 
-        with patch.object(manager, 'trace_llm_request') as mock_trace, \
-                patch.object(manager, 'set_span_attributes') as mock_set_attrs:
-
+        with (
+            patch.object(manager, "trace_llm_request") as mock_trace,
+            patch.object(manager, "set_span_attributes") as mock_set_attrs,
+        ):
             mock_span = MagicMock()
             mock_trace.return_value.__enter__ = Mock(return_value=mock_span)
             mock_trace.return_value.__exit__ = Mock(return_value=None)
@@ -578,9 +613,10 @@ class TestMonitoringManager:
         config = MonitoringConfig(enable_telemetry=True)
         manager.configure(config)
 
-        with patch.object(manager, 'trace_llm_request') as mock_trace, \
-                patch.object(manager, 'create_token_tracker') as mock_create_tracker:
-
+        with (
+            patch.object(manager, "trace_llm_request") as mock_trace,
+            patch.object(manager, "create_token_tracker") as mock_create_tracker,
+        ):
             mock_span = MagicMock()
             mock_trace.return_value.__enter__ = Mock(return_value=mock_span)
             mock_trace.return_value.__exit__ = Mock(return_value=None)
@@ -604,9 +640,10 @@ class TestMonitoringManager:
         config = MonitoringConfig(enable_telemetry=True)
         manager.configure(config)
 
-        with patch.object(manager, 'trace_llm_request') as mock_trace, \
-                patch.object(manager, 'create_token_tracker') as mock_create_tracker:
-
+        with (
+            patch.object(manager, "trace_llm_request") as mock_trace,
+            patch.object(manager, "create_token_tracker") as mock_create_tracker,
+        ):
             mock_span = MagicMock()
             mock_trace.return_value.__enter__ = Mock(return_value=mock_span)
             mock_trace.return_value.__exit__ = Mock(return_value=None)
@@ -636,7 +673,7 @@ class TestLLMTokenTracker:
 
     def test_initialization(self):
         """Test LLMTokenTracker initialization."""
-        with patch('time.time', return_value=123.456):
+        with patch("time.time", return_value=123.456):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
 
             assert tracker.manager is self.manager
@@ -653,7 +690,7 @@ class TestLLMTokenTracker:
         self.manager.is_enabled = True
 
         # 0.5 second difference
-        with patch('time.time', side_effect=[123.456, 123.956]):
+        with patch("time.time", side_effect=[123.456, 123.956]):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
             tracker.record_first_token()
 
@@ -684,7 +721,7 @@ class TestLLMTokenTracker:
         """Test that first token is only recorded once."""
         self.manager.is_enabled = True
 
-        with patch('time.time', side_effect=[123.456, 123.956, 124.456]):
+        with patch("time.time", side_effect=[123.456, 123.956, 124.456]):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
 
             # First call should record
@@ -701,7 +738,7 @@ class TestLLMTokenTracker:
         """Test recording token when monitoring is enabled."""
         self.manager.is_enabled = True
 
-        with patch('time.time', side_effect=[123.456, 123.956]):
+        with patch("time.time", side_effect=[123.456, 123.956]):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
             tracker.record_token("test_token")
 
@@ -710,10 +747,7 @@ class TestLLMTokenTracker:
 
             # Verify span event
             self.span.add_event.assert_called_with(
-                "token_generated", {
-                    "token_count": 1,
-                    "token_length": len("test_token")
-                }
+                "token_generated", {"token_count": 1, "token_length": len("test_token")}
             )
 
     def test_record_token_disabled(self):
@@ -731,7 +765,7 @@ class TestLLMTokenTracker:
         """Test recording multiple tokens."""
         self.manager.is_enabled = True
 
-        with patch('time.time', side_effect=[123.456, 123.956, 124.056, 124.156]):
+        with patch("time.time", side_effect=[123.456, 123.956, 124.056, 124.156]):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
 
             tracker.record_token("token1")
@@ -747,7 +781,7 @@ class TestLLMTokenTracker:
         self.manager.is_enabled = True
 
         # 2.5 second total
-        with patch('time.time', side_effect=[123.456, 123.956, 125.956]):
+        with patch("time.time", side_effect=[123.456, 123.956, 125.956]):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
             tracker.record_first_token()  # Set first token time (creates duration of 0.5s)
             tracker.token_count = 5  # Simulate 5 tokens generated
@@ -783,7 +817,7 @@ class TestLLMTokenTracker:
         self.manager.is_enabled = True
 
         # 2 second total
-        with patch('time.time', side_effect=[123.456, 123.956, 125.456]):
+        with patch("time.time", side_effect=[123.456, 123.956, 125.456]):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
             tracker.record_first_token()
             tracker.token_count = 10
@@ -797,7 +831,7 @@ class TestLLMTokenTracker:
                 "llm.total_tokens": 50,
                 "llm.generation_rate": 5.0,  # 10 tokens / 2 seconds
                 "llm.total_duration": 2.0,
-                "llm.ttft": 0.5  # first_token_time - start_time
+                "llm.ttft": 0.5,  # first_token_time - start_time
             }
             self.span.set_attributes.assert_called_once_with(expected_attrs)
 
@@ -805,7 +839,7 @@ class TestLLMTokenTracker:
         """Test recording completion with zero duration."""
         self.manager.is_enabled = True
 
-        with patch('time.time', return_value=123.456):  # Same time for all calls
+        with patch("time.time", return_value=123.456):  # Same time for all calls
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
             tracker.token_count = 5
 
@@ -820,7 +854,7 @@ class TestLLMTokenTracker:
         self.manager.is_enabled = True
 
         # 1 second total
-        with patch('time.time', side_effect=[123.456, 124.456]):
+        with patch("time.time", side_effect=[123.456, 124.456]):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
             # Don't set token_count (remains 0)
 
@@ -858,10 +892,9 @@ class TestIntegrationScenarios:
     def test_full_monitoring_lifecycle(self):
         """Test complete monitoring lifecycle from config to metrics."""
         manager = get_monitoring_manager()
-        config = MonitoringConfig(
-            enable_telemetry=True, service_name="test-service")
+        config = MonitoringConfig(enable_telemetry=True, service_name="test-service")
 
-        with patch.object(manager, '_init_telemetry'):
+        with patch.object(manager, "_init_telemetry"):
             manager.configure(config)
 
             # Test that all methods work with enabled monitoring
@@ -937,7 +970,7 @@ class TestIntegrationScenarios:
         manager._config.enable_telemetry = True
 
         # Test decorator with mocked internal error handling
-        with patch.object(manager, 'trace_llm_request') as mock_trace:
+        with patch.object(manager, "trace_llm_request") as mock_trace:
             # Mock context manager that handles errors gracefully
             mock_context = MagicMock()
             mock_context.__enter__ = Mock(return_value=None)
@@ -951,3 +984,385 @@ class TestIntegrationScenarios:
             # Function should work normally
             result = test_func()
             assert result == "success"
+
+
+# ---------------------------------------------------------------------------
+# Fixture: reset the module-level _monitoring_buffer singleton before each
+# test so that state never leaks between test classes.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _reset_monitoring_buffer():
+    """Reset the global _monitoring_buffer singleton before each test."""
+    import sdk.nexent.monitor.monitoring as _mod
+
+    original = _mod._monitoring_buffer
+    _mod._monitoring_buffer = None
+    yield
+    # Stop any running flush thread to avoid leaked threads
+    buf = _mod._monitoring_buffer
+    if buf is not None and hasattr(buf, "stop"):
+        buf.stop()
+    _mod._monitoring_buffer = original
+
+
+# =========================================================================
+# TestDetectModelType  (Task 1.1)
+# =========================================================================
+class TestDetectModelType:
+    """Verify _detect_model_type infers model type from class name."""
+
+    def test_vlm_class_name(self):
+        """Class name containing 'vlm' returns 'vlm'."""
+
+        class OpenAIVLModel:
+            pass
+
+        assert _detect_model_type(OpenAIVLModel()) == "vlm"
+
+    def test_llm_class_name(self):
+        """Class name 'OpenAIModel' returns 'llm'."""
+
+        class OpenAIModel:
+            pass
+
+        assert _detect_model_type(OpenAIModel()) == "llm"
+
+    def test_embedding_class_name(self):
+        """Class names containing 'embed' return 'embedding'."""
+
+        class OpenAICompatibleEmbedding:
+            pass
+
+        class JinaEmbedding:
+            pass
+
+        assert _detect_model_type(OpenAICompatibleEmbedding()) == "embedding"
+        assert _detect_model_type(JinaEmbedding()) == "embedding"
+
+    def test_unknown_class_name_defaults_to_llm(self):
+        """Unknown class names default to 'llm'."""
+
+        class SomeRandomModel:
+            pass
+
+        assert _detect_model_type(SomeRandomModel()) == "llm"
+
+
+# =========================================================================
+# TestWriteBatchIsolation  (Tasks 2.1 + 2.2)
+# =========================================================================
+class TestWriteBatchIsolation:
+    """Verify _write_batch isolates individual record failures."""
+
+    def _make_buffer(self):
+        """Create a MonitoringRecordBuffer with flush thread disabled."""
+        with patch.dict("os.environ", {"ENABLE_MODEL_MONITORING": "false"}):
+            buf = MonitoringRecordBuffer()
+        buf._enabled = True
+        return buf
+
+    def _setup_db_mocks(self):
+        """Inject mock database modules into sys.modules for lazy imports."""
+        mock_db_models = MagicMock()
+        mock_db_client = MagicMock()
+        sys.modules["database"] = MagicMock()
+        sys.modules["database.db_models"] = mock_db_models
+        sys.modules["database.client"] = mock_db_client
+        return (
+            mock_db_client.get_monitoring_db_session,
+            mock_db_models.ModelMonitoringRecord,
+        )
+
+    def test_mixed_valid_and_invalid_records(self):
+        """Valid records succeed; invalid ones are skipped silently."""
+        mock_session_fn, mock_model_cls = self._setup_db_mocks()
+        call_count = {"n": 0}
+
+        def _session_ctx():
+            class _Ctx:
+                def __enter__(self_inner):
+                    call_count["n"] += 1
+                    if call_count["n"] == 2:
+                        raise RuntimeError("DB error on second record")
+                    return MagicMock()
+
+                def __exit__(self_inner, *args):
+                    pass
+
+            return _Ctx()
+
+        mock_session_fn.side_effect = _session_ctx
+        buf = self._make_buffer()
+
+        batch = [
+            {"model_name": "m1", "tenant_id": "t1"},
+            {"model_name": "m2", "tenant_id": "t2"},
+            {"model_name": "m3", "tenant_id": "t3"},
+        ]
+        buf._write_batch(batch)
+
+    def test_all_valid_records(self):
+        """All valid records are written successfully."""
+        mock_session_fn, mock_model_cls = self._setup_db_mocks()
+        mock_session = MagicMock()
+        mock_session_fn.return_value.__enter__ = Mock(return_value=mock_session)
+        mock_session_fn.return_value.__exit__ = Mock(return_value=None)
+
+        buf = self._make_buffer()
+        batch = [{"model_name": f"m{i}"} for i in range(3)]
+        buf._write_batch(batch)
+
+        assert mock_session.add.call_count == 3
+
+    def test_all_invalid_records(self):
+        """When every record fails, _write_batch still does not raise."""
+        mock_session_fn, mock_model_cls = self._setup_db_mocks()
+        mock_session_fn.return_value.__enter__ = Mock(
+            side_effect=RuntimeError("DB down")
+        )
+        mock_session_fn.return_value.__exit__ = Mock(return_value=None)
+
+        buf = self._make_buffer()
+        batch = [{"model_name": f"m{i}"} for i in range(3)]
+        buf._write_batch(batch)
+
+
+# =========================================================================
+# TestEnqueueMonitoringRecord  (Tasks 3.1 + 3.2)
+# =========================================================================
+class TestEnqueueMonitoringRecord:
+    """Verify _enqueue_monitoring_record tenant_id checks and snapshot priority."""
+
+    def setup_method(self):
+        """Reset monitoring context vars."""
+        import sdk.nexent.monitor.monitoring as _mod
+
+        _mod._monitoring_tenant_id.set(None)
+        _mod._monitoring_user_id.set(None)
+        _mod._monitoring_agent_id.set(None)
+        _mod._monitoring_conversation_id.set(None)
+
+    def test_enqueue_with_tenant_id(self):
+        """Record is added to buffer when tenant_id is present."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        tracker = MagicMock()
+        tracker.start_time = time.time()
+        tracker.first_token_time = None
+        tracker.input_tokens = 10
+        tracker.output_tokens = 20
+        tracker.token_count = 5
+        tracker._context_snapshot = {"tenant_id": "t-123"}
+
+        with patch(
+            "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+            return_value=mock_buffer,
+        ):
+            _enqueue_monitoring_record(tracker, "model-a", "op", {})
+
+        mock_buffer.add_record.assert_called_once()
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["tenant_id"] == "t-123"
+
+    def test_enqueue_without_tenant_id_skips(self):
+        """Record is NOT added when tenant_id is absent everywhere."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        tracker = MagicMock()
+        tracker._context_snapshot = {}
+        tracker.start_time = time.time()
+        tracker.first_token_time = None
+        tracker.input_tokens = 0
+        tracker.output_tokens = 0
+        tracker.token_count = 0
+
+        with (
+            patch(
+                "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+                return_value=mock_buffer,
+            ),
+            patch(
+                "sdk.nexent.monitor.monitoring.get_monitoring_context", return_value={}
+            ),
+        ):
+            _enqueue_monitoring_record(tracker, "model-a", "op", {})
+
+        mock_buffer.add_record.assert_not_called()
+
+    def test_snapshot_priority_over_live_context(self):
+        """Tracker snapshot tenant_id takes priority over live context."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        tracker = MagicMock()
+        tracker.start_time = time.time()
+        tracker.first_token_time = None
+        tracker.input_tokens = 0
+        tracker.output_tokens = 0
+        tracker.token_count = 0
+        tracker._context_snapshot = {"tenant_id": "from-snapshot"}
+        tracker._display_name = None
+
+        live_ctx = {"tenant_id": "from-live"}
+
+        with (
+            patch(
+                "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+                return_value=mock_buffer,
+            ),
+            patch(
+                "sdk.nexent.monitor.monitoring.get_monitoring_context",
+                return_value=live_ctx,
+            ),
+        ):
+            _enqueue_monitoring_record(tracker, "model-a", "op", {})
+
+        mock_buffer.add_record.assert_called_once()
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["tenant_id"] == "from-snapshot"
+
+
+# =========================================================================
+# TestRecordModelCallContext  (Task 4.1)
+# =========================================================================
+class TestRecordModelCallContext:
+    """Verify RecordModelCallContext handles tenant_id and exceptions correctly."""
+
+    def setup_method(self):
+        """Reset monitoring context vars."""
+        import sdk.nexent.monitor.monitoring as _mod
+
+        _mod._monitoring_tenant_id.set(None)
+        _mod._monitoring_user_id.set(None)
+        _mod._monitoring_agent_id.set(None)
+        _mod._monitoring_conversation_id.set(None)
+
+    def test_normal_flow_with_tenant_id(self):
+        """Record is enqueued when tenant_id is present."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with (
+            patch(
+                "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+                return_value=mock_buffer,
+            ),
+            patch(
+                "sdk.nexent.monitor.monitoring.get_monitoring_context",
+                return_value={
+                    "tenant_id": "t-1",
+                    "user_id": None,
+                    "agent_id": None,
+                    "conversation_id": None,
+                },
+            ),
+        ):
+            with RecordModelCallContext("embedding", "bge-model") as ctx:
+                pass  # no exception
+
+        mock_buffer.add_record.assert_called_once()
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["tenant_id"] == "t-1"
+        assert record["is_success"] is True
+
+    def test_no_tenant_id_does_not_raise(self):
+        """Missing tenant_id causes graceful skip, no exception."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with (
+            patch(
+                "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+                return_value=mock_buffer,
+            ),
+            patch(
+                "sdk.nexent.monitor.monitoring.get_monitoring_context",
+                return_value={
+                    "tenant_id": None,
+                    "user_id": None,
+                    "agent_id": None,
+                    "conversation_id": None,
+                },
+            ),
+        ):
+            # Must NOT raise
+            with RecordModelCallContext("embedding", "bge-model") as ctx:
+                pass
+
+        mock_buffer.add_record.assert_not_called()
+
+    def test_exception_not_suppressed(self):
+        """Exceptions inside the with-block propagate normally."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with pytest.raises(ValueError, match="boom"):
+            with (
+                patch(
+                    "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+                    return_value=mock_buffer,
+                ),
+                patch(
+                    "sdk.nexent.monitor.monitoring.get_monitoring_context",
+                    return_value={
+                        "tenant_id": "t-1",
+                        "user_id": None,
+                        "agent_id": None,
+                        "conversation_id": None,
+                    },
+                ),
+            ):
+                with RecordModelCallContext("embedding", "bge-model"):
+                    raise ValueError("boom")
+
+
+# =========================================================================
+# TestBufferDegradation  (Tasks 5.1 + 5.2)
+# =========================================================================
+class TestBufferDegradation:
+    """Verify MonitoringRecordBuffer degradation and recovery."""
+
+    def _make_buffer(self):
+        """Create a buffer with flush thread disabled."""
+        with patch.dict("os.environ", {"ENABLE_MODEL_MONITORING": "false"}):
+            buf = MonitoringRecordBuffer()
+        buf._enabled = True
+        return buf
+
+    def test_consecutive_failures_trigger_degradation(self):
+        """After 3 consecutive failures, buffer enters degraded mode."""
+        buf = self._make_buffer()
+        buf._max_failures = 3
+
+        with patch.object(buf, "_write_batch", side_effect=RuntimeError("DB down")):
+            buf._buffer.append({"model_name": "m1"})
+            buf._flush_to_db()
+            buf._buffer.append({"model_name": "m2"})
+            buf._flush_to_db()
+            buf._buffer.append({"model_name": "m3"})
+            buf._flush_to_db()
+
+        assert buf._consecutive_failures == 3
+        assert buf._degraded_until > 0
+
+        buf._buffer.append({"model_name": "m4"})
+        with patch.object(buf, "_write_batch") as mock_write:
+            buf._flush_to_db()
+            mock_write.assert_not_called()
+
+    def test_degradation_recovery(self):
+        """After cooldown expires, buffer retries writing."""
+        buf = self._make_buffer()
+        buf._max_failures = 3
+        buf._consecutive_failures = 3
+        buf._degraded_until = time.time() - 1
+
+        buf._buffer.append({"model_name": "m1"})
+
+        with patch.object(buf, "_write_batch") as mock_write:
+            buf._flush_to_db()
+            mock_write.assert_called_once()
+
+        assert buf._consecutive_failures == 0

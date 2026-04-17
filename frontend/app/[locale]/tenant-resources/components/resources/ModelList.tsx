@@ -1,28 +1,37 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Button, Popconfirm, message, Tag, Pagination } from "antd";
+import { Table, Button, Popconfirm, message, Tag } from "antd";
 import { Edit, Trash2, RefreshCw } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
 import type { TablePaginationConfig } from "antd";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
 import { useManageTenantModels } from "@/hooks/model/useManageTenantModels";
+import { useMonitoringData } from "@/hooks/useMonitoringData";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
+import type { ModelMonitoringItem } from "@/types/monitoring";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import { CheckCircle, CircleSlash, XCircle, CircleEllipsis, CircleHelp } from "lucide-react";
 
+interface UnifiedModelRow extends ModelOption {
+  request_count?: number;
+  error_rate?: number;
+  avg_duration?: number;
+  avg_ttft?: number;
+  token_generation_rate?: number;
+  total_tokens?: number;
+}
+
 export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
 
-  // Pagination state
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Use manage API to get models for the specified tenant
   const {
     models = [],
     total = 0,
@@ -34,12 +43,40 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     pageSize,
   });
 
+  const {
+    models: monitoringModels,
+    loading: monitoringLoading,
+    refresh: refreshMonitoring,
+  } = useMonitoringData();
+
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
   const [editDialogVisible, setEditDialogVisible] = useState(false);
 
-  // Track which models are being checked for connectivity
   const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(new Set());
+
+  const monitoringMap = useMemo(() => {
+    const map = new Map<string, ModelMonitoringItem>();
+    for (const m of monitoringModels) {
+      map.set(m.display_name, m);
+    }
+    return map;
+  }, [monitoringModels]);
+
+  const unifiedData: UnifiedModelRow[] = useMemo(() => {
+    return models.map((m) => {
+      const mon = monitoringMap.get(m.displayName);
+      return {
+        ...m,
+        request_count: mon?.request_count,
+        error_rate: mon?.error_rate,
+        avg_duration: mon?.avg_duration,
+        avg_ttft: mon?.avg_ttft,
+        token_generation_rate: mon?.token_generation_rate,
+        total_tokens: mon?.total_tokens,
+      };
+    });
+  }, [models, monitoringMap]);
 
   const openCreate = () => {
     setAddDialogVisible(true);
@@ -91,7 +128,6 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     }
   };
 
-  // Handle checking model connectivity
   const handleCheckConnectivity = async (displayName: string) => {
     if (!tenantId) {
       message.error(t("tenantResources.tenants.tenantIdRequired"));
@@ -109,7 +145,6 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       } else {
         message.warning(t("tenantResources.models.connectivityFailed"));
       }
-      // Refresh the model list to get updated connectivity status
       refetch();
     } catch (error) {
       message.error(t("tenantResources.models.connectivityError"));
@@ -122,11 +157,10 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     }
   };
 
-  // Handle pagination change
   const handlePageChange = (
     pagination: TablePaginationConfig,
     _filters: Record<string, FilterValue | null>,
-    _sorter: SorterResult<ModelOption> | SorterResult<ModelOption>[]
+    _sorter: SorterResult<UnifiedModelRow> | SorterResult<UnifiedModelRow>[]
   ) => {
     const newPage = pagination.current || 1;
     const newPageSize = pagination.pageSize || 10;
@@ -136,13 +170,19 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     }
   };
 
+  const getErrorRateColor = (rate: number | undefined) => {
+    if (rate === undefined) return "default";
+    if (rate < 1.5) return "#52c41a";
+    if (rate < 3) return "#faad14";
+    return "#ff4d4f";
+  };
 
-  const columns: ColumnsType<ModelOption> = [
+  const columns: ColumnsType<UnifiedModelRow> = [
     {
       title: t("common.name"),
       dataIndex: "displayName",
       key: "displayName",
-      width: 200,
+      width: 180,
       ellipsis: true,
     },
     {
@@ -156,7 +196,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("common.status"),
       dataIndex: "connect_status",
       key: "connect_status",
-      width: 100,
+      width: 110,
       render: (status: string) => {
         const color =
                 status === "available" ? "#229954" :
@@ -184,14 +224,71 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("common.source"),
       dataIndex: "source",
       key: "source",
-      width: 100,
+      width: 90,
       render: (source: string) => <Tag color="default">{source}</Tag>,
     },
     {
-      title: t("common.actions"),
+      title: t("monitoring.table.requests"),
+      dataIndex: "request_count",
+      key: "request_count",
+      width: 100,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.request_count ?? 0) - (b.request_count ?? 0),
+      render: (v: number | undefined) => v !== undefined ? v.toLocaleString() : "--",
+    },
+    {
+      title: t("monitoring.table.errorRate"),
+      dataIndex: "error_rate",
+      key: "error_rate",
+      width: 100,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.error_rate ?? 0) - (b.error_rate ?? 0),
+      render: (v: number | undefined) =>
+        v !== undefined ? <Tag color={getErrorRateColor(v)}>{v.toFixed(2)}%</Tag> : "--",
+    },
+    {
+      title: t("monitoring.table.avgDuration"),
+      dataIndex: "avg_duration",
+      key: "avg_duration",
+      width: 110,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.avg_duration ?? 0) - (b.avg_duration ?? 0),
+      render: (v: number | undefined) => v !== undefined ? `${v.toFixed(0)} ${t("monitoring.time.ms")}` : "--",
+    },
+    {
+      title: t("monitoring.table.avgTTFT"),
+      dataIndex: "avg_ttft",
+      key: "avg_ttft",
+      width: 110,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.avg_ttft ?? 0) - (b.avg_ttft ?? 0),
+      render: (v: number | undefined, record: UnifiedModelRow) =>
+        !["llm", "vlm", "long_context"].includes(record.type)
+          ? "--"
+          : v !== undefined ? `${v.toFixed(0)} ${t("monitoring.time.ms")}` : "--",
+    },
+    {
+      title: t("monitoring.table.tokens"),
+      dataIndex: "total_tokens",
+      key: "total_tokens",
+      width: 100,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.total_tokens ?? 0) - (b.total_tokens ?? 0),
+      render: (v: number | undefined, record: UnifiedModelRow) =>
+        !["llm", "vlm", "long_context"].includes(record.type)
+          ? "--"
+          : v !== undefined ? v.toLocaleString() : "--",
+    },
+    {
+      title: t("monitoring.table.tokenGenerationRate"),
+      dataIndex: "token_generation_rate",
+      key: "token_generation_rate",
+      width: 120,
+      sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.token_generation_rate ?? 0) - (b.token_generation_rate ?? 0),
+      render: (v: number | undefined, record: UnifiedModelRow) =>
+        !["llm", "vlm", "long_context"].includes(record.type)
+          ? "--"
+          : v !== undefined ? `${v.toFixed(1)} ${t("monitoring.unit.tokensPerSec")}` : "--",
+    },
+    {
       key: "actions",
-      width: 300,
-      render: (_, record: ModelOption) => (
+      width: 200,
+      render: (_, record: UnifiedModelRow) => (
         <div className="flex items-center space-x-2">
           <Tooltip title={t("tenantResources.models.checkConnectivity")}>
             <Button
@@ -232,25 +329,29 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-auto">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
-        <div />
-        <div>
-          <Button type="primary" onClick={openCreate}>
-            + {t("modelConfig.button.addCustomModel")}
-          </Button>
-        </div>
+        <Button
+          icon={<RefreshCw className="h-3 w-3" />}
+          size="small"
+          onClick={refreshMonitoring}
+        >
+          {t("monitoring.dashboard.refresh")}
+        </Button>
+        <Button type="primary" onClick={openCreate}>
+          + {t("modelConfig.button.addCustomModel")}
+        </Button>
       </div>
 
       <Table
         columns={columns}
-        dataSource={models}
-        loading={isLoading}
+        dataSource={unifiedData}
+        loading={isLoading || monitoringLoading}
         rowKey="id"
         pagination={{
           current: page,
           pageSize: pageSize,
-          total: total
+          total: total,
         }}
         onChange={handlePageChange}
         scroll={{ x: true }}

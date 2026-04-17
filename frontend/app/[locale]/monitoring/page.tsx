@@ -1,185 +1,91 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { motion } from "framer-motion";
-import { Tabs, Button, Drawer, Segmented } from "antd";
-import { ArrowLeftOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { useMonitoringData, useModelDetail, useAlerts } from "@/hooks/useMonitoringData";
-import OverviewCards from "@/components/monitoring/OverviewCards";
-import ModelComparisonTable from "@/components/monitoring/ModelComparisonTable";
-import MonitoringTrendChart from "@/components/monitoring/MonitoringTrendChart";
-import AlertList from "@/components/monitoring/AlertList";
-import PerformanceCharts from "@/components/monitoring/PerformanceCharts";
-import FailureDetailPanel from "@/components/monitoring/FailureDetailPanel";
-import CostAnalysisCharts from "@/components/monitoring/CostAnalysisCharts";
-import type { ModelMonitoringItem } from "@/types/monitoring";
+import { Activity } from "lucide-react";
 
-export default function MonitoringPage() {
+import { useSetupFlow } from "@/hooks/useSetupFlow";
+
+export default function MonitoringContent({}) {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
-
-  const [activeTab, setActiveTab] = useState("models");
-  const [selectedModel, setSelectedModel] = useState<ModelMonitoringItem | null>(null);
-
-  const { models, trend, loading, timeRange, setTimeRange, trendModelId, setTrendModelId, refresh } = useMonitoringData();
-  const alertsHook = useAlerts();
-
-  const handleModelClick = (model: ModelMonitoringItem) => {
-    setSelectedModel(model);
-  };
-
-  const timeOptions = [
-    { label: t("monitoring.dashboard.timeRange.24h"), value: "24h" },
-    { label: t("monitoring.dashboard.timeRange.7d"), value: "7d" },
-    { label: t("monitoring.dashboard.timeRange.30d"), value: "30d" },
-  ];
-
-  const tabItems = [
-    {
-      key: "models",
-      label: t("monitoring.dashboard.models"),
-      children: (
-        <div className="space-y-4">
-          <OverviewCards models={models} loading={loading} />
-          <MonitoringTrendChart
-            trend={trend}
-            models={models}
-            loading={loading}
-            selectedModelId={trendModelId}
-            onModelChange={setTrendModelId}
-          />
-          <ModelComparisonTable
-            models={models}
-            loading={loading}
-            onModelClick={handleModelClick}
-          />
-        </div>
-      ),
-    },
-    {
-      key: "alerts",
-      label: t("monitoring.dashboard.alerts"),
-      children: (
-        <AlertList
-          alerts={alertsHook.alerts.items}
-          total={alertsHook.alerts.total}
-          loading={alertsHook.loading}
-          onAcknowledge={alertsHook.acknowledge}
-          onResolve={alertsHook.resolve}
-        />
-      ),
-    },
-  ];
-
   return (
-    <div className="w-full h-full">
-      <motion.div
-        initial="initial"
-        animate="in"
-        exit="out"
-        variants={pageVariants}
-        transition={pageTransition}
-        className="w-full h-full p-6 overflow-auto"
-      >
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-              {t("monitoring.dashboard.title")}
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              {t("monitoring.dashboard.subtitle")}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Segmented
-              options={timeOptions}
-              value={timeRange}
-              onChange={(v) => setTimeRange(v as string)}
-              size="small"
-            />
-            <Button
-              icon={<ReloadOutlined />}
-              size="small"
-              onClick={refresh}
+    <>
+      <div className="w-full h-full">
+        <motion.div
+          initial="initial"
+          animate="in"
+          exit="out"
+          variants={pageVariants}
+          transition={pageTransition}
+          className="w-full h-full flex items-center justify-center"
+        >
+          <div className="flex flex-col items-center justify-center space-y-6 p-8 max-w-md text-center">
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+              className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-sky-600 flex items-center justify-center shadow-lg"
             >
-              {t("monitoring.dashboard.refresh")}
-            </Button>
+              <Activity className="h-12 w-12 text-white" />
+            </motion.div>
+
+            <motion.h1
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="text-3xl font-bold text-slate-800 dark:text-slate-100"
+            >
+              {t("monitoring.comingSoon.title")}
+            </motion.h1>
+
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+              className="text-lg text-slate-600 dark:text-slate-400"
+            >
+              {t("monitoring.comingSoon.description")}
+            </motion.p>
+
+            <motion.ul
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className="text-left space-y-2 w-full"
+            >
+              <li className="flex items-start space-x-2">
+                <span className="text-emerald-500 mt-1">✓</span>
+                <span className="text-slate-600 dark:text-slate-400">
+                  {t("monitoring.comingSoon.feature1")}
+                </span>
+              </li>
+              <li className="flex items-start space-x-2">
+                <span className="text-emerald-500 mt-1">✓</span>
+                <span className="text-slate-600 dark:text-slate-400">
+                  {t("monitoring.comingSoon.feature2")}
+                </span>
+              </li>
+              <li className="flex items-start space-x-2">
+                <span className="text-emerald-500 mt-1">✓</span>
+                <span className="text-slate-600 dark:text-slate-400">
+                  {t("monitoring.comingSoon.feature3")}
+                </span>
+              </li>
+            </motion.ul>
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.6 }}
+              className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-sky-600 text-white rounded-full text-sm font-medium shadow-md"
+            >
+              {t("monitoring.comingSoon.badge")}
+            </motion.div>
           </div>
-        </div>
-
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={tabItems}
-        />
-      </motion.div>
-
-      <ModelDetailDrawer
-        model={selectedModel}
-        onClose={() => setSelectedModel(null)}
-      />
-    </div>
-  );
-}
-
-function ModelDetailDrawer({
-  model,
-  onClose,
-}: {
-  model: ModelMonitoringItem | null;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation("common");
-  const { summary, trend: modelTrend, failures, loading } = useModelDetail(model?.model_id ?? "");
-
-  if (!model) return null;
-
-  const detailTabs = [
-    {
-      key: "overview",
-      label: t("monitoring.detail.overview"),
-      children: (
-        <div className="space-y-4">
-          <MonitoringTrendChart
-            trend={modelTrend}
-            models={[model]}
-            loading={loading}
-            selectedModelId={model.model_id}
-            onModelChange={() => {}}
-          />
-          <PerformanceCharts summary={summary} loading={loading} />
-        </div>
-      ),
-    },
-    {
-      key: "failures",
-      label: t("monitoring.detail.failures"),
-      children: <FailureDetailPanel failures={failures} loading={loading} />,
-    },
-    {
-      key: "cost",
-      label: t("monitoring.detail.cost"),
-      children: <CostAnalysisCharts summary={summary} loading={loading} />,
-    },
-  ];
-
-  return (
-    <Drawer
-      title={
-        <div className="flex items-center gap-2">
-          <span className="font-semibold">{model.display_name}</span>
-          <span className="text-sm text-slate-400">{model.model_name}</span>
-        </div>
-      }
-      placement="right"
-      width={720}
-      open={!!model}
-      onClose={onClose}
-      styles={{ body: { padding: "0 16px 16px" } }}
-    >
-      <Tabs items={detailTabs} />
-    </Drawer>
+        </motion.div>
+      </div>
+    </>
   );
 }

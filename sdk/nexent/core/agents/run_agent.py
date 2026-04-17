@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextvars import copy_context
 from threading import Thread
 from typing import Any, Dict, Union
 
@@ -89,16 +90,14 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             nexent = NexentAgent(
                 observer=agent_run_info.observer,
                 model_config_list=agent_run_info.model_config_list,
-                stop_event=agent_run_info.stop_event
+                stop_event=agent_run_info.stop_event,
             )
             agent = nexent.create_single_agent(agent_run_info.agent_config)
             nexent.set_agent(agent)
             nexent.add_history_to_agent(agent_run_info.history)
-            nexent.agent_run_with_observer(
-                query=agent_run_info.query, reset=False)
+            nexent.agent_run_with_observer(query=agent_run_info.query, reset=False)
         else:
-            agent_run_info.observer.add_message(
-                "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
+            agent_run_info.observer.add_message("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
             # Normalize MCP host configurations to support both string and dict formats
             mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
 
@@ -107,22 +106,23 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     observer=agent_run_info.observer,
                     model_config_list=agent_run_info.model_config_list,
                     stop_event=agent_run_info.stop_event,
-                    mcp_tool_collection=tool_collection
+                    mcp_tool_collection=tool_collection,
                 )
                 agent = nexent.create_single_agent(agent_run_info.agent_config)
                 nexent.set_agent(agent)
                 nexent.add_history_to_agent(agent_run_info.history)
-                nexent.agent_run_with_observer(
-                    query=agent_run_info.query, reset=False)
+                nexent.agent_run_with_observer(query=agent_run_info.query, reset=False)
 
     except Exception as e:
         if "Couldn't connect to the MCP server" in str(e):
-            mcp_connect_error_str = "MCP服务器连接超时。" if agent_run_info.observer.lang == "zh" else "Couldn't connect to the MCP server."
-            agent_run_info.observer.add_message(
-                "", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
+            mcp_connect_error_str = (
+                "MCP服务器连接超时。"
+                if agent_run_info.observer.lang == "zh"
+                else "Couldn't connect to the MCP server."
+            )
+            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
         else:
-            agent_run_info.observer.add_message(
-                "", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
+            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
         raise ValueError(f"Error in agent_run_thread: {e}")
 
 
@@ -131,15 +131,16 @@ async def agent_run(agent_run_info: AgentRunInfo):
     observer = agent_run_info.observer
 
     monitoring_manager.add_span_event("agent_run.started")
-    thread_agent = Thread(target=agent_run_thread, args=(agent_run_info,))
+    # copy_context() preserves contextvars (e.g. tenant_id) into the new thread
+    ctx = copy_context()
+    thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
     thread_agent.start()
     monitoring_manager.add_span_event("agent_run.thread_started")
 
     while thread_agent.is_alive():
         monitoring_manager.add_span_event("agent_run.get_cached_message")
         cached_message = observer.get_cached_message()
-        monitoring_manager.add_span_event(
-            "agent_run.get_cached_message_completed")
+        monitoring_manager.add_span_event("agent_run.get_cached_message_completed")
         for message in cached_message:
             yield message
             monitoring_manager.add_span_event("agent_run.yield_message")
