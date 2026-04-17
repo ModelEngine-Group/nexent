@@ -179,7 +179,10 @@ export function setAgentGenerationStatus(
   const updates = businessInfo
     ? { isGenerating, ...businessInfo }
     : { isGenerating };
-  updateAgentGenerationCache(agentId, updates);
+  updateAgentGenerationCache<keyof typeof updates>(
+    agentId,
+    updates as Pick<AgentGenerationCache, 'isGenerating' | 'businessDescription' | 'businessLogicModelId' | 'businessLogicModelName'>
+  );
 }
 
 /**
