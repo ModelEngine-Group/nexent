@@ -1,12 +1,12 @@
 import threading
 import logging
-from typing import List
+from typing import List, Optional
 from urllib.parse import urljoin
 from datetime import datetime
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig
+from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig
 from nexent.memory.memory_service import search_memory_in_levels
 
 from services.file_management_service import get_llm_model
@@ -17,6 +17,8 @@ from services.vectordatabase_service import (
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
+
+from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
 from services.image_service import get_vlm_model
 from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
@@ -63,6 +65,95 @@ def _get_skills_for_template(
         ]
     except Exception as e:
         logger.warning(f"Failed to get skills for template: {e}")
+        return []
+
+
+def _extract_url_from_card(raw_card: Optional[dict]) -> str:
+    """Extract http-json-rpc URL from Agent Card supportedInterfaces."""
+    if not raw_card:
+        return ""
+
+    supported_interfaces = raw_card.get("supportedInterfaces", [])
+    if not supported_interfaces:
+        return raw_card.get("url", "")
+
+    # Prefer http-json-rpc protocol
+    for iface in supported_interfaces:
+        protocol_binding = iface.get("protocolBinding", "").lower()
+        if protocol_binding in ("http-json-rpc", "jsonrpc", "httpjsonrpc"):
+            url = iface.get("url", "")
+            if url:
+                return url
+
+    # Fallback to first interface with a URL
+    for iface in supported_interfaces:
+        url = iface.get("url", "")
+        if url:
+            return url
+
+    return raw_card.get("url", "")
+
+
+def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgentConfig:
+    """Build an ExternalA2AAgentConfig from agent data."""
+    return ExternalA2AAgentConfig(
+        agent_id=str(agent.get("external_agent_id", "")),
+        name=agent.get("name", "Unknown"),
+        description=agent.get("description", "External A2A agent"),
+        url=agent_url,
+        api_key=None,
+        transport_type=agent.get("transport_type", "http-streaming"),
+        protocol_version=agent.get("protocol_version", "1.0"),
+        protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
+        timeout=300.0,
+        raw_card=agent.get("raw_card"),
+    )
+
+
+def _get_external_a2a_agents(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int = 0
+) -> List[ExternalA2AAgentConfig]:
+    """Get external A2A agent configurations for an agent.
+
+    Args:
+        agent_id: Agent ID
+        tenant_id: Tenant ID
+        version_no: Version number
+
+    Returns:
+        List of ExternalA2AAgentConfig for external A2A sub-agents
+    """
+    logger.info(f"[_get_external_a2a_agents] START - agent_id={agent_id}, tenant_id={tenant_id}")
+    try:
+        from database import a2a_agent_db
+
+        external_agents = a2a_agent_db.query_external_sub_agents(
+            local_agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+        logger.info(f"[_get_external_a2a_agents] DB query returned {len(external_agents)} agents")
+        logger.debug(f"[_get_external_a2a_agents] agent details: {external_agents}")
+
+        result = []
+        for agent in external_agents:
+            agent_url = agent.get("agent_url", "") or _extract_url_from_card(agent.get("raw_card"))
+            if not agent_url:
+                logger.warning(
+                    f"[_get_external_a2a_agents] Skipping agent '{agent.get('name')}' - no URL available"
+                )
+                continue
+
+            result.append(_build_external_agent_config(agent, agent_url))
+
+        logger.info(f"[_get_external_a2a_agents] returning {len(result)} ExternalA2AAgentConfig")
+        for i, config in enumerate(result):
+            logger.info(f"  [{i}] name={config.name}, description={config.description}")
+        return result
+    except Exception as e:
+        logger.error(f"[_get_external_a2a_agents] FAILED: {e}", exc_info=True)
         return []
 
 
@@ -209,6 +300,9 @@ async def create_agent_config(
         )
         managed_agents.append(sub_agent_config)
 
+    # create external A2A agents (synchronous function, no await needed)
+    external_a2a_agents = _get_external_a2a_agents(agent_id, tenant_id, version_no)
+
     tool_list = await create_tool_config_list(agent_id, tenant_id, user_id, version_no=version_no)
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
@@ -216,9 +310,9 @@ async def create_agent_config(
     constraint_prompt = agent_info.get("constraint_prompt", "")
     few_shots_prompt = agent_info.get("few_shots_prompt", "")
 
-    # Get template content
-    prompt_template = get_agent_prompt_template(
-        is_manager=len(managed_agents) > 0, language=language)
+    # Get template content (use manager template if has any sub-agents)
+    is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
+    prompt_template = get_agent_prompt_template(is_manager=is_manager, language=language)
 
     # Get app information
     default_app_description = 'Nexent 是一个开源智能体SDK和平台' if language == 'zh' else 'Nexent is an open-source agent SDK and platform'
@@ -228,7 +322,7 @@ async def create_agent_config(
         'APP_DESCRIPTION', tenant_id=tenant_id) or default_app_description
 
     # Get memory list
-    memory_context = build_memory_context(user_id, tenant_id, agent_id)
+    memory_context = build_memory_context(user_id, tenant_id, agent_id, skip_query=not allow_memory_search)
     memory_list = []
     if allow_memory_search and memory_context.user_config.memory_switch:
         logger.debug("Retrieving memory list...")
@@ -288,6 +382,7 @@ async def create_agent_config(
         "tools": {tool.name: tool for tool in tool_list},
         "skills": skills,
         "managed_agents": {agent.name: agent for agent in managed_agents},
+        "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
         "APP_NAME": app_name,
         "APP_DESCRIPTION": app_description,
         "memory_list": memory_list,
@@ -306,7 +401,7 @@ async def create_agent_config(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         description="undefined" if agent_info["description"] is None else agent_info["description"],
         prompt_templates=await prepare_prompt_templates(
-            is_manager=len(managed_agents) > 0,
+            is_manager=len(managed_agents) > 0 or len(external_a2a_agents) > 0,
             system_prompt=system_prompt,
             language=language,
             agent_id=agent_id
@@ -315,7 +410,8 @@ async def create_agent_config(
         max_steps=agent_info.get("max_steps", 10),
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
-        managed_agents=managed_agents
+        managed_agents=managed_agents,
+        external_a2a_agents=external_a2a_agents
     )
     return agent_config
 
@@ -482,7 +578,7 @@ def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict)
                 used_mcp_urls.add(
                     mcp_info_dict[tool.usage]["remote_mcp_server"])
 
-        # Recursively check sub-agent
+        # Recursively check sub-agents (only internal AgentConfig, not external A2A)
         for sub_agent_config in agent_config.managed_agents:
             check_agent_tools(sub_agent_config)
 

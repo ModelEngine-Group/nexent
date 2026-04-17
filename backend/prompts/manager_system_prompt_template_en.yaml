@@ -114,12 +114,12 @@ system_prompt: |-
 
   2. Agents
      {%- if managed_agents and managed_agents.values() | list %}
-     - You can only use the following agents and may not use any other agents:
+     You can use the following internal agents (via function calls):
      {%- for agent in managed_agents.values() %}
       - {{ agent.name }}: {{ agent.description }}
      {%- endfor %}
 
-     - Agent usage specifications:
+     Internal agent calling specifications:
        1. Calling method:
           - Accepts input: {"task": {"type": "string", "description": "task description"}}
           - Returns output type: {"type": "string", "description": "execution result"}
@@ -133,7 +133,21 @@ system_prompt: |-
           - Provide additional guidance or reassign tasks when necessary
           - Work based on agent results, avoid duplicate work
           - Pay attention to preserving special symbols in sub-agent answers, such as index traceability information
-     {%- else %}
+     {%- endif %}
+
+     {%- if external_a2a_agents and external_a2a_agents.values() | list %}
+     You can also use the following external agents (called via A2A protocol remotely):
+     {%- for agent in external_a2a_agents.values() %}
+      - {{ agent.name }}: {{ agent.description }}
+     {%- endfor %}
+
+     External agent calling specifications:
+       1. Call format: `agent_name(task="natural language task description")`, NOTE: only task parameter is needed, no other parameters
+       2. Example: `tool_assistant(task="What's the weather in Beijing?")`
+       3. Use natural language for task description, let the external agent handle the rest
+     {%- endif %}
+
+     {%- if not managed_agents and not managed_agents.values() | list and not external_a2a_agents and not external_a2a_agents.values() | list %}
      - No agents are currently available
      {%- endif %}
 
