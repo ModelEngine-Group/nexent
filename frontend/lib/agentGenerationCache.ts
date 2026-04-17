@@ -4,7 +4,7 @@
  * when switching back to the same agent
  */
 
-const GENERATION_CACHE_PREFIX = 'nexent_agent_generation_cache_';
+const GENERATION_CACHE_PREFIX = "nexent_agent_generation_cache_";
 
 /**
  * Cache structure for agent generation content
