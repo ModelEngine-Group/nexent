@@ -4387,7 +4387,7 @@ class TestDeleteOuterApiTool:
 
         assert result is True
         mock_delete.assert_called_once_with(1, "tenant1", "user1")
-        mock_remove.assert_called_once_with("test_tool", "tenant1")
+        mock_remove.assert_called_once_with("test_tool", "tenant1", None)
 
     @patch('backend.services.tool_configuration_service._remove_outer_api_tool_from_mcp')
     @patch('backend.services.tool_configuration_service.query_outer_api_tool_by_id')
@@ -4433,7 +4433,11 @@ class TestRemoveOuterApiToolFromMcp:
         result = _remove_outer_api_tool_from_mcp("test_tool", "tenant1")
 
         assert result is True
-        mock_delete.assert_called_once()
+        mock_delete.assert_called_once_with(
+            "http://localhost:5015/tools/outer_api/test_tool",
+            headers={},
+            timeout=10
+        )
 
     @patch('requests.delete')
     def test_remove_outer_api_tool_from_mcp_failure(self, mock_delete):
@@ -4476,7 +4480,12 @@ class TestRefreshOuterApiToolsInMcp:
         result = _refresh_outer_api_tools_in_mcp("tenant1")
 
         assert result == {"refreshed": 5}
-        mock_post.assert_called_once()
+        mock_post.assert_called_once_with(
+            "http://localhost:5015/tools/outer_api/refresh",
+            params={"tenant_id": "tenant1"},
+            headers={},
+            timeout=30
+        )
 
     @patch('time.sleep')
     @patch('requests.post')
@@ -4551,7 +4560,7 @@ class TestUpdateToolListRefreshOuterApi:
         from backend.services.tool_configuration_service import update_tool_list
         await update_tool_list("tenant123", "user456")
 
-        mock_refresh.assert_called_once_with("tenant123")
+        mock_refresh.assert_called_once_with("tenant123", None)
 
     @pytest.mark.asyncio
     @patch('backend.services.tool_configuration_service._refresh_outer_api_tools_in_mcp')

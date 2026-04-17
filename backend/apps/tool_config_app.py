@@ -73,7 +73,11 @@ async def scan_and_update_tool(
     """ Used to update the tool list and status """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+        await update_tool_list(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            authorization_token=authorization
+        )
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Successfully update tool", "status": "success"}
@@ -159,7 +163,7 @@ async def import_openapi_api(
         user_id, tenant_id = get_current_user_id(authorization)
         result = import_openapi_json(openapi_json, tenant_id, user_id)
 
-        mcp_result = _refresh_outer_api_tools_in_mcp(tenant_id)
+        mcp_result = _refresh_outer_api_tools_in_mcp(tenant_id, authorization)
         result["mcp_refresh"] = mcp_result
 
         return JSONResponse(
@@ -246,7 +250,7 @@ async def delete_outer_api_tool_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        deleted = delete_outer_api_tool(tool_id, tenant_id, user_id)
+        deleted = delete_outer_api_tool(tool_id, tenant_id, user_id, authorization)
         if not deleted:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,

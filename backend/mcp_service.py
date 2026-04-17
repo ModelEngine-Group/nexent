@@ -79,6 +79,19 @@ _registered_outer_api_tools: Dict[str, Callable] = {}
 _mcp_management_app = None
 
 
+def _require_management_authorization(authorization: Optional[str]) -> tuple[str, str]:
+    """Validate the caller for MCP management endpoints."""
+    try:
+        from utils.auth_utils import get_current_user_id
+        return get_current_user_id(authorization)
+    except Exception as e:
+        logger.warning(f"Unauthorized MCP management API access: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token"
+        ) from e
+
+
 def get_mcp_management_app():
     """Get or create FastAPI app for MCP management endpoints."""
     global _mcp_management_app
@@ -97,6 +110,7 @@ def get_mcp_management_app():
             to notify the MCP server to reload outer API tools.
             """
             try:
+                _require_management_authorization(authorization)
                 result = refresh_outer_api_tools(tenant_id)
                 return {
                     "status": "success",
@@ -111,6 +125,7 @@ def get_mcp_management_app():
             authorization: Optional[str] = Header(None)
         ):
             """List all registered outer API tool names."""
+            _require_management_authorization(authorization)
             return {
                 "status": "success",
                 "data": get_registered_outer_api_tools()
@@ -131,6 +146,7 @@ def get_mcp_management_app():
                 Success status
             """
             try:
+                _require_management_authorization(authorization)
                 sanitized_name = _sanitize_function_name(tool_name)
                 result = remove_outer_api_tool(sanitized_name)
                 if result:

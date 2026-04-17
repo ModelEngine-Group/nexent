@@ -80,8 +80,11 @@ sys.modules['tool_collection.mcp.local_mcp_service'] = stub_local_mcp
 stub_utils = types.ModuleType("utils")
 stub_utils.logging_utils = types.ModuleType("utils.logging_utils")
 stub_utils.logging_utils.configure_logging = MagicMock()
+stub_utils.auth_utils = types.ModuleType("utils.auth_utils")
+stub_utils.auth_utils.get_current_user_id = MagicMock(return_value=("user123", "tenant456"))
 sys.modules['utils'] = stub_utils
 sys.modules['utils.logging_utils'] = stub_utils.logging_utils
+sys.modules['utils.auth_utils'] = stub_utils.auth_utils
 
 # Stub database
 stub_database = types.ModuleType("database")
@@ -99,10 +102,7 @@ stub_outer_api_tool_db.query_available_outer_api_tools = MagicMock()
 sys.modules['database.outer_api_tool_db'] = stub_outer_api_tool_db
 sys.modules['backend.database.outer_api_tool_db'] = stub_outer_api_tool_db
 
-# Stub http
-stub_http = types.ModuleType("http")
-stub_http.HTTPStatus = types.SimpleNamespace(OK=200)
-sys.modules['http'] = stub_http
+# Keep the stdlib http module intact so later httpx imports still work.
 
 # Import the module under test
 import mcp_service
@@ -1117,7 +1117,8 @@ class TestMcpManagementApp:
         assert app1 is app2
 
     @pytest.mark.asyncio
-    async def test_refresh_outer_api_tools_endpoint(self, mock_nexent_mcp):
+    @patch.object(mcp_service, '_require_management_authorization', return_value=("user123", "tenant456"))
+    async def test_refresh_outer_api_tools_endpoint(self, mock_require_auth, mock_nexent_mcp):
         """Test refresh outer API tools endpoint"""
         tools = [{"name": "api1", "url": "https://api.example.com/1"}]
         mcp_service.query_available_outer_api_tools.return_value = tools
@@ -1133,9 +1134,11 @@ class TestMcpManagementApp:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "success"
+        mock_require_auth.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_list_outer_api_tools_endpoint(self, mock_nexent_mcp):
+    @patch.object(mcp_service, '_require_management_authorization', return_value=("user123", "tenant456"))
+    async def test_list_outer_api_tools_endpoint(self, mock_require_auth, mock_nexent_mcp):
         """Test list outer API tools endpoint"""
         app = mcp_service.get_mcp_management_app()
         client = TestClient(app)
@@ -1146,9 +1149,11 @@ class TestMcpManagementApp:
         data = response.json()
         assert data["status"] == "success"
         assert "data" in data
+        mock_require_auth.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_remove_outer_api_tool_endpoint_success(self, mock_nexent_mcp):
+    @patch.object(mcp_service, '_require_management_authorization', return_value=("user123", "tenant456"))
+    async def test_remove_outer_api_tool_endpoint_success(self, mock_require_auth, mock_nexent_mcp):
         """Test remove outer API tool endpoint success"""
         tools = [{"name": "api1", "url": "https://api.example.com/1"}]
         mcp_service.query_available_outer_api_tools.return_value = tools
@@ -1162,9 +1167,11 @@ class TestMcpManagementApp:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "success"
+        mock_require_auth.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_remove_outer_api_tool_endpoint_not_found(self, mock_nexent_mcp):
+    @patch.object(mcp_service, '_require_management_authorization', return_value=("user123", "tenant456"))
+    async def test_remove_outer_api_tool_endpoint_not_found(self, mock_require_auth, mock_nexent_mcp):
         """Test remove outer API tool endpoint when tool not found"""
         app = mcp_service.get_mcp_management_app()
         client = TestClient(app)
@@ -1175,9 +1182,11 @@ class TestMcpManagementApp:
         # verifies that remove_outer_api_tool returns False for not found
         # In real test with FastAPI, this would return 404
         assert response is not None
+        mock_require_auth.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_refresh_endpoint_exception(self, mock_nexent_mcp):
+    @patch.object(mcp_service, '_require_management_authorization', return_value=("user123", "tenant456"))
+    async def test_refresh_endpoint_exception(self, mock_require_auth, mock_nexent_mcp):
         """Test refresh endpoint handles exceptions"""
         mcp_service.query_available_outer_api_tools.side_effect = Exception("DB error")
 
@@ -1193,6 +1202,36 @@ class TestMcpManagementApp:
         # catches the exception and returns 500
         # In real test with FastAPI, this would return 500
         assert response is not None
+        mock_require_auth.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch.object(mcp_service, '_require_management_authorization')
+    async def test_refresh_outer_api_tools_endpoint_unauthorized(self, mock_require_auth, mock_nexent_mcp):
+        """Test refresh outer API tools endpoint rejects unauthorized access."""
+        mock_require_auth.side_effect = RealHTTPException(status_code=401, detail="Invalid or expired authentication token")
+
+        app = mcp_service.get_mcp_management_app()
+        client = TestClient(app)
+
+        response = await client.post(
+            "/tools/outer_api/refresh",
+            params={"tenant_id": "tenant1"}
+        )
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    @patch.object(mcp_service, '_require_management_authorization')
+    async def test_list_outer_api_tools_endpoint_unauthorized(self, mock_require_auth, mock_nexent_mcp):
+        """Test list outer API tools endpoint rejects unauthorized access."""
+        mock_require_auth.side_effect = RealHTTPException(status_code=401, detail="Invalid or expired authentication token")
+
+        app = mcp_service.get_mcp_management_app()
+        client = TestClient(app)
+
+        response = await client.get("/tools/outer_api")
+
+        assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------
