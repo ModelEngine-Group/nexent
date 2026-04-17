@@ -26,8 +26,7 @@ import {
   setAgentGenerationStatus,
   saveGeneratedField,
   clearAgentGenerationCache,
-  clearExpiredGenerationCaches,
-  AgentGenerationCache,
+  clearExpiredGenerationCaches
 } from "@/lib/agentGenerationCache";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
@@ -115,10 +114,6 @@ export default function AgentGenerateDetail({
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
-
-  // Track which agent is currently being generated (stored in cache)
-  // This allows us to detect if we're generating for a different agent
-  const [generatingForAgentId, setGeneratingForAgentId] = useState<number | null>(null);
 
   // Use ref to track generation initiator - this doesn't trigger re-renders
   // but is accessible in closures
@@ -586,8 +581,6 @@ export default function AgentGenerateDetail({
     const effectiveAgentId = currentAgentId ?? 0;
 
     setIsGenerating(true);
-    setGeneratingForAgentId(effectiveAgentId);
-    // Store the agent ID that initiated the generation
     generationInitiatorRef.current = effectiveAgentId;
     setActiveTab("few-shots");
 
@@ -698,7 +691,6 @@ export default function AgentGenerateDetail({
           // Always clear generating state regardless of current agent
           // This prevents stuck "generating" state when user switches agents
           setIsGenerating(false);
-          setGeneratingForAgentId(null);
           generationInitiatorRef.current = null;
 
           // If we're on the same agent, show error message
@@ -735,12 +727,13 @@ export default function AgentGenerateDetail({
           // Clear generating state immediately for ALL cases
           // This prevents the "stuck in generating" state when user switches agents
           setIsGenerating(false);
-          setGeneratingForAgentId(null);
           generationInitiatorRef.current = null;
 
           // If not on same agent, keep the cache so user can restore when switching back
           // Do NOT clear cache here - the cache contains the completed generation result
+          // Always mark cache as finished (isGenerating=false) so switch-back effect can restore it
           if (!isSameAgent) {
+            setAgentGenerationStatus(generationAgentId, false);
             return;
           }
 
@@ -788,7 +781,6 @@ export default function AgentGenerateDetail({
 
       // Clear generating state but keep cache for potential resume
       setIsGenerating(false);
-      setGeneratingForAgentId(null);
       generationInitiatorRef.current = null;
       setAgentGenerationStatus(effectiveAgentId, false);
     }
