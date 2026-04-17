@@ -58,6 +58,9 @@ sys.modules['database.group_db'] = MagicMock()
 sys.modules['database.user_tenant_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
 
+# Mock a2a_agent_db (referenced by agent_service.py)
+sys.modules['database.a2a_agent_db'] = MagicMock()
+
 # Mock services submodules
 sys.modules['services'] = MagicMock()
 sys.modules['services.conversation_management_service'] = MagicMock()

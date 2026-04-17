@@ -1629,7 +1629,7 @@ class ElasticSearchService:
                 base_fields={
                     **update_fields,
                     "updated_by": user_id,
-                    "update_time": datetime.utcnow().strftime(
+                    "update_time": datetime.now(timezone.utc).strftime(
                         "%Y-%m-%dT%H:%M:%S"),
                 },
                 metadata=metadata,
@@ -1761,7 +1761,7 @@ class ElasticSearchService:
                     payload[key] = value
 
         if ensure_create_time and "create_time" not in payload:
-            payload["create_time"] = datetime.utcnow().strftime(
+            payload["create_time"] = datetime.now(timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%S")
 
         return payload
