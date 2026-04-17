@@ -114,16 +114,18 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(call_args[0][1], "Test task")  # task_description
         self.assertEqual(call_args[0][2], [mock_tool1, mock_tool2])  # tool_info_list
 
-    @patch('backend.services.prompt_service.generate_system_prompt')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.generate_system_prompt')
     @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_knowledge_base_display_names')
     def test_generate_and_save_system_prompt_impl_create_mode(
         self,
-        mock_get_enabled_tools,
+        mock_get_kb_display_names,
         mock_get_enabled_sub_agents,
-        mock_query_all_agents,
+        mock_get_enabled_tools,
         mock_generate_system_prompt,
+        mock_query_all_agents,
     ):
         """Test generate_and_save_system_prompt_impl in create mode (agent_id=0)"""
         # Setup - Mock the generator to return the expected data structure
@@ -146,6 +148,7 @@ class TestPromptService(unittest.TestCase):
         enabled_sub_agents = [{"name": "db_agent", "description": "DB agent"}]
         mock_get_enabled_tools.return_value = enabled_tools
         mock_get_enabled_sub_agents.return_value = enabled_sub_agents
+        mock_get_kb_display_names.return_value = None
 
         # Execute - test as a generator with agent_id=0 (create mode) and empty tool/sub-agent IDs
         result_gen = generate_and_save_system_prompt_impl(
@@ -170,7 +173,8 @@ class TestPromptService(unittest.TestCase):
             enabled_tools,  # tool_info_list from helper
             "tenant456",
             self.test_model_id,
-            "zh"
+            "zh",
+            None  # knowledge_base_display_names
         )
 
     @patch('backend.services.prompt_service._regenerate_agent_display_name_with_llm')
@@ -648,13 +652,14 @@ class TestPromptService(unittest.TestCase):
         # Verify template loading
         mock_get_prompt_template.assert_called_once_with(mock_language)
 
-        # Verify template joining
+        # Verify template joining - now includes knowledge_base_display_names parameter
         mock_join_info.assert_called_once_with(
             prompt_for_generate=mock_prompt_config,
             sub_agent_info_list=mock_sub_agents,
             task_description=mock_task_description,
             tool_info_list=mock_tools,
-            language=mock_language
+            language=mock_language,
+            knowledge_base_display_names=None
         )
 
         # Verify LLM calls - should be called 6 times for each prompt type
@@ -1186,4 +1191,283 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         self.assertEqual(result, "Rendered content")
+
+    @patch('backend.services.prompt_service.Template')
+    def test_join_info_for_generate_system_prompt_with_knowledge_base_names(self, mock_template):
+        """Test join_info_for_generate_system_prompt with knowledge_base_display_names"""
+        # Setup
+        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_sub_agents = []
+        mock_task_description = "Test task"
+        mock_tools = [
+            {"name": "knowledge_base_search", "description": "Search knowledge base",
+                "inputs": "{}", "output_type": "string"}
+        ]
+
+        mock_template_instance = MagicMock()
+        mock_template.return_value = mock_template_instance
+        mock_template_instance.render.return_value = "Rendered content with KB names"
+
+        # Execute with knowledge base display names
+        result = join_info_for_generate_system_prompt(
+            mock_prompt_for_generate, mock_sub_agents, mock_task_description, mock_tools,
+            knowledge_base_display_names=["redis", "kafka"]
+        )
+
+        # Assert
+        self.assertEqual(result, "Rendered content with KB names")
+        # Verify that knowledge_base_names was passed to template
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertIn("knowledge_base_names", template_vars)
+        self.assertEqual(template_vars["knowledge_base_names"], '"redis", "kafka"')
+
+    @patch('backend.services.prompt_service.Template')
+    def test_join_info_for_generate_system_prompt_without_knowledge_base_names(self, mock_template):
+        """Test join_info_for_generate_system_prompt without knowledge_base_display_names"""
+        # Setup
+        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_sub_agents = []
+        mock_task_description = "Test task"
+        mock_tools = [
+            {"name": "web_search", "description": "Web search",
+                "inputs": "{}", "output_type": "string"}
+        ]
+
+        mock_template_instance = MagicMock()
+        mock_template.return_value = mock_template_instance
+        mock_template_instance.render.return_value = "Rendered content"
+
+        # Execute without knowledge base display names
+        result = join_info_for_generate_system_prompt(
+            mock_prompt_for_generate, mock_sub_agents, mock_task_description, mock_tools
+        )
+
+        # Assert
+        template_vars = mock_template_instance.render.call_args[0][0]
+        # knowledge_base_names should not be in template vars when not provided
+        self.assertNotIn("knowledge_base_names", template_vars)
+
+    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    def test_get_knowledge_base_display_names_with_configured_kb(
+        self,
+        mock_query_tool_instance,
+        mock_get_knowledge_map,
+    ):
+        """Test get_knowledge_base_display_names with configured knowledge base"""
+        from backend.services.prompt_service import get_knowledge_base_display_names
+
+        # Setup
+        tool_info_list = [
+            {"tool_id": 1, "name": "knowledge_base_search"},
+            {"tool_id": 2, "name": "web_search"},
+        ]
+
+        mock_query_tool_instance.return_value = {
+            "params": {
+                "index_names": ["index-1", "index-2"]
+            }
+        }
+        mock_get_knowledge_map.return_value = {
+            "index-1": "redis",
+            "index-2": "kafka"
+        }
+
+        # Execute
+        result = get_knowledge_base_display_names(
+            tool_info_list=tool_info_list,
+            agent_id=123,
+            tenant_id="tenant-abc"
+        )
+
+        # Assert
+        self.assertEqual(result, ["redis", "kafka"])
+        mock_query_tool_instance.assert_called_once_with(
+            agent_id=123, tool_id=1, tenant_id="tenant-abc"
+        )
+        mock_get_knowledge_map.assert_called_once_with(["index-1", "index-2"])
+
+    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    def test_get_knowledge_base_display_names_no_kb_tool(self, mock_query_tool_instance):
+        """Test get_knowledge_base_display_names when no knowledge_base_search tool exists"""
+        from backend.services.prompt_service import get_knowledge_base_display_names
+
+        # Setup - no knowledge_base_search tool
+        tool_info_list = [
+            {"tool_id": 2, "name": "web_search"},
+        ]
+
+        # Execute
+        result = get_knowledge_base_display_names(
+            tool_info_list=tool_info_list,
+            agent_id=123,
+            tenant_id="tenant-abc"
+        )
+
+        # Assert
+        self.assertIsNone(result)
+        mock_query_tool_instance.assert_not_called()
+
+    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    def test_get_knowledge_base_display_names_empty_index_names(
+        self,
+        mock_query_tool_instance,
+        mock_get_knowledge_map,
+    ):
+        """Test get_knowledge_base_display_names when index_names is empty"""
+        from backend.services.prompt_service import get_knowledge_base_display_names
+
+        # Setup
+        tool_info_list = [
+            {"tool_id": 1, "name": "knowledge_base_search"},
+        ]
+
+        mock_query_tool_instance.return_value = {
+            "params": {}
+        }
+
+        # Execute
+        result = get_knowledge_base_display_names(
+            tool_info_list=tool_info_list,
+            agent_id=123,
+            tenant_id="tenant-abc"
+        )
+
+        # Assert
+        self.assertIsNone(result)
+        mock_get_knowledge_map.assert_not_called()
+
+    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    def test_get_knowledge_base_display_names_with_json_string(
+        self,
+        mock_query_tool_instance,
+        mock_get_knowledge_map,
+    ):
+        """Test get_knowledge_base_display_names when index_names is a JSON string"""
+        from backend.services.prompt_service import get_knowledge_base_display_names
+
+        # Setup
+        tool_info_list = [
+            {"tool_id": 1, "name": "knowledge_base_search"},
+        ]
+
+        mock_query_tool_instance.return_value = {
+            "params": {
+                "index_names": '["index-1", "index-2"]'  # JSON string format
+            }
+        }
+        mock_get_knowledge_map.return_value = {
+            "index-1": "redis",
+            "index-2": "kafka"
+        }
+
+        # Execute
+        result = get_knowledge_base_display_names(
+            tool_info_list=tool_info_list,
+            agent_id=123,
+            tenant_id="tenant-abc"
+        )
+
+        # Assert
+        self.assertEqual(result, ["redis", "kafka"])
+
+    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    def test_get_knowledge_base_display_names_multiple_tools(
+        self,
+        mock_query_tool_instance,
+        mock_get_knowledge_map,
+    ):
+        """Test get_knowledge_base_display_names with multiple knowledge_base_search tools"""
+        from backend.services.prompt_service import get_knowledge_base_display_names
+
+        # Setup - two knowledge_base_search tools
+        tool_info_list = [
+            {"tool_id": 1, "name": "knowledge_base_search"},
+            {"tool_id": 2, "name": "knowledge_base_search"},
+        ]
+
+        mock_query_tool_instance.side_effect = [
+            {"params": {"index_names": ["index-1"]}},
+            {"params": {"index_names": ["index-2"]}},
+        ]
+        mock_get_knowledge_map.return_value = {
+            "index-1": "redis",
+            "index-2": "kafka"
+        }
+
+        # Execute
+        result = get_knowledge_base_display_names(
+            tool_info_list=tool_info_list,
+            agent_id=123,
+            tenant_id="tenant-abc"
+        )
+
+        # Assert
+        self.assertEqual(result, ["redis", "kafka"])
+        self.assertEqual(mock_query_tool_instance.call_count, 2)
+
+    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    def test_get_knowledge_base_display_names_duplicate_index_names(
+        self,
+        mock_query_tool_instance,
+        mock_get_knowledge_map,
+    ):
+        """Test get_knowledge_base_display_names handles duplicate index_names"""
+        from backend.services.prompt_service import get_knowledge_base_display_names
+
+        # Setup
+        tool_info_list = [
+            {"tool_id": 1, "name": "knowledge_base_search"},
+        ]
+
+        mock_query_tool_instance.return_value = {
+            "params": {"index_names": ["index-1", "index-1", "index-2"]}  # Duplicates
+        }
+        mock_get_knowledge_map.return_value = {
+            "index-1": "redis",
+            "index-2": "kafka"
+        }
+
+        # Execute
+        result = get_knowledge_base_display_names(
+            tool_info_list=tool_info_list,
+            agent_id=123,
+            tenant_id="tenant-abc"
+        )
+
+        # Assert - should deduplicate while preserving order
+        self.assertEqual(result, ["redis", "kafka"])
+        # Should be called with deduplicated list
+        mock_get_knowledge_map.assert_called_once_with(["index-1", "index-2"])
+
+    @patch('backend.services.prompt_service.generate_and_save_system_prompt_impl')
+    def test_gen_system_prompt_streamable_knowledge_base_flow(self, mock_generate_impl):
+        """Test gen_system_prompt_streamable with knowledge base configuration"""
+        # Setup
+        test_data = [
+            {"type": "duty", "content": "Test duty", "is_complete": False},
+            {"type": "few_shots", "content": 'index_names=["redis", "kafka"]', "is_complete": True},
+        ]
+        mock_generate_impl.return_value = iter(test_data)
+
+        # Execute
+        result_list = list(gen_system_prompt_streamable(
+            agent_id=123,
+            model_id=self.test_model_id,
+            task_description="Test task with knowledge base",
+            user_id="user123",
+            tenant_id="tenant456",
+            language="zh"
+        ))
+
+        # Assert
+        self.assertEqual(len(result_list), 2)
+        # Verify success format
+        import json
+        parsed = json.loads(result_list[0].replace("data: ", "").replace("\n\n", ""))
+        self.assertTrue(parsed['success'])
 

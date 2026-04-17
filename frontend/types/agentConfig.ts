@@ -75,6 +75,12 @@ export interface Tool {
   usage?: string;
   inputs?: string;
   category?: string;
+  /**
+   * Knowledge base display names associated with this tool.
+   * This is populated when the tool (e.g., knowledge_base_search) has knowledge bases configured.
+   * Used to pass knowledge base names to prompt generation without requiring database lookup.
+   */
+  display_names?: string[];
 }
 
 export interface ToolParam {
@@ -401,6 +407,13 @@ export interface GeneratePromptParams {
   model_id: string;
   tool_ids?: number[]; // Optional: tool IDs selected in frontend (takes precedence over database query)
   sub_agent_ids?: number[]; // Optional: sub-agent IDs selected in frontend (takes precedence over database query)
+  /**
+   * Optional: Knowledge base display names for few-shot examples.
+   * If provided, the backend will use these instead of querying the database.
+   * This allows the frontend to pass the latest configured knowledge base names
+   * without waiting for tool config to be saved first.
+   */
+  knowledge_base_display_names?: string[];
 }
 
 /**

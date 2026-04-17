@@ -249,6 +249,13 @@ USER_PROMPT: |-
   你没有可用的助手
   {% endif %}
 
+  {% if knowledge_base_names %}
+  ### 知识库配置说明：
+  在生成 few-shot 示例时，如果使用 knowledge_base_search 工具，必须使用以下实际配置的知识库名称：
+  {{knowledge_base_names}}
+  请将这些名称直接用于示例中，例如：knowledge_base_search(query="xxx", index_names=[{{knowledge_base_names}}])
+  {% endif %}
+
  
 AGENT_NAME_REGENERATE_SYSTEM_PROMPT: |-
   ### 你是【Agent变量名调整专家】

@@ -250,6 +250,8 @@ class GeneratePromptRequest(BaseModel):
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
+    knowledge_base_display_names: Optional[List[str]] = Field(
+        None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
 
 
 class GenerateTitleRequest(BaseModel):

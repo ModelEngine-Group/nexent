@@ -244,12 +244,19 @@ USER_PROMPT: |-
   {% else %}
   You have no available tools.
   {% endif %}
-  
+
   ### Available Assistants List:
   {% if assistant_description %}
   {{assistant_description}}
   {% else %}
   You have no available assistants
+  {% endif %}
+
+  {% if knowledge_base_names %}
+  ### Knowledge Base Configuration Note:
+  When generating few-shot examples, if using the knowledge_base_search tool, you MUST use the following actual configured knowledge base names:
+  {{knowledge_base_names}}
+  Please use these names directly in examples, e.g.: knowledge_base_search(query="xxx", index_names=[{{knowledge_base_names}}])
   {% endif %}
 
 

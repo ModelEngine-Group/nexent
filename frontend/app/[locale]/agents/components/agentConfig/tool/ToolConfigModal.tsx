@@ -952,8 +952,16 @@ export default function ToolConfigModal({
         {} as Record<string, any>
       );
 
-      // Update local state: Add tool to selected tools with updated params
-      const updatedTool = { ...toolToSave, initParams: currentParams };
+      // Update local state: Add tool to selected tools with updated params and display_names
+      // Include display_names for knowledge base tools to pass to prompt generation
+      const updatedTool: typeof toolToSave = {
+        ...toolToSave,
+        initParams: currentParams,
+        // Store knowledge base display names for prompt generation
+        ...(toolRequiresKbSelection && selectedKbDisplayNames.length > 0
+          ? { display_names: selectedKbDisplayNames }
+          : {})
+      };
       const currentTools = useAgentConfigStore.getState().editedAgent.tools;
 
       // Check if tool already exists, if so replace it, otherwise add it

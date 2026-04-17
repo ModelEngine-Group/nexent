@@ -476,6 +476,18 @@ export default function AgentGenerateDetail({
 
     setIsGenerating(true);
     setActiveTab("few-shots");
+
+    // Extract knowledge base display names from selected tools
+    // This allows the backend to use frontend-configured display names without database lookup
+    const knowledgeBaseDisplayNames: string[] = [];
+    if (Array.isArray(editedAgent.tools)) {
+      for (const tool of editedAgent.tools) {
+        if (typeof tool === "object" && tool.display_names && Array.isArray(tool.display_names)) {
+          knowledgeBaseDisplayNames.push(...tool.display_names);
+        }
+      }
+    }
+
     try {
       await generatePromptStream(
         {
@@ -490,6 +502,8 @@ export default function AgentGenerateDetail({
                 : tool
             )
             : [],
+          // Pass knowledge base display names from frontend-configured tools
+          knowledge_base_display_names: knowledgeBaseDisplayNames.length > 0 ? knowledgeBaseDisplayNames : undefined,
         },
         (data) => {
           // Process streaming response data
