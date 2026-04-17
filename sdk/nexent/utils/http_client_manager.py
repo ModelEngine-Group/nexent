@@ -169,7 +169,8 @@ class HttpClientManager:
                     limits=Limits(
                         max_connections=100,
                         max_keepalive_connections=20
-                    )
+                    ),
+                    trust_env=False
                 )
                 logger.info(f"Sync HTTP client created for {base_url}")
 
@@ -208,7 +209,8 @@ class HttpClientManager:
                     limits=Limits(
                         max_connections=100,
                         max_keepalive_connections=20
-                    )
+                    ),
+                    trust_env=False
                 )
                 logger.info(f"Async HTTP client created for {base_url}")
 
