@@ -105,6 +105,8 @@ class MinioClient:
             )
             self._storage_client = create_storage_client_from_config(
                 self.storage_config)
+            return True
+        return False
 
     def upload_file(
             self,
