@@ -62,6 +62,7 @@ from database import skill_db
 from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.a2a_agent_db import get_server_agent_ids
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import save_conversation_assistant, save_conversation_user
 from services.memory_config_service import build_memory_context
@@ -1367,6 +1368,9 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
 
         agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
 
+        # Get all agent IDs that are registered as A2A Server agents
+        a2a_server_agent_ids = get_server_agent_ids(tenant_id)
+
         model_cache: Dict[int, Optional[dict]] = {}
         enriched_agents: list[dict] = []
 
@@ -1437,6 +1441,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "group_ids": convert_string_to_list(agent.get("group_ids")),
                 "permission": permission,
                 "is_published": agent.get("current_version_no") is not None,
+                "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
             })
 
         return simple_agent_list

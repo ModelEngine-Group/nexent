@@ -235,6 +235,32 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
   },
+  // A2A Client endpoints
+  a2a: {
+    // External agent discovery
+    discoverUrl: `${API_BASE_URL}/a2a/client/discover/url`,
+    discoverNacos: `${API_BASE_URL}/a2a/client/discover/nacos`,
+    // External agent management
+    agents: `${API_BASE_URL}/a2a/client/agents`,
+    agent: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}`,
+    agentRefresh: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}/refresh`,
+    agentProtocol: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}/protocol`,
+    // External agent relations
+    relations: `${API_BASE_URL}/a2a/client/relations`,
+    relation: (localAgentId: number, externalAgentId: number) =>
+      `${API_BASE_URL}/a2a/client/relations?local_agent_id=${localAgentId}&external_agent_id=${externalAgentId}`,
+    subAgents: (localAgentId: number) => `${API_BASE_URL}/a2a/client/sub-agents/${localAgentId}`,
+    externalRelations: (localAgentId: number) => `${API_BASE_URL}/a2a/client/relations/${localAgentId}`,
+    // Nacos config management
+    nacosConfigs: `${API_BASE_URL}/a2a/client/nacos-configs`,
+    nacosConfig: (configId: string) => `${API_BASE_URL}/a2a/client/nacos-configs/${configId}`,
+    // A2A Server management
+    serverAgents: `${API_BASE_URL}/a2a/management/agents`,
+    serverAgent: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}`,
+    serverAgentEnable: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/enable`,
+    serverAgentDisable: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/disable`,
+    serverAgentSettings: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/settings`,
+  },
   skills: {
     list: `${API_BASE_URL}/skills`,
     create: `${API_BASE_URL}/skills`,
