@@ -176,7 +176,9 @@ export function setAgentGenerationStatus(
     businessLogicModelName: string;
   }
 ): void {
-  const updates = { isGenerating, ...businessInfo };
+  const updates = businessInfo
+    ? { isGenerating, ...businessInfo }
+    : { isGenerating };
   updateAgentGenerationCache(agentId, updates);
 }
 
