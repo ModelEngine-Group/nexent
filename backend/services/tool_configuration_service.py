@@ -425,7 +425,11 @@ async def init_tool_list_for_tenant(tenant_id: str, user_id: str):
     return {"status": "success", "message": "Tool list initialized successfully"}
 
 
-async def update_tool_list(tenant_id: str, user_id: str):
+async def update_tool_list(
+    tenant_id: str,
+    user_id: str,
+    authorization_token: Optional[str] = None
+):
     """
         Scan and gather all available tools from local, MCP, and outer API sources.
         Also refreshes dynamic outer API tools in MCP server.
@@ -440,7 +444,7 @@ async def update_tool_list(tenant_id: str, user_id: str):
     local_tools = get_local_tools()
     langchain_tools = get_langchain_tools()
 
-    _refresh_outer_api_tools_in_mcp(tenant_id)
+    _refresh_outer_api_tools_in_mcp(tenant_id, authorization_token)
 
     try:
         mcp_tools = await get_all_mcp_tools(tenant_id)
@@ -1157,7 +1161,12 @@ def get_outer_api_tool(tool_id: int, tenant_id: str) -> Optional[Dict[str, Any]]
     return query_outer_api_tool_by_id(tool_id, tenant_id)
 
 
-def delete_outer_api_tool(tool_id: int, tenant_id: str, user_id: str) -> bool:
+def delete_outer_api_tool(
+    tool_id: int,
+    tenant_id: str,
+    user_id: str,
+    authorization_token: Optional[str] = None
+) -> bool:
     """
     Delete an outer API tool.
 
@@ -1178,12 +1187,16 @@ def delete_outer_api_tool(tool_id: int, tenant_id: str, user_id: str) -> bool:
 
     if deleted and tool_name:
         # Also remove from MCP server
-        _remove_outer_api_tool_from_mcp(tool_name, tenant_id)
+        _remove_outer_api_tool_from_mcp(tool_name, tenant_id, authorization_token)
 
     return deleted
 
 
-def _remove_outer_api_tool_from_mcp(tool_name: str, tenant_id: str) -> bool:
+def _remove_outer_api_tool_from_mcp(
+    tool_name: str,
+    tenant_id: str,
+    authorization_token: Optional[str] = None
+) -> bool:
     """
     Remove a specific outer API tool from the MCP server via HTTP API.
 
@@ -1196,7 +1209,8 @@ def _remove_outer_api_tool_from_mcp(tool_name: str, tenant_id: str) -> bool:
     """
     remove_url = f"{MCP_MANAGEMENT_API}/tools/outer_api/{tool_name}"
     try:
-        response = requests.delete(remove_url, timeout=10)
+        headers = {"Authorization": authorization_token} if authorization_token else {}
+        response = requests.delete(remove_url, headers=headers, timeout=10)
         if response.ok:
             logger.info(f"Removed outer API tool '{tool_name}' from MCP server")
             return True
@@ -1208,7 +1222,10 @@ def _remove_outer_api_tool_from_mcp(tool_name: str, tenant_id: str) -> bool:
         return False
 
 
-def _refresh_outer_api_tools_in_mcp(tenant_id: str) -> Dict[str, Any]:
+def _refresh_outer_api_tools_in_mcp(
+    tenant_id: str,
+    authorization_token: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Refresh outer API tools in MCP server via HTTP API.
 
@@ -1227,9 +1244,11 @@ def _refresh_outer_api_tools_in_mcp(tenant_id: str) -> Dict[str, Any]:
 
     for attempt in range(max_retries):
         try:
+            headers = {"Authorization": authorization_token} if authorization_token else {}
             response = requests.post(
                 refresh_url,
                 params={"tenant_id": tenant_id},
+                headers=headers,
                 timeout=30
             )
             response.raise_for_status()

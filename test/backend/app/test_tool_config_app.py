@@ -4,6 +4,7 @@ import os
 
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../sdk"))
 
 # Mock boto3 to avoid dependency issues
 sys.modules['boto3'] = MagicMock()
@@ -212,7 +213,7 @@ class TestScanAndUpdateToolAPI:
 
         mock_get_user_id.assert_called_once_with(None)
         mock_update_tool_list.assert_called_once_with(
-            tenant_id="tenant456", user_id="user123")
+            tenant_id="tenant456", user_id="user123", authorization_token=None)
 
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.update_tool_list')
