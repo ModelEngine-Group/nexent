@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-from typing import Optional
 from pydantic import Field
 from smolagents.tools import Tool
 
@@ -55,30 +54,35 @@ class CreateFileTool(Tool):
 
     tool_sign = ToolSign.FILE_OPERATION.value  # File operation tool identifier
 
-    def __init__(self, 
+    def __init__(self,
                  init_path: str = Field(description="Initial workspace path", default="/mnt/nexent"),
                  observer: MessageObserver = Field(description="Message observer", default=None, exclude=True)):
         """Initialize the CreateFileTool.
-        
+
         Args:
             init_path (str): Initial workspace path for file operations. Defaults to "/mnt/nexent".
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
+
+        Raises:
+            ValueError: If init_path is provided but empty.
         """
         super().__init__()
-        self.init_path = os.path.abspath(init_path)
+        if init_path is not None and init_path.strip() == "":
+            raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
+        self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
         self.running_prompt_zh = "正在创建文件..."
         self.running_prompt_en = "Creating file..."
 
     def _validate_path(self, file_path: str) -> str:
         """Validate and resolve file path within the workspace.
-        
+
         Args:
             file_path (str): Input file path
-            
+
         Returns:
             str: Validated absolute path
-            
+
         Raises:
             Exception: If path is outside workspace or invalid
         """
@@ -88,16 +92,16 @@ class CreateFileTool(Tool):
         else:
             # Treat as relative path from init_path
             abs_path = os.path.abspath(os.path.join(self.init_path, file_path))
-        
+
         # Normalize path to resolve any '..' or '.' components
         abs_path = os.path.normpath(abs_path)
-        
+
         # Check if the path is within the allowed workspace
         if not abs_path.startswith(self.init_path):
             raise Exception(f"Permission denied: File operations are restricted to the workspace directory '{self.init_path}'. "
                           f"Attempted path '{abs_path}' is outside the allowed area. "
                           f"Please use relative paths within the workspace.")
-        
+
         return abs_path
 
     def forward(self, file_path: str, content: str = "", encoding: str = "utf-8") -> str:
@@ -115,7 +119,7 @@ class CreateFileTool(Tool):
 
             # Validate and resolve path within workspace
             abs_path = self._validate_path(file_path)
-            
+
             # Create parent directories if they don't exist
             parent_dir = os.path.dirname(abs_path)
             if parent_dir and not os.path.exists(parent_dir):
@@ -134,7 +138,7 @@ class CreateFileTool(Tool):
                 f.write(content if content is not None else "")
 
             logger.info(f"Successfully created file: {abs_path} with encoding: {encoding}")
-            
+
             # Prepare success message
             file_size = os.path.getsize(abs_path)
             # Show relative path in response for better UX
@@ -155,18 +159,18 @@ class CreateFileTool(Tool):
             logger.error(f"Permission denied when creating file: {file_path}, error: {e}")
             error_msg = f"Permission denied: Cannot create file at {file_path}. Check file permissions."
             raise Exception(error_msg)
-        
+
         except UnicodeEncodeError as e:
             logger.error(f"Encoding error when creating file: {file_path}, encoding: {encoding}, error: {e}")
             error_msg = f"Encoding error: Cannot write content with {encoding} encoding. Try a different encoding."
             raise Exception(error_msg)
-        
+
         except OSError as e:
             logger.error(f"OS error when creating file: {file_path}, error: {e}")
             error_msg = f"OS error: Cannot create file at {file_path}. {str(e)}"
             raise Exception(error_msg)
-        
+
         except Exception as e:
             logger.error(f"Unexpected error when creating file: {file_path}, error: {e}")
             error_msg = f"Failed to create file: {str(e)}"
-            raise Exception(error_msg) 
+            raise Exception(error_msg)
