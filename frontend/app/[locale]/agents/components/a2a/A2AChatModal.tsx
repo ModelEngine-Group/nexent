@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Button, Input, Tag, Space, Typography } from "antd";
+import { Modal, Button, Input, Tag, Typography } from "antd";
 import { Globe, Send, User, Bot, Loader2 } from "lucide-react";
 import { A2AExternalAgent, a2aClientService } from "@/services/a2aService";
 import log from "@/lib/logger";
