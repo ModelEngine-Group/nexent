@@ -692,6 +692,7 @@ class ManageTenantModelCreateRequest(BaseModel):
     base_url: Optional[str] = Field('', description="Base URL for the model API")
     max_tokens: Optional[int] = Field(0, description="Maximum tokens for the model")
     display_name: Optional[str] = Field('', description="Display name for the model")
+    model_factory: Optional[str] = Field('OpenAI-API-Compatible', description="Model factory/provider name")
     expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
     maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
     chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
@@ -708,6 +709,7 @@ class ManageTenantModelUpdateRequest(BaseModel):
     base_url: Optional[str] = Field(None, description="Base URL for the model API")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens for the model")
     display_name: Optional[str] = Field(None, description="New display name for the model")
+    model_factory: Optional[str] = Field(None, description="Model factory/provider name")
     expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
     maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
     chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
@@ -756,6 +758,7 @@ class VersionPublishRequest(BaseModel):
     """Request model for publishing a new version"""
     version_name: Optional[str] = Field(None, description="User-defined version name for display")
     release_note: Optional[str] = Field(None, description="Release notes / publish remarks")
+    publish_as_a2a: bool = Field(False, description="Whether to publish this agent as an A2A Server agent")
 
 
 class VersionListItemResponse(BaseModel):

@@ -1,5 +1,4 @@
 import json
-import re
 import ast
 import time
 import threading
@@ -30,7 +29,7 @@ def parse_code_blobs(text: str) -> str:
     """Extract code blocs from the LLM's output for execution.
 
     This function is used to parse code that needs to be executed, so it only handles
-    <RUN> format and legacy python formats.
+    <code> format and legacy python formats.
 
     Args:
         text (`str`): LLM's output text to parse.
@@ -41,19 +40,76 @@ def parse_code_blobs(text: str) -> str:
     Raises:
         ValueError: If no valid code block is found in the text.
     """
-    # First try to match the new <RUN> format for execution
-    # <END_CODE> is optional - match both with and without it
-    run_pattern = r"```<RUN>\s*\n(.*?)\n```(?:<END_CODE>)?"
-    run_matches = re.findall(run_pattern, text, re.DOTALL)
+    # First try to match the new <code>...</code> format for execution
+    # Use string find/slice operations instead of regex to prevent backtracking issues
+    code_matches = []
+    search_pos = 0
+    while True:
+        start = text.find("<code>", search_pos)
+        if start == -1:
+            break
+        # Move past the opening tag
+        content_start = start + len("<code>")
+        end = text.find("</code>", content_start)
+        if end == -1:
+            # No closing tag found, stop searching
+            break
+        # Extract the content between tags
+        code_matches.append(text[content_start:end])
+        search_pos = end + len("</code>")
+
+    if code_matches:
+        return "\n\n".join(match.strip() for match in code_matches)
+
+    # Fallback to legacy <RUN> format for backward compatibility
+    # Use string operations instead of regex to prevent backtracking
+    run_matches = []
+    search_pos = 0
+    run_tag = "```<RUN>"
+    while True:
+        start = text.find(run_tag, search_pos)
+        if start == -1:
+            break
+        # Move past the opening tag (including newline)
+        content_start = start + len(run_tag)
+        # Find the closing ```
+        end = text.find("```", content_start)
+        if end == -1:
+            break
+        run_matches.append(text[content_start:end])
+        search_pos = end + len("```")
 
     if run_matches:
         return "\n\n".join(match.strip() for match in run_matches)
 
     # Fallback to original patterns: py|python (for execution)
-    pattern = r"```(?:py|python)\s*\n(.*?)\n```"
-    matches = re.findall(pattern, text, re.DOTALL)
-    if matches:
-        return "\n\n".join(match.strip() for match in matches)
+    # Use string operations to prevent backtracking
+    py_matches = []
+    search_pos = 0
+    while True:
+        # Find ```py or ```python
+        start = text.find("```py", search_pos)
+        if start == -1:
+            start = text.find("```python", search_pos)
+        if start == -1:
+            break
+        # Skip the opening backticks and optional language specifier
+        if text[start:start + len("```python")] == "```python":
+            content_start = start + len("```python")
+        else:
+            content_start = start + len("```py")
+        # Skip optional newline after opening fence
+        if content_start < len(text) and text[content_start] == "\n":
+            content_start += 1
+        # Find the closing ```
+        end = text.find("```", content_start)
+        if end == -1:
+            break
+        py_matches.append(text[content_start:end])
+        search_pos = end + len("```")
+
+    if py_matches:
+        return "\n\n".join(match.strip() for match in py_matches)
 
     # Maybe the LLM outputted a code blob directly
     try:
@@ -71,9 +127,9 @@ def parse_code_blobs(text: str) -> str:
             Make sure to include code with the correct pattern for execution:
             Thoughts: Your thoughts
             Code:
-            ```<RUN>
+            <code>
             # Your python code here (for execution)
-            ```<END_CODE>
+            </code>
             """
         ).strip()
     )
@@ -84,20 +140,64 @@ def convert_code_format(text):
     Convert code blocks to markdown format for display.
 
     This function is used to convert code blocks in final answers to markdown format,
-    so it handles <DISPLAY:language> format and legacy formats.
+    so it handles <DISPLAY:language>...</DISPLAY> format and legacy formats.
     """
-    # Handle new format: ```<DISPLAY:language> to ```language
-    text = re.sub(r'```<DISPLAY:(\w+)>', r'```\1', text)
+    # Use string operations instead of regex to prevent backtracking issues
+    backtick = chr(96)
+    triple_backtick = backtick * 3
 
-    # Handle legacy format: ```code:language to ```language
-    text = re.sub(r'```code:(\w+)', r'```\1', text)
+    # Step 1: Handle legacy format ```<DISPLAY:language> -> ```language
+    # Handle all variants: `, ``, ``` followed by <DISPLAY:language>
+    for n_backticks in [1, 2, 3]:
+        b = backtick * n_backticks
+        prefix = b + "<DISPLAY:"
+        while True:
+            idx = text.find(prefix)
+            if idx == -1:
+                break
+            lang_start = idx + len(prefix)
+            lang_end = text.find(">", lang_start)
+            if lang_end == -1:
+                break
+            lang = text[lang_start:lang_end]
+            text = text[:idx] + b + lang + text[lang_end + 1:]
 
-    # Restore <END_CODE> if it was affected by the above replacement
-    text = text.replace("```<END_CODE>", "```")
-    text = text.replace("```<END_DISPLAY_CODE>", "```")
+    # Step 2: Handle legacy format ```code:language -> ```language
+    for n_backticks in [1, 2, 3]:
+        b = backtick * n_backticks
+        prefix = b + "code:"
+        while True:
+            idx = text.find(prefix)
+            if idx == -1:
+                break
+            lang_start = idx + len(prefix)
+            lang_end = lang_start
+            while lang_end < len(text) and (text[lang_end].isalnum() or text[lang_end] == "_"):
+                lang_end += 1
+            if lang_end == lang_start:
+                break
+            lang = text[lang_start:lang_end]
+            text = text[:idx] + b + lang + text[lang_end:]
 
-    # Clean up any remaining ```< patterns
-    text = text.replace("```<", "```")
+    # Step 3: Handle new format <DISPLAY:language>...</DISPLAY> -> ```language...```
+    # Replace opening tags first
+    while True:
+        idx = text.find("<DISPLAY:")
+        if idx == -1:
+            break
+        lang_start = idx + len("<DISPLAY:")
+        lang_end = text.find(">", lang_start)
+        if lang_end == -1:
+            break
+        lang = text[lang_start:lang_end]
+        text = text[:idx] + triple_backtick + lang + text[lang_end + 1:]
+
+    # Step 4: Replace closing tags
+    text = text.replace("</DISPLAY>", triple_backtick)
+
+    # Step 5: Handle closing tags - restore closing backticks from legacy END markers
+    text = text.replace(triple_backtick + "<END_DISPLAY_CODE>", triple_backtick)
+    text = text.replace(triple_backtick + "<END_CODE>", triple_backtick)
 
     return text
 
@@ -181,7 +281,7 @@ Additional Args:
 
         # Add new step in logs
         memory_step.model_input_messages = input_messages
-        stop_sequences = ["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"]
+        stop_sequences = ["Observation:", "Calling tools:"]
 
         # Prepare additional arguments
         additional_args: dict[str, Any] = {}

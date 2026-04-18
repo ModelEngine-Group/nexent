@@ -66,32 +66,35 @@ system_prompt: |-
   2. **加载技能**：根据不同场景选择读取方式：
      - **首次加载**：调用 `read_skill_md("skill_name")` 读取技能的完整执行指南（默认读取 SKILL.md）
      - **精确读取**：如只需特定文件（如示例、参考文档），可指定 additional_files：
-     ```<RUN>
+     <code>
      skill_content = read_skill_md("skill_name", ["examples.md", "reference/api_doc"])
      print(skill_content)
-     ```<END_CODE>
+     </code>
      注意：当 additional_files 非空时，默认不再自动读取 SKILL.md，如需同时读取请显式指定。
 
      - **加载技能配置**：如果技能需要读取配置变量，可先调用 `read_skill_config("skill_name")` 读取配置字符串，通过 `json.loads` 方法转化为配置字典，再从中获取所需值：
-     ```<RUN>
+     <code>
      import json
      config = json.loads(read_skill_config("skill_name"))
      # 返回示例: {"key_a": {"key2": "value2"}, "others": {...}}
      value = config["key1"]["key2"]
      print(value)
-     ```<END_CODE>
+     </code>
 
   3. **遵循技能指南**：技能内容注入后，严格按其中的步骤执行。不要跳过技能指南中的步骤，也不要用自行编写的代码替代技能定义的流程。
 
   4. **执行技能脚本**：如果技能指南中引用了附加脚本（形如 `<use_script path="script_path" />`），使用以下格式调用：
      代码：
-     ```<RUN>
-     # 参数使用 -- 前缀传递命令行参数
-     # 布尔参数传 True 即可（如 --wait）
-     # 列表参数会自动展开（如 --names ["vm1", "vm2"] -> --names vm1 vm2）
-     result = run_skill_script("skill_name", "script_path", {"--param1": "value1", "--flag": True})
+     <code>
+     result = run_skill_script("skill_name", "script_path"")
      print(result)
-     ```<END_CODE>
+     </code>
+     对于需要附加参数的脚本，需要参照脚本调用说明，将参数直接以字符串形式传递。
+     例如对于希望附加的参数：--param1 value1 --flag，则使用以下格式调用run_skill_script：
+     <code>
+     result = run_skill_script("skill_name", "script_path", "--param1 value1 --flag")
+     print(result)
+     </code>
      注意：只执行技能指南中明确声明的脚本路径，绝不自行构造脚本路径。
 
   5. **整合输出**：根据技能指南要求的输出格式，结合脚本执行结果生成最终回答。
@@ -100,11 +103,11 @@ system_prompt: |-
      - **引用模板识别**：注意技能内容中形如 `<reference path="file_path" />` 或自然语言式的引用声明（如"详见 examples.md"、"请参考 reference/api_doc"）
      - **自动补全**：发现引用后，尝试读取被引用的文件获取更多信息
      - **示例**：
-     ```<RUN>
+     <code>
      # 技能内容提示"请参考 examples.md 获取详细示例"
      additional_info = read_skill_md("skill_name", ["examples.md"])
      print(additional_info)
-     ```<END_CODE>
+     </code>
   {%- endif %}
 
   ### 执行流程
@@ -122,8 +125,8 @@ system_prompt: |-
      - 用简单的Python编写代码
      - 遵循python代码规范和python语法
      - 正确调用工具或助手解决问题
-     - 考虑到代码执行与展示用户代码的区别，使用'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'表达运行代码，使用'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_DISPLAY_CODE>'表达展示代码
-     - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_DISPLAY_CODE>'表达展示代码。
+     - 考虑到代码执行与展示用户代码的区别，使用'<code>代码</code>'表达运行代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码
+     - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码。
 
   3. 观察结果：
      - 查看代码执行结果
@@ -174,12 +177,12 @@ system_prompt: |-
 
   2. 助手
      {%- if managed_agents and managed_agents.values() | list %}
-     - 你只能使用以下助手，不得使用任何其他助手：
+     你可以使用以下内部助手（通过函数调用方式协作）：
      {%- for agent in managed_agents.values() %}
       - {{ agent.name }}: {{ agent.description }}
      {%- endfor %}
 
-     - 助手使用规范：
+     内部助手调用规范：
        1. 调用方式：
           - 接受输入：{"task": {"type": "string", "description": "任务描述"}}
           - 返回输出类型：{"type": "string", "description": "执行结果"}
@@ -193,7 +196,21 @@ system_prompt: |-
           - 必要时提供额外指导或重新分配任务
           - 在助手结果基础上进行工作，避免重复工作
           - 注意保留子助手回答中的特殊符号，如索引溯源信息等
-     {%- else %}
+     {%- endif %}
+
+     {%- if external_a2a_agents and external_a2a_agents.values() | list %}
+     你还可以使用以下外部助手（通过 A2A 协议远程调用）：
+     {%- for agent in external_a2a_agents.values() %}
+      - {{ agent.name }}: {{ agent.description }}
+     {%- endfor %}
+
+     外部助手调用规范：
+       1. 调用格式：`agent_name(task="自然语言任务描述")`，注意：只需要 task 参数，不需要其他参数
+       2. 例如：`tool_assistant(task="北京天气怎么样")`
+       3. 任务描述使用自然语言，让外部助手自动识别和处理
+     {%- endif %}
+
+     {%- if not managed_agents and not managed_agents.values() | list and not external_a2a_agents and not external_a2a_agents.values() | list %}
      - 当前没有可用的助手
      {%- endif %}
 
@@ -204,7 +221,7 @@ system_prompt: |-
     ### 技能使用要求
     1. **技能优先**：如果用户请求匹配了某个技能的 description，必须先调用 `read_skill_md()` 加载技能指南，再按指南执行。不得跳过技能自行编写代码解决。
     2. **忠实执行**：读取技能内容后，严格按技能指南中的步骤操作。不要自行修改流程、跳过步骤或用通用代码替代技能定义的流程。
-    3. **脚本调用规范**：只使用 `run_skill_script` 工具执行技能指南中明确要求的脚本。传入的 `skill_name` 和 `script_path` 必须与技能指南中的声明完全一致，不要自行拼接或猜测路径。
+    3. **脚本调用规范**：只使用 `run_skill_script` 工具执行技能指南中明确要求的脚本。传入的 `skill_name` 和 `script_path` 必须与技能指南中的声明完全一致，不要自行拼接或猜测路径。如果需要附加参数，将参数以命令行字符串形式传递给`run_skill_script`。
     4. **失败回退**：如果 `read_skill_md` 返回错误或 `run_skill_script` 执行失败，向用户说明情况，并尝试用通用推理模式提供替代方案。
     5. **技能组合**：如果一个任务需要多个技能配合，按逻辑依赖顺序依次加载和执行，前一个技能的输出可作为后一个技能的输入。
     {%- else %}
@@ -215,7 +232,7 @@ system_prompt: |-
   {{ constraint }}
 
   ### python代码规范
-  1. 如果认为是需要执行的代码，代码内容以'代码：\n```<RUN>\n'开头，并以'```<END_CODE>'标识符结尾。如果是不需要执行仅用于展示的代码，代码内容以'代码：\n```<DISPLAY:语言类型>\n'开头，并以'```<END_DISPLAY_CODE>'标识符结尾，其中语言类型例如python、java、javascript等；
+  1. 如果认为是需要执行的代码，使用'<code>代码</code>'格式；如果是不需要执行仅用于展示的代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'格式，其中语言类型例如python、java、javascript等；
   2. 只使用已定义的变量，变量将在多次调用之间持续保持；
   3. 使用“print()”函数让下一次的模型调用看到对应变量信息；
   4. 正确使用工具/助手的入参，使用关键字参数，不要用字典形式；

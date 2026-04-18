@@ -22,6 +22,8 @@ from utils.auth_utils import validate_bearer_token, get_user_and_tenant_by_acces
 
 router = APIRouter(prefix="/nb/v1", tags=["northbound"])
 
+__all__ = ["router", "_get_northbound_context"]
+
 
 async def _get_northbound_context(request: Request) -> NorthboundContext:
     """

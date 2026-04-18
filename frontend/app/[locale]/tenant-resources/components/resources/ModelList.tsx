@@ -100,10 +100,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
     setCheckingConnectivity((prev) => new Set(prev).add(displayName));
     try {
-      const isConnected = await modelService.checkManageTenantModelConnectivity(
-        tenantId,
-        displayName
-      );
+      const isConnected = await modelService.verifyCustomModel(displayName);
       if (isConnected) {
         message.success(t("tenantResources.models.connectivitySuccess"));
       } else {

@@ -449,71 +449,48 @@ export const ModelAddDialog = ({
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
           : form.type;
 
-      // Use manage interface if tenantId is provided
-      if (tenantId) {
-        // Call backend healthcheck API for tenant management
-        const result = await modelService.checkManageTenantModelConnectivity(
-          tenantId,
-          form.displayName || form.name
-        );
+      const config = {
+        modelName: form.name,
+        modelType: modelType,
+        baseUrl: form.url,
+        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+        maxTokens:
+          form.type === MODEL_TYPES.EMBEDDING
+            ? parseInt(form.vectorDimension)
+            : form.type === MODEL_TYPES.RERANK
+              ? 0
+              : parseInt(form.maxTokens),
+        embeddingDim:
+          form.type === MODEL_TYPES.EMBEDDING
+            ? parseInt(form.vectorDimension)
+            : undefined,
+      };
 
-        // Set connectivity status
-        if (result) {
-          setConnectivityStatus({
-            status: "available",
-            message: t("model.dialog.connectivity.status.available"),
-          });
-        } else {
-          setConnectivityStatus({
-            status: "unavailable",
-            message: t("model.dialog.connectivity.status.unavailable"),
-          });
-        }
+      const result = await modelService.verifyModelConfigConnectivity(config);
+
+      // Set connectivity status
+      if (result.connectivity) {
+        setConnectivityStatus({
+          status: "available",
+          message: t("model.dialog.connectivity.status.available"),
+        });
       } else {
-        // Use local config verification for non-tenant operations
-        const config = {
-          modelName: form.name,
-          modelType: modelType,
-          baseUrl: form.url,
-          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          maxTokens:
-            form.type === MODEL_TYPES.EMBEDDING
-              ? parseInt(form.vectorDimension)
-              : form.type === MODEL_TYPES.RERANK
-                ? 0
-                : parseInt(form.maxTokens),
-          embeddingDim:
-            form.type === MODEL_TYPES.EMBEDDING
-              ? parseInt(form.vectorDimension)
-              : undefined,
-        };
-
-        const result = await modelService.verifyModelConfigConnectivity(config);
-
-        // Set connectivity status
-        if (result.connectivity) {
-          setConnectivityStatus({
-            status: "available",
-            message: t("model.dialog.connectivity.status.available"),
-          });
-        } else {
-          // Set status to unavailable
-          setConnectivityStatus({
-            status: "unavailable",
-            message: t("model.dialog.connectivity.status.unavailable"),
-          });
-          // Show detailed error message using internationalized component (same as add failure)
-          if (result.error) {
-            const translatedError = translateError(result.error, t);
-            // Ensure translatedError is a valid string, fallback to original error if needed
-            const errorText =
-              translatedError && translatedError.length > 0
-                ? translatedError
-                : result.error || "Unknown error";
-            message.error(
-              t("model.dialog.error.connectivityFailed", { error: errorText })
-            );
-          }
+        // Set status to unavailable
+        setConnectivityStatus({
+          status: "unavailable",
+          message: t("model.dialog.connectivity.status.unavailable"),
+        });
+        // Show detailed error message using internationalized component (same as add failure)
+        if (result.error) {
+          const translatedError = translateError(result.error, t);
+          // Ensure translatedError is a valid string, fallback to original error if needed
+          const errorText =
+            translatedError && translatedError.length > 0
+              ? translatedError
+              : result.error || "Unknown error";
+          message.error(
+            t("model.dialog.error.connectivityFailed", { error: errorText })
+          );
         }
       }
     } catch (error) {
