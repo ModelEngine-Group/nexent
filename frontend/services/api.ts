@@ -260,6 +260,7 @@ export const API_ENDPOINTS = {
     serverAgentEnable: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/enable`,
     serverAgentDisable: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/disable`,
     serverAgentSettings: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/settings`,
+    agentChat: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}/chat`,
   },
   skills: {
     list: `${API_BASE_URL}/skills`,

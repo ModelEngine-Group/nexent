@@ -2190,6 +2190,15 @@
   "a2a.status.unavailable": "Unavailable",
   "a2a.status.unknown": "Unknown",
 
+  "a2a.chat.title": "Chat with Agent",
+  "a2a.chat.placeholder": "Enter your message...",
+  "a2a.chat.send": "Send",
+  "a2a.chat.messageSent": "Message sent",
+  "a2a.chat.sendFailed": "Failed to send message",
+  "a2a.chat.emptyHistory": "Start a conversation with this agent",
+  "a2a.chat.noResponse": "No response received",
+  "a2a.chat.agentUnavailable": "This agent is currently unavailable",
+
   "a2a.server.previewTitle": "A2A Agent Publish Preview",
   "a2a.server.previewDescription": "After publishing, external systems can discover and call this agent via the following addresses",
   "a2a.server.noAgentCard": "No A2A agent card information available",
@@ -2222,6 +2231,7 @@
   "a2a.service.getServerSettingsFailed": "Failed to get settings",
   "a2a.service.updateServerSettingsFailed": "Failed to update settings",
   "a2a.service.listServerAgentsFailed": "Failed to get A2A Server list",
+  "a2a.service.chatFailed": "Failed to send chat message",
 
   "collaborativeAgent.internalAgents": "Internal Agents",
   "collaborativeAgent.externalAgents": "External Agents",

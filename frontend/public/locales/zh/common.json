@@ -2207,6 +2207,15 @@
   "a2a.status.unavailable": "不可用",
   "a2a.status.unknown": "未知",
 
+  "a2a.chat.title": "与 Agent 对话",
+  "a2a.chat.placeholder": "输入你的问题...",
+  "a2a.chat.send": "发送",
+  "a2a.chat.messageSent": "消息已发送",
+  "a2a.chat.sendFailed": "发送消息失败",
+  "a2a.chat.emptyHistory": "开始与 Agent 对话",
+  "a2a.chat.noResponse": "未收到响应",
+  "a2a.chat.agentUnavailable": "当前 Agent 不可用",
+
   "a2a.server.previewTitle": "A2A Agent 发布预览",
   "a2a.server.previewDescription": "发布后，外部系统可以通过以下地址发现和调用本 Agent",
   "a2a.server.noAgentCard": "暂无 A2A Agent Card 信息",
@@ -2240,6 +2249,7 @@
   "a2a.service.updateServerSettingsFailed": "更新设置失败",
   "a2a.service.updateProtocolFailed": "更新协议失败",
   "a2a.service.listServerAgentsFailed": "获取 A2A Server 列表失败",
+  "a2a.service.chatFailed": "发送聊天消息失败",
 
   "collaborativeAgent.internalAgents": "内部 Agent",
   "collaborativeAgent.externalAgents": "外部 Agent",

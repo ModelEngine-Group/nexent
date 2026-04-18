@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from services.a2a_client_service import (
     a2a_client_service,
+    AgentCallError,
     AgentDiscoveryError,
 )
 from services.a2a_server_service import a2a_server_service
@@ -606,4 +607,83 @@ async def delete_nacos_config(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to delete Nacos config"
+        )
+
+
+# =============================================================================
+# External Agent Chat
+# =============================================================================
+
+class ChatRequest(BaseModel):
+    """Request to send a chat message to an external A2A agent."""
+    message: str = Field(..., description="The chat message to send")
+
+
+@router.post("/agents/{external_agent_id}/chat")
+async def chat_with_external_agent(
+    external_agent_id: int,
+    request_body: ChatRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Request = None
+):
+    """Send a chat message to an external A2A agent and get a response.
+
+    This endpoint allows users to directly interact with external A2A agents
+    without the need to add them as sub-agents first.
+    """
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+
+        if not request_body.message.strip():
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Message cannot be empty"
+            )
+
+        # Build A2A message format following A2A protocol with parts array
+        a2a_message = {
+            "role": "user",
+            "parts": [
+                {
+                    "text": request_body.message.strip(),
+                    "mediaType": "text/plain"
+                }
+            ],
+            "metadata": {
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+            }
+        }
+
+        # Call the external agent
+        result = await a2a_client_service.call_agent(
+            external_agent_id=external_agent_id,
+            tenant_id=tenant_id,
+            message=a2a_message
+        )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": result}
+        )
+
+    except AgentCallError as e:
+        logger.error(f"Chat with agent failed: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(e)
+        )
+    except AgentDiscoveryError as e:
+        logger.error(f"Agent not found: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat with external agent failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to chat with external agent"
         )
