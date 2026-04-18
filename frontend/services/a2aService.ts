@@ -601,4 +601,38 @@ export const a2aClientService = {
       return { success: false, message: t('a2a.service.listServerAgentsFailed') };
     }
   },
+
+  // ---------------------------------------------------------------------------
+  // External Agent Chat
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Send a chat message to an external A2A agent
+   */
+  async sendChatMessage(
+    agentId: string,
+    message: string
+  ): Promise<{
+    success: boolean;
+    data?: any;
+    message?: string;
+  }> {
+    try {
+      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.agentChat(agentId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        return { success: true, data: data.data };
+      }
+
+      return { success: false, message: data.detail || t('a2a.service.chatFailed') };
+    } catch (error) {
+      log.error('Failed to send chat message:', error);
+      return { success: false, message: t('a2a.service.chatFailed') };
+    }
+  },
 };

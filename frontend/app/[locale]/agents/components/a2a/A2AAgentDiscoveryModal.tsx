@@ -31,8 +31,10 @@ import {
   Search,
   Eye,
   Settings,
+  MessageCircle,
 } from "lucide-react";
 import { a2aClientService, A2AExternalAgent, NacosConfig } from "@/services/a2aService";
+import A2AChatModal from "./A2AChatModal";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -187,6 +189,10 @@ export default function A2AAgentDiscoveryModal({
 }: Readonly<A2AAgentDiscoveryModalProps>) {
   const { t } = useTranslation("common");
   const [messageApi, contextHolder] = message.useMessage();
+
+  // Chat modal state
+  const [chatModalOpen, setChatModalOpen] = useState(false);
+  const [chatAgent, setChatAgent] = useState<A2AExternalAgent | null>(null);
 
   // Discovery mode
   const [mode, setMode] = useState<"url" | "nacos">("url");
@@ -421,6 +427,12 @@ export default function A2AAgentDiscoveryModal({
     }
   };
 
+  // Open chat modal
+  const handleOpenChat = (agent: A2AExternalAgent) => {
+    setChatAgent(agent);
+    setChatModalOpen(true);
+  };
+
   // Get status icon
   const getStatusIcon = (agent: A2AExternalAgent) => {
     if (!agent.is_available) {
@@ -537,7 +549,7 @@ export default function A2AAgentDiscoveryModal({
     {
       title: t("common.actions"),
       key: "action",
-      width: 220,
+      width: 280,
       render: (_: any, record: A2AExternalAgent) => (
         <Space size="small">
           <Tooltip title={t("a2a.discovery.refresh")}>
@@ -558,6 +570,14 @@ export default function A2AAgentDiscoveryModal({
             agent={record}
             onProtocolChange={handleProtocolChange}
           />
+          <Tooltip title={t("a2a.chat.title")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<MessageCircle size={14} />}
+              onClick={() => handleOpenChat(record)}
+            />
+          </Tooltip>
           {localAgentId && (
             <Tooltip title={t("a2a.discovery.addAsSubAgent")}>
               <Button
@@ -585,6 +605,13 @@ export default function A2AAgentDiscoveryModal({
   return (
     <>
       {contextHolder}
+      {chatAgent && (
+        <A2AChatModal
+          open={chatModalOpen}
+          onClose={() => setChatModalOpen(false)}
+          agent={chatAgent}
+        />
+      )}
       <Modal
         title={t("a2a.discovery.title")}
         open={open}
