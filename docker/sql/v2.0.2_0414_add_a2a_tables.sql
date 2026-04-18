@@ -362,7 +362,9 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_message_t (
 
     -- Partial unique constraint for non-NULL task_id values
     -- Allows multiple NULL task_id rows (simple requests without Task)
-    UNIQUE(task_id, message_index)
+    UNIQUE(task_id, message_index),
+    CONSTRAINT ag_a2a_message_t_task_id_fk FOREIGN KEY (task_id)
+        REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE
 );
 
 ALTER TABLE nexent.ag_a2a_message_t OWNER TO "root";

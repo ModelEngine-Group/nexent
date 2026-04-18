@@ -1472,7 +1472,9 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_message_t (
     extensions JSONB,                               -- Extension URI list
     reference_task_ids JSONB,                        -- Referenced task IDs array
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(task_id, message_index)
+    UNIQUE(task_id, message_index),
+    CONSTRAINT ag_a2a_message_t_task_id_fk FOREIGN KEY (task_id)
+        REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE
 );
 
 ALTER TABLE nexent.ag_a2a_message_t OWNER TO "root";

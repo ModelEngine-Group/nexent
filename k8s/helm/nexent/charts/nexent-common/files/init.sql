@@ -1344,14 +1344,15 @@ CREATE TABLE IF NOT EXISTS "ag_a2a_message_t" (
     extensions JSONB,
     reference_task_ids JSONB,
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(task_id, message_index)
+    UNIQUE(task_id, message_index),
+    CONSTRAINT ag_a2a_message_t_task_id_fk FOREIGN KEY (task_id) REFERENCES "ag_a2a_task_t"(id) ON DELETE CASCADE
 );
 
 ALTER TABLE "ag_a2a_message_t" OWNER TO "root";
 
 COMMENT ON TABLE "ag_a2a_message_t" IS 'A2A messages within tasks. Stores conversation history for multi-turn interactions.';
 COMMENT ON COLUMN "ag_a2a_message_t".message_id IS 'Message ID, primary key (A2A spec: messageId)';
-COMMENT ON COLUMN "ag_a2a_message_t".task_id IS 'Task ID this message belongs to (FK to ag_a2a_task_t.id)';
+COMMENT ON COLUMN "ag_a2a_message_t".task_id IS 'Task ID this message belongs to (FK to ag_a2a_task_t.id), can be NULL for simple requests without Task';
 COMMENT ON COLUMN "ag_a2a_message_t".message_index IS 'Order of message in the conversation';
 COMMENT ON COLUMN "ag_a2a_message_t".role IS 'Message sender role: ROLE_UNSPECIFIED, ROLE_USER, or ROLE_AGENT';
 COMMENT ON COLUMN "ag_a2a_message_t".parts IS 'Message parts following A2A Part structure';
