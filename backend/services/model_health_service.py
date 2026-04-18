@@ -67,6 +67,10 @@ async def _perform_connectivity_check(
     model_base_url: str,
     model_api_key: str,
     ssl_verify: bool = True,
+    model_factory: Optional[str] = None,
+    model_appid: Optional[str] = None,
+    access_token: Optional[str] = None,
+    voice_type: Optional[str] = None,
 ) -> bool:
     """
     Perform specific model connectivity check
@@ -76,9 +80,10 @@ async def _perform_connectivity_check(
         model_base_url: Model base URL
         model_api_key: API key
         ssl_verify: Whether to verify SSL certificates (default: True)
-        model_factory: Model factory/vendor (for STT models)
-        model_appid: Application ID (for Volcano STT models)
-        access_token: Access token (for Volcano STT models)
+        model_factory: Model factory/vendor (for STT/TTS models)
+        model_appid: Application ID (for Volcano STT/TTS models)
+        access_token: Access token (for Volcano STT/TTS models)
+        voice_type: Voice type (for TTS models)
     Returns:
         bool: Connectivity check result
     """
@@ -135,37 +140,66 @@ async def _perform_connectivity_check(
             api_key=model_api_key,
             ssl_verify=ssl_verify
         ).check_connectivity()
-    elif model_type in ["tts", "stt"]:
+    elif model_type == 'stt':
         voice_service = get_voice_service()
 
-        if model_type == "stt":
-            # Determine STT provider based on model_factory
-            use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
 
-            if use_volc:
-                # Use Volcano STT with appid and access_token
-                connectivity = await voice_service.check_voice_connectivity(
-                    model_type="stt",
-                    stt_config={
-                        "model_factory": model_factory,
-                        "model_appid": model_appid,
-                        "access_token": access_token,
-                        "base_url": model_base_url
-                    }
-                )
-            else:
-                # Use Ali STT (default) with api_key and model name
-                connectivity = await voice_service.check_voice_connectivity(
-                    model_type="stt",
-                    stt_config={
-                        "api_key": model_api_key,
-                        "base_url": model_base_url,
-                        "model": model_name
-                    }
-                )
+        # Determine STT provider based on model_factory
+        use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
+
+        if use_volc:
+            # Use Volcano STT with appid and access_token
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="stt",
+                stt_config={
+                    "model_factory": model_factory,
+                    "model_appid": model_appid,
+                    "access_token": access_token,
+                    "base_url": model_base_url
+                }
+            )
         else:
-            # TTS uses default service
-            connectivity = await voice_service.check_voice_connectivity(model_type="tts")
+            # Use Ali STT (default) with api_key and model name
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="stt",
+                stt_config={
+                    "api_key": model_api_key,
+                    "base_url": model_base_url,
+                    "model": model_name
+                }
+            )
+    elif model_type == "tts":
+        # Determine TTS provider based on model_factory
+        use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
+        voice_service = get_voice_service()
+        if use_volc:
+            # Use Volcano TTS with appid and access_token
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="tts",
+                stt_config={
+                    "model_factory": model_factory,
+                    "model_appid": model_appid,
+                    "access_token": access_token,
+                    "base_url": model_base_url
+                }
+            )
+        else:
+            # Use Ali TTS with api_key, voice_type, and optional custom base_url
+            is_qwen_realtime = "qwen" in (model_name or "").lower() or "/realtime" in (model_base_url or "").lower()
+            tts_voice_type = voice_type or ("Cherry" if is_qwen_realtime else "longxia")
+            # Use custom base_url if provided (for international or custom endpoints)
+            tts_config = {
+                "model_factory": model_factory,
+                "api_key": model_api_key,
+                "voice_type": tts_voice_type,
+                "model": model_name  # Pass the actual model name (e.g., cosyvoice-v3.5-plus)
+            }
+            if model_base_url and model_base_url.startswith("wss://"):
+                tts_config["base_url"] = model_base_url
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="tts",
+                stt_config=tts_config
+            )
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
@@ -194,6 +228,7 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         model_factory = model.get("model_factory")
         model_appid = model.get("model_appid")
         access_token = model.get("access_token")
+        voice_type = model.get("voice_type")
 
         try:
             set_monitoring_context(tenant_id=tenant_id)

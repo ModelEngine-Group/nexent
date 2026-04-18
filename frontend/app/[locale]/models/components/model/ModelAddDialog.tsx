@@ -13,7 +13,7 @@ import {
 import { useConfig } from "@/hooks/useConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import { modelService } from "@/services/modelService";
-import { ModelType, SingleModelConfig, STTModelConfig } from "@/types/modelConfig";
+import { ModelType, SingleModelConfig, STTModelConfig, TTSModelConfig } from "@/types/modelConfig";
 import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
 import { useDashscopeModelList } from "@/hooks/model/useDashscopeModelList";
@@ -64,6 +64,8 @@ const DEFAULT_FORM_STATE = {
   sttProvider: "dashscope", // dashscope or volc
   modelAppid: "",
   accessToken: "",
+  // TTS specific fields
+  ttsProvider: "dashscope", // dashscope or volc
 };
 
 // Connectivity status type comes from utils
@@ -440,6 +442,19 @@ export const ModelAddDialog = ({
         return form.apiKey.trim() !== "";
       }
     }
+    if (form.type === MODEL_TYPES.TTS) {
+      // For TTS models, validate based on provider type
+      if (form.ttsProvider === "volc") {
+        // Volcano Engine requires appid and access_token
+        return (
+          form.modelAppid.trim() !== "" &&
+          form.accessToken.trim() !== ""
+        );
+      } else {
+        // DashScope requires API Key
+        return form.apiKey.trim() !== "";
+      }
+    }
     return (
       form.name.trim() !== "" &&
       form.url.trim() !== "" &&
@@ -491,6 +506,27 @@ export const ModelAddDialog = ({
           }
 
           const result = await modelService.verifyModelConfigConnectivity(sttConfig);
+          connectivity = result.connectivity;
+        } else if (form.type === MODEL_TYPES.TTS) {
+          // For TTS models, build the appropriate config based on provider
+          const ttsConfig: any = {
+            modelType: modelType,
+          };
+
+          if (form.ttsProvider === "volc") {
+            ttsConfig.modelFactory = "volc";
+            ttsConfig.modelName = form.name;
+            ttsConfig.modelAppid = form.modelAppid.trim();
+            ttsConfig.accessToken = form.accessToken.trim();
+            ttsConfig.baseUrl = form.url;
+          } else {
+            ttsConfig.modelName = form.name;
+            ttsConfig.apiKey = form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
+            ttsConfig.modelFactory = "dashscope";
+            ttsConfig.baseUrl = form.url;
+          }
+
+          const result = await modelService.verifyModelConfigConnectivity(ttsConfig);
           connectivity = result.connectivity;
         } else {
           const config = {
@@ -721,6 +757,15 @@ export const ModelAddDialog = ({
           }
         }
 
+        // Add TTS specific fields
+        if (form.type === MODEL_TYPES.TTS) {
+          modelParams.modelFactory = form.ttsProvider === "volc" ? "volc" : "dashscope";
+          if (form.ttsProvider === "volc") {
+            modelParams.modelAppid = form.modelAppid;
+            modelParams.accessToken = form.accessToken;
+          }
+        }
+
         // Add embedding specific fields
         if (isEmbeddingModel) {
           modelParams.expectedChunkSize = form.chunkSizeRange[0];
@@ -748,6 +793,15 @@ export const ModelAddDialog = ({
           }
         }
 
+        // Add TTS specific fields
+        if (form.type === MODEL_TYPES.TTS) {
+          modelParams.modelFactory = form.ttsProvider === "volc" ? "volc" : "dashscope";
+          if (form.ttsProvider === "volc") {
+            modelParams.modelAppid = form.modelAppid;
+            modelParams.accessToken = form.accessToken;
+          }
+        }
+
         // Add embedding specific fields
         if (isEmbeddingModel) {
           modelParams.expectedChunkSize = form.chunkSizeRange[0];
@@ -759,7 +813,7 @@ export const ModelAddDialog = ({
       }
 
       // Create the model configuration object
-      let modelConfig: SingleModelConfig | STTModelConfig = {
+      let modelConfig: SingleModelConfig | STTModelConfig | TTSModelConfig = {
         modelName: form.name,
         displayName: form.displayName || form.name,
         apiConfig: {
@@ -842,6 +896,7 @@ export const ModelAddDialog = ({
 
   const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
   const isSTTModel = form.type === MODEL_TYPES.STT;
+  const isTTSModel = form.type === MODEL_TYPES.TTS;
 
   return (
     <Modal
@@ -907,6 +962,22 @@ export const ModelAddDialog = ({
           </div>
         )}
 
+        {/* API Key (shown only when batch import is enabled) */}
+        {form.isBatchImport && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.apiKey")}
+              <span className="text-red-500">*</span>
+            </label>
+            <Input.Password
+              placeholder={t("model.dialog.placeholder.apiKey")}
+              value={form.apiKey}
+              onChange={(e) => handleFormChange("apiKey", e.target.value)}
+              autoComplete="new-password"
+            />
+          </div>
+        )}
+
         {/* Model Type */}
         <div>
           <label className="block mb-1 text-sm font-medium text-gray-700">
@@ -929,7 +1000,7 @@ export const ModelAddDialog = ({
             <Option value={MODEL_TYPES.STT}>
               {t("model.type.stt")}
             </Option>
-            <Option value={MODEL_TYPES.TTS} disabled>
+            <Option value={MODEL_TYPES.TTS}>
               {t("model.type.tts")}
             </Option>
           </Select>
@@ -995,7 +1066,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* Model URL */}
-        {!form.isBatchImport && !isSTTModel && (
+        {!form.isBatchImport   && (
           <div>
             <label
               htmlFor="url"
@@ -1017,23 +1088,6 @@ export const ModelAddDialog = ({
           </div>
         )}
 
-        {/* STT URL (Optional) */}
-        {!form.isBatchImport && isSTTModel && (
-          <div>
-            <label
-              htmlFor="url"
-              className="block mb-1 text-sm font-medium text-gray-700"
-            >
-              {t("model.dialog.label.url")}
-            </label>
-            <Input
-              id="url"
-              placeholder="wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
-              value={form.url}
-              onChange={(e) => handleFormChange("url", e.target.value)}
-            />
-          </div>
-        )}
 
         {/* STT Provider Selection */}
         {!form.isBatchImport && isSTTModel && (
@@ -1111,8 +1165,8 @@ export const ModelAddDialog = ({
           </div>
         )}
 
-        {/* API Key (for non-STT models) */}
-        {!form.isBatchImport && !isSTTModel && (
+        {/* API Key (for non-STT, non-TTS models) */}
+        {!form.isBatchImport && !isSTTModel && !isTTSModel && (
           <div>
             <label
               htmlFor="apiKey"
@@ -1130,6 +1184,83 @@ export const ModelAddDialog = ({
             />
           </div>
         )}
+
+        {/* TTS Provider Selection */}
+        {!form.isBatchImport && isTTSModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.ttsProvider")}
+              <span className="text-red-500">*</span>
+            </label>
+            <Select
+              style={{ width: "100%" }}
+              value={form.ttsProvider}
+              onChange={(value) => handleFormChange("ttsProvider", value)}
+            >
+              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
+              <Option value="volc">{t("model.provider.volc")}</Option>
+            </Select>
+          </div>
+        )}
+
+        {/* TTS Fields for Volcano Engine */}
+        {!form.isBatchImport && isTTSModel && form.ttsProvider === "volc" && (
+          <>
+            <div>
+              <label
+                htmlFor="modelAppid"
+                className="block mb-1 text-sm font-medium text-gray-700"
+              >
+                {t("model.dialog.label.modelAppid")}
+                <span className="text-red-500">*</span>
+              </label>
+              <Input
+                id="modelAppid"
+                placeholder={t("model.dialog.placeholder.modelAppid")}
+                value={form.modelAppid}
+                onChange={(e) => handleFormChange("modelAppid", e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="accessToken"
+                className="block mb-1 text-sm font-medium text-gray-700"
+              >
+                {t("model.dialog.label.accessToken")}
+                <span className="text-red-500">*</span>
+              </label>
+              <Input.Password
+                id="accessToken"
+                placeholder={t("model.dialog.placeholder.accessToken")}
+                value={form.accessToken}
+                onChange={(e) => handleFormChange("accessToken", e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+          </>
+        )}
+
+        {/* API Key (for DashScope TTS) */}
+        {!form.isBatchImport && isTTSModel && form.ttsProvider === "dashscope" && (
+          <div>
+            <label
+              htmlFor="apiKey"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.apiKey")}{" "}
+              <span className="text-red-500">*</span>
+            </label>
+            <Input.Password
+              id="apiKey"
+              placeholder={t("model.dialog.placeholder.apiKey")}
+              value={form.apiKey}
+              onChange={(e) => handleFormChange("apiKey", e.target.value)}
+              autoComplete="new-password"
+            />
+          </div>
+        )}
+
 
         {/* Chunk Size Slider (Embedding model only) */}
         {isEmbeddingModel && (
@@ -1182,7 +1313,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* Max Tokens */}
-        {!isEmbeddingModel && !form.isBatchImport && !isSTTModel && (
+        {!isEmbeddingModel && !form.isBatchImport && !isSTTModel && !isTTSModel && (
           <div>
             <label
               htmlFor="maxTokens"

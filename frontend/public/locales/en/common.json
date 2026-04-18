@@ -713,6 +713,7 @@
   "model.dialog.label.url": "Model URL",
   "model.dialog.label.apiKey": "API Key",
   "model.dialog.label.sttProvider": "STT Provider",
+  "model.dialog.label.ttsProvider": "TTS Provider",
   "model.dialog.label.modelAppid": "App ID",
   "model.dialog.label.accessToken": "Access Token",
   "model.dialog.label.maxTokens": "Max Tokens",

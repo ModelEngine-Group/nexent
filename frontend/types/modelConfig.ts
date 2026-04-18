@@ -77,6 +77,13 @@ export interface STTModelConfig extends SingleModelConfig {
   accessToken?: string;  // Access token for Volcano STT
 }
 
+// TTS model specific configuration interface
+export interface TTSModelConfig extends SingleModelConfig {
+  modelFactory?: string; // Model factory (e.g., "volc", "dashscope")
+  modelAppid?: string;   // App ID for Volcano TTS
+  accessToken?: string;  // Access token for Volcano TTS
+}
+
 // Single model configuration interface
 export interface SingleModelConfig {
   modelName: string;
@@ -93,7 +100,7 @@ export interface ModelConfig {
   rerank: SingleModelConfig;
   vlm: SingleModelConfig;
   stt: STTModelConfig;
-  tts: SingleModelConfig;
+  tts: TTSModelConfig;
 }
 
 // Global configuration interface

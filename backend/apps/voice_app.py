@@ -67,18 +67,45 @@ async def tts_websocket(websocket: WebSocket):
     logger.info("TTS WebSocket connection accepted")
 
     try:
-        # Receive text from client (single request)
-        data = await websocket.receive_json()
-        text = data.get("text")
+        # Receive config and text from client
+        msg = await websocket.receive()
+        client_config = {}
+        text = None
+
+        if msg["type"] == "websocket.receive":
+            if "text" in msg:
+                import json
+                client_config = json.loads(msg["text"])
+                text = client_config.get("text")
+            elif "bytes" in msg:
+                try:
+                    import json
+                    client_config = json.loads(msg["bytes"].decode('utf-8'))
+                    text = client_config.get("text")
+                except Exception as e:
+                    logger.warning(f"Failed to parse bytes as JSON: {e}")
 
         if not text:
             if websocket.client_state.name == "CONNECTED":
                 await websocket.send_json({"error": "No text provided"})
             return
 
+        # Extract config from client
+        tenant_id = client_config.get("tenant_id")
+        model_name = client_config.get("model_name")
+        api_key = client_config.get("api_key")
+        base_url = client_config.get("base_url")
+
         # Stream TTS audio to WebSocket
         voice_service = get_voice_service()
-        await voice_service.stream_tts_to_websocket(websocket, text)
+        await voice_service.stream_tts_to_websocket(
+            websocket,
+            text,
+            tenant_id=tenant_id,
+            model_name=model_name,
+            api_key=api_key,
+            base_url=base_url
+        )
 
     except TTSConnectionException as e:
         logger.error(f"TTS WebSocket error: {str(e)}")

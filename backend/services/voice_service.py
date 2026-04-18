@@ -5,6 +5,9 @@ from typing import Any, Dict, Optional
 from nexent.core.models.volc_stt_model import VolcSTTConfig, VolcSTTModel
 from nexent.core.models.ali_stt_model import AliSTTConfig, AliSTTModel
 from nexent.core.models.stt_model import BaseSTTModel
+from nexent.core.models.base_tts_model import BaseTTSModel
+from nexent.core.models.volc_tts_model import VolcTTSConfig, VolcTTSModel
+from nexent.core.models.ali_tts_model import AliTTSConfig, AliTTSModel
 
 from consts.const import APPID, CLUSTER, SPEED_RATIO, TEST_VOICE_PATH, TEST_PCM_PATH, TOKEN, VOICE_TYPE
 from consts.exceptions import (
@@ -25,16 +28,16 @@ class VoiceService:
     def __init__(self):
         """Initialize the voice service with configurations from const.py"""
         try:
-            # Initialize TTS configuration
-            from nexent.core.models.tts_model import TTSConfig, TTSModel
-            self.tts_config = TTSConfig(
+            # Store default TTS configuration from const.py for fallback
+            from nexent.core.models.tts_model import TTSConfig
+            self._default_tts_config = TTSConfig(
                 appid=APPID,
                 token=TOKEN,
                 cluster=CLUSTER,
                 voice_type=VOICE_TYPE,
                 speed_ratio=SPEED_RATIO
             )
-            self.tts_model = TTSModel(self.tts_config)
+            self.tts_config = self._default_tts_config
 
         except Exception as e:
             logger.error(f"Failed to initialize voice service: {str(e)}")
@@ -165,6 +168,139 @@ class VoiceService:
             # Return default on error
             return self._get_stt_model_from_config(tenant_id=tenant_id, language=language)
 
+    def _get_tts_model_from_config(
+        self,
+        tenant_id: Optional[str],
+        model_factory: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model_appid: Optional[str] = None,
+        access_token: Optional[str] = None,
+        voice_type: Optional[str] = None,
+        speed_ratio: float = 1.0,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None
+    ) -> BaseTTSModel:
+        """
+        Get the appropriate TTS model based on model factory configuration.
+
+        Args:
+            tenant_id: Tenant ID for model lookup
+            model_factory: Model factory/vendor name
+            api_key: API key (for Ali TTS)
+            model_appid: Application ID (for Volcano TTS)
+            access_token: Access token (for Volcano TTS)
+            voice_type: Voice type for TTS
+            speed_ratio: Speech speed ratio
+            base_url: Custom WebSocket URL (optional)
+            model: Model name (for Ali TTS)
+
+        Returns:
+            TTS model instance based on configuration
+        """
+        use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
+
+        if use_volc:
+            logger.info(f"Using Volcano Engine TTS with appid={model_appid}, access_token={'***' if access_token else None}")
+            volc_config = VolcTTSConfig(
+                appid=model_appid or "",
+                token=access_token or "",
+                cluster="volcengine_tts",
+                voice_type=voice_type or "BV700_V2",
+                speed_ratio=speed_ratio,
+                host=base_url.replace("wss://", "").split("/")[0] if base_url else "openspeech.bytedance.com"
+            )
+            return VolcTTSModel(volc_config)
+        else:
+            # Determine default voice based on model type
+            is_qwen_realtime = model and ("qwen" in model.lower() or "/realtime" in (base_url or "").lower())
+            default_voice = "Cherry" if is_qwen_realtime else "longxiaochun_v2"
+            effective_voice = voice_type or default_voice
+
+            logger.info(f"Using Ali Cloud TTS with api_key={'***' if api_key else None}")
+            ali_config = AliTTSConfig(
+                api_key=api_key or "",
+                model=model or ("qwen3-tts-instruct-flash-realtime" if is_qwen_realtime else "cosyvoice-v2"),
+                voice=effective_voice,
+                speech_rate=speed_ratio,
+                ws_url=base_url if base_url else None
+            )
+            return AliTTSModel(ali_config)
+
+    def _get_tts_model_from_tenant_config(
+        self,
+        tenant_id: str
+    ) -> BaseTTSModel:
+        """
+        Get TTS model based on tenant's model configuration.
+
+        Args:
+            tenant_id: Tenant ID
+
+        Returns:
+            TTS model instance based on tenant's configuration
+        """
+        try:
+            tts_config = tenant_config_manager.get_model_config(tenant_id, "tts")
+
+            if tts_config:
+                model_factory = tts_config.get("model_factory", "")
+                api_key = tts_config.get("api_key", "")
+                model_appid = tts_config.get("model_appid", "")
+                access_token_val = tts_config.get("access_token", "")
+                voice_type = tts_config.get("voice_type")
+                if not voice_type:
+                    is_qwen_realtime = "qwen" in (tts_config.get("model") or tts_config.get("model_name", "")).lower() or "/realtime" in (tts_config.get("base_url") or "").lower()
+                    voice_type = "Cherry" if is_qwen_realtime else "longxiaochun_v2"
+                speed_ratio = float(tts_config.get("speed_ratio", 1.0))
+                base_url = tts_config.get("base_url", "")
+                model = tts_config.get("model") or tts_config.get("model_name", "")
+
+                return self._get_tts_model_from_config(
+                    tenant_id=tenant_id,
+                    model_factory=model_factory,
+                    api_key=api_key,
+                    model_appid=model_appid,
+                    access_token=access_token_val,
+                    voice_type=voice_type,
+                    speed_ratio=speed_ratio,
+                    base_url=base_url if base_url else None,
+                    model=model if model else None
+                )
+
+            model_records = get_model_records({"model_type": "tts"}, tenant_id)
+            if model_records:
+                record = model_records[0]
+                model_factory = record.get("model_factory", "")
+                api_key = record.get("api_key", "")
+                model_appid = record.get("model_appid", "")
+                access_token_val = record.get("access_token", "")
+                voice_type = record.get("voice_type")
+                if not voice_type:
+                    is_qwen_realtime = "qwen" in record.get("model_name", "").lower() or "/realtime" in record.get("base_url", "").lower()
+                    voice_type = "Cherry" if is_qwen_realtime else "longxiaochun_v2"
+                speed_ratio = float(record.get("speed_ratio", 1.0))
+                base_url = record.get("base_url", "")
+                model = record.get("model_name", "")
+
+                return self._get_tts_model_from_config(
+                    tenant_id=tenant_id,
+                    model_factory=model_factory,
+                    api_key=api_key,
+                    model_appid=model_appid,
+                    access_token=access_token_val,
+                    voice_type=voice_type,
+                    speed_ratio=speed_ratio,
+                    base_url=base_url if base_url else None,
+                    model=model if model else None
+                )
+
+            logger.warning(f"No TTS model configuration found for tenant {tenant_id}, using default config")
+            return self._get_tts_model_from_config(tenant_id=tenant_id)
+
+        except Exception as e:
+            logger.error(f"Error getting TTS model config for tenant {tenant_id}: {str(e)}")
+            return self._get_tts_model_from_config(tenant_id=tenant_id)
+
     async def start_stt_streaming_session(
         self,
         websocket,
@@ -238,13 +374,23 @@ class VoiceService:
             logger.error(f"STT streaming session failed: {str(e)}")
             raise STTConnectionException(f"STT streaming failed: {str(e)}") from e
 
-    async def generate_tts_speech(self, text: str, stream: bool = True) -> Any:
+    async def generate_tts_speech(
+        self,
+        text: str,
+        stream: bool = True,
+        tts_config: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None,
+        model_name_override: Optional[str] = None
+    ) -> Any:
         """
         Generate TTS speech from text
 
         Args:
             text: Text to convert to speech
             stream: Whether to stream the audio or return complete audio
+            tts_config: TTS configuration dict from client (preferred)
+            tenant_id: Tenant ID for model lookup
+            model_name_override: Model name override
 
         Returns:
             Audio data (streaming or complete)
@@ -257,19 +403,75 @@ class VoiceService:
 
         try:
             logger.info(f"Generating TTS speech for text: {text[:50]}...")
-            speech_result = await self.tts_model.generate_speech(text, stream=stream)
+
+            model_factory = None
+            api_key = None
+            model_appid = None
+            access_token = None
+            voice_type = None
+            speed_ratio = 1.0
+            base_url = None
+            model_name = None
+
+            if tts_config:
+                model_factory = tts_config.get("model_factory")
+                api_key = tts_config.get("api_key") or tts_config.get("apiKey")
+                model_appid = tts_config.get("model_appid") or tts_config.get("appid")
+                access_token = tts_config.get("access_token")
+                voice_type = tts_config.get("voice_type")
+                speed_ratio = float(tts_config.get("speed_ratio", 1.0))
+                base_url = tts_config.get("base_url") or tts_config.get("baseUrl")
+                model_name = tts_config.get("model") or tts_config.get("model_name")
+                logger.info(f"Extracted TTS config - model_factory: {model_factory}, api_key: {'***' if api_key else None}, "
+                           f"model_appid: {'***' if model_appid else None}, access_token: {'***' if access_token else None}, base_url: {base_url}, model: {model_name}")
+
+            # If model_name is provided directly, use it
+            effective_model = model_name_override or model_name
+            logger.info(f"TTS generation using model: {effective_model}")
+
+            if api_key or effective_model:
+                # Use explicit config
+                tts_model = self._get_tts_model_from_config(
+                    tenant_id=tenant_id,
+                    model_factory=model_factory,
+                    api_key=api_key,
+                    model_appid=model_appid,
+                    access_token=access_token,
+                    voice_type=voice_type,
+                    speed_ratio=speed_ratio,
+                    base_url=base_url,
+                    model=effective_model
+                )
+            elif tenant_id:
+                tts_model = self._get_tts_model_from_tenant_config(tenant_id)
+            else:
+                tts_model = self._get_tts_model_from_config(tenant_id=tenant_id)
+
+            speech_result = await tts_model.generate_speech(text, stream=stream)
             return speech_result
         except Exception as e:
             logger.error(f"TTS generation failed: {str(e)}")
             raise TTSConnectionException(f"TTS generation failed: {str(e)}") from e
 
-    async def stream_tts_to_websocket(self, websocket, text: str) -> None:
+    async def stream_tts_to_websocket(
+        self,
+        websocket,
+        text: str,
+        tenant_id: Optional[str] = None,
+        model_name: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None
+    ) -> None:
         """
         Stream TTS audio to WebSocket with proper error handling and fallback
 
         Args:
             websocket: WebSocket connection to stream to
             text: Text to convert to speech
+            tenant_id: Optional tenant ID for model selection
+            model_name: Optional model name override
+            api_key: Optional API key override
+            base_url: Optional base URL override
 
         Raises:
             TTSConnectionException: If TTS service connection fails
@@ -277,7 +479,14 @@ class VoiceService:
         """
         try:
             # Generate and stream audio chunks
-            speech_result = await self.generate_tts_speech(text, stream=True)
+            tts_config = {"api_key": api_key, "base_url": base_url} if api_key or base_url else None
+            speech_result = await self.generate_tts_speech(
+                text,
+                stream=True,
+                tenant_id=tenant_id,
+                model_name_override=model_name,
+                tts_config=tts_config
+            )
 
             # Check if it's an async iterator or a regular iterable
             if hasattr(speech_result, '__aiter__'):
@@ -369,9 +578,29 @@ class VoiceService:
             logger.error(f"STT connectivity check failed: {str(e)}")
             raise STTConnectionException(f"STT connectivity check failed: {str(e)}") from e
 
-    async def check_tts_connectivity(self) -> bool:
+    async def check_tts_connectivity(
+        self,
+        model_factory: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model_appid: Optional[str] = None,
+        access_token: Optional[str] = None,
+        voice_type: Optional[str] = None,
+        speed_ratio: float = 1.0,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None
+    ) -> bool:
         """
-        Check TTS service connectivity
+        Check TTS service connectivity.
+
+        Args:
+            model_factory: Model factory/vendor name (e.g., "volc", "dashscope")
+            api_key: API key for Ali TTS
+            model_appid: Application ID for Volcano TTS
+            access_token: Access token for Volcano TTS
+            voice_type: Voice type for TTS
+            speed_ratio: Speech speed ratio
+            base_url: Custom WebSocket URL (optional)
+            model: Model name (e.g., "cosyvoice-v3.5-plus")
 
         Returns:
             bool: True if TTS service is connected, False otherwise
@@ -380,8 +609,20 @@ class VoiceService:
             TTSConnectionException: If connectivity check fails
         """
         try:
-            logger.info(f"Checking TTS connectivity with config: {self.tts_config}")
-            connected = await self.tts_model.check_connectivity()
+            tts_model = self._get_tts_model_from_config(
+                tenant_id=None,
+                model_factory=model_factory,
+                api_key=api_key,
+                model_appid=model_appid,
+                access_token=access_token,
+                voice_type=voice_type,
+                speed_ratio=speed_ratio,
+                base_url=base_url,
+                model=model
+            )
+
+            logger.info(f"Checking TTS connectivity for model factory: {model_factory}")
+            connected = await tts_model.check_connectivity()
             if not connected:
                 logger.error("TTS service connection failed")
                 raise TTSConnectionException("TTS service connection failed")
@@ -432,7 +673,25 @@ class VoiceService:
                     base_url=base_url
                 )
             elif model_type == 'tts':
-                return await self.check_tts_connectivity()
+                model_factory = stt_config.get("model_factory") if stt_config else None
+                api_key = stt_config.get("api_key") if stt_config else None
+                model_appid = stt_config.get("model_appid") if stt_config else None
+                access_token = stt_config.get("access_token") if stt_config else None
+                voice_type = stt_config.get("voice_type") if stt_config else None
+                speed_ratio = float(stt_config.get("speed_ratio", 1.0)) if stt_config else 1.0
+                base_url = stt_config.get("base_url") if stt_config else None
+                model = stt_config.get("model") if stt_config else None
+
+                return await self.check_tts_connectivity(
+                    model_factory=model_factory,
+                    api_key=api_key,
+                    model_appid=model_appid,
+                    access_token=access_token,
+                    voice_type=voice_type,
+                    speed_ratio=speed_ratio,
+                    base_url=base_url,
+                    model=model
+                )
             else:
                 logger.error(f"Unknown model type: {model_type}")
                 raise VoiceServiceException(f"Unknown model type: {model_type}")

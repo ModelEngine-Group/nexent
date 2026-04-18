@@ -714,6 +714,7 @@
   "model.dialog.label.url": "模型URL",
   "model.dialog.label.apiKey": "API Key",
   "model.dialog.label.sttProvider": "STT服务商",
+  "model.dialog.label.ttsProvider": "TTS服务商",
   "model.dialog.label.maxTokens": "最大Token数",
   "model.dialog.label.modelAppid": "App ID",
   "model.dialog.label.accessToken": "Access Token",
