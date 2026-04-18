@@ -1112,3 +1112,280 @@ WHERE delete_flag = 'N';
 CREATE INDEX IF NOT EXISTS idx_ag_outer_api_services_mcp_service_name
 ON nexent.ag_outer_api_services (mcp_service_name)
 WHERE delete_flag = 'N';
+
+-- =============================================================================
+-- A2A Protocol Tables (v2.0.2)
+-- =============================================================================
+
+-- Table: ag_a2a_nacos_config_t
+-- Purpose: Store Nacos server configuration for external A2A agent discovery
+CREATE TABLE IF NOT EXISTS "ag_a2a_nacos_config_t" (
+    id BIGSERIAL PRIMARY KEY,
+    config_id VARCHAR(64) UNIQUE NOT NULL,
+    nacos_addr VARCHAR(512) NOT NULL,
+    nacos_username VARCHAR(100),
+    nacos_password VARCHAR(256),
+    namespace_id VARCHAR(100) DEFAULT 'public',
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    tenant_id VARCHAR(100) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100),
+    is_active BOOLEAN DEFAULT TRUE,
+    last_scan_at TIMESTAMP(6),
+    create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "ag_a2a_nacos_config_t" OWNER TO "root";
+
+COMMENT ON TABLE "ag_a2a_nacos_config_t" IS 'Nacos configuration for external A2A agent discovery';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".id IS 'Primary key, auto-increment';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".config_id IS 'Unique config identifier for API reference';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".nacos_addr IS 'Nacos server address, e.g., http://nacos-server:8848';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".nacos_username IS 'Nacos username for authentication';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".nacos_password IS 'Nacos password, encrypted at rest';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".namespace_id IS 'Nacos namespace for service discovery, default is public';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".name IS 'Display name for this Nacos config';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".description IS 'Description of this Nacos configuration';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".tenant_id IS 'Tenant ID for multi-tenancy isolation';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".created_by IS 'User who created this config';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".updated_by IS 'User who last updated this record';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".is_active IS 'Whether this Nacos config is active';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".last_scan_at IS 'Last time a scan was performed using this config';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".create_time IS 'Record creation timestamp';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".update_time IS 'Record last update timestamp';
+COMMENT ON COLUMN "ag_a2a_nacos_config_t".delete_flag IS 'Soft delete flag: Y/N';
+
+-- Table: ag_a2a_external_agent_t
+-- Purpose: Cache external A2A agents discovered from URL or Nacos
+CREATE TABLE IF NOT EXISTS "ag_a2a_external_agent_t" (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    version VARCHAR(50),
+    agent_url VARCHAR(512) NOT NULL,
+    protocol_type VARCHAR(20) DEFAULT 'JSONRPC',
+    streaming BOOLEAN DEFAULT FALSE,
+    supported_interfaces JSONB,
+    source_type VARCHAR(20) NOT NULL,
+    source_url VARCHAR(512),
+    nacos_config_id VARCHAR(64),
+    nacos_agent_name VARCHAR(255),
+    tenant_id VARCHAR(100) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100),
+    raw_card JSONB,
+    cached_at TIMESTAMP(6),
+    cache_expires_at TIMESTAMP(6),
+    is_available BOOLEAN DEFAULT TRUE,
+    last_check_at TIMESTAMP(6),
+    last_check_result VARCHAR(50),
+    create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "ag_a2a_external_agent_t" OWNER TO "root";
+
+COMMENT ON TABLE "ag_a2a_external_agent_t" IS 'External A2A agents discovered from URL or Nacos';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".id IS 'Primary key, auto-increment';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".name IS 'Agent name from Agent Card';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".description IS 'Agent description from Agent Card';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".version IS 'Agent version from Agent Card';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".agent_url IS 'Primary A2A endpoint URL';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".protocol_type IS 'Protocol type: JSONRPC, HTTP+JSON, or GRPC';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".streaming IS 'Whether this agent supports SSE streaming';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".supported_interfaces IS 'All supported interfaces array from Agent Card';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".source_type IS 'Discovery source: url or nacos';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".source_url IS 'Direct URL to agent card';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".nacos_config_id IS 'Reference to Nacos config used for discovery';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".nacos_agent_name IS 'Original name used for Nacos query';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".tenant_id IS 'Tenant ID for multi-tenancy isolation';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".created_by IS 'User who discovered this agent';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".updated_by IS 'User who last updated this record';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".raw_card IS 'Full original Agent Card JSON from discovery';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".cached_at IS 'Timestamp when Agent Card was cached';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".cache_expires_at IS 'Timestamp when cache expires';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".is_available IS 'Whether this agent is currently reachable';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".last_check_at IS 'Last health check timestamp';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".last_check_result IS 'Last health check result: OK, ERROR, TIMEOUT';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".create_time IS 'Record creation timestamp';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".update_time IS 'Record last update timestamp';
+COMMENT ON COLUMN "ag_a2a_external_agent_t".delete_flag IS 'Soft delete flag: Y/N';
+
+-- Table: ag_a2a_external_agent_relation_t
+-- Purpose: Relation between local agent and external A2A agent
+CREATE TABLE IF NOT EXISTS "ag_a2a_external_agent_relation_t" (
+    id BIGSERIAL PRIMARY KEY,
+    local_agent_id INTEGER NOT NULL,
+    external_agent_id BIGINT NOT NULL,
+    tenant_id VARCHAR(100) NOT NULL,
+    is_enabled BOOLEAN DEFAULT TRUE,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100),
+    create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    CONSTRAINT uq_local_external_agent UNIQUE (local_agent_id, external_agent_id),
+    CONSTRAINT fk_external_agent FOREIGN KEY (external_agent_id) REFERENCES "ag_a2a_external_agent_t"(id)
+);
+
+ALTER TABLE "ag_a2a_external_agent_relation_t" OWNER TO "root";
+
+COMMENT ON TABLE "ag_a2a_external_agent_relation_t" IS 'Relation between local agent and external A2A agent';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".id IS 'Primary key, auto-increment';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".local_agent_id IS 'Local parent agent ID (FK to ag_tenant_agent_t)';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".external_agent_id IS 'External A2A agent ID (FK to ag_a2a_external_agent_t.id)';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".tenant_id IS 'Tenant ID for multi-tenancy isolation';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".is_enabled IS 'Whether this relation is active';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".created_by IS 'User who created this relation';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".updated_by IS 'User who last updated this record';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".create_time IS 'Record creation timestamp';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".update_time IS 'Record last update timestamp';
+COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".delete_flag IS 'Soft delete flag: Y/N';
+
+-- Table: ag_a2a_server_agent_t
+-- Purpose: Local agents registered as A2A Server endpoints
+CREATE TABLE IF NOT EXISTS "ag_a2a_server_agent_t" (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id INTEGER NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    tenant_id VARCHAR(100) NOT NULL,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    endpoint_id VARCHAR(64) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    version VARCHAR(50),
+    agent_url VARCHAR(512),
+    streaming BOOLEAN DEFAULT FALSE,
+    supported_interfaces JSONB,
+    card_overrides JSONB,
+    is_enabled BOOLEAN DEFAULT FALSE,
+    raw_card JSONB,
+    published_at TIMESTAMP(6),
+    unpublished_at TIMESTAMP(6),
+    response_format VARCHAR(20) DEFAULT 'task',
+    create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "ag_a2a_server_agent_t" OWNER TO "root";
+
+COMMENT ON TABLE "ag_a2a_server_agent_t" IS 'Local agents registered as A2A Server endpoints';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".id IS 'Primary key, auto-increment';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".agent_id IS 'Local agent ID (FK to ag_tenant_agent_t)';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".user_id IS 'Owner user ID';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".tenant_id IS 'Tenant ID for multi-tenancy isolation';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".created_by IS 'User who created this A2A Server agent';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".updated_by IS 'User who last updated this A2A Server agent';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".endpoint_id IS 'Generated endpoint ID for A2A routing';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".name IS 'Agent name exposed in Agent Card';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".description IS 'Agent description exposed in Agent Card';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".version IS 'Agent version exposed in Agent Card';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".agent_url IS 'Primary A2A endpoint URL';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".streaming IS 'Whether this agent supports SSE streaming';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".supported_interfaces IS 'All supported interfaces: [{protocolBinding, url, protocolVersion}, ...]';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".card_overrides IS 'User customizations for Agent Card';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".is_enabled IS 'Whether A2A Server is enabled for this agent';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".raw_card IS 'Generated Agent Card JSON (for debugging)';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".published_at IS 'Timestamp when A2A Server was last enabled';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".unpublished_at IS 'Timestamp when A2A Server was disabled';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".response_format IS 'Response format: task or message';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".create_time IS 'Record creation timestamp';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".update_time IS 'Record last update timestamp';
+COMMENT ON COLUMN "ag_a2a_server_agent_t".delete_flag IS 'Soft delete flag: Y/N';
+
+-- Table: ag_a2a_task_t
+-- Purpose: A2A tasks for tracking requests (Server side)
+CREATE TABLE IF NOT EXISTS "ag_a2a_task_t" (
+    id VARCHAR(64) PRIMARY KEY,
+    context_id VARCHAR(64),
+    endpoint_id VARCHAR(64) NOT NULL,
+    caller_user_id VARCHAR(100),
+    caller_tenant_id VARCHAR(100),
+    raw_request JSONB,
+    task_state VARCHAR(50) NOT NULL DEFAULT 'TASK_STATE_SUBMITTED',
+    state_timestamp TIMESTAMP(6),
+    result_data JSONB,
+    create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP(6)
+);
+
+ALTER TABLE "ag_a2a_task_t" OWNER TO "root";
+
+COMMENT ON TABLE "ag_a2a_task_t" IS 'A2A tasks for tracking requests';
+COMMENT ON COLUMN "ag_a2a_task_t".id IS 'Task ID from A2A protocol, primary key';
+COMMENT ON COLUMN "ag_a2a_task_t".context_id IS 'Context ID for grouping related A2A tasks';
+COMMENT ON COLUMN "ag_a2a_task_t".endpoint_id IS 'Endpoint ID (FK to ag_a2a_server_agent_t.endpoint_id)';
+COMMENT ON COLUMN "ag_a2a_task_t".caller_user_id IS 'User ID of the caller (for audit)';
+COMMENT ON COLUMN "ag_a2a_task_t".caller_tenant_id IS 'Tenant ID of the caller (for audit)';
+COMMENT ON COLUMN "ag_a2a_task_t".raw_request IS 'Original A2A request payload';
+COMMENT ON COLUMN "ag_a2a_task_t".task_state IS 'Task state: TASK_STATE_SUBMITTED, TASK_STATE_WORKING, TASK_STATE_COMPLETED, etc.';
+COMMENT ON COLUMN "ag_a2a_task_t".state_timestamp IS 'Task state last update timestamp';
+COMMENT ON COLUMN "ag_a2a_task_t".result_data IS 'Task final result data';
+COMMENT ON COLUMN "ag_a2a_task_t".create_time IS 'Task creation timestamp';
+COMMENT ON COLUMN "ag_a2a_task_t".update_time IS 'Task last update timestamp';
+COMMENT ON COLUMN "ag_a2a_task_t".completed_at IS 'Task completion timestamp';
+
+-- Table: ag_a2a_message_t
+-- Purpose: A2A messages within tasks (Task history)
+CREATE TABLE IF NOT EXISTS "ag_a2a_message_t" (
+    message_id VARCHAR(64) PRIMARY KEY,
+    task_id VARCHAR(64),
+    message_index INTEGER NOT NULL,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('ROLE_UNSPECIFIED', 'ROLE_USER', 'ROLE_AGENT')),
+    parts JSONB NOT NULL,
+    meta_data JSONB,
+    extensions JSONB,
+    reference_task_ids JSONB,
+    create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, message_index)
+);
+
+ALTER TABLE "ag_a2a_message_t" OWNER TO "root";
+
+COMMENT ON TABLE "ag_a2a_message_t" IS 'A2A messages within tasks. Stores conversation history for multi-turn interactions.';
+COMMENT ON COLUMN "ag_a2a_message_t".message_id IS 'Message ID, primary key (A2A spec: messageId)';
+COMMENT ON COLUMN "ag_a2a_message_t".task_id IS 'Task ID this message belongs to (FK to ag_a2a_task_t.id)';
+COMMENT ON COLUMN "ag_a2a_message_t".message_index IS 'Order of message in the conversation';
+COMMENT ON COLUMN "ag_a2a_message_t".role IS 'Message sender role: ROLE_UNSPECIFIED, ROLE_USER, or ROLE_AGENT';
+COMMENT ON COLUMN "ag_a2a_message_t".parts IS 'Message parts following A2A Part structure';
+COMMENT ON COLUMN "ag_a2a_message_t".meta_data IS 'Optional message metadata';
+COMMENT ON COLUMN "ag_a2a_message_t".extensions IS 'Extension URI list';
+COMMENT ON COLUMN "ag_a2a_message_t".reference_task_ids IS 'Referenced task IDs array for multi-turn scenarios';
+COMMENT ON COLUMN "ag_a2a_message_t".create_time IS 'Message creation timestamp';
+
+-- Table: ag_a2a_artifact_t
+-- Purpose: A2A artifacts (task outputs)
+CREATE TABLE IF NOT EXISTS "ag_a2a_artifact_t" (
+    id VARCHAR(64) PRIMARY KEY,
+    artifact_id VARCHAR(64) NOT NULL,
+    task_id VARCHAR(64) NOT NULL,
+    name VARCHAR(255),
+    description TEXT,
+    parts JSONB NOT NULL,
+    meta_data JSONB,
+    extensions JSONB,
+    create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_artifact_task FOREIGN KEY (task_id) REFERENCES "ag_a2a_task_t"(id) ON DELETE CASCADE,
+    UNIQUE(task_id, artifact_id)
+);
+
+ALTER TABLE "ag_a2a_artifact_t" OWNER TO "root";
+
+COMMENT ON TABLE "ag_a2a_artifact_t" IS 'A2A artifacts. Stores the output/artifacts produced by a task.';
+COMMENT ON COLUMN "ag_a2a_artifact_t".id IS 'Internal primary key';
+COMMENT ON COLUMN "ag_a2a_artifact_t".artifact_id IS 'Artifact ID (A2A spec: artifactId)';
+COMMENT ON COLUMN "ag_a2a_artifact_t".task_id IS 'Task ID this artifact belongs to (FK to ag_a2a_task_t.id)';
+COMMENT ON COLUMN "ag_a2a_artifact_t".name IS 'Human-readable artifact name';
+COMMENT ON COLUMN "ag_a2a_artifact_t".description IS 'Artifact description';
+COMMENT ON COLUMN "ag_a2a_artifact_t".parts IS 'Artifact parts following A2A Part structure';
+COMMENT ON COLUMN "ag_a2a_artifact_t".meta_data IS 'Artifact metadata';
+COMMENT ON COLUMN "ag_a2a_artifact_t".extensions IS 'Extension URI list';
+COMMENT ON COLUMN "ag_a2a_artifact_t".create_time IS 'Artifact creation timestamp';
+
