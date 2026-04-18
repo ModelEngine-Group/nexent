@@ -37,6 +37,54 @@ export default function A2AChatModal({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  /**
+   * Extract text content from A2A SendMessage response.
+   * Supports multiple response formats:
+   * 1. Direct message: { message: { parts: [...] } }
+   * 2. Task wrapper: { task: { status: { message: { parts: [...] } } } }
+   * 3. Fallback: any response with message text
+   */
+  const extractAgentContent = (data: any): string => {
+    if (!data) return t("a2a.chat.noResponse");
+
+    // Format 1: Direct message with parts
+    if (data.message?.parts) {
+      const parts = data.message.parts;
+      if (Array.isArray(parts) && parts.length > 0) {
+        return parts[0].text || t("a2a.chat.noResponse");
+      }
+    }
+
+    // Format 1 fallback: Direct message as string
+    if (typeof data.message === "string") {
+      return data.message;
+    }
+
+    // Format 2: Task wrapper (A2A SendMessage standard)
+    if (data.task?.status?.message?.parts) {
+      const parts = data.task.status.message.parts;
+      if (Array.isArray(parts) && parts.length > 0) {
+        return parts[0].text || t("a2a.chat.noResponse");
+      }
+    }
+
+    // Format 2 fallback: Task status message as string
+    if (typeof data.task?.status?.message === "string") {
+      return data.task.status.message;
+    }
+
+    // Format 3: Look for text in common locations
+    if (data.text) return data.text;
+    if (data.content) return typeof data.content === "string" ? data.content : data.content?.text;
+    if (data.result?.text) return data.result.text;
+    if (data.result?.message?.text) return data.result.message.text;
+
+    // Last resort: stringify meaningful data
+    if (data.message) return JSON.stringify(data.message);
+
+    return t("a2a.chat.noResponse");
+  };
+
   useEffect(() => {
     if (open) {
       setMessages([]);
@@ -71,11 +119,10 @@ export default function A2AChatModal({
       );
 
       if (result.success) {
-        const parts = result.data?.message?.parts;
-        const agentContent =
-          (parts && parts.length > 0 && parts[0].text) ||
-          result.data?.message ||
-          t("a2a.chat.noResponse");
+        // Support both direct message format and Task wrapper format (A2A SendMessage standard)
+        // Format 1: { message: { parts: [...] } }
+        // Format 2: { task: { status: { message: { parts: [...] } } } }
+        const agentContent = extractAgentContent(result.data);
 
         const agentMessage: ChatMessage = {
           id: `agent-${Date.now()}`,

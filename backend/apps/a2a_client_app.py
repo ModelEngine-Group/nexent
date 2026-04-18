@@ -617,6 +617,12 @@ async def delete_nacos_config(
 class ChatRequest(BaseModel):
     """Request to send a chat message to an external A2A agent."""
     message: str = Field(..., description="The chat message to send")
+    include_metadata: bool = Field(
+        default=False,
+        description="Whether to include user_id and tenant_id in metadata sent to the agent. "
+                    "Defaults to False to prevent leaking sensitive information to third-party agents. "
+                    "Only set to True for trusted internal agents."
+    )
 
 
 @router.post("/agents/{external_agent_id}/chat")
@@ -642,18 +648,25 @@ async def chat_with_external_agent(
 
         # Build A2A message format following A2A protocol with parts array
         a2a_message = {
-            "role": "user",
+            "role": "ROLE_USER",
             "parts": [
                 {
                     "text": request_body.message.strip(),
                     "mediaType": "text/plain"
                 }
             ],
-            "metadata": {
+        }
+
+        # Only include metadata if explicitly requested by the caller
+        # This prevents leaking user_id and tenant_id to untrusted external agents
+        if request_body.include_metadata:
+            a2a_message["metadata"] = {
                 "user_id": user_id,
                 "tenant_id": tenant_id,
             }
-        }
+            logger.debug(f"Including user metadata for external agent {external_agent_id}")
+        else:
+            logger.debug(f"Skipping user metadata for external agent {external_agent_id} (include_metadata=False)")
 
         # Call the external agent
         result = await a2a_client_service.call_agent(
