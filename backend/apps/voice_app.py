@@ -92,9 +92,21 @@ async def tts_websocket(websocket: WebSocket):
 
         # Extract config from client
         tenant_id = client_config.get("tenant_id")
+        model_factory = client_config.get("model_factory")
         model_name = client_config.get("model_name")
         api_key = client_config.get("api_key")
+        model_appid = client_config.get("model_appid")
+        access_token = client_config.get("access_token")
         base_url = client_config.get("base_url")
+
+        # Build tts_config dict for voice service
+        tts_config = {
+            "model_factory": model_factory,
+            "api_key": api_key,
+            "model_appid": model_appid,
+            "access_token": access_token,
+            "base_url": base_url,
+        }
 
         # Stream TTS audio to WebSocket
         voice_service = get_voice_service()
@@ -103,8 +115,7 @@ async def tts_websocket(websocket: WebSocket):
             text,
             tenant_id=tenant_id,
             model_name=model_name,
-            api_key=api_key,
-            base_url=base_url
+            tts_config=tts_config
         )
 
     except TTSConnectionException as e:

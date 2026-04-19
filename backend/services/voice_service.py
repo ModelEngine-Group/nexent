@@ -175,7 +175,6 @@ class VoiceService:
         api_key: Optional[str] = None,
         model_appid: Optional[str] = None,
         access_token: Optional[str] = None,
-        voice_type: Optional[str] = None,
         speed_ratio: float = 1.0,
         base_url: Optional[str] = None,
         model: Optional[str] = None
@@ -189,7 +188,6 @@ class VoiceService:
             api_key: API key (for Ali TTS)
             model_appid: Application ID (for Volcano TTS)
             access_token: Access token (for Volcano TTS)
-            voice_type: Voice type for TTS
             speed_ratio: Speech speed ratio
             base_url: Custom WebSocket URL (optional)
             model: Model name (for Ali TTS)
@@ -198,23 +196,23 @@ class VoiceService:
             TTS model instance based on configuration
         """
         use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
+        if not use_volc and base_url and "openspeech.bytedance.com" in base_url:
+            use_volc = True
+            logger.info("Auto-detected Volcano Engine TTS from base_url")
 
         if use_volc:
             logger.info(f"Using Volcano Engine TTS with appid={model_appid}, access_token={'***' if access_token else None}")
             volc_config = VolcTTSConfig(
                 appid=model_appid or "",
                 token=access_token or "",
-                cluster="volcengine_tts",
-                voice_type=voice_type or "BV700_V2",
                 speed_ratio=speed_ratio,
-                host=base_url.replace("wss://", "").split("/")[0] if base_url else "openspeech.bytedance.com"
+                ws_url=base_url or None,
             )
             return VolcTTSModel(volc_config)
         else:
             # Determine default voice based on model type
             is_qwen_realtime = model and ("qwen" in model.lower() or "/realtime" in (base_url or "").lower())
-            default_voice = "Cherry" if is_qwen_realtime else "longxiaochun_v2"
-            effective_voice = voice_type or default_voice
+            effective_voice = "Cherry" if is_qwen_realtime else "longxiaochun_v2"
 
             logger.info(f"Using Ali Cloud TTS with api_key={'***' if api_key else None}")
             ali_config = AliTTSConfig(
@@ -247,10 +245,6 @@ class VoiceService:
                 api_key = tts_config.get("api_key", "")
                 model_appid = tts_config.get("model_appid", "")
                 access_token_val = tts_config.get("access_token", "")
-                voice_type = tts_config.get("voice_type")
-                if not voice_type:
-                    is_qwen_realtime = "qwen" in (tts_config.get("model") or tts_config.get("model_name", "")).lower() or "/realtime" in (tts_config.get("base_url") or "").lower()
-                    voice_type = "Cherry" if is_qwen_realtime else "longxiaochun_v2"
                 speed_ratio = float(tts_config.get("speed_ratio", 1.0))
                 base_url = tts_config.get("base_url", "")
                 model = tts_config.get("model") or tts_config.get("model_name", "")
@@ -261,7 +255,6 @@ class VoiceService:
                     api_key=api_key,
                     model_appid=model_appid,
                     access_token=access_token_val,
-                    voice_type=voice_type,
                     speed_ratio=speed_ratio,
                     base_url=base_url if base_url else None,
                     model=model if model else None
@@ -274,10 +267,6 @@ class VoiceService:
                 api_key = record.get("api_key", "")
                 model_appid = record.get("model_appid", "")
                 access_token_val = record.get("access_token", "")
-                voice_type = record.get("voice_type")
-                if not voice_type:
-                    is_qwen_realtime = "qwen" in record.get("model_name", "").lower() or "/realtime" in record.get("base_url", "").lower()
-                    voice_type = "Cherry" if is_qwen_realtime else "longxiaochun_v2"
                 speed_ratio = float(record.get("speed_ratio", 1.0))
                 base_url = record.get("base_url", "")
                 model = record.get("model_name", "")
@@ -288,7 +277,6 @@ class VoiceService:
                     api_key=api_key,
                     model_appid=model_appid,
                     access_token=access_token_val,
-                    voice_type=voice_type,
                     speed_ratio=speed_ratio,
                     base_url=base_url if base_url else None,
                     model=model if model else None
@@ -408,7 +396,6 @@ class VoiceService:
             api_key = None
             model_appid = None
             access_token = None
-            voice_type = None
             speed_ratio = 1.0
             base_url = None
             model_name = None
@@ -418,12 +405,12 @@ class VoiceService:
                 api_key = tts_config.get("api_key") or tts_config.get("apiKey")
                 model_appid = tts_config.get("model_appid") or tts_config.get("appid")
                 access_token = tts_config.get("access_token")
-                voice_type = tts_config.get("voice_type")
                 speed_ratio = float(tts_config.get("speed_ratio", 1.0))
                 base_url = tts_config.get("base_url") or tts_config.get("baseUrl")
                 model_name = tts_config.get("model") or tts_config.get("model_name")
                 logger.info(f"Extracted TTS config - model_factory: {model_factory}, api_key: {'***' if api_key else None}, "
-                           f"model_appid: {'***' if model_appid else None}, access_token: {'***' if access_token else None}, base_url: {base_url}, model: {model_name}")
+                           f"model_appid: {'***' if model_appid else None}, access_token: {'***' if access_token else None}, "
+                           f"base_url: {base_url}, model: {model_name}")
 
             # If model_name is provided directly, use it
             effective_model = model_name_override or model_name
@@ -437,7 +424,6 @@ class VoiceService:
                     api_key=api_key,
                     model_appid=model_appid,
                     access_token=access_token,
-                    voice_type=voice_type,
                     speed_ratio=speed_ratio,
                     base_url=base_url,
                     model=effective_model
@@ -459,8 +445,7 @@ class VoiceService:
         text: str,
         tenant_id: Optional[str] = None,
         model_name: Optional[str] = None,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None
+        tts_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Stream TTS audio to WebSocket with proper error handling and fallback
@@ -470,16 +455,13 @@ class VoiceService:
             text: Text to convert to speech
             tenant_id: Optional tenant ID for model selection
             model_name: Optional model name override
-            api_key: Optional API key override
-            base_url: Optional base URL override
+            tts_config: Optional TTS configuration dict with model_factory, api_key, model_appid, access_token, base_url
 
         Raises:
             TTSConnectionException: If TTS service connection fails
             VoiceServiceException: If TTS streaming fails
         """
         try:
-            # Generate and stream audio chunks
-            tts_config = {"api_key": api_key, "base_url": base_url} if api_key or base_url else None
             speech_result = await self.generate_tts_speech(
                 text,
                 stream=True,
@@ -584,7 +566,6 @@ class VoiceService:
         api_key: Optional[str] = None,
         model_appid: Optional[str] = None,
         access_token: Optional[str] = None,
-        voice_type: Optional[str] = None,
         speed_ratio: float = 1.0,
         base_url: Optional[str] = None,
         model: Optional[str] = None
@@ -597,7 +578,6 @@ class VoiceService:
             api_key: API key for Ali TTS
             model_appid: Application ID for Volcano TTS
             access_token: Access token for Volcano TTS
-            voice_type: Voice type for TTS
             speed_ratio: Speech speed ratio
             base_url: Custom WebSocket URL (optional)
             model: Model name (e.g., "cosyvoice-v3.5-plus")
@@ -615,7 +595,6 @@ class VoiceService:
                 api_key=api_key,
                 model_appid=model_appid,
                 access_token=access_token,
-                voice_type=voice_type,
                 speed_ratio=speed_ratio,
                 base_url=base_url,
                 model=model
@@ -677,7 +656,6 @@ class VoiceService:
                 api_key = stt_config.get("api_key") if stt_config else None
                 model_appid = stt_config.get("model_appid") if stt_config else None
                 access_token = stt_config.get("access_token") if stt_config else None
-                voice_type = stt_config.get("voice_type") if stt_config else None
                 speed_ratio = float(stt_config.get("speed_ratio", 1.0)) if stt_config else 1.0
                 base_url = stt_config.get("base_url") if stt_config else None
                 model = stt_config.get("model") if stt_config else None
@@ -687,7 +665,6 @@ class VoiceService:
                     api_key=api_key,
                     model_appid=model_appid,
                     access_token=access_token,
-                    voice_type=voice_type,
                     speed_ratio=speed_ratio,
                     base_url=base_url,
                     model=model

@@ -99,7 +99,7 @@ class TTSModel:
             Union[bytes, AsyncGenerator[bytes, None]]: Audio data either as complete bytes or streaming chunks
         """
         request = self._prepare_request(text)
-        headers = {"Authorization": f"Bearer; {self.config.token}"}
+        headers = {"Authorization": f"Bearer {self.config.token}"}
 
         if not stream:
             buffer = io.BytesIO()
@@ -129,7 +129,7 @@ class TTSModel:
     async def query_status(self, text: str) -> Dict[str, Any]:
         """Query the status of text synthesis"""
         request = self._prepare_request(text, operation="query")
-        headers = {"Authorization": f"Bearer; {self.config.token}"}
+        headers = {"Authorization": f"Bearer {self.config.token}"}
 
         async with websockets.connect(self.config.api_url, additional_headers=headers, ping_interval=None) as ws:
             await ws.send(request)

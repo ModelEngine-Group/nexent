@@ -22,17 +22,19 @@ class VolcTTSConfig:
     """Configuration for Volcano Engine TTS model."""
     appid: str
     token: str
-    cluster: str
-    voice_type: str
     speed_ratio: float
+    ws_url: str = "wss://openspeech.bytedance.com/api/v1/tts/ws_binary"
     host: str = "openspeech.bytedance.com"
     encoding: str = "mp3"
     volume_ratio: float = 1.0
     pitch_ratio: float = 1.0
+    cluster:str="volcano_tts"
+    resource_id:str="seed-tts-2.0"
+    voice_type: str = "BV700_V2_streaming"
 
     @property
     def api_url(self) -> str:
-        return "wss://" + self.host + "/api/v1/tts/ws_binary"
+        return self.ws_url
 
 
 class VolcTTSModel(BaseTTSModel):
@@ -68,7 +70,12 @@ class VolcTTSModel(BaseTTSModel):
         return self.config.api_url
 
     def get_auth_headers(self) -> Dict[str, str]:
-        return {"Authorization": "Bearer; " + self.config.token}
+        headers = {
+            "X-Api-App-Id": self.config.appid,
+            "X-Api-Access-Key": self.config.token,
+            "X-Api-Resource-Id": self.config.resource_id
+        }
+        return headers
 
     def _prepare_request(self, text: str, operation: str = "submit") -> bytes:
         request_json = copy.deepcopy(self._request_template)
@@ -88,6 +95,7 @@ class VolcTTSModel(BaseTTSModel):
         message_type = res[1] >> 4
         message_type_specific_flags = res[1] & 0x0f
         payload = res[header_size * 4:]
+        logger.info(f"Volc TTS protocol: version={protocol_version}, header_size={header_size}, msg_type={message_type:#x}, flags={message_type_specific_flags}")
 
         if message_type == 0xb:
             if message_type_specific_flags == 0:
@@ -103,7 +111,9 @@ class VolcTTSModel(BaseTTSModel):
             error_msg = payload[8:]
             if (res[2] & 0x0f) == 1:
                 error_msg = gzip.decompress(error_msg)
-            raise Exception("Volc TTS Error " + str(code) + ": " + error_msg.decode('utf-8'))
+            err_str = "Volc TTS Error " + str(code) + ": " + error_msg.decode('utf-8')
+            logger.error(err_str)
+            raise Exception(err_str)
         return True, None
 
     async def generate_speech(
@@ -113,6 +123,7 @@ class VolcTTSModel(BaseTTSModel):
     ) -> Union[bytes, AsyncGenerator[bytes, None]]:
         request = self._prepare_request(text)
         headers = self.get_auth_headers()
+        logger.info(f"Volc TTS request prepared, text_len={len(text)}, stream={stream}")
         if not stream:
             buffer = io.BytesIO()
             async with websockets.connect(self.config.api_url, additional_headers=headers, ping_interval=None) as ws:
@@ -130,7 +141,9 @@ class VolcTTSModel(BaseTTSModel):
                     await ws.send(request)
                     while True:
                         response = await ws.recv()
+                        logger.info(f"Volc TTS raw response ({len(response)} bytes): {response[:50]!r}")
                         done, chunk = self._parse_response(response)
+                        logger.info(f"Volc TTS parsed: done={done}, chunk_len={len(chunk) if chunk else 0}")
                         if chunk:
                             yield chunk
                         if done:

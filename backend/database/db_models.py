@@ -179,9 +179,9 @@ class ModelRecord(TableBase):
     chunk_batch = Column(
         Integer, doc="Batch size for concurrent embedding requests during document chunking")
     model_appid = Column(
-        String(100), doc="Application ID for model authentication (used by some STT providers like Volcano Engine)")
+        String(100), doc="Application ID for model authentication (used by some STT/TTS providers like Volcano Engine)")
     access_token = Column(
-        String(100), doc="Access token for model authentication (used by some STT providers like Volcano Engine)")
+        String(100), doc="Access token for model authentication (used by some STT/TTS providers like Volcano Engine)")
 
 
 class ModelMonitoringRecord(SimpleTableBase):

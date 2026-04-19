@@ -70,7 +70,6 @@ async def _perform_connectivity_check(
     model_factory: Optional[str] = None,
     model_appid: Optional[str] = None,
     access_token: Optional[str] = None,
-    voice_type: Optional[str] = None,
 ) -> bool:
     """
     Perform specific model connectivity check
@@ -80,10 +79,6 @@ async def _perform_connectivity_check(
         model_base_url: Model base URL
         model_api_key: API key
         ssl_verify: Whether to verify SSL certificates (default: True)
-        model_factory: Model factory/vendor (for STT/TTS models)
-        model_appid: Application ID (for Volcano STT/TTS models)
-        access_token: Access token (for Volcano STT/TTS models)
-        voice_type: Voice type (for TTS models)
     Returns:
         bool: Connectivity check result
     """
@@ -174,19 +169,20 @@ async def _perform_connectivity_check(
         voice_service = get_voice_service()
         if use_volc:
             # Use Volcano TTS with appid and access_token
+            # voice_type uses SDK default (BV700_V2_streaming)
             connectivity = await voice_service.check_voice_connectivity(
                 model_type="tts",
                 stt_config={
                     "model_factory": model_factory,
                     "model_appid": model_appid,
                     "access_token": access_token,
-                    "base_url": model_base_url
+                    "base_url": model_base_url,
                 }
             )
         else:
-            # Use Ali TTS with api_key, voice_type, and optional custom base_url
+            # Use Ali TTS with api_key and optional custom base_url
             is_qwen_realtime = "qwen" in (model_name or "").lower() or "/realtime" in (model_base_url or "").lower()
-            tts_voice_type = voice_type or ("Cherry" if is_qwen_realtime else "longxia")
+            tts_voice_type = "Cherry" if is_qwen_realtime else "longxia"
             # Use custom base_url if provided (for international or custom endpoints)
             tts_config = {
                 "model_factory": model_factory,
@@ -228,7 +224,6 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         model_factory = model.get("model_factory")
         model_appid = model.get("model_appid")
         access_token = model.get("access_token")
-        voice_type = model.get("voice_type")
 
         try:
             set_monitoring_context(tenant_id=tenant_id)

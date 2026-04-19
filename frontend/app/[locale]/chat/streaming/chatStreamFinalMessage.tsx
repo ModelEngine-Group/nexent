@@ -206,7 +206,10 @@ function ChatStreamFinalMessageInner({
         },
         {
           model_name: ttsModelName,
+          model_factory: modelConfig?.tts?.modelFactory,
           api_key: modelConfig?.tts?.apiConfig?.apiKey,
+          model_appid: modelConfig?.tts?.modelAppid,
+          access_token: modelConfig?.tts?.accessToken,
           base_url: modelConfig?.tts?.apiConfig?.modelUrl
         }
       );

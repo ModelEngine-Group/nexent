@@ -719,6 +719,12 @@ export const ModelConfigSection = forwardRef<
         configUpdate[configKey].modelAppid = "";
         configUpdate[configKey].accessToken = "";
       }
+      // Clear TTS specific fields
+      if (configKey === MODEL_TYPES.TTS) {
+        configUpdate[configKey].modelFactory = "";
+        configUpdate[configKey].modelAppid = "";
+        configUpdate[configKey].accessToken = "";
+      }
     } else {
       configUpdate = {
         [configKey]: {
@@ -733,6 +739,12 @@ export const ModelConfigSection = forwardRef<
       }
       // Add STT specific fields
       if (configKey === MODEL_TYPES.STT) {
+        configUpdate[configKey].modelFactory = modelInfo?.source || "";
+        configUpdate[configKey].modelAppid = modelInfo?.modelAppid || "";
+        configUpdate[configKey].accessToken = modelInfo?.accessToken || "";
+      }
+      // Add TTS specific fields
+      if (configKey === MODEL_TYPES.TTS) {
         configUpdate[configKey].modelFactory = modelInfo?.source || "";
         configUpdate[configKey].modelAppid = modelInfo?.modelAppid || "";
         configUpdate[configKey].accessToken = modelInfo?.accessToken || "";

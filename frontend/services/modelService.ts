@@ -310,6 +310,10 @@ export const modelService = {
     expectedChunkSize?: number;
     maximumChunkSize?: number;
     chunkingBatchSize?: number;
+    // TTS specific fields
+    modelFactory?: string;
+    modelAppid?: string;
+    accessToken?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -335,6 +339,15 @@ export const modelService = {
               : {}),
             ...(model.chunkingBatchSize !== undefined
               ? { chunk_batch: model.chunkingBatchSize }
+              : {}),
+            ...(model.modelFactory !== undefined
+              ? { model_factory: model.modelFactory }
+              : {}),
+            ...(model.modelAppid !== undefined
+              ? { model_appid: model.modelAppid }
+              : {}),
+            ...(model.accessToken !== undefined
+              ? { access_token: model.accessToken }
               : {}),
           }),
         }
@@ -482,10 +495,10 @@ export const modelService = {
   // Verify model configuration connectivity before adding it
   verifyModelConfigConnectivity: async (
     config: {
-      modelName: string;
+      modelName?: string;
       modelType: ModelType;
       baseUrl?: string;
-      apiKey: string;
+      apiKey?: string;
       maxTokens?: number;
       embeddingDim?: number;
       // STT specific fields
@@ -627,6 +640,9 @@ export const modelService = {
             expectedChunkSize: model.expected_chunk_size,
             maximumChunkSize: model.maximum_chunk_size,
             chunkingBatchSize: model.chunk_batch,
+            // STT specific fields
+            modelAppid: model.model_appid,
+            accessToken: model.access_token,
           })),
           total: result.data.total || 0,
           page: result.data.page || 1,
@@ -734,7 +750,10 @@ export const modelService = {
     expectedChunkSize?: number;
     maximumChunkSize?: number;
     chunkingBatchSize?: number;
+    // TTS specific fields
     modelFactory?: string;
+    modelAppid?: string;
+    accessToken?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -752,10 +771,12 @@ export const modelService = {
             base_url: params.url,
             api_key: params.apiKey,
             ...(params.maxTokens !== undefined ? { max_tokens: params.maxTokens } : {}),
-            ...(params.modelFactory !== undefined ? { model_factory: params.modelFactory } : {}),
             ...(params.expectedChunkSize !== undefined ? { expected_chunk_size: params.expectedChunkSize } : {}),
             ...(params.maximumChunkSize !== undefined ? { maximum_chunk_size: params.maximumChunkSize } : {}),
             ...(params.chunkingBatchSize !== undefined ? { chunk_batch: params.chunkingBatchSize } : {}),
+            ...(params.modelFactory !== undefined ? { model_factory: params.modelFactory } : {}),
+            ...(params.modelAppid !== undefined ? { model_appid: params.modelAppid } : {}),
+            ...(params.accessToken !== undefined ? { access_token: params.accessToken } : {}),
           }),
         }
       );

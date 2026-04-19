@@ -114,9 +114,9 @@ function transformModelEntry(
 }
 
 /**
- * Transform backend STT config format to frontend format
+ * Transform backend voice model config (STT or TTS) to frontend format
  */
-function transformSTTModelEntry(raw: Record<string, any> | undefined): STTModelConfig {
+function transformVoiceModelEntry(raw: Record<string, any> | undefined): STTModelConfig {
   return {
     modelName: raw?.name || "",
     displayName: raw?.displayName || "",
@@ -161,8 +161,8 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
         ),
         rerank: transformModelEntry(backendConfig.models.rerank),
         vlm: transformModelEntry(backendConfig.models.vlm),
-        stt: transformSTTModelEntry(backendConfig.models.stt),
-        tts: transformModelEntry(backendConfig.models.tts),
+        stt: transformVoiceModelEntry(backendConfig.models.stt),
+        tts: transformVoiceModelEntry(backendConfig.models.tts),
       }
     : defaultConfig.models;
 

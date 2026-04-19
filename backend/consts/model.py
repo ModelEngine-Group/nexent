@@ -787,6 +787,10 @@ class ManageTenantModelUpdateRequest(BaseModel):
     expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
     maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
     chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
+    # TTS specific fields
+    model_factory: Optional[str] = Field(None, description="Model factory/vendor for TTS models")
+    model_appid: Optional[str] = Field(None, description="Application ID for TTS models")
+    access_token: Optional[str] = Field(None, description="Access token for TTS models")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):

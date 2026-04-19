@@ -196,7 +196,7 @@ export const conversationService = {
       const playAudio = async (
         text: string,
         onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void,
-        ttsConfig?: { tenant_id?: string; model_name?: string; api_key?: string; base_url?: string }
+        ttsConfig?: { tenant_id?: string; model_name?: string; model_factory?: string; api_key?: string; model_appid?: string; access_token?: string; base_url?: string }
       ): Promise<void> => {
         if (!text) return;
 
@@ -475,7 +475,7 @@ export const conversationService = {
       const playAudioTraditional = async (
         text: string,
         onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void,
-        ttsConfig?: { tenant_id?: string; model_name?: string; api_key?: string; base_url?: string }
+        ttsConfig?: { tenant_id?: string; model_name?: string; model_factory?: string; api_key?: string; model_appid?: string; access_token?: string; base_url?: string }
       ) => {
         audioChunksRef.current = [];
         const wsUrl = getWebSocketUrl(API_ENDPOINTS.tts.ws);
