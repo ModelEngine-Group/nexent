@@ -112,7 +112,7 @@ class KnowledgeBaseSearchTool(Tool):
         return default if value is None else value
 
     def _resolve_index_names(self) -> List[str]:
-        raw_index_names = self._resolve_field_value(self.index_names, [])
+        raw_index_names = self._resolve_field_value(self.index_names, None)
         if raw_index_names is None:
             return []
         if isinstance(raw_index_names, str):
