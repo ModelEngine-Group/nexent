@@ -72,7 +72,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(1)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        knowledge_base_search_tool.forward("hello world", index_names="test_index1,test_index2")
+        knowledge_base_search_tool.forward("hello world")
 
         knowledge_base_search_tool.observer.add_message.assert_any_call(
             "", ProcessType.TOOL, "Searching the knowledge base..."
@@ -199,7 +199,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
+        result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
         search_results = json.loads(result)
@@ -216,7 +216,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(4)
         knowledge_base_search_tool.vdb_core.semantic_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
+        result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
         search_results = json.loads(result)
@@ -230,7 +230,7 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.search_mode = "invalid"
 
         with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.forward("test query", index_names="test_index1")
+            knowledge_base_search_tool.forward("test query")
 
         assert "Invalid search mode" in str(excinfo.value)
         assert "hybrid, accurate, semantic" in str(excinfo.value)
@@ -241,18 +241,18 @@ class TestKnowledgeBaseSearchTool:
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = []
 
         with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.forward("test query", index_names="test_index1")
+            knowledge_base_search_tool.forward("test query")
 
         assert "No results found" in str(excinfo.value)
 
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
-        """Test forward method with custom index names passed as parameter"""
+        """Test forward method uses configured custom index names."""
         # Mock search results
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.index_names = ["custom_index1", "custom_index2"]
 
-        # Pass index_names as a list parameter (forward expects List[str])
-        knowledge_base_search_tool.forward("test query", index_names=["custom_index1", "custom_index2"])
+        knowledge_base_search_tool.forward("test query")
 
         # Verify vdb_core was called with the index names as-is
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
@@ -271,7 +271,7 @@ class TestKnowledgeBaseSearchTool:
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
+        result = knowledge_base_search_tool.forward("test query")
 
         # Verify Chinese running prompt
         knowledge_base_search_tool.observer.add_message.assert_any_call(
@@ -297,7 +297,7 @@ class TestKnowledgeBaseSearchTool:
         ]
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        result = knowledge_base_search_tool.forward("test query", index_names="test_index1")
+        result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
         search_results = json.loads(result)
@@ -315,14 +315,13 @@ class TestKnowledgeBaseSearchTool:
             {
                 "document": {
                     "title": "Image Doc",
-                    "content": "Image content",
+                    "content": json.dumps({"image_url": "s3://bucket/img.png"}),
                     "filename": "img.png",
                     "path_or_url": "/path/img.png",
                     "create_time": "2024-01-01T12:00:00Z",
-                    "source_type": "file"
+                    "source_type": "file",
+                    "process_source": "UniversalImageExtractor",
                 },
-                "content": json.dumps({"image_url": "s3://bucket/img.png"}),
-                "process_source": "UniversalImageExtractor",
                 "score": 0.9,
                 "index": "test_index"
             }
@@ -522,12 +521,9 @@ class TestKnowledgeBaseSearchToolRerank:
 
     def test_forward_empty_index_names_string(self, knowledge_base_search_tool):
         """Test forward method with empty index_names string returns no results"""
-        # Mock search results
-        mock_results = create_mock_search_result(2)
-        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.index_names = ""
 
-        # Pass empty string as index_names
-        result = knowledge_base_search_tool.forward("test query", index_names="")
+        result = knowledge_base_search_tool.forward("test query")
 
         # Should return no results message
         assert result == json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
@@ -537,9 +533,9 @@ class TestKnowledgeBaseSearchToolRerank:
         # Mock search results
         mock_results = create_mock_search_result(1)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.index_names = ["single_index"]
 
-        # Pass index_names as a list parameter (forward expects List[str])
-        knowledge_base_search_tool.forward("test query", index_names=["single_index"])
+        knowledge_base_search_tool.forward("test query")
 
         # Verify vdb_core was called with single index
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
@@ -554,13 +550,13 @@ class TestKnowledgeBaseSearchToolRerank:
         # Mock search results
         mock_results = create_mock_search_result(1)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+        knowledge_base_search_tool.index_names = ["  index1  ", "  index2  "]
 
-        # Pass index_names as a list parameter (forward expects List[str])
-        knowledge_base_search_tool.forward("test query", index_names=["  index1  ", "  index2  "])
+        knowledge_base_search_tool.forward("test query")
 
-        # Verify vdb_core was called with the index names as-is (no stripping performed)
+        # _resolve_index_names strips whitespace.
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
-            index_names=["  index1  ", "  index2  "],
+            index_names=["index1", "index2"],
             query_text="test query",
             embedding_model=knowledge_base_search_tool.embedding_model,
             top_k=5

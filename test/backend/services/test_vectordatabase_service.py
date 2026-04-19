@@ -259,7 +259,8 @@ class TestElasticSearchService(unittest.TestCase):
             "test_index", embedding_dim=768)
         mock_create_knowledge.assert_called_once()
         call_kwargs = mock_create_knowledge.call_args[0][0]
-        self.assertNotIn("embedding_model_name", call_kwargs)
+        self.assertIn("embedding_model_name", call_kwargs)
+        self.assertEqual(call_kwargs["embedding_model_name"], "test-model")
         self.assertEqual(call_kwargs["index_name"], "test_index")
         self.assertEqual(call_kwargs["created_by"], "test_user")
         self.assertEqual(call_kwargs["tenant_id"], "test_tenant")
@@ -513,7 +514,9 @@ class TestElasticSearchService(unittest.TestCase):
 
         # Verify get_embedding_model was called with the model name
         mock_get_embedding.assert_called_once_with(
-            "tenant-1", is_multimodal=False, model_name="text-embedding-3-small"
+            tenant_id="tenant-1",
+            is_multimodal=False,
+            model_name="text-embedding-3-small",
         )
 
         # Verify knowledge record was created with the embedding model name
@@ -561,7 +564,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
 
         # Verify get_embedding_model was called with None (no specific model)
-        mock_get_embedding.assert_called_once_with("tenant-1", is_multimodal=False)
+        mock_get_embedding.assert_called_once_with(
+            tenant_id="tenant-1",
+            is_multimodal=False,
+            model_name=None,
+        )
 
         # Verify knowledge record was created with the model's display name
         mock_create_knowledge.assert_called_once()
@@ -3247,7 +3254,12 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["chunk_id"], "chunk-1")
 
         # Verify embedding was generated
-        mock_get_embedding_model.assert_called_once_with("tenant-123", "text-embedding-3-small")
+        mock_get_embedding_model.assert_called_once_with(
+            tenant_id="tenant-123",
+            is_multimodal=False,
+            model_name="text-embedding-3-small",
+            strict_model_name=True,
+        )
         mock_embedding.get_embeddings.assert_called_once()
 
         # Verify vdb_core was called with embedding in payload
@@ -3324,21 +3336,17 @@ class TestElasticSearchService(unittest.TestCase):
             metadata={},
         )
 
-        # Should not raise exception, just log warning
-        result = ElasticSearchService.create_chunk(
-            index_name="kb-index",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-            tenant_id="tenant-123",
-        )
-
-        # Result should still be successful (embedding is optional)
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["chunk_id"], "chunk-1")
-
-        # Verify chunk was still created without embedding
-        self.mock_vdb_core.create_chunk.assert_called_once()
+        # When KB has explicit embedding_model_name, embedding resolution failure is surfaced.
+        with self.assertRaises(Exception) as context:
+            ElasticSearchService.create_chunk(
+                index_name="kb-index",
+                chunk_request=chunk_request,
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+                tenant_id="tenant-123",
+            )
+        self.assertIn("Error creating chunk", str(context.exception))
+        self.mock_vdb_core.create_chunk.assert_not_called()
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_embedding_model')
@@ -3430,7 +3438,12 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
 
         # Verify embedding model was called (backend doesn't skip based on "unknown")
-        mock_get_embedding_model.assert_called_once_with("tenant-123", "unknown")
+        mock_get_embedding_model.assert_called_once_with(
+            tenant_id="tenant-123",
+            is_multimodal=False,
+            model_name="unknown",
+            strict_model_name=True,
+        )
 
     def test_update_chunk_builds_payload_and_calls_core(self):
         """

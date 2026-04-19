@@ -53,6 +53,8 @@ sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_factory_mo
 minio_client_mock = MagicMock()
 minio_client_mock.storage_config = MagicMock()
 minio_client_mock.storage_config.default_bucket = 'test-bucket'
+# Current attachment_db uses minio_client.default_bucket directly.
+minio_client_mock.default_bucket = 'test-bucket'
 client_mock = MagicMock()
 client_mock.minio_client = minio_client_mock
 sys.modules['database'] = MagicMock()
