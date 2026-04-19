@@ -686,6 +686,8 @@ def _validate_local_tool(
         if not tool_class:
             raise NotFoundException(f"Tool class not found for {tool_name}")
 
+        runtime_inputs = dict(inputs or {})
+
         # Parse instantiation parameters first
         instantiation_params = params or {}
         # Get signature and extract default values for all parameters
@@ -708,6 +710,12 @@ def _validate_local_tool(
                     instantiation_params[param_name] = param.default
 
         if tool_name == "knowledge_base_search":
+            # Compatibility: historically index_names might be sent in runtime inputs.
+            # knowledge_base_search now treats index_names as init params (tool config),
+            # not forward() inputs.
+            if "index_names" in runtime_inputs and "index_names" not in instantiation_params:
+                instantiation_params["index_names"] = runtime_inputs.pop("index_names")
+
             is_multimodal = instantiation_params.pop("multimodal", False)
             embedding_model = get_embedding_model(tenant_id=tenant_id, is_multimodal=is_multimodal)
             vdb_core = get_vector_db_core()
@@ -765,7 +773,18 @@ def _validate_local_tool(
         else:
             tool_instance = tool_class(**instantiation_params)
 
-        result = tool_instance.forward(**(inputs or {}))
+        # Only pass declared runtime inputs to forward() to avoid unexpected kwargs.
+        declared_inputs = getattr(tool_class, "inputs", {}) or {}
+        allowed_input_names = (
+            set(declared_inputs.keys()) if isinstance(declared_inputs, dict) else set()
+        )
+        filtered_runtime_inputs = (
+            {k: v for k, v in runtime_inputs.items() if k in allowed_input_names}
+            if allowed_input_names
+            else runtime_inputs
+        )
+
+        result = tool_instance.forward(**filtered_runtime_inputs)
         return result
     except Exception as e:
         logger.error(f"Local tool validation failed for {tool_name}: {e}")

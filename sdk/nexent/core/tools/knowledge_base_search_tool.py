@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import List, Optional
 
 from pydantic import Field
@@ -98,6 +99,7 @@ class KnowledgeBaseSearchTool(Tool):
         self.rerank = rerank
         self.rerank_model_name = rerank_model_name
         self.rerank_model = rerank_model
+        self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
 
         self.record_ops = 1
         self.running_prompt_zh = "知识库检索中..."
@@ -109,14 +111,19 @@ class KnowledgeBaseSearchTool(Tool):
             return value.default if value.default is not None else default
         return default if value is None else value
 
-    def forward(self, query: str, index_names: List[str] | str | None = None) -> str:
-        # Parse index_names from string (optional)
-        if index_names is None:
-            search_index_names = self.index_names
-        elif isinstance(index_names, str):
-            search_index_names = [name.strip() for name in index_names.split(",") if name.strip()]
-        else:
-            search_index_names = index_names
+    def _resolve_index_names(self) -> List[str]:
+        raw_index_names = self._resolve_field_value(self.index_names, [])
+        if raw_index_names is None:
+            return []
+        if isinstance(raw_index_names, str):
+            return [name.strip() for name in raw_index_names.split(",") if name.strip()]
+        if isinstance(raw_index_names, list):
+            return [str(name).strip() for name in raw_index_names if str(name).strip()]
+        return []
+
+    def forward(self, query: str) -> str:
+        # index_names is configured in tool init params, not runtime inputs
+        search_index_names = self._resolve_index_names()
 
         # Use the instance search_mode
         search_mode = self.search_mode

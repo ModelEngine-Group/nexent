@@ -370,14 +370,25 @@ def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str
     """
     try:
         with get_db_session() as session:
+            # First try resolving by user-facing knowledge_name.
             result = session.query(KnowledgeRecord).filter(
                 KnowledgeRecord.knowledge_name == knowledge_name,
                 KnowledgeRecord.tenant_id == tenant_id,
                 KnowledgeRecord.delete_flag != 'Y'
             ).first()
-
             if result:
                 return result.index_name
+
+            # Backward/forward compatibility: if caller already passes internal index_name,
+            # accept it directly by resolving on index_name as well.
+            index_result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == knowledge_name,
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if index_result:
+                return index_result.index_name
+
             raise ValueError(
                 f"Knowledge base '{knowledge_name}' not found for the current tenant"
             )
