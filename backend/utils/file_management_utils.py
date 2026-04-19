@@ -15,7 +15,6 @@ from consts.const import DATA_PROCESS_SERVICE, LIBREOFFICE_PROFILE_DIR
 from consts.model import ProcessParams
 from database.attachment_db import get_file_size_from_minio
 from utils.auth_utils import get_current_user_id
-from utils.config_utils import tenant_config_manager
 
 logger = logging.getLogger("file_management_utils")
 
@@ -45,18 +44,13 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
         if not files:
             return None
 
-        # Get chunking size according to the embedding model
-        embedding_model_id = None
+        # Get tenant_id from authorization for downstream task processing
+        embedding_model_id = process_params.model_id
         tenant_id = None
         try:
             _, tenant_id = get_current_user_id(process_params.authorization)
-            # Get embedding model ID from tenant config
-            tenant_config = tenant_config_manager.load_config(tenant_id)
-            embedding_model_id_str = tenant_config.get("EMBEDDING_ID") if tenant_config else None
-            if embedding_model_id_str:
-                embedding_model_id = int(embedding_model_id_str)
         except Exception as e:
-            logger.warning(f"Failed to get embedding model ID for tenant: {e}")
+            logger.warning(f"Failed to get tenant_id from authorization: {e}")
 
         # Build headers with authorization
         headers = {
@@ -105,6 +99,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     "index_name": process_params.index_name,
                     "original_filename": file_details.get("filename"),
                     "embedding_model_id": embedding_model_id,
+                    "is_multimodal": is_multimodal,
                     "tenant_id": tenant_id
                 }
                 sources.append(source)

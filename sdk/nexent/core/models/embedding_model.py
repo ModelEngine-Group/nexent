@@ -19,6 +19,7 @@ class BaseEmbedding(ABC):
         api_key: str = None,
         embedding_dim: int = None,
         ssl_verify: bool = True,
+        model_type: str = None
     ):
         """
         Initialize the embedding model.
@@ -84,6 +85,7 @@ class TextEmbedding(BaseEmbedding):
         api_key: str = None,
         embedding_dim: int = None,
         ssl_verify: bool = True,
+        model_type: str = None
     ):
         super().__init__(model_name, base_url, api_key, embedding_dim, ssl_verify=ssl_verify)
 
@@ -126,6 +128,7 @@ class MultimodalEmbedding(BaseEmbedding):
         api_key: str = None,
         embedding_dim: int = None,
         ssl_verify: bool = True,
+        model_type: str = None
     ):
         super().__init__(model_name, base_url, api_key, embedding_dim, ssl_verify=ssl_verify)
 
@@ -162,6 +165,7 @@ class JinaEmbedding(MultimodalEmbedding):
         model_name: str = "jina-clip-v2",
         embedding_dim: int = 1024,
         ssl_verify: bool = True,
+        model_type: str = "multimodal"
     ):
         """Initialize JinaEmbedding with configuration."""
         self.api_key = api_key
@@ -169,6 +173,7 @@ class JinaEmbedding(MultimodalEmbedding):
         self.model = model_name
         self.embedding_dim = embedding_dim
         self.ssl_verify = ssl_verify
+        self.model_type = model_type
 
         self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 
@@ -319,13 +324,14 @@ class JinaEmbedding(MultimodalEmbedding):
 
 
 class OpenAICompatibleEmbedding(TextEmbedding):
-    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int, ssl_verify: bool = True):
+    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int, model_type: str = "text", ssl_verify: bool = True):
         """Initialize OpenAICompatibleEmbedding with configuration from environment variables or provided parameters."""
         self.api_key = api_key
         self.api_url = base_url
         self.model = model_name
         self.embedding_dim = embedding_dim
         self.ssl_verify = ssl_verify
+        self.model_type=model_type
 
         self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 

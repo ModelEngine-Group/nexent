@@ -1,8 +1,10 @@
 import asyncio
+import io
 import sys
 import os
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, ANY, AsyncMock, call
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
@@ -12,6 +14,25 @@ from types import ModuleType, SimpleNamespace
 from fastapi.responses import StreamingResponse
 
 # Environment variables are now configured in conftest.py
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SDK_ROOT = REPO_ROOT / "sdk"
+if str(SDK_ROOT) not in sys.path:
+    sys.path.insert(0, str(SDK_ROOT))
+
+try:
+    import nexent.memory.memory_service as real_memory_service
+    memory_pkg = sys.modules.get("nexent.memory")
+except Exception:
+    real_memory_service = None
+    memory_pkg = ModuleType("nexent.memory")
+    memory_pkg.__path__ = []
+    memory_service_stub = ModuleType("nexent.memory.memory_service")
+    async def _clear_memory_stub(*_args, **_kwargs):
+        await asyncio.sleep(0)
+        return None
+    memory_service_stub.clear_memory = _clear_memory_stub
+    sys.modules["nexent.memory.memory_service"] = memory_service_stub
 
 # Mock boto3 before importing the module under test
 boto3_mock = MagicMock()
@@ -62,6 +83,11 @@ class _VectorDatabaseCore:
 vector_db_base_module.VectorDatabaseCore = _VectorDatabaseCore
 sys.modules['nexent.vector_database.base'] = vector_db_base_module
 sys.modules['nexent.vector_database.elasticsearch_core'] = MagicMock()
+if memory_pkg is not None:
+    sys.modules["nexent.memory"] = memory_pkg
+    nexent_mock.memory = memory_pkg
+    if real_memory_service is not None:
+        sys.modules["nexent.memory.memory_service"] = real_memory_service
 sys.modules['nexent.vector_database.datamate_core'] = MagicMock()
 # Mock nexent.storage module and its submodules before any imports
 sys.modules['nexent.storage'] = _create_package_mock('nexent.storage')
@@ -175,6 +201,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_embedding = MagicMock()
         self.mock_embedding.embedding_dim = 768
         self.mock_embedding.model = "test-model"
+        self.mock_embedding.model_type = "text"
         self.mock_get_embedding.return_value = self.mock_embedding
 
         # Patch get_rerank_model for all tests
@@ -216,6 +243,7 @@ class TestElasticSearchService(unittest.TestCase):
 
         # Execute
         result = ElasticSearchService.create_index(
+            embedding_model=self.mock_embedding,
             index_name="test_index",
             embedding_dim=768,
             vdb_core=self.mock_vdb_core,
@@ -230,6 +258,13 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.create_index.assert_called_once_with(
             "test_index", embedding_dim=768)
         mock_create_knowledge.assert_called_once()
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        self.assertIn("embedding_model_name", call_kwargs)
+        self.assertEqual(call_kwargs["embedding_model_name"], "test-model")
+        self.assertEqual(call_kwargs["index_name"], "test_index")
+        self.assertEqual(call_kwargs["created_by"], "test_user")
+        self.assertEqual(call_kwargs["tenant_id"], "test_tenant")
+        self.assertFalse(call_kwargs["is_multimodal"])
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_index_already_exists(self, mock_create_knowledge):
@@ -247,6 +282,7 @@ class TestElasticSearchService(unittest.TestCase):
         # Execute and Assert
         with self.assertRaises(Exception) as context:
             ElasticSearchService.create_index(
+                embedding_model=self.mock_embedding,
                 index_name="test_index",
                 embedding_dim=768,
                 vdb_core=self.mock_vdb_core,
@@ -281,6 +317,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.create_index.assert_called_once_with(
             "7-uuid", embedding_dim=256
         )
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        self.assertFalse(call_kwargs["is_multimodal"])
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_knowledge_base_with_group_permissions(self, mock_create_knowledge):
@@ -314,6 +352,7 @@ class TestElasticSearchService(unittest.TestCase):
         call_kwargs = mock_create_knowledge.call_args[0][0]
         self.assertEqual(call_kwargs["ingroup_permission"], "EDIT")
         self.assertEqual(call_kwargs["group_ids"], [1, 2, 3])
+        self.assertFalse(call_kwargs["is_multimodal"])
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_knowledge_base_with_partial_group_permissions(self, mock_create_knowledge):
@@ -346,6 +385,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_kwargs["ingroup_permission"], "READ_ONLY")
         # group_ids should not be in the call if not provided
         self.assertNotIn("group_ids", call_kwargs)
+        self.assertFalse(call_kwargs["is_multimodal"])
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_knowledge_base_with_empty_group_ids(self, mock_create_knowledge):
@@ -377,6 +417,29 @@ class TestElasticSearchService(unittest.TestCase):
         call_kwargs = mock_create_knowledge.call_args[0][0]
         self.assertEqual(call_kwargs["ingroup_permission"], "PRIVATE")
         self.assertEqual(call_kwargs["group_ids"], [])
+        self.assertFalse(call_kwargs["is_multimodal"])
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_with_multimodal(self, mock_create_knowledge):
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 10,
+            "index_name": "10-uuid",
+            "knowledge_name": "kb-mm",
+        }
+
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb-mm",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            is_multimodal=True,
+        )
+
+        self.assertEqual(result["status"], "success")
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        self.assertTrue(call_kwargs["is_multimodal"])
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_index_failure(self, mock_create_knowledge):
@@ -395,6 +458,7 @@ class TestElasticSearchService(unittest.TestCase):
         # Execute and Assert
         with self.assertRaises(Exception) as context:
             ElasticSearchService.create_index(
+                embedding_model=self.mock_embedding,
                 index_name="test_index",
                 embedding_dim=768,
                 vdb_core=self.mock_vdb_core,
@@ -449,7 +513,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["knowledge_id"], 10)
 
         # Verify get_embedding_model was called with the model name
-        mock_get_embedding.assert_called_once_with("tenant-1", "text-embedding-3-small")
+        mock_get_embedding.assert_called_once_with(
+            tenant_id="tenant-1",
+            is_multimodal=False,
+            model_name="text-embedding-3-small",
+        )
 
         # Verify knowledge record was created with the embedding model name
         mock_create_knowledge.assert_called_once()
@@ -496,7 +564,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
 
         # Verify get_embedding_model was called with None (no specific model)
-        mock_get_embedding.assert_called_once_with("tenant-1", None)
+        mock_get_embedding.assert_called_once_with(
+            tenant_id="tenant-1",
+            is_multimodal=False,
+            model_name=None,
+        )
 
         # Verify knowledge record was created with the model's display name
         mock_create_knowledge.assert_called_once()
@@ -1554,6 +1626,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.vectorize_documents.return_value = 2
         mock_embedding_model = MagicMock()
         mock_embedding_model.model = "test-model"
+        mock_embedding_model.model_type = "text"
         with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
                 patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
             mock_get_record.return_value = {"tenant_id": "tenant-1"}
@@ -1600,6 +1673,69 @@ class TestElasticSearchService(unittest.TestCase):
             self.assertEqual(kwargs.get("embedding_batch_size"), 5)
             self.assertTrue(callable(kwargs.get("progress_callback")))
 
+    def test_index_documents_uses_multi_embedding_config_key(self):
+        self.mock_vdb_core.check_index_exists.return_value = True
+        self.mock_vdb_core.vectorize_documents.return_value = 1
+
+        mock_embedding_model = MagicMock()
+        mock_embedding_model.model = "test-model"
+        mock_embedding_model.model_type = "multimodal"
+
+        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
+                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
+            mock_get_record.return_value = {"tenant_id": "tenant-1"}
+            mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 6}
+
+            result = ElasticSearchService.index_documents(
+                index_name="test_index",
+                data=[{"path_or_url": "p1", "content": "c1", "metadata": {}}],
+                vdb_core=self.mock_vdb_core,
+                embedding_model=mock_embedding_model
+            )
+
+            self.assertTrue(result["success"])
+            mock_tenant_cfg.get_model_config.assert_called_once_with(
+                key="MULTI_EMBEDDING_ID", tenant_id="tenant-1"
+            )
+
+    def test_index_documents_fetches_image_bytes(self):
+        self.mock_vdb_core.check_index_exists.return_value = True
+        self.mock_vdb_core.vectorize_documents.return_value = 1
+        mock_embedding_model = MagicMock()
+        mock_embedding_model.model = "test-model"
+        mock_embedding_model.model_type = "text"
+
+        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
+                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
+                patch('backend.services.vectordatabase_service.get_file_stream') as mock_get_stream:
+            mock_get_record.return_value = {"tenant_id": "tenant-1"}
+            mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
+            mock_get_stream.return_value = io.BytesIO(b"img-bytes")
+
+            data = [
+                {
+                    "metadata": {"image_url": "s3://bucket/img.png", "process_source": "UniversalImageExtractor"},
+                    "path_or_url": "test_path",
+                    "content": "image content",
+                    "source_type": "file",
+                    "file_size": 123,
+                    "filename": "img.png"
+                }
+            ]
+
+            result = ElasticSearchService.index_documents(
+                index_name="test_index",
+                data=data,
+                vdb_core=self.mock_vdb_core,
+                embedding_model=mock_embedding_model
+            )
+
+            self.assertTrue(result["success"])
+            _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
+            documents = kwargs.get("documents")
+            self.assertEqual(documents[0]["image_bytes"], b"img-bytes")
+            mock_get_stream.assert_called_once_with(object_name="s3://bucket/img.png")
+
     def test_vectorize_documents_empty_data(self):
         """
         Test document indexing with empty data.
@@ -1612,6 +1748,7 @@ class TestElasticSearchService(unittest.TestCase):
         # Setup
         test_data = []
         mock_embedding_model = MagicMock()
+        mock_embedding_model.model_type = "text"
 
         # Execute
         result = ElasticSearchService.index_documents(
@@ -1641,6 +1778,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.create_index.return_value = True
         self.mock_vdb_core.vectorize_documents.return_value = 1
         mock_embedding_model = MagicMock()
+        mock_embedding_model.model_type = "text"
         test_data = [
             {
                 "metadata": {"title": "Test"},
@@ -1687,6 +1825,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.vectorize_documents.side_effect = Exception(
             "Indexing error")
         mock_embedding_model = MagicMock()
+        mock_embedding_model.model_type = "text"
         test_data = [
             {
                 "metadata": {"title": "Test"},
@@ -3115,7 +3254,12 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["chunk_id"], "chunk-1")
 
         # Verify embedding was generated
-        mock_get_embedding_model.assert_called_once_with("tenant-123", "text-embedding-3-small")
+        mock_get_embedding_model.assert_called_once_with(
+            tenant_id="tenant-123",
+            is_multimodal=False,
+            model_name="text-embedding-3-small",
+            strict_model_name=True,
+        )
         mock_embedding.get_embeddings.assert_called_once()
 
         # Verify vdb_core was called with embedding in payload
@@ -3192,21 +3336,17 @@ class TestElasticSearchService(unittest.TestCase):
             metadata={},
         )
 
-        # Should not raise exception, just log warning
-        result = ElasticSearchService.create_chunk(
-            index_name="kb-index",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-            tenant_id="tenant-123",
-        )
-
-        # Result should still be successful (embedding is optional)
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["chunk_id"], "chunk-1")
-
-        # Verify chunk was still created without embedding
-        self.mock_vdb_core.create_chunk.assert_called_once()
+        # When KB has explicit embedding_model_name, embedding resolution failure is surfaced.
+        with self.assertRaises(Exception) as context:
+            ElasticSearchService.create_chunk(
+                index_name="kb-index",
+                chunk_request=chunk_request,
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+                tenant_id="tenant-123",
+            )
+        self.assertIn("Error creating chunk", str(context.exception))
+        self.mock_vdb_core.create_chunk.assert_not_called()
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_embedding_model')
@@ -3298,7 +3438,12 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
 
         # Verify embedding model was called (backend doesn't skip based on "unknown")
-        mock_get_embedding_model.assert_called_once_with("tenant-123", "unknown")
+        mock_get_embedding_model.assert_called_once_with(
+            tenant_id="tenant-123",
+            is_multimodal=False,
+            model_name="unknown",
+            strict_model_name=True,
+        )
 
     def test_update_chunk_builds_payload_and_calls_core(self):
         """
@@ -3533,6 +3678,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.vectorize_documents.return_value = 3
         mock_embedding_model = MagicMock()
         mock_embedding_model.model = "test-model"
+        mock_embedding_model.model_type = "text"
         mock_get_record.return_value = {"tenant_id": "tenant-1"}
         mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 10}
 
@@ -3727,12 +3873,12 @@ class TestElasticSearchService(unittest.TestCase):
 
                 # Execute - now we can call the real function
                 from backend.services.vectordatabase_service import get_embedding_model
-                result = get_embedding_model("test_tenant")
+                result = get_embedding_model("test_tenant", is_multimodal=True)
 
                 # Assert
                 self.assertEqual(result, mock_embedding_instance)
                 mock_tenant_config_manager.get_model_config.assert_called_once_with(
-                    key="EMBEDDING_ID", tenant_id="test_tenant")
+                    key="MULTI_EMBEDDING_ID", tenant_id="test_tenant")
                 mock_embedding_class.assert_called_once_with(
                     api_key="test_api_key",
                     base_url="https://test.api.com",
@@ -3957,6 +4103,51 @@ class TestElasticSearchService(unittest.TestCase):
                 mock_tenant_config_manager.get_model_config.assert_not_called()
         finally:
             # Restart the mock for other tests
+            self.get_embedding_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    def test_get_embedding_model_with_model_name_found_multimodal(self, mock_get_models, mock_tenant_config_manager):
+        mock_get_models.return_value = [
+            {
+                "model_repo": "jina",
+                "model_name": "jina-clip-v2",
+                "api_key": "test_api_key",
+                "base_url": "https://test.api.com",
+                "max_tokens": 1024,
+                "ssl_verify": True
+            }
+        ]
+        mock_tenant_config_manager.get_model_config.return_value = {}
+
+        self.get_embedding_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
+                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
+                mock_embedding_instance = MagicMock()
+                mock_embedding_class.return_value = mock_embedding_instance
+                mock_get_model_name.return_value = "jina-clip-v2"
+
+                from backend.services.vectordatabase_service import get_embedding_model
+                result = get_embedding_model(
+                    "test_tenant",
+                    is_multimodal=True,
+                    model_name="jina/jina-clip-v2"
+                )
+
+                self.assertEqual(result, mock_embedding_instance)
+                mock_get_models.assert_called_once_with(
+                    {"model_type": "multi_embedding"}, "test_tenant")
+                mock_embedding_class.assert_called_once_with(
+                    api_key="test_api_key",
+                    base_url="https://test.api.com",
+                    model_name="jina-clip-v2",
+                    embedding_dim=1024,
+                    ssl_verify=True
+                )
+                mock_tenant_config_manager.get_model_config.assert_not_called()
+        finally:
             self.get_embedding_model_patcher.start()
 
     @patch('backend.services.vectordatabase_service.tenant_config_manager')

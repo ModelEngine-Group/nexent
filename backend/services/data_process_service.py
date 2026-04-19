@@ -255,6 +255,17 @@ class DataProcessService:
     async def _load_image(self, session: aiohttp.ClientSession, path: str) -> Optional[Image.Image]:
         """Internal method to load an image from various sources"""
         try:
+            if path.startswith('s3://'):
+                # Fetch from MinIO using s3://bucket/key
+                file_stream = get_file_stream(object_name=path)
+                if file_stream is None:
+                    raise FileNotFoundError(
+                        f"Unable to fetch file from URL: {path}")
+                file_data = file_stream.read()
+                image_based64_str = base64.b64encode(
+                    file_data).decode('utf-8')
+                path = f"data:image/jpeg;base64,{image_based64_str}"
+
             # Check if input is base64 encoded
             if path.startswith('data:image'):
                 # Extract the base64 data after the comma
@@ -463,6 +474,8 @@ class DataProcessService:
             chunking_strategy = source_config.get('chunking_strategy')
             index_name = source_config.get('index_name')
             original_filename = source_config.get('original_filename')
+            embedding_model_id = source_config.get('embedding_model_id')
+            tenant_id = source_config.get('tenant_id')
 
             # Validate required fields
             if not source:
@@ -481,7 +494,9 @@ class DataProcessService:
                     source_type=source_type,
                     chunking_strategy=chunking_strategy,
                     index_name=index_name,
-                    original_filename=original_filename
+                    original_filename=original_filename,
+                    embedding_model_id=embedding_model_id,
+                    tenant_id=tenant_id
                 ).set(queue='process_q'),
                 forward.s(
                     index_name=index_name,
@@ -559,7 +574,7 @@ class DataProcessService:
         }
 
     async def convert_office_to_pdf_impl(self, object_name: str, pdf_object_name: str) -> None:
-        """Full conversion pipeline: download → convert → upload → validate → cleanup.
+        """Full conversion pipeline: download -> convert -> upload -> validate -> cleanup.
 
         All five steps run inside data-process so that LibreOffice only needs to be
         installed in this container.

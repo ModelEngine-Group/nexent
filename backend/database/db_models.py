@@ -280,6 +280,7 @@ class KnowledgeRecord(TableBase):
     group_ids = Column(String, doc="Knowledge base group IDs list")
     ingroup_permission = Column(
         String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    is_multimodal = Column(String(1), default="N",  doc="Whether it is multimodal. Optional values: Y/N")
 
 
 class TenantConfig(TableBase):

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -30,6 +30,10 @@ import { API_ENDPOINTS } from "@/services/api";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
 import { isZhLocale, getLocalizedDescription } from "@/lib/utils";
+import {
+  isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
+  isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
+} from "@/lib/knowledgeBaseCompatibility";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -459,6 +463,86 @@ export default function ToolConfigModal({
     }
   }, [configData]);
 
+  const currentMultiEmbeddingModel = useMemo(() => {
+    try {
+      const modelConfig = configData?.models;
+      return (
+        modelConfig?.multiEmbedding?.modelName ||
+        modelConfig?.multiEmbedding?.displayName ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  }, [configData]);
+
+  const hasEmbeddingModel = Boolean(currentEmbeddingModel);
+  const hasMultiEmbeddingModel = Boolean(currentMultiEmbeddingModel);
+  const canToggleMultimodalParam = hasEmbeddingModel && hasMultiEmbeddingModel;
+  const forcedMultimodalValue = useMemo(() => {
+    if (!hasEmbeddingModel && hasMultiEmbeddingModel) {
+      return true;
+    }
+    if (hasEmbeddingModel && !hasMultiEmbeddingModel) {
+      return false;
+    }
+    return null;
+  }, [hasEmbeddingModel, hasMultiEmbeddingModel]);
+
+  const toolMultimodal = useMemo(() => {
+    const multimodalParam = currentParams.find(
+      (param) => param.name === "multimodal"
+    );
+    const value = multimodalParam?.value;
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "1", "yes", "y"].includes(normalized)) return true;
+      if (["false", "0", "no", "n"].includes(normalized)) return false;
+    }
+    return null;
+  }, [currentParams]);
+
+  useEffect(() => {
+    if (tool?.name !== "knowledge_base_search") return;
+    if (forcedMultimodalValue === null) return;
+
+    const index = currentParams.findIndex(
+      (param) => param.name === "multimodal"
+    );
+    if (index < 0) return;
+
+    const param = currentParams[index];
+    if (param.value === forcedMultimodalValue) return;
+
+    const updatedParams = [...currentParams];
+    updatedParams[index] = { ...param, value: forcedMultimodalValue };
+    setCurrentParams(updatedParams);
+
+    const fieldName = `param_${index}`;
+    form.setFieldValue(fieldName, forcedMultimodalValue);
+  }, [tool?.name, forcedMultimodalValue, currentParams, form]);
+
+  const isMultimodalConstraintMismatch = useCallback(
+    (kb: KnowledgeBase) => {
+      return isMultimodalConstraintMismatchBase(kb, toolMultimodal);
+    },
+    [toolMultimodal]
+  );
+
+  const isEmbeddingModelCompatible = useCallback(
+    (kb: KnowledgeBase) => {
+      return isEmbeddingModelCompatibleBase(
+        kb,
+        currentEmbeddingModel,
+        currentMultiEmbeddingModel
+      );
+    },
+    [currentEmbeddingModel, currentMultiEmbeddingModel]
+  );
+
   // Check if a knowledge base can be selected
   const canSelectKnowledgeBase = useCallback(
     (kb: KnowledgeBase): boolean => {
@@ -469,9 +553,16 @@ export default function ToolConfigModal({
         return false;
       }
 
+      if (kb.source === "nexent") {
+        if (isMultimodalConstraintMismatch(kb)) {
+          return false;
+        }
+        return isEmbeddingModelCompatible(kb);
+      }
+
       return true;
     },
-    [currentEmbeddingModel]
+    [isEmbeddingModelCompatible, isMultimodalConstraintMismatch]
   );
 
   // Track whether this is the first time opening the modal (reset when modal closes)
@@ -1290,7 +1381,7 @@ export default function ToolConfigModal({
             })}
             options={options.map((option) => ({
               value: option,
-              label: option,
+              label: String(option),
             }))}
           />
         );
@@ -1684,6 +1775,8 @@ export default function ToolConfigModal({
         syncLoading={kbLoading}
         isSelectable={canSelectKnowledgeBase}
         currentEmbeddingModel={currentEmbeddingModel}
+        currentMultiEmbeddingModel={currentMultiEmbeddingModel}
+        toolMultimodal={toolMultimodal}
         difyConfig={
           toolKbType === "dify_search"
             ? difyConfig

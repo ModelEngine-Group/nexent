@@ -1,11 +1,19 @@
+from io import BytesIO
 import logging
 import json
 from typing import Any, Dict, List, Optional
 
 import ray
 
-from consts.const import RAY_ACTOR_NUM_CPUS, REDIS_BACKEND_URL, DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
-from database.attachment_db import get_file_stream
+from consts.const import (
+    RAY_ACTOR_NUM_CPUS,
+    REDIS_BACKEND_URL,
+    DEFAULT_EXPECTED_CHUNK_SIZE,
+    DEFAULT_MAXIMUM_CHUNK_SIZE,
+    TABLE_TRANSFORMER_MODEL_PATH,
+    UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH,
+)
+from database.attachment_db import build_s3_url, get_file_stream, upload_fileobj
 from database.model_management_db import get_model_by_model_id
 from nexent.data_process import DataProcessCore
 
@@ -58,50 +66,137 @@ class DataProcessorRayActor:
         if task_id:
             params['task_id'] = task_id
 
-        # Get chunk size parameters from embedding model if model_id is provided
-        if model_id and tenant_id:
-            try:
-                # Get embedding model details directly by model_id
-                model_record = get_model_by_model_id(
-                    model_id=model_id, tenant_id=tenant_id)
-                if model_record:
-                    expected_chunk_size = model_record.get(
-                        'expected_chunk_size', DEFAULT_EXPECTED_CHUNK_SIZE)
-                    maximum_chunk_size = model_record.get(
-                        'maximum_chunk_size', DEFAULT_MAXIMUM_CHUNK_SIZE)
-                    model_name = model_record.get('display_name')
+        self._apply_model_chunk_sizes(
+            model_id=model_id, tenant_id=tenant_id, params=params)
+        self._apply_model_paths(params)
+        file_data = self._read_file_bytes(source)
 
-                    # Pass chunk sizes to processing parameters
-                    params['max_characters'] = maximum_chunk_size
-                    params['new_after_n_chars'] = expected_chunk_size
-
-                    logger.info(
-                        f"[RayActor] Using chunk sizes from embedding model '{model_name}' (ID: {model_id}): "
-                        f"max_characters={maximum_chunk_size}, new_after_n_chars={expected_chunk_size}")
-                else:
-                    logger.warning(
-                        f"[RayActor] Embedding model with ID {model_id} not found for tenant '{tenant_id}', using default chunk sizes")
-            except Exception as e:
-                logger.warning(
-                    f"[RayActor] Failed to retrieve chunk sizes from embedding model ID {model_id}: {e}. Using default chunk sizes")
-
-        try:
-            file_stream = get_file_stream(source)
-            if file_stream is None:
-                raise FileNotFoundError(
-                    f"Unable to fetch file from URL: {source}")
-            file_data = file_stream.read()
-        except Exception as e:
-            logger.error(f"Failed to fetch file from {source}: {e}")
-            raise
-
-        chunks = self._processor.file_process(
+        result = self._processor.file_process(
             file_data=file_data,
             filename=source,
             chunking_strategy=chunking_strategy,
             **params
         )
+        chunks, images_info = self._normalize_processor_result(result)
+        if images_info:
+            self._append_image_chunks(
+                source=source, chunks=chunks, images_info=images_info)
 
+        chunks = self._validate_chunks(chunks, source)
+        if not chunks:
+            return []
+
+        logger.info(
+            f"[RayActor] Processing done: produced {len(chunks)} chunks for source='{source}'")
+        return chunks
+
+    def _apply_model_paths(self, params: Dict[str, Any]) -> None:
+        params["table_transformer_model_path"] = TABLE_TRANSFORMER_MODEL_PATH
+        params[
+            "unstructured_default_model_initialize_params_json_path"
+        ] = UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH
+
+    def _apply_model_chunk_sizes(
+        self,
+        model_id: Optional[int],
+        tenant_id: Optional[str],
+        params: Dict[str, Any],
+    ) -> None:
+        if not (model_id and tenant_id):
+            return
+
+        try:
+            model_record = get_model_by_model_id(
+                model_id=model_id, tenant_id=tenant_id)
+            if not model_record:
+                logger.warning(
+                    f"[RayActor] Embedding model with ID {model_id} not found for tenant '{tenant_id}', using default chunk sizes")
+                return
+
+            expected_chunk_size = model_record.get(
+                'expected_chunk_size', DEFAULT_EXPECTED_CHUNK_SIZE)
+            maximum_chunk_size = model_record.get(
+                'maximum_chunk_size', DEFAULT_MAXIMUM_CHUNK_SIZE)
+            model_name = model_record.get('display_name')
+            model_type = model_record.get('model_type')
+
+            params['max_characters'] = maximum_chunk_size
+            params['new_after_n_chars'] = expected_chunk_size
+            if model_type:
+                params['model_type'] = model_type
+
+            logger.info(
+                f"[RayActor] Using chunk sizes from embedding model '{model_name}' (ID: {model_id}): "
+                f"max_characters={maximum_chunk_size}, new_after_n_chars={expected_chunk_size}")
+        except Exception as e:
+            logger.warning(
+                f"[RayActor] Failed to retrieve chunk sizes from embedding model ID {model_id}: {e}. Using default chunk sizes")
+
+    def _read_file_bytes(self, source: str) -> bytes:
+        try:
+            file_stream = get_file_stream(source)
+            if file_stream is None:
+                raise FileNotFoundError(
+                    f"Unable to fetch file from URL: {source}")
+            return file_stream.read()
+        except Exception as e:
+            logger.error(f"Failed to fetch file from {source}: {e}")
+            raise
+
+    def _normalize_processor_result(
+        self, result: Any
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        if isinstance(result, tuple) and len(result) == 2:
+            chunks, images_info = result
+            return chunks or [], images_info or []
+        return result or [], []
+
+    def _append_image_chunks(
+        self,
+        source: str,
+        chunks: List[Dict[str, Any]],
+        images_info: List[Dict[str, Any]],
+    ) -> None:
+        folder = "images_in_attachments"
+        for index, image_data in enumerate(images_info):
+            if not isinstance(image_data, dict):
+                logger.warning(
+                    f"[RayActor] Skipping image entry at index {index}: unexpected type {type(image_data)}"
+                )
+                continue
+            if "image_bytes" not in image_data:
+                logger.warning(
+                    f"[RayActor] Skipping image entry at index {index}: missing image_bytes"
+                )
+                continue
+
+            img_obj = BytesIO(image_data["image_bytes"])
+            result = upload_fileobj(
+                file_obj=img_obj,
+                file_name=f"{index}.{image_data['image_format']}",
+                prefix=folder)
+            image_url = build_s3_url(result.get("object_name", ""))
+
+            image_data["source_file"] = source
+            image_data["image_url"] = image_url
+
+            chunks.append({
+                "content": json.dumps({
+                    "source_file": source,
+                    "position": image_data["position"],
+                    "image_url": image_url,
+                }),
+                "filename": source,
+                "metadata": {
+                    "chunk_index": len(chunks) + index,
+                    "process_source": "UniversalImageExtractor",
+                    "image_url": image_url,
+                }
+            })
+
+    def _validate_chunks(
+        self, chunks: Any, source: str
+    ) -> List[Dict[str, Any]]:
         if chunks is None:
             logger.warning(
                 f"[RayActor] file_process returned None for source='{source}'")
@@ -114,9 +209,6 @@ class DataProcessorRayActor:
             logger.warning(
                 f"[RayActor] file_process returned empty list for source='{source}'")
             return []
-
-        logger.info(
-            f"[RayActor] Processing done: produced {len(chunks)} chunks for source='{source}'")
         return chunks
 
     def store_chunks_in_redis(self, redis_key: str, chunks: List[Dict[str, Any]]) -> bool:

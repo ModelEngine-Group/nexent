@@ -796,6 +796,20 @@ class TestDataProcessService(unittest.TestCase):
         # Verify result
         self.assertIsNone(result)
 
+    @pytest.mark.asyncio
+    async def async_test_load_image_from_s3(self):
+        """Ensure s3:// URLs are routed through MinIO and decoded."""
+        img = Image.new('RGB', (64, 64), color='green')
+        img_byte_arr = io.BytesIO()
+        img.save(img_byte_arr, format='JPEG')
+        img_byte_arr.seek(0)
+
+        with patch('backend.services.data_process_service.get_file_stream', return_value=img_byte_arr):
+            result = await self.service.load_image("s3://bucket/path/to/image.jpg")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.size, (64, 64))
+
     @patch('aiohttp.ClientSession')
     @pytest.mark.asyncio
     async def async_test_load_image_from_base64(self, mock_session):
@@ -1257,6 +1271,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_load_image_from_url())
         asyncio.run(self.async_test_load_image_from_url_failure())
+        asyncio.run(self.async_test_load_image_from_s3())
         asyncio.run(self.async_test_load_image_from_base64())
         asyncio.run(self.async_test_load_image_from_file())
         asyncio.run(self.async_test_load_image_rgba_to_rgb_conversion())
@@ -1652,14 +1667,18 @@ class TestDataProcessService(unittest.TestCase):
                 'source_type': 'url',
                 'chunking_strategy': 'semantic',
                 'index_name': 'test_index_1',
-                'original_filename': 'doc1.pdf'
+                'original_filename': 'doc1.pdf',
+                'embedding_model_id': None,
+                'tenant_id': None
             },
             {
                 'source': 'http://example.com/doc2.pdf',
                 'source_type': 'url',
                 'chunking_strategy': 'fixed',
                 'index_name': 'test_index_2',
-                'original_filename': 'doc2.pdf'
+                'original_filename': 'doc2.pdf',
+                'embedding_model_id': None,
+                'tenant_id': None
             }
         ]
         actual_process_calls = [kwargs for args,

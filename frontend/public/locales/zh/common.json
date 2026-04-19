@@ -665,7 +665,7 @@
   "document.chunk.error.updateFailed": "分片更新失败",
   "document.chunk.error.deleteFailed": "分片删除失败",
   "document.chunk.error.missingChunkId": "缺少分片 ID",
-  "document.chunk.tooltip.disabledDueToModelMismatch": "当前配置的向量模型 ({{currentModel}}) 与创建知识库所用模型 ({{knowledgeBaseModel}}) 不一致，无法创建分片或召回检索。",
+  "document.chunk.tooltip.disabledDueToModelMismatch": "当前配置的向量模型 ({{currentModel}}) 与创建知识库所用模型 ({{knowledgeBaseModel}}) 不一致",
   "document.chunk.form.createTitle": "新建分片",
   "document.chunk.form.editTitle": "编辑分片",
   "document.chunk.form.documentName": "所属文档",
@@ -2134,6 +2134,7 @@
   "errorCode.990105": "服务器内部错误，请稍后重试",
   "errorCode.990201": "配置不存在",
   "errorCode.990202": "配置更新失败",
+  "embedding.model.notConfigured": "未配置",
 
   "a2a.discovery.title": "A2A Agent 发现",
   "a2a.discovery.tab.url": "URL 发现",

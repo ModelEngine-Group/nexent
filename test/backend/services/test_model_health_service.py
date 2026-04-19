@@ -24,6 +24,14 @@ sys.modules['utils'] = MockModule()
 sys.modules['utils.auth_utils'] = MockModule()
 sys.modules['utils.config_utils'] = MockModule()
 sys.modules['utils.model_name_utils'] = MockModule()
+sys.modules['consts'] = MockModule()
+consts_const_module = MockModule()
+consts_const_module.LOCALHOST_IP = "127.0.0.1"
+consts_const_module.LOCALHOST_NAME = "localhost"
+consts_const_module.DOCKER_INTERNAL_HOST = "host.docker.internal"
+sys.modules['consts.const'] = consts_const_module
+sys.modules['consts.model'] = MockModule()
+sys.modules['consts.provider'] = MockModule()
 
 # Mock nexent packages and modules with proper hierarchy
 sys.modules['nexent'] = MockModule()
@@ -65,70 +73,13 @@ class ModelResponse:
 
 
 # Now import the module under test
-try:
-    from backend.services.model_health_service import (
-        _perform_connectivity_check,
-        check_model_connectivity,
-        verify_model_config_connectivity,
-        _embedding_dimension_check,
-        embedding_dimension_check,
-    )
-except ImportError:
-    from backend.services.model_health_service import (
-        _perform_connectivity_check,
-        check_model_connectivity,
-        verify_model_config_connectivity,
-        _embedding_dimension_check,
-        embedding_dimension_check,
-    )
-
-# Mock imported functions/classes after import
-
-# Apply patch before importing the module to be tested
-with mock.patch.dict('sys.modules', {
-    'nexent': mock.MagicMock(),
-    'nexent.core': mock.MagicMock(),
-    'nexent.core.agents': mock.MagicMock(),
-    'nexent.core.agents.agent_model': mock.MagicMock(),
-    'nexent.core.models': mock.MagicMock(),
-    'nexent.core.models.embedding_model': mock.MagicMock(),
-    'database': mock.MagicMock(),
-    'database.client': mock.MagicMock(),
-    'database.model_management_db': mock.MagicMock(),
-    'utils': mock.MagicMock(),
-    'utils.auth_utils': mock.MagicMock(),
-    'utils.config_utils': mock.MagicMock(),
-    'utils.model_name_utils': mock.MagicMock(),
-    'services': mock.MagicMock(),
-    'services.voice_service': mock.MagicMock(),
-    'consts.model': mock.MagicMock(),
-    'consts.const': mock.MagicMock(),
-    'consts.provider': mock.MagicMock()
-}):
-    # Define the mocked enums and classes
-    mock_model_enum = mock.MagicMock()
-    mock_model_enum.AVAILABLE = "available"
-    mock_model_enum.UNAVAILABLE = "unavailable"
-    mock_model_enum.DETECTING = "detecting"
-    mock.patch('consts.model.ModelConnectStatusEnum', mock_model_enum)
-
-    # Now import the module under test (wrapped with fallback for optional symbols)
-    try:
-        from backend.services.model_health_service import (
-            _perform_connectivity_check,
-            check_model_connectivity,
-            verify_model_config_connectivity,
-            _embedding_dimension_check,
-            embedding_dimension_check,
-        )
-    except ImportError:
-        from backend.services.model_health_service import (
-            _perform_connectivity_check,
-            check_model_connectivity,
-            verify_model_config_connectivity,
-            _embedding_dimension_check,
-            embedding_dimension_check,
-        )
+from backend.services.model_health_service import (
+    _perform_connectivity_check,
+    check_model_connectivity,
+    verify_model_config_connectivity,
+    _embedding_dimension_check,
+    embedding_dimension_check,
+)
 
 
 @pytest.mark.asyncio
@@ -432,12 +383,12 @@ async def test_check_model_connectivity_success():
         mock_connectivity_check.return_value = True
 
         # Execute
-        response = await check_model_connectivity("GPT-4", "tenant456")
+        response = await check_model_connectivity("GPT-4", "tenant456", "embedding")
 
         # Assert
         assert response["connectivity"] is True
 
-        mock_get_model.assert_called_once_with("GPT-4", tenant_id="tenant456")
+        mock_get_model.assert_called_once_with("GPT-4", tenant_id="tenant456", model_type="embedding")
         # Detecting first, then available
         mock_update_model.assert_any_call(
             "model123", {"connect_status": "detecting"})
@@ -457,7 +408,7 @@ async def test_check_model_connectivity_model_not_found():
 
         # Execute & Assert
         with pytest.raises(LookupError):
-            await check_model_connectivity("NonexistentModel", "tenant456")
+            await check_model_connectivity("NonexistentModel", "tenant456", "embedding")
 
 
 @pytest.mark.asyncio

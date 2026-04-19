@@ -620,6 +620,39 @@ class TestCreateToolConfigList:
             assert last_call[1]['class_name'] == "KnowledgeBaseSearchTool"
 
     @pytest.mark.asyncio
+    async def test_create_tool_config_list_knowledge_base_multimodal(self):
+        """Ensure multimodal param is forwarded to embedding model selection."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config:
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "knowledge_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [{"name": "multimodal", "default": True}],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "mock_elastic_core"
+            mock_embedding.return_value = "mock_embedding_model"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            mock_embedding.assert_called_once_with(tenant_id="tenant_1", is_multimodal=True)
+
+    @pytest.mark.asyncio
     async def test_create_tool_config_list_with_analyze_image_tool(self):
         """Ensure AnalyzeImageTool receives VLM model metadata."""
         mock_tool_instance = MagicMock()
@@ -1372,36 +1405,34 @@ class TestCreateAgentConfig:
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_disabled_no_search(self):
-        with (
-            patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
-            ) as mock_search_agent,
+        with patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+        ) as mock_search_agent, \
             patch(
                 "backend.agents.create_agent_info.query_sub_agents_id_list"
-            ) as mock_query_sub,
+            ) as mock_query_sub, \
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
-            ) as mock_create_tools,
+            ) as mock_create_tools, \
             patch(
                 "backend.agents.create_agent_info.get_agent_prompt_template"
-            ) as mock_get_template,
+            ) as mock_get_template, \
             patch(
                 "backend.agents.create_agent_info.tenant_config_manager"
-            ) as mock_tenant_config,
+            ) as mock_tenant_config, \
             patch(
                 "backend.agents.create_agent_info.build_memory_context"
-            ) as mock_build_memory,
+            ) as mock_build_memory, \
             patch(
                 "backend.agents.create_agent_info.get_model_by_model_id"
-            ) as mock_get_model_by_id,
+            ) as mock_get_model_by_id, \
             patch(
                 "backend.agents.create_agent_info.search_memory_in_levels",
                 new_callable=AsyncMock,
-            ) as mock_search_memory,
+            ) as mock_search_memory, \
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
-            ) as mock_prepare_templates,
-        ):
+            ) as mock_prepare_templates:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",

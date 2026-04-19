@@ -128,10 +128,10 @@ async def _perform_connectivity_check(
     return connectivity
 
 
-async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
+async def check_model_connectivity(display_name: str, tenant_id: str, model_type: str = None) -> dict:
     try:
         # Query the database using display_name and tenant context from app layer
-        model = get_model_by_display_name(display_name, tenant_id=tenant_id)
+        model = get_model_by_display_name(display_name, tenant_id=tenant_id, model_type=model_type)
         if not model:
             raise LookupError(f"Model configuration not found for {display_name}")
 

@@ -99,7 +99,7 @@ async def save_config_impl(config, tenant_id, user_id):
 
         config_key = get_env_key(model_type) + "_ID"
         model_id = get_model_id_by_display_name(
-            model_display_name, tenant_id)
+            model_display_name, tenant_id, model_type=model_type)
 
         handle_model_config(tenant_id, user_id, config_key,
                             model_id, tenant_config_dict)

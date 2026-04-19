@@ -51,7 +51,8 @@ async def _create_datamate_knowledge_records(knowledge_base_ids: List[str],
                 "tenant_id": tenant_id,
                 "user_id": user_id,
                 # Use datamate as embedding model name
-                "embedding_model_name": embedding_model_names[i]
+                "embedding_model_name": embedding_model_names[i],
+                "is_multimodal": False,
             }
 
             # Run synchronous database operation in executor to avoid blocking

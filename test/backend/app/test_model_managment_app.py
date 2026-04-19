@@ -406,7 +406,7 @@ async def test_check_model_health_success(client, auth_header, user_credentials,
     
     response = client.post(
         "/model/healthcheck",
-        params={"display_name": "Test Model"},
+        params={"display_name": "Test Model", "modelType": "embedding"},
         headers=auth_header
     )
     
@@ -414,7 +414,7 @@ async def test_check_model_health_success(client, auth_header, user_credentials,
     data = response.json()
     assert data["message"] == "Successfully checked model connectivity"
     assert data["data"]["connectivity"] is True
-    mock_check.assert_called_once_with("Test Model", user_credentials[1])
+    mock_check.assert_called_once_with("Test Model", user_credentials[1], "embedding")
 
 
 @pytest.mark.asyncio
@@ -429,7 +429,7 @@ async def test_check_model_health_lookup_error(client, auth_header, user_credent
     
     response = client.post(
         "/model/healthcheck",
-        params={"display_name": "X"},
+        params={"display_name": "X", "modelType": "embedding"},
         headers=auth_header
     )
     assert response.status_code == HTTPStatus.NOT_FOUND

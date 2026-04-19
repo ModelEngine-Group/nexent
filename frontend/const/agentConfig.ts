@@ -97,6 +97,7 @@ export const TOOL_PARAM_OPTIONS = {
   // Knowledge base search tool
   knowledge_base_search: {
     search_mode: ["hybrid", "accurate", "semantic"],
+    multimodal: [true, false],
   },
   // Dify search tool
   dify_search: {
@@ -117,11 +118,12 @@ export const TOOL_PARAM_OPTIONS = {
 export function getToolParamOptions(
   toolName: string,
   paramName: string
-): string[] | undefined {
+): string[] | boolean[] | undefined {
   const toolOptions =
     TOOL_PARAM_OPTIONS[toolName as keyof typeof TOOL_PARAM_OPTIONS];
   if (!toolOptions) return undefined;
   return toolOptions[paramName as keyof typeof toolOptions] as
     | string[]
+    | boolean[]
     | undefined;
 }

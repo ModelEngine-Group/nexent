@@ -79,6 +79,8 @@ interface DocumentListProps {
   availableEmbeddingModels?: ModelOption[];
   selectedEmbeddingModel?: string;
   onEmbeddingModelChange?: (value: string) => void;
+  isMultimodal?: boolean;
+  onMultimodalChange?: (value: boolean) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
 
   // Upload related props
@@ -122,6 +124,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       availableEmbeddingModels,
       selectedEmbeddingModel,
       onEmbeddingModelChange,
+      isMultimodal = false,
+      onMultimodalChange,
       permission,
 
       // Upload related props
@@ -238,6 +242,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
 
     // Determine if user has read-only permission
     const isReadOnlyMode = permission === "READ_ONLY";
+    const canToggleMultimodal =
+      isCreatingMode && typeof onMultimodalChange === "function";
 
     // Permission options with icons shown inside dropdown
     const permissionOptions = [
@@ -503,11 +509,29 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         onChange={onEmbeddingModelChange}
                         style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={t("knowledgeBase.create.embeddingModelPlaceholder") || "Select embedding model"}
-                        options={(availableEmbeddingModels || []).map((model) => ({
-                          value: model.displayName,
-                          label: model.displayName,
-                          disabled: model.connect_status === "unavailable",
-                        }))}
+                        allowClear={false}
+                        options={[
+                          {
+                            label: t("modelConfig.option.embeddingModel"),
+                            options: (availableEmbeddingModels || [])
+                              .filter((model) => model.type === "embedding")
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: model.connect_status === "unavailable",
+                              })),
+                          },
+                          {
+                            label: t("modelConfig.option.multiEmbeddingModel"),
+                            options: (availableEmbeddingModels || [])
+                              .filter((model) => model.type === "multi_embedding")
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: model.connect_status === "unavailable",
+                              })),
+                          },
+                        ].filter((group) => group.options.length > 0)}
                       />
                     )}
                     {/* User groups multi-select */}
@@ -615,7 +639,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             <div className="flex h-full flex-col px-8">
               <DocumentChunk
                 knowledgeBaseName={knowledgeBaseName}
-                knowledgeBaseId={knowledgeBaseId}
+                knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
                 documents={documents}
                 getFileIcon={getFileIcon}
                 currentEmbeddingModel={currentModel}

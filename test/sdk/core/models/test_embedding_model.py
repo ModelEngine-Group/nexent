@@ -61,6 +61,22 @@ def jina_embedding_instance():
     return JinaEmbedding(api_key="dummy-key", ssl_verify=True)
 
 
+def test_openai_embedding_default_model_type():
+    emb = OpenAICompatibleEmbedding(
+        model_name="dummy-model",
+        base_url="https://api.example.com",
+        api_key="dummy-key",
+        embedding_dim=128,
+        ssl_verify=True,
+    )
+    assert emb.model_type == "text"
+
+
+def test_jina_embedding_default_model_type():
+    emb = JinaEmbedding(api_key="dummy-key", ssl_verify=True)
+    assert emb.model_type == "multimodal"
+
+
 # ---------------------------------------------------------------------------
 # Tests for dimension_check
 # ---------------------------------------------------------------------------

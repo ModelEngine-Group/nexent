@@ -300,6 +300,7 @@ async def test_create_datamate_knowledge_records_success(monkeypatch):
     assert first_call_args["tenant_id"] == "tenant1"
     assert first_call_args["user_id"] == "user1"
     assert first_call_args["embedding_model_name"] == "embedding1"
+    assert first_call_args["is_multimodal"] is False
 
 
 @pytest.mark.asyncio

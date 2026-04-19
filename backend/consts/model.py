@@ -234,6 +234,7 @@ class ProcessParams(BaseModel):
     source_type: str
     index_name: str
     authorization: Optional[str] = None
+    model_id: Optional[int] = None
 
 
 class OpinionRequest(BaseModel):

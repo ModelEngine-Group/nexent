@@ -6,6 +6,8 @@ All external services and dependencies are mocked to isolate the tests.
 import os
 import sys
 import pytest
+import types
+import importlib.machinery
 from unittest.mock import patch, MagicMock, ANY, AsyncMock
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
@@ -20,9 +22,11 @@ sys.path.insert(0, backend_dir)
 
 # Environment variables are now configured in conftest.py
 
-boto3_mock = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+boto3_module.client = MagicMock()
 minio_client_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+sys.modules["boto3"] = boto3_module
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -235,6 +239,25 @@ async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, au
         called_kwargs = mock_create.call_args[1]
         assert called_kwargs["ingroup_permission"] == "READ_ONLY"
         assert called_kwargs["group_ids"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_new_index_with_multimodal_flag(vdb_core_mock, auth_data):
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
+
+        mock_create.return_value = {"status": "success", "index_name": auth_data["index_name"]}
+
+        response = client.post(
+            f"/indices/{auth_data['index_name']}",
+            json={"is_multimodal": True},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 200
+        called_kwargs = mock_create.call_args[1]
+        assert called_kwargs["is_multimodal"] is True
 
 
 @pytest.mark.asyncio
@@ -634,7 +657,7 @@ async def test_create_index_documents_success(vdb_core_mock, auth_data):
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value={"is_multimodal": "N"}), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
             patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
 
@@ -656,9 +679,35 @@ async def test_create_index_documents_success(vdb_core_mock, auth_data):
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
         # Verify
+    assert response.status_code == 200
+    assert response.json() == expected_response.dict()
+    mock_index.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_index_documents_uses_multimodal_embedding(vdb_core_mock, auth_data):
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value={"is_multimodal": "Y"}), \
+            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index:
+
+        mock_get_embedding.return_value = MagicMock()
+        mock_index.return_value = IndexingResponse(
+            success=True,
+            message="Documents indexed successfully",
+            total_indexed=1,
+            total_submitted=1
+        )
+
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/documents",
+            json=[{"id": 1, "text": "test doc"}],
+            headers=auth_data["auth_header"],
+        )
+
         assert response.status_code == 200
-        assert response.json() == expected_response.dict()
-        mock_index.assert_called_once()
+        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], True)
 
 
 @pytest.mark.asyncio
@@ -670,7 +719,7 @@ async def test_create_index_documents_exception(vdb_core_mock, auth_data):
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value={"is_multimodal": "N"}), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
             patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
 
@@ -736,7 +785,7 @@ async def test_create_index_documents_embedding_model_exception(vdb_core_mock, a
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value={"is_multimodal": "N"}), \
             patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
 
         index_name = "test_index"
@@ -770,7 +819,7 @@ async def test_create_index_documents_validation_exception(vdb_core_mock, auth_d
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value={"is_multimodal": "N"}), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
             patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
 
@@ -1356,7 +1405,8 @@ async def test_update_index_success(auth_data):
         payload = {
             "knowledge_name": "Updated Knowledge Base",
             "ingroup_permission": "EDIT",
-            "group_ids": [1, 2, 3]
+            "group_ids": [1, 2, 3],
+            "is_multimodal": True
         }
         response = client.patch(
             f"/indices/{auth_data['index_name']}",
@@ -1373,6 +1423,7 @@ async def test_update_index_success(auth_data):
             knowledge_name="Updated Knowledge Base",
             ingroup_permission="EDIT",
             group_ids=[1, 2, 3],
+            is_multimodal=True,
             tenant_id=auth_data["tenant_id"],
             user_id=auth_data["user_id"]
         )
@@ -1407,6 +1458,7 @@ async def test_update_index_partial_update(auth_data):
             knowledge_name="Only Name Updated",
             ingroup_permission=None,
             group_ids=None,
+            is_multimodal=None,
             tenant_id=auth_data["tenant_id"],
             user_id=auth_data["user_id"]
         )

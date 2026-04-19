@@ -17,6 +17,7 @@ DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
 MODE_CHOICE_SAVED=""
 VERSION_CHOICE_SAVED=""
 IS_MAINLAND_SAVED=""
+DOWNLOAD_MODELS="N"
 ENABLE_TERMINAL_SAVED="N"
 TERMINAL_MOUNT_DIR_SAVED="${TERMINAL_MOUNT_DIR:-}"
 APP_VERSION=""
@@ -77,6 +78,58 @@ is_windows_env() {
     return 0
   fi
   return 1
+}
+
+detect_os_type() {
+  # Return: windows | mac | linux | unknown
+  local os_name
+  os_name=$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')
+  case "$os_name" in
+    mingw*|msys*|cygwin*)
+      echo "windows"
+      ;;
+    darwin*)
+      echo "mac"
+      ;;
+    linux*)
+      echo "linux"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
+  return 0
+}
+
+format_path_for_env() {
+  # Convert path to OS-specific format for .env values
+  local input_path="$1"
+  local os_type
+  os_type=$(detect_os_type)
+
+  if [[ "$os_type" = "windows" ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -w "$input_path"
+      return 0
+    fi
+
+    if [[ "$input_path" =~ ^/([a-zA-Z])/(.*)$ ]]; then
+      local drive="${BASH_REMATCH[1]}"
+      local rest="${BASH_REMATCH[2]}"
+      rest="${rest//\//\\}"
+      printf "%s:\\%s" "$(echo "$drive" | tr '[:lower:]' '[:upper:]')" "$rest"
+      return 0
+    fi
+  fi
+
+  printf "%s" "$input_path"
+}
+
+escape_backslashes() {
+  # Escape backslashes for safe writing into .env or JSON
+  local input_path="$1"
+  printf "%s" "$input_path" | sed 's/\\/\\\\/g'
+  return 0
 }
 
 is_port_in_use() {
@@ -266,6 +319,7 @@ persist_deploy_options() {
     echo "MODE_CHOICE=\"${MODE_CHOICE_SAVED}\""
     echo "VERSION_CHOICE=\"${VERSION_CHOICE_SAVED}\""
     echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
+    echo "DOWNLOAD_MODELS=\"${DOWNLOAD_MODELS}\""
     echo "ENABLE_TERMINAL=\"${ENABLE_TERMINAL_SAVED}\""
     echo "TERMINAL_MOUNT_DIR=\"${TERMINAL_MOUNT_DIR_SAVED}\""
   } > "$DEPLOY_OPTIONS_FILE"
@@ -528,6 +582,229 @@ select_deployment_mode() {
   echo ""
 }
 
+
+# Model download selection
+select_model_download() {
+  echo ""
+
+  local input_choice=""
+  read -r -p "Do you want to download AI model files (table-transformer and yolox)? [Y/N] (default: N): " input_choice
+  echo ""
+
+  if [[ $input_choice =~ ^[Yy]$ ]]; then
+    DOWNLOAD_MODELS="Y"
+    echo "INFO: Model download will be performed."
+  else
+    DOWNLOAD_MODELS="N"
+    echo "INFO: Skipping model download."
+  fi
+  echo "----------------------------------------"
+  echo ""
+  return 0
+}
+
+# kerry
+
+download_and_config_models() {
+  if [[ "$DOWNLOAD_MODELS" != "Y" ]]; then
+    echo "INFO: Model download skipped by user choice."
+    return 0
+  fi
+
+  echo "INFO: Downloading AI model files (this may take a while)..."
+
+  local env_file_dir="$SCRIPT_DIR"
+  local env_file_path="$env_file_dir/.env"
+  local original_dir="$(pwd)"
+
+  MODEL_ROOT="$ROOT_DIR/model"
+  mkdir -p "$MODEL_ROOT"
+  echo "INFO: Model directory: $MODEL_ROOT"
+
+  export HF_ENDPOINT="https://hf-mirror.com"
+
+  command -v git >/dev/null || { echo "ERROR: git is required but not found." >&2; return 1; }
+
+  # ==========================================
+  # 1. Table Transformer (table-structure recognition)
+  echo "INFO: Downloading table-transformer-structure-recognition..."
+
+  TT_MODEL_DIR_NAME="table-transformer-structure-recognition"
+  TT_MODEL_DIR_PATH="$MODEL_ROOT/$TT_MODEL_DIR_NAME"
+  MODEL_SAFETENSORS_FILE="model.safetensors"
+  TT_MODEL_FILE_CHECK="$TT_MODEL_DIR_PATH/$MODEL_SAFETENSORS_FILE"
+
+  cd "$MODEL_ROOT" || return 1
+
+  if [[ -d "$TT_MODEL_DIR_PATH" ]] && [[ -f "$TT_MODEL_FILE_CHECK" ]]; then
+      FILE_SIZE=$(stat -c%s "$TT_MODEL_FILE_CHECK" 2>/dev/null || stat -f%z "$TT_MODEL_FILE_CHECK" 2>/dev/null)
+      if [[ "$FILE_SIZE" -gt 1000000 ]]; then
+          echo "INFO: Table Transformer already exists."
+      else
+          echo "WARN: Existing model file looks incomplete, re-downloading..."
+          rm -rf "$TT_MODEL_DIR_NAME"
+      fi
+  fi
+
+  if [[ ! -f "$TT_MODEL_FILE_CHECK" ]]; then
+      if [[ -d "$TT_MODEL_DIR_NAME" ]]; then
+          echo "WARN: Removing existing directory before re-download..."
+          rm -rf "$TT_MODEL_DIR_NAME"
+      fi
+
+      echo "INFO: Step 1/2: Clone repo (skip LFS files)..."
+      if ! GIT_LFS_SKIP_SMUDGE=1 git clone "$HF_ENDPOINT/microsoft/$TT_MODEL_DIR_NAME" "$TT_MODEL_DIR_NAME"; then
+          echo "ERROR: Failed to clone repository." >&2
+          cd "$original_dir"
+          return 1
+      fi
+
+      cd "$TT_MODEL_DIR_NAME" || return 1
+
+      echo "INFO: Step 2/2: Download model.safetensors..."
+      LARGE_FILE_URL="$HF_ENDPOINT/microsoft/$TT_MODEL_DIR_NAME/resolve/main/$MODEL_SAFETENSORS_FILE"
+
+      if command -v curl &> /dev/null; then
+          curl -L -o "$MODEL_SAFETENSORS_FILE" "$LARGE_FILE_URL" --progress-bar
+      elif command -v wget &> /dev/null; then
+          wget "$LARGE_FILE_URL" -O "$MODEL_SAFETENSORS_FILE"
+      else
+          echo "ERROR: curl or wget is required to download model files." >&2
+          cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$original_dir"; return 1
+      fi
+
+      if [[ ! -f "$MODEL_SAFETENSORS_FILE" ]]; then
+          echo "ERROR: $MODEL_SAFETENSORS_FILE download failed." >&2
+          cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$original_dir"; return 1
+      fi
+
+      FILE_SIZE=$(stat -c%s "$MODEL_SAFETENSORS_FILE" 2>/dev/null || stat -f%z "$MODEL_SAFETENSORS_FILE" 2>/dev/null)
+      if [[ "$FILE_SIZE" -lt 1000000 ]]; then
+          echo "ERROR: $MODEL_SAFETENSORS_FILE seems too small (size: $FILE_SIZE bytes)." >&2
+          cd "$MODEL_ROOT"; rm -rf "$TT_MODEL_DIR_NAME"; cd "$original_dir"; return 1
+      fi
+
+      echo "INFO: $MODEL_SAFETENSORS_FILE downloaded (size: $(du -h "$MODEL_SAFETENSORS_FILE" | cut -f1))"
+      cd "$MODEL_ROOT"
+  fi
+
+  echo "INFO: Table Transformer OK"
+
+  # ==========================================
+  # 2. YOLOX (layout detection model)
+  echo "INFO: Downloading yolox_l0.05.onnx"
+
+  YOLOX_MODEL_FILE="$MODEL_ROOT/yolox_l0.05.onnx"
+  MIN_YOLOX_SIZE=50000000
+
+  NEED_DOWNLOAD=false
+
+  if [[ -f "$YOLOX_MODEL_FILE" ]]; then
+      CURRENT_SIZE=$(stat -c%s "$YOLOX_MODEL_FILE" 2>/dev/null || stat -f%z "$YOLOX_MODEL_FILE" 2>/dev/null)
+      if [[ "$CURRENT_SIZE" -lt "$MIN_YOLOX_SIZE" ]]; then
+          echo "WARN: Existing YOLOX file looks incomplete (size: $(numfmt --to=iec-i --suffix=B $CURRENT_SIZE 2>/dev/null || echo $CURRENT_SIZE)). Re-downloading..."
+          NEED_DOWNLOAD=true
+      else
+          echo "INFO: YOLOX already exists."
+      fi
+  else
+      NEED_DOWNLOAD=true
+  fi
+
+  if [[ "$NEED_DOWNLOAD" = true ]]; then
+      ONNX_URL="$HF_ENDPOINT/unstructuredio/yolo_x_layout/resolve/main/yolox_l0.05.onnx"
+
+      if command -v curl &> /dev/null; then
+          echo "INFO: Downloading with curl (supports resume -C -)..."
+          if curl -L -C - -o "$YOLOX_MODEL_FILE" "$ONNX_URL" --progress-bar; then
+              echo "INFO: curl download completed"
+          else
+              echo "ERROR: curl download failed." >&2
+              cd "$original_dir"
+              return 1
+          fi
+      elif command -v wget &> /dev/null; then
+          echo "INFO: Downloading with wget (supports resume -c)..."
+          wget -c "$ONNX_URL" -O "$YOLOX_MODEL_FILE"
+      else
+          echo "ERROR: curl or wget is required to download model files." >&2
+          cd "$original_dir"
+          return 1
+      fi
+
+      if [[ -f "$YOLOX_MODEL_FILE" ]]; then
+          FINAL_SIZE=$(stat -c%s "$YOLOX_MODEL_FILE" 2>/dev/null || stat -f%z "$YOLOX_MODEL_FILE" 2>/dev/null)
+          if [[ "$FINAL_SIZE" -lt "$MIN_YOLOX_SIZE" ]]; then
+              echo "ERROR: YOLOX file seems too small (size: $FINAL_SIZE bytes)." >&2
+              cd "$original_dir"
+              return 1
+          else
+              echo "INFO: YOLOX downloaded (size: $(numfmt --to=iec-i --suffix=B $FINAL_SIZE 2>/dev/null || echo $FINAL_SIZE))"
+          fi
+      else
+          echo "ERROR: YOLOX download failed: file not found." >&2
+          cd "$original_dir"
+          return 1
+      fi
+  fi
+
+  echo "INFO: YOLOX OK"
+
+  # ==========================================
+  # 3. config.json
+  CONFIG_FILE="$MODEL_ROOT/config.json"
+  YOLOX_ABS_PATH=$(cd "$(dirname "$YOLOX_MODEL_FILE")" && pwd)/$(basename "$YOLOX_MODEL_FILE")
+  YOLOX_OS_PATH=$(format_path_for_env "$YOLOX_ABS_PATH")
+  YOLOX_CONFIG_PATH=$(escape_backslashes "$YOLOX_OS_PATH")
+
+  cat > "$CONFIG_FILE" <<EOF
+{
+    "model_path": "$YOLOX_CONFIG_PATH",
+    "label_map": {
+        "0": "Caption",
+        "1": "Footnote",
+        "2": "Formula",
+        "3": "List-item",
+        "4": "Page-footer",
+        "5": "Page-header",
+        "6": "Picture",
+        "7": "Section-header",
+        "8": "Table",
+        "9": "Text",
+        "10": "Title"
+    }
+}
+EOF
+  echo "INFO: config.json generated"
+
+  # ==========================================
+  # 4. Update .env
+  cd "$env_file_dir" || return 1
+  touch "$env_file_path"
+
+  TT_MODEL_DIR_ABS_PATH=$(cd "$TT_MODEL_DIR_PATH" && pwd)
+  CONFIG_FILE_ABS_PATH=$(cd "$(dirname "$CONFIG_FILE")" && pwd)/$(basename "$CONFIG_FILE")
+  TT_MODEL_DIR_ENV_PATH=$(format_path_for_env "$TT_MODEL_DIR_ABS_PATH")
+  CONFIG_FILE_ENV_PATH=$(format_path_for_env "$CONFIG_FILE_ABS_PATH")
+  TT_MODEL_DIR_ENV_PATH=$(escape_backslashes "$TT_MODEL_DIR_ENV_PATH")
+  CONFIG_FILE_ENV_PATH=$(escape_backslashes "$CONFIG_FILE_ENV_PATH")
+
+  if declare -f update_env_var > /dev/null; then
+      update_env_var "TABLE_TRANSFORMER_MODEL_PATH" "$TT_MODEL_DIR_ENV_PATH"
+      update_env_var "UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH" "$CONFIG_FILE_ENV_PATH"
+  else
+      sed -i.bak "/^TABLE_TRANSFORMER_MODEL_PATH=/d" "$env_file_path" 2>/dev/null || true
+      echo "TABLE_TRANSFORMER_MODEL_PATH="$TT_MODEL_DIR_ENV_PATH"" >> "$env_file_path"
+
+      sed -i.bak "/^UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH=/d" "$env_file_path" 2>/dev/null || true
+      echo "UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH="$CONFIG_FILE_ENV_PATH"" >> "$env_file_path"
+      rm -f "$env_file_path.bak" 2>/dev/null
+  fi
+
+  echo "INFO: Environment file updated"
+  cd "$original_dir"
+}
+
 clean() {
   export MINIO_ACCESS_KEY=
   export MINIO_SECRET_KEY=
@@ -599,6 +876,13 @@ prepare_directory_and_data() {
   create_dir_with_permission "$ROOT_DIR/postgresql" 775
   create_dir_with_permission "$ROOT_DIR/minio" 775
   create_dir_with_permission "$ROOT_DIR/redis" 775
+
+  echo "📦 Check the status of model configuration..."
+  download_and_config_models || { 
+    echo "⚠️  A warning occurred during the model configuration step, but subsequent deployment will proceed..." 
+    # Do not exit here; the user may choose N or prefer to continue after a download failure.
+  }
+  echo ""
 
   cp -rn volumes $ROOT_DIR
   chmod -R 775 $ROOT_DIR/volumes
@@ -1057,6 +1341,8 @@ main_deploy() {
   select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 1; }
   choose_image_env || { echo "❌ Image environment setup failed"; exit 1; }
 
+  select_model_download || { echo "❌ Model download failed"; exit 1;}
+
   # Set NEXENT_MCP_DOCKER_IMAGE in .env file
   if [ -n "${NEXENT_MCP_DOCKER_IMAGE:-}" ]; then
     update_env_var "NEXENT_MCP_DOCKER_IMAGE" "${NEXENT_MCP_DOCKER_IMAGE}"
@@ -1142,7 +1428,7 @@ docker_compose_command=""
 case $version_type in
     "v1")
         echo "Detected Docker Compose V1, version: $version_number"
-        # The version ​​v1.28.0​​ is the minimum requirement in Docker Compose v1 that explicitly supports interpolation syntax with default values like ${VAR:-default}
+        # The version 1.28.0 is the minimum requirement in Docker Compose v1 for default interpolation syntax.
         if [[ $version_number < "1.28.0" ]]; then
             echo "Warning: V1 version is too old, consider upgrading to V2"
             exit 1

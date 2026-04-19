@@ -33,7 +33,7 @@ from fastapi import APIRouter, Header, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from services.model_health_service import (
     check_model_connectivity,
     verify_model_config_connectivity,
@@ -297,7 +297,8 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
 
 @router.post("/healthcheck")
 async def check_model_health(
-        display_name: str = Query(..., description="Display name to check"),
+        display_name: Annotated[str, Query(..., description="Display name to check")],
+        model_type: Annotated[str, Query(..., description="...")],
         authorization: Optional[str] = Header(None)
 ):
     """Check and update model connectivity, returning the latest status.
@@ -308,7 +309,7 @@ async def check_model_health(
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        result = await check_model_connectivity(display_name, tenant_id)
+        result = await check_model_connectivity(display_name, tenant_id, model_type)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully checked model connectivity",
             "data": result

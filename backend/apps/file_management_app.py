@@ -116,12 +116,13 @@ async def upload_files(
 
 @file_management_config_router.post("/process")
 async def process_files(
-        files: List[dict] = Body(
-            ..., description="List of file details to process, including path_or_url and filename"),
-        chunking_strategy: Optional[str] = Body("basic"),
-        index_name: str = Body(...),
-        destination: str = Body(...),
-        authorization: Optional[str] = Header(None)
+        files: Annotated[List[dict], Body(
+            ..., description="List of file details to process, including path_or_url and filename")],
+        index_name: Annotated[str, Body(...)],
+        destination: Annotated[str, Body(...)],
+        chunking_strategy: Annotated[Optional[str], Body(...)] = "basic",
+        model_id: Annotated[Optional[int], Body(...)] = None,
+        authorization: Annotated[Optional[str], Header()] = None
 ):
     """
     Trigger data processing for a list of uploaded files.
@@ -134,7 +135,8 @@ async def process_files(
         chunking_strategy=chunking_strategy,
         source_type=destination,
         index_name=index_name,
-        authorization=authorization
+        authorization=authorization,
+        model_id=model_id
     )
 
     process_result = await trigger_data_process(files, process_params)
