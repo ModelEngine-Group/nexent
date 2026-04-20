@@ -101,7 +101,6 @@ class VolcTTSModel(BaseTTSModel):
             if message_type_specific_flags == 0:
                 return False, None
             sequence_number = int.from_bytes(payload[:4], "big", signed=True)
-            payload_size = int.from_bytes(payload[4:8], "big", signed=False)
             audio_chunk = payload[8:]
             if buffer is not None:
                 buffer.write(audio_chunk)
@@ -149,17 +148,6 @@ class VolcTTSModel(BaseTTSModel):
                         if done:
                             break
             return audio_generator()
-
-    async def query_status(self, text: str) -> Dict[str, Any]:
-        request = self._prepare_request(text, operation="query")
-        headers = self.get_auth_headers()
-        async with websockets.connect(self.config.api_url, additional_headers=headers, ping_interval=None) as ws:
-            await ws.send(request)
-            response = await ws.recv()
-            return self._parse_query_response(response)
-
-    def _parse_query_response(self, response: bytes) -> Dict[str, Any]:
-        return {"status": "unknown"}
 
     async def check_connectivity(self) -> bool:
         try:

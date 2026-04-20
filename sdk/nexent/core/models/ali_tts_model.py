@@ -32,29 +32,6 @@ QWEN_REALTIME_API_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 class AliTTSConfig:
     """Configuration for Ali TTS model."""
 
-    # CosyVoice model and voice compatibility mapping
-    COSYVOICE_VOICE_COMPATIBILITY = {
-        "cosyvoice-v3.5-plus": {
-            "description": "No system voices, requires custom voice (clone/design)",
-            "fallback_voice": "longxiaochun_v2"
-        },
-        "cosyvoice-v3.5-flash": {
-            "description": "No system voices, requires custom voice (clone/design)",
-            "fallback_voice": "longxiaochun_v2"
-        },
-        "cosyvoice-v3-plus": {"fallback_voice": "longanyang"},
-        "cosyvoice-v3-flash": {"fallback_voice": "longanyang"},
-        "cosyvoice-v2": {"fallback_voice": "longxiaochun_v2"},
-        "cosyvoice-v1": {"fallback_voice": "longwan"}
-    }
-
-    # Qwen Realtime API voice mapping
-    QWEN_REALTIME_VOICES = [
-        "Cherry", "Apple", "Qingyi", "Wanyi", "Guyi", "Yunyang",
-        "Xiaochao", "Xuanwu", "Shanshan", "Xize", "Xinyi", "Xiaoan",
-        "Xiaying", "Xiayun", "Xiaoquan", "Yitong"
-    ]
-
     def __init__(
         self,
         api_key: str,

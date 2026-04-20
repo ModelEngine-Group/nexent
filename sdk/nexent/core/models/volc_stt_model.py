@@ -160,8 +160,7 @@ class VolcSTTModel(BaseSTTModel):
         header.append(reserved_data)
         return header
 
-    @staticmethod
-    def generate_before_payload(sequence: int) -> bytearray:
+    def generate_before_payload(self, sequence: int) -> bytearray:
         """
         Generate the payload prefix with sequence number.
 
@@ -185,14 +184,11 @@ class VolcSTTModel(BaseSTTModel):
         Returns:
             Parsed response dict
         """
-        protocol_version = res[0] >> 4
         header_size = res[0] & 0x0f
         message_type = res[1] >> 4
         message_type_specific_flags = res[1] & 0x0f
         serialization_method = res[2] >> 4
         message_compression = res[2] & 0x0f
-        reserved = res[3]
-        header_extensions = res[4:header_size * 4]
         payload = res[header_size * 4:]
         result: Dict[str, Any] = {'is_last_package': False}
         payload_msg = None
@@ -270,8 +266,7 @@ class VolcSTTModel(BaseSTTModel):
         while offset + chunk_size < data_len:
             yield data[offset: offset + chunk_size], False
             offset += chunk_size
-        else:
-            yield data[offset: data_len], True
+        yield data[offset: data_len], True
 
     def construct_request(self, reqid: str) -> Dict[str, Any]:
         """
@@ -415,7 +410,7 @@ class VolcSTTModel(BaseSTTModel):
             return await self.process_audio_data(audio_data, segment_size)
 
         if self.config.format == "wav":
-            nchannels, sampwidth, framerate, nframes, wav_bytes = self.read_wav_info(audio_data)
+            nchannels, sampwidth, framerate, _, wav_bytes = self.read_wav_info(audio_data)
             size_per_sec = nchannels * sampwidth * framerate
             segment_size = int(size_per_sec * self.config.seg_duration / 1000)
             return await self.process_audio_data(wav_bytes, segment_size)
@@ -471,7 +466,6 @@ class VolcSTTModel(BaseSTTModel):
                     client_connected = False
                     return
 
-                counter = 0
                 last_chunk_received = False
 
                 while client_connected:
@@ -562,8 +556,6 @@ class VolcSTTModel(BaseSTTModel):
                             except:
                                 pass
                             break
-
-                    counter += 1
 
                     if last_chunk_received:
                         logger.info("Last chunk processed, exiting loop")

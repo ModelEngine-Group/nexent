@@ -47,9 +47,6 @@ class AliSTTConfig:
         self.enable_vad = enable_vad
         self.vad_threshold = vad_threshold
         self.vad_silence_duration_ms = vad_silence_duration_ms
-        self.workspace_id = workspace_id
-
-
 class TranscriptionResult:
     """Container for transcription results."""
 
@@ -358,14 +355,14 @@ class AliSTTModel(BaseSTTModel):
         audio_data = bytes(data)
 
         if self.config.format == "wav":
-            nchannels, sampwidth, framerate, nframes, wav_bytes = self.read_wav_info(audio_data)
+            nchannels, sampwidth, framerate, _, wav_bytes = self.read_wav_info(audio_data)
             size_per_sec = nchannels * sampwidth * framerate
             segment_size = int(size_per_sec * self.config.seg_duration / 1000)
             return await self.process_audio_data(wav_bytes, segment_size, on_result)
 
         if self.config.format == "pcm":
             if audio_data[:4] == b'RIFF' and audio_data[8:12] == b'WAVE':
-                nchannels, sampwidth, framerate, nframes, wav_bytes = self.read_wav_info(audio_data)
+                nchannels, sampwidth, framerate, _, wav_bytes = self.read_wav_info(audio_data)
                 segment_size = int(self.config.rate * 2 * self.config.channel * self.config.seg_duration / 1000)
                 return await self.process_audio_data(wav_bytes, segment_size, on_result)
             else:

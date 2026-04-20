@@ -465,8 +465,8 @@ export const ModelListCard = ({
                     title={model.displayName}
                   >
                     <img
-                      src={getProviderIconByUrl(model.apiUrl)}
-                      alt="provider"
+                      src="/volcengine.png"
+                      alt="volc"
                       className="w-4 h-4 rounded mr-2 flex-shrink-0"
                     />
                     <span className="truncate">{model.displayName}</span>

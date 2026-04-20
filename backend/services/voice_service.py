@@ -2,19 +2,18 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 
-from nexent.core.models.volc_stt_model import VolcSTTConfig, VolcSTTModel
-from nexent.core.models.ali_stt_model import AliSTTConfig, AliSTTModel
 from nexent.core.models.stt_model import BaseSTTModel
 from nexent.core.models.base_tts_model import BaseTTSModel
+from nexent.core.models.volc_stt_model import VolcSTTConfig, VolcSTTModel
+from nexent.core.models.ali_stt_model import AliSTTConfig, AliSTTModel
 from nexent.core.models.volc_tts_model import VolcTTSConfig, VolcTTSModel
 from nexent.core.models.ali_tts_model import AliTTSConfig, AliTTSModel
 
-from consts.const import APPID, CLUSTER, SPEED_RATIO, TEST_VOICE_PATH, TEST_PCM_PATH, TOKEN, VOICE_TYPE
+from consts.const import TEST_VOICE_PATH, TEST_PCM_PATH
 from consts.exceptions import (
     VoiceServiceException,
     STTConnectionException,
     TTSConnectionException,
-    VoiceConfigException
 )
 from database.model_management_db import get_model_records
 from utils.config_utils import tenant_config_manager
@@ -25,27 +24,8 @@ logger = logging.getLogger("voice_service")
 class VoiceService:
     """Voice service that handles STT and TTS operations"""
 
-    def __init__(self):
-        """Initialize the voice service with configurations from const.py"""
-        try:
-            # Store default TTS configuration from const.py for fallback
-            from nexent.core.models.tts_model import TTSConfig
-            self._default_tts_config = TTSConfig(
-                appid=APPID,
-                token=TOKEN,
-                cluster=CLUSTER,
-                voice_type=VOICE_TYPE,
-                speed_ratio=SPEED_RATIO
-            )
-            self.tts_config = self._default_tts_config
-
-        except Exception as e:
-            logger.error(f"Failed to initialize voice service: {str(e)}")
-            raise VoiceConfigException(f"Voice service initialization failed: {str(e)}") from e
-
     def _get_stt_model_from_config(
         self,
-        tenant_id: Optional[str],
         model_factory: Optional[str] = None,
         model_name: Optional[str] = None,
         api_key: Optional[str] = None,
@@ -56,9 +36,8 @@ class VoiceService:
     ) -> BaseSTTModel:
         """
         Get the appropriate STT model based on model factory configuration.
-        
+
         Args:
-            tenant_id: Tenant ID for model lookup
             model_factory: Model factory/vendor name
             model_name: Model name
             api_key: API key (for Ali STT)
@@ -66,7 +45,7 @@ class VoiceService:
             access_token: Access token (for Volcano STT)
             base_url: Custom WebSocket URL (optional)
             language: Language for speech recognition
-            
+
         Returns:
             STT model instance based on configuration
         """
@@ -127,7 +106,6 @@ class VoiceService:
                 access_token_val = stt_config.get("access_token", "")
                 
                 return self._get_stt_model_from_config(
-                    tenant_id=tenant_id,
                     model_factory=model_factory,
                     model_name=model_name,
                     api_key=api_key,
@@ -136,7 +114,7 @@ class VoiceService:
                     base_url=base_url,
                     language=language
                 )
-            
+
             # Try to get from model records in database
             model_records = get_model_records({"model_type": "stt"}, tenant_id)
             if model_records:
@@ -147,9 +125,8 @@ class VoiceService:
                 base_url = record.get("base_url", "")
                 model_appid = record.get("model_appid", "")
                 access_token_val = record.get("access_token", "")
-                
+
                 return self._get_stt_model_from_config(
-                    tenant_id=tenant_id,
                     model_factory=model_factory,
                     model_name=model_name,
                     api_key=api_key,
@@ -158,19 +135,16 @@ class VoiceService:
                     base_url=base_url,
                     language=language
                 )
-            
+
             logger.warning(f"No STT model configuration found for tenant {tenant_id}, using default config")
-            # Return default Ali STT model with empty config
-            return self._get_stt_model_from_config(tenant_id=tenant_id, language=language)
-            
+            return self._get_stt_model_from_config(language=language)
+
         except Exception as e:
             logger.error(f"Error getting STT model config for tenant {tenant_id}: {str(e)}")
-            # Return default on error
-            return self._get_stt_model_from_config(tenant_id=tenant_id, language=language)
+            return self._get_stt_model_from_config(language=language)
 
     def _get_tts_model_from_config(
         self,
-        tenant_id: Optional[str],
         model_factory: Optional[str] = None,
         api_key: Optional[str] = None,
         model_appid: Optional[str] = None,
@@ -183,7 +157,6 @@ class VoiceService:
         Get the appropriate TTS model based on model factory configuration.
 
         Args:
-            tenant_id: Tenant ID for model lookup
             model_factory: Model factory/vendor name
             api_key: API key (for Ali TTS)
             model_appid: Application ID (for Volcano TTS)
@@ -250,7 +223,6 @@ class VoiceService:
                 model = tts_config.get("model") or tts_config.get("model_name", "")
 
                 return self._get_tts_model_from_config(
-                    tenant_id=tenant_id,
                     model_factory=model_factory,
                     api_key=api_key,
                     model_appid=model_appid,
@@ -272,7 +244,6 @@ class VoiceService:
                 model = record.get("model_name", "")
 
                 return self._get_tts_model_from_config(
-                    tenant_id=tenant_id,
                     model_factory=model_factory,
                     api_key=api_key,
                     model_appid=model_appid,
@@ -283,11 +254,11 @@ class VoiceService:
                 )
 
             logger.warning(f"No TTS model configuration found for tenant {tenant_id}, using default config")
-            return self._get_tts_model_from_config(tenant_id=tenant_id)
+            return self._get_tts_model_from_config()
 
         except Exception as e:
             logger.error(f"Error getting TTS model config for tenant {tenant_id}: {str(e)}")
-            return self._get_tts_model_from_config(tenant_id=tenant_id)
+            return self._get_tts_model_from_config()
 
     async def start_stt_streaming_session(
         self,
@@ -334,9 +305,7 @@ class VoiceService:
 
             # Get STT model based on configuration
             if model_factory or api_key or model_appid:
-                # Use explicit configuration from client
                 stt_model = self._get_stt_model_from_config(
-                    tenant_id=tenant_id,
                     model_factory=model_factory,
                     model_name=model_name,
                     api_key=api_key,
@@ -346,13 +315,10 @@ class VoiceService:
                     language=language
                 )
             elif tenant_id:
-                # Use tenant's configured model
                 stt_model = self._get_stt_model_from_tenant_config(tenant_id, language)
             else:
-                # Use default Ali STT model
                 logger.warning("No tenant_id provided and no explicit config, using default Ali STT")
                 stt_model = self._get_stt_model_from_config(
-                    tenant_id=tenant_id,
                     api_key=api_key,
                     language=language
                 )
@@ -417,9 +383,7 @@ class VoiceService:
             logger.info(f"TTS generation using model: {effective_model}")
 
             if api_key or effective_model:
-                # Use explicit config
                 tts_model = self._get_tts_model_from_config(
-                    tenant_id=tenant_id,
                     model_factory=model_factory,
                     api_key=api_key,
                     model_appid=model_appid,
@@ -431,7 +395,7 @@ class VoiceService:
             elif tenant_id:
                 tts_model = self._get_tts_model_from_tenant_config(tenant_id)
             else:
-                tts_model = self._get_tts_model_from_config(tenant_id=tenant_id)
+                tts_model = self._get_tts_model_from_config()
 
             speech_result = await tts_model.generate_speech(text, stream=stream)
             return speech_result
@@ -461,46 +425,33 @@ class VoiceService:
             TTSConnectionException: If TTS service connection fails
             VoiceServiceException: If TTS streaming fails
         """
-        try:
-            speech_result = await self.generate_tts_speech(
-                text,
-                stream=True,
-                tenant_id=tenant_id,
-                model_name_override=model_name,
-                tts_config=tts_config
-            )
+        speech_result = await self.generate_tts_speech(
+            text,
+            stream=True,
+            tenant_id=tenant_id,
+            model_name_override=model_name,
+            tts_config=tts_config
+        )
 
-            # Check if it's an async iterator or a regular iterable
-            if hasattr(speech_result, '__aiter__'):
-                # It's an async iterator, use async for
-                async for chunk in speech_result:
-                    if websocket.client_state.name == "CONNECTED":
-                        await websocket.send_bytes(chunk)
-                    else:
-                        break
-            elif hasattr(speech_result, '__iter__'):
-                # It's a regular iterator, use normal for
-                for chunk in speech_result:
-                    if websocket.client_state.name == "CONNECTED":
-                        await websocket.send_bytes(chunk)
-                    else:
-                        break
-            else:
-                # It's a single chunk, send it directly
+        # Check if it's an async iterator or a regular iterable
+        if hasattr(speech_result, '__aiter__'):
+            # It's an async iterator, use async for
+            async for chunk in speech_result:
                 if websocket.client_state.name == "CONNECTED":
-                    await websocket.send_bytes(speech_result)
-
-            await asyncio.sleep(0.1)
-
-        except TypeError as te:
-            # If speech_result is still a coroutine, try calling it directly without stream=True
-            if "async for" in str(te) and "requires an object with __aiter__" in str(te):
-                logger.error("Falling back to non-streaming TTS")
-                speech_data = await self.generate_tts_speech(text, stream=False)
+                    await websocket.send_bytes(chunk)
+                else:
+                    break
+        elif hasattr(speech_result, '__iter__'):
+            # It's a regular iterator, use normal for
+            for chunk in speech_result:
                 if websocket.client_state.name == "CONNECTED":
-                    await websocket.send_bytes(speech_data)
-            else:
-                raise
+                    await websocket.send_bytes(chunk)
+                else:
+                    break
+        else:
+            # It's a single chunk, send it directly
+            if websocket.client_state.name == "CONNECTED":
+                await websocket.send_bytes(speech_result)
 
         # Send end marker after successful TTS generation
         if websocket.client_state.name == "CONNECTED":
@@ -537,7 +488,6 @@ class VoiceService:
         try:
             # Get STT model based on factory
             stt_model = self._get_stt_model_from_config(
-                tenant_id=None,
                 model_factory=model_factory,
                 model_name=model,
                 api_key=api_key,
@@ -590,7 +540,6 @@ class VoiceService:
         """
         try:
             tts_model = self._get_tts_model_from_config(
-                tenant_id=None,
                 model_factory=model_factory,
                 api_key=api_key,
                 model_appid=model_appid,

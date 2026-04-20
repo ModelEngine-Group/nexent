@@ -1,8 +1,7 @@
-import asyncio
 import logging
 from http import HTTPStatus
 
-from fastapi import APIRouter, WebSocket, HTTPException, Body, Query
+from fastapi import APIRouter, WebSocket, HTTPException
 from fastapi.responses import JSONResponse
 
 from consts.exceptions import (
