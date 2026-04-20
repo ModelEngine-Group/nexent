@@ -812,6 +812,7 @@ class ElasticSearchService:
                        ] = Body(..., description="Document List to process"),
             vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
             task_id: Optional[str] = None,
+            large_mode: bool = False,
     ):
         """
         Index documents and create vector embeddings, create index if it doesn't exist
@@ -939,6 +940,7 @@ class ElasticSearchService:
                     embedding_model=embedding_model,
                     documents=documents,
                     embedding_batch_size=embedding_batch_size,
+                    large_mode=large_mode,
                     progress_callback=lambda processed, total: _update_progress(
                         task_id, processed, total) if task_id else None
                 )

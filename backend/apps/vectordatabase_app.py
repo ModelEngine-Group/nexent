@@ -191,6 +191,8 @@ def create_index_documents(
         authorization: Optional[str] = Header(None),
         task_id: Optional[str] = Header(
             None, alias="X-Task-Id", description="Task ID for progress tracking"),
+        large_mode: bool = Query(
+            False, description="Force large-batch path when current request chunk count is below threshold"),
 ):
     """
     Index documents with embeddings, creating the index if it doesn't exist.
@@ -214,6 +216,7 @@ def create_index_documents(
             data=data,
             vdb_core=vdb_core,
             task_id=task_id,
+            large_mode=large_mode,
         )
     except Exception as e:
         error_msg = str(e)
