@@ -92,6 +92,20 @@ export default function SkillBuildModal({
   // Track if streaming is complete to prevent late onFormContent callbacks from overwriting cleaned content
   const isStreamingCompleteRef = useRef(false);
 
+  // Multi-turn conversation state: accumulated skill draft from previous turns.
+  // When the user sends a follow-up message, this draft is passed as existing_skill
+  // so the backend can refine the skill rather than generating from scratch.
+  const [accumulatedDraft, setAccumulatedDraft] = useState<{
+    name: string;
+    description: string;
+    tags: string[];
+    content: string;
+  } | null>(null);
+
+  // Whether the user is in multi-turn refinement mode (has already received a draft).
+  // Used to switch the placeholder from "创建" to "继续修改" and to pass existing_skill.
+  const [isMultiTurn, setIsMultiTurn] = useState(false);
+
   // Name input dropdown control
   const [isNameDropdownOpen, setIsNameDropdownOpen] = useState(false);
   const [isTagsFocused, setIsTagsFocused] = useState(false);
@@ -150,6 +164,8 @@ export default function SkillBuildModal({
       setIsSummaryVisible(false);
       setIsContentStreaming(false);
       currentAssistantIdRef.current = "";
+      setAccumulatedDraft(null);
+      setIsMultiTurn(false);
     }
   }, [isOpen, form]);
 
@@ -162,18 +178,19 @@ export default function SkillBuildModal({
   }, []);
 
   // Sync streaming content to the current assistant chat message for real-time display.
-  // Show thinking content while thinking is visible, then switch to summary.
+  // Only updates the message whose id matches the currently streaming one — never touches history.
   useEffect(() => {
     if (!currentAssistantIdRef.current) return;
     const displayContent = isSummaryVisible ? summaryStreamingContent : thinkingStreamingContent;
     if (!displayContent) return;
-    setChatMessages((prev) =>
-      prev.map((msg) =>
+    setChatMessages((prev) => {
+      if (!prev.some((m) => m.id === currentAssistantIdRef.current)) return prev;
+      return prev.map((msg) =>
         msg.id === currentAssistantIdRef.current
           ? { ...msg, content: displayContent }
           : msg
-      )
-    );
+      );
+    });
   }, [thinkingStreamingContent, summaryStreamingContent, isSummaryVisible]);
 
   // Sync formStreamingContent to the form content field for real-time display
@@ -339,8 +356,11 @@ export default function SkillBuildModal({
     const currentInput = chatInput.trim();
     setChatInput("");
 
-    // Read current form fields to provide context to the model
+    // Read current form fields to provide context to the model.
+    // Include accumulated draft when available so the backend knows this is a
+    // refinement turn rather than a fresh creation.
     const formValues = form.getFieldsValue();
+    const draft = accumulatedDraft;
     const formContext = [
       formValues.name ? `当前技能名称：${formValues.name}` : "",
       formValues.description ? `当前技能描述：${formValues.description}` : "",
@@ -361,14 +381,14 @@ export default function SkillBuildModal({
     setThinkingDescription(THINKING_STEPS_ZH.find((s) => s.step === 1)?.description || "生成技能内容中 ...");
     setIsThinkingVisible(true);
 
-    // Clear content input before streaming
+    // Clear content input before streaming — start fresh so the streamed content
+    // reflects the (possibly refined) result of this turn.
     form.setFieldValue("content", "");
     setFormStreamingContent("");
     setThinkingStreamingContent("");
     setSummaryStreamingContent("");
     setIsSummaryVisible(false);
     setIsContentStreaming(true);
-    // Reset streaming complete flag
     isStreamingCompleteRef.current = false;
 
     const assistantId = (Date.now() + 1).toString();
@@ -378,11 +398,12 @@ export default function SkillBuildModal({
       { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
     ]);
 
-    // Track current assistant message ID for streaming updates
     currentAssistantIdRef.current = assistantId;
 
     try {
-      // Build user prompt with form context
+      // On first turn, no existing_skill is sent → backend creates from scratch.
+      // On subsequent turns (accumulatedDraft exists), existing_skill is passed
+      // → backend follows the modify-workflow template and refines the draft.
       const userPrompt = formContext
         ? `用户需求：${currentInput}\n\n${formContext}`
         : `用户需求：${currentInput}`;
@@ -390,11 +411,11 @@ export default function SkillBuildModal({
       await createSimpleSkillStream(
         {
           user_request: userPrompt,
-          existing_skill: !isCreateMode ? {
-            name: formValues.name || "",
-            description: formValues.description || "",
-            tags: formValues.tags || [],
-            content: formValues.content || "",
+          existing_skill: draft ? {
+            name: draft.name || formValues.name || "",
+            description: draft.description || formValues.description || "",
+            tags: draft.tags?.length ? draft.tags : (formValues.tags || []),
+            content: draft.content || formValues.content || "",
           } : undefined,
         },
         {
@@ -446,6 +467,18 @@ export default function SkillBuildModal({
                 form.setFieldsValue({ content: skillInfo.contentWithoutFrontmatter });
                 setFormStreamingContent(skillInfo.contentWithoutFrontmatter);
               }
+
+              // Update accumulated draft so the next follow-up turn carries it forward.
+              // This is what enables multi-turn refinement: the draft persists across turns.
+              const newDraft = {
+                name: skillInfo?.name || draft?.name || "",
+                description: skillInfo?.description || draft?.description || "",
+                tags: skillInfo?.tags?.length ? skillInfo.tags : (draft?.tags || []),
+                content: skillInfo?.contentWithoutFrontmatter || draft?.content || "",
+              };
+              setAccumulatedDraft(newDraft);
+              setIsMultiTurn(true);
+
               message.success(t("skillManagement.message.skillReadyForSave"));
             }
           },
@@ -478,6 +511,8 @@ export default function SkillBuildModal({
     setThinkingStreamingContent("");
     setSummaryStreamingContent("");
     setIsSummaryVisible(false);
+    setAccumulatedDraft(null);
+    setIsMultiTurn(false);
   };
 
   // Scroll to bottom of chat when new messages arrive
@@ -543,7 +578,7 @@ export default function SkillBuildModal({
                       : "bg-gray-100 text-gray-800"
                   }`}
                 >
-                  {msg.role === "assistant" && isThinkingVisible && !isSummaryVisible ? (
+                  {msg.role === "assistant" && msg.id === currentAssistantIdRef.current && isThinkingVisible && !isSummaryVisible ? (
                     <div className="min-w-[200px] flex flex-col items-center">
                       <Loader2 size={24} className="animate-spin text-blue-500" />
                       {thinkingDescription && (
@@ -555,7 +590,7 @@ export default function SkillBuildModal({
                   ) : msg.role === "assistant" ? (
                     <div className="markdown-content">
                       <MarkdownRenderer
-                        content={isSummaryVisible ? summaryStreamingContent : msg.content}
+                        content={msg.content}
                         className="text-sm"
                       />
                     </div>
@@ -579,7 +614,10 @@ export default function SkillBuildModal({
                     handleChatSend();
                   }
                 }}
-                placeholder={t("skillManagement.form.chatPlaceholder")}
+                placeholder={isMultiTurn
+                  ? t("skillManagement.form.multiTurnPlaceholder")
+                  : t("skillManagement.form.chatPlaceholder")
+                }
                 disabled={isChatLoading}
                 autoSize={{ minRows: 1, maxRows: 3 }}
                 className="resize-none"

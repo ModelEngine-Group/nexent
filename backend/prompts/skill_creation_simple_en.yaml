@@ -45,19 +45,13 @@ system_prompt: |-
     - tag1
     - tag2
   ---
-
   # Skill Name
-
   ## Usage Instructions
-
   Step-by-step guidance for the Agent. Keep it concise—assume the Agent already has relevant knowledge.
-
   ## Examples (Optional)
-
   Specific usage examples.
   </SKILL>
-
-  [Your friendly message to the user, such as skill created, feature highlights, etc.]
+  Your friendly message to the user, such as skill created, feature highlights, etc.
   ```
 
   ## Writing Descriptions (Key Point)
