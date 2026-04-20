@@ -10,7 +10,6 @@ import json
 import logging
 import re
 import time
-from abc import ABC, abstractmethod
 from typing import Any, List, Optional, Tuple
 
 from pydantic import Field
@@ -22,7 +21,6 @@ from ....core.utils.observer import MessageObserver, ProcessType
 logger = logging.getLogger("sql_database_base")
 
 
-# High-risk SQL patterns that are forbidden
 HIGH_RISK_SQL_PATTERNS = [
     (re.compile(r"\bDROP\s+DATABASE\b", re.IGNORECASE), "DROP DATABASE", "DROP_DATABASE"),
     (re.compile(r"\bGRANT\b", re.IGNORECASE), "GRANT", "GRANT"),
@@ -33,40 +31,21 @@ HIGH_RISK_SQL_PATTERNS = [
     (re.compile(r"\bEXEC\s+xp_", re.IGNORECASE), "EXEC xp_", "EXEC_XP"),
 ]
 
-# Patterns that require WHERE clause
 WHERE_REQUIRED_PATTERNS = [
     (re.compile(r"\bUPDATE\s+.*\s+SET\b", re.IGNORECASE), "UPDATE"),
     (re.compile(r"\bDELETE\s+FROM\b", re.IGNORECASE), "DELETE"),
 ]
 
 
-class SqlDatabaseBaseTool(Tool, ABC):
+class SqlDatabaseBaseTool(Tool):
     """
-    Abstract base class for SQL database tools.
+    Base class for SQL database tools.
 
     Provides common functionality:
     - Security validation (SQL blacklist, WHERE clause enforcement)
     - SQL dialect conversion (LIMIT clause adaptation)
     - Result formatting
     """
-
-    @property
-    @abstractmethod
-    def db_type(self) -> str:
-        """Database type identifier."""
-        pass
-
-    @property
-    @abstractmethod
-    def tool_name(self) -> str:
-        """Tool name for this database."""
-        pass
-
-    @property
-    @abstractmethod
-    def default_port(self) -> int:
-        """Default port for this database."""
-        pass
 
     def __init__(
         self,
@@ -81,7 +60,21 @@ class SqlDatabaseBaseTool(Tool, ABC):
         self.running_prompt_zh = "正在执行 SQL 查询..."
         self.running_prompt_en = "Executing SQL query..."
 
-    @abstractmethod
+    @property
+    def db_type(self) -> str:
+        """Database type identifier."""
+        raise NotImplementedError("Subclasses must implement db_type property")
+
+    @property
+    def tool_name(self) -> str:
+        """Tool name for this database."""
+        raise NotImplementedError("Subclasses must implement tool_name property")
+
+    @property
+    def default_port(self) -> int:
+        """Default port for this database."""
+        raise NotImplementedError("Subclasses must implement default_port property")
+
     def _execute_query(
         self,
         sql: str,
@@ -101,7 +94,7 @@ class SqlDatabaseBaseTool(Tool, ABC):
         Returns:
             Tuple of (rows, columns)
         """
-        pass
+        raise NotImplementedError("Subclasses must implement _execute_query method")
 
     def forward(
         self,
@@ -143,7 +136,6 @@ class SqlDatabaseBaseTool(Tool, ABC):
                 timeout = 10
 
             sql = self._preprocess_sql(sql)
-
             self._validate_sql_security(sql)
 
             start_time = time.time()
@@ -183,19 +175,11 @@ class SqlDatabaseBaseTool(Tool, ABC):
             return json.dumps(error_result, ensure_ascii=False)
 
     def _preprocess_sql(self, sql: str) -> str:
-        """
-        Preprocess SQL for dialect-specific conversions.
-        Override in subclasses for database-specific conversions.
-        """
+        """Preprocess SQL for dialect-specific conversions. Override in subclasses."""
         return sql
 
     def _validate_sql_security(self, sql: str) -> None:
-        """
-        Validate SQL for security concerns.
-
-        Raises:
-            Exception: If SQL contains forbidden operations or violates security rules
-        """
+        """Validate SQL for security concerns."""
         for pattern, name, code in HIGH_RISK_SQL_PATTERNS:
             if pattern.search(sql):
                 raise Exception(
@@ -215,10 +199,7 @@ class SqlDatabaseBaseTool(Tool, ABC):
                     )
 
     def _add_limit_clause(self, sql: str, max_rows: int) -> str:
-        """
-        Add LIMIT clause to SQL query.
-        Override in subclasses for databases with different syntax.
-        """
+        """Add LIMIT clause to SQL query. Override in subclasses for different syntax."""
         if max_rows <= 0:
             return sql
         sql = sql.strip().rstrip(";")
