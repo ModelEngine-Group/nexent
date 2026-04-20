@@ -128,4 +128,5 @@ async def list_models_endpoint(
         return ConversationResponse(code=0, message="success", data=paginated)
     except Exception as e:
         logger.error(f"Failed to list monitoring models: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

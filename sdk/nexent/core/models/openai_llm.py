@@ -66,7 +66,8 @@ class OpenAIModel(OpenAIServerModel):
                 normalized_messages.append(msg)
             elif isinstance(msg, dict):
                 if "role" not in msg or "content" not in msg:
-                    raise ValueError("Each message dict must include 'role' and 'content'.")
+                    raise ValueError(
+                        "Each message dict must include 'role' and 'content'.")
                 normalized_messages.append(
                     ChatMessage.from_dict(
                         {
@@ -77,10 +78,12 @@ class OpenAIModel(OpenAIServerModel):
                     )
                 )
             else:
-                raise TypeError("Messages must be ChatMessage or dict objects.")
+                raise TypeError(
+                    "Messages must be ChatMessage or dict objects.")
 
         # Prepare messages for completion according to provider requirements.
-        messages_for_completion = prepare_messages_for_completion(normalized_messages, self.model_factory)
+        messages_for_completion = prepare_messages_for_completion(
+            normalized_messages, self.model_factory)
 
         # Add completion started event and model parameters
         if token_tracker:
@@ -89,7 +92,8 @@ class OpenAIModel(OpenAIServerModel):
                 model_id=self.model_id,
                 temperature=self.temperature,
                 top_p=self.top_p,
-                message_count=len(messages_for_completion) if messages_for_completion else 0,
+                message_count=len(
+                    messages_for_completion) if messages_for_completion else 0,
                 **{f"llm.param.{k}": v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))},
             )
 
@@ -106,7 +110,8 @@ class OpenAIModel(OpenAIServerModel):
             **kwargs,
         )
 
-        current_request = self.client.chat.completions.create(stream=True, **completion_kwargs)
+        current_request = self.client.chat.completions.create(
+            stream=True, **completion_kwargs)
         chunk_list = []
         token_join = []
         role = None
@@ -121,11 +126,13 @@ class OpenAIModel(OpenAIServerModel):
         try:
             for chunk in current_request:
                 new_token = chunk.choices[0].delta.content
-                reasoning_content = getattr(chunk.choices[0].delta, "reasoning_content", None)
+                reasoning_content = getattr(
+                    chunk.choices[0].delta, "reasoning_content", None)
 
                 # Handle reasoning_content if it exists and is not null
                 if reasoning_content is not None:
-                    self.observer.add_model_reasoning_content(reasoning_content)
+                    self.observer.add_model_reasoning_content(
+                        reasoning_content)
                     if token_tracker and not first_token_received:
                         token_tracker.record_first_token()
                         first_token_received = True
@@ -147,7 +154,8 @@ class OpenAIModel(OpenAIServerModel):
                 chunk_list.append(chunk)
                 if self.stop_event.is_set():
                     if token_tracker:
-                        self._monitoring.add_span_event("model_stopped", {"reason": "stop_event_set"})
+                        self._monitoring.add_span_event(
+                            "model_stopped", {"reason": "stop_event_set"})
                     raise RuntimeError("Model is interrupted by stop event")
 
             # Send end marker
@@ -160,7 +168,8 @@ class OpenAIModel(OpenAIServerModel):
             if chunk_list and chunk_list[-1].usage is not None:
                 usage = chunk_list[-1].usage
                 input_tokens = usage.prompt_tokens
-                output_tokens = usage.completion_tokens if hasattr(usage, "completion_tokens") else usage.total_tokens
+                output_tokens = usage.completion_tokens if hasattr(
+                    usage, "completion_tokens") else usage.total_tokens
                 self.last_input_token_count = input_tokens
                 self.last_output_token_count = output_tokens
             else:
@@ -184,7 +193,8 @@ class OpenAIModel(OpenAIServerModel):
 
             message = ChatMessage.from_dict(
                 ChatCompletionMessage(
-                    role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
+                    # If there is no explicit role, default to "assistant"
+                    role=role if role else "assistant",
                     content=model_output,
                 ).model_dump(include={"role", "content", "tool_calls"})
             )
@@ -196,7 +206,8 @@ class OpenAIModel(OpenAIServerModel):
         except Exception as e:
             if token_tracker:
                 self._monitoring.add_span_event(
-                    "error_occurred", {"error_type": type(e).__name__, "error_message": str(e)}
+                    "error_occurred", {"error_type": type(
+                        e).__name__, "error_message": str(e)}
                 )
 
             if "context_length_exceeded" in str(e):

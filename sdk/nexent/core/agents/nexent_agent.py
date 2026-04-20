@@ -86,9 +86,11 @@ class NexentAgent:
                 # Set excluded parameters directly as attributes after instantiation
                 # This bypasses smolagents wrapper restrictions
                 tools_obj.observer = self.observer
-                tools_obj.vdb_core = tool_config.metadata.get("vdb_core", None) if tool_config.metadata else None
+                tools_obj.vdb_core = tool_config.metadata.get(
+                    "vdb_core", None) if tool_config.metadata else None
                 tools_obj.embedding_model = (
-                    tool_config.metadata.get("embedding_model", None) if tool_config.metadata else None
+                    tool_config.metadata.get(
+                        "embedding_model", None) if tool_config.metadata else None
                 )
             elif class_name == "DataMateSearchTool":
                 tools_obj = tool_class(**params)
@@ -97,15 +99,18 @@ class NexentAgent:
                 tools_obj = tool_class(
                     observer=self.observer,
                     llm_model=tool_config.metadata.get("llm_model", []),
-                    storage_client=tool_config.metadata.get("storage_client", []),
-                    data_process_service_url=tool_config.metadata.get("data_process_service_url", []),
+                    storage_client=tool_config.metadata.get(
+                        "storage_client", []),
+                    data_process_service_url=tool_config.metadata.get(
+                        "data_process_service_url", []),
                     **params,
                 )
             elif class_name == "AnalyzeImageTool":
                 tools_obj = tool_class(
                     observer=self.observer,
                     vlm_model=tool_config.metadata.get("vlm_model", []),
-                    storage_client=tool_config.metadata.get("storage_client", []),
+                    storage_client=tool_config.metadata.get(
+                        "storage_client", []),
                     **params,
                 )
             else:
@@ -121,7 +126,8 @@ class NexentAgent:
     def create_mcp_tool(self, class_name):
         if self.mcp_tool_collection is None:
             raise ValueError("MCP tool collection is not initialized")
-        tool_obj = next((tool for tool in self.mcp_tool_collection.tools if tool.name == class_name), None)
+        tool_obj = next(
+            (tool for tool in self.mcp_tool_collection.tools if tool.name == class_name), None)
         if tool_obj is None:
             raise ValueError(f"{class_name} not found in MCP server")
         return tool_obj
@@ -227,7 +233,8 @@ class NexentAgent:
             prompt_templates = agent_config.prompt_templates
 
             try:
-                tool_list = [self.create_tool(tool_config) for tool_config in agent_config.tools]
+                tool_list = [self.create_tool(tool_config)
+                             for tool_config in agent_config.tools]
             except Exception as e:
                 raise ValueError(f"Error in creating tool: {e}")
 
@@ -255,7 +262,8 @@ class NexentAgent:
 
             return agent
         except Exception as e:
-            raise ValueError(f"Error in creating agent, agent name: {agent_config.name}, Error: {e}")
+            raise ValueError(
+                f"Error in creating agent, agent name: {agent_config.name}, Error: {e}")
 
     def add_history_to_agent(self, history: List[AgentHistory]):
         """
@@ -268,7 +276,8 @@ class NexentAgent:
             return
 
         if not isinstance(self.agent, CoreAgent):
-            raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
+            raise TypeError(
+                f"agent must be a CoreAgent object, not {type(self.agent)}")
 
         if not all(isinstance(msg, AgentHistory) for msg in history):
             raise TypeError("history must be a list of AgentHistory objects")
@@ -291,7 +300,8 @@ class NexentAgent:
 
     def agent_run_with_observer(self, query: str, reset=True):
         if not isinstance(self.agent, CoreAgent):
-            raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
+            raise TypeError(
+                f"agent must be a CoreAgent object, not {type(self.agent)}")
 
         observer = self.agent.observer
         try:
@@ -301,22 +311,28 @@ class NexentAgent:
                     continue
                 # Keep duration
                 if hasattr(step_log, "duration"):
-                    observer.add_message("", ProcessType.TOKEN_COUNT, str(round(float(step_log.duration), 2)))
+                    observer.add_message("", ProcessType.TOKEN_COUNT, str(
+                        round(float(step_log.duration), 2)))
 
                 if hasattr(step_log, "error") and step_log.error is not None:
-                    observer.add_message("", ProcessType.ERROR, str(step_log.error))
+                    observer.add_message(
+                        "", ProcessType.ERROR, str(step_log.error))
 
             final_answer = step_log.output  # Last log is the run's final_answer
 
             if isinstance(final_answer, AgentText):
-                final_answer_str = convert_code_format(final_answer.to_string())
+                final_answer_str = convert_code_format(
+                    final_answer.to_string())
             else:
                 # prepare for multi-modal final_answer
                 final_answer_str = convert_code_format(str(final_answer))
-            final_answer_str = re.sub(THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
+            final_answer_str = re.sub(
+                THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
             # Remove "思考：" or "思考:" prefix content (until two newlines)
-            final_answer_str = re.sub(THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
-            observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, final_answer_str)
+            final_answer_str = re.sub(
+                THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+            observer.add_message(self.agent.agent_name,
+                                 ProcessType.FINAL_ANSWER, final_answer_str)
 
             # Check if we need to stop from external stop_event
             if self.agent.stop_event.is_set():
@@ -333,5 +349,6 @@ class NexentAgent:
 
     def set_agent(self, agent: CoreAgent):
         if not isinstance(agent, CoreAgent):
-            raise TypeError(f"agent must be a CoreAgent object, not {type(agent)}")
+            raise TypeError(
+                f"agent must be a CoreAgent object, not {type(agent)}")
         self.agent = agent

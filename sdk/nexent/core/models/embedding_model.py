@@ -172,7 +172,8 @@ class JinaEmbedding(MultimodalEmbedding):
         self.embedding_dim = embedding_dim
         self.ssl_verify = ssl_verify
 
-        self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+        self.headers = {"Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}"}
 
     def _prepare_multimodal_input(self, inputs: List[Dict[str, str]]) -> Dict[str, Any]:
         """Prepare the input data for the API request."""
@@ -234,7 +235,8 @@ class JinaEmbedding(MultimodalEmbedding):
                 )
                 last_timeout = e
                 if attempt_index == attempts - 1:
-                    logging.error("JinaEmbedding API connection test timed out.")
+                    logging.error(
+                        "JinaEmbedding API connection test timed out.")
                     raise
                 continue
 
@@ -280,12 +282,14 @@ class JinaEmbedding(MultimodalEmbedding):
             for attempt_index in range(attempts):
                 current_timeout = base_timeout + attempt_index * retry_timeout_step
                 try:
-                    response = self._make_request(data, timeout=current_timeout)
+                    response = self._make_request(
+                        data, timeout=current_timeout)
 
                     if with_metadata:
                         return response
 
-                    embeddings = [item["embedding"] for item in response["data"]]
+                    embeddings = [item["embedding"]
+                                  for item in response["data"]]
                     return embeddings
                 except requests.exceptions.Timeout as e:
                     logging.warning(
@@ -293,7 +297,8 @@ class JinaEmbedding(MultimodalEmbedding):
                     )
                     last_timeout = e
                     if attempt_index == attempts - 1:
-                        logging.error("JinaEmbedding API connection test timed out.")
+                        logging.error(
+                            "JinaEmbedding API connection test timed out.")
                         raise
                     continue
 
@@ -313,10 +318,12 @@ class JinaEmbedding(MultimodalEmbedding):
             return embeddings
 
         except requests.exceptions.Timeout:
-            logging.error(f"Embedding API connection test timed out ({timeout} seconds)")
+            logging.error(
+                f"Embedding API connection test timed out ({timeout} seconds)")
             return []
         except requests.exceptions.ConnectionError:
-            logging.error("Embedding API connection error, unable to establish connection")
+            logging.error(
+                "Embedding API connection error, unable to establish connection")
             return []
         except Exception as e:
             logging.error(f"Embedding API connection test failed: {str(e)}")
@@ -332,7 +339,8 @@ class OpenAICompatibleEmbedding(TextEmbedding):
         self.embedding_dim = embedding_dim
         self.ssl_verify = ssl_verify
 
-        self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+        self.headers = {"Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}"}
 
     def _prepare_input(self, inputs: Union[str, List[str]]) -> Dict[str, Any]:
         """Prepare the input data for the API request."""
@@ -387,12 +395,14 @@ class OpenAICompatibleEmbedding(TextEmbedding):
             for attempt_index in range(attempts):
                 current_timeout = base_timeout + attempt_index * retry_timeout_step
                 try:
-                    response = self._make_request(data, timeout=current_timeout)
+                    response = self._make_request(
+                        data, timeout=current_timeout)
 
                     if with_metadata:
                         return response
 
-                    embeddings = [item["embedding"] for item in response["data"]]
+                    embeddings = [item["embedding"]
+                                  for item in response["data"]]
                     return embeddings
                 except requests.exceptions.Timeout as e:
                     logging.warning(
@@ -420,10 +430,12 @@ class OpenAICompatibleEmbedding(TextEmbedding):
             return embeddings
 
         except requests.exceptions.Timeout:
-            logging.error(f"OpenAI API connection test timed out ({timeout} seconds)")
+            logging.error(
+                f"OpenAI API connection test timed out ({timeout} seconds)")
             return []
         except requests.exceptions.ConnectionError:
-            logging.error("OpenAI API connection error, unable to establish connection")
+            logging.error(
+                "OpenAI API connection error, unable to establish connection")
             return []
         except Exception as e:
             logging.error(f"OpenAI API connection test failed: {str(e)}")

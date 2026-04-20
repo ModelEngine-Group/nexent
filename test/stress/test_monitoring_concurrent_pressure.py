@@ -8,6 +8,11 @@ Usage:
     python test/stress/test_monitoring_concurrent_pressure.py
 """
 
+from sdk.nexent.monitor.monitoring import (
+    MonitoringRecordBuffer,
+    _enqueue_monitoring_record,
+    set_monitoring_context,
+)
 import os
 import sys
 import time
@@ -18,12 +23,6 @@ from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from sdk.nexent.monitor.monitoring import (
-    MonitoringRecordBuffer,
-    _enqueue_monitoring_record,
-    set_monitoring_context,
-)
 
 
 @dataclass

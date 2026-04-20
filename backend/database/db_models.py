@@ -77,7 +77,8 @@ class ConversationMessage(TableBase):
     conversation_id = Column(
         Integer, doc="Formal foreign key used to associate with the conversation"
     )
-    message_index = Column(Integer, doc="Sequence number for frontend display sorting")
+    message_index = Column(
+        Integer, doc="Sequence number for frontend display sorting")
     message_role = Column(
         String(30), doc="The role sending the message, such as system, assistant, user"
     )
@@ -112,9 +113,11 @@ class ConversationMessageUnit(TableBase):
     conversation_id = Column(
         Integer, doc="Formal foreign key used to associate with the conversation"
     )
-    unit_index = Column(Integer, doc="Sequence number for frontend display sorting")
+    unit_index = Column(
+        Integer, doc="Sequence number for frontend display sorting")
     unit_type = Column(String(100), doc="Type of the smallest answer unit")
-    unit_content = Column(String, doc="Complete content of the smallest reply unit")
+    unit_content = Column(
+        String, doc="Complete content of the smallest reply unit")
 
 
 class ConversationSourceImage(TableBase):
@@ -183,7 +186,8 @@ class ConversationSourceSearch(TableBase):
         String(100),
         doc="Source type, used to distinguish whether source_location is a URL or a path. Optional values: url/text",
     )
-    source_title = Column(String(400), doc="Title or file name of the search source")
+    source_title = Column(
+        String(400), doc="Title or file name of the search source")
     source_location = Column(
         String(400), doc="URL link or file path of the search source"
     )
@@ -198,7 +202,8 @@ class ConversationSourceSearch(TableBase):
         TIMESTAMP(timezone=False),
         doc="Upload date of local files or network search date",
     )
-    cite_index = Column(Integer, doc="Citation serial number for precise traceability")
+    cite_index = Column(
+        Integer, doc="Citation serial number for precise traceability")
     search_type = Column(
         String(100),
         doc="Search source type, specifically describing the retrieval tool used for this search record. Optional values: web_search/knowledge_base_search",
@@ -397,7 +402,8 @@ class ModelMonitoringRecord(SimpleTableBase):
         String(100), nullable=False, doc="Model name at the time of the request"
     )
     agent_id = Column(Integer, doc="Agent ID that initiated the request")
-    agent_name = Column(String(100), doc="Agent name at the time of the request")
+    agent_name = Column(
+        String(100), doc="Agent name at the time of the request")
     conversation_id = Column(
         Integer, doc="Conversation ID associated with this request"
     )
@@ -405,12 +411,14 @@ class ModelMonitoringRecord(SimpleTableBase):
         String(100), nullable=False, doc="Tenant ID for multi-tenant isolation"
     )
     user_id = Column(String(100), doc="User ID who initiated the request")
-    request_duration_ms = Column(Integer, doc="Total request duration in milliseconds")
+    request_duration_ms = Column(
+        Integer, doc="Total request duration in milliseconds")
     ttft_ms = Column(Integer, doc="Time to first token in milliseconds")
     input_tokens = Column(Integer, doc="Number of input tokens")
     output_tokens = Column(Integer, doc="Number of output tokens")
     total_tokens = Column(Integer, doc="Total tokens (input + output)")
-    generation_rate = Column(Float, doc="Token generation rate (tokens per second)")
+    generation_rate = Column(
+        Float, doc="Token generation rate (tokens per second)")
     is_streaming = Column(
         Boolean, default=False, doc="Whether the request used streaming"
     )
@@ -602,7 +610,8 @@ class UserTenant(TableBase):
     )
     user_id = Column(String(100), nullable=False, doc="User ID")
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
-    user_role = Column(String(30), doc="User role: SUPER_ADMIN, ADMIN, DEV, USER")
+    user_role = Column(
+        String(30), doc="User role: SUPER_ADMIN, ADMIN, DEV, USER")
     user_email = Column(String(255), doc="User email address")
 
 
@@ -621,7 +630,8 @@ class AgentRelation(TableBase):
         nullable=False,
         doc="Relationship ID, primary key",
     )
-    selected_agent_id = Column(Integer, primary_key=True, doc="Selected agent ID")
+    selected_agent_id = Column(
+        Integer, primary_key=True, doc="Selected agent ID")
     parent_agent_id = Column(Integer, doc="Parent agent ID")
     tenant_id = Column(String(100), doc="Tenant ID")
     version_no = Column(
@@ -647,8 +657,10 @@ class PartnerMappingId(TableBase):
         nullable=False,
         doc="ID",
     )
-    external_id = Column(String(100), doc="The external id given by the outer partner")
-    internal_id = Column(Integer, doc="The internal id of the other database table")
+    external_id = Column(
+        String(100), doc="The external id given by the outer partner")
+    internal_id = Column(
+        Integer, doc="The internal id of the other database table")
     mapping_type = Column(
         String(30),
         doc="Type of the external - internal mapping, value set: CONVERSATION",
@@ -672,7 +684,8 @@ class TenantInvitationCode(TableBase):
         nullable=False,
         doc="Invitation ID, primary key",
     )
-    tenant_id = Column(String(100), nullable=False, doc="Tenant ID, foreign key")
+    tenant_id = Column(String(100), nullable=False,
+                       doc="Tenant ID, foreign key")
     invitation_code = Column(
         String(100), nullable=False, unique=True, doc="Invitation code"
     )
@@ -680,7 +693,8 @@ class TenantInvitationCode(TableBase):
     capacity = Column(
         Integer, nullable=False, default=1, doc="Invitation code capacity"
     )
-    expiry_date = Column(TIMESTAMP(timezone=False), doc="Invitation code expiry date")
+    expiry_date = Column(TIMESTAMP(timezone=False),
+                         doc="Invitation code expiry date")
     status = Column(
         String(30),
         nullable=False,
@@ -703,12 +717,14 @@ class TenantInvitationRecord(TableBase):
 
     invitation_record_id = Column(
         Integer,
-        Sequence("tenant_invitation_record_t_invitation_record_id_seq", schema=SCHEMA),
+        Sequence("tenant_invitation_record_t_invitation_record_id_seq",
+                 schema=SCHEMA),
         primary_key=True,
         nullable=False,
         doc="Invitation record ID, primary key",
     )
-    invitation_id = Column(Integer, nullable=False, doc="Invitation ID, foreign key")
+    invitation_id = Column(Integer, nullable=False,
+                           doc="Invitation ID, foreign key")
     user_id = Column(String(100), nullable=False, doc="User ID")
 
 
@@ -727,7 +743,8 @@ class TenantGroupInfo(TableBase):
         nullable=False,
         doc="Group ID, primary key",
     )
-    tenant_id = Column(String(100), nullable=False, doc="Tenant ID, foreign key")
+    tenant_id = Column(String(100), nullable=False,
+                       doc="Tenant ID, foreign key")
     group_name = Column(String(100), nullable=False, doc="Group name")
     group_description = Column(String(500), doc="Group description")
 
@@ -797,7 +814,8 @@ class AgentVersion(TableBase):
         nullable=False,
         doc="Version number, starts from 1. Does not include 0 (draft)",
     )
-    version_name = Column(String(100), doc="User-defined version name for display")
+    version_name = Column(
+        String(100), doc="User-defined version name for display")
     release_note = Column(Text, doc="Release notes / publish remarks")
     source_version_no = Column(
         Integer,
@@ -830,7 +848,8 @@ class UserTokenInfo(TableBase):
         doc="Token ID, unique primary key",
     )
     access_key = Column(String(100), nullable=False, doc="Access Key (AK)")
-    user_id = Column(String(100), nullable=False, doc="User ID who owns this token")
+    user_id = Column(String(100), nullable=False,
+                     doc="User ID who owns this token")
 
 
 class UserTokenUsageLog(TableBase):
@@ -851,8 +870,10 @@ class UserTokenUsageLog(TableBase):
     token_id = Column(
         Integer, nullable=False, doc="Foreign key to user_token_info_t.token_id"
     )
-    call_function_name = Column(String(100), doc="API function name being called")
-    related_id = Column(Integer, doc="Related resource ID (e.g., conversation_id)")
+    call_function_name = Column(
+        String(100), doc="API function name being called")
+    related_id = Column(
+        Integer, doc="Related resource ID (e.g., conversation_id)")
     meta_data = Column(
         JSONB, doc="Additional metadata for this usage log entry, stored as JSON"
     )

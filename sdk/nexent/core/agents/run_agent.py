@@ -60,26 +60,30 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
         if not transport:
             transport = _detect_transport(url)
         if transport not in ("sse", "streamable-http"):
-            raise ValueError(f"Invalid transport type: {transport}. Must be 'sse' or 'streamable-http'")
+            raise ValueError(
+                f"Invalid transport type: {transport}. Must be 'sse' or 'streamable-http'")
 
         result = {"url": url, "transport": transport}
 
         # Support authorization parameter - convert to headers format
         if "authorization" in mcp_host_item and "headers" in mcp_host_item:
             # Both provided: merge headers with authorization
-            headers = mcp_host_item["headers"].copy() if isinstance(mcp_host_item["headers"], dict) else {}
+            headers = mcp_host_item["headers"].copy() if isinstance(
+                mcp_host_item["headers"], dict) else {}
             headers["Authorization"] = mcp_host_item["authorization"]
             result["headers"] = headers
         elif "authorization" in mcp_host_item:
             # Only authorization provided: create headers dict
-            result["headers"] = {"Authorization": mcp_host_item["authorization"]}
+            result["headers"] = {
+                "Authorization": mcp_host_item["authorization"]}
         elif "headers" in mcp_host_item:
             # Only headers provided: use as is
             result["headers"] = mcp_host_item["headers"]
 
         return result
     else:
-        raise ValueError(f"Invalid MCP host item type: {type(mcp_host_item)}. Must be str or dict")
+        raise ValueError(
+            f"Invalid MCP host item type: {type(mcp_host_item)}. Must be str or dict")
 
 
 @monitoring_manager.monitor_endpoint("agent_run_thread", "agent_run_thread")
@@ -95,11 +99,14 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             agent = nexent.create_single_agent(agent_run_info.agent_config)
             nexent.set_agent(agent)
             nexent.add_history_to_agent(agent_run_info.history)
-            nexent.agent_run_with_observer(query=agent_run_info.query, reset=False)
+            nexent.agent_run_with_observer(
+                query=agent_run_info.query, reset=False)
         else:
-            agent_run_info.observer.add_message("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
+            agent_run_info.observer.add_message(
+                "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
             # Normalize MCP host configurations to support both string and dict formats
-            mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
+            mcp_client_list = [_normalize_mcp_config(
+                item) for item in mcp_host]
 
             with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
                 nexent = NexentAgent(
@@ -111,7 +118,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 agent = nexent.create_single_agent(agent_run_info.agent_config)
                 nexent.set_agent(agent)
                 nexent.add_history_to_agent(agent_run_info.history)
-                nexent.agent_run_with_observer(query=agent_run_info.query, reset=False)
+                nexent.agent_run_with_observer(
+                    query=agent_run_info.query, reset=False)
 
     except Exception as e:
         if "Couldn't connect to the MCP server" in str(e):
@@ -120,9 +128,11 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 if agent_run_info.observer.lang == "zh"
                 else "Couldn't connect to the MCP server."
             )
-            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
+            agent_run_info.observer.add_message(
+                "", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
         else:
-            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
+            agent_run_info.observer.add_message(
+                "", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
         raise ValueError(f"Error in agent_run_thread: {e}")
 
 
@@ -133,14 +143,16 @@ async def agent_run(agent_run_info: AgentRunInfo):
     monitoring_manager.add_span_event("agent_run.started")
     # copy_context() preserves contextvars (e.g. tenant_id) into the new thread
     ctx = copy_context()
-    thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
+    thread_agent = Thread(target=ctx.run, args=(
+        agent_run_thread, agent_run_info))
     thread_agent.start()
     monitoring_manager.add_span_event("agent_run.thread_started")
 
     while thread_agent.is_alive():
         monitoring_manager.add_span_event("agent_run.get_cached_message")
         cached_message = observer.get_cached_message()
-        monitoring_manager.add_span_event("agent_run.get_cached_message_completed")
+        monitoring_manager.add_span_event(
+            "agent_run.get_cached_message_completed")
         for message in cached_message:
             yield message
             monitoring_manager.add_span_event("agent_run.yield_message")

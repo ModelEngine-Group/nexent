@@ -61,7 +61,8 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SERVICE_ROLE_KEY = os.getenv("SERVICE_ROLE_KEY", SUPABASE_KEY)
 # JWT secret for verifying Supabase-signed access tokens.
 # GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET") or os.getenv("JWT_SECRET", "")
+SUPABASE_JWT_SECRET = os.getenv(
+    "SUPABASE_JWT_SECRET") or os.getenv("JWT_SECRET", "")
 
 
 # ===== To be migrated to frontend configuration =====
@@ -125,11 +126,13 @@ REDIS_URL = os.getenv("REDIS_URL")
 REDIS_BACKEND_URL = os.getenv("REDIS_BACKEND_URL")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 FLOWER_PORT = int(os.getenv("FLOWER_PORT", "5555"))
-DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "30"))
+DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(
+    os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "30"))
 DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(
     os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200")
 )
-FORWARD_REDIS_RETRY_DELAY_S = int(os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
+FORWARD_REDIS_RETRY_DELAY_S = int(
+    os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
 FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
@@ -138,22 +141,27 @@ RAY_ACTOR_NUM_CPUS = int(os.getenv("RAY_ACTOR_NUM_CPUS", "2"))
 RAY_DASHBOARD_PORT = int(os.getenv("RAY_DASHBOARD_PORT", "8265"))
 RAY_DASHBOARD_HOST = os.getenv("RAY_DASHBOARD_HOST", "0.0.0.0")
 RAY_NUM_CPUS = os.getenv("RAY_NUM_CPUS")
-RAY_OBJECT_STORE_MEMORY_GB = float(os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
+RAY_OBJECT_STORE_MEMORY_GB = float(
+    os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
 RAY_TEMP_DIR = os.getenv("RAY_TEMP_DIR", "/tmp/ray")
 RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
 # Disable plasma preallocation to reduce idle memory usage
 # When set to false, Ray will allocate object store memory on-demand instead of preallocating
-RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
+RAY_preallocate_plasma = os.getenv(
+    "RAY_preallocate_plasma", "false").lower() == "true"
 
 
 # Service Control Flags
-DISABLE_RAY_DASHBOARD = os.getenv("DISABLE_RAY_DASHBOARD", "false").lower() == "true"
-DISABLE_CELERY_FLOWER = os.getenv("DISABLE_CELERY_FLOWER", "false").lower() == "true"
+DISABLE_RAY_DASHBOARD = os.getenv(
+    "DISABLE_RAY_DASHBOARD", "false").lower() == "true"
+DISABLE_CELERY_FLOWER = os.getenv(
+    "DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
 NEXENT_MCP_DOCKER_IMAGE = os.getenv(
     "NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest"
 )
-ENABLE_UPLOAD_IMAGE = os.getenv("ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
+ENABLE_UPLOAD_IMAGE = os.getenv(
+    "ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
 
 
 # Celery Configuration
@@ -161,7 +169,8 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = int(
     os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", "1")
 )
 CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "3600"))
-ELASTICSEARCH_REQUEST_TIMEOUT = int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "30"))
+ELASTICSEARCH_REQUEST_TIMEOUT = int(
+    os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "30"))
 
 
 # Worker Configuration
@@ -210,7 +219,8 @@ INVITE_CODE = os.getenv("INVITE_CODE")
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv("DEBUG_JWT_EXPIRE_SECONDS", "0") or 0)
 
 # User info query source control: "supabase" or "pg" (default: "supabase" for backward compatibility)
-USER_INFO_QUERY_SOURCE = os.getenv("USER_INFO_QUERY_SOURCE", "supabase").lower()
+USER_INFO_QUERY_SOURCE = os.getenv(
+    "USER_INFO_QUERY_SOURCE", "supabase").lower()
 
 # Memory Search Status Messages (for i18n placeholders)
 MEMORY_SEARCH_START_MSG = "<MEM_START>"
@@ -241,7 +251,8 @@ DOCKER_INTERNAL_HOST = "host.docker.internal"
 
 
 # Mock User Management Configuration (for speed mode)
-MOCK_USER = {"id": DEFAULT_USER_ID, "email": "mock@example.com", "role": "admin"}
+MOCK_USER = {"id": DEFAULT_USER_ID,
+             "email": "mock@example.com", "role": "admin"}
 
 MOCK_SESSION = {
     "access_token": "mock_access_token",
@@ -290,7 +301,8 @@ THINK_END_PATTERN = "</think>"
 # Telemetry and Monitoring Configuration
 ENABLE_TELEMETRY = os.getenv("ENABLE_TELEMETRY", "false").lower() == "true"
 SERVICE_NAME = os.getenv("SERVICE_NAME", "nexent-backend")
-JAEGER_ENDPOINT = os.getenv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces")
+JAEGER_ENDPOINT = os.getenv(
+    "JAEGER_ENDPOINT", "http://localhost:14268/api/traces")
 PROMETHEUS_PORT = int(os.getenv("PROMETHEUS_PORT", "8000"))
 TELEMETRY_SAMPLE_RATE = float(os.getenv("TELEMETRY_SAMPLE_RATE", "1.0"))
 
@@ -303,8 +315,10 @@ LLM_SLOW_TOKEN_RATE_THRESHOLD = float(
 )  # tokens per second
 
 # Model Monitoring Configuration
-ENABLE_MODEL_MONITORING = os.getenv("ENABLE_MODEL_MONITORING", "true").lower() == "true"
-MODEL_MONITORING_BATCH_SIZE = int(os.getenv("MODEL_MONITORING_BATCH_SIZE", "100"))
+ENABLE_MODEL_MONITORING = os.getenv(
+    "ENABLE_MODEL_MONITORING", "true").lower() == "true"
+MODEL_MONITORING_BATCH_SIZE = int(
+    os.getenv("MODEL_MONITORING_BATCH_SIZE", "100"))
 MODEL_MONITORING_FLUSH_INTERVAL_SECONDS = int(
     os.getenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "30")
 )

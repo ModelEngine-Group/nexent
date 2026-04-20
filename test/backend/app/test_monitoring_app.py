@@ -30,7 +30,8 @@ patch(
 patch(
     "nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None
 ).start()
-patch("backend.database.client.MinioClient", return_value=minio_client_mock).start()
+patch("backend.database.client.MinioClient",
+      return_value=minio_client_mock).start()
 
 
 class TestQueryModelMetrics:
@@ -42,7 +43,8 @@ class TestQueryModelMetrics:
         from apps.monitoring_app import _query_model_metrics_from_db
 
         mock_session = MagicMock()
-        mock_session_fn.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_session_fn.return_value.__enter__ = MagicMock(
+            return_value=mock_session)
         mock_session_fn.return_value.__exit__ = MagicMock(return_value=None)
         mock_session.execute.return_value.fetchall.return_value = []
 
@@ -51,7 +53,8 @@ class TestQueryModelMetrics:
         call_args = mock_session.execute.call_args
         sql_text = str(call_args[0][0])
 
-        assert "model_type" not in sql_text.lower().split("where")[1].split("group")[0]
+        assert "model_type" not in sql_text.lower().split("where")[
+            1].split("group")[0]
 
     @patch("apps.monitoring_app.get_monitoring_db_session")
     def test_return_format(self, mock_session_fn):
@@ -71,7 +74,8 @@ class TestQueryModelMetrics:
         mock_row.total_tokens = 1000
 
         mock_session = MagicMock()
-        mock_session_fn.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_session_fn.return_value.__enter__ = MagicMock(
+            return_value=mock_session)
         mock_session_fn.return_value.__exit__ = MagicMock(return_value=None)
         mock_session.execute.return_value.fetchall.return_value = [mock_row]
 

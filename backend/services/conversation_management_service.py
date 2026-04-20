@@ -103,7 +103,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
                 "content": string_content,
                 "minio_files": minio_files,
             }
-            message_id = create_conversation_message(message_data_copy, user_id)
+            message_id = create_conversation_message(
+                message_data_copy, user_id)
 
         # If there are other types of units but no string type, create an empty content message for them
         if other_units and message_id is None:
@@ -115,7 +116,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
                 "content": "",
                 "minio_files": minio_files,
             }
-            message_id = create_conversation_message(message_data_copy, user_id)
+            message_id = create_conversation_message(
+                message_data_copy, user_id)
 
         # Process other types of units
         filtered_message_units = []
@@ -331,7 +333,8 @@ def call_llm_for_title(
         prompt_template["USER_PROMPT"], undefined=StrictUndefined
     ).render({"question": question})
     messages = [
-        {"role": MESSAGE_ROLE["SYSTEM"], "content": prompt_template["SYSTEM_PROMPT"]},
+        {"role": MESSAGE_ROLE["SYSTEM"],
+            "content": prompt_template["SYSTEM_PROMPT"]},
         {"role": MESSAGE_ROLE["USER"], "content": user_prompt},
     ]
 
@@ -486,7 +489,8 @@ def get_conversation_history_service(
             published_date = None
             if record["published_date"] is not None:
                 if isinstance(record["published_date"], datetime):
-                    published_date = record["published_date"].strftime("%Y-%m-%d")
+                    published_date = record["published_date"].strftime(
+                        "%Y-%m-%d")
                 elif isinstance(record["published_date"], str):
                     published_date = record["published_date"]
 
@@ -562,7 +566,8 @@ def get_conversation_history_service(
                     unit_content = unit.get("unit_content")
 
                     if unit_type == "search_content_placeholder" and unit_id:
-                        placeholder_content = {"placeholder": True, "unit_id": unit_id}
+                        placeholder_content = {
+                            "placeholder": True, "unit_id": unit_id}
                         processed_units.append(
                             {
                                 "type": "search_content_placeholder",
@@ -666,7 +671,8 @@ def get_sources_service(
         if source_type in ["image", "all"]:
             images = []
             if message_id:
-                image_records = get_source_images_by_message(message_id, user_id)
+                image_records = get_source_images_by_message(
+                    message_id, user_id)
             elif conversation_id:
                 image_records = get_source_images_by_conversation(
                     conversation_id, user_id
@@ -682,7 +688,8 @@ def get_sources_service(
             searches = []
             search_records = []
             if message_id:
-                search_records = get_source_searches_by_message(message_id, user_id)
+                search_records = get_source_searches_by_message(
+                    message_id, user_id)
             elif conversation_id:
                 search_records = get_source_searches_by_conversation(
                     conversation_id, user_id

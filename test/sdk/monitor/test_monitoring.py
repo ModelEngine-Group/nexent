@@ -190,7 +190,8 @@ class TestMonitoringManager:
         )
 
         # Verify tracer provider setup
-        mock_tracer_provider.assert_called_once_with(resource=mock_resource_instance)
+        mock_tracer_provider.assert_called_once_with(
+            resource=mock_resource_instance)
         mock_trace.set_tracer_provider.assert_called_once_with(
             mock_tracer_provider_instance
         )
@@ -281,7 +282,8 @@ class TestMonitoringManager:
         with patch(
             "sdk.nexent.monitor.monitoring.FastAPIInstrumentor"
         ) as mock_instrumentor:
-            mock_instrumentor.instrument_app.side_effect = Exception("Test error")
+            mock_instrumentor.instrument_app.side_effect = Exception(
+                "Test error")
 
             result = manager.setup_fastapi_app(mock_app)
             assert result is False
@@ -399,7 +401,8 @@ class TestMonitoringManager:
 
         manager.add_span_event("test_event", {"key": "value"})
 
-        mock_span.add_event.assert_called_once_with("test_event", {"key": "value"})
+        mock_span.add_event.assert_called_once_with(
+            "test_event", {"key": "value"})
 
     @patch("sdk.nexent.monitor.monitoring.trace")
     def test_add_span_event_no_attributes(self, mock_trace):
@@ -517,7 +520,8 @@ class TestMonitoringManager:
 
         manager.record_llm_metrics("tokens", 100, {"model": "test"})
 
-        manager._llm_total_tokens.add.assert_called_once_with(100, {"model": "test"})
+        manager._llm_total_tokens.add.assert_called_once_with(
+            100, {"model": "test"})
 
     def test_monitor_endpoint_decorator_async(self):
         """Test monitor_endpoint decorator with async function."""
@@ -747,7 +751,8 @@ class TestLLMTokenTracker:
 
             # Verify span event
             self.span.add_event.assert_called_with(
-                "token_generated", {"token_count": 1, "token_length": len("test_token")}
+                "token_generated", {"token_count": 1,
+                                    "token_length": len("test_token")}
             )
 
     def test_record_token_disabled(self):
@@ -892,7 +897,8 @@ class TestIntegrationScenarios:
     def test_full_monitoring_lifecycle(self):
         """Test complete monitoring lifecycle from config to metrics."""
         manager = get_monitoring_manager()
-        config = MonitoringConfig(enable_telemetry=True, service_name="test-service")
+        config = MonitoringConfig(
+            enable_telemetry=True, service_name="test-service")
 
         with patch.object(manager, "_init_telemetry"):
             manager.configure(config)
@@ -1105,7 +1111,8 @@ class TestWriteBatchIsolation:
         """All valid records are written successfully."""
         mock_session_fn, mock_model_cls = self._setup_db_mocks()
         mock_session = MagicMock()
-        mock_session_fn.return_value.__enter__ = Mock(return_value=mock_session)
+        mock_session_fn.return_value.__enter__ = Mock(
+            return_value=mock_session)
         mock_session_fn.return_value.__exit__ = Mock(return_value=None)
 
         buf = self._make_buffer()

@@ -133,7 +133,8 @@ def _get_user_group_ids(user_id: str, tenant_id: str) -> str:
         group_ids = query_group_ids_by_user(user_id)
         return convert_list_to_string(group_ids)
     except Exception as e:
-        logger.warning(f"Failed to get user groups for user {user_id}: {str(e)}")
+        logger.warning(
+            f"Failed to get user groups for user {user_id}: {str(e)}")
         return ""
 
 
@@ -363,7 +364,8 @@ def _regenerate_agent_value_with_llm(
                 callback=None,
                 tenant_id=tenant_id,
             )
-            candidate = (regenerated_value or "").strip().splitlines()[0].strip()
+            candidate = (regenerated_value or "").strip().splitlines()[
+                0].strip()
             if candidate in value_set:
                 raise ValueError(f"Generated duplicate value '{candidate}'")
             return candidate
@@ -488,7 +490,8 @@ async def check_agent_name_conflict_batch_impl(
                 continue
             matches_name = item.name and agent.get("name") == item.name
             matches_display = (
-                item.display_name and agent.get("display_name") == item.display_name
+                item.display_name and agent.get(
+                    "display_name") == item.display_name
             )
             if matches_name:
                 name_conflict = True
@@ -521,7 +524,8 @@ async def regenerate_agent_name_batch_impl(
     _, tenant_id, _ = get_current_user_info(authorization)
     agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
 
-    existing_names = [agent.get("name") for agent in agents_cache if agent.get("name")]
+    existing_names = [agent.get("name")
+                      for agent in agents_cache if agent.get("name")]
     existing_display_names = [
         agent.get("display_name") for agent in agents_cache if agent.get("display_name")
     ]
@@ -615,7 +619,8 @@ async def regenerate_agent_name_batch_impl(
         if agent_display_name:
             display_name_set.add(agent_display_name)
 
-        results.append({"name": agent_name, "display_name": agent_display_name})
+        results.append(
+            {"name": agent_name, "display_name": agent_display_name})
 
     return results
 
@@ -665,7 +670,8 @@ async def _stream_agent_chunks(
                 user_id=user_id,
             )
         # Always unregister the run to release resources
-        agent_run_manager.unregister_agent_run(agent_request.conversation_id, user_id)
+        agent_run_manager.unregister_agent_run(
+            agent_request.conversation_id, user_id)
 
         # Schedule memory addition in background to avoid blocking SSE termination
         async def _add_memory_background():
@@ -694,8 +700,10 @@ async def _stream_agent_chunks(
                     return
 
                 mem_messages_local = [
-                    {"role": MESSAGE_ROLE["USER"], "content": agent_run_info.query},
-                    {"role": MESSAGE_ROLE["ASSISTANT"], "content": final_answer_local},
+                    {"role": MESSAGE_ROLE["USER"],
+                        "content": agent_run_info.query},
+                    {"role": MESSAGE_ROLE["ASSISTANT"],
+                        "content": final_answer_local},
                 ]
 
                 add_result_local = await add_memory_in_levels(
@@ -753,13 +761,15 @@ async def get_creating_sub_agent_id_service(tenant_id: str, user_id: str = None)
 
 async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0):
     try:
-        agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
+        agent_info = search_agent_info_by_agent_id(
+            agent_id, tenant_id, version_no)
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
         raise ValueError(f"Failed to get agent info: {str(e)}")
 
     try:
-        tool_info = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
+        tool_info = search_tools_for_sub_agent(
+            agent_id=agent_id, tenant_id=tenant_id)
         agent_info["tools"] = tool_info
     except Exception as e:
         logger.error(f"Failed to get agent tools: {str(e)}")
@@ -777,7 +787,8 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     if agent_info["model_id"] is not None:
         model_info = get_model_by_model_id(agent_info["model_id"])
         agent_info["model_name"] = (
-            model_info.get("display_name", None) if model_info is not None else None
+            model_info.get(
+                "display_name", None) if model_info is not None else None
         )
     else:
         agent_info["model_name"] = None
@@ -796,7 +807,8 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         agent_info["business_logic_model_name"] = None
 
     if agent_info.get("group_ids") is not None:
-        agent_info["group_ids"] = convert_string_to_list(agent_info.get("group_ids"))
+        agent_info["group_ids"] = convert_string_to_list(
+            agent_info.get("group_ids"))
 
     # Check agent availability
     is_available, unavailable_reasons = check_agent_availability(
@@ -826,10 +838,12 @@ async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
         raise ValueError(f"Failed to get sub agent info: {str(e)}")
 
     try:
-        enable_tool_id_list = get_enable_tool_id_by_agent_id(sub_agent_id, tenant_id)
+        enable_tool_id_list = get_enable_tool_id_by_agent_id(
+            sub_agent_id, tenant_id)
     except Exception as e:
         logger.error(f"Failed to get sub agent enable tool id list: {str(e)}")
-        raise ValueError(f"Failed to get sub agent enable tool id list: {str(e)}")
+        raise ValueError(
+            f"Failed to get sub agent enable tool id list: {str(e)}")
 
     return {
         "agent_id": sub_agent_id,
@@ -899,7 +913,8 @@ async def update_agent_info_impl(
         if request.enabled_tool_ids is not None and agent_id is not None:
             enabled_set = set(request.enabled_tool_ids)
             # Query existing tool instances for this agent
-            existing_instances = query_tool_instances_by_agent_id(agent_id, tenant_id)
+            existing_instances = query_tool_instances_by_agent_id(
+                agent_id, tenant_id)
 
             # Handle unselected tool（already exist instance）→ enabled=False
             for instance in existing_instances:
@@ -959,7 +974,8 @@ async def update_agent_info_impl(
                         skill_info=SkillInstanceInfoRequest(
                             skill_id=inst_skill_id,
                             agent_id=agent_id,
-                            skill_description=instance.get("skill_description"),
+                            skill_description=instance.get(
+                                "skill_description"),
                             skill_content=instance.get("skill_content"),
                             enabled=False,
                         ),
@@ -978,7 +994,8 @@ async def update_agent_info_impl(
                     ),
                     None,
                 )
-                skill_description = (existing_instance or {}).get("skill_description")
+                skill_description = (existing_instance or {}).get(
+                    "skill_description")
                 skill_content = (existing_instance or {}).get("skill_content")
                 skill_db.create_or_update_skill_by_skill_info(
                     skill_info=SkillInstanceInfoRequest(
@@ -1105,7 +1122,8 @@ async def clear_agent_memory(agent_id: int, tenant_id: str, user_id: str):
             )
 
     except Exception as e:
-        logger.error(f"Failed to build memory config for agent {agent_id}: {str(e)}")
+        logger.error(
+            f"Failed to build memory config for agent {agent_id}: {str(e)}")
         # Silently fail to maintain agent deletion process
 
 
@@ -1158,7 +1176,8 @@ async def export_agent_impl(agent_id: int, authorization: str = Header(None)) ->
     for mcp_server_name in mcp_info_set:
         # get mcp url by mcp_server_name and tenant_id
         mcp_url = get_mcp_server_by_name_and_tenant(mcp_server_name, tenant_id)
-        mcp_info_list.append(MCPInfo(mcp_server_name=mcp_server_name, mcp_url=mcp_url))
+        mcp_info_list.append(
+            MCPInfo(mcp_server_name=mcp_server_name, mcp_url=mcp_url))
 
     export_data = ExportAndImportDataFormat(
         agent_id=agent_id, agent_info=export_agent_dict, mcp_info=mcp_info_list
@@ -1172,7 +1191,8 @@ async def export_agent_by_agent_id(
     """
     Export a single agent's information based on agent_id
     """
-    agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id)
+    agent_info = search_agent_info_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id)
     agent_relation_in_db = query_sub_agents_id_list(
         main_agent_id=agent_id, tenant_id=tenant_id
     )
@@ -1203,7 +1223,8 @@ async def export_agent_by_agent_id(
     business_logic_model_id = agent_info.get("business_logic_model_id")
     business_logic_model_display_name = None
     if business_logic_model_id is not None:
-        business_logic_model_info = get_model_by_model_id(business_logic_model_id)
+        business_logic_model_info = get_model_by_model_id(
+            business_logic_model_id)
         business_logic_model_display_name = (
             business_logic_model_info.get("display_name")
             if business_logic_model_info is not None
@@ -1259,12 +1280,14 @@ async def import_agent_impl(
         if need_import_agent_id in agent_id_set:
             continue
 
-        need_import_agent_info = agent_info.agent_info[str(need_import_agent_id)]
+        need_import_agent_info = agent_info.agent_info[str(
+            need_import_agent_id)]
         managed_agents = need_import_agent_info.managed_agents
 
         if agent_id_set.issuperset(managed_agents):
             new_agent_id = await import_agent_by_agent_id(
-                import_agent_info=agent_info.agent_info[str(need_import_agent_id)],
+                import_agent_info=agent_info.agent_info[str(
+                    need_import_agent_id)],
                 tenant_id=tenant_id,
                 user_id=user_id,
                 skip_duplicate_regeneration=force_import,
@@ -1309,7 +1332,8 @@ async def import_agent_by_agent_id(
         )
 
         if db_tool_info is None:
-            raise ValueError(f"Cannot find tool {tool.class_name} in {tool.source}.")
+            raise ValueError(
+                f"Cannot find tool {tool.class_name} in {tool.source}.")
 
         db_tool_info_params = db_tool_info["params"]
         db_tool_info_params_name_set = set(
@@ -1418,7 +1442,8 @@ def load_default_agents_json_file(default_agent_path):
             ) as f:
                 agent_json = json.load(f)
 
-            export_agent_info = ExportAndImportAgentInfo.model_validate(agent_json)
+            export_agent_info = ExportAndImportAgentInfo.model_validate(
+                agent_json)
             all_json_files.append(export_agent_info)
     return all_json_files
 
@@ -1481,7 +1506,8 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
 
             # Apply visibility filter for DEV/USER based on group overlap
             if not can_edit_all:
-                agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
+                agent_group_ids = set(
+                    convert_string_to_list(agent.get("group_ids")))
                 ingroup_permission = agent.get("ingroup_permission")
                 is_creator = str(agent.get("created_by")) == str(user_id)
                 # Hide agent if: no group overlap OR (ingroup_permission is PRIVATE AND user is not creator)
@@ -1514,13 +1540,15 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
         simple_agent_list: list[dict] = []
         for entry in enriched_agents:
             agent = entry["raw_agent"]
-            unavailable_reasons = list(dict.fromkeys(entry["unavailable_reasons"]))
+            unavailable_reasons = list(
+                dict.fromkeys(entry["unavailable_reasons"]))
 
             model_id = agent.get("model_id")
             model_info = None
             if model_id is not None:
                 if model_id not in model_cache:
-                    model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
+                    model_cache[model_id] = get_model_by_model_id(
+                        model_id, tenant_id)
                 model_info = model_cache.get(model_id)
 
             # Permission logic:
@@ -1642,7 +1670,8 @@ def _check_single_model_availability(
     if not model_info:
         return [reason_key]
 
-    connect_status = ModelConnectStatusEnum.get_value(model_info.get("connect_status"))
+    connect_status = ModelConnectStatusEnum.get_value(
+        model_info.get("connect_status"))
     if connect_status != ModelConnectStatusEnum.AVAILABLE.value:
         return [reason_key]
 
@@ -1680,7 +1709,8 @@ def check_agent_availability(
         return False, ["agent_not_found"]
 
     # Check tool availability
-    tool_info = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
+    tool_info = search_tools_for_sub_agent(
+        agent_id=agent_id, tenant_id=tenant_id)
     tool_id_list = [
         tool["tool_id"] for tool in tool_info if tool.get("tool_id") is not None
     ]
@@ -1718,7 +1748,8 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
             continue
         else:
             agent_id_set.add(left_ele)
-        sub_ids = query_sub_agents_id_list(main_agent_id=left_ele, tenant_id=tenant_id)
+        sub_ids = query_sub_agents_id_list(
+            main_agent_id=left_ele, tenant_id=tenant_id)
         search_list.extend(sub_ids)
 
     result = insert_related_agent(parent_agent_id, child_agent_id, tenant_id)
@@ -1776,8 +1807,10 @@ def save_messages(
         submit(save_conversation_user, agent_request, user_id, tenant_id)
     elif target == MESSAGE_ROLE["ASSISTANT"]:
         if messages is None:
-            raise ValueError("Messages cannot be None when saving for assistant.")
-        submit(save_conversation_assistant, agent_request, messages, user_id, tenant_id)
+            raise ValueError(
+                "Messages cannot be None when saving for assistant.")
+        submit(save_conversation_assistant, agent_request,
+               messages, user_id, tenant_id)
 
 
 # Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
@@ -1864,7 +1897,8 @@ async def generate_stream_with_memory(
             ):
                 yield data_chunk
         except Exception as run_exc:
-            logger.error(f"Agent run error after memory failure: {str(run_exc)}")
+            logger.error(
+                f"Agent run error after memory failure: {str(run_exc)}")
             # Emit an error chunk and terminate the stream immediately
             error_payload = json.dumps(
                 {"type": "error", "content": str(run_exc)}, ensure_ascii=False
@@ -1907,7 +1941,8 @@ async def generate_stream_no_memory(
     )
     monitoring_manager.add_span_event("generate_stream_no_memory.completed")
 
-    monitoring_manager.add_span_event("generate_stream_no_memory.streaming.started")
+    monitoring_manager.add_span_event(
+        "generate_stream_no_memory.streaming.started")
     async for data_chunk in _stream_agent_chunks(
         agent_request=agent_request,
         user_id=user_id,
@@ -1916,7 +1951,8 @@ async def generate_stream_no_memory(
         memory_ctx=memory_context,
     ):
         yield data_chunk
-    monitoring_manager.add_span_event("generate_stream_no_memory.streaming.completed")
+    monitoring_manager.add_span_event(
+        "generate_stream_no_memory.streaming.completed")
 
 
 @monitoring_manager.monitor_endpoint(
@@ -1945,7 +1981,8 @@ async def run_agent_stream(
         has_override_user_id=user_id is not None,
         has_override_tenant_id=tenant_id is not None,
         query_length=len(agent_request.query) if agent_request.query else 0,
-        history_count=len(agent_request.history) if agent_request.history else 0,
+        history_count=len(
+            agent_request.history) if agent_request.history else 0,
         minio_files_count=len(agent_request.minio_files)
         if agent_request.minio_files
         else 0,
@@ -2063,7 +2100,8 @@ async def run_agent_stream(
     )
 
     if use_memory_stream:
-        monitoring_manager.add_span_event("stream_generator.memory_stream.creating")
+        monitoring_manager.add_span_event(
+            "stream_generator.memory_stream.creating")
         stream_gen = generate_stream_with_memory(
             agent_request,
             user_id=resolved_user_id,
@@ -2071,7 +2109,8 @@ async def run_agent_stream(
             language=language,
         )
     else:
-        monitoring_manager.add_span_event("stream_generator.no_memory_stream.creating")
+        monitoring_manager.add_span_event(
+            "stream_generator.no_memory_stream.creating")
         stream_gen = generate_stream_no_memory(
             agent_request,
             user_id=resolved_user_id,
@@ -2088,7 +2127,8 @@ async def run_agent_stream(
         },
     )
     monitoring_manager.set_span_attributes(
-        streaming_strategy=("with_memory" if use_memory_stream else "no_memory"),
+        streaming_strategy=(
+            "with_memory" if use_memory_stream else "no_memory"),
         strategy_selection_duration=strategy_duration,
     )
 
@@ -2129,7 +2169,8 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
     agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
 
     # Stop preprocess tasks
-    preprocess_stopped = preprocess_manager.stop_preprocess_tasks(conversation_id)
+    preprocess_stopped = preprocess_manager.stop_preprocess_tasks(
+        conversation_id)
 
     if agent_stopped or preprocess_stopped:
         message_parts = []
@@ -2177,7 +2218,8 @@ def get_agent_by_name_impl(agent_name: str, tenant_id: str) -> dict:
         latest_version = versions[0]["version_no"] if versions else None
         return {"agent_id": agent_id, "latest_version_no": latest_version}
     except Exception as _:
-        logger.error(f"Failed to find agent '{agent_name}' in tenant {tenant_id}")
+        logger.error(
+            f"Failed to find agent '{agent_name}' in tenant {tenant_id}")
         raise Exception("agent not found")
 
 
@@ -2230,17 +2272,20 @@ def get_agent_call_relationship_impl(agent_id: int, tenant_id: str) -> dict:
         if not agent_info:
             raise ValueError(f"Agent {agent_id} not found")
 
-        tool_info = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
+        tool_info = search_tools_for_sub_agent(
+            agent_id=agent_id, tenant_id=tenant_id)
         tools = []
         for tool in tool_info:
             tool_name = (
-                tool.get("name") or tool.get("tool_name") or str(tool["tool_id"])
+                tool.get("name") or tool.get(
+                    "tool_name") or str(tool["tool_id"])
             )
             tool_source = tool.get("source", ToolSourceEnum.LOCAL.value)
             tool_type = _normalize_tool_type(tool_source)
 
             tools.append(
-                {"tool_id": tool["tool_id"], "name": tool_name, "type": tool_type}
+                {"tool_id": tool["tool_id"],
+                    "name": tool_name, "type": tool_type}
             )
 
         def get_sub_agents_recursive(
@@ -2270,7 +2315,8 @@ def get_agent_call_relationship_impl(agent_id: int, tenant_id: str) -> dict:
                                 or tool.get("tool_name")
                                 or str(tool["tool_id"])
                             )
-                            tool_source = tool.get("source", ToolSourceEnum.LOCAL.value)
+                            tool_source = tool.get(
+                                "source", ToolSourceEnum.LOCAL.value)
                             tool_type = _normalize_tool_type(tool_source)
 
                             sub_tools.append(
