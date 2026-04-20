@@ -1233,7 +1233,8 @@ def test_publish_version_api_success(mocker, mock_auth_header):
         tenant_id="test_tenant_id",
         user_id="test_user_id",
         version_name="v1.0.0",
-        release_note="Initial release"
+        release_note="Initial release",
+        publish_as_a2a=False
     )
     assert response.json()["success"] is True
     assert response.json()["version_no"] == 1

@@ -60,6 +60,7 @@ export interface Agent {
    */
   permission?: "EDIT" | "READ_ONLY";
   current_version_no?: number;
+  is_a2a_server?: boolean;
 }
 
 export interface Tool {

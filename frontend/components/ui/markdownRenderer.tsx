@@ -835,6 +835,39 @@ const convertLatexDelimiters = (content: string): string => {
   );
 };
 
+/**
+ * Convert custom code tags to standard markdown code fences for proper rendering
+ * Handles both complete and incomplete tags (for streaming scenarios)
+ * - <code>...</code> → ```python ... ```
+ * - <code>... (incomplete) → ```python\n (open code fence)
+ * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
+ * - <DISPLAY:language>... (incomplete) → ```language\n (open code fence)
+ */
+const convertCustomCodeTags = (content: string): string => {
+  // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
+  content = content.replace(/<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g, (_match, language, code) => {
+    return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+  });
+
+  // Step 2: Handle complete <code>...</code> blocks
+  content = content.replace(/<code>([\s\S]*?)<\/code>/g, (_match, code) => {
+    return `\`\`\`python\n${code.trim()}\n\`\`\``;
+  });
+
+  // Step 3: Handle incomplete tags during streaming
+  // <DISPLAY:language> without closing </DISPLAY> → ```language\n
+  content = content.replace(/<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g, (_match, language) => {
+    return `\`\`\`${language}\n`;
+  });
+
+  // <code> without closing </code> → ```python\n
+  content = content.replace(/<code>(?![\s\S]*<\/code>)/g, () => {
+    return `\`\`\`python\n`;
+  });
+
+  return content;
+};
+
 // Video component with error handling - defined outside to prevent re-creation on each render
 interface VideoWithErrorHandlingProps {
   src: string;
@@ -1015,8 +1048,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 }) => {
   const { t } = useTranslation("common");
 
-  // Convert LaTeX delimiters to markdown math delimiters
-  const processedContent = convertLatexDelimiters(content);
+  // Preprocess content: convert LaTeX delimiters and custom code tags
+  const processedContent = convertCustomCodeTags(convertLatexDelimiters(content));
   const extractedHeadings = React.useMemo(() => extractParsedMarkdownHeadings(content), [content]);
   let renderedHeadingIndex = 0;
 

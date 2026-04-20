@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -704,7 +705,7 @@ class SkillManager:
         self,
         skill_name: str,
         script_path: str,
-        params: Optional[Dict[str, Any]] = None,
+        params: Optional[str] = None,
         agent_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         version_no: int = 0,
@@ -714,7 +715,8 @@ class SkillManager:
         Args:
             skill_name: Name of the skill containing the script
             script_path: Path to script relative to skill directory (e.g., "scripts/analyze.py")
-            params: Parameters to pass to the script
+            params: Raw command-line argument string to pass to the script.
+                Example: "--target /path/to/file -c --code \"SELECT 1\""
             agent_id: Agent ID for DB-based available skills lookup
             tenant_id: Tenant ID for DB-based available skills lookup
             version_no: Version number for DB-based available skills lookup
@@ -746,8 +748,6 @@ class SkillManager:
                 f"Available scripts: {available if available else 'none'}"
             )
 
-        params = params or {}
-
         if script_path.endswith(".py"):
             return self._run_python_script(full_path, params)
         elif script_path.endswith(".sh"):
@@ -755,54 +755,21 @@ class SkillManager:
         else:
             raise ValueError(f"Unsupported script type: {script_path}")
 
-    def _build_command_args(self, params: Dict[str, Any]) -> List[str]:
-        """Build command-line arguments from params dict.
-
-        Handles different parameter formats:
-        - "--name": value -> ["--name", "value"]
-        - "--flag": True -> ["--flag"]
-        - "--flag": False -> (not included)
-        - "key": value -> ["key", "value"]
-
-        Args:
-            params: Parameters dictionary
-
-        Returns:
-            List of command-line arguments
-        """
-        args = []
-        for key, value in params.items():
-            if value is None:
-                continue
-
-            if isinstance(value, bool):
-                if value:
-                    args.append(key)
-            elif isinstance(value, (list, tuple)):
-                for item in value:
-                    args.append(key)
-                    args.append(str(item))
-            else:
-                args.append(key)
-                args.append(str(value))
-
-        return args
-
-    def _run_python_script(self, script_path: str, params: Dict[str, Any]) -> str:
+    def _run_python_script(self, script_path: str, params: Optional[str]) -> str:
         """Run a Python script with parameters.
 
         Args:
             script_path: Full path to the Python script
-            params: Parameters to pass as command-line arguments
+            params: Raw command-line argument string to pass to the script
 
         Returns:
             Script output as string
         """
-        cmd_args = self._build_command_args(params)
+        cmd_parts = shlex.split(params) if params else []
 
         try:
             result = subprocess.run(
-                ["python", script_path] + cmd_args,
+                ["python", script_path] + cmd_parts,
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -818,21 +785,21 @@ class SkillManager:
             logger.error(f"Failed to run script: {e}")
             raise
 
-    def _run_shell_script(self, script_path: str, params: Dict[str, Any]) -> str:
+    def _run_shell_script(self, script_path: str, params: Optional[str]) -> str:
         """Run a shell script with parameters.
 
         Args:
             script_path: Full path to the shell script
-            params: Parameters to pass as command-line arguments
+            params: Raw command-line argument string to pass to the script
 
         Returns:
             Script output as string
         """
-        cmd_args = self._build_command_args(params)
+        cmd_parts = shlex.split(params) if params else []
 
         try:
             result = subprocess.run(
-                ["bash", script_path] + cmd_args,
+                ["bash", script_path] + cmd_parts,
                 capture_output=True,
                 text=True,
                 timeout=300,

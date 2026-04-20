@@ -632,6 +632,7 @@ export const modelService = {
     expectedChunkSize?: number;
     maximumChunkSize?: number;
     chunkingBatchSize?: number;
+    modelFactory?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(API_ENDPOINTS.model.manageModelCreate, {
@@ -649,6 +650,7 @@ export const modelService = {
           api_key: params.apiKey,
           max_tokens: params.maxTokens || 4096,
           display_name: params.displayName || params.name,
+          model_factory: params.modelFactory || "OpenAI-API-Compatible",
           expected_chunk_size: params.expectedChunkSize,
           maximum_chunk_size: params.maximumChunkSize,
           chunk_batch: params.chunkingBatchSize,
@@ -680,6 +682,7 @@ export const modelService = {
     expectedChunkSize?: number;
     maximumChunkSize?: number;
     chunkingBatchSize?: number;
+    modelFactory?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -697,6 +700,7 @@ export const modelService = {
             base_url: params.url,
             api_key: params.apiKey,
             ...(params.maxTokens !== undefined ? { max_tokens: params.maxTokens } : {}),
+            ...(params.modelFactory !== undefined ? { model_factory: params.modelFactory } : {}),
             ...(params.expectedChunkSize !== undefined ? { expected_chunk_size: params.expectedChunkSize } : {}),
             ...(params.maximumChunkSize !== undefined ? { maximum_chunk_size: params.maximumChunkSize } : {}),
             ...(params.chunkingBatchSize !== undefined ? { chunk_batch: params.chunkingBatchSize } : {}),

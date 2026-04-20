@@ -134,6 +134,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       permission: agent.permission,
       is_published: agent.is_published,
       current_version_no: agent.current_version_no,
+      is_a2a_server: agent.is_a2a_server || false,
     }));
 
     return {
