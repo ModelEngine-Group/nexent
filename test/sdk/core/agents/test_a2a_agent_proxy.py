@@ -642,6 +642,26 @@ class TestExternalA2AAgentProxy:
         }
         assert proxy._find_agent_text_in_messages(result) == "caption text"
 
+    def test_find_agent_text_in_messages_agent_with_empty_parts(self):
+        """Test _find_agent_text_in_messages returns None when agent has empty parts."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "messages": [
+                {"role": "ROLE_AGENT", "parts": []},
+            ]
+        }
+        assert proxy._find_agent_text_in_messages(result) is None
+
+    def test_find_agent_text_in_messages_agent_parts_without_text_field(self):
+        """Test _find_agent_text_in_messages returns None when agent parts have no text."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "messages": [
+                {"role": "ROLE_AGENT", "parts": [{"type": "image", "data": "abc123"}]},
+            ]
+        }
+        assert proxy._find_agent_text_in_messages(result) is None
+
     def test_find_text_in_status_message_dict_parts(self):
         """Test _find_text_in_status_message extracts text from dict parts."""
         proxy = ExternalA2AAgentProxy(self._make_info())
@@ -685,6 +705,26 @@ class TestExternalA2AAgentProxy:
         }
         assert proxy._find_text_in_status_message(result) == "file description"
 
+    def test_find_text_in_status_message_dict_empty_parts(self):
+        """Test _find_text_in_status_message returns str(message) when parts is empty."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "status": {
+                "message": {"parts": []}
+            }
+        }
+        assert proxy._find_text_in_status_message(result) == "{'parts': []}"
+
+    def test_find_text_in_status_message_dict_parts_without_text_field(self):
+        """Test _find_text_in_status_message returns str(message) when parts have no text."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "status": {
+                "message": {"parts": [{"type": "image", "data": "abc123"}]}
+            }
+        }
+        assert proxy._find_text_in_status_message(result) == "{'parts': [{'type': 'image', 'data': 'abc123'}]}"
+
     def test_extract_text_from_message_object_agent_role(self):
         """Test _extract_text_from_message_object returns text for ROLE_AGENT."""
         proxy = ExternalA2AAgentProxy(self._make_info())
@@ -708,6 +748,18 @@ class TestExternalA2AAgentProxy:
         proxy = ExternalA2AAgentProxy(self._make_info())
         msg = {"role": "ROLE_AGENT", "parts": [{"type": "audio", "text": "transcript text"}]}
         assert proxy._extract_text_from_message_object(msg) == "transcript text"
+
+    def test_extract_text_from_message_object_empty_parts(self):
+        """Test _extract_text_from_message_object returns None when parts is empty."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        msg = {"role": "ROLE_AGENT", "parts": []}
+        assert proxy._extract_text_from_message_object(msg) is None
+
+    def test_extract_text_from_message_object_parts_without_text_field(self):
+        """Test _extract_text_from_message_object returns None when parts have no text."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        msg = {"role": "ROLE_AGENT", "parts": [{"type": "image", "data": "abc123"}]}
+        assert proxy._extract_text_from_message_object(msg) is None
 
     def test_extract_text_from_response_jsonrpc_message(self):
         """Test extract_text_from_response prioritizes result.message for JSON-RPC responses."""
