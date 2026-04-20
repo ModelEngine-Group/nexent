@@ -1630,7 +1630,7 @@ def test_compute_split_wait_timeout_respects_waves_and_cap(monkeypatch):
 
 def test_forward_large_chunks_uses_chord_batches(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
-    monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
+    monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "https://api")
     monkeypatch.setattr(tasks, "get_file_size", lambda *args, **kwargs: 0)
 
     class _RedisSvc:

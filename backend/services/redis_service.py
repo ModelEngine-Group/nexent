@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, Set
 
 import redis
 
@@ -216,7 +216,7 @@ class RedisService:
 
         return result
 
-    def _recursively_delete_task_and_parents(self, task_id: str) -> tuple[int, set]:
+    def _recursively_delete_task_and_parents(self, task_id: str) -> Tuple[int, Set[str]]:
         """
         Iteratively delete a Celery task and all its parent tasks from Redis.
         A single task chain is deleted, and the IDs of the deleted tasks are returned.
@@ -735,26 +735,13 @@ class RedisService:
             try:
                 pipe.watch(progress_key)
                 raw = pipe.get(progress_key)
-                current_processed = 0
-                current_total = int(total_chunks or 0)
-                if raw:
-                    if isinstance(raw, bytes):
-                        raw = raw.decode("utf-8")
-                    try:
-                        data = json.loads(raw)
-                        current_processed = int(data.get("processed_chunks", 0) or 0)
-                        if not total_chunks:
-                            current_total = int(data.get("total_chunks", 0) or 0)
-                    except Exception:
-                        current_processed = 0
-                        current_total = int(total_chunks or 0)
-
-                new_processed = current_processed + int(delta_processed)
-                if current_total > 0:
-                    new_processed = min(new_processed, current_total)
-                elif total_chunks:
-                    current_total = int(total_chunks)
-                    new_processed = min(new_processed, current_total)
+                current_processed, current_total = self._parse_progress(raw, total_chunks)
+                new_processed, current_total = self._compute_next_progress(
+                    current_processed=current_processed,
+                    delta_processed=delta_processed,
+                    current_total=current_total,
+                    total_chunks=total_chunks,
+                )
 
                 payload = json.dumps({
                     "processed_chunks": new_processed,
@@ -779,6 +766,46 @@ class RedisService:
 
         logger.warning(f"Failed to increment progress for task {task_id}: too many concurrent updates")
         return False
+
+    def _parse_progress(self, raw: Any, total_chunks: Optional[int]) -> Tuple[int, int]:
+        """
+        Parse persisted progress payload from Redis with tolerant fallback.
+        """
+        default_total = int(total_chunks or 0)
+        if not raw:
+            return 0, default_total
+
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+
+        try:
+            data = json.loads(raw)
+            processed = int(data.get("processed_chunks", 0) or 0)
+            total = default_total if total_chunks else int(data.get("total_chunks", 0) or 0)
+            return processed, total
+        except Exception:
+            return 0, default_total
+
+    def _compute_next_progress(
+        self,
+        current_processed: int,
+        delta_processed: int,
+        current_total: int,
+        total_chunks: Optional[int],
+    ) -> Tuple[int, int]:
+        """
+        Compute new processed/total values, clamping to known total when available.
+        """
+        next_processed = current_processed + int(delta_processed)
+        next_total = int(current_total or 0)
+
+        if next_total <= 0 and total_chunks:
+            next_total = int(total_chunks)
+
+        if next_total > 0:
+            next_processed = min(next_processed, next_total)
+
+        return next_processed, next_total
 
     def _extract_error_metadata_from_exc_message(self, exc_message: Any) -> Optional[Dict[str, Any]]:
         """

@@ -9,7 +9,7 @@ import os
 import threading
 import time
 from collections import deque
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Tuple
 
 import aiohttp
 import re
@@ -102,6 +102,38 @@ def _count_image_metadata_chunks(chunks: Optional[List[Dict[str, Any]]]) -> int:
     )
 
 
+def _get_next_available_batch_index(
+    batches: List[List[Dict[str, Any]]],
+    start_idx: int,
+    batch_size: int,
+) -> int:
+    total_batches = len(batches)
+    idx = start_idx
+    for _ in range(total_batches):
+        if len(batches[idx]) < batch_size:
+            return idx
+        idx = (idx + 1) % total_batches
+    raise RuntimeError("No available batch capacity")
+
+
+def _distribute_chunks_round_robin(
+    batches: List[List[Dict[str, Any]]],
+    chunks: List[Dict[str, Any]],
+    batch_size: int,
+    error_context: str,
+) -> None:
+    idx = 0
+    for chunk in chunks:
+        try:
+            idx = _get_next_available_batch_index(batches, idx, batch_size)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"No available batch capacity while distributing {error_context}"
+            ) from exc
+        batches[idx].append(chunk)
+        idx = (idx + 1) % len(batches)
+
+
 def _build_balanced_batches(
     formatted_chunks: List[Dict[str, Any]],
     batch_size: int = FORWARD_ES_CHUNK_BATCH_SIZE,
@@ -127,29 +159,18 @@ def _build_balanced_batches(
 
     batches: List[List[Dict[str, Any]]] = [[] for _ in range(total_batches)]
 
-    # 1) Distribute image metadata chunks round-robin to even out each batch.
-    idx = 0
-    for chunk in image_chunks:
-        attempts = 0
-        while len(batches[idx]) >= batch_size and attempts < total_batches:
-            idx = (idx + 1) % total_batches
-            attempts += 1
-        if attempts >= total_batches and len(batches[idx]) >= batch_size:
-            raise RuntimeError("No available batch capacity while distributing image metadata chunks")
-        batches[idx].append(chunk)
-        idx = (idx + 1) % total_batches
-
-    # 2) Fill remaining capacity with normal text chunks.
-    idx = 0
-    for chunk in text_chunks:
-        attempts = 0
-        while len(batches[idx]) >= batch_size and attempts < total_batches:
-            idx = (idx + 1) % total_batches
-            attempts += 1
-        if attempts >= total_batches and len(batches[idx]) >= batch_size:
-            raise RuntimeError("No available batch capacity while distributing text chunks")
-        batches[idx].append(chunk)
-        idx = (idx + 1) % total_batches
+    _distribute_chunks_round_robin(
+        batches=batches,
+        chunks=image_chunks,
+        batch_size=batch_size,
+        error_context="image metadata chunks",
+    )
+    _distribute_chunks_round_robin(
+        batches=batches,
+        chunks=text_chunks,
+        batch_size=batch_size,
+        error_context="text chunks",
+    )
 
     return batches
 
@@ -306,6 +327,55 @@ def run_async(coro):
         raise
 
 
+def _build_forward_error(
+    message: str,
+    index_name: str,
+    source: Optional[str],
+    original_filename: Optional[str],
+) -> Exception:
+    return Exception(json.dumps({
+        "message": message,
+        "index_name": index_name,
+        "task_name": "forward",
+        "source": source,
+        "original_filename": original_filename
+    }, ensure_ascii=False))
+
+
+def _parse_json_or_none(text: str) -> Optional[Dict[str, Any]]:
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _extract_error_code_from_es_response(
+    parsed_body: Optional[Dict[str, Any]],
+    text: str,
+) -> Optional[str]:
+    error_code = None
+    if isinstance(parsed_body, dict):
+        error_code = parsed_body.get("error_code")
+        detail = parsed_body.get("detail")
+        if isinstance(detail, dict) and detail.get("error_code"):
+            error_code = detail.get("error_code")
+        elif isinstance(detail, str):
+            parsed_detail = _parse_json_or_none(detail)
+            if isinstance(parsed_detail, dict):
+                error_code = parsed_detail.get("error_code", error_code)
+
+    if error_code:
+        return error_code
+
+    try:
+        match = re.search(
+            r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', text)
+        return match.group(1) if match else None
+    except Exception:
+        return None
+
+
 def _send_chunks_to_es(
     chunks: List[Dict[str, Any]],
     index_name: str,
@@ -318,13 +388,12 @@ def _send_chunks_to_es(
     async def _post():
         elasticsearch_url = ELASTICSEARCH_SERVICE
         if not elasticsearch_url:
-            raise Exception(json.dumps({
-                "message": "ELASTICSEARCH_SERVICE env is not set",
-                "index_name": index_name,
-                "task_name": "forward",
-                "source": source,
-                "original_filename": original_filename
-            }, ensure_ascii=False))
+            raise _build_forward_error(
+                message="ELASTICSEARCH_SERVICE env is not set",
+                index_name=index_name,
+                source=source,
+                original_filename=original_filename,
+            )
         route_url = f"/indices/{index_name}/documents"
         full_url = elasticsearch_url + route_url
         headers = {"Content-Type": "application/json"}
@@ -335,10 +404,12 @@ def _send_chunks_to_es(
         try:
             connector = aiohttp.TCPConnector(verify_ssl=False)
             timeout = aiohttp.ClientTimeout(total=600)
+            
+            large_mode_value = "true" if large_mode else "false" if large_mode is not None else None
             request_params = (
-                {"large_mode": "true" if large_mode else "false"}
-                if large_mode is not None
-                else None
+                {
+                    "large_mode": large_mode_value
+                }
             )
 
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
@@ -351,37 +422,10 @@ def _send_chunks_to_es(
                 ) as response:
                     text = await response.text()
                     status = response.status
-                    parsed_body = None
-                    try:
-                        parsed_body = json.loads(text)
-                    except Exception:
-                        parsed_body = None
+                    parsed_body = _parse_json_or_none(text)
 
                     if status >= 400:
-                        error_code = None
-                        if isinstance(parsed_body, dict):
-                            error_code = parsed_body.get("error_code")
-                            detail = parsed_body.get("detail")
-                            if isinstance(detail, dict) and detail.get("error_code"):
-                                error_code = detail.get("error_code")
-                            elif isinstance(detail, str):
-                                try:
-                                    parsed_detail = json.loads(detail)
-                                    if isinstance(parsed_detail, dict):
-                                        error_code = parsed_detail.get(
-                                            "error_code", error_code)
-                                except Exception:
-                                    pass
-
-                        if not error_code:
-                            try:
-                                match = re.search(
-                                    r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', text)
-                                if match:
-                                    error_code = match.group(1)
-                            except Exception:
-                                pass
-
+                        error_code = _extract_error_code_from_es_response(parsed_body, text)
                         if error_code:
                             raise Exception(json.dumps({
                                 "error_code": error_code
@@ -396,33 +440,30 @@ def _send_chunks_to_es(
         except aiohttp.ClientConnectorError as e:
             logger.error(
                 f"[{task_id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
-            raise Exception(json.dumps({
-                "message": f"Failed to connect to API: {str(e)}",
-                "index_name": index_name,
-                "task_name": "forward",
-                "source": source,
-                "original_filename": original_filename
-            }, ensure_ascii=False))
+            raise _build_forward_error(
+                message=f"Failed to connect to API: {str(e)}",
+                index_name=index_name,
+                source=source,
+                original_filename=original_filename,
+            )
         except asyncio.TimeoutError as e:
             logger.warning(
                 f"[{task_id}] FORWARD TASK: Timeout when indexing documents: {str(e)}.")
-            raise Exception(json.dumps({
-                "message": f"Timeout when indexing documents: {str(e)}",
-                "index_name": index_name,
-                "task_name": "forward",
-                "source": source,
-                "original_filename": original_filename
-            }, ensure_ascii=False))
+            raise _build_forward_error(
+                message=f"Timeout when indexing documents: {str(e)}",
+                index_name=index_name,
+                source=source,
+                original_filename=original_filename,
+            )
         except Exception as e:
             logger.error(
                 f"[{task_id}] FORWARD TASK: Unexpected error when indexing documents: {str(e)}.")
-            raise Exception(json.dumps({
-                "message": f"Unexpected error when indexing documents: {str(e)}",
-                "index_name": index_name,
-                "task_name": "forward",
-                "source": source,
-                "original_filename": original_filename
-            }, ensure_ascii=False))
+            raise _build_forward_error(
+                message=f"Unexpected error when indexing documents: {str(e)}",
+                index_name=index_name,
+                source=source,
+                original_filename=original_filename,
+            )
 
     return run_async(_post())
 
@@ -787,6 +828,214 @@ def aggregate_forward_parts(
     }
 
 
+def _split_file_for_processing(
+    request_id: str,
+    source: str,
+    source_type: str,
+    task_id: str,
+    params: Dict[str, Any],
+    file_data: Optional[bytes] = None,
+) -> List[bytes]:
+    max_size = 5 * 1024 * 1024
+    params.pop("max_size", None)
+    logger.info(
+        f"[{request_id}] PROCESS TASK: Splitting file before processing (max_size={max_size})")
+
+    split_actor_get_start = time.perf_counter()
+    split_actor = _get_split_actor()
+    split_actor_get_elapsed = time.perf_counter() - split_actor_get_start
+    logger.info(
+        f"[{request_id}] PROCESS TASK: split actor ready in {split_actor_get_elapsed:.3f}s")
+
+    split_call_start = time.perf_counter()
+    split_kwargs = {
+        "source": source,
+        "destination": source_type,
+        "task_id": task_id,
+        "max_size": max_size,
+        **params,
+    }
+    if file_data is not None:
+        split_kwargs["file_data"] = file_data
+
+    parts_ref = split_actor.split_file.remote(**split_kwargs)
+    parts = ray.get(parts_ref)
+    split_call_elapsed = time.perf_counter() - split_call_start
+    logger.info(
+        f"[{request_id}] PROCESS TASK: split_file RPC done in {split_call_elapsed:.3f}s "
+        f"(source_type={source_type})")
+
+    if parts:
+        part_sizes = [len(p) for p in parts]
+        total_bytes = sum(part_sizes)
+        min_size = min(part_sizes)
+        max_part_size = max(part_sizes)
+        avg_size = total_bytes / len(part_sizes)
+        logger.info(
+            f"[{request_id}] PROCESS TASK: Split stats: parts={len(part_sizes)}, "
+            f"total={total_bytes/1024/1024:.2f}MB, "
+            f"min={min_size/1024:.2f}KB, max={max_part_size/1024:.2f}KB, avg={avg_size/1024:.2f}KB")
+
+    return parts
+
+
+def _run_processing_for_parts(
+    request_id: str,
+    source: str,
+    source_type: str,
+    task_id: str,
+    chunking_strategy: str,
+    filename_for_processing: str,
+    parts: List[bytes],
+    index_name: Optional[str],
+    original_filename: Optional[str],
+    embedding_model_id: Optional[int],
+    tenant_id: Optional[str],
+    params: Dict[str, Any],
+) -> Tuple[bool, Optional[List[Dict[str, Any]]], Optional[int]]:
+    if not parts:
+        logger.warning(
+            f"[{request_id}] PROCESS TASK: Split returned no parts; fallback to full-file processing")
+        process_actor = get_ray_actor()
+        chunks_ref = process_actor.process_file.remote(
+            source,
+            chunking_strategy,
+            destination=source_type,
+            task_id=task_id,
+            model_id=embedding_model_id,
+            tenant_id=tenant_id,
+            **params
+        )
+        logger.info(
+            f"[{request_id}] PROCESS TASK: Waiting for Ray processing to complete...")
+        return False, ray.get(chunks_ref), None
+
+    if len(parts) == 1:
+        process_actor = get_ray_actor()
+        chunks_ref = process_actor.process_bytes.remote(
+            parts[0],
+            filename_for_processing,
+            chunking_strategy,
+            task_id=None,
+            model_id=embedding_model_id,
+            tenant_id=tenant_id,
+            **params
+        )
+        logger.info(
+            f"[{request_id}] PROCESS TASK: Waiting for Ray processing to complete...")
+        return False, ray.get(chunks_ref), None
+
+    redis_key = f"dp:{task_id}:chunks"
+    group_tasks = group(
+        process_part.s(
+            part_bytes=part,
+            filename=filename_for_processing,
+            chunking_strategy=chunking_strategy,
+            part_redis_key=f"dp:{task_id}:part:{idx}",
+            source=source,
+            source_type=source_type,
+            model_id=embedding_model_id,
+            tenant_id=tenant_id,
+            **params
+        ) for idx, part in enumerate(parts)
+    )
+    callback = aggregate_store_chunks.s(
+        redis_key=redis_key,
+        source=source,
+        index_name=index_name,
+        original_filename=original_filename
+    ).set(queue='process_part_q')
+    logger.info(
+        f"[{request_id}] PROCESS TASK: Dispatching {len(parts)} part tasks...")
+    chord(group_tasks)(callback)
+
+    split_wait_timeout = _compute_split_wait_timeout(len(parts))
+    logger.info(
+        f"[{request_id}] PROCESS TASK: Waiting split aggregation, timeout={split_wait_timeout}s, "
+        f"parts={len(parts)}, est_parallel={_estimate_parallel_parts()}")
+    split_chunk_count = _wait_for_split_ready(
+        redis_key=redis_key,
+        timeout_s=split_wait_timeout,
+        poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
+    )
+    return True, None, split_chunk_count
+
+
+def _process_source_with_split(
+    request_id: str,
+    source: str,
+    source_type: str,
+    task_id: str,
+    chunking_strategy: str,
+    index_name: Optional[str],
+    original_filename: Optional[str],
+    embedding_model_id: Optional[int],
+    tenant_id: Optional[str],
+    params: Dict[str, Any],
+    file_data: Optional[bytes] = None,
+) -> Tuple[bool, Optional[List[Dict[str, Any]]], Optional[int]]:
+    parts = _split_file_for_processing(
+        request_id=request_id,
+        source=source,
+        source_type=source_type,
+        task_id=task_id,
+        params=params,
+        file_data=file_data,
+    )
+    filename_for_processing = original_filename or os.path.basename(source)
+    split_async, chunks, split_chunk_count = _run_processing_for_parts(
+        request_id=request_id,
+        source=source,
+        source_type=source_type,
+        task_id=task_id,
+        chunking_strategy=chunking_strategy,
+        filename_for_processing=filename_for_processing,
+        parts=parts,
+        index_name=index_name,
+        original_filename=original_filename,
+        embedding_model_id=embedding_model_id,
+        tenant_id=tenant_id,
+        params=params,
+    )
+
+    if split_async:
+        logger.info(
+            f"[{request_id}] PROCESS TASK: Async split finished with {split_chunk_count or 0} chunks")
+    else:
+        logger.info(
+            f"[{request_id}] PROCESS TASK: Ray processing completed, got {len(chunks) if chunks else 0} chunks")
+
+    if not split_async:
+        redis_key = f"dp:{task_id}:chunks"
+        process_actor = get_ray_actor()
+        process_actor.store_chunks_in_redis.remote(redis_key, chunks)
+        logger.info(
+            f"[{request_id}] PROCESS TASK: Stored chunks in Redis at key '{redis_key}'")
+
+    return split_async, chunks, split_chunk_count
+
+
+def _build_no_valid_chunks_error(
+    split_async: bool,
+    index_name: Optional[str],
+    source: str,
+    original_filename: Optional[str],
+) -> Exception:
+    message = (
+        "Async split completed but produced 0 chunks"
+        if split_async else
+        "Ray processing completed but produced 0 chunks"
+    )
+    return Exception(json.dumps({
+        "message": message,
+        "index_name": index_name,
+        "task_name": "process",
+        "source": source,
+        "original_filename": original_filename,
+        "error_code": "no_valid_chunks"
+    }, ensure_ascii=False))
+
+
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process', queue='process_q')
 def process(
         self,
@@ -836,6 +1085,10 @@ def process(
         file_size_mb = 0
         split_chunk_count = None
         image_metadata_chunk_count = 0
+        elapsed_time = 0.0
+        chunks: Optional[List[Dict[str, Any]]] = None
+        split_async = False
+
         if source_type == "local":
             # Check file existence and size for optimization
             if not os.path.exists(source):
@@ -847,126 +1100,19 @@ def process(
             logger.info(
                 f"[{self.request.id}] PROCESS TASK: File size: {file_size_mb:.2f}MB")
 
-            # Split first, then fan out per-part tasks
-            max_size = 5 * 1024 * 1024
-            params.pop("max_size", None)
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: Splitting file before processing (max_size={max_size})")
-
-            split_actor_get_start = time.perf_counter()
-            split_actor = _get_split_actor()
-            split_actor_get_elapsed = time.perf_counter() - split_actor_get_start
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: split actor ready in {split_actor_get_elapsed:.3f}s")
-            split_call_start = time.perf_counter()
-            parts_ref = split_actor.split_file.remote(
-                source,
-                destination=source_type,
+            split_async, chunks, split_chunk_count = _process_source_with_split(
+                request_id=self.request.id,
+                source=source,
+                source_type=source_type,
                 task_id=task_id,
-                max_size=max_size,
-                **params
+                chunking_strategy=chunking_strategy,
+                index_name=index_name,
+                original_filename=original_filename,
+                embedding_model_id=embedding_model_id,
+                tenant_id=tenant_id,
+                params=params,
             )
-            parts = ray.get(parts_ref)
-            split_call_elapsed = time.perf_counter() - split_call_start
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: split_file RPC done in {split_call_elapsed:.3f}s (source_type={source_type})")
-            if parts:
-                part_sizes = [len(p) for p in parts]
-                total_bytes = sum(part_sizes)
-                min_size = min(part_sizes)
-                max_size = max(part_sizes)
-                avg_size = total_bytes / len(part_sizes)
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Split stats: parts={len(part_sizes)}, "
-                    f"total={total_bytes/1024/1024:.2f}MB, "
-                    f"min={min_size/1024:.2f}KB, max={max_size/1024:.2f}KB, avg={avg_size/1024:.2f}KB")
-
-            filename_for_processing = original_filename or os.path.basename(source)
-
-            split_async = False
-            if not parts:
-                logger.warning(
-                    f"[{self.request.id}] PROCESS TASK: Split returned no parts; fallback to full-file processing")
-                process_actor = get_ray_actor()
-                chunks_ref = process_actor.process_file.remote(
-                    source,
-                    chunking_strategy,
-                    destination=source_type,
-                    task_id=task_id,
-                    model_id=embedding_model_id,
-                    tenant_id=tenant_id,
-                    **params
-                )
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Waiting for Ray processing to complete...")
-                chunks = ray.get(chunks_ref)
-            elif len(parts) == 1:
-                process_actor = get_ray_actor()
-                chunks_ref = process_actor.process_bytes.remote(
-                    parts[0],
-                    filename_for_processing,
-                    chunking_strategy,
-                    task_id=None,
-                    model_id=embedding_model_id,
-                    tenant_id=tenant_id,
-                    **params
-                )
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Waiting for Ray processing to complete...")
-                chunks = ray.get(chunks_ref)
-            else:
-                split_async = True
-                redis_key = f"dp:{task_id}:chunks"
-                group_tasks = group(
-                    process_part.s(
-                        part_bytes=part,
-                        filename=filename_for_processing,
-                        chunking_strategy=chunking_strategy,
-                        part_redis_key=f"dp:{task_id}:part:{idx}",
-                        source=source,
-                        source_type=source_type,
-                        model_id=embedding_model_id,
-                        tenant_id=tenant_id,
-                        **params
-                    ) for idx, part in enumerate(parts)
-                )
-                callback = aggregate_store_chunks.s(
-                    redis_key=redis_key,
-                    source=source,
-                    index_name=index_name,
-                    original_filename=original_filename
-                ).set(queue='process_part_q')
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Dispatching {len(parts)} part tasks...")
-                chord(group_tasks)(callback)
-                chunks = None
-                split_wait_timeout = _compute_split_wait_timeout(len(parts))
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Waiting split aggregation, timeout={split_wait_timeout}s, "
-                    f"parts={len(parts)}, est_parallel={_estimate_parallel_parts()}")
-                split_chunk_count = _wait_for_split_ready(
-                    redis_key=redis_key,
-                    timeout_s=split_wait_timeout,
-                    poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
-                )
-
-            if split_async:
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Async split finished with {split_chunk_count or 0} chunks")
-            else:
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Ray processing completed, got {len(chunks) if chunks else 0} chunks")
-
-            # Persist chunks into Redis only for non-async split flows
-            if not split_async:
-                redis_key = f"dp:{task_id}:chunks"
-                process_actor = get_ray_actor()
-                process_actor.store_chunks_in_redis.remote(redis_key, chunks)
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Stored chunks in Redis at key '{redis_key}'")
-
-            end_time = time.time()
-            elapsed_time = end_time - start_time
+            elapsed_time = time.time() - start_time
             processing_speed = file_size_mb / \
                 elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
             logger.info(
@@ -987,128 +1133,20 @@ def process(
                 f"[{self.request.id}] PROCESS TASK: MinIO fetch done in {fetch_elapsed:.3f}s, "
                 f"bytes={len(file_data)}")
 
-            # Split first, then fan out per-part tasks
-            max_size = 5 * 1024 * 1024
-            params.pop("max_size", None)
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: Splitting file before processing (max_size={max_size})")
-
-            split_actor_get_start = time.perf_counter()
-            split_actor = _get_split_actor()
-            split_actor_get_elapsed = time.perf_counter() - split_actor_get_start
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: split actor ready in {split_actor_get_elapsed:.3f}s")
-            split_call_start = time.perf_counter()
-            parts_ref = split_actor.split_file.remote(
-                source,
-                destination=source_type,
+            split_async, chunks, split_chunk_count = _process_source_with_split(
+                request_id=self.request.id,
+                source=source,
+                source_type=source_type,
                 task_id=task_id,
-                max_size=max_size,
+                chunking_strategy=chunking_strategy,
+                index_name=index_name,
+                original_filename=original_filename,
+                embedding_model_id=embedding_model_id,
+                tenant_id=tenant_id,
+                params=params,
                 file_data=file_data,
-                **params
             )
-            parts = ray.get(parts_ref)
-            split_call_elapsed = time.perf_counter() - split_call_start
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: Split done in {split_call_elapsed:.3f}s "
-                f"(source_type={source_type})")
-            if parts:
-                part_sizes = [len(p) for p in parts]
-                total_bytes = sum(part_sizes)
-                min_size = min(part_sizes)
-                max_size = max(part_sizes)
-                avg_size = total_bytes / len(part_sizes)
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Split stats: parts={len(part_sizes)}, "
-                    f"total={total_bytes/1024/1024:.2f}MB, "
-                    f"min={min_size/1024:.2f}KB, max={max_size/1024:.2f}KB, avg={avg_size/1024:.2f}KB")
-
-            filename_for_processing = original_filename or os.path.basename(source)
-
-            split_async = False
-            if not parts:
-                logger.warning(
-                    f"[{self.request.id}] PROCESS TASK: Split returned no parts; fallback to full-file processing")
-                process_actor = get_ray_actor()
-                chunks_ref = process_actor.process_file.remote(
-                    source,
-                    chunking_strategy,
-                    destination=source_type,
-                    task_id=task_id,
-                    model_id=embedding_model_id,
-                    tenant_id=tenant_id,
-                    **params
-                )
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Waiting for Ray processing to complete...")
-                chunks = ray.get(chunks_ref)
-            elif len(parts) == 1:
-                process_actor = get_ray_actor()
-                chunks_ref = process_actor.process_bytes.remote(
-                    parts[0],
-                    filename_for_processing,
-                    chunking_strategy,
-                    task_id=None,
-                    model_id=embedding_model_id,
-                    tenant_id=tenant_id,
-                    **params
-                )
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Waiting for Ray processing to complete...")
-                chunks = ray.get(chunks_ref)
-            else:
-                split_async = True
-                redis_key = f"dp:{task_id}:chunks"
-                group_tasks = group(
-                    process_part.s(
-                        part_bytes=part,
-                        filename=filename_for_processing,
-                        chunking_strategy=chunking_strategy,
-                        part_redis_key=f"dp:{task_id}:part:{idx}",
-                        source=source,
-                        source_type=source_type,
-                        model_id=embedding_model_id,
-                        tenant_id=tenant_id,
-                        **params
-                    ) for idx, part in enumerate(parts)
-                )
-                callback = aggregate_store_chunks.s(
-                    redis_key=redis_key,
-                    source=source,
-                    index_name=index_name,
-                    original_filename=original_filename
-                ).set(queue='process_part_q')
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Dispatching {len(parts)} part tasks...")
-                chord(group_tasks)(callback)
-                chunks = None
-                split_wait_timeout = _compute_split_wait_timeout(len(parts))
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Waiting split aggregation, timeout={split_wait_timeout}s, "
-                    f"parts={len(parts)}, est_parallel={_estimate_parallel_parts()}")
-                split_chunk_count = _wait_for_split_ready(
-                    redis_key=redis_key,
-                    timeout_s=split_wait_timeout,
-                    poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
-                )
-
-            if split_async:
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Async split finished with {split_chunk_count or 0} chunks")
-            else:
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Ray processing completed, got {len(chunks) if chunks else 0} chunks")
-
-            # Persist chunks into Redis only for non-async split flows
-            if not split_async:
-                redis_key = f"dp:{task_id}:chunks"
-                process_actor = get_ray_actor()
-                process_actor.store_chunks_in_redis.remote(redis_key, chunks)
-                logger.info(
-                    f"[{self.request.id}] PROCESS TASK: Stored chunks in Redis at key '{redis_key}'")
-
-            end_time = time.time()
-            elapsed_time = end_time - start_time
+            elapsed_time = time.time() - start_time
             logger.info(
                 f"[{self.request.id}] PROCESS TASK: URL processing completed in {elapsed_time:.2f}s")
 
@@ -1120,14 +1158,12 @@ def process(
         if split_async:
             chunk_count = split_chunk_count or 0
             if chunk_count == 0:
-                raise Exception(json.dumps({
-                    "message": "Async split completed but produced 0 chunks",
-                    "index_name": index_name,
-                    "task_name": "process",
-                    "source": source,
-                    "original_filename": original_filename,
-                    "error_code": "no_valid_chunks"
-                }, ensure_ascii=False))
+                raise _build_no_valid_chunks_error(
+                    split_async=True,
+                    index_name=index_name,
+                    source=source,
+                    original_filename=original_filename,
+                )
             # For async split, chunks are persisted in Redis; count image-metadata chunks from cached payload.
             try:
                 if REDIS_BACKEND_URL:
@@ -1146,14 +1182,12 @@ def process(
         else:
             chunk_count = len(chunks) if chunks else 0
             if chunk_count == 0:
-                raise Exception(json.dumps({
-                    "message": "Ray processing completed but produced 0 chunks",
-                    "index_name": index_name,
-                    "task_name": "process",
-                    "source": source,
-                    "original_filename": original_filename,
-                    "error_code": "no_valid_chunks"
-                }, ensure_ascii=False))
+                raise _build_no_valid_chunks_error(
+                    split_async=False,
+                    index_name=index_name,
+                    source=source,
+                    original_filename=original_filename,
+                )
             image_metadata_chunk_count = _count_image_metadata_chunks(chunks)
 
         logger.info(
