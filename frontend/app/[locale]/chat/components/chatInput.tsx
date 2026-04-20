@@ -414,11 +414,11 @@ export function ChatInput({
           };
 
           // Check if using Volcano Engine STT
-          const isVolcSTT = modelConfig?.stt?.modelFactory === "volc";
+          const isVolcSTT = modelConfig?.stt?.modelFactory === "volcengine";
 
           if (isVolcSTT) {
             // Volcano Engine STT requires modelFactory, modelAppid, and accessToken
-            sttConfig.model_factory = "volc";
+            sttConfig.model_factory = "volcengine";
             sttConfig.model_appid = modelConfig?.stt?.modelAppid || "";
             sttConfig.access_token = modelConfig?.stt?.accessToken || "";
             sttConfig.base_url = modelConfig?.stt?.apiConfig?.modelUrl || "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";

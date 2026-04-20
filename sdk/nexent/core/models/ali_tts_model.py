@@ -311,19 +311,24 @@ class AliTTSModel(BaseTTSModel):
 
     def _qwen_construct_session_update(self) -> Dict[str, Any]:
         """Construct session.update request for Qwen Realtime API."""
-        # Use default voice if not specified
         voice = self.config.voice or "Cherry"
         return {
             "event_id": self._qwen_generate_event_id(),
             "type": "session.update",
             "session": {
                 "voice": voice,
-                "mode": "server_commit",
-                "language_type": "Auto",
-                "response_format": self._qwen_format_to_response_format(self.config.format),
-                "sample_rate": self.config.sample_rate,
-                "speech_rate": self.config.speech_rate,
-                "volume": int(self.config.volume)
+                "modalities": ["text", "audio"],
+            }
+        }
+
+    def _qwen_construct_response_create(self) -> Dict[str, Any]:
+        """Construct response.create request to trigger model response (TTS synthesis)."""
+        return {
+            "event_id": self._qwen_generate_event_id(),
+            "type": "response.create",
+            "response": {
+                "modalities": ["text", "audio"],
+                "stream": True,
             }
         }
 
@@ -379,17 +384,19 @@ class AliTTSModel(BaseTTSModel):
             if isinstance(message, bytes):
                 continue
             event = self._qwen_parse_event(message)
-            logger.info(f"Qwen Realtime received event: {event.get('type')}")
+            event_type = event.get("type")
+            raw_event = event.get("raw", {})
+            logger.info(f"Qwen Realtime received event during init: {event_type}, keys: {list(raw_event.keys())}, raw: {message[:300]}")
 
-            if event.get("type") == "session.created":
+            if event_type == "session.created":
                 return True
-            if event.get("type") == "error":
+            if event_type == "error":
                 raise AliTTSError(f"Qwen Realtime session error: {event.get('error_message', 'Unknown error')}")
         return False
 
     def _qwen_is_terminal_event(self, event_type: str) -> bool:
         """Check if event type indicates the session is done."""
-        return event_type in ("response.audio.done", "session.finished")
+        return event_type in ("response.done", "response.audio.done", "session.finished")
 
     def _qwen_handle_audio_delta(self, event: Dict[str, Any], buffer: Optional[bytearray], yield_chunks: bool) -> Optional[bytes]:
         """Handle response.audio.delta event and return audio chunk."""
@@ -400,6 +407,22 @@ class AliTTSModel(BaseTTSModel):
         if buffer is not None:
             buffer.extend(audio_data)
         return audio_data if yield_chunks else None
+
+    def _qwen_handle_response_done(self, event: Dict[str, Any], buffer: Optional[bytearray], yield_chunks: bool) -> Optional[bytes]:
+        """Handle response.done event - it may contain final audio in the output array."""
+        output_list = event.get("raw", {}).get("output", [])
+        for item in output_list:
+            audio_base64 = item.get("data") or item.get("audio_base64") or ""
+            if item.get("type") == "audio" and audio_base64:
+                try:
+                    audio_data = base64.b64decode(audio_base64)
+                    if buffer is not None:
+                        buffer.extend(audio_data)
+                    logger.info(f"Qwen Realtime extracted {len(audio_data)} bytes from response.done")
+                    return audio_data if yield_chunks else None
+                except Exception as e:
+                    logger.warning(f"Failed to decode audio from response.done: {e}")
+        return None
 
     async def _qwen_receive_audio(
         self,
@@ -421,22 +444,36 @@ class AliTTSModel(BaseTTSModel):
 
                 event = self._qwen_parse_event(message)
                 event_type = event.get("type")
-                logger.info(f"Qwen Realtime received event: {event_type}")
+                raw_event = event.get("raw", {})
+                logger.info(f"Qwen Realtime received event: {event_type}, keys: {list(raw_event.keys())}, raw: {message[:500]}")
 
-                if event_type == "error":
-                    raise AliTTSError(f"Qwen Realtime error: {event.get('error_message', 'Unknown error')}")
-
-                if event_type == "response.audio.delta":
-                    chunk = self._qwen_handle_audio_delta(event, buffer, yield_chunks)
-                    if chunk:
-                        yield chunk
-
-                if self._qwen_is_terminal_event(event_type):
-                    audio_done = True
+                audio_done = self._qwen_process_event(event_type, event, buffer, yield_chunks)
 
             except asyncio.TimeoutError:
                 logger.warning("Timeout waiting for Qwen Realtime response")
                 break
+
+    def _qwen_process_event(
+        self,
+        event_type: str,
+        event: Dict[str, Any],
+        buffer: Optional[bytearray],
+        yield_chunks: bool
+    ) -> bool:
+        """Process a received Qwen Realtime event. Returns True if session is done."""
+        if event_type == "error":
+            raise AliTTSError(f"Qwen Realtime error: {event.get('error_message', 'Unknown error')}")
+
+        if event_type == "response.audio.delta":
+            chunk = self._qwen_handle_audio_delta(event, buffer, yield_chunks)
+            if chunk:
+                return False
+
+        if event_type == "response.done":
+            self._qwen_handle_response_done(event, buffer, yield_chunks)
+            return False
+
+        return self._qwen_is_terminal_event(event_type)
 
     async def _generate_qwen_realtime_non_streaming(self, text: str, ws_url: str, headers: Dict[str, str]) -> bytes:
         """Non-streaming speech generation using Qwen Realtime API."""
@@ -453,17 +490,13 @@ class AliTTSModel(BaseTTSModel):
                 voice = self.config.voice or "Cherry"
                 logger.info(f"Sent Qwen Realtime session.update with voice={voice}")
 
-                # Send text
+                # Add text as a conversation item
                 await ws.send(json.dumps(self._qwen_construct_text_append(text)))
                 logger.info(f"Sent Qwen Realtime text: {text[:50]}...")
 
-                # Commit and trigger synthesis
-                await ws.send(json.dumps(self._qwen_construct_text_commit()))
-                logger.info("Sent Qwen Realtime text commit")
-
-                # Finish session
-                await ws.send(json.dumps(self._qwen_construct_session_finish()))
-                logger.info("Sent Qwen Realtime session.finish")
+                # Trigger synthesis via response.create (required for Qwen Realtime API)
+                await ws.send(json.dumps(self._qwen_construct_response_create()))
+                logger.info("Sent Qwen Realtime response.create")
 
                 # Receive audio chunks to accumulate in buffer
                 async for _ in self._qwen_receive_audio(ws, buffer=buffer):
@@ -492,17 +525,13 @@ class AliTTSModel(BaseTTSModel):
                 voice = self.config.voice or "Cherry"
                 logger.info(f"Sent Qwen Realtime session.update with voice={voice}")
 
-                # Send text
+                # Add text as a conversation item
                 await ws.send(json.dumps(self._qwen_construct_text_append(text)))
                 logger.info(f"Sent Qwen Realtime text: {text[:50]}...")
 
-                # Commit and trigger synthesis
-                await ws.send(json.dumps(self._qwen_construct_text_commit()))
-                logger.info("Sent Qwen Realtime text commit")
-
-                # Finish session
-                await ws.send(json.dumps(self._qwen_construct_session_finish()))
-                logger.info("Sent Qwen Realtime session.finish")
+                # Trigger synthesis via response.create
+                await ws.send(json.dumps(self._qwen_construct_response_create()))
+                logger.info("Sent Qwen Realtime response.create")
 
                 # Receive audio
                 async for chunk in self._qwen_receive_audio(ws, yield_chunks=True):

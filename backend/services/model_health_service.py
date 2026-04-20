@@ -140,7 +140,7 @@ async def _perform_connectivity_check(
 
 
         # Determine STT provider based on model_factory
-        use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
+        use_volc = model_factory and model_factory.lower() in ["volcengine", "volcano", "volcengine", "火山引擎"]
 
         if use_volc:
             # Use Volcano STT with appid and access_token
@@ -165,7 +165,7 @@ async def _perform_connectivity_check(
             )
     elif model_type == "tts":
         # Determine TTS provider based on model_factory
-        use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
+        use_volc = model_factory and model_factory.lower() in ["volcengine", "volcano", "volcengine", "火山引擎"]
         voice_service = get_voice_service()
         if use_volc:
             # Use Volcano TTS with appid and access_token

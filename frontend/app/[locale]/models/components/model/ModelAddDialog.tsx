@@ -61,11 +61,11 @@ const DEFAULT_FORM_STATE = {
   ],
   chunkingBatchSize: "10",
   // STT specific fields
-  sttProvider: "dashscope", // dashscope or volc
+  sttProvider: "dashscope", // dashscope or volcengine
   modelAppid: "",
   accessToken: "",
   // TTS specific fields
-  ttsProvider: "dashscope", // dashscope or volc
+  ttsProvider: "dashscope", // dashscope or volcengine
 };
 
 // Connectivity status type comes from utils
@@ -320,6 +320,13 @@ export const ModelAddDialog = ({
     }));
   }, [isOpen, defaultProvider, defaultIsBatchImport]);
 
+  // Switch to LLM when batch import is enabled while STT/TTS is selected
+  useEffect(() => {
+    if (form.isBatchImport && (form.type === MODEL_TYPES.STT || form.type === MODEL_TYPES.TTS)) {
+      handleFormChange("type", MODEL_TYPES.LLM);
+    }
+  }, [form.isBatchImport]);
+
   const parseModelName = (name: string): string => {
     if (!name) return "";
     const parts = name.split("/");
@@ -431,7 +438,7 @@ export const ModelAddDialog = ({
     }
     if (form.type === MODEL_TYPES.STT) {
       // For STT models, validate based on provider type
-      if (form.sttProvider === "volc") {
+      if (form.sttProvider === "volcengine") {
         // Volcano Engine requires appid and access_token
         return (
           form.modelAppid.trim() !== "" &&
@@ -444,7 +451,7 @@ export const ModelAddDialog = ({
     }
     if (form.type === MODEL_TYPES.TTS) {
       // For TTS models, validate based on provider type
-      if (form.ttsProvider === "volc") {
+      if (form.ttsProvider === "volcengine") {
         // Volcano Engine requires appid and access_token
         return (
           form.modelAppid.trim() !== "" &&
@@ -496,8 +503,8 @@ export const ModelAddDialog = ({
             modelType: modelType,
           };
 
-          if (form.sttProvider === "volc") {
-            sttConfig.modelFactory = "volc";
+          if (form.sttProvider === "volcengine") {
+            sttConfig.modelFactory = "volcengine";
             sttConfig.modelAppid = form.modelAppid.trim();
             sttConfig.accessToken = form.accessToken.trim();
           } else {
@@ -513,8 +520,8 @@ export const ModelAddDialog = ({
             modelType: modelType,
           };
 
-          if (form.ttsProvider === "volc") {
-            ttsConfig.modelFactory = "volc";
+          if (form.ttsProvider === "volcengine") {
+            ttsConfig.modelFactory = "volcengine";
             ttsConfig.modelName = form.name;
             ttsConfig.modelAppid = form.modelAppid.trim();
             ttsConfig.accessToken = form.accessToken.trim();
@@ -750,8 +757,8 @@ export const ModelAddDialog = ({
 
         // Add STT specific fields
         if (form.type === MODEL_TYPES.STT) {
-          modelParams.modelFactory = form.sttProvider === "volc" ? "volc" : "dashscope";
-          if (form.sttProvider === "volc") {
+          modelParams.modelFactory = form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
+          if (form.sttProvider === "volcengine") {
             modelParams.modelAppid = form.modelAppid;
             modelParams.accessToken = form.accessToken;
           }
@@ -759,8 +766,8 @@ export const ModelAddDialog = ({
 
         // Add TTS specific fields
         if (form.type === MODEL_TYPES.TTS) {
-          modelParams.modelFactory = form.ttsProvider === "volc" ? "volc" : "dashscope";
-          if (form.ttsProvider === "volc") {
+          modelParams.modelFactory = form.ttsProvider === "volcengine" ? "volcengine" : "dashscope";
+          if (form.ttsProvider === "volcengine") {
             modelParams.modelAppid = form.modelAppid;
             modelParams.accessToken = form.accessToken;
           }
@@ -786,8 +793,8 @@ export const ModelAddDialog = ({
 
         // Add STT specific fields
         if (form.type === MODEL_TYPES.STT) {
-          modelParams.modelFactory = form.sttProvider === "volc" ? "volc" : "dashscope";
-          if (form.sttProvider === "volc") {
+          modelParams.modelFactory = form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
+          if (form.sttProvider === "volcengine") {
             modelParams.modelAppid = form.modelAppid;
             modelParams.accessToken = form.accessToken;
           }
@@ -795,8 +802,8 @@ export const ModelAddDialog = ({
 
         // Add TTS specific fields
         if (form.type === MODEL_TYPES.TTS) {
-          modelParams.modelFactory = form.ttsProvider === "volc" ? "volc" : "dashscope";
-          if (form.ttsProvider === "volc") {
+          modelParams.modelFactory = form.ttsProvider === "volcengine" ? "volcengine" : "dashscope";
+          if (form.ttsProvider === "volcengine") {
             modelParams.modelAppid = form.modelAppid;
             modelParams.accessToken = form.accessToken;
           }
@@ -824,8 +831,8 @@ export const ModelAddDialog = ({
 
       // Add STT specific fields to config
       if (form.type === MODEL_TYPES.STT) {
-        (modelConfig as STTModelConfig).modelFactory = form.sttProvider === "volc" ? "volc" : "dashscope";
-        if (form.sttProvider === "volc") {
+        (modelConfig as STTModelConfig).modelFactory = form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
+        if (form.sttProvider === "volcengine") {
           (modelConfig as STTModelConfig).modelAppid = form.modelAppid;
           (modelConfig as STTModelConfig).accessToken = form.accessToken;
         }
@@ -997,10 +1004,10 @@ export const ModelAddDialog = ({
             <Option value={MODEL_TYPES.RERANK}>
               {t("model.type.rerank")}
             </Option>
-            <Option value={MODEL_TYPES.STT}>
+            <Option value={MODEL_TYPES.STT} disabled={form.isBatchImport}>
               {t("model.type.stt")}
             </Option>
-            <Option value={MODEL_TYPES.TTS}>
+            <Option value={MODEL_TYPES.TTS} disabled={form.isBatchImport}>
               {t("model.type.tts")}
             </Option>
           </Select>
@@ -1102,13 +1109,13 @@ export const ModelAddDialog = ({
               onChange={(value) => handleFormChange("sttProvider", value)}
             >
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
-              <Option value="volc">{t("model.provider.volc")}</Option>
+              <Option value="volcengine">{t("model.provider.volcengine")}</Option>
             </Select>
           </div>
         )}
 
         {/* STT Fields for Volcano Engine */}
-        {!form.isBatchImport && isSTTModel && form.sttProvider === "volc" && (
+        {!form.isBatchImport && isSTTModel && form.sttProvider === "volcengine" && (
           <>
             <div>
               <label
@@ -1198,13 +1205,13 @@ export const ModelAddDialog = ({
               onChange={(value) => handleFormChange("ttsProvider", value)}
             >
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
-              <Option value="volc">{t("model.provider.volc")}</Option>
+              <Option value="volcengine">{t("model.provider.volcengine")}</Option>
             </Select>
           </div>
         )}
 
         {/* TTS Fields for Volcano Engine */}
-        {!form.isBatchImport && isTTSModel && form.ttsProvider === "volc" && (
+        {!form.isBatchImport && isTTSModel && form.ttsProvider === "volcengine" && (
           <>
             <div>
               <label
@@ -1523,7 +1530,9 @@ export const ModelAddDialog = ({
             <div className="mt-0.5 ml-6">
               {(form.isBatchImport
                 ? t("model.dialog.help.content.batchImport")
-                : t("model.dialog.help.content")
+                : isSTTModel || isTTSModel
+                  ? t("model.dialog.help.content.voice")
+                  : t("model.dialog.help.content")
               )
                 .split("\n")
                 .map((line, index) => {
@@ -1627,6 +1636,36 @@ export const ModelAddDialog = ({
                       <img
                         src="/tokenpony.png"
                         alt="TokenPony"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                </>
+              )}
+              {(isSTTModel || isTTSModel) && (
+                <>
+                  <Tooltip title={t("model.provider.volengine")}>
+                    <a
+                      href={PROVIDER_LINKS.volcengine}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/volcengine.png"
+                        alt="VolcEngine"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                  <Tooltip title={t("model.provider.dashscope")}>
+                    <a
+                      href={PROVIDER_LINKS.dashscope}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/aliyuncs.png"
+                        alt="AlibabaCloud"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
                     </a>

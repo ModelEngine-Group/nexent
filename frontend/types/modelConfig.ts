@@ -21,7 +21,7 @@ export type ModelSource =
   | "tokenpony"
   | "OpenAI-API-Compatible"
   | "modelengine"
-  | "volc";
+  | "volcengine";
 
 // Model type
 export type ModelType =
@@ -72,14 +72,14 @@ export interface ModelApiConfig {
 
 // STT model specific configuration interface
 export interface STTModelConfig extends SingleModelConfig {
-  modelFactory?: string; // Model factory (e.g., "volc", "dashscope")
+  modelFactory?: string; // Model factory (e.g., "volcengine", "dashscope")
   modelAppid?: string;   // App ID for Volcano STT
   accessToken?: string;  // Access token for Volcano STT
 }
 
 // TTS model specific configuration interface
 export interface TTSModelConfig extends SingleModelConfig {
-  modelFactory?: string; // Model factory (e.g., "volc", "dashscope")
+  modelFactory?: string; // Model factory (e.g., "volcengine", "dashscope")
   modelAppid?: string;   // App ID for Volcano TTS
   accessToken?: string;  // Access token for Volcano TTS
 }

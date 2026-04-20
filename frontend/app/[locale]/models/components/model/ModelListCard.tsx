@@ -174,8 +174,8 @@ export const ModelListCard = ({
       return t("model.source.dashscope");
     } else if (model.source === "tokenpony") {
       return t("model.source.tokenpony");
-    } else if (model.source === "volc") {
-      return t("model.provider.volc");
+    } else if (model.source === "volcengine") {
+      return t("model.provider.volcengine");
     } else if (model.source === "OpenAI-API-Compatible") {
       return t("model.source.custom");
     }
@@ -191,7 +191,7 @@ export const ModelListCard = ({
     silicon: filteredModels.filter((m) => m.source === "silicon"),
     dashscope: filteredModels.filter((m) => m.source === "dashscope"),
     tokenpony: filteredModels.filter((m) => m.source === "tokenpony"),
-    volc: filteredModels.filter((m) => m.source === "volc"),
+    volcengine: filteredModels.filter((m) => m.source === "volcengine"),
     custom: filteredModels.filter((m) => m.source === "OpenAI-API-Compatible"),
   };
 
@@ -448,11 +448,11 @@ export const ModelListCard = ({
             ))}
           </Select.OptGroup>
         )}
-        {groupedModels.volc.length > 0 && (
-          <Select.OptGroup label={t("model.group.volc")}>
-            {groupedModels.volc.map((model) => (
+        {groupedModels.volcengine.length > 0 && (
+          <Select.OptGroup label={t("model.group.volcengine")}>
+            {groupedModels.volcengine.map((model) => (
               <Option
-                key={`${type}-${model.displayName}-volc`}
+                key={`${type}-${model.displayName}-volcengine`}
                 value={model.displayName}
               >
                 <div
@@ -465,8 +465,8 @@ export const ModelListCard = ({
                     title={model.displayName}
                   >
                     <img
-                      src="/volcengine.png"
-                      alt="volc"
+                      src={getProviderIconByUrl(model.apiUrl)}
+                      alt="provider"
                       className="w-4 h-4 rounded mr-2 flex-shrink-0"
                     />
                     <span className="truncate">{model.displayName}</span>
