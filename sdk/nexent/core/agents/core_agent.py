@@ -25,7 +25,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import PIL.Image
 
-from .agent_context import ContextManager, msg_token_count
+from .agent_context import ContextManager
+from ..utils.token_estimation import msg_token_count
 
 def parse_code_blobs(text: str) -> str:
     """Extract code blocs from the LLM's output for execution.
@@ -139,7 +140,7 @@ class CoreAgent(CodeAgent):
             # Format as JSON with truncation for readability
             messages_json = json.dumps(messages_data, indent=2, ensure_ascii=False, default=str)
             truncated_messages = truncate_content(messages_json, max_length=1000)
-            # truncated_messages = messages_json
+            truncated_messages = messages_json
 
             # Format stop sequences
             stop_seq_str = ", ".join(f'"{seq}"' for seq in stop_sequences) if stop_sequences else "None"
