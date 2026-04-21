@@ -34,7 +34,7 @@ from database.conversation_db import (
 )
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.core.models import OpenAIModel
-from nexent.monitor import set_monitoring_context
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
@@ -315,6 +315,10 @@ def call_llm_for_title(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
     )
 
+    display_name = model_config.get("display_name", "") if model_config else ""
+    set_monitoring_operation(
+        "title_generation", display_name=display_name or None)
+
     # Create OpenAIModel instance
     llm = OpenAIModel(
         model_id=get_model_name_from_config(model_config)
@@ -326,6 +330,7 @@ def call_llm_for_title(
         top_p=0.95,
         model_factory=model_config.get("model_factory", None),
         ssl_verify=model_config.get("ssl_verify", True),
+        display_name=display_name or None,
     )
 
     # Build messages - use new template variable 'question' instead of 'content'
