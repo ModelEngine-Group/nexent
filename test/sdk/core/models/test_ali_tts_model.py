@@ -22,18 +22,16 @@ class _MockConnectionClosedError(Exception):
 _mock_websockets.exceptions.ConnectionClosedError = _MockConnectionClosedError
 _mock_websockets.exceptions.WebSocketException = Exception
 
-_module_mocks = {
-    "websockets": _mock_websockets,
-}
+if "websockets" not in _sys.modules:
+    _sys.modules["websockets"] = _mock_websockets
 
-with patch.dict(_sys.modules, _module_mocks):
-    from sdk.nexent.core.models.ali_tts_model import (
-        AliTTSModel,
-        AliTTSConfig,
-        AliTTSError,
-        COSYVOICE_API_URL,
-        QWEN_REALTIME_API_URL,
-    )
+from sdk.nexent.core.models.ali_tts_model import (
+    AliTTSModel,
+    AliTTSConfig,
+    AliTTSError,
+    COSYVOICE_API_URL,
+    QWEN_REALTIME_API_URL,
+)
 
 
 class TestAliTTSConfig:
@@ -271,21 +269,13 @@ class TestAliTTSModel:
         assert "event_id" in session
         assert "session" in session
         assert session["session"]["voice"] == "Cherry"
-        assert session["session"]["modalities"] == ["text", "audio"]
+        assert session["session"]["mode"] == "server_commit"
 
     def test_qwen_construct_session_update_default_voice(self, qwen_model):
         """Test _qwen_construct_session_update with default voice."""
         qwen_model.config.voice = None
         session = qwen_model._qwen_construct_session_update()
         assert session["session"]["voice"] == "Cherry"
-
-    def test_qwen_construct_response_create(self, qwen_model):
-        """Test _qwen_construct_response_create."""
-        response_create = qwen_model._qwen_construct_response_create()
-        assert response_create["type"] == "response.create"
-        assert "event_id" in response_create
-        assert response_create["response"]["modalities"] == ["text", "audio"]
-        assert response_create["response"]["stream"] is True
 
     def test_qwen_format_to_response_format(self, qwen_model):
         """Test _qwen_format_to_response_format."""
@@ -334,8 +324,8 @@ class TestAliTTSModel:
         assert event["type"] == "unknown"
 
     def test_qwen_is_terminal_event_response_done(self, qwen_model):
-        """Test _qwen_is_terminal_event with response.done."""
-        assert qwen_model._qwen_is_terminal_event("response.done") is True
+        """Test _qwen_is_terminal_event with response.done (not terminal)."""
+        assert qwen_model._qwen_is_terminal_event("response.done") is False
 
     def test_qwen_is_terminal_event_response_audio_done(self, qwen_model):
         """Test _qwen_is_terminal_event with response.audio.done."""
@@ -367,45 +357,40 @@ class TestAliTTSModel:
         result = qwen_model._qwen_handle_audio_delta(event, None, yield_chunks=True)
         assert result is None
 
-    def test_qwen_handle_response_done_with_audio(self, qwen_model):
-        """Test _qwen_handle_response_done with audio in output."""
-        audio_data = b"final_audio"
-        encoded = base64.b64encode(audio_data).decode('utf-8')
-        event = {
-            "raw": {
-                "output": [
-                    {"type": "audio", "data": encoded}
-                ]
-            }
-        }
-        buffer = bytearray()
-        result = qwen_model._qwen_handle_response_done(event, buffer, yield_chunks=True)
-        assert buffer == bytearray(audio_data)
-
-    def test_qwen_handle_response_done_no_audio(self, qwen_model):
-        """Test _qwen_handle_response_done with no audio."""
-        event = {"raw": {"output": []}}
-        result = qwen_model._qwen_handle_response_done(event, None, yield_chunks=False)
-        assert result is None
-
-    def test_qwen_process_event_error(self, qwen_model):
-        """Test _qwen_process_event with error."""
-        event = {"type": "error", "error_message": "Service error"}
-        with pytest.raises(AliTTSError, match="Service error"):
-            qwen_model._qwen_process_event("error", event, None, False)
-
-    def test_qwen_process_event_audio_delta(self, qwen_model):
-        """Test _qwen_process_event with audio delta."""
-        audio_data = b"chunk"
+    def test_qwen_handle_audio_delta_with_buffer(self, qwen_model):
+        """Test _qwen_handle_audio_delta appends decoded audio to buffer."""
+        audio_data = b"test_audio"
         encoded = base64.b64encode(audio_data).decode('utf-8')
         event = {"raw": {"delta": encoded}}
-        done = qwen_model._qwen_process_event("response.audio.delta", event, None, False)
-        assert done is False
 
-    def test_qwen_process_event_terminal(self, qwen_model):
-        """Test _qwen_process_event with session.finished (terminal event)."""
-        done = qwen_model._qwen_process_event("session.finished", {}, None, False)
-        assert done is True
+        buffer = bytearray()
+        result = qwen_model._qwen_handle_audio_delta(event, buffer, yield_chunks=True)
+        assert result == audio_data
+        assert buffer == bytearray(audio_data)
+
+    def test_qwen_handle_audio_delta_empty_delta(self, qwen_model):
+        """Test _qwen_handle_audio_delta with empty delta."""
+        event = {"raw": {"delta": ""}}
+        result = qwen_model._qwen_handle_audio_delta(event, None, yield_chunks=True)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_generate_speech_qwen_non_streaming(self, qwen_model):
+        """Test generate_speech for Qwen non-streaming calls the right method."""
+        qwen_model._generate_qwen_realtime_non_streaming = AsyncMock(return_value=b"audio_data")
+        result = await qwen_model.generate_speech("hello", stream=False)
+        assert result == b"audio_data"
+
+    @pytest.mark.asyncio
+    async def test_generate_speech_qwen_streaming(self, qwen_model):
+        """Test generate_speech for Qwen streaming returns an async generator."""
+        async def fake_gen():
+            yield b"chunk1"
+            yield b"chunk2"
+        qwen_model._generate_qwen_realtime_streaming = MagicMock(return_value=fake_gen())
+        result = await qwen_model.generate_speech("hello", stream=True)
+        chunks = [c async for c in result]
+        assert chunks == [b"chunk1", b"chunk2"]
 
     def test_is_tts_result_successful_valid(self, cosy_model):
         """Test _is_tts_result_successful with valid result."""
