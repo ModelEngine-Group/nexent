@@ -35,7 +35,7 @@ from database.tool_db import (
     update_tool_table_from_scan_tool_list,
 )
 from mcpadapt.smolagents_adapter import _sanitize_function_name
-from services.file_management_service import get_llm_model
+from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model, get_rerank_model, get_vector_db_core
 from database.client import minio_client
 from services.image_service import get_vlm_model
@@ -740,7 +740,8 @@ def _validate_local_tool(
             params = {
                 **instantiation_params,
                 'vlm_model': image_to_text_model,
-                'storage_client': minio_client
+                'storage_client': minio_client,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_text_file":
@@ -752,7 +753,8 @@ def _validate_local_tool(
                 **instantiation_params,
                 'llm_model': long_text_to_text_model,
                 'storage_client': minio_client,
-                "data_process_service_url": DATA_PROCESS_SERVICE
+                "data_process_service_url": DATA_PROCESS_SERVICE,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }
             tool_instance = tool_class(**params)
         else:
