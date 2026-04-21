@@ -345,4 +345,4 @@ NORTHBOUND_EXTERNAL_URL = _northbound_url.rstrip("/") if _northbound_url else "h
 
 
 # APP Version
-APP_VERSION = "v2.0.1"
+APP_VERSION = "v2.0.2"
