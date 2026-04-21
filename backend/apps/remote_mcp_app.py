@@ -38,7 +38,7 @@ async def get_tools_from_remote_mcp(
 ):
     """ Used to list tool information from the remote MCP server """
     try:
-        user_id, tenant_id, _ = get_current_user_info(
+        _, tenant_id, _ = get_current_user_info(
             authorization, http_request)
         tools_info = await get_tool_from_remote_mcp_server(
             mcp_server_name=service_name,

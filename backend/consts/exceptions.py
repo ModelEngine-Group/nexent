@@ -200,6 +200,16 @@ class SkillException(Exception):
     pass
 
 
+class TaskNotFoundError(Exception):
+    """Raised when A2A task is not found (per A2A spec Section 3.4.2)."""
+    pass
+
+
+class UnsupportedOperationError(Exception):
+    """Raised when A2A operation is not supported (e.g., task already terminated)."""
+    pass
+
+
 # ==================== Legacy Aliases (same as above, for compatibility) ====================
 # These are additional aliases that map to the same simple exception classes above.
 # They provide backward compatibility for code that uses these names.

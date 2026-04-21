@@ -58,6 +58,27 @@ class TestCreateFileTool:
         assert tool.init_path == os.path.abspath(temp_workspace)
         assert tool.observer == mock_observer
 
+    def test_init_with_default_path(self):
+        """Test initialization with default path"""
+        tool = CreateFileTool(init_path="/mnt/nexent", observer=None)
+
+        assert tool.init_path == os.path.abspath("/mnt/nexent")
+        assert tool.observer is None
+
+    def test_init_with_empty_string_raises_error(self):
+        """Test initialization with empty string raises ValueError"""
+        with pytest.raises(ValueError) as excinfo:
+            CreateFileTool(init_path="")
+
+        assert "init_path cannot be empty" in str(excinfo.value)
+
+    def test_init_with_whitespace_only_raises_error(self):
+        """Test initialization with whitespace-only string raises ValueError"""
+        with pytest.raises(ValueError) as excinfo:
+            CreateFileTool(init_path="   ")
+
+        assert "init_path cannot be empty" in str(excinfo.value)
+
     def test_validate_relative_path(self, create_file_tool, temp_workspace):
         """Test validation of relative path"""
         relative_path = "test_dir/file.txt"

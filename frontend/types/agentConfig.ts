@@ -60,6 +60,7 @@ export interface Agent {
    */
   permission?: "EDIT" | "READ_ONLY";
   current_version_no?: number;
+  is_a2a_server?: boolean;
 }
 
 export interface Tool {
@@ -82,6 +83,7 @@ export interface ToolParam {
   type: "string" | "number" | "boolean" | "array" | "object" | "Optional";
   required: boolean;
   value?: any;
+  default?: any;
   description?: string;
   description_zh?: string;
 }
