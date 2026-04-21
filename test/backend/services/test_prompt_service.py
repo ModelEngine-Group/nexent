@@ -569,6 +569,7 @@ class TestPromptService(unittest.TestCase):
             language="zh",
             tool_ids=None,
             sub_agent_ids=None,
+            knowledge_base_display_names=None,
         )
 
         # Verify output format - should be SSE format
