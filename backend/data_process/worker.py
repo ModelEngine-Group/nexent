@@ -13,9 +13,6 @@ Usage:
     # Start a worker for processing only (high concurrency)
     QUEUES=process_q WORKER_CONCURRENCY=8 python worker.py
 
-    # Start a worker for split part processing only
-    WORKER_QUEUES=process_part_q WORKER_CONCURRENCY=8 python worker.py
-
     # Start a worker for forwarding only (lower concurrency)
     QUEUES=forward_q WORKER_CONCURRENCY=2 python worker.py
 """
@@ -48,6 +45,7 @@ from consts.const import (
     REDIS_URL,
     WORKER_CONCURRENCY,
     WORKER_NAME,
+    RAY_GLOBAL_ACTOR_POOL_SIZE,
 )
 
 from .app import app
@@ -207,16 +205,13 @@ def worker_ready_handler(**kwargs):
     # Prewarm Ray actors for process-related queues to reduce first-task latency.
     # IMPORTANT: run asynchronously so worker queue registration is never blocked.
     try:
-        worker_queues = os.getenv("WORKER_QUEUES") or os.getenv("QUEUES") or ""
-        queue_set = {q.strip() for q in worker_queues.split(",") if q.strip()}
+        queue_set = {q.strip() for q in QUEUES.split(",") if q.strip()}
         if "process_q" in queue_set or "process_part_q" in queue_set:
             from data_process.tasks import prewarm_ray_actors
 
-            # Safer defaults for startup + keep process_part queue parallelism.
-            if "process_part_q" in queue_set:
-                target = int(os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
-            else:
-                target = int(os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
+            # Prewarm a cluster-global shared actor pool once at startup.
+            # Multiple workers may trigger this, but pool manager is idempotent.
+            target = RAY_GLOBAL_ACTOR_POOL_SIZE
 
             def _prewarm_in_background():
                 try:
@@ -233,8 +228,7 @@ def worker_ready_handler(**kwargs):
 
     # Periodic concurrency + Ray CPU availability log for process_part_q.
     try:
-        worker_queues = os.getenv("WORKER_QUEUES") or os.getenv("QUEUES") or ""
-        queue_set = {q.strip() for q in worker_queues.split(",") if q.strip()}
+        queue_set = {q.strip() for q in QUEUES.split(",") if q.strip()}
         if "process_part_q" in queue_set:
             def _log_part_concurrency():
                 while True:
@@ -351,12 +345,10 @@ def validate_redis_connection() -> bool:
 def start_worker():
     """Start Celery worker with appropriate settings"""
 
-    # NOTE:
-    # const.py loads .env with override=True, which can overwrite QUEUES set by launcher.
-    # To avoid queue drift, prefer dedicated WORKER_QUEUES at runtime.
-    queues = os.getenv("WORKER_QUEUES") or os.getenv("QUEUES") or QUEUES
-    worker_name = os.getenv("WORKER_NAME") or WORKER_NAME or f'worker-{os.getpid()}'
-    concurrency = int(os.getenv("WORKER_CONCURRENCY", str(WORKER_CONCURRENCY)))
+    # Read from runtime env first, so launcher-assigned values always win.
+    queues = QUEUES
+    worker_name = WORKER_NAME
+    concurrency = WORKER_CONCURRENCY
 
     logger.info(f"Start Celery worker '{worker_name}' with queues: {queues}")
     logger.info(f"Worker concurrency: {concurrency}")

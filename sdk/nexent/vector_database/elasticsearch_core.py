@@ -453,17 +453,9 @@ class ElasticSearchCore(VectorDatabaseCore):
         Splits large document batches into smaller chunks to respect embedding API limits before bulk inserting into Elasticsearch.
         """
         try:
-            sub_batch_max_retries = max(
-                1,
-                int(os.getenv("EMBEDDING_SUB_BATCH_MAX_RETRIES", str(self.max_retries))),
-            )
-            sub_batch_base_delay = max(
-                0.2, float(os.getenv("EMBEDDING_SUB_BATCH_RETRY_DELAY_S", "1.0"))
-            )
-            sub_batch_max_delay = max(
-                sub_batch_base_delay,
-                float(os.getenv("EMBEDDING_SUB_BATCH_RETRY_MAX_DELAY_S", "30.0")),
-            )
+            sub_batch_max_retries = self.max_retries
+
+
 
             processed_docs = self._preprocess_documents(
                 documents, content_field)
@@ -513,10 +505,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                         break  # Success, exit retry loop
 
                     except Exception as e:
-                        retry_delay = min(
-                            sub_batch_base_delay * (2 ** retry_attempt),
-                            sub_batch_max_delay,
-                        )
+                        retry_delay = min(1.0 * (2 ** retry_attempt), 30.0)
                         if retry_attempt < sub_batch_max_retries - 1:
                             logger.warning(
                                 f"Embedding API error (attempt {retry_attempt + 1}/{sub_batch_max_retries}): "

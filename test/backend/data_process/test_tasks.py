@@ -133,6 +133,12 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.FORWARD_REDIS_RETRY_MAX = 1
         const_mod.DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = 30
         const_mod.DP_REDIS_CHUNKS_POLL_INTERVAL_MS = 200
+        const_mod.PER_WAVE_TIMEOUT = 30
+        const_mod.MAX_TIMEOUT = 1800
+        const_mod.RAY_GLOBAL_ACTOR_POOL_SIZE = 3
+        const_mod.RAY_ACTOR_WARM_TIMEOUT_S = 60
+        const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "nexent_global_data_processor_pool"
+        const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent-data-process"
         const_mod.DISABLE_RAY_DASHBOARD = False
         # New defaults required by ray_actors import
         const_mod.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
@@ -432,16 +438,15 @@ def test_run_async_running_loop_with_nest_asyncio(monkeypatch):
 def test_get_ray_actor_returns_actor(monkeypatch):
     tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch, initialized=True)
 
-    actor_obj = types.SimpleNamespace(
-        ping=types.SimpleNamespace(remote=lambda *a, **k: "pong")
-    )
+    actor_obj = types.SimpleNamespace(ping=types.SimpleNamespace(remote=lambda *a, **k: "pong"))
 
-    class DummyActor:
-        @staticmethod
-        def remote():
-            return actor_obj
+    class _ManagerHandle:
+        def __init__(self, actor):
+            self.get_actor = types.SimpleNamespace(remote=lambda: "__actor_ref__")
+            self._actor = actor
 
-    monkeypatch.setattr(tasks, "DataProcessorRayActor", DummyActor)
+    monkeypatch.setattr(tasks, "_get_or_create_global_pool_manager", lambda: _ManagerHandle(actor_obj))
+    fake_ray.get_returns = {"__actor_ref__": actor_obj}
     actor = tasks.get_ray_actor()
     assert actor is actor_obj
 
@@ -1621,8 +1626,8 @@ def test_compute_split_wait_timeout_respects_waves_and_cap(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", 10)
     monkeypatch.setattr(tasks, "_estimate_parallel_parts", lambda: 2)
-    monkeypatch.setenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "7")
-    monkeypatch.setenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "20")
+    monkeypatch.setattr(tasks, "PER_WAVE_TIMEOUT", 7)
+    monkeypatch.setattr(tasks, "MAX_TIMEOUT", 20)
 
     # parts=5 -> waves=3 -> timeout=10 + (3-1)*7 = 24, capped to 20
     assert tasks._compute_split_wait_timeout(5) == 20
@@ -1691,6 +1696,11 @@ def test_forward_large_chunks_uses_chord_batches(monkeypatch):
 
 def test_process_sync_unsupported_raises_and_updates_state(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch, initialized=True)
+    monkeypatch.setattr(
+        tasks,
+        "get_ray_actor",
+        lambda: types.SimpleNamespace(process_file=types.SimpleNamespace(remote=lambda *a, **k: "ref")),
+    )
     self = FakeSelf("s2")
     with pytest.raises(NotImplementedError):
         tasks.process_sync(self, source="/a.txt", source_type="minio")

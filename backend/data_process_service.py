@@ -251,7 +251,6 @@ if project_root not in sys.path:
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s: %(levelname)s/%(name)s] %(message)s')
 logger = logging.getLogger("data_process.worker_launcher")
 
-os.environ["WORKER_QUEUES"] = "{config['queue']}"
 os.environ["QUEUES"] = "{config['queue']}"  # backward compatibility
 os.environ["WORKER_NAME"] = "{config['name']}"
 os.environ["WORKER_CONCURRENCY"] = "{config['concurrency']}"
@@ -263,6 +262,10 @@ try:
     logger.debug(f"Celery app instance: {{celery_app}}")
     logger.debug(f"Attempting to start worker for queue: {config['queue']}")
     from data_process.worker import start_worker
+    # Re-apply launcher values after imports in case .env override changed them.
+    os.environ["QUEUES"] = "{config['queue']}"
+    os.environ["WORKER_NAME"] = "{config['name']}"
+    os.environ["WORKER_CONCURRENCY"] = "{config['concurrency']}"
     start_worker()
 except ImportError as e:
     logger.error(f"Import error: {{e}}")

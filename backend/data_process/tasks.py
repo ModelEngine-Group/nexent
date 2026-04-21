@@ -8,7 +8,6 @@ import math
 import os
 import threading
 import time
-from collections import deque
 from typing import Any, Dict, Optional, List, Tuple
 
 import aiohttp
@@ -18,13 +17,13 @@ from celery import Task, chain, states, group, chord
 from celery.exceptions import Retry
 from celery.result import allow_join_result
 
-from consts.const import ELASTICSEARCH_SERVICE
 from utils.file_management_utils import get_file_size
 from database.attachment_db import get_file_stream
 from services.redis_service import get_redis_service
 from .app import app
 from .ray_actors import DataProcessorRayActor
 from consts.const import (
+    ELASTICSEARCH_SERVICE,
     REDIS_BACKEND_URL,
     FORWARD_REDIS_RETRY_DELAY_S,
     FORWARD_REDIS_RETRY_MAX,
@@ -34,6 +33,12 @@ from consts.const import (
     RAY_NUM_CPUS,
     DISABLE_RAY_DASHBOARD,
     ROOT_DIR,
+    PER_WAVE_TIMEOUT,
+    MAX_TIMEOUT,
+    RAY_GLOBAL_ACTOR_POOL_SIZE,
+    RAY_ACTOR_WARM_TIMEOUT_S,
+    RAY_GLOBAL_ACTOR_POOL_NAME,
+    RAY_GLOBAL_ACTOR_POOL_NAMESPACE
 )
 
 
@@ -76,7 +81,7 @@ def _wait_for_split_ready(redis_key: str, timeout_s: int, poll_interval_ms: int)
 
 def _estimate_parallel_parts() -> int:
     try:
-        total_cpus = int(RAY_NUM_CPUS) if RAY_NUM_CPUS else (os.cpu_count() or 1)
+        total_cpus = RAY_NUM_CPUS
     except Exception:
         total_cpus = os.cpu_count() or 1
     actor_cpus = max(1, int(RAY_ACTOR_NUM_CPUS))
@@ -84,12 +89,10 @@ def _estimate_parallel_parts() -> int:
 
 
 def _compute_split_wait_timeout(parts_count: int) -> int:
-    base_timeout = max(1, int(DP_REDIS_CHUNKS_WAIT_TIMEOUT_S))
-    per_wave_timeout = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
-    max_timeout = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
+    base_timeout = DP_REDIS_CHUNKS_WAIT_TIMEOUT_S
     waves = math.ceil(max(1, parts_count) / _estimate_parallel_parts())
-    dynamic_timeout = base_timeout + max(0, waves - 1) * max(1, per_wave_timeout)
-    return min(max_timeout, max(base_timeout, dynamic_timeout))
+    dynamic_timeout = base_timeout + max(0, waves - 1) * max(1, PER_WAVE_TIMEOUT)
+    return min(MAX_TIMEOUT, max(base_timeout, dynamic_timeout))
 
 
 def _count_image_metadata_chunks(chunks: Optional[List[Dict[str, Any]]]) -> int:
@@ -178,9 +181,6 @@ def _build_balanced_batches(
 
 # Thread lock for initializing Ray to prevent race conditions
 ray_init_lock = threading.Lock()
-ray_pool_lock = threading.Lock()
-ray_actor_pool: deque = deque()
-ray_actor_pool_rr_index = 0
 
 ROOT_DIR_DISPLAY = ROOT_DIR or "{ROOT_DIR}"
 
@@ -467,75 +467,110 @@ def _send_chunks_to_es(
 
     return run_async(_post())
 
- 
-# Initialize the data processing core LAZILY
-# This will be initialized on first task run by a worker process
-def _get_target_warm_pool_size() -> int:
-    raw = os.getenv("RAY_WARM_ACTOR_POOL_SIZE")
-    if raw:
+
+@ray.remote(num_cpus=0)
+class GlobalRayActorPoolManager:
+    """
+    Cluster-wide shared actor pool manager.
+    A single detached manager serves all Celery worker processes.
+    """
+
+    def __init__(self, warm_timeout_s: float):
+        self.warm_timeout_s = warm_timeout_s
+        self.actors: List[Any] = []
+        self.rr_index = 0
+
+    def _create_and_warm_actor(self) -> Optional[Any]:
+        actor = DataProcessorRayActor.remote()
         try:
-            return max(0, int(raw))
-        except ValueError:
-            pass
-    # Keep default warm pool tiny to avoid reserving all Ray CPUs by idle actors.
-    return 1
+            ray.get(actor.ping.remote(), timeout=self.warm_timeout_s)
+            return actor
+        except Exception as exc:
+            try:
+                ray.kill(actor, no_restart=True)
+            except Exception:
+                pass
+            logger.warning(
+                f"[GlobalRayActorPoolManager] Warm actor failed in {self.warm_timeout_s:.1f}s: {exc}"
+            )
+            return None
+
+    def ensure_pool(self, desired: int, max_allowed: int) -> int:
+        desired = max(0, int(desired))
+        max_allowed = max(1, int(max_allowed))
+        desired = min(desired, max_allowed)
+        missing = max(0, desired - len(self.actors))
+        for _ in range(missing):
+            actor = self._create_and_warm_actor()
+            if actor is not None:
+                self.actors.append(actor)
+        return len(self.actors)
+
+    def get_actor(self) -> Any:
+        if not self.actors:
+            actor = self._create_and_warm_actor()
+            if actor is None:
+                raise RuntimeError("Global actor pool is empty and actor warm-up failed")
+            self.actors.append(actor)
+        idx = self.rr_index % len(self.actors)
+        self.rr_index += 1
+        return self.actors[idx]
 
 
-def _cap_warm_pool_size(desired: int) -> int:
-    reserve = int(os.getenv("RAY_WARM_ACTOR_RESERVE_CPUS", "0"))
-    total_cpus = _estimate_parallel_parts()
-    # _estimate_parallel_parts already divides by actor_cpus, so treat it as max actors.
-    max_actors = max(1, total_cpus - reserve) if total_cpus > 0 else 1
-    return max(0, min(desired, max_actors))
+def _get_or_create_global_pool_manager() -> Any:
+    with ray_init_lock:
+        init_ray_in_worker()
 
+    # Prefer atomic get/create when supported.
+    try:
+        return GlobalRayActorPoolManager.options(
+            name=RAY_GLOBAL_ACTOR_POOL_NAME,
+            namespace=RAY_GLOBAL_ACTOR_POOL_NAMESPACE,
+            lifetime="detached",
+            get_if_exists=True,
+        ).remote(RAY_ACTOR_WARM_TIMEOUT_S)
+    except TypeError:
+        pass
 
-def _create_and_warm_actor() -> Any:
-    actor = DataProcessorRayActor.remote()
-    # Force actor initialization now to reduce first-task latency.
-    ray.get(actor.ping.remote())
-    return actor
+    try:
+        return ray.get_actor(
+            RAY_GLOBAL_ACTOR_POOL_NAME, namespace=RAY_GLOBAL_ACTOR_POOL_NAMESPACE)
+    except Exception:
+        pass
+
+    try:
+        return GlobalRayActorPoolManager.options(
+            name=RAY_GLOBAL_ACTOR_POOL_NAME,
+            namespace=RAY_GLOBAL_ACTOR_POOL_NAMESPACE,
+            lifetime="detached",
+        ).remote(RAY_ACTOR_WARM_TIMEOUT_S)
+    except Exception:
+        # Name race: another worker may have created it in the meantime.
+        return ray.get_actor(
+            RAY_GLOBAL_ACTOR_POOL_NAME, namespace=RAY_GLOBAL_ACTOR_POOL_NAMESPACE)
 
 
 def prewarm_ray_actors(target_size: Optional[int] = None) -> int:
     """
-    Ensure a pool of warm Ray actors exists for low-latency task execution.
+    Ensure a global shared pool of warm Ray actors exists for low-latency task execution.
     """
-    with ray_init_lock:
-        init_ray_in_worker()
-
-    desired = _get_target_warm_pool_size() if target_size is None else max(0, target_size)
-    desired = _cap_warm_pool_size(desired)
-    if desired == 0:
-        return len(ray_actor_pool)
-    with ray_pool_lock:
-        current = len(ray_actor_pool)
-        missing = max(0, desired - current)
-        for _ in range(missing):
-            ray_actor_pool.append(_create_and_warm_actor())
-        logger.info(
-            f"Ray actor pool ready: current={len(ray_actor_pool)}, desired={desired}"
-        )
-        return len(ray_actor_pool)
+    desired = RAY_GLOBAL_ACTOR_POOL_SIZE if target_size is None else max(0, int(target_size))
+    manager = _get_or_create_global_pool_manager()
+    current_after = ray.get(
+        manager.ensure_pool.remote(desired=desired, max_allowed=_estimate_parallel_parts())
+    )
+    logger.info(
+        f"Global Ray actor pool ready: current={current_after}, desired={desired}"
+    )
+    return current_after
 
 
 def get_ray_actor() -> Any:
     """
-    Return a warm actor from the pool with round-robin selection.
+    Return a warm actor from the global shared pool with round-robin selection.
     """
-    global ray_actor_pool_rr_index
-    # Ensure at least one warm actor is available without aggressive prewarming.
-    prewarm_ray_actors(target_size=1)
-
-    with ray_pool_lock:
-        if not ray_actor_pool:
-            actor = _create_and_warm_actor()
-            ray_actor_pool.append(actor)
-            return actor
-
-        idx = ray_actor_pool_rr_index % len(ray_actor_pool)
-        ray_actor_pool_rr_index += 1
-        actor = list(ray_actor_pool)[idx]
-        return actor
+    manager = _get_or_create_global_pool_manager()
+    return ray.get(manager.get_actor.remote())
 
 
 def _get_split_actor() -> Any:
