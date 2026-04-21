@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { monitoringService } from "@/services/monitoringService";
 import type { ModelMonitoringItem } from "@/types/monitoring";
 
@@ -22,9 +22,9 @@ export function useMonitoringData() {
     await fetchData();
   }, [fetchData]);
 
-  useState(() => {
+  useEffect(() => {
     fetchData();
-  });
+  }, [fetchData]);
 
   return { models, loading, refresh };
 }

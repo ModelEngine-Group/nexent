@@ -1,5 +1,5 @@
 export interface ModelMonitoringItem {
-  model_id: string;
+  model_id: number | null;
   model_name: string;
   model_type: string;
   display_name: string;
