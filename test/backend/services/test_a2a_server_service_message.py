@@ -57,7 +57,7 @@ class TestStoreUserMessage:
 
             mock_db.create_message.assert_called_once()
             call_kwargs = mock_db.create_message.call_args.kwargs
-            expected_parts = [{"type": "text", "text": "Just a text message"}]
+            expected_parts = [{"text": "Just a text message"}]
             assert call_kwargs["parts"] == expected_parts
 
     def test_store_user_message_empty(self):
