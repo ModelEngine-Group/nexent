@@ -265,6 +265,50 @@ class MinIOStorageClient(StorageClient):
             logger.error(error_msg)
             return False, error_msg
 
+    def get_file_range(
+        self,
+        object_name: str,
+        start: int,
+        end: int,
+        bucket: Optional[str] = None,
+    ) -> Tuple[bool, Any]:
+        """
+        Get a byte-range slice of an object from MinIO.
+
+        Args:
+            object_name: Object name
+            start: Start byte offset (inclusive)
+            end: End byte offset (inclusive), matching HTTP Range semantics
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, Any]: (True, raw_body_stream) on success, (False, error_str) on failure
+        """
+        bucket = bucket or self.default_bucket
+        if bucket is None:
+            return False, "Bucket name is required"
+
+        try:
+            response = self.client.get_object(
+                Bucket=bucket,
+                Key=object_name,
+                Range=f'bytes={start}-{end}',
+            )
+            return True, response['Body']
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code == '404':
+                logger.debug(f"File not found when getting range: {object_name}")
+                return False, f"File not found: {object_name}"
+            else:
+                error_msg = f"Failed to get file range for {object_name}: {e}"
+                logger.error(error_msg)
+                return False, error_msg
+        except Exception as e:
+            error_msg = f"Unexpected error getting file range for {object_name}: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+
     def get_file_size(
         self,
         object_name: str,

@@ -77,6 +77,7 @@ from database import skill_db
 from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.a2a_agent_db import get_server_agent_ids
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     save_conversation_assistant,
@@ -1497,6 +1498,9 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
 
         agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
 
+        # Get all agent IDs that are registered as A2A Server agents
+        a2a_server_agent_ids = get_server_agent_ids(tenant_id)
+
         model_cache: Dict[int, Optional[dict]] = {}
         enriched_agents: list[dict] = []
 
@@ -1564,30 +1568,23 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                     else PERMISSION_READ
                 )
 
-            simple_agent_list.append(
-                {
-                    "agent_id": agent["agent_id"],
-                    "name": agent["name"] if agent["name"] else agent["display_name"],
-                    "display_name": agent["display_name"]
-                    if agent["display_name"]
-                    else agent["name"],
-                    "description": agent["description"],
-                    "author": agent.get("author"),
-                    "model_id": model_id,
-                    "model_name": model_info.get("model_name")
-                    if model_info is not None
-                    else agent.get("model_name"),
-                    "model_display_name": model_info.get("display_name")
-                    if model_info is not None
-                    else None,
-                    "is_available": len(unavailable_reasons) == 0,
-                    "unavailable_reasons": unavailable_reasons,
-                    "is_new": agent.get("is_new", False),
-                    "group_ids": convert_string_to_list(agent.get("group_ids")),
-                    "permission": permission,
-                    "is_published": agent.get("current_version_no") is not None,
-                }
-            )
+            simple_agent_list.append({
+                "agent_id": agent["agent_id"],
+                "name": agent["name"] if agent["name"] else agent["display_name"],
+                "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
+                "description": agent["description"],
+                "author": agent.get("author"),
+                "model_id": model_id,
+                "model_name": model_info.get("model_name") if model_info is not None else agent.get("model_name"),
+                "model_display_name": model_info.get("display_name") if model_info is not None else None,
+                "is_available": len(unavailable_reasons) == 0,
+                "unavailable_reasons": unavailable_reasons,
+                "is_new": agent.get("is_new", False),
+                "group_ids": convert_string_to_list(agent.get("group_ids")),
+                "permission": permission,
+                "is_published": agent.get("current_version_no") is not None,
+                "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
+            })
 
         return simple_agent_list
     except Exception as e:
@@ -1790,6 +1787,8 @@ async def prepare_agent_run(
         language=language,
         allow_memory_search=allow_memory_search,
         is_debug=agent_request.is_debug,
+        override_version_no=agent_request.version_no,
+        override_model_id=agent_request.model_id,
     )
     agent_run_manager.register_agent_run(
         agent_request.conversation_id, agent_run_info, user_id
@@ -2184,8 +2183,8 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
         return {"status": "success", "message": message}
     else:
         message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
-        logging.error(message)
-        return {"status": "error", "message": message}
+        logging.info(message)
+        return {"status": "success", "message": message, "already_stopped": True}
 
 
 async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:

@@ -173,15 +173,15 @@ class TestDashScopeModelProvider:
         assert result[0]["model_tag"] == "chat"
 
     @pytest.mark.asyncio
-    async def test_get_models_reranker_success(self, mocker: MockFixture):
-        """Test successful model retrieval for reranker models."""
+    async def test_get_models_rerank_success(self, mocker: MockFixture):
+        """Test successful model retrieval for rerank models."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "output": {
                 "models": [
                     {
-                        "model": "gte-reranker",
+                        "model": "gte-rerank",
                         "description": "Reranking model",
                         "inference_metadata": {
                             "request_modality": ["Text"],
@@ -202,16 +202,16 @@ class TestDashScopeModelProvider:
 
         provider = DashScopeModelProvider()
         provider_config = {
-            "model_type": "reranker",
+            "model_type": "rerank",
             "api_key": "test-api-key"
         }
 
         result = await provider.get_models(provider_config)
 
         assert len(result) == 1
-        assert result[0]["id"] == "gte-reranker"
-        assert result[0]["model_type"] == "reranker"
-        assert result[0]["model_tag"] == "reranker"
+        assert result[0]["id"] == "gte-rerank"
+        assert result[0]["model_type"] == "rerank"
+        assert result[0]["model_tag"] == "rerank"
 
     @pytest.mark.asyncio
     async def test_get_models_tts_success(self, mocker: MockFixture):
@@ -663,7 +663,7 @@ class TestDashScopeModelProvider:
         assert len(result) == 1
         assert result[0]["id"] == "embedding-v1"
 
-        # Test reranker classification by Chinese description
-        result = await provider.get_models({"model_type": "reranker", "api_key": "test-key"})
+        # Test rerank classification by Chinese description
+        result = await provider.get_models({"model_type": "rerank", "api_key": "test-key"})
         assert len(result) == 1
         assert result[0]["id"] == "rerank-v1"

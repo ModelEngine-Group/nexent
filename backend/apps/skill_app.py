@@ -1,22 +1,28 @@
 """Skill management HTTP endpoints."""
 
+import asyncio
 import logging
 import os
-import re
+import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Header
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from consts.exceptions import SkillException, UnauthorizedError
 from services.skill_service import SkillService
 from consts.model import SkillInstanceInfoRequest
-from utils.auth_utils import get_current_user_id
+from utils.auth_utils import get_current_user_id, get_current_user_info
+from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
+from nexent.core.agents.agent_model import ModelConfig
+from agents.skill_creation_agent import create_simple_skill_from_request
+from nexent.core.utils.observer import MessageObserver
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/skills", tags=["skills"])
+skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
 
 
 class SkillCreateRequest(BaseModel):
@@ -453,88 +459,147 @@ async def delete_skill(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{skill_name}/files/{file_path:path}")
-async def delete_skill_file(
-    skill_name: str,
-    file_path: str,
+class SkillCreateSimpleRequest(BaseModel):
+    """Request model for interactive skill creation."""
+    user_request: str
+    existing_skill: Optional[Dict[str, Any]] = None
+
+
+def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
+    """Build ModelConfig from tenant's quick-config LLM model."""
+    from utils.config_utils import tenant_config_manager, get_model_name_from_config
+    from consts.const import MODEL_CONFIG_MAPPING
+
+    quick_config = tenant_config_manager.get_model_config(
+        key=MODEL_CONFIG_MAPPING["llm"],
+        tenant_id=tenant_id
+    )
+    if not quick_config:
+        raise ValueError("No LLM model configured for tenant")
+
+    return ModelConfig(
+        cite_name=quick_config.get("display_name", "default"),
+        api_key=quick_config.get("api_key", ""),
+        model_name=get_model_name_from_config(quick_config),
+        url=quick_config.get("base_url", ""),
+        temperature=0.1,
+        top_p=0.95,
+        ssl_verify=True,
+        model_factory=quick_config.get("model_factory")
+    )
+
+
+@skill_creator_router.post("/create-simple")
+async def create_simple_skill(
+    request: SkillCreateSimpleRequest,
     authorization: Optional[str] = Header(None)
-) -> JSONResponse:
-    """Delete a specific file within a skill directory.
+):
+    """Create a simple skill interactively via LLM agent.
 
-    Args:
-        skill_name: Name of the skill
-        file_path: Relative path to the file within the skill directory
+    Loads the skill_creation_simple prompt template, runs an internal agent
+    with WriteSkillFileTool and ReadSkillMdTool, extracts the <SKILL> block
+    from the final answer, and streams step progress and token content via SSE.
+
+    Yields SSE events:
+        - step_count: Current agent step number
+        - skill_content: Token-level content (thinking, code, deep_thinking, tool output)
+        - final_answer: Complete skill content
+        - done: Stream completion signal
     """
-    try:
-        _, _ = get_current_user_id(authorization)
-        service = SkillService()
+    # Message types to stream as skill_content (token-level output)
+    STREAMABLE_CONTENT_TYPES = frozenset([
+        "model_output_thinking",
+        "model_output_code",
+        "model_output_deep_thinking",
+        "tool",
+        "execution_logs",
+    ])
 
-        # Validate skill_name so it cannot be used for path traversal
-        if not skill_name:
-            raise HTTPException(status_code=400, detail="Invalid skill name")
-        if os.sep in skill_name or "/" in skill_name or ".." in skill_name:
-            raise HTTPException(status_code=400, detail="Invalid skill name")
-
-        # Read config to get temp_filename for validation
-        config_content = service.get_skill_file_content(skill_name, "config.yaml")
-        if config_content is None:
-            raise HTTPException(status_code=404, detail="Config file not found")
-
-        # Parse config to get temp_filename
-        import yaml
-        config = yaml.safe_load(config_content)
-        temp_filename = config.get("temp_filename", "")
-
-        # Get the base directory for the skill
-        local_dir = os.path.join(service.skill_manager.local_skills_dir, skill_name)
-
-        # Check for path traversal patterns in the raw file_path BEFORE any normalization
-        # This catches attempts like ../../etc/passwd or /etc/passwd
-        normalized_for_check = os.path.normpath(file_path)
-        if ".." in file_path or file_path.startswith("/") or (os.sep in file_path and file_path.startswith(os.sep)):
-            # Additional check: ensure the normalized path doesn't escape local_dir
-            abs_local_dir = os.path.abspath(local_dir)
-            abs_full_path = os.path.abspath(os.path.join(local_dir, normalized_for_check))
-            try:
-                common = os.path.commonpath([abs_local_dir, abs_full_path])
-                if common != abs_local_dir:
-                    raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
-
-        # Normalize the requested file path - use basename to strip directory components
-        safe_file_path = os.path.basename(os.path.normpath(file_path))
-
-        # Build full path and validate it stays within local_dir
-        full_path = os.path.normpath(os.path.join(local_dir, safe_file_path))
-        abs_local_dir = os.path.abspath(local_dir)
-        abs_full_path = os.path.abspath(full_path)
-
-        # Check for path traversal: abs_full_path should be within abs_local_dir
+    async def generate():
+        import json
         try:
-            common = os.path.commonpath([abs_local_dir, abs_full_path])
-            if common != abs_local_dir:
-                raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
-        except ValueError:
-            # Different drives on Windows
-            raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
+            _, tenant_id, language = get_current_user_info(authorization)
 
-        # Validate the filename matches temp_filename
-        if not temp_filename or safe_file_path != temp_filename:
-            raise HTTPException(status_code=400, detail="Can only delete temp_filename files")
+            template = get_skill_creation_simple_prompt_template(
+                language,
+                existing_skill=request.existing_skill
+            )
 
-        # Check if file exists
-        if not os.path.exists(full_path):
-            raise HTTPException(status_code=404, detail=f"File not found: {safe_file_path}")
+            model_config = _build_model_config_from_tenant(tenant_id)
+            observer = MessageObserver(lang=language)
+            stop_event = threading.Event()
 
-        os.remove(full_path)
-        logger.info(f"Deleted skill file: {full_path}")
+            # Get local_skills_dir from SkillManager
+            skill_service = SkillService()
+            local_skills_dir = skill_service.skill_manager.local_skills_dir or ""
 
-        return JSONResponse(content={"message": f"File {safe_file_path} deleted successfully"})
-    except UnauthorizedError as e:
-        raise HTTPException(status_code=401, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting skill file {skill_name}/{file_path}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+            # Start skill creation in background thread
+            def run_task():
+                create_simple_skill_from_request(
+                    system_prompt=template.get("system_prompt", ""),
+                    user_prompt=request.user_request,
+                    model_config_list=[model_config],
+                    observer=observer,
+                    stop_event=stop_event,
+                    local_skills_dir=local_skills_dir
+                )
+
+            thread = threading.Thread(target=run_task)
+            thread.start()
+
+            # Poll observer for step_count and token content messages
+            while thread.is_alive():
+                cached = observer.get_cached_message()
+                for msg in cached:
+                    if isinstance(msg, str):
+                        try:
+                            data = json.loads(msg)
+                            msg_type = data.get("type", "")
+                            content = data.get("content", "")
+
+                            # Stream step progress
+                            if msg_type == "step_count":
+                                yield f"data: {json.dumps({'type': 'step_count', 'content': content}, ensure_ascii=False)}\n\n"
+                            # Stream token content (thinking, code, deep_thinking, tool output)
+                            elif msg_type in STREAMABLE_CONTENT_TYPES:
+                                yield f"data: {json.dumps({'type': 'skill_content', 'content': content}, ensure_ascii=False)}\n\n"
+                            # Stream final_answer content separately
+                            elif msg_type == "final_answer":
+                                yield f"data: {json.dumps({'type': 'final_answer', 'content': content}, ensure_ascii=False)}\n\n"
+                        except (json.JSONDecodeError, Exception):
+                            pass
+                await asyncio.sleep(0.1)
+
+            thread.join()
+
+            # Stream any remaining cached messages after thread completes
+            remaining = observer.get_cached_message()
+            for msg in remaining:
+                if isinstance(msg, str):
+                    try:
+                        data = json.loads(msg)
+                        msg_type = data.get("type", "")
+                        content = data.get("content", "")
+
+                        if msg_type == "step_count":
+                            yield f"data: {json.dumps({'type': 'step_count', 'content': content}, ensure_ascii=False)}\n\n"
+                        elif msg_type in STREAMABLE_CONTENT_TYPES:
+                            yield f"data: {json.dumps({'type': 'skill_content', 'content': content}, ensure_ascii=False)}\n\n"
+                        elif msg_type == "final_answer":
+                            yield f"data: {json.dumps({'type': 'final_answer', 'content': content}, ensure_ascii=False)}\n\n"
+                    except (json.JSONDecodeError, Exception):
+                        pass
+
+            # Stream final answer content from observer
+            final_result = observer.get_final_answer()
+            if final_result:
+                yield f"data: {json.dumps({'type': 'final_answer', 'content': final_result}, ensure_ascii=False)}\n\n"
+
+            # Send done signal
+            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Error in create_simple_skill stream: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")

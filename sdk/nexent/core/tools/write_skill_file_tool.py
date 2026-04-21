@@ -1,7 +1,7 @@
 """Skill file writing tool."""
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Optional
 from smolagents import tool
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,8 @@ class WriteSkillFileTool:
         """Write a file to a skill directory in local storage.
 
         Args:
-            skill_name: Name of the skill (e.g., "code-reviewer")
+            skill_name: Name of the skill (e.g., "code-reviewer").
+                If empty, writes directly to local_skills_dir.
             file_path: Relative path within the skill directory. Use forward slashes.
                 Examples: "SKILL.md", "scripts/analyze.py", "examples.md"
             content: File content to write
@@ -60,8 +61,6 @@ class WriteSkillFileTool:
         Returns:
             Success or error message
         """
-        if not skill_name:
-            return "[Error] skill_name is required"
         if not file_path:
             return "[Error] file_path is required"
 
@@ -69,6 +68,10 @@ class WriteSkillFileTool:
         if "/" in normalized_path or normalized_path != file_path.lstrip("/"):
             pass
         normalized_path = normalized_path.lstrip("/")
+
+        # If skill_name is empty, write directly to local_skills_dir
+        if not skill_name:
+            return self._write_direct_file(normalized_path, content)
 
         try:
             manager = self._get_skill_manager()
@@ -83,6 +86,29 @@ class WriteSkillFileTool:
         except Exception as e:
             logger.error(f"Failed to write skill file: {e}")
             return f"[Error] Failed to write file: {type(e).__name__}: {str(e)}"
+
+    def _write_direct_file(self, relative_path: str, content: str) -> str:
+        """Write a file directly to local_skills_dir.
+
+        Args:
+            relative_path: Path relative to local_skills_dir
+            content: File content
+
+        Returns:
+            Success or error message
+        """
+        if not self.local_skills_dir:
+            return "[Error] local_skills_dir is not configured"
+
+        file_path = os.path.join(self.local_skills_dir, *relative_path.split("/"))
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            return f"Successfully wrote '{relative_path}' to local_skills_dir"
+        except Exception as e:
+            return f"[Error] Failed to write '{relative_path}': {e}"
 
     def _write_skill_md(self, manager, skill_name: str, content: str) -> str:
         """Write SKILL.md using SkillManager.save_skill().
@@ -179,7 +205,8 @@ def write_skill_file(skill_name: str, file_path: str, content: str) -> str:
     agent's local_skills_dir configuration.
 
     Args:
-        skill_name: Name of the skill (e.g., "code-reviewer", "my-new-skill")
+        skill_name: Name of the skill (e.g., "code-reviewer", "my-new-skill").
+            If empty, writes directly to local_skills_dir.
         file_path: Relative path within the skill directory. Use forward slashes.
             - "SKILL.md" for the main skill file
             - "scripts/analyze.py" for Python scripts
@@ -199,6 +226,9 @@ def write_skill_file(skill_name: str, file_path: str, content: str) -> str:
 
         # Write supporting documentation
         write_skill_file("code-reviewer", "examples.md", "# Examples\\n...")
+
+        # Write directly to local_skills_dir (when skill_name is empty)
+        write_skill_file("", "my-file.txt", "file content")
     """
     tool_instance = get_write_skill_file_tool()
     return tool_instance.execute(skill_name, file_path, content)

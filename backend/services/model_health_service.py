@@ -5,6 +5,7 @@ from nexent.core import MessageObserver
 from nexent.core.models import OpenAIModel, OpenAIVLModel
 from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from nexent.core.models.rerank_model import OpenAICompatibleRerank
 
 from services.voice_service import get_voice_service
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
@@ -107,7 +108,13 @@ async def _perform_connectivity_check(
             ssl_verify=ssl_verify
         ).check_connectivity()
     elif model_type == "rerank":
-        connectivity = False
+        rerank_model = OpenAICompatibleRerank(
+            model_name=model_name,
+            base_url=model_base_url,
+            api_key=model_api_key,
+            ssl_verify=ssl_verify,
+        )
+        connectivity = await rerank_model.connectivity_check()
     elif model_type == "vlm":
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",

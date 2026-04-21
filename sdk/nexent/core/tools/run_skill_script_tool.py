@@ -1,6 +1,6 @@
 """Skill script execution tool."""
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 from smolagents import tool
 
 logger = logging.getLogger(__name__)
@@ -46,14 +46,15 @@ class RunSkillScriptTool:
         self,
         skill_name: str,
         script_path: str,
-        params: Optional[Dict[str, Any]] = None,
+        params: Optional[str] = None,
     ) -> str:
         """Execute a skill script with given parameters.
 
         Args:
             skill_name: Name of the skill containing the script
             script_path: Path to script relative to skill directory (e.g., "scripts/analyze.py")
-            params: Parameters to pass to the script
+            params: Parameters to pass to the script as a raw string.
+                The string is appended directly to the command line.
 
         Returns:
             Script execution result as string
@@ -65,7 +66,7 @@ class RunSkillScriptTool:
             result = manager.run_skill_script(
                 skill_name,
                 script_path,
-                params or {},
+                params,
                 agent_id=self.agent_id,
                 tenant_id=self.tenant_id,
                 version_no=self.version_no,
@@ -113,7 +114,7 @@ def get_run_skill_script_tool(
 
 
 @tool
-def run_skill_script(skill_name: str, script_path: str, params: Optional[Dict[str, Any]] = None) -> str:
+def run_skill_script(skill_name: str, script_path: str, params: Optional[str] = None) -> str:
     """Execute a skill script with given parameters.
 
     This tool runs Python or shell scripts that are part of a skill.
@@ -122,12 +123,8 @@ def run_skill_script(skill_name: str, script_path: str, params: Optional[Dict[st
     Args:
         skill_name: Name of the skill containing the script (e.g., "code-reviewer")
         script_path: Path to the script relative to skill directory (e.g., "scripts/analyze.py")
-        params: Optional dictionary of parameters to pass to the script as command-line arguments.
-            Examples:
-            - {"--name": "test", "--wait": True} -> passes --name test --wait
-            - {"--flag": True} -> passes --flag (boolean flags)
-            - {"--names": ["vm1", "vm2"]} -> passes --names vm1 vm2
-            - {"--cpu": 4} -> passes --cpu 4
+        params: Raw command-line argument string to pass to the script.
+            Example: "--target /path/to/file -c --code \"SELECT 1\""
 
     Returns:
         Script execution result as string

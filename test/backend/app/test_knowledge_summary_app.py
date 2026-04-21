@@ -20,11 +20,31 @@ sys.modules['botocore'] = MagicMock()
 sys.modules['botocore.client'] = MagicMock()
 sys.modules['botocore.exceptions'] = MagicMock()
 sys.modules['nexent'] = MagicMock()
-sys.modules['nexent.core'] = MagicMock()
-sys.modules['nexent.core.agents'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.core.models'] = MagicMock()
-sys.modules['nexent.core.models.embedding_model'] = MagicMock()
+nexent_core = types.ModuleType('nexent.core')
+sys.modules['nexent.core'] = nexent_core
+nexent_core_agents = types.ModuleType('nexent.core.agents')
+sys.modules['nexent.core.agents'] = nexent_core_agents
+nexent_core_agents_agent_model = types.ModuleType('nexent.core.agents.agent_model')
+sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model
+
+# nexent.core.models must be a ModuleType (not MagicMock) to allow submodules
+nexent_core_models = types.ModuleType('nexent.core.models')
+sys.modules['nexent.core.models'] = nexent_core_models
+sys.modules['nexent.core.models.embedding_model'] = types.ModuleType('nexent.core.models.embedding_model')
+
+# Mock rerank_model module with proper class exports
+class MockBaseRerank:
+    pass
+
+class MockOpenAICompatibleRerank(MockBaseRerank):
+    def __init__(self, *args, **kwargs):
+        pass
+
+rerank_module = MagicMock()
+rerank_module.BaseRerank = MockBaseRerank
+rerank_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
+sys.modules['nexent.core.models.rerank_model'] = rerank_module
+
 sys.modules['nexent.core.models.stt_model'] = MagicMock()
 sys.modules['nexent.core.models.tts_model'] = MagicMock()
 sys.modules['nexent.core.nlp'] = MagicMock()

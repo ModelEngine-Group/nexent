@@ -94,9 +94,11 @@ class ReadSkillMdTool:
         """Read skill markdown files.
 
         Args:
-            skill_name: Name of the skill
-            *additional_files: Optional additional files to read. If empty, reads SKILL.md.
-                If non-empty, only reads specified files (SKILL.md is NOT read by default
+            skill_name: Name of the skill. If empty, reads directly from local_skills_dir.
+            *additional_files: Optional additional files to read. If skill_name is empty,
+                this is treated as the file path directly. If skill_name is non-empty:
+                - If empty, reads SKILL.md by default.
+                - If non-empty, only reads specified files (SKILL.md is NOT read by default
                 unless explicitly included in the list).
 
         Returns:
@@ -104,6 +106,11 @@ class ReadSkillMdTool:
         """
         try:
             manager = self._get_skill_manager()
+
+            # If skill_name is empty, read directly from local_skills_dir
+            if not skill_name:
+                return self._read_direct_file(additional_files)
+
             skill = manager.load_skill(skill_name)
 
             if not skill:
@@ -138,6 +145,39 @@ class ReadSkillMdTool:
             logger.error(f"Failed to read skill markdown: {e}")
             return f"Error reading skill: {str(e)}"
 
+    def _read_direct_file(self, path_parts: tuple) -> str:
+        """Read a file directly from local_skills_dir.
+
+        Args:
+            path_parts: Tuple of path components. If empty, reads SKILL.md from root.
+
+        Returns:
+            File content or error message
+        """
+        if not self.local_skills_dir:
+            return "[Error] local_skills_dir is not configured"
+
+        if not path_parts:
+            # No path specified, try to read SKILL.md from root
+            file_path = "SKILL.md"
+        else:
+            file_path = "/".join(path_parts)
+
+        full_path = os.path.join(self.local_skills_dir, file_path)
+        if not os.path.exists(full_path):
+            return f"File not found: {file_path}"
+
+        try:
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            # Strip frontmatter if it's a markdown file
+            if full_path.endswith('.md'):
+                content = self._strip_frontmatter(content)
+            return content
+        except Exception as e:
+            logger.error(f"Failed to read file {full_path}: {e}")
+            return f"[Error] Failed to read '{file_path}': {e}"
+
 
 # Global instance for tool execution
 _skill_md_tool = None
@@ -170,15 +210,18 @@ def read_skill_md(skill_name: str, additional_files: Optional[list[str]] = None)
     Reads skill files from the skill root directory. Behavior depends on whether
     additional_files is provided:
 
-    - If additional_files is empty/not provided: reads SKILL.md by default
-    - If additional_files is provided: only reads the specified files (SKILL.md is NOT
-      included by default unless explicitly listed in additional_files)
+    - If skill_name is empty: reads directly from local_skills_dir root.
+      additional_files is treated as the file path. If empty, reads SKILL.md from root.
+    - If skill_name is non-empty and additional_files is empty: reads SKILL.md by default
+    - If skill_name is non-empty and additional_files is provided: only reads the specified
+      files (SKILL.md is NOT included by default unless explicitly listed)
 
     Use this tool to load the execution guide for a skill when you need to understand
     how to handle a specific task that matches the skill's purpose.
 
     Args:
-        skill_name: Name of the skill (e.g., "code-reviewer")
+        skill_name: Name of the skill (e.g., "code-reviewer"). If empty, reads directly
+            from local_skills_dir root.
         additional_files: Optional list of specific files to read. When provided, only
             reads these files (SKILL.md is not automatically included). Examples:
             - ["examples.md"] - reads only examples.md
@@ -195,6 +238,10 @@ def read_skill_md(skill_name: str, additional_files: Optional[list[str]] = None)
         # Only reads specified files (SKILL.md NOT included by default)
         read_skill_md("code-reviewer", ["examples.md"])
         read_skill_md("code-reviewer", ["SKILL.md", "examples.md"])
+
+        # Read directly from local_skills_dir (skill_name is empty)
+        read_skill_md("")  # reads SKILL.md from root
+        read_skill_md("", ["my-file.txt"])  # reads my-file.txt from root
     """
     tool_instance = get_read_skill_md_tool()
     files = additional_files or []

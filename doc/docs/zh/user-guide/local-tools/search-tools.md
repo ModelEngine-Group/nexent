@@ -31,6 +31,8 @@ title: 搜索工具
   - `query`：检索问题，必填。
   - `search_mode`：`hybrid`（默认，混合召回）、`accurate`（文本模糊匹配）、`semantic`（向量语义）。
   - `index_names`：指定要搜索的知识库名称列表（可用用户侧名称或内部索引名），可选。
+  - `enable_rerank`：是否启用重排序，默认 False。开启后会对检索结果进行二次排序，提升结果相关性。
+  - `rerank_model`：重排序使用的模型，默认为系统配置的 rerank 模型。`enable_rerank` 为 True 时生效。
 - 返回匹配片段的标题、路径/URL、来源类型、得分等。
 - 若未选择知识库，会提示"无可用知识库"。
 
@@ -44,6 +46,8 @@ title: 搜索工具
   - `threshold`：相似度阈值，默认 0.2。
   - `index_names`：指定要搜索的知识库名称列表，可选。
   - `kb_page` / `kb_page_size`：分页获取 DataMate 知识库列表。
+  - `enable_rerank`：是否启用重排序，默认 False。开启后会对检索结果进行二次排序，提升结果相关性。
+  - `rerank_model`：重排序使用的模型，默认为系统配置的 rerank 模型。`enable_rerank` 为 True 时生效。
 - 返回包含文件名、下载链接、得分等结构化结果。
 
 ### dify_search
@@ -58,6 +62,8 @@ title: 搜索工具
 - **检索参数**：
   - `query`：检索问题，必填。
   - `search_method`：搜索方法，选项：`keyword_search`、`semantic_search`、`full_text_search`、`hybrid_search`，默认 `semantic_search`。
+  - `enable_rerank`：是否启用重排序，默认 False。开启后会对检索结果进行二次排序，提升结果相关性。
+  - `rerank_model`：重排序使用的模型，默认为系统配置的 rerank 模型。`enable_rerank` 为 True 时生效。
 - 返回匹配片段的标题、内容、得分等。
 
 ### exa_search / tavily_search / linkup_search
@@ -79,7 +85,8 @@ title: 搜索工具
 1. **选择数据源**：私有资料用 `knowledge_base_search`、`datamate_search` 或 `dify_search`；实时公开信息用 Exa/Tavily/Linkup。
 2. **设置检索模式/数量**：知识库可在 `search_mode` 之间切换；公网搜索可调整 `max_results` 与是否启用图片过滤。
 3. **限定范围**：需要特定知识库时填写 `index_names`，避免无关结果；DataMate 可通过阈值与 top_k 控制结果精度与数量。
-4. **结果利用**：返回为 JSON，可直接用于回答、摘要或后续引用；包含 cite 索引便于引用管理。
+4. **启用重排序（可选）**：如需提升检索结果相关性，可设置 `enable_rerank: true`，并通过 `rerank_top_n` 和 `rerank_model` 调整重排序效果。
+5. **结果利用**：返回为 JSON，可直接用于回答、摘要或后续引用；包含 cite 索引便于引用管理。
 
 ## 🛡️ 安全与最佳实践
 

@@ -36,7 +36,7 @@ class ReadSkillConfigTool:
         """Read the config.yaml file from a skill directory.
 
         Args:
-            skill_name: Name of the skill (e.g., "simple-skill-creator")
+            skill_name: Name of the skill (e.g., "skill-creator")
 
         Returns:
             JSON-serialized dict of the config file, or an error message.
@@ -109,14 +109,14 @@ def read_skill_config(skill_name: str) -> str:
     needed for skill creation workflows.
 
     Args:
-        skill_name: Name of the skill whose config.yaml to read (e.g., "simple-skill-creator")
+        skill_name: Name of the skill whose config.yaml to read (e.g., "skill-creator")
 
     Returns:
         JSON string containing the parsed config.yaml contents as a dictionary.
 
     Examples:
-        # Read the config for simple-skill-creator to get temp_skill path
-        read_skill_config("simple-skill-creator")
+        # Read the config for skill-creator to get temp_skill path
+        read_skill_config("skill-creator")
         # Returns: {"path": {"temp_skill": "/mnt/nexent/skills/tmp/"}}
     """
     tool_instance = get_read_skill_config_tool()

@@ -21,6 +21,7 @@ data:
   ELASTICSEARCH_SERVICE: {{ .Values.config.services.elasticsearchService | quote }}
   RUNTIME_SERVICE_URL: {{ .Values.config.services.runtimeUrl | quote }}
   NEXENT_MCP_SERVER: {{ .Values.config.services.mcpServer | quote }}
+  MCP_MANAGEMENT_API: {{ .Values.config.services.northboundServer | quote }}
   DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}
   NORTHBOUND_API_SERVER: {{ .Values.config.services.northboundServer | quote }}
 

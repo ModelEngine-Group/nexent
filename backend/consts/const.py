@@ -1,5 +1,6 @@
 import os
 from enum import Enum
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -44,6 +45,11 @@ CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
 # Limit concurrent Office-to-PDF conversions
 MAX_CONCURRENT_CONVERSIONS = 5
+# LibreOffice profile directory
+LIBREOFFICE_PROFILE_DIR = os.getenv(
+    "LIBREOFFICE_PROFILE_DIR",
+    str(Path.home() / ".cache" / "nexent" / "libreoffice-profile"),
+)
 # Supported Office file MIME types
 OFFICE_MIME_TYPES = [
     "application/msword",  # .doc
@@ -210,6 +216,7 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
+MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 
 
 # Invite code
@@ -338,6 +345,12 @@ IS_DEPLOYED_BY_KUBERNETES = (
 )
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
 
+# Northbound API External URL (used for A2A Agent Card URLs)
+# When accessed through reverse proxy, set this to the public-facing URL
+# Falls back to http://localhost:5013 for local development
+_northbound_url = os.getenv("NORTHBOUND_EXTERNAL_URL", "")
+NORTHBOUND_EXTERNAL_URL = _northbound_url.rstrip("/") if _northbound_url else "http://localhost:5013"
+
 
 # APP Version
-APP_VERSION = "v2.0.0"
+APP_VERSION = "v2.0.2"

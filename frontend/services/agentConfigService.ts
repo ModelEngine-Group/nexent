@@ -134,6 +134,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       permission: agent.permission,
       is_published: agent.is_published,
       current_version_no: agent.current_version_no,
+      is_a2a_server: agent.is_a2a_server || false,
     }));
 
     return {
@@ -1393,5 +1394,35 @@ export const fetchSkillConfig = async (skillName: string): Promise<Record<string
   } catch (error) {
     log.error("Error fetching skill config:", error);
     return null;
+  }
+};
+
+/**
+ * Delete a skill by name
+ * @param skillName skill name to delete
+ * @returns delete result
+ */
+export const deleteSkill = async (skillName: string) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.skills.delete(skillName), {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    return {
+      success: true,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error deleting skill:", error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Failed to delete skill",
+    };
   }
 };

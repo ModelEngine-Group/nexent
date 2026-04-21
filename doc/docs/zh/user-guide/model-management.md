@@ -52,7 +52,7 @@ Nexent支持与ModelEngine平台的无缝对接
 1. **添加自定义模型**
    - 点击"添加自定义模型"按钮，进入添加模型弹窗。
 2. **选择模型类型**
-   - 点击模型类型下拉框，选择要添加的模型类型（大语言模型/向量化模型/视觉语言模型）。
+   - 点击模型类型下拉框，选择要添加的模型类型（大语言模型/向量化模型/视觉语言模型/重排模型）。
 3. **配置模型参数**
    - **模型名称（必填）**：输入请求体中的模型名称。
    - **展示名称**：可为模型设置一个展示名称，默认与模型名称相同。
@@ -82,7 +82,7 @@ Nexent支持与ModelEngine平台的无缝对接
 2. **选择模型提供商**
    - 点击模型提供商下拉框，选择模型提供商。
 3. **选择模型类型**
-   - 点击模型类型下拉框，选择要添加的模型类型（大语言模型/向量化模型/视觉语言模型）。
+   - 点击模型类型下拉框，选择要添加的模型类型（大语言模型/向量化模型/视觉语言模型/重排模型）。
 4. **输入API Key（必填）**
    - 输入您的API密钥。
 5. **获取模型**
@@ -150,6 +150,10 @@ Nexent支持与ModelEngine平台的无缝对接
   <img src="./assets/model-management/vector-model.png" style="width: 50%; height: 50%;" />
 </div>
 
+#### 重排模型
+重排模型用于初筛后的文档进行语义匹配与评分，确保最相关的核心答案能够排在首位，以提升检索的准确性和效率。配置合适的重排模型，可以显著提升知识库的检索效果。
+
+- 点击重排模型下拉框，从已添加的重排模型中选择一个。
 
 
 #### 多模态模型
@@ -161,6 +165,7 @@ Nexent支持与ModelEngine平台的无缝对接
 <div style="display: flex; gap: 8px;">
   <img src="./assets/model-management/select-model-1.png" style="width: 30%; height: 100%;" />
   <img src="./assets/model-management/select-model-2.png" style="width: 30%; height: 100%;" />
+  <img src="./assets/model-management/select-model-4.png" style="width: 30%; height: 100%;" />
   <img src="./assets/model-management/select-model-3.png" style="width: 30%; height: 100%;" />
 </div>
 
@@ -215,6 +220,8 @@ Nexent 支持任何 **遵循OpenAI API规范** 的大语言模型供应商，包
 
 使用与大语言模型相同的API Key，但模型URL一般会有所差异，一般以`/v1/embeddings`为结尾，同时指定向量模型名称，如硅基流动提供的**BAAI/bge-m3**。
 
+#### 🔃 重排模型
+使用与大语言模型相同的API Key，但模型URL一般会有所差异，一般以`/v1/rerank`为结尾。
 #### 🎤 语音模型
 
 目前仅支持火山引擎语音，且需要在`.env`中进行配置

@@ -90,6 +90,13 @@ sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.agent_version_db'] = MagicMock()
+a2a_agent_db_stub = _create_stub_module(
+    "database.a2a_agent_db",
+    PROTOCOL_JSONRPC="JSONRPC",
+    query_external_sub_agents=MagicMock(return_value=[]),
+)
+sys.modules['database.a2a_agent_db'] = a2a_agent_db_stub
+database_module.a2a_agent_db = a2a_agent_db_stub
 sys.modules['services.vectordatabase_service'] = MagicMock()
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
@@ -182,7 +189,9 @@ from backend.agents.create_agent_info import (
     prepare_prompt_templates,
     _get_skills_for_template,
     _get_skill_script_tools,
-    _print_prompt_with_token_count,
+    _extract_url_from_card,
+    _build_external_agent_config,
+    _get_external_a2a_agents,
 )
 
 # Import constants for testing
@@ -431,88 +440,6 @@ class TestGetSkillScriptTools:
                 desc = call[1]['description']
                 assert len(desc) > 0
                 assert "skill" in desc.lower()
-
-
-class TestPrintPromptWithTokenCount:
-    """Tests for the _print_prompt_with_token_count function"""
-
-    def test_print_prompt_with_token_count_success(self):
-        """Test successful token counting with tiktoken available"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = ["token1", "token2", "token3"]
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("test prompt content", agent_id=123, stage="TEST")
-
-                mock_encoding.encode.assert_called_once_with("test prompt content")
-                mock_logger.info.assert_called()
-
-                # Check that log messages contain expected content
-                log_calls = mock_logger.info.call_args_list
-                log_text = " ".join([str(call) for call in log_calls])
-                assert "TEST" in log_text
-                assert "123" in log_text
-                assert "3" in log_text  # Token count
-
-    def test_print_prompt_with_token_count_tiktoken_failure(self):
-        """Test graceful handling when tiktoken fails"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            with patch.object(tiktoken, 'get_encoding', side_effect=Exception("tiktoken not available")):
-                _print_prompt_with_token_count("test prompt", agent_id=456, stage="FALLBACK")
-
-                # Should log a warning and then log the prompt
-                mock_logger.warning.assert_called_once()
-                assert "Failed to count tokens: tiktoken not available" in mock_logger.warning.call_args[0][0]
-
-                # Should still log the prompt
-                mock_logger.info.assert_called()
-
-    def test_print_prompt_with_token_count_default_stage(self):
-        """Test with default stage parameter"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = ["a", "b"]
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("short prompt")
-
-                log_calls = mock_logger.info.call_args_list
-                log_text = " ".join([str(call) for call in log_calls])
-                assert "PROMPT" in log_text  # Default stage
-
-    def test_print_prompt_with_token_count_empty_prompt(self):
-        """Test with empty prompt"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = []
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("", agent_id=1, stage="EMPTY")
-
-                mock_encoding.encode.assert_called_once_with("")
-                # Should log token count of 0
-                log_calls = mock_logger.info.call_args_list
-                log_text = " ".join([str(call) for call in log_calls])
-                assert "0" in log_text
-
-    def test_print_prompt_with_token_count_none_agent_id(self):
-        """Test with None agent_id"""
-        import tiktoken
-
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = ["token"]
-            with patch.object(tiktoken, 'get_encoding', return_value=mock_encoding):
-                _print_prompt_with_token_count("prompt", agent_id=None, stage="NO_ID")
-
-                # Should not raise an error
-                mock_encoding.encode.assert_called_once_with("prompt")
 
 
 class TestDiscoverLangchainTools:
@@ -779,7 +706,8 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
                 {
@@ -788,15 +716,21 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [{"name": "index_names", "default": []}],
+                    "params": [
+                        {"name": "index_names", "default": []},
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 }
             ]
             mock_vdb_core = "mock_elastic_core"
             mock_embedding_model = "mock_embedding_model"
+            mock_rerank_model = "mock_rerank_model"
             mock_get_vector_db_core.return_value = mock_vdb_core
             mock_embedding.return_value = mock_embedding_model
+            mock_rerank.return_value = mock_rerank_model
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -807,10 +741,11 @@ class TestCreateToolConfigList:
             mock_get_vector_db_core.assert_called_once()
             mock_embedding.assert_called_once_with(tenant_id="tenant_1")
 
-            # Verify metadata contains ONLY vdb_core and embedding_model (no index_names or name_resolver)
+            # Verify metadata contains vdb_core, embedding_model and rerank_model
             expected_metadata = {
                 "vdb_core": mock_vdb_core,
                 "embedding_model": mock_embedding_model,
+                "rerank_model": mock_rerank.return_value,
             }
             assert mock_tool_instance.metadata == expected_metadata
 
@@ -834,7 +769,8 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.side_effect = [mock_tool_kb, mock_tool_other]
 
@@ -845,7 +781,11 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "index_names", "default": []},
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 },
@@ -862,6 +802,7 @@ class TestCreateToolConfigList:
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
             mock_embedding.return_value = "embedding_instance"
+            mock_rerank.return_value = "rerank_instance"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -871,6 +812,7 @@ class TestCreateToolConfigList:
             assert mock_tool_kb.metadata == {
                 "vdb_core": "vdb_core_instance",
                 "embedding_model": "embedding_instance",
+                "rerank_model": mock_rerank.return_value,
             }
 
             # Verify OtherTool has no special metadata (should not have metadata attribute set)
@@ -891,7 +833,8 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -902,13 +845,17 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "mcp",
                     "usage": "mcp_server_1"
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
             mock_embedding.return_value = "embedding"
+            mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -917,6 +864,7 @@ class TestCreateToolConfigList:
             assert mock_tool_instance.metadata == {
                 "vdb_core": "vdb_core",
                 "embedding_model": "embedding",
+                "rerank_model": mock_rerank.return_value,
             }
 
     @pytest.mark.asyncio
@@ -1023,7 +971,8 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
                 {
@@ -1032,7 +981,10 @@ class TestCreateToolConfigList:
                     "description": "First knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 },
@@ -1042,13 +994,17 @@ class TestCreateToolConfigList:
                     "description": "Second knowledge search",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
                     "source": "local",
                     "usage": None
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
             mock_embedding.return_value = "embedding"
+            mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -1058,9 +1014,172 @@ class TestCreateToolConfigList:
             expected_metadata = {
                 "vdb_core": "vdb_core",
                 "embedding_model": "embedding",
+                "rerank_model": mock_rerank.return_value,
             }
             assert mock_tool_1.metadata == expected_metadata
             assert mock_tool_2.metadata == expected_metadata
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_dify_tool(self):
+        """Test that DifySearchTool gets correct metadata including rerank model."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DifySearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+            mock_rerank.return_value = "mock_rerank_model"
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DifySearchTool",
+                    "name": "dify_search",
+                    "description": "Dify knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was fetched
+            mock_rerank.assert_called_once_with(
+                tenant_id="tenant_1", model_name="gte-rerank-v2"
+            )
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_dify_tool_no_rerank(self):
+        """Test that DifySearchTool without rerank gets None metadata."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DifySearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DifySearchTool",
+                    "name": "dify_search",
+                    "description": "Dify knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": False},
+                        {"name": "rerank_model_name", "default": ""},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was NOT fetched
+            mock_rerank.assert_not_called()
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool(self):
+        """Test that DataMateSearchTool gets correct metadata including rerank model."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DataMateSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+            mock_rerank.return_value = "mock_datamate_rerank_model"
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateSearchTool",
+                    "name": "datamate_search",
+                    "description": "DataMate knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "jina-rerank-v2"},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was fetched
+            mock_rerank.assert_called_once_with(
+                tenant_id="tenant_1", model_name="jina-rerank-v2"
+            )
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool_no_rerank(self):
+        """Test that DataMateSearchTool without rerank gets None metadata."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DataMateSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateSearchTool",
+                    "name": "datamate_search",
+                    "description": "DataMate knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "rerank", "default": False},
+                        {"name": "rerank_model_name", "default": ""},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            from backend.agents.create_agent_info import create_tool_config_list
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify rerank model was NOT fetched
+            mock_rerank.assert_not_called()
+
+            # Verify metadata
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
 
 
 class TestCreateAgentConfig:
@@ -1118,7 +1237,8 @@ class TestCreateAgentConfig:
                 max_steps=5,
                 model_name="test_model",
                 provide_run_summary=True,
-                managed_agents=[]
+                managed_agents=[],
+                external_a2a_agents=[]
             )
 
     @pytest.mark.asyncio
@@ -1184,7 +1304,8 @@ class TestCreateAgentConfig:
                     max_steps=5,
                     model_name="test_model",
                     provide_run_summary=True,
-                    managed_agents=[mock_sub_agent_config]
+                    managed_agents=[mock_sub_agent_config],
+                    external_a2a_agents=[]
                 )
 
     @pytest.mark.asyncio
@@ -1383,7 +1504,8 @@ class TestCreateAgentConfig:
                 max_steps=5,
                 model_name="main_model",  # Should fallback to "main_model"
                 provide_run_summary=True,
-                managed_agents=[]
+                managed_agents=[],
+                external_a2a_agents=[]
             )
 
     @pytest.mark.asyncio
@@ -1958,7 +2080,7 @@ class TestCreateAgentConfig:
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
-            
+
             # Create a tool that raises exception when accessing class_name
             mock_tool = MagicMock()
             type(mock_tool).class_name = PropertyMock(side_effect=Exception("Test Error"))
@@ -2319,8 +2441,8 @@ class TestCreateAgentRunInfo:
                     "status": True,
                     "authorization_token": None
                 },
-                "nexent": {
-                    "remote_mcp_server_name": "nexent",
+                "outer-apis": {
+                    "remote_mcp_server_name": "outer-apis",
                     "remote_mcp_server": "http://nexent.mcp/sse",
                     "status": True,
                     "authorization_token": None
@@ -2785,7 +2907,7 @@ class TestCreateAgentRunInfo:
 
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
-            
+
             # Verify that the returned data includes authorization_token (used in mcp_host construction)
             assert mock_get_mcp.return_value[0]["authorization_token"] == "secret_token_123"
 
@@ -2870,6 +2992,320 @@ class TestPreparePromptTemplates:
             mock_get_template.assert_called_once_with(False, "en")
             assert result["system_prompt"] == "test system prompt"
             assert result["test"] == "template"
+
+
+class TestExtractUrlFromCard:
+    """Tests for the _extract_url_from_card function"""
+
+    def test_extract_url_from_card_none(self):
+        """Test case for None raw_card"""
+        result = _extract_url_from_card(None)
+        assert result == ""
+
+    def test_extract_url_from_card_empty_dict(self):
+        """Test case for empty dict raw_card"""
+        result = _extract_url_from_card({})
+        assert result == ""
+
+    def test_extract_url_from_card_no_interfaces(self):
+        """Test case for card with url but no supportedInterfaces"""
+        raw_card = {"name": "test_agent", "url": "http://example.com/agent"}
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://example.com/agent"
+
+    def test_extract_url_from_card_empty_interfaces(self):
+        """Test case for card with empty supportedInterfaces"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://example.com/agent",
+            "supportedInterfaces": []
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://example.com/agent"
+
+    def test_extract_url_from_card_prefers_http_json_rpc(self):
+        """Test case for preferring http-json-rpc protocol"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "http-streaming", "url": "http://streaming.com"},
+                {"protocolBinding": "http-json-rpc", "url": "http://jsonrpc.com/agent"},
+                {"protocolBinding": "sse", "url": "http://sse.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://jsonrpc.com/agent"
+
+    def test_extract_url_from_card_jsonrpc_variant(self):
+        """Test case for jsonrpc protocol variant"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "jsonrpc", "url": "http://jsonrpc.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://jsonrpc.com/agent"
+
+    def test_extract_url_from_card_httpjsonrpc_variant(self):
+        """Test case for httpjsonrpc protocol variant"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "httpjsonrpc", "url": "http://httpjsonrpc.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://httpjsonrpc.com/agent"
+
+    def test_extract_url_from_card_case_insensitive(self):
+        """Test case for case-insensitive protocol matching"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "HTTP-JSON-RPC", "url": "http://uppercase.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://uppercase.com/agent"
+
+    def test_extract_url_from_card_fallback_to_first_interface(self):
+        """Test case for fallback to first interface when no http-json-rpc"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "sse", "url": "http://sse.com/agent"},
+                {"protocolBinding": "http-streaming", "url": "http://streaming.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://sse.com/agent"
+
+    def test_extract_url_from_card_fallback_skips_empty_url(self):
+        """Test case for skipping interfaces with empty URL"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "sse", "url": ""},
+                {"protocolBinding": "http-streaming", "url": "http://streaming.com/agent"},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://streaming.com/agent"
+
+    def test_extract_url_from_card_fallback_to_root_url(self):
+        """Test case for fallback to root url when all interfaces have empty URL"""
+        raw_card = {
+            "name": "test_agent",
+            "url": "http://fallback.com/agent",
+            "supportedInterfaces": [
+                {"protocolBinding": "sse", "url": ""},
+                {"protocolBinding": "http-streaming", "url": ""},
+            ]
+        }
+        result = _extract_url_from_card(raw_card)
+        assert result == "http://fallback.com/agent"
+
+
+class TestBuildExternalAgentConfig:
+    """Tests for the _build_external_agent_config function"""
+
+    def test_build_external_agent_config_basic(self):
+        """Test case for building basic external agent config"""
+        agent = {
+            "external_agent_id": "ext_123",
+            "name": "External Agent",
+            "description": "An external A2A agent",
+            "transport_type": "http-streaming",
+            "protocol_version": "1.0",
+            "protocol_type": "JSONRPC",
+        }
+        agent_url = "http://external.com/a2a"
+
+        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+            result = _build_external_agent_config(agent, agent_url)
+
+            MockConfig.assert_called_once_with(
+                agent_id="ext_123",
+                name="External Agent",
+                description="An external A2A agent",
+                url="http://external.com/a2a",
+                api_key=None,
+                transport_type="http-streaming",
+                protocol_version="1.0",
+                protocol_type="JSONRPC",
+                timeout=300.0,
+                raw_card=None,
+            )
+            assert result == MockConfig.return_value
+
+    def test_build_external_agent_config_defaults(self):
+        """Test case for building config with missing fields"""
+        agent = {
+            "external_agent_id": "ext_456",
+        }
+        agent_url = "http://default.com/agent"
+
+        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+            result = _build_external_agent_config(agent, agent_url)
+
+            MockConfig.assert_called_once_with(
+                agent_id="ext_456",
+                name="Unknown",
+                description="External A2A agent",
+                url="http://default.com/agent",
+                api_key=None,
+                transport_type="http-streaming",
+                protocol_version="1.0",
+                protocol_type="JSONRPC",
+                timeout=300.0,
+                raw_card=None,
+            )
+            assert result == MockConfig.return_value
+
+    def test_build_external_agent_config_with_raw_card(self):
+        """Test case for building config with raw_card"""
+        agent = {
+            "external_agent_id": "ext_789",
+            "name": "Agent with Card",
+            "description": "Agent with raw card",
+            "raw_card": {"name": "raw_card_agent", "url": "http://raw.com"},
+        }
+        agent_url = "http://raw.com"
+
+        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+            result = _build_external_agent_config(agent, agent_url)
+
+            call_kwargs = MockConfig.call_args[1]
+            assert call_kwargs["agent_id"] == "ext_789"
+            assert call_kwargs["raw_card"] == {"name": "raw_card_agent", "url": "http://raw.com"}
+            assert result == MockConfig.return_value
+
+
+class TestGetExternalA2AAgents:
+    """Tests for the _get_external_a2a_agents function"""
+
+    def test_get_external_a2a_agents_success(self):
+        """Test case for successfully getting external A2A agents"""
+        mock_query_result = [
+            {
+                "external_agent_id": "ext_1",
+                "name": "Agent 1",
+                "description": "First external agent",
+                "agent_url": "http://agent1.com/a2a",
+            },
+            {
+                "external_agent_id": "ext_2",
+                "name": "Agent 2",
+                "description": "Second external agent",
+                "agent_url": "http://agent2.com/a2a",
+            },
+        ]
+
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+            with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1", version_no=1)
+
+                assert len(result) == 2
+                from database.a2a_agent_db import query_external_sub_agents
+                query_external_sub_agents.assert_called_once_with(
+                    local_agent_id=1, tenant_id="tenant_1", version_no=1
+                )
+                assert mock_build.call_count == 2
+                mock_build.assert_any_call(mock_query_result[0], "http://agent1.com/a2a")
+                mock_build.assert_any_call(mock_query_result[1], "http://agent2.com/a2a")
+
+    def test_get_external_a2a_agents_skips_missing_url(self):
+        """Test case for skipping agents without URL"""
+        mock_query_result = [
+            {
+                "external_agent_id": "ext_1",
+                "name": "Valid Agent",
+                "agent_url": "http://valid.com/a2a",
+            },
+            {
+                "external_agent_id": "ext_2",
+                "name": "Invalid Agent",
+                "description": "No URL available",
+            },
+        ]
+
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+            with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                assert len(result) == 1
+                mock_build.assert_called_once_with(mock_query_result[0], "http://valid.com/a2a")
+
+    def test_get_external_a2a_agents_empty_db_response(self):
+        """Test case for empty database response"""
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=[]):
+            with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                assert result == []
+                mock_build.assert_not_called()
+
+    def test_get_external_a2a_agents_uses_explicit_url_first(self):
+        """Test case for preferring explicit agent_url over raw_card"""
+        mock_query_result = [
+            {
+                "external_agent_id": "ext_1",
+                "name": "Agent with both URLs",
+                "agent_url": "http://explicit.com/a2a",
+                "raw_card": {"url": "http://card.com/a2a"},
+            },
+        ]
+
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+            with patch('backend.agents.create_agent_info._extract_url_from_card') as mock_extract:
+                with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                    result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                    assert len(result) == 1
+                    mock_extract.assert_not_called()
+                    mock_build.assert_called_once_with(mock_query_result[0], "http://explicit.com/a2a")
+
+    def test_get_external_a2a_agents_extracts_url_from_raw_card(self):
+        """Test case for extracting URL from raw_card when no explicit URL"""
+        mock_query_result = [
+            {
+                "external_agent_id": "ext_1",
+                "name": "Agent without explicit URL",
+                "raw_card": {
+                    "url": "http://card-url.com/a2a",
+                    "supportedInterfaces": [
+                        {"protocolBinding": "http-json-rpc", "url": "http://card-jsonrpc.com"}
+                    ]
+                },
+            },
+        ]
+
+        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+            with patch('backend.agents.create_agent_info._extract_url_from_card', return_value="http://card-jsonrpc.com") as mock_extract:
+                with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+                    result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                    assert len(result) == 1
+                    mock_extract.assert_called_once_with(mock_query_result[0]["raw_card"])
+                    mock_build.assert_called_once_with(mock_query_result[0], "http://card-jsonrpc.com")
+
+    def test_get_external_a2a_agents_exception_handling(self):
+        """Test case for exception handling"""
+        with patch('database.a2a_agent_db.query_external_sub_agents', side_effect=Exception("Database error")):
+            with patch('backend.agents.create_agent_info.logger') as mock_logger:
+                result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
+
+                assert result == []
+                mock_logger.error.assert_called_once()
+                assert "FAILED" in mock_logger.error.call_args[0][0]
+                assert "Database error" in mock_logger.error.call_args[0][0]
 
 
 if __name__ == "__main__":

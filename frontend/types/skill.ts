@@ -13,24 +13,16 @@ export const MAX_RECENT_SKILLS = 5;
  * Interactive skill creation steps (Chinese)
  */
 export const THINKING_STEPS_ZH = [
-  { step: 0, description: "等待大模型响应..." },
-  { step: 1, description: "加载内置技能提示词..." },
-  { step: 2, description: "加载技能配置..." },
-  { step: 3, description: "生成技能 SKILL.md ..." },
-  { step: 4, description: "保存中..." },
-  { step: 5, description: "已完成, 正在总结..." },
+  { step: 1, description: "生成技能内容中 ..." },
+  { step: 2, description: "总结中 ..." },
 ];
 
 /**
  * Interactive skill creation steps (English)
  */
 export const THINKING_STEPS_EN = [
-  { step: 0, description: "Waiting for model response..." },
-  { step: 1, description: "Loading built-in skills..." },
-  { step: 2, description: "Loading dynamic config..." },
-  { step: 3, description: "Generating skill SKILL.md ..." },
-  { step: 4, description: "Saving skill..." },
-  { step: 5, description: "Done, summarizing..." },
+  { step: 1, description: "Generating skill content..." },
+  { step: 2, description: "Summarizing..." },
 ];
 
 /**
@@ -59,6 +51,24 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+}
+
+/**
+ * Existing skill data for update scenarios
+ */
+export interface ExistingSkill {
+  name: string;
+  description: string;
+  tags: string[];
+  content: string;
+}
+
+/**
+ * Result of parsing a skill draft from AI response
+ */
+export interface CreateSimpleSkillRequest {
+  user_request: string;
+  existing_skill?: ExistingSkill;
 }
 
 /**

@@ -1,138 +1,217 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Tag, App, Card, Flex, Dropdown, Col } from "antd";
-import { Plus } from "lucide-react";
+import { Tag, App, Flex, Dropdown, Col, Button } from "antd";
+import { Plus, Globe } from "lucide-react";
 import { Agent } from "@/types/agentConfig";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
+import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
+import { a2aClientService, A2AExternalAgent } from "@/services/a2aService";
 
-interface CollaborativeAgentProps {}
-
-export default function CollaborativeAgent({}: CollaborativeAgentProps) {
+export default function CollaborativeAgent() {
   const { t } = useTranslation("common");
-  const { message } = App.useApp();
+  const { message: messageApi } = App.useApp();
 
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
-  const currentAgentPermission = useAgentConfigStore(
-    (state) => state.currentAgentPermission
-  );
+  const currentAgentPermission = useAgentConfigStore((state) => state.currentAgentPermission);
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
-  const updateSubAgentIds = useAgentConfigStore(
-    (state) => state.updateSubAgentIds
+  const updateSubAgentIds = useAgentConfigStore((state) => state.updateSubAgentIds);
+  const updateExternalSubAgentIds = useAgentConfigStore((state) => state.updateExternalSubAgentIds);
+
+  const { availableAgents: internalAgents } = usePublishedAgentList();
+  const { availableAgents: externalAgents } = useExternalAgents();
+
+  // Local state for edit mode (when currentAgentId exists)
+  const [externalRelatedAgents, setExternalRelatedAgents] = useState<A2AExternalAgent[]>([]);
+
+  // External agent IDs from store (for creation mode)
+  const externalSubAgentIdList = editedAgent?.external_sub_agent_id_list || [];
+
+  // Store-based external agents for creation mode
+  const externalRelatedAgentsFromStore = (Array.isArray(externalAgents) ? externalAgents : []).filter(
+    (agent: A2AExternalAgent) => externalSubAgentIdList.includes(agent.id)
   );
 
-  const { availableAgents } = usePublishedAgentList();
+  const editable = !!isCreatingMode || (currentAgentId != null && currentAgentPermission !== "READ_ONLY");
 
-  const editable =
-    !!isCreatingMode ||
-    ((currentAgentId != null && currentAgentId != undefined) &&
-      currentAgentPermission !== "READ_ONLY");
+  // Related internal agent IDs
+  const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list) ? editedAgent.sub_agent_id_list : [];
 
-  // Get related agents - use edited agent state (which includes current agent data when editing)
-  const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list)
-    ? editedAgent.sub_agent_id_list
-    : [];
-
-  const relatedAgents = (
-    Array.isArray(availableAgents) ? availableAgents : []
-  ).filter((agent: Agent) => relatedAgentIds.includes(Number(agent.id)));
-
-  // Filter available agents (exclude already related ones and current agent)
-  const availableAgentsForMenu = (
-    Array.isArray(availableAgents) ? availableAgents : []
-  ).filter(
-    (agent: Agent) =>
-      !relatedAgentIds.includes(Number(agent.id)) &&
-      Number(agent.id) !== currentAgentId
+  // Related internal agents (from published list)
+  const relatedInternalAgents = (Array.isArray(internalAgents) ? internalAgents : []).filter(
+    (agent: Agent) => relatedAgentIds.includes(Number(agent.id))
   );
 
-  const handleAddAgent = (agentId: number) => {
-    const newRelatedAgentIds = [
-      ...(Array.isArray(relatedAgentIds) ? relatedAgentIds : []),
-      agentId,
-    ];
+  // Available internal agents (exclude already related ones and current agent)
+  const availableInternalAgents = (Array.isArray(internalAgents) ? internalAgents : []).filter(
+    (agent: Agent) => !relatedAgentIds.includes(Number(agent.id)) && Number(agent.id) !== currentAgentId
+  );
+
+  // Related external agent IDs (combine local state for edit mode + store for creation mode)
+  const relatedExternalAgentIds: number[] = isCreatingMode
+    ? externalSubAgentIdList
+    : externalRelatedAgents.map((agent) => agent.id);
+
+  // Available external agents (exclude already related ones)
+  const availableExternalForSelection = (Array.isArray(externalAgents) ? externalAgents : []).filter(
+    (agent: A2AExternalAgent) => !relatedExternalAgentIds.includes(agent.id)
+  );
+
+  // External agents to display (from store for creation mode, from API for edit mode)
+  const displayExternalAgents = isCreatingMode ? externalRelatedAgentsFromStore : externalRelatedAgents;
+
+  // Load external related agents
+  useEffect(() => {
+    if (currentAgentId) {
+      loadExternalRelatedAgents();
+    }
+  }, [currentAgentId]);
+
+  const loadExternalRelatedAgents = async () => {
+    if (!currentAgentId) return;
+    const result = await a2aClientService.getSubAgents(Number(currentAgentId));
+    if (result.success && result.data) {
+      setExternalRelatedAgents(result.data);
+    }
+  };
+
+  // Add internal agent
+  const handleSelectInternalAgent = (agentId: number) => {
+    const newRelatedAgentIds = [...(Array.isArray(relatedAgentIds) ? relatedAgentIds : []), agentId];
     updateSubAgentIds(newRelatedAgentIds);
   };
 
-  const handleRemoveAgent = (agentId: number) => {
-    const newRelatedAgentIds = (
-      Array.isArray(relatedAgentIds) ? relatedAgentIds : []
-    ).filter((id: number) => id !== agentId);
+  // Add external agent
+  const handleSelectExternalAgent = async (externalAgentId: number) => {
+    if (isCreatingMode) {
+      const newRelatedAgentIds = [...externalSubAgentIdList, externalAgentId];
+      updateExternalSubAgentIds(newRelatedAgentIds);
+    } else if (currentAgentId) {
+      const result = await a2aClientService.addRelation(Number(currentAgentId), externalAgentId);
+      if (result.success) {
+        messageApi.success(t("a2a.service.addRelationSuccess"));
+        loadExternalRelatedAgents();
+      } else {
+        messageApi.error(result.message || t("a2a.service.addRelationFailed"));
+      }
+    }
+  };
+
+  // Remove internal agent
+  const handleRemoveInternalAgent = (agentId: number) => {
+    const newRelatedAgentIds = (Array.isArray(relatedAgentIds) ? relatedAgentIds : []).filter(
+      (id: number) => id !== agentId
+    );
     updateSubAgentIds(newRelatedAgentIds);
   };
 
-  const addRelatedAgent = (event: React.MouseEvent) => {};
+  // Remove external agent
+  const handleRemoveExternalAgent = async (agentId: number) => {
+    if (isCreatingMode) {
+      const newRelatedAgentIds = externalSubAgentIdList.filter((id) => id !== agentId);
+      updateExternalSubAgentIds(newRelatedAgentIds);
+    } else if (currentAgentId) {
+      const result = await a2aClientService.removeRelation(Number(currentAgentId), agentId);
+      if (result.success) {
+        messageApi.success(t("a2a.service.removeRelationSuccess"));
+        loadExternalRelatedAgents();
+      } else {
+        messageApi.error(result.message || t("a2a.service.removeRelationFailed"));
+      }
+    }
+  };
 
-  const menuItems = Array.isArray(availableAgentsForMenu)
-    ? availableAgentsForMenu.map((agent: Agent) => ({
-        key: String(agent.id),
+  // Unified dropdown menu items
+  const dropdownMenuItems = [
+    // Internal agents group
+    {
+      key: "internal",
+      type: "group" as const,
+      label: t("collaborativeAgent.internalAgents"),
+      children: availableInternalAgents.map((agent: Agent) => ({
+        key: `internal-${agent.id}`,
+        label: agent.display_name || agent.name,
+        onClick: () => handleSelectInternalAgent(Number(agent.id)),
+      })),
+    },
+    // External A2A agents group
+    {
+      key: "external",
+      type: "group" as const,
+      label: t("collaborativeAgent.externalAgents"),
+      children: availableExternalForSelection.map((agent: A2AExternalAgent) => ({
+        key: `external-${agent.id}`,
         label: (
-          <>
-            <span>{agent.display_name || agent.name}</span>
-            {agent.display_name && (
-              <span className="ml-2 text-xs text-gray-400">({agent.name})</span>
-            )}
-          </>
+          <span className="flex items-center gap-2">
+            <Globe size={12} />
+            {agent.name}
+          </span>
         ),
-        onClick: () => handleAddAgent(Number(agent.id)),
-      }))
-    : [];
+        onClick: () => handleSelectExternalAgent(agent.id),
+      })),
+    },
+  ];
 
   return (
     <>
-      <Col xs={24}>
-        <h4 className="text-md font-medium text-gray-700">
-          {t("collaborativeAgent.title")}
-        </h4>
-      </Col>
-      <Col xs={24}>
-        <Flex className="w-full">
-          <Card
-            className="w-full bg-gray-50 rounded-md border-2 border-gray-200 h-24"
-            styles={{ body: { padding: "16px" } }}
+      {/* Agent Selection & Lists */}
+      <Col xs={24} className="border-2 p-4 rounded-md min-h-[100px] flex items-center bg-gray-50">
+        {/* Add Button with Dropdown */}
+        <Flex justify="flex-start" align="center" className="w-full">
+          <Dropdown
+            menu={{ items: dropdownMenuItems }}
+            disabled={!editable}
+            trigger={["click"]}
           >
-            <Flex justify="flex-start" align="center" className="h-full">
-              <Dropdown
-                menu={{
-                  items: menuItems,
-                }}
+            <div className="flex items-center shrink-0">
+              <Button
+                icon={<Plus size={14} />}
                 disabled={!editable}
+                className={`${editable ? "hover:!border-2 hover:!border-dashed hover:!border-blue-500 hover:!text-blue-500 hover:!bg-blue-50 transition-colors" : "!bg-gray-50"}`}
+                style={{ border: '2px dashed #9ca3af' }}
               >
-                <button
-                  type="button"
-                  onClick={addRelatedAgent}
-                  disabled={!editable}
-                  className={`flex-shrink-0 box-border flex items-center justify-center w-8 h-8 border-2 border-dashed transition-colors duration-200 ${
-                    editable
-                      ? "border-blue-400 text-blue-500 hover:border-blue-500 hover:text-blue-600 hover:bg-blue-50"
-                      : "border-gray-300 text-gray-400 cursor-not-allowed"
-                  }`}
-                  title={editable ? t("collaborativeAgent.button.add") : ""}
+              </Button>
+            </div>
+          </Dropdown>
+          <div className="ml-4">
+            {/* Internal Agents List */}
+            <div className={relatedInternalAgents.length > 0 && displayExternalAgents.length > 0 ? "mb-3" : ""}>
+              <Flex className="flex flex-wrap items-center gap-2">
+              {relatedInternalAgents.map((agent: Agent) => (
+                <Tag
+                  key={`internal-${agent.id}`}
+                  closable={editable}
+                  onClose={editable ? () => handleRemoveInternalAgent(Number(agent.id)) : undefined}
+                  className="bg-blue-50 text-blue-700 border-blue-200"
                 >
-                  <Plus size={16} />
-                </button>
-              </Dropdown>
-              <div className="h-full overflow-y-auto ml-4">
-                <Flex className="flex flex-wrap items-center h-full gap-2">
-                  {relatedAgents.map((agent: Agent) => (
-                    <Tag
-                      key={agent.id}
-                      closable={!!editable}
-                      onClose={() => handleRemoveAgent(Number(agent.id))}
-                      className="bg-blue-50 text-blue-700 border-blue-200 truncate"
-                      style={{
-                        maxWidth: "200px",
-                      }}
-                    >
-                      {agent.display_name || agent.name}
-                    </Tag>
-                  ))}
-                </Flex>
-              </div>
-            </Flex>
-          </Card>
+                  {agent.display_name || agent.name}
+                </Tag>
+              ))}
+              </Flex>
+            </div>
+            
+            {/* External Agents List */}
+            <div >
+              <Flex className="flex flex-wrap items-center gap-2">  
+              {displayExternalAgents.map((agent) => (
+                <Tag
+                  key={`external-${agent.id}`}
+                  closable={editable}
+                  onClose={editable ? () => handleRemoveExternalAgent(agent.id) : undefined}
+                  className="bg-green-50 text-green-700 border-green-200"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <Globe size={12} />
+                    {agent.name}
+                  </span>
+                </Tag>
+              ))}
+              </Flex>
+            </div>
+          </div>
         </Flex>
       </Col>
     </>

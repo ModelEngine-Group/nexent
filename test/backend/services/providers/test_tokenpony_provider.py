@@ -161,14 +161,14 @@ class TestTokenPonyModelProvider:
         assert result[0]["model_tag"] == "chat"
 
     @pytest.mark.asyncio
-    async def test_get_models_reranker_success(self, mocker: MockFixture):
-        """Test successful model retrieval for reranker models."""
+    async def test_get_models_rerank_success(self, mocker: MockFixture):
+        """Test successful model retrieval for rerank models."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "data": [
                 {
-                    "id": "gte-reranker-base",
+                    "id": "gte-rerank-base",
                     "object": "model",
                     "owned_by": "gte"
                 }
@@ -194,16 +194,16 @@ class TestTokenPonyModelProvider:
 
         provider = TokenPonyModelProvider()
         provider_config = {
-            "model_type": "reranker",
+            "model_type": "rerank",
             "api_key": "test-api-key"
         }
 
         result = await provider.get_models(provider_config)
 
         assert len(result) == 1
-        assert result[0]["id"] == "gte-reranker-base"
-        assert result[0]["model_type"] == "reranker"
-        assert result[0]["model_tag"] == "reranker"
+        assert result[0]["id"] == "gte-rerank-base"
+        assert result[0]["model_type"] == "rerank"
+        assert result[0]["model_tag"] == "rerank"
 
     @pytest.mark.asyncio
     async def test_get_models_tts_success(self, mocker: MockFixture):

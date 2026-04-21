@@ -78,9 +78,8 @@ class NexentAgent:
                 # Filter out conflicting parameters from params to avoid conflicts
                 # These parameters have exclude=True and cannot be passed to __init__
                 # due to smolagents.tools.Tool wrapper restrictions
-                filtered_params = {
-                    k: v for k, v in params.items() if k not in ["vdb_core", "embedding_model", "observer"]
-                }
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -88,13 +87,18 @@ class NexentAgent:
                 tools_obj.observer = self.observer
                 tools_obj.vdb_core = tool_config.metadata.get(
                     "vdb_core", None) if tool_config.metadata else None
-                tools_obj.embedding_model = (
-                    tool_config.metadata.get(
-                        "embedding_model", None) if tool_config.metadata else None
-                )
-            elif class_name == "DataMateSearchTool":
-                tools_obj = tool_class(**params)
+                tools_obj.embedding_model = tool_config.metadata.get(
+                    "embedding_model", None) if tool_config.metadata else None
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
+            elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
+                # These parameters have exclude=True and cannot be passed to __init__
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "rerank_model"]}
+                tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
             elif class_name == "AnalyzeTextFileTool":
                 tools_obj = tool_class(
                     observer=self.observer,
@@ -239,13 +243,31 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
+                # Create internal managed agents recursively
                 managed_agents_list = [
-                    self.create_single_agent(sub_agent_config) for sub_agent_config in agent_config.managed_agents
+                    self.create_single_agent(sub_agent_config)
+                    for sub_agent_config in agent_config.managed_agents
                 ]
             except Exception as e:
                 raise ValueError(f"Error in creating managed agent: {e}")
 
-            # create the agent
+            # Create wrapper agents for external A2A agents - add them to managed_agents
+            # so model can call them like: external_agent_name(task="...")
+            if agent_config.external_a2a_agents:
+                try:
+                    from .a2a_agent_proxy import ExternalA2AAgentWrapper
+                    for ext_agent_config in agent_config.external_a2a_agents:
+                        a2a_agent_info = ext_agent_config.to_a2a_agent_info()
+                        wrapper = ExternalA2AAgentWrapper(
+                            agent_info=a2a_agent_info,
+                            stop_event=self.stop_event,
+                            observer=self.observer
+                        )
+                        managed_agents_list.append(wrapper)
+                except Exception as e:
+                    raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
+
+            # Create the agent
             agent = CoreAgent(
                 observer=self.observer,
                 tools=tool_list,
@@ -257,6 +279,7 @@ class NexentAgent:
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=["*"],
+                instructions=agent_config.instructions,
             )
             agent.stop_event = self.stop_event
 

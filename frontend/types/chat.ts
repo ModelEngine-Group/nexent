@@ -103,6 +103,16 @@ export interface ChatAttachmentProps {
   className?: string;
 }
 
+// File preview drawer props
+export interface FilePreviewProps {
+  open: boolean;
+  objectName: string;
+  fileName: string;
+  fileType?: string;
+  fileSize?: number;
+  onClose: () => void;
+}
+
 // Main chat message type
 export interface ChatMessageType {
   id: string

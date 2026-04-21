@@ -81,8 +81,8 @@ class MinioClient:
     This class maintains backward compatibility with the existing MinioClient interface
     while using the new storage SDK under the hood.
     """
-
-    _instance: Optional["MinioClient"] = None
+    _instance: Optional['MinioClient'] = None
+    _initialized: bool = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -90,20 +90,7 @@ class MinioClient:
         return cls._instance
 
     def __init__(self):
-        # Determine if endpoint uses HTTPS
-        secure = MINIO_ENDPOINT.startswith(
-            "https://") if MINIO_ENDPOINT else True
-        # Initialize storage client using SDK factory
-        self.storage_config = MinIOStorageConfig(
-            endpoint=MINIO_ENDPOINT,
-            access_key=MINIO_ACCESS_KEY,
-            secret_key=MINIO_SECRET_KEY,
-            region=MINIO_REGION,
-            default_bucket=MINIO_DEFAULT_BUCKET,
-            secure=secure,
-        )
-        self._storage_client = create_storage_client_from_config(
-            self.storage_config)
+        if MinioClient._initialized:
 
     def upload_file(
         self,
@@ -122,6 +109,7 @@ class MinioClient:
         Returns:
             Tuple[bool, str]: (Success status, File URL or error message)
         """
+        self._ensure_initialized()
         return self._storage_client.upload_file(file_path, object_name, bucket)
 
     def upload_fileobj(
@@ -138,6 +126,7 @@ class MinioClient:
         Returns:
             Tuple[bool, str]: (Success status, File URL or error message)
         """
+        self._ensure_initialized()
         return self._storage_client.upload_fileobj(file_obj, object_name, bucket)
 
     def download_file(
@@ -154,6 +143,7 @@ class MinioClient:
         Returns:
             Tuple[bool, str]: (Success status, Success message or error message)
         """
+        self._ensure_initialized()
         return self._storage_client.download_file(object_name, file_path, bucket)
 
     def get_file_url(
@@ -170,6 +160,7 @@ class MinioClient:
         Returns:
             Tuple[bool, str]: (Success status, Presigned URL or error message)
         """
+        self._ensure_initialized()
         return self._storage_client.get_file_url(object_name, bucket, expires)
 
     def get_file_size(self, object_name: str, bucket: Optional[str] = None) -> int:
@@ -183,6 +174,7 @@ class MinioClient:
         Returns:
             int: File size in bytes, 0 if file not found or error
         """
+        self._ensure_initialized()
         return self._storage_client.get_file_size(object_name, bucket)
 
     def list_files(self, prefix: str = "", bucket: Optional[str] = None) -> List[dict]:
@@ -196,6 +188,7 @@ class MinioClient:
         Returns:
             List[dict]: List of file information
         """
+        self._ensure_initialized()
         return self._storage_client.list_files(prefix, bucket)
 
     def delete_file(
@@ -211,6 +204,7 @@ class MinioClient:
         Returns:
             Tuple[bool, str]: (Success status, Success message or error message)
         """
+        self._ensure_initialized()
         return self._storage_client.delete_file(object_name, bucket)
 
     def get_file_stream(
@@ -226,7 +220,24 @@ class MinioClient:
         Returns:
             Tuple[bool, Any]: (Success status, File stream object or error message)
         """
+        self._ensure_initialized()
         return self._storage_client.get_file_stream(object_name, bucket)
+
+    def get_file_range(self, object_name: str, start: int, end: int, bucket: Optional[str] = None) -> Tuple[bool, Any]:
+        """
+        Get a byte-range slice of a file from MinIO.
+
+        Args:
+            object_name: Object name
+            start: Start byte offset (inclusive)
+            end: End byte offset (inclusive), matching HTTP Range semantics
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, Any]: (True, raw_body_stream) on success, (False, error_str) on failure
+        """
+        self._ensure_initialized()
+        return self._storage_client.get_file_range(object_name, start, end, bucket)
 
     def file_exists(self, object_name: str, bucket: Optional[str] = None) -> bool:
         """
@@ -239,6 +250,7 @@ class MinioClient:
         Returns:
             bool: True if file exists, False otherwise
         """
+        self._ensure_initialized()
         return self._storage_client.exists(object_name, bucket)
 
     def copy_file(
@@ -255,6 +267,7 @@ class MinioClient:
         Returns:
             Tuple[bool, str]: (Success status, Destination object name or error message)
         """
+        self._ensure_initialized()
         return self._storage_client.copy_file(source_object, dest_object, bucket)
 
 

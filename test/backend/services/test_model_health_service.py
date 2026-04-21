@@ -33,6 +33,19 @@ sys.modules['nexent.core.agents.agent_model'] = MockModule()
 sys.modules['nexent.core.models'] = MockModule()
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
 
+# Mock rerank_model module with proper class exports
+class MockBaseRerank:
+    pass
+
+class MockOpenAICompatibleRerank(MockBaseRerank):
+    def __init__(self, *args, **kwargs):
+        pass
+
+rerank_module = MockModule()
+rerank_module.BaseRerank = MockBaseRerank
+rerank_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
+sys.modules['nexent.core.models.rerank_model'] = rerank_module
+
 # Mock services packages
 sys.modules['services'] = MockModule()
 sys.modules['services.voice_service'] = MockModule()
@@ -292,16 +305,29 @@ async def test_perform_connectivity_check_stt():
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_rerank():
-    # Execute
-    result = await _perform_connectivity_check(
-        "rerank-model",
-        "rerank",
-        "https://api.example.com",
-        "test-key",
-    )
+    # Setup - mock the rerank model
+    with mock.patch("backend.services.model_health_service.OpenAICompatibleRerank") as mock_rerank:
+        mock_rerank_instance = mock.MagicMock()
+        mock_rerank_instance.connectivity_check = mock.AsyncMock(return_value=True)
+        mock_rerank.return_value = mock_rerank_instance
 
-    # Assert
-    assert result is False
+        # Execute
+        result = await _perform_connectivity_check(
+            "rerank-model",
+            "rerank",
+            "https://api.example.com",
+            "test-key",
+        )
+
+        # Assert
+        assert result is True
+        mock_rerank.assert_called_once_with(
+            model_name="rerank-model",
+            base_url="https://api.example.com",
+            api_key="test-key",
+            ssl_verify=True
+        )
+        mock_rerank_instance.connectivity_check.assert_called_once()
 
 
 @pytest.mark.asyncio

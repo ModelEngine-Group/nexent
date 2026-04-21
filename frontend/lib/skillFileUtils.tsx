@@ -20,15 +20,31 @@ export interface SkillInfo {
  */
 const extractFrontmatter = (content: string): { name: string | null; description: string | null } => {
   const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const frontmatterMatch = normalized.match(/^---\n([\s\S]*?)\n---/);
 
-  if (!frontmatterMatch) return { name: null, description: null };
+  // Use indexOf-based approach to avoid catastrophic backtracking from [\s\S]*? pattern.
+  // This is safe and linear-time O(n) regardless of content structure.
+  let frontmatter: string | null = null;
+  let frontmatterStart = -1;
+  let frontmatterEnd = -1;
 
-  const frontmatter = frontmatterMatch[1];
+  const firstDash = normalized.indexOf("---");
+  if (firstDash !== -1 && (firstDash === 0 || normalized[firstDash - 1] === "\n")) {
+    frontmatterStart = firstDash;
+    const searchStart = frontmatterStart + 3;
+    const secondDash = normalized.indexOf("\n---", searchStart);
+    if (secondDash !== -1) {
+      frontmatterEnd = secondDash;
+      frontmatter = normalized.substring(frontmatterStart, frontmatterEnd + 3);
+    }
+  }
 
-  // Try yaml.load first
+  if (!frontmatter) {
+    return { name: null, description: null };
+  }
+
+  // Try yaml.load first with JSON schema (safest, no type coercion issues)
   try {
-    const parsed = yaml.load(frontmatter) as Record<string, unknown> | null;
+    const parsed = yaml.load(frontmatter, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown> | null;
 
     // Check if yaml.load returned a valid object with the required fields
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -42,7 +58,7 @@ const extractFrontmatter = (content: string): { name: string | null; description
         return { name, description };
       }
     }
-  } catch {
+  } catch (e) {
     // yaml.load failed, fall through to regex extraction
   }
 
@@ -53,49 +69,70 @@ const extractFrontmatter = (content: string): { name: string | null; description
 
 /**
  * Fallback regex-based extraction when yaml.load fails.
- * Handles simple YAML key: value pairs including multi-line values.
+ * Handles simple YAML key: value pairs including multi-line values and block scalars.
  */
 const extractFrontmatterByRegex = (frontmatter: string): { name: string | null; description: string | null } => {
   let name: string | null = null;
   let description: string | null = null;
 
-  // Extract name field - simple pattern: "name: value" at start of line
-  const nameMatch = frontmatter.match(/^name:\s*(.+?)\s*$/m);
-  if (nameMatch && nameMatch[1]) {
-    name = nameMatch[1].trim();
+  // Use indexOf-based approach for name field to avoid catastrophic backtracking from (.+?) pattern.
+  // The original regex `^name:\s*(.+?)\s*$` can cause exponential time complexity.
+  const namePrefix = "name:";
+  const nameIdx = frontmatter.indexOf(namePrefix);
+  if (nameIdx !== -1 && (nameIdx === 0 || frontmatter[nameIdx - 1] === "\n")) {
+    const afterPrefix = frontmatter.substring(nameIdx + namePrefix.length);
+    const eolIdx = afterPrefix.indexOf("\n");
+    const value = eolIdx !== -1 ? afterPrefix.substring(0, eolIdx) : afterPrefix;
+    const trimmedValue = value.trim();
+    if (trimmedValue) {
+      name = trimmedValue;
+    }
   }
 
-  // Extract description field - handles multi-line values with proper indentation
-  // Look for "description:" followed by content until next top-level key
-  const lines = frontmatter.split('\n');
-  let descLines: string[] = [];
-  let inDescription = false;
+  // Extract description field - need to handle block scalars (">" and "|")
+  // The key insight: "description:" line may be followed by ">" on the same line,
+  // and then all indented lines are the value
+  const descStartIdx = frontmatter.indexOf("description:");
+  if (descStartIdx === -1 || (descStartIdx > 0 && frontmatter[descStartIdx - 1] !== "\n")) {
+    return { name, description };
+  }
 
-  for (const line of lines) {
-    // Skip empty lines at start
-    if (!inDescription && line.match(/^description:\s*$/)) {
-      inDescription = true;
-      continue;
+  const afterDesc = frontmatter.substring(descStartIdx + "description:".length);
+  const firstNewline = afterDesc.indexOf("\n");
+  const descFirstLine = firstNewline !== -1 ? afterDesc.substring(0, firstNewline) : afterDesc;
+
+  // Check if description uses block scalar (">" or "|")
+  const hasBlockScalar = /^[>|]/.test(descFirstLine.trim());
+
+  if (hasBlockScalar) {
+    // Block scalar: collect all lines that have at least one leading space
+    const lines = frontmatter.split("\n");
+    const descLineIndex = lines.findIndex((line) => line.includes("description:"));
+    if (descLineIndex === -1) {
+      return { name, description };
     }
 
-    if (inDescription) {
-      // Check if this line is a new top-level key (no leading whitespace)
-      if (line.match(/^[a-z_]+:/)) {
-        // End of description
+    const remainingLines = lines.slice(descLineIndex + 1);
+    const contentLines: string[] = [];
+    for (const line of remainingLines) {
+      // Non-empty line without leading space ends the block
+      if (line.length > 0 && !line.startsWith(" ") && !line.startsWith("\t")) {
         break;
       }
-      // Collect description lines
-      descLines.push(line.replace(/^[ \t]+/, ''));
+      // Collect the line, removing the leading space (YAML block scalars use 1 space indent)
+      if (line.trim() !== "") {
+        contentLines.push(line.replace(/^ /, ""));
+      }
     }
-  }
-
-  if (descLines.length > 0) {
-    description = descLines.join(' ').trim();
+    if (contentLines.length > 0) {
+      description = contentLines.join("\n").trim();
+    }
   } else {
-    // Fallback: try single-line description
-    const singleLineDescMatch = frontmatter.match(/^description:\s*(.+?)\s*$/m);
-    if (singleLineDescMatch && singleLineDescMatch[1]) {
-      description = singleLineDescMatch[1].trim();
+    // Single-line value: capture everything after "description:" (stripped of trailing whitespace).
+    // Use indexOf-based approach to avoid regex backtracking.
+    const descValue = descFirstLine.trimEnd();
+    if (descValue) {
+      description = descValue;
     }
   }
 
@@ -188,26 +225,76 @@ export const extractSkillInfoFromContent = (content: string): { name: string; de
 
   if (!content) return result;
 
-  const skillBlockMatch = content.match(/<SKILL>([\s\S]*?)<\/SKILL>/);
-  const blockContent = skillBlockMatch ? skillBlockMatch[1] : content;
+  // Content may or may not have <SKILL> wrapper tags depending on source.
+  // Use indexOf-based approach instead of regex to avoid catastrophic backtracking.
+  // The [\s\S]*? pattern in regex can cause exponential time complexity on crafted input.
+  let blockContent = content;
+  const openTag = "<SKILL>";
+  const closeTag = "</SKILL>";
+  const openIdx = content.indexOf(openTag);
+  if (openIdx !== -1) {
+    const closeIdx = content.indexOf(closeTag, openIdx + openTag.length);
+    if (closeIdx !== -1) {
+      blockContent = content.substring(openIdx + openTag.length, closeIdx);
+    }
+  }
 
-  const frontmatterMatch = blockContent.match(/^---\n([\s\S]*?)\n---/);
-  if (frontmatterMatch) {
-    const frontmatter = frontmatterMatch[1];
-    const parsed = yaml.load(frontmatter) as Record<string, unknown>;
-    if (parsed && typeof parsed === "object") {
+  // Normalize line endings so regex patterns work with CRLF (Windows) input
+  const normalizedBlock = blockContent.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  // Try to match the frontmatter block. The content may have a leading newline
+  // before the opening --- (e.g. "\n---\n..."), so we use indexOf-based approach
+  // for more reliable matching than regex with non-greedy quantifiers.
+  let frontmatter: string | null = null;
+  let frontmatterStart = -1;
+  let frontmatterEnd = -1;
+
+  // Find opening --- (must be at start of line: position 0 or after \n)
+  const firstDash = normalizedBlock.indexOf("---");
+  if (firstDash !== -1) {
+    const isAtLineStart = firstDash === 0 || normalizedBlock[firstDash - 1] === "\n";
+    if (isAtLineStart) {
+      frontmatterStart = firstDash;
+      // Find closing --- (must be on its own line, after opening)
+      const searchStart = frontmatterStart + 3;
+      // First try "\n---" format
+      let secondDash = normalizedBlock.indexOf("\n---", searchStart);
+      if (secondDash !== -1) {
+        frontmatterEnd = secondDash + 1; // Include the \n in the boundary
+      } else {
+        // Try to find "---" at line start
+        let i = searchStart;
+        while (i < normalizedBlock.length) {
+          const nextDash = normalizedBlock.indexOf("---", i);
+          if (nextDash === -1) break;
+          const isClosingDash = nextDash === 0 || normalizedBlock[nextDash - 1] === "\n";
+          if (isClosingDash) {
+            frontmatterEnd = nextDash;
+            break;
+          }
+          i = nextDash + 3;
+        }
+      }
+      if (frontmatterEnd !== -1) {
+        frontmatter = normalizedBlock.substring(frontmatterStart, frontmatterEnd + 3);
+      }
+    }
+  }
+
+  if (frontmatter) {
+    // Extract YAML content between the opening --- and closing ---
+    const yamlContent = frontmatter
+      .replace(/^---/, "")
+      .replace(/---$/, "")
+      .trim();
+    const parsed = yaml.load(yamlContent, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown> | null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       result.name = typeof parsed.name === "string" ? parsed.name.trim() : "";
       result.description = typeof parsed.description === "string" ? parsed.description.trim() : "";
       result.tags = Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === "string") : [];
     }
-    // Extract content after frontmatter
-    const frontmatterEnd = blockContent.indexOf("---");
-    const secondDash = blockContent.indexOf("---", frontmatterEnd + 3);
-    if (secondDash !== -1) {
-      result.contentWithoutFrontmatter = blockContent.substring(secondDash + 3).trim();
-    } else {
-      result.contentWithoutFrontmatter = blockContent.substring(frontmatterEnd + 3).trim();
-    }
+    // Extract content after frontmatter (everything after the closing ---)
+    result.contentWithoutFrontmatter = normalizedBlock.substring(frontmatterEnd + 3).trim();
   } else {
     result.contentWithoutFrontmatter = blockContent;
   }
@@ -228,32 +315,40 @@ export const parseSkillDraft = (content: string): {
   tags: string[];
   content: string;
 } | null => {
-  const match = content.match(/<SKILL>([\s\S]*?)<\/SKILL>/);
-  if (!match) return null;
+  // Use indexOf-based approach instead of regex to avoid catastrophic backtracking.
+  // The [\s\S]*? pattern can cause exponential time complexity on crafted input.
+  const openTag = "<SKILL>";
+  const closeTag = "</SKILL>";
+  const openIdx = content.indexOf(openTag);
+  if (openIdx === -1) return null;
 
-  const skillBlock = match[1].trim();
+  const closeIdx = content.indexOf(closeTag, openIdx + openTag.length);
+  if (closeIdx === -1) return null;
+
+  const skillBlock = content.substring(openIdx + openTag.length, closeIdx).trim();
 
   let tags: string[] = [];
   let description = "";
   let name = "";
   let contentWithoutFrontmatter = skillBlock;
 
-  const frontmatterMatch = skillBlock.match(/^---\n([\s\S]*?)\n---/);
-  if (frontmatterMatch) {
-    const frontmatter = frontmatterMatch[1];
-    const parsed = yaml.load(frontmatter) as Record<string, unknown>;
-    if (parsed && typeof parsed === "object") {
-      name = typeof parsed.name === "string" ? parsed.name.trim() : "";
-      description = typeof parsed.description === "string" ? parsed.description.trim() : "";
-      tags = Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === "string") : [];
-    }
-    // Remove frontmatter from content
-    const frontmatterEnd = skillBlock.indexOf("---");
-    const secondDash = skillBlock.indexOf("---", frontmatterEnd + 3);
+  // Use indexOf-based approach for frontmatter extraction to avoid regex backtracking.
+  const firstDash = skillBlock.indexOf("---");
+  if (firstDash !== -1 && (firstDash === 0 || skillBlock[firstDash - 1] === "\n")) {
+    const secondDash = skillBlock.indexOf("\n---", firstDash + 3);
     if (secondDash !== -1) {
-      contentWithoutFrontmatter = skillBlock.substring(secondDash + 3).trim();
-    } else {
-      contentWithoutFrontmatter = skillBlock.substring(frontmatterEnd + 3).trim();
+      const frontmatter = skillBlock.substring(firstDash + 3, secondDash).trim();
+      try {
+        const parsed = yaml.load(frontmatter) as Record<string, unknown>;
+        if (parsed && typeof parsed === "object") {
+          name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+          description = typeof parsed.description === "string" ? parsed.description.trim() : "";
+          tags = Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === "string") : [];
+        }
+      } catch {
+        // YAML parse failed, keep empty values
+      }
+      contentWithoutFrontmatter = skillBlock.substring(secondDash + 4).trim();
     }
   }
 
@@ -261,18 +356,6 @@ export const parseSkillDraft = (content: string): {
   return { name, description, tags, content: contentWithoutFrontmatter };
 };
 
-/**
- * Extract content after </SKILL> tag for display.
- * @param content The full content string
- * @returns Content after </SKILL> tag
- */
-export const extractSkillGenerationResult = (content: string): string => {
-  const skillTagIndex = content.indexOf("</SKILL>");
-  if (skillTagIndex !== -1) {
-    return content.substring(skillTagIndex + 8).trim();
-  }
-  return content;
-};
 
 // ========== Skill Detail Modal Methods ==========
 

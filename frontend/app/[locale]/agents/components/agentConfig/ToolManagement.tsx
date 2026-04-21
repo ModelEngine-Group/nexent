@@ -293,26 +293,24 @@ export default function ToolManagement({
 
   // Generate Tabs configuration
   const tabItems = toolGroups.map((group) => {
-    // Limit tab display to maximum 7 characters
-    const displayLabel =
-      t(group.label).length > 7
-        ? `${t(group.label).substring(0, 7)}...`
-        : t(group.label);
+    const label = t(group.label);
 
     return {
       key: group.key,
       label: (
-        <span
-          style={{
-            display: "block",
-            maxWidth: "70px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {displayLabel}
-        </span>
+        <Tooltip title={label} placement="right">
+          <span
+            style={{
+              display: "block",
+              maxWidth: "70px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {label}
+          </span>
+        </Tooltip>
       ),
       children: (
         <div

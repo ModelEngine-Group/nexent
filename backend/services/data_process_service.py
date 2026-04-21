@@ -581,7 +581,7 @@ class DataProcessService:
                 original_filename = os.path.basename(object_name)
                 input_path = os.path.join(temp_dir, original_filename)
                 with open(input_path, 'wb') as f:
-                    while chunk := original_stream.read(8192):
+                    while chunk := original_stream.read(1024 * 1024):
                         f.write(chunk)
 
                 # Step 2: Local conversion using LibreOffice
