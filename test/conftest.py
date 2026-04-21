@@ -4,7 +4,18 @@ Global test configuration for third-party component environment variables.
 This file sets up environment variables for external services used in tests.
 """
 import os
+import sys
 
+# Add backend and sdk directories to sys.path so that modules can be imported
+# as `from backend.xxx import ...` and `from sdk.xxx import ...`
+_test_root = os.path.dirname(os.path.abspath(__file__))
+_backend_dir = os.path.abspath(os.path.join(_test_root, "..", "backend"))
+_sdk_dir = os.path.abspath(os.path.join(_test_root, "..", "sdk"))
+
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
+if _sdk_dir not in sys.path:
+    sys.path.insert(0, _sdk_dir)
 
 # MinIO Configuration
 os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
