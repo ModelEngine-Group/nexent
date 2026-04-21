@@ -950,51 +950,6 @@ class SkillInstance(TableBase):
     version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
 
 
-class ModelMonitoringRecord(SimpleTableBase):
-    __tablename__ = "model_monitoring_record_t"
-    __table_args__ = (
-        Index("ix_monitoring_model_id", "model_id"),
-        Index("ix_monitoring_tenant_id", "tenant_id"),
-        Index("ix_monitoring_agent_id", "agent_id"),
-        Index("ix_monitoring_create_time", "create_time"),
-        Index("ix_monitoring_is_error", "is_error"),
-        Index("ix_monitoring_model_time", "model_id", "create_time"),
-        Index("ix_monitoring_model_type", "model_type"),
-        {"schema": SCHEMA},
-    )
-
-    monitoring_id = Column(
-        Integer,
-        Sequence("model_monitoring_record_t_monitoring_id_seq", schema=SCHEMA),
-        primary_key=True,
-        nullable=False,
-    )
-    model_id = Column(Integer)
-    model_name = Column(String(100), nullable=False)
-    agent_id = Column(Integer)
-    agent_name = Column(String(100))
-    conversation_id = Column(Integer)
-    tenant_id = Column(String(100), nullable=False)
-    user_id = Column(String(100))
-    request_duration_ms = Column(Integer)
-    ttft_ms = Column(Integer)
-    input_tokens = Column(Integer)
-    output_tokens = Column(Integer)
-    total_tokens = Column(Integer)
-    generation_rate = Column(Float)
-    is_streaming = Column(Boolean, default=False)
-    is_success = Column(Boolean, default=True)
-    is_error = Column(Boolean, default=False)
-    error_type = Column(String(50))
-    error_message = Column(Text)
-    retry_count = Column(Integer, default=0)
-    operation = Column(String(50))
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now())
-    delete_flag = Column(String(1), default="N")
-    display_name = Column(String(200))
-    model_type = Column(String(20), default="llm")
-
-
 class OuterApiService(TableBase):
     """
     OpenAPI service table - stores MCP service information converted from OpenAPI specs.
