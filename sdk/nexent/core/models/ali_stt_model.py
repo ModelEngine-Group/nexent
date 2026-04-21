@@ -33,7 +33,6 @@ class AliSTTConfig:
         enable_vad: bool = True,
         vad_threshold: float = 0.5,
         vad_silence_duration_ms: int = 2000,
-        workspace_id: Optional[str] = None
     ):
         self.api_key = api_key
         self.model = model
@@ -47,6 +46,8 @@ class AliSTTConfig:
         self.enable_vad = enable_vad
         self.vad_threshold = vad_threshold
         self.vad_silence_duration_ms = vad_silence_duration_ms
+
+
 class TranscriptionResult:
     """Container for transcription results."""
 
@@ -87,8 +88,6 @@ class AliSTTModel(BaseSTTModel):
             "Authorization": f"Bearer {self.config.api_key}",
             "OpenAI-Beta": "realtime=v1"
         }
-        if self.config.workspace_id:
-            headers["X-DashScope-WorkSpace"] = self.config.workspace_id
         return headers
 
     def generate_event_id(self) -> str:
