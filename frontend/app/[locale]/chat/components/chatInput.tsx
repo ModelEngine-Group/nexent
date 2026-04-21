@@ -425,7 +425,7 @@ export function ChatInput({
           } else {
             // Ali/DashScope STT uses api_key and model name
             sttConfig.api_key = modelConfig?.stt?.apiConfig?.apiKey || "sk-no-api-key";
-            sttConfig.model = modelConfig?.stt?.modelName || modelConfig?.stt?.name || "qwen3-asr-flash-realtime";
+            sttConfig.model = modelConfig?.stt?.modelName || "qwen3-asr-flash-realtime";
             sttConfig.base_url = modelConfig?.stt?.apiConfig?.modelUrl || "";
           }
 
