@@ -1,4 +1,11 @@
 from ...monitor import get_monitoring_manager
+from ...monitor.monitoring import (
+    _MonitoredClient,
+    _monitoring_operation,
+    _monitoring_tracker_snapshot,
+    _monitoring_display_name,
+    _detect_model_type,
+)
 import logging
 import threading
 import asyncio
@@ -46,7 +53,11 @@ class OpenAIModel(OpenAIServerModel):
 
         super().__init__(*args, **kwargs)
 
-    @get_monitoring_manager().monitor_llm_call("openai_chat", "chat_completion")
+        model_type = _detect_model_type(self)
+        self.client = _MonitoredClient(self.client, self.model_id, model_type)
+        if self.display_name:
+            _monitoring_display_name.set(self.display_name)
+
     def __call__(
         self,
         messages: List[Dict[str, Any]],
@@ -55,8 +66,11 @@ class OpenAIModel(OpenAIServerModel):
         tools_to_call_from: Optional[List[Tool]] = None,
         **kwargs,
     ) -> ChatMessage:
-        # Get token tracker from decorator (if monitoring is available)
-        token_tracker = kwargs.pop("_token_tracker", None)
+        # Set operation for client-level monitoring wrapper
+        _monitoring_operation.set("chat_completion")
+
+        # Create a token tracker for TTFT/streaming metrics (used by client wrapper via ContextVar)
+        token_tracker = self._monitoring.create_token_tracker(self.model_id)
 
         # Normalize incoming messages so we can accept plain dict payloads like
         # {"role": "user", "content": "..."} alongside ChatMessage instances.

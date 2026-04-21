@@ -34,3 +34,15 @@ model-assets/
 *.pytest_cache
 *.coverage
 *coverage.xml
+
+# OpenCode / OpenSpec working directories
+openspec/
+.opencode/
+.sisyphus/
+.claude/
+.cursor/
+.github/
+.opencode/
+
+#log
+logs/

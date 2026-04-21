@@ -45,10 +45,29 @@ logger = logging.getLogger(__name__)
 
 # Context variables for passing request-scoped metadata from service layer
 # to monitoring layer without polluting function signatures.
-_monitoring_tenant_id: ContextVar[Optional[str]] = ContextVar("_monitoring_tenant_id", default=None)
-_monitoring_user_id: ContextVar[Optional[str]] = ContextVar("_monitoring_user_id", default=None)
-_monitoring_agent_id: ContextVar[Optional[int]] = ContextVar("_monitoring_agent_id", default=None)
-_monitoring_conversation_id: ContextVar[Optional[int]] = ContextVar("_monitoring_conversation_id", default=None)
+_monitoring_tenant_id: ContextVar[Optional[str]] = ContextVar(
+    "_monitoring_tenant_id", default=None)
+_monitoring_user_id: ContextVar[Optional[str]] = ContextVar(
+    "_monitoring_user_id", default=None)
+_monitoring_agent_id: ContextVar[Optional[int]] = ContextVar(
+    "_monitoring_agent_id", default=None)
+_monitoring_conversation_id: ContextVar[Optional[int]] = ContextVar(
+    "_monitoring_conversation_id", default=None)
+
+# Operation tag to identify which business scenario triggered the model call.
+# Set at the service/call-site layer; read by the client-level monitoring wrapper.
+_monitoring_operation: ContextVar[str] = ContextVar(
+    "_monitoring_operation", default="unknown")
+
+# Tracker snapshot populated by LLMTokenTracker in __call__ for streaming calls.
+# The client-level wrapper reads this after stream consumption to get TTFT/token data.
+_monitoring_tracker_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "_monitoring_tracker_snapshot", default=None
+)
+
+# display_name carried from model instance to client-level monitoring wrapper
+_monitoring_display_name: ContextVar[Optional[str]] = ContextVar(
+    "_monitoring_display_name", default=None)
 
 
 def set_monitoring_context(
@@ -70,6 +89,12 @@ def set_monitoring_context(
         _monitoring_agent_id.set(agent_id)
     if conversation_id is not None:
         _monitoring_conversation_id.set(conversation_id)
+
+
+def set_monitoring_operation(operation: str, display_name: Optional[str] = None) -> None:
+    _monitoring_operation.set(operation)
+    if display_name is not None:
+        _monitoring_display_name.set(display_name)
 
 
 def get_monitoring_context() -> Dict[str, Any]:
@@ -146,7 +171,8 @@ class MonitoringManager:
     def configure(self, config: MonitoringConfig) -> None:
         """Configure the monitoring system."""
         self._config = config
-        logger.info(f"Monitoring configured: enabled={config.enable_telemetry}, service={config.service_name}")
+        logger.info(
+            f"Monitoring configured: enabled={config.enable_telemetry}, service={config.service_name}")
 
         if config.enable_telemetry:
             self._init_telemetry()
@@ -188,7 +214,8 @@ class MonitoringManager:
 
             # Setup metrics with Prometheus exporter
             prometheus_reader = PrometheusMetricReader()
-            self._meter_provider = MeterProvider(resource=resource, metric_readers=[prometheus_reader])
+            self._meter_provider = MeterProvider(
+                resource=resource, metric_readers=[prometheus_reader])
             metrics.set_meter_provider(self._meter_provider)
 
             # Get tracer and meter instances
@@ -221,7 +248,8 @@ class MonitoringManager:
             # Auto-instrument other libraries
             RequestsInstrumentor().instrument()
 
-            logger.info(f"Telemetry initialized successfully for service: {self._config.service_name}")
+            logger.info(
+                f"Telemetry initialized successfully for service: {self._config.service_name}")
 
         except Exception as e:
             logger.error(f"Failed to initialize telemetry: {str(e)}")
@@ -241,7 +269,8 @@ class MonitoringManager:
         try:
             if self.is_enabled and app and OPENTELEMETRY_AVAILABLE:
                 FastAPIInstrumentor.instrument_app(app)
-                logger.info("FastAPI application monitoring initialized successfully")
+                logger.info(
+                    "FastAPI application monitoring initialized successfully")
                 return True
             elif not OPENTELEMETRY_AVAILABLE:
                 logger.warning(
@@ -261,7 +290,8 @@ class MonitoringManager:
             return
 
         with self._tracer.start_as_current_span(
-            operation_name, attributes={"llm.model_name": model_name, "llm.operation": operation_name, **attributes}
+            operation_name, attributes={
+                "llm.model_name": model_name, "llm.operation": operation_name, **attributes}
         ) as span:
             start_time = time.time()
             try:
@@ -269,12 +299,14 @@ class MonitoringManager:
             except Exception as e:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 if self._llm_error_count:
-                    self._llm_error_count.add(1, {"model": model_name, "operation": operation_name})
+                    self._llm_error_count.add(
+                        1, {"model": model_name, "operation": operation_name})
                 raise
             finally:
                 duration = time.time() - start_time
                 if self._llm_request_duration:
-                    self._llm_request_duration.record(duration, {"model": model_name, "operation": operation_name})
+                    self._llm_request_duration.record(
+                        duration, {"model": model_name, "operation": operation_name})
 
     def get_current_span(self) -> Optional[Any]:
         """Get the current active span."""
@@ -339,7 +371,8 @@ class MonitoringManager:
                             if k not in exclude_set and isinstance(v, (str, int, float, bool))
                         }
                         if safe_params:
-                            self.set_span_attributes(**{f"param.{k}": v for k, v in safe_params.items()})
+                            self.set_span_attributes(
+                                **{f"param.{k}": v for k, v in safe_params.items()})
 
                     self.add_span_event(f"{op_name}.started")
                     start_time = time.time()
@@ -347,13 +380,15 @@ class MonitoringManager:
                     try:
                         result = await func(*args, **kwargs)
                         duration = time.time() - start_time
-                        self.add_span_event(f"{op_name}.completed", {"duration": duration})
+                        self.add_span_event(f"{op_name}.completed", {
+                                            "duration": duration})
                         return result
                     except Exception as e:
                         duration = time.time() - start_time
                         self.add_span_event(
                             f"{op_name}.error",
-                            {"error_type": type(e).__name__, "error_message": str(e), "duration": duration},
+                            {"error_type": type(e).__name__, "error_message": str(
+                                e), "duration": duration},
                         )
                         raise
 
@@ -368,7 +403,8 @@ class MonitoringManager:
                             if k not in exclude_set and isinstance(v, (str, int, float, bool))
                         }
                         if safe_params:
-                            self.set_span_attributes(**{f"param.{k}": v for k, v in safe_params.items()})
+                            self.set_span_attributes(
+                                **{f"param.{k}": v for k, v in safe_params.items()})
 
                     self.add_span_event(f"{op_name}.started")
                     start_time = time.time()
@@ -376,13 +412,15 @@ class MonitoringManager:
                     try:
                         result = func(*args, **kwargs)
                         duration = time.time() - start_time
-                        self.add_span_event(f"{op_name}.completed", {"duration": duration})
+                        self.add_span_event(f"{op_name}.completed", {
+                                            "duration": duration})
                         return result
                     except Exception as e:
                         duration = time.time() - start_time
                         self.add_span_event(
                             f"{op_name}.error",
-                            {"error_type": type(e).__name__, "error_message": str(e), "duration": duration},
+                            {"error_type": type(e).__name__, "error_message": str(
+                                e), "duration": duration},
                         )
                         raise
 
@@ -400,11 +438,13 @@ class MonitoringManager:
         def decorator(func: F) -> F:
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
-                actual_model_name = getattr(args[0], "model_id", None) or model_name
+                actual_model_name = getattr(
+                    args[0], "model_id", None) or model_name
                 detected_type = _detect_model_type(args[0])
                 with self.trace_llm_request(operation, model_name, **kwargs) as span:
                     token_tracker = self.create_token_tracker(model_name, span)
-                    token_tracker._display_name = getattr(args[0], "display_name", None)
+                    token_tracker._display_name = getattr(
+                        args[0], "display_name", None)
                     self.add_span_event("llm_call_started")
 
                     try:
@@ -416,7 +456,8 @@ class MonitoringManager:
                         return result
                     except Exception as e:
                         self.add_span_event(
-                            "llm_call_error", {"error_type": type(e).__name__, "error_message": str(e)}
+                            "llm_call_error", {"error_type": type(
+                                e).__name__, "error_message": str(e)}
                         )
                         _enqueue_monitoring_record(
                             token_tracker, actual_model_name, operation, kwargs, error=e, model_type=detected_type
@@ -425,15 +466,18 @@ class MonitoringManager:
 
             @functools.wraps(func)
             def sync_wrapper(*args, **kwargs):
-                actual_model_name = getattr(args[0], "model_id", None) or model_name
+                actual_model_name = getattr(
+                    args[0], "model_id", None) or model_name
                 detected_type = _detect_model_type(args[0])
                 with self.trace_llm_request(operation, model_name, **kwargs) as span:
                     token_tracker = self.create_token_tracker(model_name, span)
-                    token_tracker._display_name = getattr(args[0], "display_name", None)
+                    token_tracker._display_name = getattr(
+                        args[0], "display_name", None)
                     self.add_span_event("llm_call_started")
 
                     try:
-                        result = func(*args, **kwargs, _token_tracker=token_tracker)
+                        result = func(*args, **kwargs,
+                                      _token_tracker=token_tracker)
                         self.add_span_event("llm_call_completed")
                         _enqueue_monitoring_record(
                             token_tracker, actual_model_name, operation, kwargs, model_type=detected_type
@@ -441,7 +485,8 @@ class MonitoringManager:
                         return result
                     except Exception as e:
                         self.add_span_event(
-                            "llm_call_error", {"error_type": type(e).__name__, "error_message": str(e)}
+                            "llm_call_error", {"error_type": type(
+                                e).__name__, "error_message": str(e)}
                         )
                         _enqueue_monitoring_record(
                             token_tracker, actual_model_name, operation, kwargs, error=e, model_type=detected_type
@@ -478,11 +523,13 @@ class LLMTokenTracker:
 
             if self.span:
                 ttft = self.first_token_time - self.start_time
-                self.span.add_event("first_token_received", {"ttft_seconds": ttft})
+                self.span.add_event("first_token_received",
+                                    {"ttft_seconds": ttft})
 
             if self.manager.is_enabled:
                 ttft = self.first_token_time - self.start_time
-                self.manager.record_llm_metrics("ttft", ttft, {"model": self.model_name})
+                self.manager.record_llm_metrics(
+                    "ttft", ttft, {"model": self.model_name})
 
     def record_token(self, token: str) -> None:
         if self.first_token_time is None:
@@ -491,7 +538,8 @@ class LLMTokenTracker:
         self.token_count += 1
 
         if self.span:
-            self.span.add_event("token_generated", {"token_count": self.token_count, "token_length": len(token)})
+            self.span.add_event("token_generated", {
+                                "token_count": self.token_count, "token_length": len(token)})
 
     def record_completion(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
         self.input_tokens = input_tokens
@@ -502,9 +550,12 @@ class LLMTokenTracker:
             generation_rate = 0
             if total_duration > 0 and self.token_count > 0:
                 generation_rate = self.token_count / total_duration
-                self.manager.record_llm_metrics("token_rate", generation_rate, {"model": self.model_name})
-            self.manager.record_llm_metrics("tokens", input_tokens, {"model": self.model_name, "type": "input"})
-            self.manager.record_llm_metrics("tokens", output_tokens, {"model": self.model_name, "type": "output"})
+                self.manager.record_llm_metrics("token_rate", generation_rate, {
+                                                "model": self.model_name})
+            self.manager.record_llm_metrics("tokens", input_tokens, {
+                                            "model": self.model_name, "type": "input"})
+            self.manager.record_llm_metrics("tokens", output_tokens, {
+                                            "model": self.model_name, "type": "output"})
 
         # Add span attributes
         if self.span:
@@ -620,6 +671,231 @@ class RecordModelCallContext:
         return False  # do not suppress exceptions
 
 
+class _MonitoredStreamIterator:
+
+    def __init__(self, stream, start_time: float, model_name: str, model_type: str):
+        self._stream = stream
+        self._start_time = start_time
+        self._model_name = model_name
+        self._model_type = model_type
+        self._error: Optional[Exception] = None
+        self._first_chunk_time: Optional[float] = None
+        self._input_tokens: int = 0
+        self._output_tokens: int = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            chunk = next(self._stream)
+            if self._first_chunk_time is None:
+                self._first_chunk_time = time.time()
+            if hasattr(chunk, "usage") and chunk.usage is not None:
+                self._input_tokens = getattr(
+                    chunk.usage, "prompt_tokens", 0) or 0
+                self._output_tokens = getattr(
+                    chunk.usage, "completion_tokens", 0) or 0
+            return chunk
+        except StopIteration:
+            self._finalize()
+            raise
+        except Exception as exc:
+            self._error = exc
+            self._finalize()
+            raise
+
+    def _finalize(self):
+        try:
+            request_duration_ms = int((time.time() - self._start_time) * 1000)
+
+            if self._first_chunk_time is not None:
+                ttft_ms = int(
+                    (self._first_chunk_time - self._start_time) * 1000)
+            else:
+                ttft_ms = 0
+
+            duration_seconds = request_duration_ms / 1000.0
+            if duration_seconds > 0 and self._output_tokens > 0:
+                generation_rate = round(
+                    self._output_tokens / duration_seconds, 2)
+            else:
+                generation_rate = 0.0
+
+            _enqueue_client_monitoring_record(
+                model_name=self._model_name,
+                model_type=self._model_type,
+                request_duration_ms=request_duration_ms,
+                ttft_ms=ttft_ms,
+                input_tokens=self._input_tokens,
+                output_tokens=self._output_tokens,
+                total_tokens=self._input_tokens + self._output_tokens,
+                generation_rate=generation_rate,
+                is_streaming=True,
+                error=self._error,
+            )
+        except Exception:
+            pass
+
+
+class _MonitoredChatCompletions:
+    """Wraps openai.ChatCompletions to intercept create() calls for monitoring."""
+
+    def __init__(self, original, model_name: str, model_type: str):
+        self._original = original
+        self._model_name = model_name
+        self._model_type = model_type
+
+    def create(self, **kwargs):
+        stream = kwargs.get("stream", False)
+        start_time = time.time()
+        error: Optional[Exception] = None
+        try:
+            response = self._original.create(**kwargs)
+        except Exception as exc:
+            error = exc
+            self._record_non_streaming(start_time, error=exc)
+            raise
+
+        if stream:
+            return _MonitoredStreamIterator(response, start_time, self._model_name, self._model_type)
+        else:
+            self._record_non_streaming(start_time, response=response)
+            return response
+
+    def _record_non_streaming(self, start_time: float, response=None, error: Optional[Exception] = None):
+        try:
+            request_duration_ms = int((time.time() - start_time) * 1000)
+            input_tokens = 0
+            output_tokens = 0
+            if response is not None and hasattr(response, "usage") and response.usage:
+                input_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+                output_tokens = getattr(
+                    response.usage, "completion_tokens", 0) or 0
+
+            _enqueue_client_monitoring_record(
+                model_name=self._model_name,
+                model_type=self._model_type,
+                request_duration_ms=request_duration_ms,
+                ttft_ms=0,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                generation_rate=0.0,
+                is_streaming=False,
+                error=error,
+            )
+        except Exception:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+
+class _MonitoredChat:
+    """Proxies chat.completions to return the monitored wrapper."""
+
+    def __init__(self, original_chat, model_name: str, model_type: str):
+        self._original_chat = original_chat
+        self._model_name = model_name
+        self._model_type = model_type
+        self._completions = _MonitoredChatCompletions(
+            original_chat.completions, model_name, model_type
+        )
+
+    @property
+    def completions(self):
+        return self._completions
+
+    def __getattr__(self, name):
+        return getattr(self._original_chat, name)
+
+
+class _MonitoredClient:
+    """Wraps an openai.OpenAI client to inject monitoring at the chat.completions layer."""
+
+    def __init__(self, original_client, model_name: str, model_type: str):
+        self._original_client = original_client
+        self._model_name = model_name
+        self._model_type = model_type
+        self._chat = _MonitoredChat(
+            original_client.chat, model_name, model_type)
+
+    @property
+    def chat(self):
+        return self._chat
+
+    def __getattr__(self, name):
+        return getattr(self._original_client, name)
+
+
+def _enqueue_client_monitoring_record(
+    model_name: str,
+    model_type: str,
+    request_duration_ms: int,
+    ttft_ms: int,
+    input_tokens: int,
+    output_tokens: int,
+    total_tokens: int,
+    generation_rate: float,
+    is_streaming: bool,
+    error: Optional[Exception] = None,
+) -> None:
+    """Enqueue a monitoring record from the client-level interceptor."""
+    try:
+        buffer = get_monitoring_buffer()
+        if buffer is None or not buffer.is_enabled:
+            return
+
+        ctx = get_monitoring_context()
+        tenant_id = ctx.get("tenant_id")
+        if not tenant_id:
+            logger.debug(
+                "Monitoring: skipping client-level record for %s - no tenant_id",
+                model_name,
+            )
+            return
+
+        operation = _monitoring_operation.get()
+        record = {
+            "model_name": model_name,
+            "operation": operation,
+            "request_duration_ms": request_duration_ms,
+            "ttft_ms": ttft_ms,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "generation_rate": round(generation_rate, 2),
+            "is_success": error is None,
+            "is_error": error is not None,
+            "is_streaming": is_streaming,
+            "model_type": model_type,
+        }
+
+        if error is not None:
+            record["error_type"] = type(error).__name__
+            record["error_message"] = str(error)[:2000]
+
+        record["tenant_id"] = tenant_id
+        user_id = ctx.get("user_id")
+        agent_id = ctx.get("agent_id")
+        conversation_id = ctx.get("conversation_id")
+        if user_id:
+            record["user_id"] = user_id
+        if agent_id is not None:
+            record["agent_id"] = agent_id
+        if conversation_id is not None:
+            record["conversation_id"] = conversation_id
+
+        display_name = _monitoring_display_name.get()
+        if display_name:
+            record["display_name"] = display_name
+
+        buffer.add_record(record)
+    except Exception:
+        pass
+
+
 def _enqueue_monitoring_record(
     tracker: Optional[LLMTokenTracker],
     model_name: str,
@@ -641,14 +917,17 @@ def _enqueue_monitoring_record(
         generation_rate = 0.0
 
         if tracker is not None:
-            request_duration_ms = int((time.time() - tracker.start_time) * 1000)
+            request_duration_ms = int(
+                (time.time() - tracker.start_time) * 1000)
             if tracker.first_token_time is not None:
-                ttft_ms = int((tracker.first_token_time - tracker.start_time) * 1000)
+                ttft_ms = int((tracker.first_token_time -
+                              tracker.start_time) * 1000)
             input_tokens = tracker.input_tokens
             output_tokens = tracker.output_tokens
             total_tokens = input_tokens + output_tokens
             if request_duration_ms > 0 and output_tokens > 0:
-                generation_rate = output_tokens / (request_duration_ms / 1000.0)
+                generation_rate = output_tokens / \
+                    (request_duration_ms / 1000.0)
 
         record = {
             "model_name": model_name,
@@ -671,7 +950,8 @@ def _enqueue_monitoring_record(
         # Source priority: tracker snapshot > live context > kwargs
         snapshot = getattr(tracker, "_context_snapshot", {}) or {}
         ctx = get_monitoring_context()
-        tenant_id = snapshot.get("tenant_id") or ctx.get("tenant_id") or kwargs.get("tenant_id")
+        tenant_id = snapshot.get("tenant_id") or ctx.get(
+            "tenant_id") or kwargs.get("tenant_id")
 
         if not tenant_id:
             logger.debug(
@@ -682,10 +962,103 @@ def _enqueue_monitoring_record(
             return
 
         record["tenant_id"] = tenant_id
-        user_id = snapshot.get("user_id") or ctx.get("user_id") or kwargs.get("user_id")
-        agent_id = snapshot.get("agent_id") or ctx.get("agent_id") or kwargs.get("agent_id")
+        user_id = snapshot.get("user_id") or ctx.get(
+            "user_id") or kwargs.get("user_id")
+        agent_id = snapshot.get("agent_id") or ctx.get(
+            "agent_id") or kwargs.get("agent_id")
         conversation_id = (
-            snapshot.get("conversation_id") or ctx.get("conversation_id") or kwargs.get("conversation_id")
+            snapshot.get("conversation_id") or ctx.get(
+                "conversation_id") or kwargs.get("conversation_id")
+        )
+
+        if user_id:
+            record["user_id"] = user_id
+        if agent_id is not None:
+            record["agent_id"] = agent_id
+        if conversation_id is not None:
+            record["conversation_id"] = conversation_id
+
+        display_name = getattr(tracker, "_display_name", None)
+        if display_name:
+            record["display_name"] = display_name
+
+        buffer.add_record(record)
+    except Exception:
+        pass
+
+
+def _enqueue_monitoring_record(
+    tracker: Optional[LLMTokenTracker],
+    model_name: str,
+    operation: str,
+    kwargs: dict,
+    error: Optional[Exception] = None,
+    model_type: str = "llm",
+) -> None:
+    try:
+        buffer = get_monitoring_buffer()
+        if buffer is None or not buffer.is_enabled:
+            return
+
+        request_duration_ms = 0
+        ttft_ms = 0
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
+        generation_rate = 0.0
+
+        if tracker is not None:
+            request_duration_ms = int(
+                (time.time() - tracker.start_time) * 1000)
+            if tracker.first_token_time is not None:
+                ttft_ms = int((tracker.first_token_time -
+                              tracker.start_time) * 1000)
+            input_tokens = tracker.input_tokens
+            output_tokens = tracker.output_tokens
+            total_tokens = input_tokens + output_tokens
+            if request_duration_ms > 0 and output_tokens > 0:
+                generation_rate = output_tokens / \
+                    (request_duration_ms / 1000.0)
+
+        record = {
+            "model_name": model_name,
+            "operation": operation,
+            "request_duration_ms": request_duration_ms,
+            "ttft_ms": ttft_ms,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "generation_rate": round(generation_rate, 2),
+            "is_success": error is None,
+            "is_error": error is not None,
+            "is_streaming": tracker.token_count > 0 if tracker else False,
+            "model_type": model_type,
+        }
+        if error is not None:
+            record["error_type"] = type(error).__name__
+            record["error_message"] = str(error)[:2000]
+
+        snapshot = getattr(tracker, "_context_snapshot", {}) or {}
+        ctx = get_monitoring_context()
+        tenant_id = snapshot.get("tenant_id") or ctx.get(
+            "tenant_id") or kwargs.get("tenant_id")
+
+        if not tenant_id:
+            logger.debug(
+                "Monitoring: skipping %s record for %s - no tenant_id in context",
+                model_type,
+                model_name,
+            )
+            return
+
+        record["tenant_id"] = tenant_id
+        user_id = snapshot.get("user_id") or ctx.get(
+            "user_id") or kwargs.get("user_id")
+        agent_id = snapshot.get("agent_id") or ctx.get(
+            "agent_id") or kwargs.get("agent_id")
+        conversation_id = (
+            snapshot.get("conversation_id") or ctx.get(
+                "conversation_id") or kwargs.get("conversation_id")
         )
 
         if user_id:
@@ -716,9 +1089,12 @@ class MonitoringRecordBuffer:
 
     def __init__(self):
         self._buffer: deque = deque(maxlen=5000)
-        self._enabled: bool = os.getenv("ENABLE_MODEL_MONITORING", "true").lower() == "true"
-        self._batch_size: int = int(os.getenv("MODEL_MONITORING_BATCH_SIZE", "100"))
-        self._flush_interval: int = int(os.getenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "30"))
+        self._enabled: bool = os.getenv(
+            "ENABLE_MODEL_MONITORING", "true").lower() == "true"
+        self._batch_size: int = int(
+            os.getenv("MODEL_MONITORING_BATCH_SIZE", "100"))
+        self._flush_interval: int = int(
+            os.getenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "30"))
         self._consecutive_failures: int = 0
         self._max_failures: int = 3
         self._degraded_until: float = 0.0
@@ -754,7 +1130,8 @@ class MonitoringRecordBuffer:
                 now = time.time()
                 buffer_size = len(self._buffer)
                 should_flush = buffer_size >= self._batch_size or (
-                    buffer_size > 0 and (now - self._last_flush_time) >= self._flush_interval
+                    buffer_size > 0 and (
+                        now - self._last_flush_time) >= self._flush_interval
                 )
                 if should_flush:
                     self._flush_to_db()
@@ -773,7 +1150,8 @@ class MonitoringRecordBuffer:
         if self._consecutive_failures >= self._max_failures:
             if now < self._degraded_until:
                 return
-            logger.info("Monitoring buffer: retrying after degradation cooldown")
+            logger.info(
+                "Monitoring buffer: retrying after degradation cooldown")
 
         batch: List[dict] = []
         while len(batch) < self._batch_size and self._buffer:
@@ -785,16 +1163,19 @@ class MonitoringRecordBuffer:
         try:
             self._write_batch(batch)
             self._consecutive_failures = 0
-            logger.debug(f"Monitoring buffer: flushed {len(batch)} records to DB")
+            logger.debug(
+                f"Monitoring buffer: flushed {len(batch)} records to DB")
         except Exception as e:
             self._consecutive_failures += 1
-            logger.error(f"Monitoring buffer: DB write failed (attempt {self._consecutive_failures}): {e}")
+            logger.error(
+                f"Monitoring buffer: DB write failed (attempt {self._consecutive_failures}): {e}")
             for record in reversed(batch):
                 self._buffer.appendleft(record)
 
             if self._consecutive_failures >= self._max_failures:
                 self._degraded_until = now + 30
-                logger.warning(f"Monitoring buffer: degraded mode for 30s after {self._max_failures} failures")
+                logger.warning(
+                    f"Monitoring buffer: degraded mode for 30s after {self._max_failures} failures")
 
     def _write_batch(self, batch: List[dict]) -> None:
         try:
@@ -808,7 +1189,8 @@ class MonitoringRecordBuffer:
             from database.client import get_monitoring_db_session
             from database.db_models import ModelMonitoringRecord
         except ImportError as e:
-            logger.debug(f"Monitoring buffer: backend database not available: {e}")
+            logger.debug(
+                f"Monitoring buffer: backend database not available: {e}")
             raise RuntimeError("Backend database module not available")
 
         # Write records individually so that one bad record (e.g. missing
@@ -827,7 +1209,8 @@ class MonitoringRecordBuffer:
                 logger.warning(
                     "Monitoring buffer: skipping record due to error: %s | record=%s",
                     rec_err,
-                    {k: v for k, v in record.items() if k in ("model_name", "tenant_id", "model_type")},
+                    {k: v for k, v in record.items() if k in (
+                        "model_name", "tenant_id", "model_type")},
                 )
 
         if failed > 0:
@@ -901,5 +1284,6 @@ __all__ = [
     "is_opentelemetry_available",
     "set_monitoring_context",
     "get_monitoring_context",
+    "set_monitoring_operation",
     "record_model_call",
 ]

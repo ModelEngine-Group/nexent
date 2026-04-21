@@ -31,6 +31,7 @@ from services.file_management_service import get_llm_model
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
 from database.client import minio_client
 from services.image_service import get_vlm_model
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
@@ -106,28 +107,32 @@ def get_local_tools() -> List[ToolInfo]:
     tools_classes = get_local_tools_classes()
     for tool_class in tools_classes:
         # Get class-level init_param_descriptions for fallback
-        init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
-        
+        init_param_descriptions = getattr(
+            tool_class, 'init_param_descriptions', {})
+
         init_params_list = []
         sig = inspect.signature(tool_class.__init__)
         for param_name, param in sig.parameters.items():
             if param_name == "self":
                 continue
-            
+
             # Check if parameter has a default value and if it should be excluded
             if param.default != inspect.Parameter.empty:
                 if hasattr(param.default, 'exclude') and param.default.exclude:
                     continue
 
             # Get description in both languages
-            param_description = param.default.description if hasattr(param.default, 'description') else ""
-            
+            param_description = param.default.description if hasattr(
+                param.default, 'description') else ""
+
             # First try to get from param.default.description_zh (FieldInfo)
-            param_description_zh = param.default.description_zh if hasattr(param.default, 'description_zh') else None
-            
+            param_description_zh = param.default.description_zh if hasattr(
+                param.default, 'description_zh') else None
+
             # Fallback to init_param_descriptions if not found
             if param_description_zh is None and param_name in init_param_descriptions:
-                param_description_zh = init_param_descriptions[param_name].get('description_zh')
+                param_description_zh = init_param_descriptions[param_name].get(
+                    'description_zh')
 
             param_info = {
                 "type": python_type_to_json_schema(param.annotation),
@@ -353,7 +358,8 @@ async def get_tool_from_remote_mcp_server(
     tools_info = []
 
     try:
-        transport = _create_mcp_transport(remote_mcp_server, authorization_token)
+        transport = _create_mcp_transport(
+            remote_mcp_server, authorization_token)
         client = Client(transport=transport, timeout=10)
         async with client:
             # List available operations
@@ -407,7 +413,8 @@ async def init_tool_list_for_tenant(tenant_id: str, user_id: str):
     """
     # Check if tools have already been initialized for this tenant
     if check_tool_list_initialized(tenant_id):
-        logger.info(f"Tool list already initialized for tenant {tenant_id}, skipping")
+        logger.info(
+            f"Tool list already initialized for tenant {tenant_id}, skipping")
         return {"status": "already_initialized", "message": "Tool list already exists"}
 
     logger.info(f"Initializing tool list for new tenant: {tenant_id}")
@@ -468,20 +475,23 @@ async def list_all_tools(tenant_id: str):
                         # Find matching param in SDK
                         for sdk_param in sdk_info.get("params", []):
                             if sdk_param.get("name") == param.get("name"):
-                                param["description_zh"] = sdk_param.get("description_zh")
+                                param["description_zh"] = sdk_param.get(
+                                    "description_zh")
                                 break
 
             # Merge inputs description_zh from SDK
             inputs_str = tool.get("inputs", "{}")
             try:
-                inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+                inputs = json.loads(inputs_str) if isinstance(
+                    inputs_str, str) else inputs_str
                 if isinstance(inputs, dict):
                     for key, value in inputs.items():
                         if isinstance(value, dict) and not value.get("description_zh"):
                             # Find matching input in SDK
                             sdk_inputs = sdk_info.get("inputs", {})
                             if key in sdk_inputs:
-                                value["description_zh"] = sdk_inputs[key].get("description_zh")
+                                value["description_zh"] = sdk_inputs[key].get(
+                                    "description_zh")
                     inputs_str = json.dumps(inputs, ensure_ascii=False)
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -705,6 +715,11 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
+            vlm_display_name = getattr(
+                image_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=vlm_display_name)
             params = {
                 **instantiation_params,
                 'vlm_model': image_to_text_model,
@@ -716,6 +731,11 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
+            llm_display_name = getattr(
+                long_text_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=llm_display_name)
             params = {
                 **instantiation_params,
                 'llm_model': long_text_to_text_model,

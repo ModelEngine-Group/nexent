@@ -24,6 +24,14 @@ from sdk.nexent.monitor.monitoring import (
     set_monitoring_context,
     get_monitoring_context,
     _monitoring_buffer,
+    _MonitoredClient,
+    _MonitoredChatCompletions,
+    _MonitoredStreamIterator,
+    _monitoring_operation,
+    _monitoring_tracker_snapshot,
+    _monitoring_display_name,
+    set_monitoring_operation,
+    _enqueue_client_monitoring_record,
 )
 import pytest
 import asyncio
@@ -1373,3 +1381,474 @@ class TestBufferDegradation:
             mock_write.assert_called_once()
 
         assert buf._consecutive_failures == 0
+
+
+# =========================================================================
+# TestSetMonitoringOperation  (Task 1.1)
+# =========================================================================
+class TestSetMonitoringOperation:
+    """Verify set_monitoring_operation sets ContextVar correctly."""
+
+    def setup_method(self):
+        import sdk.nexent.monitor.monitoring as _mod
+        _mod._monitoring_operation.set("unknown")
+        _mod._monitoring_display_name.set(None)
+
+    def test_sets_operation_value(self):
+        set_monitoring_operation("title_generation")
+        assert _monitoring_operation.get() == "title_generation"
+
+    def test_sets_display_name(self):
+        set_monitoring_operation("chat_completion", display_name="TestModel")
+        assert _monitoring_display_name.get() == "TestModel"
+
+    def test_does_not_overwrite_display_name_when_none(self):
+        _monitoring_display_name.set("Existing")
+        set_monitoring_operation("chat_completion", display_name=None)
+        assert _monitoring_display_name.get() == "Existing"
+
+
+# =========================================================================
+# TestMonitoredClientWrapper  (Tasks 1.2-1.4, 4.1-4.3)
+# =========================================================================
+class TestMonitoredClientWrapper:
+    """Verify _MonitoredClient intercepts chat.completions.create calls."""
+
+    def setup_method(self):
+        import sdk.nexent.monitor.monitoring as _mod
+        _mod._monitoring_tenant_id.set("t-1")
+        _mod._monitoring_user_id.set(None)
+        _mod._monitoring_agent_id.set(None)
+        _mod._monitoring_conversation_id.set(None)
+        _mod._monitoring_operation.set("unknown")
+        _mod._monitoring_display_name.set("TestModel")
+        _mod._monitoring_tracker_snapshot.set(None)
+
+    def _make_monitored_client(self):
+        mock_original = MagicMock()
+        return _MonitoredClient(mock_original, "test-model", "llm"), mock_original
+
+    def test_non_streaming_creates_record(self):
+        monitored, mock_original = self._make_monitored_client()
+        mock_response = MagicMock()
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 20
+        mock_original.chat.completions.create.return_value = mock_response
+
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            _monitoring_operation.set("title_generation")
+            result = monitored.chat.completions.create(
+                stream=False, messages=[])
+
+        assert result is mock_response
+        mock_buffer.add_record.assert_called_once()
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["operation"] == "title_generation"
+        assert record["input_tokens"] == 10
+        assert record["output_tokens"] == 20
+        assert record["is_streaming"] is False
+        assert record["is_success"] is True
+        assert record["display_name"] == "TestModel"
+        assert record["model_type"] == "llm"
+
+    def test_non_streaming_error_creates_error_record(self):
+        monitored, mock_original = self._make_monitored_client()
+        mock_original.chat.completions.create.side_effect = RuntimeError(
+            "API down")
+
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with (
+            patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+                  return_value=mock_buffer),
+            pytest.raises(RuntimeError, match="API down"),
+        ):
+            _monitoring_operation.set("connectivity_check")
+            monitored.chat.completions.create(stream=False, messages=[])
+
+        mock_buffer.add_record.assert_called_once()
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["is_success"] is False
+        assert record["is_error"] is True
+        assert record["error_type"] == "RuntimeError"
+        assert record["operation"] == "connectivity_check"
+
+    def test_streaming_creates_record_after_consumption(self):
+        monitored, mock_original = self._make_monitored_client()
+        chunks = [MagicMock(
+            choices=[MagicMock(delta=MagicMock(content="hi"))],
+            usage=MagicMock(prompt_tokens=5, completion_tokens=3))]
+        mock_original.chat.completions.create.return_value = iter(chunks)
+
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            set_monitoring_context(tenant_id="test-tenant")
+            _monitoring_operation.set("chat_completion")
+            result = monitored.chat.completions.create(
+                stream=True, messages=[])
+            consumed = list(result)
+
+        assert len(consumed) == 1
+        mock_buffer.add_record.assert_called_once()
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["is_streaming"] is True
+        assert record["input_tokens"] == 5
+        assert record["output_tokens"] == 3
+        assert record["ttft_ms"] >= 0
+        assert record["operation"] == "chat_completion"
+
+    def test_passthrough_attributes(self):
+        monitored, mock_original = self._make_monitored_client()
+        mock_original.models.list.return_value = ["model1"]
+        assert monitored.models.list() == ["model1"]
+
+    def test_no_tenant_id_skips_record(self):
+        import sdk.nexent.monitor.monitoring as _mod
+        _mod._monitoring_tenant_id.set(None)
+
+        monitored, mock_original = self._make_monitored_client()
+        mock_response = MagicMock()
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 20
+        mock_original.chat.completions.create.return_value = mock_response
+
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            monitored.chat.completions.create(stream=False, messages=[])
+
+        mock_buffer.add_record.assert_not_called()
+
+    def test_monitoring_disabled_no_record(self):
+        monitored, mock_original = self._make_monitored_client()
+        mock_response = MagicMock()
+        mock_response.usage = None
+        mock_original.chat.completions.create.return_value = mock_response
+
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = False
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            result = monitored.chat.completions.create(
+                stream=False, messages=[])
+
+        assert result is mock_response
+        mock_buffer.add_record.assert_not_called()
+
+
+# =========================================================================
+# TestEnqueueClientMonitoringRecord  (Task 4.1-4.3)
+# =========================================================================
+class TestEnqueueClientMonitoringRecord:
+    """Verify _enqueue_client_monitoring_record builds correct records."""
+
+    def setup_method(self):
+        import sdk.nexent.monitor.monitoring as _mod
+        _mod._monitoring_tenant_id.set("t-1")
+        _mod._monitoring_user_id.set("u-1")
+        _mod._monitoring_agent_id.set(42)
+        _mod._monitoring_conversation_id.set(99)
+        _mod._monitoring_operation.set("title_generation")
+        _mod._monitoring_display_name.set("MyModel")
+
+    def test_full_record_fields(self):
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            _enqueue_client_monitoring_record(
+                model_name="test-model",
+                model_type="llm",
+                request_duration_ms=500,
+                ttft_ms=0,
+                input_tokens=10,
+                output_tokens=20,
+                total_tokens=30,
+                generation_rate=0.0,
+                is_streaming=False,
+            )
+
+        mock_buffer.add_record.assert_called_once()
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["model_name"] == "test-model"
+        assert record["operation"] == "title_generation"
+        assert record["request_duration_ms"] == 500
+        assert record["input_tokens"] == 10
+        assert record["output_tokens"] == 20
+        assert record["total_tokens"] == 30
+        assert record["is_streaming"] is False
+        assert record["is_success"] is True
+        assert record["is_error"] is False
+        assert record["model_type"] == "llm"
+        assert record["tenant_id"] == "t-1"
+        assert record["user_id"] == "u-1"
+        assert record["agent_id"] == 42
+        assert record["conversation_id"] == 99
+        assert record["display_name"] == "MyModel"
+
+    def test_error_record(self):
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            _enqueue_client_monitoring_record(
+                model_name="test-model",
+                model_type="vlm",
+                request_duration_ms=100,
+                ttft_ms=0,
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                generation_rate=0.0,
+                is_streaming=False,
+                error=ConnectionError("timeout"),
+            )
+
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["is_success"] is False
+        assert record["is_error"] is True
+        assert record["error_type"] == "ConnectionError"
+        assert record["model_type"] == "vlm"
+
+
+# =========================================================================
+# TestClientLevelIntegrationPaths  (Tasks 5.2-5.6)
+# =========================================================================
+class TestClientLevelIntegrationPaths:
+    """Verify monitoring records are produced through business code paths
+    via the client-level _MonitoredClient wrapper."""
+
+    def setup_method(self):
+        import sdk.nexent.monitor.monitoring as _mod
+        _mod._monitoring_tenant_id.set("t-1")
+        _mod._monitoring_user_id.set("u-1")
+        _mod._monitoring_agent_id.set(None)
+        _mod._monitoring_conversation_id.set(None)
+        _mod._monitoring_operation.set("unknown")
+        _mod._monitoring_display_name.set(None)
+        _mod._monitoring_tracker_snapshot.set(None)
+
+    def _mock_buffer(self):
+        buf = MagicMock()
+        buf.is_enabled = True
+        return buf
+
+    def _fake_response(self, content="hello", input_tokens=5, output_tokens=10):
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = content
+        resp.choices[0].delta = MagicMock(content=None, reasoning_content=None)
+        resp.usage = MagicMock()
+        resp.usage.prompt_tokens = input_tokens
+        resp.usage.completion_tokens = output_tokens
+        return resp
+
+    def _fake_stream_chunks(self, tokens=None, input_tokens=5, output_tokens=10):
+        if tokens is None:
+            tokens = ["hello", " world"]
+        chunks = []
+        for t in tokens:
+            chunk = MagicMock()
+            chunk.choices = [MagicMock()]
+            chunk.choices[0].delta.content = t
+            chunk.choices[0].delta.reasoning_content = None
+            chunk.choices[0].delta.role = "assistant"
+            chunks.append(chunk)
+        last = MagicMock()
+        last.choices = [MagicMock()]
+        last.choices[0].delta.content = None
+        last.choices[0].delta.reasoning_content = None
+        last.usage = MagicMock()
+        last.usage.prompt_tokens = input_tokens
+        last.usage.completion_tokens = output_tokens
+        chunks.append(last)
+        return chunks
+
+    def test_title_generation_path(self):
+        """Task 5.2: call via generate() produces record with operation=title_generation."""
+        _monitoring_operation.set("title_generation")
+        _monitoring_display_name.set("TestLLM")
+
+        mock_client = MagicMock()
+        fake_resp = self._fake_response("New Title")
+        mock_client.chat.completions.create.return_value = fake_resp
+
+        monitored = _MonitoredClient(mock_client, "test/repo", "llm")
+        buf = self._mock_buffer()
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
+            resp = monitored.chat.completions.create(
+                stream=False, messages=[{"role": "user", "content": "summarize"}]
+            )
+
+        assert resp is fake_resp
+        buf.add_record.assert_called_once()
+        record = buf.add_record.call_args[0][0]
+        assert record["operation"] == "title_generation"
+        assert record["display_name"] == "TestLLM"
+        assert record["input_tokens"] == 5
+        assert record["output_tokens"] == 10
+        assert record["is_streaming"] is False
+
+    def test_system_prompt_generation_path(self):
+        """Task 5.3: direct client call produces record with operation=system_prompt_generation."""
+        _monitoring_operation.set("system_prompt_generation")
+        _monitoring_display_name.set("PromptLLM")
+
+        mock_client = MagicMock()
+        chunks = self._fake_stream_chunks(["You", " are", " helpful"])
+        mock_client.chat.completions.create.return_value = iter(chunks)
+
+        monitored = _MonitoredClient(mock_client, "prompt/model", "llm")
+        buf = self._mock_buffer()
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
+            _monitoring_tracker_snapshot.set(None)
+            stream = monitored.chat.completions.create(
+                stream=True, messages=[{"role": "user", "content": "generate"}]
+            )
+            _ = list(stream)
+
+        buf.add_record.assert_called_once()
+        record = buf.add_record.call_args[0][0]
+        assert record["operation"] == "system_prompt_generation"
+        assert record["display_name"] == "PromptLLM"
+        assert record["is_streaming"] is True
+
+    def test_connectivity_check_path(self):
+        """Task 5.4: connectivity check produces record with operation=connectivity_check."""
+        _monitoring_operation.set("connectivity_check")
+
+        mock_client = MagicMock()
+        fake_resp = self._fake_response("Hi", input_tokens=2, output_tokens=1)
+        mock_client.chat.completions.create.return_value = fake_resp
+
+        monitored = _MonitoredClient(mock_client, "health/model", "llm")
+        buf = self._mock_buffer()
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
+            resp = monitored.chat.completions.create(
+                stream=False, messages=[{"role": "user", "content": "Hello"}], max_tokens=5
+            )
+
+        buf.add_record.assert_called_once()
+        record = buf.add_record.call_args[0][0]
+        assert record["operation"] == "connectivity_check"
+        assert record["is_success"] is True
+        assert record["input_tokens"] == 2
+        assert record["output_tokens"] == 1
+        assert record["is_streaming"] is False
+
+    def test_connectivity_check_vlm_path(self):
+        """Task 5.4 variant: VLM connectivity check uses model_type=vlm."""
+        _monitoring_operation.set("connectivity_check")
+
+        mock_client = MagicMock()
+        fake_resp = self._fake_response("ok", input_tokens=3, output_tokens=1)
+        mock_client.chat.completions.create.return_value = fake_resp
+
+        monitored = _MonitoredClient(mock_client, "vlm/model", "vlm")
+        buf = self._mock_buffer()
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
+            monitored.chat.completions.create(
+                stream=False, messages=[{"role": "user", "content": "Hello"}], max_tokens=5
+            )
+
+        record = buf.add_record.call_args[0][0]
+        assert record["operation"] == "connectivity_check"
+        assert record["model_type"] == "vlm"
+
+    def test_chat_completion_exactly_one_record(self):
+        """Task 5.5: agent __call__ streaming path produces exactly 1 record."""
+        _monitoring_operation.set("chat_completion")
+        _monitoring_display_name.set("AgentModel")
+
+        mock_client = MagicMock()
+        chunks = self._fake_stream_chunks(
+            ["token1", "token2"], input_tokens=100, output_tokens=50)
+        mock_client.chat.completions.create.return_value = iter(chunks)
+
+        monitored = _MonitoredClient(mock_client, "agent/model", "llm")
+        buf = self._mock_buffer()
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
+            set_monitoring_context(tenant_id="test-tenant")
+            stream = monitored.chat.completions.create(
+                stream=True, messages=[{"role": "user", "content": "Hello"}]
+            )
+            _ = list(stream)
+
+        assert buf.add_record.call_count == 1
+        record = buf.add_record.call_args[0][0]
+        assert record["operation"] == "chat_completion"
+        assert record["input_tokens"] == 100
+        assert record["output_tokens"] == 50
+        assert record["ttft_ms"] >= 0
+        assert record["generation_rate"] >= 0
+        assert record["is_streaming"] is True
+        assert record["display_name"] == "AgentModel"
+
+    def test_monitoring_disabled_zero_records(self):
+        """Task 5.6: ENABLE_MODEL_MONITORING=false produces zero records."""
+        _monitoring_operation.set("chat_completion")
+
+        mock_client = MagicMock()
+        fake_resp = self._fake_response("test")
+        mock_client.chat.completions.create.return_value = fake_resp
+
+        monitored = _MonitoredClient(mock_client, "test/model", "llm")
+        buf = MagicMock()
+        buf.is_enabled = False
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
+            resp = monitored.chat.completions.create(stream=False, messages=[])
+
+        buf.add_record.assert_not_called()
+
+    def test_monitoring_disabled_streaming_zero_records(self):
+        """Task 5.6 variant: streaming also produces zero records when disabled."""
+        _monitoring_operation.set("title_generation")
+
+        mock_client = MagicMock()
+        chunks = self._fake_stream_chunks(["a", "b"])
+        mock_client.chat.completions.create.return_value = iter(chunks)
+
+        monitored = _MonitoredClient(mock_client, "test/model", "llm")
+        buf = MagicMock()
+        buf.is_enabled = False
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
+            stream = monitored.chat.completions.create(
+                stream=True, messages=[])
+            _ = list(stream)
+
+        buf.add_record.assert_not_called()
+
+    def test_no_tenant_id_zero_records_all_paths(self):
+        """Task 5.6 variant: no tenant_id means zero records regardless of operation."""
+        import sdk.nexent.monitor.monitoring as _mod
+        _mod._monitoring_tenant_id.set(None)
+
+        mock_client = MagicMock()
+        fake_resp = self._fake_response("test")
+        mock_client.chat.completions.create.return_value = fake_resp
+
+        for op in ["chat_completion", "title_generation", "system_prompt_generation", "connectivity_check"]:
+            _monitoring_operation.set(op)
+            monitored = _MonitoredClient(mock_client, "test/model", "llm")
+            buf = self._mock_buffer()
+
+            with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
+                monitored.chat.completions.create(stream=False, messages=[])
+
+            buf.add_record.assert_not_called()
