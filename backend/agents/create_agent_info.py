@@ -552,16 +552,60 @@ async def prepare_prompt_templates(
     return prompt_templates
 
 
-async def join_minio_file_description_to_query(minio_files, query):
+async def join_minio_file_description_to_query(minio_files, query, history=None):
+    """
+    Join MinIO file descriptions to the user query.
+
+    This function formats uploaded file information into a structured description
+    that includes both S3 URL (for internal tools) and Download URL (for external MCP tools).
+    It processes files from both the current message and historical messages.
+
+    Args:
+        minio_files: List of file info dicts from current message upload
+        query: Original user query
+        history: Optional list of historical message dicts, each may contain minio_files
+
+    Returns:
+        Modified query with file descriptions appended
+    """
     final_query = query
+    all_files = []
+
+    # Collect files from current message
     if minio_files and isinstance(minio_files, list):
-        file_descriptions = []
         for file in minio_files:
-            if isinstance(file, dict) and "url" in file and file["url"] and "name" in file and file["name"]:
-                file_descriptions.append(f"File name: {file['name']}, S3 URL: s3:/{file['url']}")
+            if isinstance(file, dict) and file.get("url") and file.get("name"):
+                all_files.append(file)
+
+    # Collect files from historical messages
+    if history and isinstance(history, list):
+        for msg in history:
+            if isinstance(msg, dict) and msg.get("minio_files"):
+                for file in msg["minio_files"]:
+                    if isinstance(file, dict) and file.get("url") and file.get("name"):
+                        all_files.append(file)
+
+    if all_files:
+        file_descriptions = []
+        for file in all_files:
+            s3_url = f"s3:/{file['url']}"
+            presigned_url = file.get("presigned_url", "")
+
+            # Build description with both URLs
+            if presigned_url:
+                desc = (
+                    f"File name: {file['name']}\n"
+                    f"- S3 URL: {s3_url}  [permanent, for internal tools like analyze_text_file]\n"
+                    f"- Download URL: {presigned_url}  [temporary (expires in 24h), for external MCP tools]"
+                )
+            else:
+                desc = f"File name: {file['name']}, S3 URL: {s3_url}  [permanent]"
+
+            file_descriptions.append(desc)
+
         if file_descriptions:
             final_query = "User uploaded files. The file information is as follows:\n"
-            final_query += "\n".join(file_descriptions) + "\n\n"
+            final_query += "\n\n".join(file_descriptions) + "\n\n"
             final_query += f"User wants to answer questions based on the information in the above files: {query}"
     return final_query
 
@@ -617,7 +661,11 @@ async def create_agent_run_info(
             version_no = 0
             logger.info(f"Agent {agent_id} has no published version, using draft version 0")
 
-    final_query = await join_minio_file_description_to_query(minio_files=minio_files, query=query)
+    final_query = await join_minio_file_description_to_query(
+        minio_files=minio_files,
+        query=query,
+        history=history
+    )
     model_list = await create_model_config_list(tenant_id)
     create_config_kwargs = {
         "agent_id": agent_id,

@@ -258,6 +258,7 @@ export function ChatInterface() {
     // Handle file upload
     let uploadedFileUrls: Record<string, string> = {};
     let objectNames: Record<string, string> = {}; // Add object name mapping
+    let presignedUrls: Record<string, string> = {}; // Store presigned URLs for external MCP tool access
 
     if (attachments.length > 0) {
       // Show loading state
@@ -267,13 +268,16 @@ export function ChatInterface() {
       const uploadResult = await uploadAttachments(attachments, t);
       uploadedFileUrls = uploadResult.uploadedFileUrls;
       objectNames = uploadResult.objectNames; // Get object name mapping
+      presignedUrls = uploadResult.presignedUrls; // Get presigned URLs for external access
     }
 
     // Use preprocessing function to create message attachments
     const messageAttachments = createMessageAttachments(
       attachments,
       uploadedFileUrls,
-      fileUrls
+      fileUrls,
+      objectNames,
+      presignedUrls
     );
 
     // Create user message object
@@ -434,13 +438,29 @@ export function ChatInterface() {
         conversation_id: id,
         history: currentMessages
           .filter((msg) => msg.id !== userMessage.id)
-          .map((msg) => ({
-            role: msg.role,
-            content:
-              msg.role === ROLE_ASSISTANT
-                ? msg.finalAnswer?.trim() || msg.content || ""
-                : msg.content || "",
-          })),
+          .map((msg) => {
+            const historyItem: any = {
+              role: msg.role,
+              content:
+                msg.role === ROLE_ASSISTANT
+                  ? msg.finalAnswer?.trim() || msg.content || ""
+                  : msg.content || "",
+            };
+            // Include attachment info for historical messages so the agent
+            // can reference files from previous turns
+            if (msg.attachments && msg.attachments.length > 0) {
+              historyItem.minio_files = msg.attachments.map((attachment) => ({
+                object_name: attachment.object_name || "",
+                name: attachment.name,
+                type: attachment.type,
+                size: attachment.size,
+                url: attachment.url || "",
+                presigned_url: attachment.presigned_url || "",
+                description: attachment.description || "",
+              }));
+            }
+            return historyItem;
+          }),
         minio_files:
           messageAttachments.length > 0
             ? messageAttachments.map((attachment) => {
@@ -456,6 +476,7 @@ export function ChatInterface() {
                   type: attachment.type,
                   size: attachment.size,
                   url: uploadedFileUrls[attachment.name] || attachment.url,
+                  presigned_url: presignedUrls[attachment.name] || "",
                   description: description,
                 };
               })
