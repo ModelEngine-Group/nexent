@@ -18,6 +18,7 @@
   "filePreview.loadingPage": "页面加载中...",
   "filePreview.previewFailed": "文件预览失败",
   "filePreview.emptyFile": "文件内容为空",
+  "filePreview.uploadToPreview": "请上传文件后预览",
   "filePreview.download": "下载",
   "filePreview.zoomIn": "放大",
   "filePreview.zoomOut": "缩小",

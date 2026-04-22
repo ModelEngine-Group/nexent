@@ -103,15 +103,24 @@ export interface ChatAttachmentProps {
   className?: string;
 }
 
-// File preview drawer props
-export interface FilePreviewProps {
-  open: boolean;
+type RemoteFilePreviewSource = {
+  source?: "remote";
   objectName: string;
   fileName: string;
   fileType?: string;
   fileSize?: number;
+};
+
+type LocalFilePreviewSource = {
+  source: "local";
+  file: File;
+};
+
+// File preview drawer props
+export type FilePreviewProps = {
+  open: boolean;
   onClose: () => void;
-}
+} & (RemoteFilePreviewSource | LocalFilePreviewSource);
 
 // Main chat message type
 export interface ChatMessageType {
