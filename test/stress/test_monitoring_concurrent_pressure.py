@@ -73,6 +73,62 @@ def _create_test_buffer(
     return buf
 
 
+def _make_tracker(tenant_id, user_idx):
+    """Create a mock tracker for pressure testing."""
+    tracker = MagicMock()
+    tracker.start_time = time.time()
+    tracker.first_token_time = tracker.start_time + 0.05
+    tracker.input_tokens = 100
+    tracker.output_tokens = 200
+    tracker.token_count = 50
+    tracker._context_snapshot = {
+        "tenant_id": tenant_id,
+        "user_id": f"user-{user_idx}",
+    }
+    tracker._display_name = None
+    return tracker
+
+
+def _user_worker(user_idx, calls_per_user, buf, result, result_lock, peak_buffer):
+    """Simulate a single user making multiple model calls."""
+    tenant_id = str(uuid.uuid4())
+    set_monitoring_context(tenant_id=tenant_id, user_id=f"user-{user_idx}")
+
+    for _ in range(calls_per_user):
+        try:
+            tracker = _make_tracker(tenant_id, user_idx)
+
+            _enqueue_monitoring_record(
+                tracker,
+                model_name="GLM-4.6V",
+                operation="llm_completion",
+                kwargs={},
+                model_type="vlm",
+            )
+
+            with result_lock:
+                result.total_records_enqueued += 1
+
+            current_size = len(buf._buffer)
+            if current_size > peak_buffer[0]:
+                peak_buffer[0] = current_size
+
+        except Exception:
+            with result_lock:
+                result.total_errors += 1
+
+
+def _drain_buffer(buf):
+    """Flush remaining buffer contents until no progress is made."""
+    remaining = len(buf._buffer)
+    while remaining > 0:
+        buf._flush_to_db()
+        new_remaining = len(buf._buffer)
+        if new_remaining == remaining:
+            break
+        remaining = new_remaining
+
+
 def run_pressure_test(
     num_users: int = 50,
     calls_per_user: int = 50,
@@ -117,49 +173,16 @@ def run_pressure_test(
     )
     flush_thread.start()
 
-    def user_worker(user_idx: int):
-        tenant_id = str(uuid.uuid4())
-        set_monitoring_context(tenant_id=tenant_id, user_id=f"user-{user_idx}")
-
-        for _ in range(calls_per_user):
-            try:
-                tracker = MagicMock()
-                tracker.start_time = time.time()
-                tracker.first_token_time = tracker.start_time + 0.05
-                tracker.input_tokens = 100
-                tracker.output_tokens = 200
-                tracker.token_count = 50
-                tracker._context_snapshot = {
-                    "tenant_id": tenant_id,
-                    "user_id": f"user-{user_idx}",
-                }
-                tracker._display_name = None
-
-                _enqueue_monitoring_record(
-                    tracker,
-                    model_name="GLM-4.6V",
-                    operation="llm_completion",
-                    kwargs={},
-                    model_type="vlm",
-                )
-
-                with result_lock:
-                    result.total_records_enqueued += 1
-
-                current_size = len(buf._buffer)
-                if current_size > peak_buffer[0]:
-                    peak_buffer[0] = current_size
-
-            except Exception:
-                with result_lock:
-                    result.total_errors += 1
-
     start_time = time.time()
 
     with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
         threads = []
         for i in range(num_users):
-            t = threading.Thread(target=user_worker, args=(i,), daemon=True)
+            t = threading.Thread(
+                target=_user_worker,
+                args=(i, calls_per_user, buf, result, result_lock, peak_buffer),
+                daemon=True,
+            )
             threads.append(t)
 
         for t in threads:
@@ -167,13 +190,7 @@ def run_pressure_test(
         for t in threads:
             t.join(timeout=120)
 
-        remaining = len(buf._buffer)
-        while remaining > 0:
-            buf._flush_to_db()
-            new_remaining = len(buf._buffer)
-            if new_remaining == remaining:
-                break
-            remaining = new_remaining
+        _drain_buffer(buf)
 
     buf._running = False
     flush_thread.join(timeout=5)

@@ -545,9 +545,9 @@ class LLMTokenTracker:
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         total_duration = time.time() - self.start_time
+        generation_rate = 0.0
 
         if self.manager.is_enabled:
-            generation_rate = 0
             if total_duration > 0 and self.token_count > 0:
                 generation_rate = self.token_count / total_duration
                 self.manager.record_llm_metrics("token_rate", generation_rate, {
@@ -896,6 +896,89 @@ def _enqueue_client_monitoring_record(
         pass
 
 
+def _extract_tracker_metrics(tracker):
+    """Extract timing and token metrics from an LLMTokenTracker."""
+    request_duration_ms = 0
+    ttft_ms = 0
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    generation_rate = 0.0
+
+    if tracker is not None:
+        request_duration_ms = int(
+            (time.time() - tracker.start_time) * 1000)
+        if tracker.first_token_time is not None:
+            ttft_ms = int((tracker.first_token_time -
+                          tracker.start_time) * 1000)
+        input_tokens = tracker.input_tokens
+        output_tokens = tracker.output_tokens
+        total_tokens = input_tokens + output_tokens
+        if request_duration_ms > 0 and output_tokens > 0:
+            generation_rate = output_tokens / \
+                (request_duration_ms / 1000.0)
+
+    return request_duration_ms, ttft_ms, input_tokens, output_tokens, total_tokens, generation_rate
+
+
+def _build_monitoring_record(tracker, model_name, operation, error, model_type,
+                              request_duration_ms, ttft_ms, input_tokens,
+                              output_tokens, total_tokens, generation_rate):
+    """Build the base monitoring record dict."""
+    record = {
+        "model_name": model_name,
+        "operation": operation,
+        "request_duration_ms": request_duration_ms,
+        "ttft_ms": ttft_ms,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "generation_rate": round(generation_rate, 2),
+        "is_success": error is None,
+        "is_error": error is not None,
+        "is_streaming": tracker.token_count > 0 if tracker else False,
+        "model_type": model_type,
+    }
+    if error is not None:
+        record["error_type"] = type(error).__name__
+        record["error_message"] = str(error)[:2000]
+    return record
+
+
+def _resolve_context_field(snapshot, ctx, kwargs, field_name):
+    """Resolve a context field with priority: snapshot > live context > kwargs."""
+    return snapshot.get(field_name) or ctx.get(field_name) or kwargs.get(field_name)
+
+
+def _enrich_record_with_context(record, tracker, kwargs):
+    """Fill tenant/user/agent/conversation/display_name from context sources."""
+    snapshot = getattr(tracker, "_context_snapshot", {}) or {}
+    ctx = get_monitoring_context()
+
+    tenant_id = _resolve_context_field(snapshot, ctx, kwargs, "tenant_id")
+    if not tenant_id:
+        return None
+
+    record["tenant_id"] = tenant_id
+
+    user_id = _resolve_context_field(snapshot, ctx, kwargs, "user_id")
+    agent_id = _resolve_context_field(snapshot, ctx, kwargs, "agent_id")
+    conversation_id = _resolve_context_field(snapshot, ctx, kwargs, "conversation_id")
+
+    if user_id:
+        record["user_id"] = user_id
+    if agent_id is not None:
+        record["agent_id"] = agent_id
+    if conversation_id is not None:
+        record["conversation_id"] = conversation_id
+
+    display_name = getattr(tracker, "_display_name", None)
+    if display_name:
+        record["display_name"] = display_name
+
+    return tenant_id
+
+
 def _enqueue_monitoring_record(
     tracker: Optional[LLMTokenTracker],
     model_name: str,
@@ -909,78 +992,18 @@ def _enqueue_monitoring_record(
         if buffer is None or not buffer.is_enabled:
             return
 
-        request_duration_ms = 0
-        ttft_ms = 0
-        input_tokens = 0
-        output_tokens = 0
-        total_tokens = 0
-        generation_rate = 0.0
+        metrics = _extract_tracker_metrics(tracker)
+        record = _build_monitoring_record(
+            tracker, model_name, operation, error, model_type, *metrics)
 
-        if tracker is not None:
-            request_duration_ms = int(
-                (time.time() - tracker.start_time) * 1000)
-            if tracker.first_token_time is not None:
-                ttft_ms = int((tracker.first_token_time -
-                              tracker.start_time) * 1000)
-            input_tokens = tracker.input_tokens
-            output_tokens = tracker.output_tokens
-            total_tokens = input_tokens + output_tokens
-            if request_duration_ms > 0 and output_tokens > 0:
-                generation_rate = output_tokens / \
-                    (request_duration_ms / 1000.0)
-
-        record = {
-            "model_name": model_name,
-            "operation": operation,
-            "request_duration_ms": request_duration_ms,
-            "ttft_ms": ttft_ms,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": total_tokens,
-            "generation_rate": round(generation_rate, 2),
-            "is_success": error is None,
-            "is_error": error is not None,
-            "is_streaming": tracker.token_count > 0 if tracker else False,
-            "model_type": model_type,
-        }
-        if error is not None:
-            record["error_type"] = type(error).__name__
-            record["error_message"] = str(error)[:2000]
-
-        # Source priority: tracker snapshot > live context > kwargs
-        snapshot = getattr(tracker, "_context_snapshot", {}) or {}
-        ctx = get_monitoring_context()
-        tenant_id = snapshot.get("tenant_id") or ctx.get(
-            "tenant_id") or kwargs.get("tenant_id")
-
-        if not tenant_id:
+        result = _enrich_record_with_context(record, tracker, kwargs)
+        if result is None:
             logger.debug(
                 "Monitoring: skipping %s record for %s - no tenant_id in context",
                 model_type,
                 model_name,
             )
             return
-
-        record["tenant_id"] = tenant_id
-        user_id = snapshot.get("user_id") or ctx.get(
-            "user_id") or kwargs.get("user_id")
-        agent_id = snapshot.get("agent_id") or ctx.get(
-            "agent_id") or kwargs.get("agent_id")
-        conversation_id = (
-            snapshot.get("conversation_id") or ctx.get(
-                "conversation_id") or kwargs.get("conversation_id")
-        )
-
-        if user_id:
-            record["user_id"] = user_id
-        if agent_id is not None:
-            record["agent_id"] = agent_id
-        if conversation_id is not None:
-            record["conversation_id"] = conversation_id
-
-        display_name = getattr(tracker, "_display_name", None)
-        if display_name:
-            record["display_name"] = display_name
 
         buffer.add_record(record)
     except Exception:

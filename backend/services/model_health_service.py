@@ -16,6 +16,13 @@ from utils.config_utils import get_model_name_from_config
 logger = logging.getLogger("model_health_service")
 
 
+def _mask_secret(value: Optional[str]) -> str:
+    """Mask a secret value, showing only first and last 4 characters."""
+    if not value or len(value) <= 8:
+        return "***"
+    return value[:4] + "****" + value[-4:]
+
+
 async def _embedding_dimension_check(
     model_name: str,
     model_type: str,
@@ -174,10 +181,10 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
 
         if connectivity:
             logger.info(
-                f"CONNECTED: {model_name}; Base URL: {model.get('base_url')}; API Key: {model.get('api_key')}")
+                f"CONNECTED: {model_name}; Base URL: {model.get('base_url')}; API Key: {_mask_secret(model.get('api_key'))}")
         else:
             logger.warning(
-                f"UNCONNECTED: {model_name}; Base URL: {model.get('base_url')}; API Key: {model.get('api_key')}")
+                f"UNCONNECTED: {model_name}; Base URL: {model.get('base_url')}; API Key: {_mask_secret(model.get('api_key'))}")
         connect_status = ModelConnectStatusEnum.AVAILABLE.value if connectivity else ModelConnectStatusEnum.UNAVAILABLE.value
         update_data = {"connect_status": connect_status}
         update_model_record(model["model_id"], update_data)
@@ -234,7 +241,7 @@ async def verify_model_config_connectivity(model_config: dict):
         except ValueError as e:
             error_msg = str(e)
             logger.warning(
-                f"UNCONNECTED: {model_name}; Base URL: {model_base_url}; API Key: {model_api_key}; Error: {error_msg}")
+                f"UNCONNECTED: {model_name}; Base URL: {model_base_url}; API Key: {_mask_secret(model_api_key)}; Error: {error_msg}")
             return {
                 "connectivity": False,
                 "model_name": model_name,

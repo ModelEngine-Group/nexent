@@ -1089,7 +1089,7 @@ class TestWriteBatchIsolation:
 
     def test_mixed_valid_and_invalid_records(self):
         """Valid records succeed; invalid ones are skipped silently."""
-        mock_session_fn, mock_model_cls = self._setup_db_mocks()
+        mock_session_fn, _ = self._setup_db_mocks()
         call_count = {"n": 0}
 
         def _session_ctx():
@@ -1101,7 +1101,7 @@ class TestWriteBatchIsolation:
                     return MagicMock()
 
                 def __exit__(self_inner, *args):
-                    pass
+                    pass  # Intentionally empty: no cleanup needed for mock context
 
             return _Ctx()
 
@@ -1117,7 +1117,7 @@ class TestWriteBatchIsolation:
 
     def test_all_valid_records(self):
         """All valid records are written successfully."""
-        mock_session_fn, mock_model_cls = self._setup_db_mocks()
+        mock_session_fn, _ = self._setup_db_mocks()
         mock_session = MagicMock()
         mock_session_fn.return_value.__enter__ = Mock(
             return_value=mock_session)
@@ -1131,7 +1131,7 @@ class TestWriteBatchIsolation:
 
     def test_all_invalid_records(self):
         """When every record fails, _write_batch still does not raise."""
-        mock_session_fn, mock_model_cls = self._setup_db_mocks()
+        mock_session_fn, _ = self._setup_db_mocks()
         mock_session_fn.return_value.__enter__ = Mock(
             side_effect=RuntimeError("DB down")
         )
@@ -1274,7 +1274,7 @@ class TestRecordModelCallContext:
                 },
             ),
         ):
-            with RecordModelCallContext("embedding", "bge-model") as ctx:
+            with RecordModelCallContext("embedding", "bge-model") as _:
                 pass  # no exception
 
         mock_buffer.add_record.assert_called_once()
@@ -1303,7 +1303,7 @@ class TestRecordModelCallContext:
             ),
         ):
             # Must NOT raise
-            with RecordModelCallContext("embedding", "bge-model") as ctx:
+            with RecordModelCallContext("embedding", "bge-model") as _:
                 pass
 
         mock_buffer.add_record.assert_not_called()
@@ -1811,7 +1811,7 @@ class TestClientLevelIntegrationPaths:
         buf.is_enabled = False
 
         with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
-            resp = monitored.chat.completions.create(stream=False, messages=[])
+            _ = monitored.chat.completions.create(stream=False, messages=[])
 
         buf.add_record.assert_not_called()
 

@@ -7,7 +7,7 @@ Uses an independent database connection pool to avoid impacting business operati
 
 import logging
 from http import HTTPStatus
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from sqlalchemy import text
@@ -108,9 +108,9 @@ def _filter_by_rbac(
 
 @router.get("/models", response_model=ConversationResponse)
 async def list_models_endpoint(
-    time_range: str = Query("24h", description="Time range: 24h, 7d, 30d"),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    time_range: Annotated[str, Query(description="Time range: 24h, 7d, 30d")] = "24h",
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, description="Items per page")] = 20,
     authorization: Optional[str] = Header(None),
 ):
     """List all models with aggregated monitoring metrics from database."""
