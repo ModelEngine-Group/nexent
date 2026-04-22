@@ -6,7 +6,6 @@ import dynamic from 'next/dynamic';
 import { Drawer, Spin, Button, Table } from 'antd';
 import { Download, Minus, Plus, RotateCw, X } from 'lucide-react';
 import Papa from 'papaparse';
-import { Virtuoso } from 'react-virtuoso';
 import { FilePreviewProps } from '@/types/chat';
 import { storageService } from '@/services/storageService';
 import { MarkdownRenderer, extractMarkdownHeadings, type MarkdownHeading } from '@/components/ui/markdownRenderer';
@@ -24,9 +23,24 @@ const PdfViewer = dynamic(() => import('@/components/ui/PdfViewer').then(mod => 
 const CHUNK_SIZE = 128 * 1024;
 
 const CSV_ROW_HEIGHT = 40;
+const TEXT_RENDER_BLOCK_SIZE = 200;
 const CSV_DELIMITER_CANDIDATES = [',', ';', '\t', '|'] as const;
 const CHARSET_PATTERN = /charset\s*=\s*([^;\s]+)/i;
 const CONTENT_RANGE_PATTERN = /bytes (\d+)-(\d+)\/(\d+)/;
+const INVALID_CONTAINER_TAGS = new Set(['head', 'style', 'script', 'link', 'meta']);
+
+function isValidContainerElement(el: Element | null): el is HTMLDivElement {
+  if (!(el instanceof HTMLDivElement)) {
+    return false;
+  }
+
+  if (!el.isConnected) {
+    return false;
+  }
+
+  const tagName = el.tagName.toLowerCase();
+  return !INVALID_CONTAINER_TAGS.has(tagName);
+}
 
 function normalizeCharsetLabel(value: string): string {
   const normalized = value.trim().toLowerCase();
@@ -353,9 +367,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const [showMarkdownToc, setShowMarkdownToc] = useState(false);
 
   const [txtLines, setTxtLines] = useState<string[]>([]);
-  const [txtViewportHeight, setTxtViewportHeight] = useState(0);
-  const txtWrapperRef = useRef<HTMLDivElement | null>(null);
-  const txtResizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const [csvRows, setCsvRows] = useState<string[][]>([]);
   const [csvTableHeight, setCsvTableHeight] = useState(400);
@@ -385,7 +396,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const resetTextPreviewState = useCallback(() => {
     setTextContent('');
     setTxtLines([]);
-    setTxtViewportHeight(0);
     setCsvRows([]);
     setLoadingMore(false);
 
@@ -393,7 +403,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     totalBytesRef.current = null;
     remainderRef.current = '';
     isFetchingRef.current = false;
-    previewUrlRef.current = '';
     textDecoderRef.current = null;
     decoderEncodingRef.current = null;
     decoderHasExplicitCharsetRef.current = false;
@@ -448,12 +457,25 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     }
     return extractMarkdownHeadings(textContent);
   }, [detectedFileType, textContent]);
+
+  const txtLineBlocks = useMemo(() => {
+    const blocks: string[][] = [];
+    for (let i = 0; i < txtLines.length; i += TEXT_RENDER_BLOCK_SIZE) {
+      blocks.push(txtLines.slice(i, i + TEXT_RENDER_BLOCK_SIZE));
+    }
+    return blocks;
+  }, [txtLines]);
   
   const isEmptyFile = fileSize === 0;
   const isTooLargeToPreview = !!(fileSize && fileSize > 100 * 1024 * 1024);
 
   const fetchTextChunk = useCallback(async (url: string, isFirst = false, sessionId?: number): Promise<void> => {
     const activeSessionId = sessionId ?? textFetchSessionRef.current;
+    if (!url) {
+      if (isFirst) setLoading(false);
+      else setLoadingMore(false);
+      return;
+    }
     if (isFetchingRef.current) return;
     if (totalBytesRef.current !== null && byteOffsetRef.current >= totalBytesRef.current) return;
 
@@ -531,10 +553,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const setupSentinelObserver = useCallback((node: HTMLDivElement | null) => {
     observerRef.current?.disconnect();
     observerRef.current = null;
-    if (!node) return;
+    if (!isValidContainerElement(node)) return;
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
-        if (totalBytesRef.current === null || byteOffsetRef.current < totalBytesRef.current) {
+        if (!isLocalSource && previewUrlRef.current && (totalBytesRef.current === null || byteOffsetRef.current < totalBytesRef.current)) {
           fetchTextChunk(previewUrlRef.current).catch(err =>
             log.error('Failed to fetch next text chunk:', err)
           );
@@ -543,7 +565,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     }, { threshold: 0.1 });
     observer.observe(node);
     observerRef.current = observer;
-  }, [fetchTextChunk]);
+  }, [fetchTextChunk, isLocalSource]);
 
   useEffect(() => {
     if (!open || (!isLocalSource && !objectName)) {
@@ -565,7 +587,17 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
         if (isLocalSource && localFile) {
           resetTextPreviewState();
+          const previousPreviewUrl = previewUrlRef.current;
+          if (previousPreviewUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(previousPreviewUrl);
+          }
+          previewUrlRef.current = '';
 
+          if (isTooLargeToPreview && ['text', 'markdown', 'csv'].includes(detectedFileType)) {
+            setLoading(false);
+            return;
+          }
+          
           if (detectedFileType === 'image' || detectedFileType === 'pdf') {
             localPreviewUrl = URL.createObjectURL(localFile);
             setPreviewUrl(localPreviewUrl);
@@ -606,16 +638,19 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         }
 
         const url = storageService.getPreviewUrl(objectName, fileName);
-        setPreviewUrl(url);
-        previewUrlRef.current = url;
 
         if (['markdown', 'csv', 'text'].includes(detectedFileType)) {
           textFetchSessionRef.current += 1;
           const sessionId = textFetchSessionRef.current;
           resetTextPreviewState();
+          setPreviewUrl(url);
+          previewUrlRef.current = url;
           await fetchTextChunk(url, true, sessionId);
           return;
         }
+
+        setPreviewUrl(url);
+        previewUrlRef.current = url;
 
         setLoading(false);
       } catch (err) {
@@ -625,29 +660,26 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       }
     };
 
-    let revokeLocalPreviewUrl: string | null = null;
-
-    loadPreview().then(() => {
-      if (isLocalSource && previewUrlRef.current.startsWith('blob:')) {
-        revokeLocalPreviewUrl = previewUrlRef.current;
-      }
-    });
-
-    return () => {
-      if (revokeLocalPreviewUrl) {
-        URL.revokeObjectURL(revokeLocalPreviewUrl);
-      }
-    };
+    void loadPreview();
   }, [open, objectName, fileName, detectedFileType, t, fetchTextChunk, resetTextPreviewState, isEmptyFile, isLocalSource, localFile]);
 
   useEffect(() => {
+    return () => {
+      const currentPreviewUrl = previewUrlRef.current;
+      if (currentPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(currentPreviewUrl);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!open) {
+      const previousPreviewUrl = previewUrlRef.current;
       setServerTooLarge(false);
       setImageScale(1);
       setImageRotation(0);
       setTextContent('');
       setTxtLines([]);
-      setTxtViewportHeight(0);
       setCsvRows([]);
       setCsvTableHeight(400);
       setPreviewUrl('');
@@ -660,16 +692,16 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       totalBytesRef.current = null;
       remainderRef.current = '';
       isFetchingRef.current = false;
-      previewUrlRef.current = '';
       textDecoderRef.current = null;
       decoderEncodingRef.current = null;
       decoderHasExplicitCharsetRef.current = false;
       decoderAllowGbFallbackRef.current = false;
       observerRef.current?.disconnect();
       observerRef.current = null;
-      if (previewUrlRef.current.startsWith('blob:')) {
-        URL.revokeObjectURL(previewUrlRef.current);
+      if (previousPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(previousPreviewUrl);
       }
+      previewUrlRef.current = '';
     }
   }, [open]);
 
@@ -706,6 +738,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
   const fetchNextTextChunk = useCallback(() => {
     if (isLocalSource) {
+      return;
+    }
+
+    if (!previewUrlRef.current) {
       return;
     }
 
@@ -973,44 +1009,38 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const renderTextViewer = () => {
     return (
       <div
-        ref={(el) => {
-          txtWrapperRef.current = el;
-          txtResizeObserverRef.current?.disconnect();
-          if (el) {
-            const ro = new ResizeObserver(() => {
-              setTxtViewportHeight(el.clientHeight);
-            });
-            ro.observe(el);
-            txtResizeObserverRef.current = ro;
-            setTxtViewportHeight(el.clientHeight);
+        className="h-full min-h-0 w-full overflow-y-auto overflow-x-hidden bg-white"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          if (
+            !isLocalSource &&
+            el.scrollTop + el.clientHeight >= el.scrollHeight - el.clientHeight * 0.5 &&
+            !isFetchingRef.current &&
+            (totalBytesRef.current === null || byteOffsetRef.current < totalBytesRef.current)
+          ) {
+            fetchNextTextChunk();
           }
         }}
-        className="h-full overflow-hidden bg-white"
       >
-        {txtViewportHeight > 0 ? (
-          <Virtuoso
-            className="h-full overflow-x-hidden"
-            data={txtLines}
-            endReached={fetchNextTextChunk}
-            increaseViewportBy={{ top: 400, bottom: 800 }}
-            components={{
-              Footer: () =>
-                loadingMore ? (
-                  <div className="flex justify-center py-4">
-                    <Spin size="small" />
-                  </div>
-                ) : null,
-            }}
-            itemContent={(index, line) => (
-              <div
-                key={index}
-                className="px-6 font-mono text-sm leading-6 whitespace-pre-wrap break-words"
-              >
-                {line || '\u00A0'}
-              </div>
-            )}
-          />
-        ) : null}
+        <div className="px-6 py-4 font-mono text-sm leading-6">
+          {txtLineBlocks.map((block, index) => (
+            <pre
+              key={index}
+              className="m-0 whitespace-pre-wrap break-words"
+              style={{
+                contentVisibility: 'auto',
+                containIntrinsicSize: `${Math.max(block.length, 1) * 24}px`,
+              }}
+            >
+              {block.join('\n') || '\u00A0'}
+            </pre>
+          ))}
+        </div>
+        {loadingMore && (
+          <div className="flex justify-center py-4">
+            <Spin size="small" />
+          </div>
+        )}
       </div>
     );
   };
@@ -1070,7 +1100,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       placement="right"
       size="65%"
       styles={{
-        body: { padding: 0, height: '100%', display: 'flex', flexDirection: 'column' },
+        body: { padding: 0, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' },
         header: { padding: '12px 16px', borderBottom: '1px solid #e5e7eb' },
       }}
       closeIcon={<X size={20} />}
@@ -1097,7 +1127,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       }
     >
       <div className="flex h-full flex-col">
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
         {renderContent()}
         </div>
       </div>

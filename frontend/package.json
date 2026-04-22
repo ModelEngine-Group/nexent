@@ -53,7 +53,6 @@
     "react-markdown": "^8.0.7",
     "react-pdf": "10.1.0",
     "react-syntax-highlighter": "^16.1.0",
-    "react-virtuoso": "^4.12.3",
     "rehype-katex": "^6.0.3",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^3.0.1",
