@@ -23,10 +23,7 @@ from ..utils.token_estimation import (
 
 @dataclass
 class PreviousSummaryCache:
-    """缓存已压缩的 previous-run 摘要。
-    覆盖语义：pairs[0:covered_pairs] 被 summary_text 连续完整覆盖。
-    写入时机：仅 _compress_previous_with_cache 中的 fresh 路径写入。
-    """
+    """Caches the compressed summary from the previous run."""
     summary_text: str
     covered_pairs: int
     anchor_fingerprint: str
@@ -46,7 +43,7 @@ class ContextManagerConfig:
     keep_recent_steps: int = 4
     keep_recent_pairs: int = 2
     max_chunk_count: int = 0
-    max_observation_length: int = 500
+    max_memory_step_length: int = 2000 # all kinds of MemoryStep dataclass
 
     summary_system_prompt: str = (
         "你是一个对话摘要助手。请将以下对话历史压缩为结构化摘要，"
@@ -82,9 +79,10 @@ class CompressionCallRecord:
 @dataclass
 class SummaryTaskStep(TaskStep):
     is_summary: bool = True
+    prefix: str = "Summary of earlier steps in this task:" # default prefix
 
     def to_messages(self, summary_mode: bool = False) -> list:
-        content = [{"type": "text", "text": f"Summary of earlier steps in this task:\n{self.task}"}]
+        content = [{"type": "text", "text": f"{self.prefix}:\n{self.task}"}]
         return [ChatMessage(role=MessageRole.USER, content=content)]
 
 
@@ -94,8 +92,9 @@ class ContextManager:
         self._previous_summary_cache: Optional[PreviousSummaryCache] = None
         self._current_summary_cache: Optional[CurrentSummaryCache] = None
 
-        # Run 边界自检测。current cache 的指纹空间会在新 run 早期复用，
-        # 必须显式清零。previous cache 靠指纹自生自灭，不受 run 切换影响。
+        # Run boundary self-detection. The current cache fingerprint is only reused
+        # within the current run and must be explicitly cleared at the start of a new run.
+        # The previous cache is managed and updated across runs.
         self._last_run_start_idx: Optional[int] = None
 
         if max_steps is not None and self.config.keep_recent_steps >= max_steps:
@@ -103,22 +102,23 @@ class ContextManager:
 
         self.compression_calls_log: List[CompressionCallRecord] = []
         self._step_local_log: List[CompressionCallRecord] = []
-        self._prev_compress_count: int = 0
         self._lock = threading.Lock()
 
         if self.config.max_summary_input_tokens <= 0:
             self.config.max_summary_input_tokens = int(self.config.token_threshold * 1.2)
         if self.config.max_summary_reduce_tokens <= 0:
-            self.config.max_summary_reduce_tokens = int(self.config.max_summary_input_tokens * 0.8)
+            self.config.max_summary_reduce_tokens = int(self.config.token_threshold * 0.2)
 
     # ============================================================
-    #  Cache 校验
+    #  Cache validation
     # ============================================================
 
     def _is_prev_cache_valid(self, prev_pairs: List[tuple]) -> Tuple[bool, int]:
-        """Previous cache 是否覆盖 prev_pairs 的前缀。
-        返回 (is_valid, covered_idx)。is_valid=True 时 prev_pairs[0:covered_idx]
-        可由 cache.summary_text 替代，prev_pairs[covered_idx:] 是未覆盖增量。
+        """Checks whether the previous cache covers a prefix of prev_pairs.
+
+        Returns (is_valid, covered_idx). When is_valid is True, prev_pairs[0:covered_idx]
+        can be replaced by cache.summary_text, and prev_pairs[covered_idx:] represents
+        the uncovered incremental portion.
         """
         cache = self._previous_summary_cache
         if cache is None or not prev_pairs:
@@ -143,13 +143,12 @@ class ContextManager:
         return True, cache.end_steps
 
     # ============================================================
-    #  Effective token 估算
+    #  Effective token estimation
     # ============================================================
 
     def _effective_tokens(self, memory: AgentMemory, current_run_start_idx: int) -> int:
-        """估算"下一次 _build_messages 真正会产出的 token 负担"。
-        cache 有效时用 summary_text 替代被覆盖部分；无效时退回 raw。
-        这才是 G2 阈值的正确依据。
+        """Estimates the actual token burden of the upcoming _build_messages call.
+        Uses summary_text for the covered prefix when cache is valid; falls back to raw otherwise.
         """
         system_prompt_tokens = estimate_tokens_for_system_prompt(memory)
         prev_steps = memory.steps[:current_run_start_idx]
@@ -234,14 +233,7 @@ class ContextManager:
             budget -= cost
         return list(reversed(kept)) if kept else [pairs[-1]]
 
-    def _calculate_max_chunks(self) -> int:
-        budget = self.config.max_summary_reduce_tokens
-        chunk_cost = self.config.estimated_chunk_summary_tokens
-        prompt_overhead = 200
-        available = max(0, budget - prompt_overhead)
-        if chunk_cost <= 0:
-            return 5
-        return max(1, available // chunk_cost)
+
 
     def _trim_actions_to_budget(
         self, actions: List[ActionStep], task_text: str, max_tokens: int,
@@ -263,10 +255,21 @@ class ContextManager:
                     continue
             if _total_tokens(remaining) <= max_tokens:
                 return list(remaining)
-        return [actions[-1]] if actions else []
-
+            
+        last_action = actions[-1]
+        
+        if len(actions) >= 2 and hasattr(last_action, 'observations') and last_action.observations is not None:
+            prev_action = actions[-2]
+            if hasattr(prev_action, 'tool_calls') and prev_action.tool_calls is not None:
+                logger.warning(
+                    "Fallback limit triggered: Retaining the last complete ToolCall + Observation pair intact. "
+                    "This may exceed the token budget, and downstream truncation will be relied upon."
+                )
+                return [prev_action, last_action]
+        return [last_action]
+    
     # ============================================================
-    #  主入口
+    #  Mainly Entry Point
     # ============================================================
 
     def compress_if_needed(
@@ -280,18 +283,18 @@ class ContextManager:
             return original_messages 
 
         with self._lock:
-            # Run 边界自检测
+            # Run detection
             if (self._last_run_start_idx is not None
                     and current_run_start_idx != self._last_run_start_idx):
                 self._current_summary_cache = None
             self._last_run_start_idx = current_run_start_idx
 
-            # G2: effective tokens
-            # 注意这里的 memory 始终是 未经修改的、不含 summarytaskstep 原始的 previous_run + current_run 组成的
-            # 其中 previous_run 是 [(TaskStep, ActionStep),...]
-            # current_run 是 [Taskstep, ActionStep, ActionStep, ...]
+            # Note: The memory here always consists of the unmodified, summary-task-step-free
+            # original previous_run + current_run.
+            # - previous_run: [(TaskStep, ActionStep), ...]
+            # - current_run:  [TaskStep, ActionStep, ActionStep, ...]
             if self._effective_tokens(memory, current_run_start_idx) <= self.config.token_threshold:
-                # 稳定期短路：不触发 LLM，但直接应用已有 cache 构建压缩 messages
+                # Stable-phase bypass: No LLM call; construct compressed messages directly from existing cache.
                 self._step_local_log.clear()
 
                 prev_steps = memory.steps[:current_run_start_idx]
@@ -345,14 +348,12 @@ class ContextManager:
             compress_prev = prev_tokens > self.config.token_threshold * 0.6
             compress_curr = curr_tokens > self.config.token_threshold * 0.4
 
-            # --------------- Previous 段 ---------------
-            # 默认 raw 展示（修复旧 bug：compress_prev=False 时不再丢失 prev）
+            # --------------- Previous phase ---------------
             prev_summary_step: Optional[SummaryTaskStep] = None
             prev_tail_steps: List[MemoryStep] = list(prev_steps)
             prev_pairs = self._extract_pairs(prev_steps)
 
             if compress_prev and prev_pairs:
-                # 触发期
                 keep_n = min(self.config.keep_recent_pairs, len(prev_pairs))
                 pairs_to_compress = prev_pairs[:-keep_n] if keep_n > 0 else prev_pairs
                 pairs_to_keep = prev_pairs[-keep_n:] if keep_n > 0 else []
@@ -361,10 +362,13 @@ class ContextManager:
                         pairs_to_compress, model
                     )
                     if summary_text:
-                        prev_summary_step = SummaryTaskStep(task=summary_text)
+                        if "Truncated" in summary_text:
+                            prev_summary_step = SummaryTaskStep(task=summary_text, prefix="Context fallback, Truncated raw history:")
+                        else:
+                            prev_summary_step = SummaryTaskStep(task=summary_text)
                         prev_tail_steps = self._pairs_to_steps(pairs_to_keep)
             elif prev_pairs:
-                # 稳定期：cache 有效则用 cache + uncovered 展示
+                # if cache is valid, use cache + uncovered display
                 is_valid, covered_idx = self._is_prev_cache_valid(prev_pairs)
                 if is_valid:
                     prev_summary_step = SummaryTaskStep(
@@ -373,7 +377,7 @@ class ContextManager:
                     uncovered = prev_pairs[covered_idx:]
                     prev_tail_steps = self._pairs_to_steps(uncovered)
 
-            # --------------- Current 段 ---------------
+            # --------------- Current phase ---------------
             curr_kept_steps: List[MemoryStep] = list(curr_steps)
 
             if curr_steps:
@@ -381,7 +385,6 @@ class ContextManager:
                 curr_action_steps = [s for s in curr_steps if isinstance(s, ActionStep)]
 
                 if compress_curr and curr_action_steps:
-                    # 触发期
                     keep_n = min(self.config.keep_recent_steps, len(curr_action_steps))
                     if keep_n > 0 and keep_n < len(curr_action_steps):
                         boundary = curr_action_steps[-keep_n]
@@ -401,13 +404,16 @@ class ContextManager:
                             curr_task, actions_to_compress, model
                         )
                         if curr_summary_text:
+                            if "Truncated" in curr_summary_text:
+                                curr_summary_step = SummaryTaskStep(task=curr_summary_text, prefix="Truncated recent action steps:")
+                            else:
+                                curr_summary_step = SummaryTaskStep(task=curr_summary_text)
                             curr_kept_steps = (
                                 ([curr_task] if curr_task else [])
-                                + [SummaryTaskStep(task=curr_summary_text)]
+                                + [curr_summary_step]
                                 + list(actions_to_keep)
                             )
                 elif curr_action_steps:
-                    # 稳定期
                     is_valid, covered_idx = self._is_curr_cache_valid(curr_action_steps)
                     if is_valid:
                         uncovered = curr_action_steps[covered_idx:]
@@ -417,28 +423,21 @@ class ContextManager:
                             + list(uncovered)
                         )
 
-            # if not self._step_local_log:
-            #     record = CompressionCallRecord(
-            #         call_type="no_op", cache_hit=True,
-            #         details={"reason": "stable_period_or_no_content"},
-            #     )
-            #     self.compression_calls_log.append(record)
-            #     self._step_local_log.append(record)
-
             final_messages = self._build_messages(
                 memory, prev_summary_step, prev_tail_steps, curr_kept_steps
             )
-            final_tokens = sum(self._msg_token_count(m) for m in final_messages)
+            final_tokens = self._msg_token_count(final_messages)
+            # This situation is unlikely to occur unless the threshold itself is set unreasonably small
             if final_tokens > int(self.config.token_threshold * 1.1):
                 logger.warning(
-                    f"压缩后仍超阈值: {final_tokens} > {self.config.token_threshold}. "
-                    f"建议降低 keep_recent_pairs({self.config.keep_recent_pairs}) "
-                    f"或 keep_recent_steps({self.config.keep_recent_steps})"
+                    f"Still exceeds threshold after compression: {final_tokens} > {self.config.token_threshold}. "
+                    f"Consider reducing keep_recent_pairs ({self.config.keep_recent_pairs}) "
+                    f"or keep_recent_steps({self.config.keep_recent_steps})"
                 )
             return final_messages
 
     # ============================================================
-    #  Previous 压缩（触发期调用）
+    #  Previous Compression
     # ============================================================
 
     def _extract_pairs(self, steps):
@@ -459,7 +458,7 @@ class ContextManager:
         if not pairs_to_compress:
             return None
 
-        # 完整 cache 命中
+        # cache hit
         cache = self._previous_summary_cache
         if cache is not None and cache.covered_pairs == len(pairs_to_compress):
             anchor_t, anchor_a = pairs_to_compress[-1]
@@ -469,7 +468,7 @@ class ContextManager:
             if fp == cache.anchor_fingerprint:
                 return cache.summary_text
 
-        # ===== 增量压缩路径 =====
+        # ===== Incremental Compression Path =====
         if (cache is not None
                 and 0 < cache.covered_pairs < len(pairs_to_compress)):
             anchor_t, anchor_a = pairs_to_compress[cache.covered_pairs - 1]
@@ -490,7 +489,6 @@ class ContextManager:
                         call_type="previous_incremental"
                     )
                     if summary_text:
-                        self._prev_compress_count += 1
                         last_t, last_a = pairs_to_compress[-1]
                         self._previous_summary_cache = PreviousSummaryCache(
                             summary_text=summary_text,
@@ -501,15 +499,15 @@ class ContextManager:
                         )
                         return summary_text
                 logger.info(
-                    f"增量输入 {input_tokens} tokens 超预算 "
-                    f"({self.config.max_summary_input_tokens})，"
-                    f"回退到全量压缩"
+                    f"Incremental input {input_tokens} tokens exceeds budget "
+                    f"({self.config.max_summary_input_tokens}), "
+                    f"Falling back to full compression."
                 )
 
-        # Fresh 全量压缩
+        # Fresh compression
         summary_text, is_cacheable = self._summarize_pairs(pairs_to_compress, model)
+        # summary_text is valid, not None
         if summary_text and is_cacheable:
-            self._prev_compress_count += 1
             last_t, last_a = pairs_to_compress[-1]
             self._previous_summary_cache = PreviousSummaryCache(
                 summary_text=summary_text,
@@ -518,8 +516,7 @@ class ContextManager:
                     last_t.task or "", self._action_content(last_a)
                 ),
             )
-        elif summary_text and not is_cacheable:
-            self._previous_summary_cache = None
+        # is_cacheable is False, PreviousSummaryCache keep as is
         return summary_text
 
     def _action_content(self, action: ActionStep) -> str:
@@ -532,32 +529,38 @@ class ContextManager:
     def _summarize_pairs(
         self, pairs: List[tuple], model,
     ) -> Tuple[Optional[str], bool]:
-        """全量压缩入口，返回 (summary, is_cacheable)。
-          L1 全量 → (text, True)
-          L2 trim  → (text, True)    # 久远 pair 丢弃
-          失败 → (None, False)
+        """Fresh compression entry point, returns (summary, is_cacheable)。
+          L1 full summary -> (text, True)
+          L2 trim summary -> (text, True)    # discard long-lived pairs, and then summarize
+          L3 trim origin  -> (text, False)   # LLM call Failed, hard truncated, no summary returned
         """
         if not pairs:
             return None, False
 
-        # L1
         full_text = self._pairs_to_text(pairs)
         if self._estimate_text_tokens(full_text) <= self.config.max_summary_input_tokens:
-            s = self._generate_summary(full_text, model, call_type="previous_summary")
-            return s, (s is not None)
+            # L1
+            target_text = full_text 
+        else:
+            # L2 
+            trimmed_pairs = self._trim_pairs_to_budget(
+                pairs, self.config.max_summary_input_tokens, keep_first=False
+            )
+            target_text = self._pairs_to_text(trimmed_pairs)
+        
+        summary_text = self._generate_summary(target_text, model, call_type="previous_summary")
+        if summary_text:
+            return summary_text, True 
+        logger.warning("previous full/truncated history summary generation failed, triggering L3 fallback truncation")
+        
+        # L3
+        reduced_pairs = self._trim_pairs_to_budget(pairs, self.config.max_summary_reduce_tokens, False)
+        reduced_text = "Truncated: " + self._pairs_to_text(reduced_pairs)
+        return reduced_text, False
 
-        # L2
-        trimmed_pairs = self._trim_pairs_to_budget(
-            pairs, self.config.max_summary_input_tokens, keep_first=False
-        )
-        trimmed_text = self._pairs_to_text(trimmed_pairs)
-        s = self._generate_summary(
-            trimmed_text, model, call_type="previous_summary"
-        )
-        return s, (s is not None)
 
     # ============================================================
-    #  Current 压缩（触发期调用）
+    #  Current compression
     # ============================================================
 
     def _compress_current_with_cache(
@@ -597,32 +600,37 @@ class ContextManager:
                         )
                         return summary_text
                 logger.info(
-                    f"current 增量输入 {input_tokens} tokens 超预算 "
-                    f"({self.config.max_summary_input_tokens}),回退到全量裁剪"
+                    f"current incremental input {input_tokens} tokens exceeds budget "
+                    f"({self.config.max_summary_input_tokens}), fallback to full compression or trimmed actions"
                 )
 
 
-        # 3) Fresh 全量(保留原逻辑)
+        # 3) Fresh  compression: no cache or no valid cache or incremental input exceeds max_summary_input_tokens
         safe_actions = self._trim_actions_to_budget(
             actions_to_compress, task_text, self.config.max_summary_input_tokens,
         )
         is_full_coverage = (len(safe_actions) == len(actions_to_compress))
         if not is_full_coverage:
             logger.info(
-                f"current 全量摘要 trim {len(actions_to_compress) - len(safe_actions)} "
-                f"个最老 action,仍利用缓存"
+                f"current full summary trimmed {len(actions_to_compress) - len(safe_actions)} "
+                f"oldest action, still using cache"
             )
 
+        # In current phase, there may be oversized monolithic payload
+        full_text = task_text + self._actions_to_text_with_limit(safe_actions,prefill_tokens=self._estimate_text_tokens(task_text))
         full_text = task_text + self._actions_to_text(safe_actions)
         summary_text = self._generate_summary(full_text, model, call_type="current_summary")
-
-
-        self._current_summary_cache = CurrentSummaryCache(
-            summary_text=summary_text,
-            end_steps=len(actions_to_compress),
-            anchor_fingerprint=current_last_fp,
-        )
-        return summary_text
+        if summary_text:
+            self._current_summary_cache = CurrentSummaryCache(
+                summary_text=summary_text,
+                end_steps=len(actions_to_compress),
+                anchor_fingerprint=current_last_fp,
+            )
+            return summary_text
+        else:
+            reduced_actions = self._trim_actions_to_budget(actions_to_compress, task_text, self.config.max_summary_reduce_tokens)
+            reduced_text = "Truncated action steps: " + self._actions_to_text(reduced_actions)[self.config.max_summary_reduce_tokens:]
+            return reduced_text
 
     def _actions_to_text(self, actions: List[ActionStep]) -> str:
         parts = []
@@ -630,6 +638,39 @@ class ContextManager:
             text = self._render_action_step(step)
             parts.append(f"[步骤 {step.step_number or i+1}]\n{text}")
         return "\n\n".join(parts)
+
+    def _actions_to_text_with_limit(self, actions: List[ActionStep], prefill_tokens: int = 0) -> str:
+        rendered_steps = []
+        for i, step in enumerate(actions):
+            prefix = f"[步骤 {step.step_number or i+1}]\n"
+            content = self._render_action_step(step)
+            rendered_steps.append((prefix, content))
+        budget_per_action = self.config.max_memory_step_length
+
+        while True:
+            parts = [] 
+            
+            for prefix, content in rendered_steps:
+                if len(content) > budget_per_action:
+                    text = f"{prefix}{content[:budget_per_action]}\n\n[System Note: 该步骤内容过长，已被部分截断]"
+                else:
+                    text = f"{prefix}{content}"
+                parts.append(text)
+                
+            all_text = "\n\n".join(parts)
+
+            if self._estimate_text_tokens(all_text) + prefill_tokens <= self.config.max_summary_input_tokens:
+                break 
+            budget_per_action = int(budget_per_action * 0.9)
+            
+            if budget_per_action < 50:
+                logger.warning(
+                    f"Per-step compression budget has reached minimum threshold "
+                    f"(budget={budget_per_action}), possibly due to excessively long preset prompts. "
+                    f"Forcing return of truncated result."
+                )
+                break
+        return all_text
 
     @staticmethod
     def _action_fingerprint(action: ActionStep) -> str:
@@ -644,7 +685,7 @@ class ContextManager:
         return hashlib.md5(raw.encode()).hexdigest()
 
     # ============================================================
-    #  LLM 调用
+    #  LLM call
     # ============================================================
 
     def _is_context_length_error(self, err: Exception) -> bool:
@@ -661,16 +702,16 @@ class ContextManager:
             return self._do_generate_summary(text, model, call_type)
         except Exception as e:
             if self._is_context_length_error(e):
-                logger.warning(f"{call_type} 超限，按 2/3 预算截断重试")
+                logger.warning(f"{call_type} exceeds context limit; retrying with 2/3 budget truncation")
                 shrunk = self._truncate_text_to_tokens(
                     text, int(self.config.max_summary_input_tokens * 0.66)
                 )
                 try:
                     return self._do_generate_summary(shrunk, model, call_type + "_retry")
                 except Exception as e2:
-                    logger.error(f"重试仍失败: {e2}")
+                    logger.error(f"Retry still failed: {e2}")
                     return None
-            logger.error(f"摘要生成异常: {e}")
+            logger.error(f"Summary generation exception: {e}")
             return None
 
     def _do_generate_summary(self, text: str, model, call_type: str = "summary") -> Optional[str]:
@@ -729,7 +770,7 @@ class ContextManager:
             parsed = json.loads(cleaned)
             return json.dumps(parsed, ensure_ascii=False, indent=2)
         except json.JSONDecodeError:
-            logger.warning("摘要输出非合法 JSON，将作为纯文本使用")
+            logger.warning("Summary output is not valid JSON; using as plain text")
             return cleaned
 
     def _render_action_step(self, action: ActionStep) -> str:
@@ -788,7 +829,7 @@ class ContextManager:
         return result
 
     # ============================================================
-    #  Token 估算委托
+    #  Token Estimation
     # ============================================================
 
     def _estimate_tokens_for_steps(self, steps):
