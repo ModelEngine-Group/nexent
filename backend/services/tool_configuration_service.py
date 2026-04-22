@@ -17,11 +17,9 @@ from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecuti
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from database.client import minio_client
 from database.outer_api_tool_db import (
-    delete_outer_api_tool as db_delete_outer_api_tool,
-    query_outer_api_tool_by_id,
-    query_outer_api_tools_by_tenant,
-    query_available_outer_api_tools,
-    sync_outer_api_tools,
+    upsert_openapi_service,
+    query_openapi_services_by_tenant,
+    delete_openapi_service as db_delete_openapi_service,
 )
 from database.remote_mcp_db import (
     get_mcp_authorization_token_by_name_and_url,
@@ -440,7 +438,7 @@ async def update_tool_list(tenant_id: str, user_id: str):
     local_tools = get_local_tools()
     langchain_tools = get_langchain_tools()
 
-    _refresh_outer_api_tools_in_mcp(tenant_id)
+    _refresh_openapi_services_in_mcp(tenant_id)
 
     try:
         mcp_tools = await get_all_mcp_tools(tenant_id)
@@ -863,357 +861,87 @@ async def validate_tool_impl(
 # Outer API Tools (OpenAPI to MCP Conversion)
 # --------------------------------------------------
 
-def parse_openapi_to_mcp_tools(openapi_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+def import_openapi_service(
+    service_name: str,
+    openapi_json: Dict[str, Any],
+    server_url: str,
+    tenant_id: str,
+    user_id: str,
+    service_description: str = None,
+    force_update: bool = False
+) -> Dict[str, Any]:
     """
-    Parse OpenAPI JSON and convert it to a list of MCP tool definitions.
+    Import OpenAPI JSON as an MCP service, using FastMCP.from_openapi() approach.
+    All tools from the same OpenAPI spec share the same mcp_service_name.
 
     Args:
+        service_name: MCP service name for grouping tools
         openapi_json: OpenAPI 3.x specification as dictionary
-
-    Returns:
-        List of tool definition dictionaries suitable for storage and MCP registration
-    """
-    tools = []
-    paths = openapi_json.get("paths", {})
-
-    servers = openapi_json.get("servers", [])
-    base_url = servers[0].get("url", "") if servers else ""
-
-    components = openapi_json.get("components", {})
-    schemas = components.get("schemas", {})
-
-    for path, path_item in paths.items():
-        if not isinstance(path_item, dict):
-            continue
-
-        for method, operation in path_item.items():
-            if method.upper() not in ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]:
-                continue
-
-            if not isinstance(operation, dict):
-                continue
-
-            operation_id = operation.get("operationId") or _generate_operation_id(method.upper(), path)
-            tool_name = _sanitize_function_name(operation_id)
-
-            summary = operation.get("summary", "")
-            description = operation.get("description", summary)
-            if not description:
-                description = f"{method.upper()} {path}"
-
-            input_schema = _parse_request_body(operation, schemas)
-
-            full_url = base_url.rstrip("/") + "/" + path.lstrip("/") if base_url else path
-
-            tool_def = {
-                "name": tool_name,
-                "description": description,
-                "method": method.upper(),
-                "url": full_url,
-                "headers_template": {},
-                "query_template": _parse_parameters(operation.get("parameters", []), "query"),
-                "body_template": _parse_request_body_template(operation, schemas),
-                "input_schema": input_schema
-            }
-            tools.append(tool_def)
-
-    return tools
-
-
-def _generate_operation_id(method: str, path: str) -> str:
-    """Generate operation ID from method and path."""
-    path_clean = path.strip("/").replace("/", "_").replace("-", "_").replace("{", "").replace("}", "")
-    return f"{method.lower()}_{path_clean}"
-
-
-def _resolve_ref(ref: str, schemas: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Resolve a $ref reference to its actual schema.
-
-    Args:
-        ref: Reference string like "#/components/schemas/CountOutput"
-        schemas: Dictionary of schemas from components (already extracted from components/schemas)
-
-    Returns:
-        Resolved schema dictionary
-    """
-    if not ref.startswith("#/"):
-        return {}
-
-    parts = ref.lstrip("#/").split("/")
-
-    if len(parts) >= 2 and parts[-2] == "schemas":
-        schema_name = parts[-1]
-        if schema_name in schemas:
-            return schemas[schema_name]
-        return {}
-
-    if len(parts) == 1:
-        schema_name = parts[0]
-        if schema_name in schemas:
-            return schemas[schema_name]
-        return {}
-
-    return {}
-
-
-def _resolve_schema(schema: Dict[str, Any], schemas: Dict[str, Any], depth: int = 0) -> Dict[str, Any]:
-    """
-    Recursively resolve schema, handling $ref and nested schemas.
-
-    Args:
-        schema: Schema dictionary, possibly containing $ref
-        schemas: Dictionary of schemas from components
-        depth: Current recursion depth to prevent infinite loops
-
-    Returns:
-        Fully resolved schema dictionary
-    """
-    if depth > 10:
-        return schema
-
-    if "$ref" in schema:
-        resolved = _resolve_ref(schema["$ref"], schemas)
-        return _resolve_schema(resolved, schemas, depth + 1)
-
-    result = schema.copy()
-
-    if "items" in result:
-        result["items"] = _resolve_schema(result["items"], schemas, depth + 1)
-
-    if "properties" in result:
-        resolved_properties = {}
-        for prop_name, prop_schema in result["properties"].items():
-            resolved_properties[prop_name] = _resolve_schema(prop_schema, schemas, depth + 1)
-        result["properties"] = resolved_properties
-
-    if "allOf" in result:
-        resolved_allof = []
-        for sub_schema in result["allOf"]:
-            resolved_allof.append(_resolve_schema(sub_schema, schemas, depth + 1))
-        result["allOf"] = resolved_allof
-
-    if "anyOf" in result:
-        resolved_anyof = []
-        for sub_schema in result["anyOf"]:
-            resolved_anyof.append(_resolve_schema(sub_schema, schemas, depth + 1))
-        result["anyOf"] = resolved_anyof
-
-    if "oneOf" in result:
-        resolved_oneof = []
-        for sub_schema in result["oneOf"]:
-            resolved_oneof.append(_resolve_schema(sub_schema, schemas, depth + 1))
-        result["oneOf"] = resolved_oneof
-
-    return result
-
-
-def _parse_parameters(parameters: List[Dict], param_type: str) -> Dict[str, Any]:
-    """Parse OpenAPI parameters of specified type."""
-    result = {}
-    for param in parameters:
-        if param.get("in") == param_type:
-            param_name = param.get("name", "")
-            schema = param.get("schema", {"type": "string"})
-            result[param_name] = {
-                "required": param.get("required", False),
-                "description": param.get("description", ""),
-                "schema": schema
-            }
-    return result
-
-
-def _parse_request_body(operation: Dict[str, Any], schemas: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Parse OpenAPI requestBody to MCP input schema.
-    Handles $ref references and nested schemas.
-
-    Args:
-        operation: OpenAPI operation dictionary
-        schemas: Dictionary of schemas from components
-
-    Returns:
-        MCP-compatible input schema
-    """
-    input_schema = {
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-
-    parameters = operation.get("parameters", [])
-    for param in parameters:
-        if param.get("in") == "query":
-            param_name = param.get("name", "")
-            schema = param.get("schema", {"type": "string"})
-            resolved_schema = _resolve_schema(schema, schemas)
-            input_schema["properties"][param_name] = {
-                "type": resolved_schema.get("type", "string"),
-                "description": param.get("description", "")
-            }
-            if param.get("required"):
-                input_schema["required"].append(param_name)
-
-    request_body = operation.get("requestBody", {})
-    if request_body:
-        content = request_body.get("content", {})
-        json_content = content.get("application/json", {})
-        json_schema = json_content.get("schema", {})
-
-        resolved_schema = _resolve_schema(json_schema, schemas)
-
-        if resolved_schema.get("type") == "object" and "properties" in resolved_schema:
-            for prop_name, prop_schema in resolved_schema["properties"].items():
-                if prop_name not in input_schema["properties"]:
-                    input_schema["properties"][prop_name] = {
-                        "type": prop_schema.get("type", "string"),
-                        "description": prop_schema.get("description", "")
-                    }
-
-            required_props = resolved_schema.get("required", [])
-            for req in required_props:
-                if req not in input_schema["required"]:
-                    input_schema["required"].append(req)
-
-    return input_schema
-
-
-def _parse_request_body_template(operation: Dict[str, Any], schemas: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Parse OpenAPI requestBody to extract template for request body.
-    Handles $ref references.
-
-    Args:
-        operation: OpenAPI operation dictionary
-        schemas: Dictionary of schemas from components
-
-    Returns:
-        Template dictionary with default values
-    """
-    request_body = operation.get("requestBody", {})
-    if not request_body:
-        return {}
-
-    content = request_body.get("content", {})
-    json_content = content.get("application/json", {})
-    json_schema = json_content.get("schema", {})
-
-    resolved_schema = _resolve_schema(json_schema, schemas)
-
-    if resolved_schema.get("type") == "object" and "properties" in resolved_schema:
-        template = {}
-        for prop_name, prop_schema in resolved_schema["properties"].items():
-            default_value = prop_schema.get("example") or prop_schema.get("default")
-            if default_value is not None:
-                template[prop_name] = default_value
-        return template
-
-    return {}
-
-
-def import_openapi_json(openapi_json: Dict[str, Any], tenant_id: str, user_id: str) -> Dict[str, Any]:
-    """
-    Import OpenAPI JSON and convert/sync tools to database.
-
-    Args:
-        openapi_json: OpenAPI 3.x specification as dictionary
+        server_url: Base URL of the REST API server
         tenant_id: Tenant ID for multi-tenancy
         user_id: User ID for audit
+        service_description: Optional service description (if not provided, reads from openapi_json.info.description)
+        force_update: If True, replace all existing tools for this service
 
     Returns:
-        Dictionary with import result (created, updated, deleted counts)
+        Dictionary with import result
     """
-    tools = parse_openapi_to_mcp_tools(openapi_json)
-    result = sync_outer_api_tools(tools, tenant_id, user_id)
-    result["total_tools"] = len(tools)
-    logger.info(f"Imported {len(tools)} tools from OpenAPI JSON for tenant {tenant_id}")
+    # If service_description not provided, extract from openapi_json info
+    if service_description is None:
+        info = openapi_json.get("info", {})
+        service_description = info.get("description") or info.get("title", "")
+
+    # Override server URL in openapi_json if different
+    openapi_spec = openapi_json.copy()
+    openapi_spec["servers"] = [{"url": server_url}]
+
+    result = upsert_openapi_service(
+        service_name=service_name,
+        openapi_json=openapi_spec,
+        server_url=server_url,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        description=service_description
+    )
+
+    logger.info(f"Imported service '{service_name}' for tenant {tenant_id}")
     return result
 
 
-def list_outer_api_tools(tenant_id: str) -> List[Dict[str, Any]]:
+def list_openapi_services(tenant_id: str) -> List[Dict[str, Any]]:
     """
-    List all outer API tools for a tenant.
+    List all OpenAPI services for a tenant.
 
     Args:
         tenant_id: Tenant ID
 
     Returns:
-        List of tool dictionaries
+        List of service dictionaries
     """
-    return query_outer_api_tools_by_tenant(tenant_id)
+    return query_openapi_services_by_tenant(tenant_id)
 
 
-def get_outer_api_tool(tool_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
+def delete_openapi_service(service_name: str, tenant_id: str, user_id: str) -> bool:
     """
-    Get a specific outer API tool by ID.
+    Delete an OpenAPI service (all tools belonging to it).
 
     Args:
-        tool_id: Tool ID
-        tenant_id: Tenant ID
-
-    Returns:
-        Tool dictionary or None
-    """
-    return query_outer_api_tool_by_id(tool_id, tenant_id)
-
-
-def delete_outer_api_tool(tool_id: int, tenant_id: str, user_id: str) -> bool:
-    """
-    Delete an outer API tool.
-
-    Args:
-        tool_id: Tool ID
+        service_name: MCP service name
         tenant_id: Tenant ID
         user_id: User ID for audit
 
     Returns:
         True if deleted, False if not found
     """
-    # Get tool info before deletion to get the tool name
-    tool_info = query_outer_api_tool_by_id(tool_id, tenant_id)
-    tool_name = tool_info.get("name") if tool_info else None
-
-    # Delete from database
-    deleted = db_delete_outer_api_tool(tool_id, tenant_id, user_id)
-
-    if deleted and tool_name:
-        # Also remove from MCP server
-        _remove_outer_api_tool_from_mcp(tool_name, tenant_id)
-
-    return deleted
+    return db_delete_openapi_service(service_name, tenant_id, user_id)
 
 
-def _remove_outer_api_tool_from_mcp(tool_name: str, tenant_id: str) -> bool:
+def _refresh_openapi_services_in_mcp(tenant_id: str) -> Dict[str, Any]:
     """
-    Remove a specific outer API tool from the MCP server via HTTP API.
+    Refresh OpenAPI services in MCP server via HTTP API using from_openapi approach.
 
-    Args:
-        tool_name: Name of the tool to remove
-        tenant_id: Tenant ID
-
-    Returns:
-        True if removed successfully, False otherwise
-    """
-    remove_url = f"{MCP_MANAGEMENT_API}/tools/outer_api/{tool_name}"
-    try:
-        response = requests.delete(remove_url, timeout=10)
-        if response.ok:
-            logger.info(f"Removed outer API tool '{tool_name}' from MCP server")
-            return True
-        else:
-            logger.warning(f"Failed to remove tool '{tool_name}' from MCP: {response.status_code}")
-            return False
-    except requests.RequestException as e:
-        logger.warning(f"Failed to remove tool '{tool_name}' from MCP: {e}")
-        return False
-
-
-def _refresh_outer_api_tools_in_mcp(tenant_id: str) -> Dict[str, Any]:
-    """
-    Refresh outer API tools in MCP server via HTTP API.
-
-    Includes retry logic to handle cases where the MCP Server's management API
-    might not be fully ready immediately after a restart.
+    This replaces the old per-tool registration with service-level registration,
+    using FastMCP.from_openapi() to batch-load all tools from each service.
 
     Args:
         tenant_id: Tenant ID
@@ -1221,7 +949,7 @@ def _refresh_outer_api_tools_in_mcp(tenant_id: str) -> Dict[str, Any]:
     Returns:
         Dictionary with refresh result
     """
-    refresh_url = f"{MCP_MANAGEMENT_API}/tools/outer_api/refresh"
+    refresh_url = f"{MCP_MANAGEMENT_API}/tools/openapi_service/refresh"
     max_retries = 3
     retry_delay = 1.0
 
@@ -1234,19 +962,19 @@ def _refresh_outer_api_tools_in_mcp(tenant_id: str) -> Dict[str, Any]:
             )
             response.raise_for_status()
             result = response.json()
-            logger.info(f"Refreshed outer API tools for tenant {tenant_id}: {result}")
+            logger.info(f"Refreshed OpenAPI services for tenant {tenant_id}: {result}")
             return result.get("data", {})
         except requests.RequestException as e:
             if attempt < max_retries - 1:
                 logger.warning(
-                    f"Failed to refresh outer API tools (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Failed to refresh OpenAPI services (attempt {attempt + 1}/{max_retries}): {e}. "
                     f"Retrying in {retry_delay}s..."
                 )
                 time.sleep(retry_delay)
                 retry_delay *= 2
             else:
-                logger.error(f"Failed to refresh outer API tools after {max_retries} attempts: {e}")
+                logger.error(f"Failed to refresh OpenAPI services after {max_retries} attempts: {e}")
                 return {"error": str(e)}
         except Exception as e:
-            logger.warning(f"Failed to refresh outer API tools in MCP: {e}")
+            logger.warning(f"Failed to refresh OpenAPI services in MCP: {e}")
             return {"error": str(e)}

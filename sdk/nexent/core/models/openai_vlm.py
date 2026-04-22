@@ -142,4 +142,5 @@ class OpenAIVLModel(OpenAIModel):
             ChatMessage: Message returned by the model.
         """
         messages = self.prepare_image_message(image_input, system_prompt)
-        return self(messages=messages, **kwargs)
+        # Call __call__ explicitly so instance-level mocks work in tests.
+        return self.__call__(messages=messages, **kwargs)

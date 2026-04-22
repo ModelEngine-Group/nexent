@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SkillGroup, Skill } from "@/types/agentConfig";
-import { Tabs, message } from "antd";
+import { Tabs, message, Tooltip } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { Info, Trash2 } from "lucide-react";
@@ -99,26 +99,23 @@ export default function SkillManagement({
   };
 
   const tabItems = skillGroups.map((group) => {
-    const displayLabel =
-      group.label.length > 7
-        ? `${group.label.substring(0, 7)}...`
-        : group.label;
-
     return {
       key: group.key,
       label: (
-        <span
-          style={{
-            display: "block",
-            maxWidth: "70px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            textAlign: "left",
-          }}
-        >
-          {displayLabel}
-        </span>
+        <Tooltip title={group.label} placement="right">
+          <span
+            style={{
+              display: "block",
+              maxWidth: "70px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              textAlign: "left",
+            }}
+          >
+            {group.label}
+          </span>
+        </Tooltip>
       ),
       children: (
         <div
