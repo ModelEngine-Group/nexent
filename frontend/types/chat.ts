@@ -83,7 +83,7 @@ export interface FileAttachment {
   size: number
   url?: string
   object_name?: string
-  presigned_url?: string  // Temporary URL for external tools (e.g., MCP), valid for 24 hours
+  presigned_url?: string  // Temporary URL for external tools (e.g., MCP); expires after a configurable period (24 hours by default)
   description?: string
 }
 
