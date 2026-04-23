@@ -178,7 +178,7 @@ async def get_storage_file(
             "'base64' (return base64-encoded content for images)."
         ),
     ),
-    expires: int = Query(3600, description="URL validity period (seconds)"),
+    expires: int = Query(86400, description="URL validity period (seconds)"),
     filename: Optional[str] = Query(None, description="Original filename for download (optional)"),
     authorization: Optional[str] = Header(None, alias="Authorization")
 ):
@@ -191,7 +191,7 @@ async def get_storage_file(
 
     - **object_name**: File object name
     - **download**: Download mode: ignore (default, return file info), stream (return file stream), redirect (redirect to download URL)
-    - **expires**: URL validity period in seconds (default 3600)
+    - **expires**: URL validity period in seconds (default 86400 = 24 hours)
     - **filename**: Original filename for download (optional, if not provided, will use object_name)
 
     Returns file information, download link, or file content
@@ -628,7 +628,7 @@ async def get_storage_file_batch_urls(
     - attachments/{user_id}/*: Only the owner (user_id) can access
 
     - **request_data**: JSON request body containing object_names list
-    - **expires**: URL validity period in seconds (default 3600)
+    - **expires**: URL validity period in seconds (default 86400 = 24 hours)
 
     Returns URL and status information for each file
     """

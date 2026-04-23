@@ -28,7 +28,13 @@ def generate_object_name(file_name: str, prefix: str = "attachments") -> str:
     return f"{prefix}/{timestamp}_{unique_id}{ext}"
 
 
-def upload_file(file_path: str, object_name: Optional[str] = None, bucket: Optional[str] = None) -> Dict[str, Any]:
+def upload_file(
+        file_path: str,
+        object_name: Optional[str] = None,
+        bucket: Optional[str] = None,
+        generate_presigned_url: bool = True,
+        presigned_url_expires: int = 86400
+) -> Dict[str, Any]:
     """
     Upload local file to MinIO
 
@@ -36,6 +42,8 @@ def upload_file(file_path: str, object_name: Optional[str] = None, bucket: Optio
         file_path: Local file path
         object_name: Object name, if not specified will be auto-generated
         bucket: Bucket name, if not specified will use default bucket
+        generate_presigned_url: Whether to generate presigned URL for external access (default True)
+        presigned_url_expires: Expiration time in seconds for presigned URL (default 86400 = 24 hours)
 
     Returns:
         Dict[str, Any]: Upload result, containing success flag, URL and error message (if any)
@@ -55,6 +63,12 @@ def upload_file(file_path: str, object_name: Optional[str] = None, bucket: Optio
 
     if success:
         response["url"] = result
+        # Generate presigned URL for external access if requested
+        if generate_presigned_url:
+            presigned_result = get_file_url(object_name, bucket, presigned_url_expires)
+            if presigned_result.get("success"):
+                response["presigned_url"] = presigned_result["url"]
+                response["presigned_url_expires_in"] = presigned_url_expires
     else:
         response["error"] = result
 
@@ -65,7 +79,9 @@ def upload_fileobj(
         file_obj: BinaryIO,
         file_name: str,
         bucket: Optional[str] = None,
-        prefix: str = "attachments"
+        prefix: str = "attachments",
+        generate_presigned_url: bool = True,
+        presigned_url_expires: int = 86400
 ) -> Dict[str, Any]:
     """
     Upload file object to MinIO
@@ -75,6 +91,8 @@ def upload_fileobj(
         file_name: File name
         bucket: Bucket name, if not specified will use default bucket
         prefix: Object name prefix, default is "attachments"
+        generate_presigned_url: Whether to generate presigned URL for external access (default True)
+        presigned_url_expires: Expiration time in seconds for presigned URL (default 86400 = 24 hours)
 
     Returns:
         Dict[str, Any]: Upload result, containing success flag, URL and error message (if any)
@@ -89,12 +107,15 @@ def upload_fileobj(
     file_obj.seek(0, os.SEEK_END)
     file_size = file_obj.tell()
 
-    # Reset to original position
-    file_obj.seek(current_pos)
+    # Seek to beginning for upload
+    file_obj.seek(0)
 
     # Upload file
     success, result = minio_client.upload_fileobj(
         file_obj, object_name, bucket)
+
+    # Restore original position
+    file_obj.seek(current_pos)
 
     # Build response
     response = {"success": success, "object_name": object_name, "file_name": file_name, "file_size": file_size,
@@ -102,6 +123,12 @@ def upload_fileobj(
 
     if success:
         response["url"] = result
+        # Generate presigned URL for external access if requested
+        if generate_presigned_url:
+            presigned_result = get_file_url(object_name, bucket, presigned_url_expires)
+            if presigned_result.get("success"):
+                response["presigned_url"] = presigned_result["url"]
+                response["presigned_url_expires_in"] = presigned_url_expires
     else:
         response["error"] = result
 
@@ -134,14 +161,14 @@ def download_file(object_name: str, file_path: str, bucket: Optional[str] = None
     return response
 
 
-def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 3600) -> Dict[str, Any]:
+def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Dict[str, Any]:
     """
     Get presigned URL for file
 
     Args:
         object_name: Object name
         bucket: Bucket name, if not specified will use default bucket
-        expires: URL expiration time in seconds
+        expires: URL expiration time in seconds (default 86400 = 24 hours)
 
     Returns:
         Dict[str, Any]: Result containing success flag, URL and error message (if any)
@@ -223,8 +250,8 @@ def list_files(prefix: str = "", bucket: Optional[str] = None) -> List[Dict[str,
     for file in files:
         file["content_type"] = get_content_type(file["key"])
 
-        # Get presigned URL (valid for 1 hour)
-        success, url = minio_client.get_file_url(file["key"], bucket, 3600)
+        # Get presigned URL (valid for 24 hours)
+        success, url = minio_client.get_file_url(file["key"], bucket, 86400)
         if success:
             file["url"] = url
 
