@@ -115,6 +115,7 @@ sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['services.file_management_service'] = _create_stub_module(
     "services.file_management_service",
     get_llm_model=MagicMock(return_value="stub_llm_model"),
+    validate_urls_access=MagicMock(),
 )
 sys.modules['services.tool_configuration_service'] = _create_stub_module(
     "services.tool_configuration_service",
@@ -650,10 +651,11 @@ class TestCreateToolConfigList:
             assert len(result) == 1
             assert result[0] is mock_tool_instance
             mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1")
-            assert mock_tool_instance.metadata == {
-                "vlm_model": "mock_vlm_model",
-                "storage_client": mock_minio_client
-            }
+            # Verify metadata includes validate_url_access lambda
+            assert "vlm_model" in mock_tool_instance.metadata
+            assert "storage_client" in mock_tool_instance.metadata
+            assert "validate_url_access" in mock_tool_instance.metadata
+            assert callable(mock_tool_instance.metadata["validate_url_access"])
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_analyze_text_file_tool(self):
@@ -686,11 +688,12 @@ class TestCreateToolConfigList:
             assert len(result) == 1
             assert result[0] is mock_tool_instance
             mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1")
-            assert mock_tool_instance.metadata == {
-                "llm_model": "mock_llm_model",
-                "storage_client": mock_minio_client,
-                "data_process_service_url": consts_const.DATA_PROCESS_SERVICE,
-            }
+            # Verify metadata includes validate_url_access lambda
+            assert "llm_model" in mock_tool_instance.metadata
+            assert "storage_client" in mock_tool_instance.metadata
+            assert "data_process_service_url" in mock_tool_instance.metadata
+            assert "validate_url_access" in mock_tool_instance.metadata
+            assert callable(mock_tool_instance.metadata["validate_url_access"])
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool_metadata(self):
@@ -1180,6 +1183,94 @@ class TestCreateToolConfigList:
             # Verify metadata
             assert len(result) == 1
             assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_analyze_image_tool_validate_url_access(self):
+        """
+        Test that AnalyzeImageTool receives validate_url_access callback that
+        properly calls validate_urls_access with user_id.
+        """
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "AnalyzeImageTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vlm_model') as mock_get_vlm_model, \
+                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
+                patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "AnalyzeImageTool",
+                    "name": "analyze_image",
+                    "description": "Analyze image tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vlm_model.return_value = "mock_vlm_model"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_123")
+
+            assert len(result) == 1
+            assert "validate_url_access" in result[0].metadata
+            assert callable(result[0].metadata["validate_url_access"])
+
+            # Test that the callback properly wraps validate_urls_access
+            mock_validate.reset_mock()
+            test_urls = ["s3://bucket/image.jpg"]
+            result[0].metadata["validate_url_access"](test_urls)
+            mock_validate.assert_called_once_with(test_urls, "user_123")
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_analyze_text_file_tool_validate_url_access(self):
+        """
+        Test that AnalyzeTextFileTool receives validate_url_access callback that
+        properly calls validate_urls_access with user_id.
+        """
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "AnalyzeTextFileTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
+                patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "AnalyzeTextFileTool",
+                    "name": "analyze_text_file",
+                    "description": "Analyze text file tool",
+                    "inputs": "array",
+                    "output_type": "array",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_llm_model.return_value = "mock_llm_model"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_456")
+
+            assert len(result) == 1
+            assert "validate_url_access" in result[0].metadata
+            assert callable(result[0].metadata["validate_url_access"])
+
+            # Test that the callback properly wraps validate_urls_access
+            mock_validate.reset_mock()
+            test_urls = ["s3://bucket/document.pdf"]
+            result[0].metadata["validate_url_access"](test_urls)
+            mock_validate.assert_called_once_with(test_urls, "user_456")
 
 
 class TestCreateAgentConfig:
