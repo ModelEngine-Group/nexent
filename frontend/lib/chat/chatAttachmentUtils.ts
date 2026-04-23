@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
-import { FilePreview } from "@/types/chat";
+import type { FileAttachment, FilePreview } from "@/types/chat";
 import log from "@/lib/logger";
 
 /**
@@ -90,7 +90,7 @@ export const createMessageAttachments = (
   fileUrls: Record<string, string>,
   objectNames?: Record<string, string>,
   presignedUrls?: Record<string, string>
-): { type: string; name: string; size: number; url?: string; object_name?: string; presigned_url?: string }[] => {
+): FileAttachment[] => {
   return attachments.map((attachment) => ({
     type: attachment.type,
     name: attachment.file.name,
