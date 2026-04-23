@@ -178,9 +178,9 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
             raise e
 
         if connectivity:
-            logger.info(f"CONNECTED: {model_name}; Base URL: {model.get('base_url')}; API Key: {_mask_secret(model.get('api_key'))}")
+            logger.info(f"CONNECTED: {model_name}; Base URL: {_mask_secret(model.get('base_url'))}; API Key: {_mask_secret(model.get('api_key'))}")
         else:
-            logger.warning(f"UNCONNECTED: {model_name}; Base URL: {model.get('base_url')}; API Key: {_mask_secret(model.get('api_key'))}")
+            logger.warning(f"UNCONNECTED: {model_name}; Base URL: {_mask_secret(model.get('base_url'))}; API Key: {_mask_secret(model.get('api_key'))}")
         connect_status = ModelConnectStatusEnum.AVAILABLE.value if connectivity else ModelConnectStatusEnum.UNAVAILABLE.value
         update_data = {"connect_status": connect_status}
         update_model_record(model["model_id"], update_data)
@@ -235,7 +235,7 @@ async def verify_model_config_connectivity(model_config: dict):
             }
         except ValueError as e:
             error_msg = str(e)
-            logger.warning(f"UNCONNECTED: {model_name}; Base URL: {model_base_url}; API Key: {_mask_secret(model_api_key)}; Error: {error_msg}")
+            logger.warning(f"UNCONNECTED: {model_name}; Base URL: {_mask_secret(model_base_url)}; API Key: {_mask_secret(model_api_key)}; Error: {error_msg}")
             return {
                 "connectivity": False,
                 "model_name": model_name,
