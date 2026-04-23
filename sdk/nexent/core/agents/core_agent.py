@@ -214,9 +214,9 @@ class CoreAgent(CodeAgent):
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
         self.observer = observer
         self.stop_event = threading.Event()
-        self._history_step_count = 0 # For ContextManager, record boundary for compression.
+        self._history_step_count = 0  # For ContextManager, record boundary for compression
         self.context_manager: ContextManager = None 
-        self.step_metrics: List[dict] = [] # NEW, 每步的定量化指标
+        self.step_metrics: List[dict] = []  # Quantitative metrics per step
 
     def _log_model_call_parameters(self, input_messages: List[ChatMessage], stop_sequences: List[str], additional_args: Dict[str, Any]) -> None:
         """
@@ -597,17 +597,17 @@ You have been provided with these additional arguments, that you can access usin
             }
         }
 
-        # 1. 主模型 token
+        # 1. Main model tokens
         if action_step.token_usage:
             metric["main_llm"]["input_tokens"] = action_step.token_usage.input_tokens
             metric["main_llm"]["output_tokens"] = action_step.token_usage.output_tokens
 
-        # 2. 压缩开销（从 ContextManager 读取）
+        # 2. Compression overhead (from ContextManager)
         if self.context_manager and self.context_manager.config.enabled:
             comp_stats = self.context_manager.get_step_compression_stats()
             metric["compression"].update(comp_stats)
 
-        # 3. 当前 memory 估算长度
+        # 3. Current memory estimated length
         chars_per_token = (
             self.context_manager.config.chars_per_token
             if self.context_manager

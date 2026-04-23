@@ -346,7 +346,7 @@ class NexentAgent:
                 final_answer_str = convert_code_format(str(final_answer))
             final_answer_str = re.sub(
                 THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
-            # Remove "思考：" or "思考:" prefix content (until two newlines)
+            # Remove thinking prefix content (until two newlines)
             final_answer_str = re.sub(
                 THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
             observer.add_message(self.agent.agent_name,
@@ -370,7 +370,7 @@ class NexentAgent:
         self.agent = agent
 
     def _log_step_metrics(self):
-        """将 step_metrics 输出到日志或本地文件，用于上下文管理的定量分析"""
+        """Output step_metrics to log or local file for quantitative analysis of context management."""
         if not hasattr(self.agent, "step_metrics") or not self.agent.step_metrics:
             return
 
@@ -411,6 +411,6 @@ class NexentAgent:
         )
         print("\n".join(lines))
 
-        # 可选：写入本地文件
+        # Optional: write to local file
         with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")

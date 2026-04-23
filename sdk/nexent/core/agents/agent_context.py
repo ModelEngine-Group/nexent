@@ -1,13 +1,22 @@
+"""Agent context management for memory compression and summarization.
+
+Provides ContextManager for token-aware compression of agent memory,
+supporting incremental summarization with cache-based optimization.
+"""
+
 import hashlib
 import json
 import logging
 import re
 import threading
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import List, Optional, Tuple, Union
 
 from smolagents.memory import ActionStep, AgentMemory, MemoryStep, TaskStep
 from smolagents.models import ChatMessage, MessageRole
+
+from .summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
+from .summary_config import ContextManagerConfig
 
 logger = logging.getLogger("agent_context")
 
@@ -22,64 +31,10 @@ from ..utils.token_estimation import (
 
 
 @dataclass
-class PreviousSummaryCache:
-    """Caches the compressed summary from the previous run."""
-    summary_text: str
-    covered_pairs: int
-    anchor_fingerprint: str
-
-
-@dataclass
-class CurrentSummaryCache:
-    summary_text: str
-    end_steps: int
-    anchor_fingerprint: str
-
-
-@dataclass
-class ContextManagerConfig:
-    enabled: bool = False
-    token_threshold: int = 10000
-    keep_recent_steps: int = 4
-    keep_recent_pairs: int = 2
-    max_chunk_count: int = 0
-    max_memory_step_length: int = 2000 # all kinds of MemoryStep dataclass
-
-    summary_system_prompt: str = (
-        "你是一个对话摘要助手。请将以下对话历史压缩为结构化摘要，"
-        "保留所有关键信息：用户的核心需求、已完成的工作、重要发现和决策、"
-        "待办事项、需要保留的上下文。输出严格 JSON 格式，不要包含 markdown 代码块标记。"
-    )
-
-    summary_json_schema: Dict[str, Any] = field(default_factory=lambda: {
-        "task_overview": "用户的核心请求与成功标准（≤150字）",
-        "completed_work": "已完成的工作、产出的文件或结果（≤200字）",
-        "key_decisions": "重要发现、做出的决策及其理由（≤200字）",
-        "pending_items": "待完成的具体步骤、阻塞项（≤150字）",
-        "context_to_preserve": "用户偏好、领域细节、做出的承诺（≤150字）",
-    })
-
-    max_summary_input_tokens: int = 0
-    max_summary_reduce_tokens: int = 0
-    estimated_chunk_summary_tokens: int = 400
-    chars_per_token: float = 1.5
-
-
-@dataclass
-class CompressionCallRecord:
-    call_type: str
-    input_tokens: int = 0
-    output_tokens: int = 0
-    input_chars: int = 0
-    output_chars: int = 0
-    cache_hit: bool = False
-    details: dict = field(default_factory=dict)
-
-
-@dataclass
 class SummaryTaskStep(TaskStep):
+    """TaskStep subclass that contains a compressed summary of earlier steps."""
     is_summary: bool = True
-    prefix: str = "Summary of earlier steps in this task:" # default prefix
+    prefix: str = "Summary of earlier steps in this task:"  # default prefix
 
     def to_messages(self, summary_mode: bool = False) -> list:
         content = [{"type": "text", "text": f"{self.prefix}:\n{self.task}"}]
@@ -479,8 +434,8 @@ class ContextManager:
                 old_summary = cache.summary_text
                 new_pairs = pairs_to_compress[cache.covered_pairs:]
                 incremental_input = (
-                    f"## 此前对话摘要\n{old_summary}\n\n"
-                    f"## 新增对话\n{self._pairs_to_text(new_pairs)}"
+                    f"## Previous Summary\n{old_summary}\n\n"
+                    f"## New Conversations\n{self._pairs_to_text(new_pairs)}"
                 )
                 input_tokens = self._estimate_text_tokens(incremental_input)
                 if input_tokens <= self.config.max_summary_input_tokens:
@@ -529,10 +484,11 @@ class ContextManager:
     def _summarize_pairs(
         self, pairs: List[tuple], model,
     ) -> Tuple[Optional[str], bool]:
-        """Fresh compression entry point, returns (summary, is_cacheable)。
-          L1 full summary -> (text, True)
-          L2 trim summary -> (text, True)    # discard long-lived pairs, and then summarize
-          L3 trim origin  -> (text, False)   # LLM call Failed, hard truncated, no summary returned
+        """Fresh compression entry point, returns (summary, is_cacheable).
+
+        L1 full summary -> (text, True)
+        L2 trim summary -> (text, True)    # discard long-lived pairs, then summarize
+        L3 trim origin  -> (text, False)   # LLM call failed, hard truncated, no summary returned
         """
         if not pairs:
             return None, False
@@ -570,22 +526,22 @@ class ContextManager:
             return None
 
         current_last_fp = self._action_fingerprint(actions_to_compress[-1])
-        task_text = f"当前任务: {curr_task.task}\n\n" if curr_task else ""
+        task_text = f"Current Task: {curr_task.task}\n\n" if curr_task else ""
         cache = self._current_summary_cache
-        # 1) 完整 cache 命中
+        # 1) Full cache hit
         if cache is not None and cache.end_steps == len(actions_to_compress):
             if cache.anchor_fingerprint == current_last_fp:
                 return cache.summary_text
             
-        # 2) 增量压缩
+        # 2) Incremental compression
         if cache is not None and 0 < cache.end_steps < len(actions_to_compress):
             anchor_action = actions_to_compress[cache.end_steps - 1]
             if self._action_fingerprint(anchor_action) == cache.anchor_fingerprint:
                 old_summary = cache.summary_text
                 new_actions = actions_to_compress[cache.end_steps:]
                 incremental_input = (
-                    f"## 此前步骤摘要\n{old_summary}\n\n"
-                    f"## 新增步骤\n{task_text}{self._actions_to_text(new_actions)}"
+                    f"## Previous Summary\n{old_summary}\n\n"
+                    f"## New Steps\n{task_text}{self._actions_to_text(new_actions)}"
                 )
                 input_tokens = self._estimate_text_tokens(incremental_input)
                 if input_tokens <= self.config.max_summary_input_tokens:
@@ -612,8 +568,8 @@ class ContextManager:
         is_full_coverage = (len(safe_actions) == len(actions_to_compress))
         if not is_full_coverage:
             logger.info(
-                f"current full summary trimmed {len(actions_to_compress) - len(safe_actions)} "
-                f"oldest action, still using cache"
+                f"Current full summary trimmed {len(actions_to_compress) - len(safe_actions)} "
+                f"oldest actions, still using cache"
             )
 
         # In current phase, there may be oversized monolithic payload
@@ -636,13 +592,13 @@ class ContextManager:
         parts = []
         for i, step in enumerate(actions):
             text = self._render_action_step(step)
-            parts.append(f"[步骤 {step.step_number or i+1}]\n{text}")
+            parts.append(f"[Step {step.step_number or i+1}]\n{text}")
         return "\n\n".join(parts)
 
     def _actions_to_text_with_limit(self, actions: List[ActionStep], prefill_tokens: int = 0) -> str:
         rendered_steps = []
         for i, step in enumerate(actions):
-            prefix = f"[步骤 {step.step_number or i+1}]\n"
+            prefix = f"[Step {step.step_number or i+1}]\n"
             content = self._render_action_step(step)
             rendered_steps.append((prefix, content))
         budget_per_action = self.config.max_memory_step_length
@@ -652,7 +608,7 @@ class ContextManager:
             
             for prefix, content in rendered_steps:
                 if len(content) > budget_per_action:
-                    text = f"{prefix}{content[:budget_per_action]}\n\n[System Note: 该步骤内容过长，已被部分截断]"
+                    text = f"{prefix}{content[:budget_per_action]}\n\n[System Note: Step content too long, partially truncated]"
                 else:
                     text = f"{prefix}{content}"
                 parts.append(text)
@@ -719,8 +675,8 @@ class ContextManager:
             self.config.summary_json_schema, ensure_ascii=False, indent=2
         )
         user_prompt = (
-            f"请按以下 JSON 结构输出摘要：\n{schema_desc}\n\n"
-            f"需要摘要的对话内容：\n{text}"
+            f"Output a summary following this JSON structure:\n{schema_desc}\n\n"
+            f"Conversation content to summarize:\n{text}"
         )
         messages = [
             ChatMessage(role=MessageRole.SYSTEM,
@@ -790,10 +746,10 @@ class ContextManager:
                 break
             kept.append(u)
             total += u_tokens
-        result = "...[前段已截断]...\n\n" + "\n\n".join(reversed(kept))
+        result = "...[Earlier content truncated]...\n\n" + "\n\n".join(reversed(kept))
         if self._estimate_text_tokens(result) > max_tokens:
             approx_chars = int(max_tokens * self.config.chars_per_token * 0.9)
-            result = "...[前段已截断]...\n" + result[:approx_chars]
+            result = "...[Earlier content truncated]...\n" + result[:approx_chars]
         return result
 
     def _pairs_to_text(self, pairs: List[tuple]) -> str:

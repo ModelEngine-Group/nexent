@@ -192,6 +192,36 @@ def _register_stub_packages():
 _register_stub_packages()
 
 
+# ── 3.5. Load summary_cache and summary_config modules ────────────────────
+
+def _locate_module(module_name: str) -> str:
+    """Resolve the absolute path to a module in sdk/nexent/core/agents."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(here)))))
+    filename = module_name + ".py"
+    target = os.path.join(repo, "sdk", "nexent", "core", "agents", filename)
+    if not os.path.exists(target):
+        raise FileNotFoundError(f"Cannot locate {filename}. Expected: {target}")
+    return target
+
+
+def _load_summary_modules():
+    """Load summary_cache.py and summary_config.py before agent_context.py."""
+    for module_name in ["summary_cache", "summary_config"]:
+        full_name = f"sdk.nexent.core.agents.{module_name}"
+        if full_name in sys.modules:
+            continue
+        target = _locate_module(module_name)
+        spec = importlib.util.spec_from_file_location(full_name, target)
+        module = importlib.util.module_from_spec(spec)
+        module.__package__ = "sdk.nexent.core.agents"
+        sys.modules[full_name] = module
+        spec.loader.exec_module(module)
+
+
+_load_summary_modules()
+
+
 # ── 4. Load agent_context.py via importlib ────────────────────
 
 def _locate_agent_context() -> str:

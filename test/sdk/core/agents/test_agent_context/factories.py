@@ -33,8 +33,8 @@ from stubs import _SystemPromptStep
 # ──────────────────────────────────────────────────────────────
 
 def make_pair(
-    task_text: str = "任务",
-    action_output: str = "结果",
+    task_text: str = "task",
+    action_output: str = "result",
     step_num: int = 1,
 ):
     """Return a (TaskStep, ActionStep) tuple — the smallest logical unit."""
@@ -47,7 +47,7 @@ def make_pair(
     return t, a
 
 
-def make_model(summary_output: str = '{"task_overview": "测试摘要"}') -> MagicMock:
+def make_model(summary_output: str = '{"task_overview": "test summary"}') -> MagicMock:
     """
     Return a callable mock that behaves like a smolagents model.
     Calling it returns a response whose .content is summary_output and
@@ -97,7 +97,7 @@ def make_memory_with_steps(n_pairs: int = 3) -> AgentMemory:
         steps.extend([t, a])
     return AgentMemory(
         steps=steps,
-        system_prompt=_SystemPromptStep(system_prompt="系统提示"),
+        system_prompt=_SystemPromptStep(system_prompt="system prompt"),
     )
 
 
@@ -139,7 +139,7 @@ def make_memory_mixed(
 
     return AgentMemory(
         steps=steps,
-        system_prompt=_SystemPromptStep(system_prompt="系统提示"),
+        system_prompt=_SystemPromptStep(system_prompt="system prompt"),
     )
 
 

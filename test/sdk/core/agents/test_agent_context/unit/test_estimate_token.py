@@ -1,33 +1,30 @@
 """
 unit/test_estimate_token.py
-───────────────────────────
-验证 ContextManager._estimate_tokens(memory) 与
-ContextManager._msg_token_count(flat_messages) 的结果一致性。
+Verify ContextManager._estimate_tokens(memory) and
+ContextManager._msg_token_count(flat_messages) result consistency.
 """
 
 import pytest
 
 from factories import make_cm, make_memory_with_steps, make_original_messages, make_pair
-from loader import AgentMemory,PreviousSummaryCache
+from loader import AgentMemory, PreviousSummaryCache
 from stubs import _SystemPromptStep
 
 
-# ──────────────────────────────────────────────────────────────
-# 主一致性断言
-# ──────────────────────────────────────────────────────────────
-
 class TestEstimateTokenConsistency:
-    """_estimate_tokens 与 _msg_token_count(flat) 必须返回相同值。"""
+    """_estimate_tokens and _msg_token_count(flat) must return the same value."""
+
     def test_msg_token_count_equal_estimate_token_for_memory(self):
         cm = make_cm(enabled=True, threshold=10)
         memory = make_memory_with_steps(3)
         original = make_original_messages(memory)
         assert cm._estimate_tokens(memory) == cm._msg_token_count(original)
 
+
 class TestEffectiveTokens:
 
     def test_effective_prev_tokens_no_cache(self):
-        """没有 cache 时应等于 raw 估算"""
+        """No cache should equal raw estimation."""
         cm = make_cm()
         t, a = make_pair("task", "action")
         steps = [t, a]
@@ -36,13 +33,12 @@ class TestEffectiveTokens:
         assert effective == raw
 
     def test_effective_prev_tokens_with_valid_cache_less_than_raw(self):
-        """有效 cache 存在时，effective tokens 应 ≤ raw（摘要比全文短）"""
+        """Valid cache exists, effective tokens should be <= raw (summary shorter than full text)."""
         cm = make_cm()
-        # 制造一个很长的 pair
         t, a = make_pair("X" * 200, "Y" * 200, 1)
         pairs = [(t, a)]
         fp = cm._pair_fingerprint(t.task, a.model_output)
-        cm._previous_summary_cache = PreviousSummaryCache("短摘要", 1, fp)
+        cm._previous_summary_cache = PreviousSummaryCache("short summary", 1, fp)
         steps = [t, a]
         raw = cm._estimate_tokens_for_steps(steps)
         effective = cm._effective_prev_tokens(steps)

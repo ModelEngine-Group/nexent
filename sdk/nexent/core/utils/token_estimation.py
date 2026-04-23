@@ -184,7 +184,7 @@ def estimate_tokens(
 def estimate_tokens_for_system_prompt(
     memory: AgentMemory, chars_per_token: float = 1.5
 ) -> int:
-    """估算 AgentMemory 中系统提示的 token 数。"""
+    """Estimate token count for system prompt in AgentMemory."""
     if not memory.system_prompt:
         return 0
 
@@ -194,6 +194,6 @@ def estimate_tokens_for_system_prompt(
     if text is not None:
         return estimate_tokens_text(text)
     else:
-        # 回退到字符数估算
+        # Fallback to character-based estimation
         char_count = msg_char_count(sys_msgs)
         return int(char_count / chars_per_token)

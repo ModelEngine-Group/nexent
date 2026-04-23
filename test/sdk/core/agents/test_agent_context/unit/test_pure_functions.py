@@ -5,17 +5,14 @@ from factories import make_cm, make_memory_with_steps, make_original_messages, m
 from loader import ContextManager, SummaryTaskStep, TaskStep, ActionStep
 
 
-
 class TestPureFunctions:
-
-    # ---- _format_summary ----
 
     def test_format_summary_valid_json(self):
         cm = make_cm()
-        raw = '{"task_overview": "做了某件事", "completed_work": "完成了"}'
+        raw = '{"task_overview": "did something", "completed_work": "completed"}'
         result = cm._format_summary(raw)
         parsed = json.loads(result)
-        assert parsed["task_overview"] == "做了某件事"
+        assert parsed["task_overview"] == "did something"
 
     def test_format_summary_strips_markdown_fence(self):
         cm = make_cm()
@@ -26,7 +23,7 @@ class TestPureFunctions:
 
     def test_format_summary_invalid_json_returns_plain_text(self):
         cm = make_cm()
-        raw = "这不是 JSON 格式的文本内容"
+        raw = "This is not JSON format text content"
         result = cm._format_summary(raw)
         assert result == raw
 
@@ -35,33 +32,30 @@ class TestPureFunctions:
         assert cm._format_summary("") is None
         assert cm._format_summary("   ") is None
 
-    # ---- _extract_pairs ----
-
     def test_extract_pairs_basic(self):
         cm = make_cm()
-        t1, a1 = make_pair("任务1", "结果1", 1)
-        t2, a2 = make_pair("任务2", "结果2", 2)
+        t1, a1 = make_pair("task1", "result1", 1)
+        t2, a2 = make_pair("task2", "result2", 2)
         steps = [t1, a1, t2, a2]
         pairs = cm._extract_pairs(steps)
         assert len(pairs) == 2
-        assert pairs[0][0].task == "任务1"
-        assert pairs[1][0].task == "任务2"
+        assert pairs[0][0].task == "task1"
+        assert pairs[1][0].task == "task2"
 
     def test_extract_pairs_skips_summary_task_step(self):
         cm = make_cm()
-        summary = SummaryTaskStep(task="已有摘要")
-        t1, a1 = make_pair("任务1", "结果1", 1)
+        summary = SummaryTaskStep(task="existing summary")
+        t1, a1 = make_pair("task1", "result1", 1)
         steps = [summary, t1, a1]
         pairs = cm._extract_pairs(steps)
-        # SummaryTaskStep 应被跳过
         assert len(pairs) == 1
-        assert pairs[0][0].task == "任务1"
+        assert pairs[0][0].task == "task1"
 
     def test_extract_pairs_ignores_orphan_task(self):
-        """一个 TaskStep 后没有 ActionStep，不应成对"""
+        """A TaskStep without following ActionStep should not form a pair."""
         cm = make_cm()
-        t1, a1 = make_pair("任务1", "结果1", 1)
-        t_orphan = TaskStep(task="孤儿任务")
+        t1, a1 = make_pair("task1", "result1", 1)
+        t_orphan = TaskStep(task="orphan task")
         steps = [t1, a1, t_orphan]
         pairs = cm._extract_pairs(steps)
         assert len(pairs) == 1
@@ -69,8 +63,6 @@ class TestPureFunctions:
     def test_extract_pairs_empty_steps(self):
         cm = make_cm()
         assert cm._extract_pairs([]) == []
-
-    # ---- fingerprint 稳定性 ----
 
     def test_pair_fingerprint_is_deterministic(self):
         cm = make_cm()
@@ -95,20 +87,18 @@ class TestPureFunctions:
         a2 = ActionStep(step_number=1, model_output="output A", action_output="result B")
         assert ContextManager._action_fingerprint(a1) != ContextManager._action_fingerprint(a2)
 
-    # ---- _pairs_to_text ----
-
     def test_pairs_to_text_format(self):
         cm = make_cm()
-        t, a = make_pair("用户问题", "模型回答", 1)
+        t, a = make_pair("user question", "model response", 1)
         text = cm._pairs_to_text([(t, a)])
-        assert "用户问题" in text
-        assert "模型回答" in text
+        assert "user question" in text
+        assert "model response" in text
         assert "user:" in text
         assert "assistant:" in text
 
     def test_pairs_to_text_multiple_pairs_joined_by_blank_line(self):
         cm = make_cm()
-        pair1 = make_pair("问1", "答1", 1)
-        pair2 = make_pair("问2", "答2", 2)
+        pair1 = make_pair("question1", "answer1", 1)
+        pair2 = make_pair("question2", "answer2", 2)
         text = cm._pairs_to_text([pair1, pair2])
         assert "\n\n" in text
