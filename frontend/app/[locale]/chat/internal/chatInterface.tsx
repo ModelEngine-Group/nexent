@@ -30,7 +30,7 @@ import {
   createMessageAttachments,
   cleanupAttachmentUrls,
 } from "@/lib/chat/chatAttachmentUtils";
-import { ConversationListItem, ApiConversationDetail } from "@/types/chat";
+import { ConversationListItem, ApiConversationDetail, HistoryItem } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import {
@@ -439,7 +439,7 @@ export function ChatInterface() {
         history: currentMessages
           .filter((msg) => msg.id !== userMessage.id)
           .map((msg) => {
-            const historyItem: any = {
+            const historyItem: HistoryItem = {
               role: msg.role,
               content:
                 msg.role === ROLE_ASSISTANT

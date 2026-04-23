@@ -232,6 +232,13 @@ export interface MinioFileItem {
   description?: string
 }
 
+// History item for API request payload
+export interface HistoryItem {
+  role: string;
+  content: string;
+  minio_files?: MinioFileItem[];
+}
+
 export interface ApiMessage {
   role: "user" | "assistant"
   message: ApiMessageItem[]

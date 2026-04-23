@@ -2422,7 +2422,7 @@ class TestCreateAgentRunInfo:
 
             # Verify that other functions were called correctly
             mock_join_query.assert_called_once_with(
-                minio_files=[], query="test query")
+                minio_files=[], query="test query", history=[])
             mock_create_models.assert_called_once_with("tenant_1")
             mock_create_agent.assert_called_once_with(
                 agent_id="agent_1",

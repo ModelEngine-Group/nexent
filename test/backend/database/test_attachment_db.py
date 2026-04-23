@@ -228,6 +228,27 @@ class TestUploadFile:
         assert result['presigned_url_expires_in'] == 7200
         mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
 
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.os.path.exists')
+    @patch('backend.database.attachment_db.os.path.getsize')
+    @patch('backend.database.attachment_db.os.path.basename')
+    def test_upload_file_nonexistent_file(self, mock_basename, mock_getsize, mock_exists, mock_get_file_url):
+        """Test upload_file handles nonexistent local file gracefully"""
+        mock_basename.return_value = 'missing.txt'
+        mock_exists.return_value = False
+        mock_getsize.return_value = 1024
+        minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/missing.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        
+        result = upload_file('/path/to/missing.txt', 'attachments/missing.txt', 'bucket')
+        
+        assert result['success'] is True
+        assert result['file_size'] == 0
+        assert result['file_name'] == 'missing.txt'
+        assert 'url' in result
+        assert 'presigned_url' in result
+        mock_getsize.assert_not_called()
+
 
 class TestUploadFileobj:
     """Test cases for upload_fileobj function"""
@@ -273,17 +294,23 @@ class TestUploadFileobj:
     @patch('backend.database.attachment_db.generate_object_name')
     @patch('backend.database.attachment_db.get_file_url')
     def test_upload_fileobj_preserves_file_position(self, mock_get_file_url, mock_generate):
-        """Test upload_fileobj preserves original file position"""
+        """Test upload_fileobj reads full content and preserves original file position"""
         mock_generate.return_value = 'attachments/test.txt'
-        minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
         
-        file_obj = BytesIO(b'test data')
+        file_obj = BytesIO(b'full test data content')
         original_pos = 4
         file_obj.seek(original_pos)
         
+        captured_data = {}
+        def capture_upload(file_obj_arg, object_name, bucket):
+            captured_data['content'] = file_obj_arg.read()
+            return (True, '/bucket/attachments/test.txt')
+        minio_client_mock.upload_fileobj.side_effect = capture_upload
+        
         result = upload_fileobj(file_obj, 'test.txt', 'bucket')
         
+        assert captured_data['content'] == b'full test data content'
         assert file_obj.tell() == original_pos
 
     @patch('backend.database.attachment_db.generate_object_name')

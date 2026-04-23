@@ -107,12 +107,15 @@ def upload_fileobj(
     file_obj.seek(0, os.SEEK_END)
     file_size = file_obj.tell()
 
-    # Reset to original position
-    file_obj.seek(current_pos)
+    # Seek to beginning for upload
+    file_obj.seek(0)
 
     # Upload file
     success, result = minio_client.upload_fileobj(
         file_obj, object_name, bucket)
+
+    # Restore original position
+    file_obj.seek(current_pos)
 
     # Build response
     response = {"success": success, "object_name": object_name, "file_name": file_name, "file_size": file_size,
