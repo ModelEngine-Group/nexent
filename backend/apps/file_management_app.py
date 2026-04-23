@@ -179,7 +179,7 @@ async def get_storage_file(
         ),
     ),
     expires: int = Query(86400, description="URL validity period (seconds)"),
-    filename: Optional[str] = Query(None, description="Original filename for download (optional)")
+    filename: Optional[str] = Query(None, description="Original filename for download (optional)"),
     authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
