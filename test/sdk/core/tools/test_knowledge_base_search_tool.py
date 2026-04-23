@@ -1025,3 +1025,194 @@ class TestEdgeCases:
         search_results = json.loads(result)
 
         assert len(search_results) == 3
+
+
+class TestFieldInfoDefaultFactory:
+    """Tests for FieldInfo default_factory handling.
+
+    smolagents Tool may not properly expand Field defaults, so the code
+    handles FieldInfo objects with both .default and .default_factory attributes.
+    These tests verify the correct handling of both cases.
+    """
+
+    def test_convert_to_index_names_with_fieldinfo_default_factory(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test _convert_to_index_names handles FieldInfo with default_factory correctly."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        # Create a FieldInfo with default_factory only (Pydantic doesn't allow both)
+        field_info_with_factory = FieldInfo(
+            default_factory=lambda: {"Knowledge X": "es_index_x", "Knowledge Y": "es_index_y"}
+        )
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=[],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map=field_info_with_factory,
+        )
+
+        result = tool._convert_to_index_names(["Knowledge X", "Knowledge Y"])
+
+        # Should convert using the factory result
+        assert result == ["es_index_x", "es_index_y"]
+
+    def test_convert_to_index_names_with_fieldinfo_default_only(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test _convert_to_index_names handles FieldInfo with only default correctly."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        # Create a FieldInfo with default only (no factory)
+        field_info_with_default = FieldInfo(
+            default={"Knowledge A": "es_index_a"}
+        )
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=[],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map=field_info_with_default,
+        )
+
+        result = tool._convert_to_index_names(["Knowledge A"])
+
+        # Should convert using the default value
+        assert result == ["es_index_a"]
+
+    def test_forward_with_fieldinfo_top_k_default_factory(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test forward handles FieldInfo top_k with default_factory correctly."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        mock_results = create_mock_search_result(3)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        # Create FieldInfo with default_factory only (Pydantic doesn't allow both)
+        field_info_top_k = FieldInfo(
+            default_factory=lambda: 5
+        )
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+        # Override top_k with FieldInfo
+        tool.top_k = field_info_top_k
+
+        result = tool.forward("test query")
+
+        # Should use the factory result (5) for top_k
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["top_k"] == 5
+
+    def test_forward_with_fieldinfo_rerank_default_factory(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test forward handles FieldInfo rerank with default_factory correctly."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        mock_results = create_mock_search_result(10)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        # Create FieldInfo with default_factory only (Pydantic doesn't allow both)
+        field_info_rerank = FieldInfo(
+            default_factory=lambda: True
+        )
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+        # Override rerank with FieldInfo
+        tool.rerank = field_info_rerank
+
+        from sdk.nexent.core.utils.constants import RERANK_OVERSEARCH_MULTIPLIER
+
+        result = tool.forward("test query")
+
+        # Should use the factory result (True) and multiply top_k
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        # top_k from default is 3, multiplied by RERANK_OVERSEARCH_MULTIPLIER
+        assert call_kwargs["top_k"] == 3 * RERANK_OVERSEARCH_MULTIPLIER
+
+    def test_forward_with_fieldinfo_top_k_default_only(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test forward handles FieldInfo top_k with only default correctly."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        mock_results = create_mock_search_result(5)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        # Create FieldInfo with default only (no factory)
+        field_info_top_k = FieldInfo(default=10)
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+        # Override top_k with FieldInfo
+        tool.top_k = field_info_top_k
+
+        result = tool.forward("test query")
+
+        # Should use the default value (10)
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        assert call_kwargs["top_k"] == 10
+
+    def test_forward_with_fieldinfo_rerank_default_only(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        """Test forward handles FieldInfo rerank with only default correctly."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        mock_results = create_mock_search_result(5)
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        # Create FieldInfo with default only (no factory)
+        field_info_rerank = FieldInfo(default=True)
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+        # Override rerank with FieldInfo
+        tool.rerank = field_info_rerank
+
+        from sdk.nexent.core.utils.constants import RERANK_OVERSEARCH_MULTIPLIER
+
+        result = tool.forward("test query")
+
+        # Should use the default value (True) and multiply top_k
+        call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
+        # top_k from default is 3, multiplied by RERANK_OVERSEARCH_MULTIPLIER
+        assert call_kwargs["top_k"] == 3 * RERANK_OVERSEARCH_MULTIPLIER

@@ -131,20 +131,20 @@ class KnowledgeBaseSearchTool(Tool):
         Returns:
             List of actual index_names for ES queries
         """
-        # Handle FieldInfo case (smolagents doesn't expand Field defaults)
         display_map = self.display_name_to_index_map
         if isinstance(display_map, FieldInfo):
-            display_map = display_map.default
+            if display_map.default_factory is not None:
+                display_map = display_map.default_factory()
+            else:
+                display_map = display_map.default
         if not display_map:
             return names
 
         converted_names = []
         for name in names:
-            # If the name is in the map as a display_name, convert it to index_name
             if name in display_map:
                 converted_names.append(display_map[name])
             else:
-                # Otherwise, assume it's already an index_name
                 converted_names.append(name)
         return converted_names
 
@@ -177,9 +177,15 @@ class KnowledgeBaseSearchTool(Tool):
         effective_top_k = self.top_k
         is_rerank = self.rerank
         if isinstance(effective_top_k, FieldInfo):
-            effective_top_k = effective_top_k.default
+            if effective_top_k.default_factory is not None:
+                effective_top_k = effective_top_k.default_factory()
+            else:
+                effective_top_k = effective_top_k.default
         if isinstance(is_rerank, FieldInfo):
-            is_rerank = is_rerank.default
+            if is_rerank.default_factory is not None:
+                is_rerank = is_rerank.default_factory()
+            else:
+                is_rerank = is_rerank.default
         if is_rerank:
             effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
 
