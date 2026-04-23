@@ -9,7 +9,7 @@ from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig
 from nexent.memory.memory_service import search_memory_in_levels
 
-from services.file_management_service import get_llm_model
+from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
@@ -479,12 +479,14 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
             tool_config.metadata = {
                 "llm_model": get_llm_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
-                "data_process_service_url": DATA_PROCESS_SERVICE
+                "data_process_service_url": DATA_PROCESS_SERVICE,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
         elif tool_config.class_name == "AnalyzeImageTool":
             tool_config.metadata = {
                 "vlm_model": get_vlm_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
 
         tool_config_list.append(tool_config)
