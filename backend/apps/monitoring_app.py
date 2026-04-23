@@ -96,11 +96,11 @@ async def list_models_endpoint(
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(
         ge=1, le=100, description="Items per page")] = 20,
-    authorization: Optional[str] = Header(None),
+    authorization: Annotated[Optional[str], Header()] = None,
 ):
     """List all models with aggregated monitoring metrics from database."""
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        _, tenant_id = get_current_user_id(authorization)
 
         all_metrics = _query_model_metrics_from_db(time_range, tenant_id)
 

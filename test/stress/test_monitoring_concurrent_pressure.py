@@ -156,7 +156,7 @@ def run_pressure_test(
 
     def mock_write_batch(batch):
         delay = db_write_delay_ms / 1000.0
-        for rec in batch:
+        for _ in batch:
             time.sleep(delay)
             with write_records_lock:
                 written_count[0] += 1

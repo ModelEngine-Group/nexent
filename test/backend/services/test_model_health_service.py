@@ -444,7 +444,8 @@ async def test_check_model_connectivity_success():
         mock_update_model.assert_any_call(
             "model123", {"connect_status": "available"})
         mock_connectivity_check.assert_called_once_with(
-            "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True
+            "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True,
+            display_name="GPT-4"
         )
 
 

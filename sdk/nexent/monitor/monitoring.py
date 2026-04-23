@@ -690,7 +690,8 @@ class RecordModelCallContext:
         except Exception:
             pass
 
-        return False  # do not suppress exceptions
+        # noinspection PyMethodMayBeStatic
+        return False  # context manager protocol: False = do not suppress exceptions
 
 
 class _MonitoredStreamIterator:
@@ -771,11 +772,9 @@ class _MonitoredChatCompletions:
     def create(self, **kwargs):
         stream = kwargs.get("stream", False)
         start_time = time.time()
-        error: Optional[Exception] = None
         try:
             response = self._original.create(**kwargs)
         except Exception as exc:
-            error = exc
             self._record_non_streaming(start_time, error=exc)
             raise
 

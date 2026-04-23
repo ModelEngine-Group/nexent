@@ -1277,7 +1277,7 @@ class TestRecordModelCallContext:
         ):
             # Must NOT raise
             with RecordModelCallContext("embedding", "bge-model") as _:
-                pass
+                ...
 
         mock_buffer.add_record.assert_not_called()
 
@@ -1709,7 +1709,7 @@ class TestClientLevelIntegrationPaths:
         buf = self._mock_buffer()
 
         with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
-            resp = monitored.chat.completions.create(
+            monitored.chat.completions.create(
                 stream=False, messages=[{"role": "user", "content": "Hello"}], max_tokens=5
             )
 

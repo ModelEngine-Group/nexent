@@ -176,6 +176,18 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     return "#ff4d4f";
   };
 
+  const TEXT_MODEL_TYPES = ["llm", "vlm", "long_context"];
+
+  const renderTextModelMetric = (
+    value: number | undefined,
+    record: UnifiedModelRow,
+    formatter: (v: number) => string
+  ) => {
+    if (!TEXT_MODEL_TYPES.includes(record.type)) return "--";
+    if (value === undefined) return "--";
+    return formatter(value);
+  };
+
   const columns: ColumnsType<UnifiedModelRow> = [
     {
       title: t("common.name"),
@@ -258,9 +270,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       width: 110,
       sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.avg_ttft ?? 0) - (b.avg_ttft ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
-        !["llm", "vlm", "long_context"].includes(record.type)
-          ? "--"
-          : v !== undefined ? `${v.toFixed(0)} ${t("monitoring.time.ms")}` : "--",
+        renderTextModelMetric(v, record, (val) => `${val.toFixed(0)} ${t("monitoring.time.ms")}`),
     },
     {
       title: t("monitoring.table.tokens"),
@@ -269,9 +279,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       width: 100,
       sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.total_tokens ?? 0) - (b.total_tokens ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
-        !["llm", "vlm", "long_context"].includes(record.type)
-          ? "--"
-          : v !== undefined ? v.toLocaleString() : "--",
+        renderTextModelMetric(v, record, (val) => val.toLocaleString()),
     },
     {
       title: t("monitoring.table.tokenGenerationRate"),
@@ -280,9 +288,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       width: 120,
       sorter: (a: UnifiedModelRow, b: UnifiedModelRow) => (a.token_generation_rate ?? 0) - (b.token_generation_rate ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
-        !["llm", "vlm", "long_context"].includes(record.type)
-          ? "--"
-          : v !== undefined ? `${v.toFixed(1)} ${t("monitoring.unit.tokensPerSec")}` : "--",
+        renderTextModelMetric(v, record, (val) => `${val.toFixed(1)} ${t("monitoring.unit.tokensPerSec")}`),
     },
     {
       key: "actions",

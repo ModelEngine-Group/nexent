@@ -181,10 +181,10 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
 
         if connectivity:
             logger.info(
-                f"CONNECTED: {model_name}; Base URL: {_mask_secret(model.get('base_url'))}")
+                f"CONNECTED: {model_name}")
         else:
             logger.warning(
-                f"UNCONNECTED: {model_name}; Base URL: {_mask_secret(model.get('base_url'))}")
+                f"UNCONNECTED: {model_name}")
         connect_status = ModelConnectStatusEnum.AVAILABLE.value if connectivity else ModelConnectStatusEnum.UNAVAILABLE.value
         update_data = {"connect_status": connect_status}
         update_model_record(model["model_id"], update_data)
@@ -231,7 +231,7 @@ async def verify_model_config_connectivity(model_config: dict):
                 return {
                     "connectivity": False,
                     "model_name": model_name,
-                    "error": f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."
+                    "error": f"Failed to connect to model '{model_name}'. Please verify the URL, API key, and network connection."
                 }
 
             return {
@@ -241,7 +241,7 @@ async def verify_model_config_connectivity(model_config: dict):
         except ValueError as e:
             error_msg = str(e)
             logger.warning(
-                f"UNCONNECTED: {model_name}; Base URL: {_mask_secret(model_base_url)}; Error: {error_msg}")
+                f"UNCONNECTED: {model_name}; Error: {error_msg}")
             return {
                 "connectivity": False,
                 "model_name": model_name,
@@ -275,5 +275,5 @@ async def embedding_dimension_check(model_config: dict):
         return 0
     except Exception as e:
         logger.error(
-            f"Error checking embedding dimension: {model_name}; Base URL: {model_base_url}; Error: {str(e)}")
+            f"Error checking embedding dimension: {model_name};  Error: {str(e)}")
         return 0

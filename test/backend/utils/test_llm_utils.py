@@ -136,6 +136,7 @@ class TestCallLLMForSystemPrompt:
             temperature=0.3,
             top_p=0.95,
             ssl_verify=True,
+            display_name=None,
         )
 
     def test_call_llm_for_system_prompt_exception(self, mocker: MockFixture):
@@ -756,6 +757,7 @@ class AdditionalLLMUtilsTests:
             temperature=0.3,
             top_p=0.95,
             ssl_verify=True,
+            display_name=None,
         )
 
     def test_call_llm_for_system_prompt_reasoning_content_logging(self, mocker: MockFixture):
