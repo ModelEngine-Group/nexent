@@ -228,7 +228,7 @@ export interface MinioFileItem {
   size: number
   object_name?: string
   url?: string
-  presigned_url?: string  // Temporary URL for external tools (e.g., MCP), valid for 24 hours
+  presigned_url?: string  // Temporary URL for external tools (e.g., MCP), default 24h validity
   description?: string
 }
 
