@@ -55,7 +55,8 @@ class NexentAgent:
             temperature=model_config.temperature,
             top_p=model_config.top_p,
             ssl_verify=model_config.ssl_verify if model_config.ssl_verify is not None else True,
-            model_factory=model_config.model_factory
+            model_factory=model_config.model_factory,
+            display_name=model_config.cite_name,
         )
         model.stop_event = self.stop_event
         return model

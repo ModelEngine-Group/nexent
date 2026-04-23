@@ -1,4 +1,10 @@
 from ...monitor import get_monitoring_manager
+from ...monitor.monitoring import (
+    _MonitoredClient,
+    _monitoring_operation,
+    _monitoring_display_name,
+    _detect_model_type,
+)
 import logging
 import threading
 import asyncio
@@ -16,7 +22,8 @@ logger = logging.getLogger("openai_llm")
 
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-                 ssl_verify=True, model_factory: Optional[str] = None, *args, **kwargs):
+                 ssl_verify=True, model_factory: Optional[str] = None,
+                 display_name: Optional[str] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
@@ -27,6 +34,7 @@ class OpenAIModel(OpenAIServerModel):
             ssl_verify: Whether to verify SSL certificates (default: True).
                        Set to False for local services without SSL support.
             model_factory: Provider identifier (e.g., openai, modelengine)
+            display_name: Human-readable display name for monitoring
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -36,6 +44,7 @@ class OpenAIModel(OpenAIServerModel):
         self.stop_event = threading.Event()
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
+        self.display_name = display_name
 
         # Create http_client based on ssl_verify parameter
         if not ssl_verify:
@@ -47,11 +56,26 @@ class OpenAIModel(OpenAIServerModel):
 
         super().__init__(*args, **kwargs)
 
-    @get_monitoring_manager().monitor_llm_call("openai_chat", "chat_completion")
+        # Wrap the OpenAI client with monitoring interceptor
+        model_type = _detect_model_type(self)
+        base_client = getattr(self, "client", None)
+        if base_client is not None:
+            self.client = _MonitoredClient(base_client, self.model_id, model_type)
+        else:
+            logger.warning(
+                "OpenAIModel: no `client` attribute after init; "
+                "skipping monitored wrapper (model_id=%s, type=%s)",
+                getattr(self, "model_id", None),
+                model_type,
+            )
+        if self.display_name:
+            _monitoring_display_name.set(self.display_name)
+
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, **kwargs, ) -> ChatMessage:
-        # Get token tracker from decorator (if monitoring is available)
-        token_tracker = kwargs.pop('_token_tracker', None)
+        _monitoring_operation.set("chat_completion")
+
+        token_tracker = self._monitoring.create_token_tracker(self.model_id)
 
         # Normalize incoming messages so we can accept plain dict payloads like
         # {"role": "user", "content": "..."} alongside ChatMessage instances.

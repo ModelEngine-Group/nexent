@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, ForeignKey, ForeignKeyConstraint, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, ForeignKey, ForeignKeyConstraint, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
@@ -178,6 +178,82 @@ class ModelRecord(TableBase):
         Boolean, default=True, doc="Whether to verify SSL certificates when connecting to this model API. Default is true. Set to false for local services without SSL support.")
     chunk_batch = Column(
         Integer, doc="Batch size for concurrent embedding requests during document chunking")
+
+
+class ModelMonitoringRecord(SimpleTableBase):
+    """
+    Model monitoring record table - stores per-request LLM performance metrics.
+    Uses SimpleTableBase to avoid audit fields (created_by, updated_by, etc.).
+    """
+
+    __tablename__ = "model_monitoring_record_t"
+    __table_args__ = (
+        Index("ix_monitoring_model_id", "model_id"),
+        Index("ix_monitoring_tenant_id", "tenant_id"),
+        Index("ix_monitoring_agent_id", "agent_id"),
+        Index("ix_monitoring_create_time", "create_time"),
+        Index("ix_monitoring_is_error", "is_error"),
+        Index("ix_monitoring_model_time", "model_id", "create_time"),
+        Index("ix_monitoring_model_type", "model_type"),
+        {"schema": SCHEMA},
+    )
+
+    monitoring_id = Column(
+        Integer,
+        Sequence("model_monitoring_record_t_monitoring_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Monitoring record ID, auto-increment primary key",
+    )
+    model_id = Column(
+        Integer, doc="Model ID, foreign key reference to model_record_t.model_id"
+    )
+    model_name = Column(
+        String(100), nullable=False, doc="Model name at the time of the request"
+    )
+    agent_id = Column(Integer, doc="Agent ID that initiated the request")
+    agent_name = Column(
+        String(100), doc="Agent name at the time of the request")
+    conversation_id = Column(
+        Integer, doc="Conversation ID associated with this request"
+    )
+    tenant_id = Column(
+        String(100), nullable=False, doc="Tenant ID for multi-tenant isolation"
+    )
+    user_id = Column(String(100), doc="User ID who initiated the request")
+    request_duration_ms = Column(
+        Integer, doc="Total request duration in milliseconds")
+    ttft_ms = Column(Integer, doc="Time to first token in milliseconds")
+    input_tokens = Column(Integer, doc="Number of input tokens")
+    output_tokens = Column(Integer, doc="Number of output tokens")
+    total_tokens = Column(Integer, doc="Total tokens (input + output)")
+    generation_rate = Column(
+        Float, doc="Token generation rate (tokens per second)")
+    is_streaming = Column(
+        Boolean, default=False, doc="Whether the request used streaming"
+    )
+    is_success = Column(
+        Boolean, default=True, doc="Whether the request completed successfully"
+    )
+    is_error = Column(
+        Boolean, default=False, doc="Whether the request resulted in an error"
+    )
+    error_type = Column(
+        String(50), doc="Error type classification (e.g., auth_error, rate_limit)"
+    )
+    error_message = Column(Text, doc="Error message details")
+    retry_count = Column(Integer, default=0, doc="Number of retry attempts")
+    operation = Column(
+        String(50), doc="Operation type (e.g., llm_completion, llm_chat)"
+    )
+    create_time = Column(
+        TIMESTAMP(timezone=False), server_default=func.now(), doc="Record creation time"
+    )
+    delete_flag = Column(String(1), default="N", doc="Soft delete flag: Y/N")
+    display_name = Column(String(200), doc="User-facing model display name")
+    model_type = Column(
+        String(20), default="llm", doc="Model type: llm, embedding, multi_embedding"
+    )
 
 
 class ToolInfo(TableBase):

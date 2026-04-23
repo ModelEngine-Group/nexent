@@ -27,6 +27,7 @@ from database.conversation_db import (
     update_message_opinion
 )
 from nexent.core.utils.observer import MessageObserver, ProcessType
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
@@ -239,9 +240,12 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
         str: Generated title
     """
     prompt_template = get_generate_title_prompt_template(language=language)
+    set_monitoring_context(tenant_id=tenant_id, user_id=None)
 
     model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    display_name = model_config.get("display_name", "") if model_config else ""
+    set_monitoring_operation("title_generation", display_name=display_name or None)
 
     # Create OpenAIModel instance
     llm = OpenAIModel(

@@ -24,6 +24,7 @@ from apps.group_app import router as group_router
 from apps.user_app import router as user_router
 from apps.invitation_app import router as invitation_router
 from apps.a2a_client_app import router as a2a_client_router
+from apps.monitoring_app import router as monitoring_router
 from apps.a2a_server_app import router as a2a_server_router
 from consts.const import IS_SPEED_MODE
 
@@ -44,6 +45,7 @@ app.include_router(proxy_router)
 app.include_router(tool_config_router)
 app.include_router(dify_router)
 app.include_router(idata_router)
+app.include_router(monitoring_router)
 
 # Choose user management router based on IS_SPEED_MODE
 if IS_SPEED_MODE:

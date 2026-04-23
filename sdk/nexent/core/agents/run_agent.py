@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextvars import copy_context
 from threading import Thread
 from typing import Any, Dict, Union
 
@@ -131,7 +132,9 @@ async def agent_run(agent_run_info: AgentRunInfo):
     observer = agent_run_info.observer
 
     monitoring_manager.add_span_event("agent_run.started")
-    thread_agent = Thread(target=agent_run_thread, args=(agent_run_info,))
+    # copy_context() preserves contextvars (e.g. tenant_id) into the new thread
+    ctx = copy_context()
+    thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
     thread_agent.start()
     monitoring_manager.add_span_event("agent_run.thread_started")
 

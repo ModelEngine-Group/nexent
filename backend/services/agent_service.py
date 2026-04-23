@@ -73,6 +73,9 @@ from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
 
+# Monitoring utilities: expose monitoring context for downstream observers
+from nexent.monitor import set_monitoring_context
+
 # Import monitoring utilities
 from utils.monitoring import monitoring_manager
 
@@ -1660,6 +1663,9 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
 
 
 # Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
+@monitoring_manager.monitor_endpoint(
+    "agent_service.generate_stream_with_memory", exclude_params=["authorization"]
+)
 async def generate_stream_with_memory(
     agent_request: AgentRequest,
     user_id: str,
@@ -1850,6 +1856,13 @@ async def run_agent_stream(
         resolved_tenant_id=resolved_tenant_id,
         language=language,
         user_resolution_duration=resolve_duration
+    )
+    # Expose resolved identity to downstream monitoring (LLM-level record writing)
+    set_monitoring_context(
+        tenant_id=resolved_tenant_id,
+        user_id=resolved_user_id,
+        agent_id=agent_request.agent_id,
+        conversation_id=agent_request.conversation_id,
     )
 
     # Step 2: Save user message (if needed)
