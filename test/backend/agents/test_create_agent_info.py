@@ -2927,7 +2927,7 @@ class TestJoinMinioFileDescriptionToQuery:
 
         result = await join_minio_file_description_to_query(minio_files, query)
 
-        expected = "User uploaded files. The file information is as follows:\nFile name: 1.pdf, S3 URL: s3://nexent/1.pdf\nFile name: 2.pdf, S3 URL: s3://nexent/2.pdf\n\nUser wants to answer questions based on the information in the above files: test query"
+        expected = "User uploaded files. The file information is as follows:\nFile name: 1.pdf, S3 URL: s3://nexent/1.pdf  [permanent]\n\nFile name: 2.pdf, S3 URL: s3://nexent/2.pdf  [permanent]\n\nUser wants to answer questions based on the information in the above files: test query"
         assert result == expected
 
     @pytest.mark.asyncio
@@ -2962,6 +2962,98 @@ class TestJoinMinioFileDescriptionToQuery:
         result = await join_minio_file_description_to_query(minio_files, query)
 
         assert result == "test query"
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_deduplication_current(self):
+        """Test that duplicate files in current message are de-duplicated by URL"""
+        minio_files = [
+            {"url": "/nexent/1.pdf", "name": "1.pdf"},
+            {"url": "/nexent/1.pdf", "name": "1.pdf"},  # Duplicate URL
+            {"url": "/nexent/2.pdf", "name": "2.pdf"},
+        ]
+        query = "test query"
+
+        result = await join_minio_file_description_to_query(minio_files, query)
+
+        # Count occurrences of "File name: 1.pdf" which should appear exactly once
+        assert result.count("File name: 1.pdf") == 1
+        assert result.count("File name: 2.pdf") == 1
+        # Total file description blocks should be 2, not 3
+        assert result.count("S3 URL:") == 2
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_deduplication_history(self):
+        """Test that files in history are de-duplicated against current message"""
+        minio_files = [{"url": "/nexent/1.pdf", "name": "1.pdf"}]
+        history = [
+            {"minio_files": [{"url": "/nexent/1.pdf", "name": "1.pdf"}]},  # Same URL as current
+            {"minio_files": [{"url": "/nexent/2.pdf", "name": "2.pdf"}]},
+        ]
+        query = "test query"
+
+        result = await join_minio_file_description_to_query(minio_files, query, history)
+
+        # Count occurrences of "File name:" which should appear exactly once for each unique file
+        assert result.count("File name: 1.pdf") == 1
+        assert result.count("File name: 2.pdf") == 1
+        # Total file description blocks should be 2, not 3
+        assert result.count("S3 URL:") == 2
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_max_files(self):
+        """Test that file list is truncated when exceeding max_files limit"""
+        minio_files = [
+            {"url": f"/nexent/file_{i}.pdf", "name": f"file_{i}.pdf"}
+            for i in range(10)
+        ]
+        query = "test query"
+
+        result = await join_minio_file_description_to_query(minio_files, query, max_files=5)
+
+        for i in range(5):
+            assert f"file_{i}.pdf" in result
+        for i in range(5, 10):
+            assert f"file_{i}.pdf" not in result
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_max_chars(self):
+        """Test that file descriptions are truncated when exceeding max_chars limit"""
+        # Each file description is roughly 72 chars
+        # With prefix (~56) and suffix (~100), fixed overhead is ~156 chars
+        # Setting max_chars=100 should prevent ANY file from being included
+        # (since even one file needs ~72 + 156 = 228 chars)
+        minio_files = [
+            {"url": f"/nexent/file_{i}.pdf", "name": f"file_{i}.pdf"}
+            for i in range(10)
+        ]
+        query = "test query"
+
+        # Very small limit - should result in no files being included
+        result = await join_minio_file_description_to_query(minio_files, query, max_chars=100)
+        assert result == "test query"
+
+        # Reasonable limit - should include some files
+        # With 500 chars, we can fit: 500 - 156 = 344 available chars
+        # Each file is ~72 chars, so we can fit ~4 files
+        result = await join_minio_file_description_to_query(minio_files, query, max_chars=500)
+        # Should include at least some files but not all 10
+        assert "file_0.pdf" in result
+        assert result.count("File name:") < 10
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_current_files_priority(self):
+        """Test that current message files appear before history files when deduping"""
+        minio_files = [{"url": "/nexent/1.pdf", "name": "current_1.pdf"}]
+        history = [
+            {"minio_files": [{"url": "/nexent/2.pdf", "name": "history_2.pdf"}]},
+        ]
+        query = "test query"
+
+        result = await join_minio_file_description_to_query(minio_files, query, history)
+
+        pos_current = result.find("current_1.pdf")
+        pos_history = result.find("history_2.pdf")
+        assert pos_current < pos_history, "Current message files should appear before history files"
 
 
 class TestPreparePromptTemplates:

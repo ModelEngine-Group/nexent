@@ -552,7 +552,13 @@ async def prepare_prompt_templates(
     return prompt_templates
 
 
-async def join_minio_file_description_to_query(minio_files, query, history=None):
+async def join_minio_file_description_to_query(
+    minio_files,
+    query,
+    history=None,
+    max_files: int = 50,
+    max_chars: int = 10000,
+):
     """
     Join MinIO file descriptions to the user query.
 
@@ -560,34 +566,56 @@ async def join_minio_file_description_to_query(minio_files, query, history=None)
     that includes both S3 URL (for internal tools) and Download URL (for external MCP tools).
     It processes files from both the current message and historical messages.
 
+    De-duplication is performed using the file URL as the unique key. A maximum
+    file count and total character limit are enforced to prevent prompt bloat.
+
     Args:
         minio_files: List of file info dicts from current message upload
         query: Original user query
         history: Optional list of historical message dicts, each may contain minio_files
+        max_files: Maximum number of files to include (default 50)
+        max_chars: Maximum total characters for file descriptions (default 10000)
 
     Returns:
         Modified query with file descriptions appended
     """
     final_query = query
-    all_files = []
+    seen_urls: set[str] = set()
+    all_files: list[dict] = []
 
-    # Collect files from current message
+    # Collect files from current message first (higher priority)
     if minio_files and isinstance(minio_files, list):
         for file in minio_files:
             if isinstance(file, dict) and file.get("url") and file.get("name"):
-                all_files.append(file)
+                url = file["url"]
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    all_files.append(file)
 
-    # Collect files from historical messages
+    # Collect files from historical messages (lower priority, already-deduped)
     if history and isinstance(history, list):
         for msg in history:
             if isinstance(msg, dict) and msg.get("minio_files"):
                 for file in msg["minio_files"]:
                     if isinstance(file, dict) and file.get("url") and file.get("name"):
-                        all_files.append(file)
+                        url = file["url"]
+                        if url not in seen_urls:
+                            seen_urls.add(url)
+                            all_files.append(file)
+
+    # Enforce file count limit (keep most recent files by truncating from the end)
+    if len(all_files) > max_files:
+        all_files = all_files[:max_files]
+        logger.debug(f"File list truncated from {len(all_files)} to {max_files} files")
 
     if all_files:
-        file_descriptions = []
-        for file in all_files:
+        file_descriptions: list[str] = []
+        # Calculate fixed overhead that is added only once
+        prefix = "User uploaded files. The file information is as follows:\n"
+        suffix = f"\n\nUser wants to answer questions based on the information in the above files: {query}"
+        fixed_overhead = len(prefix) + len(suffix)
+
+        for i, file in enumerate(all_files):
             s3_url = f"s3:/{file['url']}"
             presigned_url = file.get("presigned_url", "")
 
@@ -601,12 +629,24 @@ async def join_minio_file_description_to_query(minio_files, query, history=None)
             else:
                 desc = f"File name: {file['name']}, S3 URL: {s3_url}  [permanent]"
 
+            # Calculate total length if we include this description
+            # Each description after the first adds 2 chars for \n\n separator
+            separator_chars = 2 if i > 0 else 0
+            total_len = sum(len(d) for d in file_descriptions) + len(desc) + separator_chars + fixed_overhead
+
+            # Check if adding this description would exceed the character limit
+            if total_len > max_chars:
+                logger.debug(
+                    f"File descriptions truncated at {len(file_descriptions)} files "
+                    f"to stay within {max_chars} character limit"
+                )
+                break
+
             file_descriptions.append(desc)
 
         if file_descriptions:
-            final_query = "User uploaded files. The file information is as follows:\n"
-            final_query += "\n\n".join(file_descriptions) + "\n\n"
-            final_query += f"User wants to answer questions based on the information in the above files: {query}"
+            final_query = prefix + "\n\n".join(file_descriptions) + suffix
+
     return final_query
 
 
