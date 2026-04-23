@@ -147,7 +147,8 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         # Query the database using display_name and tenant context from app layer
         model = get_model_by_display_name(display_name, tenant_id=tenant_id)
         if not model:
-            raise LookupError(f"Model configuration not found for {display_name}")
+            raise LookupError(
+                f"Model configuration not found for {display_name}")
 
         # Still use repo/name concatenation for model instantiation
         repo, name = model.get("model_repo", ""), model.get("model_name", "")
@@ -172,15 +173,18 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
                 display_name=display_name,
             )
         except Exception as e:
-            update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
+            update_data = {
+                "connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
             logger.error(f"Error checking model connectivity: {str(e)}")
             update_model_record(model["model_id"], update_data)
             raise e
 
         if connectivity:
-            logger.info(f"CONNECTED: {model_name}; Base URL: {_mask_secret(model.get('base_url'))}; API Key: {_mask_secret(model.get('api_key'))}")
+            logger.info(
+                f"CONNECTED: {model_name}; Base URL: {_mask_secret(model.get('base_url'))}")
         else:
-            logger.warning(f"UNCONNECTED: {model_name}; Base URL: {_mask_secret(model.get('base_url'))}; API Key: {_mask_secret(model.get('api_key'))}")
+            logger.warning(
+                f"UNCONNECTED: {model_name}; Base URL: {_mask_secret(model.get('base_url'))}")
         connect_status = ModelConnectStatusEnum.AVAILABLE.value if connectivity else ModelConnectStatusEnum.UNAVAILABLE.value
         update_data = {"connect_status": connect_status}
         update_model_record(model["model_id"], update_data)
@@ -191,7 +195,8 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
     except Exception as e:
         logger.error(f"Error checking model connectivity: {str(e)}")
         if 'model' in locals() and model:
-            update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
+            update_data = {
+                "connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
             update_model_record(model["model_id"], update_data)
         # Propagate for app layer to translate into HTTP
         raise e
@@ -235,7 +240,8 @@ async def verify_model_config_connectivity(model_config: dict):
             }
         except ValueError as e:
             error_msg = str(e)
-            logger.warning(f"UNCONNECTED: {model_name}; Base URL: {_mask_secret(model_base_url)}; API Key: {_mask_secret(model_api_key)}; Error: {error_msg}")
+            logger.warning(
+                f"UNCONNECTED: {model_name}; Base URL: {_mask_secret(model_base_url)}; Error: {error_msg}")
             return {
                 "connectivity": False,
                 "model_name": model_name,
@@ -268,5 +274,6 @@ async def embedding_dimension_check(model_config: dict):
         logger.error(f"Error checking embedding dimension: {str(e)}")
         return 0
     except Exception as e:
-        logger.error(f"Error checking embedding dimension: {model_name}; Base URL: {model_base_url}; Error: {str(e)}")
+        logger.error(
+            f"Error checking embedding dimension: {model_name}; Base URL: {model_base_url}; Error: {str(e)}")
         return 0

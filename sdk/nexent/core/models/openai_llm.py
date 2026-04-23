@@ -20,6 +20,7 @@ from .message_utils import prepare_messages_for_completion
 
 logger = logging.getLogger("openai_llm")
 
+
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
                  ssl_verify=True, model_factory: Optional[str] = None,
@@ -58,24 +59,26 @@ class OpenAIModel(OpenAIServerModel):
 
         # Wrap the OpenAI client with monitoring interceptor
         model_type = _detect_model_type(self)
+        model_id = getattr(self, "model_id", None)
         base_client = getattr(self, "client", None)
-        if base_client is not None:
-            self.client = _MonitoredClient(base_client, self.model_id, model_type)
+        if base_client is not None and model_id is not None:
+            self.client = _MonitoredClient(base_client, model_id, model_type)
         else:
             logger.warning(
                 "OpenAIModel: no `client` attribute after init; "
                 "skipping monitored wrapper (model_id=%s, type=%s)",
-                getattr(self, "model_id", None),
+                model_id,
                 model_type,
             )
         if self.display_name:
             _monitoring_display_name.set(self.display_name)
 
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
-                 response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, **kwargs, ) -> ChatMessage:
+                 response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, _token_tracker=None, **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
-        token_tracker = self._monitoring.create_token_tracker(self.model_id)
+        token_tracker = _token_tracker or self._monitoring.create_token_tracker(
+            self.model_id)
 
         # Normalize incoming messages so we can accept plain dict payloads like
         # {"role": "user", "content": "..."} alongside ChatMessage instances.
@@ -85,17 +88,20 @@ class OpenAIModel(OpenAIServerModel):
                 normalized_messages.append(msg)
             elif isinstance(msg, dict):
                 if "role" not in msg or "content" not in msg:
-                    raise ValueError("Each message dict must include 'role' and 'content'.")
+                    raise ValueError(
+                        "Each message dict must include 'role' and 'content'.")
                 normalized_messages.append(ChatMessage.from_dict({
                     "role": msg["role"],
                     "content": msg["content"],
                     "tool_calls": msg.get("tool_calls"),
                 }))
             else:
-                raise TypeError("Messages must be ChatMessage or dict objects.")
+                raise TypeError(
+                    "Messages must be ChatMessage or dict objects.")
 
         # Prepare messages for completion according to provider requirements.
-        messages_for_completion = prepare_messages_for_completion(normalized_messages, self.model_factory)
+        messages_for_completion = prepare_messages_for_completion(
+            normalized_messages, self.model_factory)
 
         # Add completion started event and model parameters
         if token_tracker:
@@ -104,7 +110,8 @@ class OpenAIModel(OpenAIServerModel):
                 model_id=self.model_id,
                 temperature=self.temperature,
                 top_p=self.top_p,
-                message_count=len(messages_for_completion) if messages_for_completion else 0,
+                message_count=len(
+                    messages_for_completion) if messages_for_completion else 0,
                 **{f"llm.param.{k}": v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))}
             )
 

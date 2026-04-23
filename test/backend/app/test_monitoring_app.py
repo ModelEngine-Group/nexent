@@ -120,8 +120,7 @@ class TestListModelsEndpoint:
 
     @patch("apps.monitoring_app._query_model_metrics_from_db", return_value=[])
     @patch("apps.monitoring_app.get_current_user_id", return_value=("u-1", "t-1"))
-    @patch("apps.monitoring_app._filter_by_rbac", side_effect=lambda m, *a: m)
-    def test_endpoint_returns_success(self, mock_rbac, mock_query, mock_auth, client):
+    def test_endpoint_returns_success(self, mock_auth, mock_query, client):
         """GET /monitoring/models returns code 0 on success."""
         response = client.get(
             "/monitoring/models",

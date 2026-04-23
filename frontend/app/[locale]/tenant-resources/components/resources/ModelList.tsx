@@ -2,14 +2,14 @@
 
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Button, Popconfirm, message, Tag } from "antd";
+import { Table, Button, Popconfirm, message, Tag, Segmented } from "antd";
 import { Edit, Trash2, RefreshCw } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
 import type { TablePaginationConfig } from "antd";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
 import { useManageTenantModels } from "@/hooks/model/useManageTenantModels";
-import { useMonitoringData } from "@/hooks/useMonitoringData";
+import { useMonitoringData, type TimeRange } from "@/hooks/useMonitoringData";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import type { ModelMonitoringItem } from "@/types/monitoring";
@@ -44,10 +44,12 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   });
 
   const {
-    models: monitoringModels,
-    loading: monitoringLoading,
-    refresh: refreshMonitoring,
-  } = useMonitoringData();
+  models: monitoringModels,
+  loading: monitoringLoading,
+  refresh: refreshMonitoring,
+  timeRange: monitoringTimeRange,
+  setTimeRange: setMonitoringTimeRange,
+} = useMonitoringData();
 
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
@@ -328,13 +330,25 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   return (
     <div className="h-full flex flex-col overflow-auto">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
-        <Button
-          icon={<RefreshCw className="h-3 w-3" />}
-          size="small"
-          onClick={refreshMonitoring}
-        >
-          {t("monitoring.dashboard.refresh")}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Segmented
+            size="small"
+            value={monitoringTimeRange}
+            onChange={(v) => setMonitoringTimeRange(v as TimeRange)}
+            options={[
+              { label: "24h", value: "24h" },
+              { label: "7d", value: "7d" },
+              { label: "30d", value: "30d" },
+            ]}
+          />
+          <Button
+            icon={<RefreshCw className="h-3 w-3" />}
+            size="small"
+            onClick={refreshMonitoring}
+          >
+            {t("monitoring.dashboard.refresh")}
+          </Button>
+        </div>
         <Button type="primary" onClick={openCreate}>
           + {t("modelConfig.button.addCustomModel")}
         </Button>

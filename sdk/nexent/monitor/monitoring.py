@@ -444,13 +444,15 @@ class MonitoringManager:
         def decorator(func: F) -> F:
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
+                self_ref = args[0] if args else None
                 actual_model_name = getattr(
-                    args[0], "model_id", None) or model_name
-                detected_type = _detect_model_type(args[0])
+                    self_ref, "model_id", None) or model_name
+                detected_type = _detect_model_type(
+                    self_ref) if self_ref else "llm"
                 with self.trace_llm_request(operation, model_name, **kwargs) as span:
                     token_tracker = self.create_token_tracker(model_name, span)
                     token_tracker._display_name = getattr(
-                        args[0], "display_name", None)
+                        self_ref, "display_name", None)
                     self.add_span_event("llm_call_started")
 
                     try:
@@ -472,13 +474,15 @@ class MonitoringManager:
 
             @functools.wraps(func)
             def sync_wrapper(*args, **kwargs):
+                self_ref = args[0] if args else None
                 actual_model_name = getattr(
-                    args[0], "model_id", None) or model_name
-                detected_type = _detect_model_type(args[0])
+                    self_ref, "model_id", None) or model_name
+                detected_type = _detect_model_type(
+                    self_ref) if self_ref else "llm"
                 with self.trace_llm_request(operation, model_name, **kwargs) as span:
                     token_tracker = self.create_token_tracker(model_name, span)
                     token_tracker._display_name = getattr(
-                        args[0], "display_name", None)
+                        self_ref, "display_name", None)
                     self.add_span_event("llm_call_started")
 
                     try:
@@ -525,6 +529,9 @@ class LLMTokenTracker:
 
     def record_first_token(self) -> None:
         """Record the time when first token is received."""
+        if not getattr(self.manager, "is_enabled", False):
+            return
+
         if self.first_token_time is None:
             self.first_token_time = time.time()
             ttft = self.first_token_time - self.start_time
@@ -539,6 +546,9 @@ class LLMTokenTracker:
 
     def record_token(self, token: str) -> None:
         """Record a new token generated."""
+        if not getattr(self.manager, "is_enabled", False):
+            return
+
         if self.first_token_time is None:
             self.record_first_token()
 

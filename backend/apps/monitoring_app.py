@@ -12,10 +12,8 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from sqlalchemy import text
 
-from consts.const import IS_SPEED_MODE
 from consts.model import ConversationResponse
 from database.client import get_monitoring_db_session
-from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger("monitoring_app")
@@ -91,26 +89,13 @@ def _query_model_metrics_from_db(
         return []
 
 
-def _filter_by_rbac(
-    all_metrics: list[dict], user_id: str, tenant_id: str
-) -> list[dict]:
-    if IS_SPEED_MODE:
-        return all_metrics
-
-    user_tenant = get_user_tenant_by_user_id(user_id)
-    user_role = str((user_tenant or {}).get("user_role", "")).upper()
-    if user_role in ("ADMIN", "SU"):
-        return all_metrics
-
-    # Models have no group_id currently, return all visible metrics for non-admin
-    return all_metrics
-
-
 @router.get("/models", response_model=ConversationResponse)
 async def list_models_endpoint(
-    time_range: Annotated[str, Query(description="Time range: 24h, 7d, 30d")] = "24h",
+    time_range: Annotated[str, Query(
+        description="Time range: 24h, 7d, 30d")] = "24h",
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, description="Items per page")] = 20,
+    page_size: Annotated[int, Query(
+        ge=1, le=100, description="Items per page")] = 20,
     authorization: Optional[str] = Header(None),
 ):
     """List all models with aggregated monitoring metrics from database."""
@@ -118,11 +103,10 @@ async def list_models_endpoint(
         user_id, tenant_id = get_current_user_id(authorization)
 
         all_metrics = _query_model_metrics_from_db(time_range, tenant_id)
-        accessible_metrics = _filter_by_rbac(all_metrics, user_id, tenant_id)
 
         start = (page - 1) * page_size
         end = start + page_size
-        paginated = accessible_metrics[start:end]
+        paginated = all_metrics[start:end]
 
         return ConversationResponse(code=0, message="success", data=paginated)
     except Exception as e:
