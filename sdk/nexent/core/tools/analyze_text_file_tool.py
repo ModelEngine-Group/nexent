@@ -56,6 +56,9 @@ class AnalyzeTextFileTool(Tool):
         },
         "llm_model": {
             "description": "The LLM model to use"
+        },
+        "validate_url_access": {
+            "description": "Callback function to validate URL access permissions (passed to LoadSaveObjectManager)"
         }
     }
     output_type = "array"
@@ -81,6 +84,10 @@ class AnalyzeTextFileTool(Tool):
         llm_model: str = Field(
             description="The LLM model to use",
             default=None,
+            exclude=True),
+        validate_url_access: callable = Field(
+            description="Callback function to validate URL access permissions",
+            default=None,
             exclude=True)
     ):
         super().__init__()
@@ -88,7 +95,16 @@ class AnalyzeTextFileTool(Tool):
         self.observer = observer
         self.llm_model = llm_model
         self.data_process_service_url = data_process_service_url
-        self.mm = LoadSaveObjectManager(storage_client=self.storage_client)
+
+        # Create LoadSaveObjectManager with the storage client and validation callback
+        # Ensure validate_url_access is callable before passing to LoadSaveObjectManager
+        validate_callback = None
+        if validate_url_access is not None and callable(validate_url_access):
+            validate_callback = validate_url_access
+        self.mm = LoadSaveObjectManager(
+            storage_client=self.storage_client,
+            validate_url_access=validate_callback
+        )
         self.time_out = 60 * 5
 
         self.running_prompt_zh = "正在分析文件..."

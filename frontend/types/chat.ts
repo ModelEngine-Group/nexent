@@ -83,6 +83,7 @@ export interface FileAttachment {
   size: number
   url?: string
   object_name?: string
+  presigned_url?: string  // Temporary URL for external tools (e.g., MCP); expires after a configurable period (24 hours by default)
   description?: string
 }
 
@@ -227,7 +228,15 @@ export interface MinioFileItem {
   size: number
   object_name?: string
   url?: string
+  presigned_url?: string  // Temporary URL for external tools (e.g., MCP), default 24h validity
   description?: string
+}
+
+// History item for API request payload
+export interface HistoryItem {
+  role: string;
+  content: string;
+  minio_files?: MinioFileItem[];
 }
 
 export interface ApiMessage {
@@ -323,6 +332,7 @@ export interface StorageUploadResult {
     content_type: string;
     upload_time: string;
     url: string;
+    presigned_url?: string;
     error?: string;
   }[];
 }

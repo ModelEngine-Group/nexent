@@ -115,6 +115,7 @@ sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['services.file_management_service'] = _create_stub_module(
     "services.file_management_service",
     get_llm_model=MagicMock(return_value="stub_llm_model"),
+    validate_urls_access=MagicMock(),
 )
 sys.modules['services.tool_configuration_service'] = _create_stub_module(
     "services.tool_configuration_service",
@@ -650,10 +651,11 @@ class TestCreateToolConfigList:
             assert len(result) == 1
             assert result[0] is mock_tool_instance
             mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1")
-            assert mock_tool_instance.metadata == {
-                "vlm_model": "mock_vlm_model",
-                "storage_client": mock_minio_client
-            }
+            # Verify metadata includes validate_url_access lambda
+            assert "vlm_model" in mock_tool_instance.metadata
+            assert "storage_client" in mock_tool_instance.metadata
+            assert "validate_url_access" in mock_tool_instance.metadata
+            assert callable(mock_tool_instance.metadata["validate_url_access"])
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_analyze_text_file_tool(self):
@@ -686,11 +688,12 @@ class TestCreateToolConfigList:
             assert len(result) == 1
             assert result[0] is mock_tool_instance
             mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1")
-            assert mock_tool_instance.metadata == {
-                "llm_model": "mock_llm_model",
-                "storage_client": mock_minio_client,
-                "data_process_service_url": consts_const.DATA_PROCESS_SERVICE,
-            }
+            # Verify metadata includes validate_url_access lambda
+            assert "llm_model" in mock_tool_instance.metadata
+            assert "storage_client" in mock_tool_instance.metadata
+            assert "data_process_service_url" in mock_tool_instance.metadata
+            assert "validate_url_access" in mock_tool_instance.metadata
+            assert callable(mock_tool_instance.metadata["validate_url_access"])
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool_metadata(self):
@@ -1180,6 +1183,94 @@ class TestCreateToolConfigList:
             # Verify metadata
             assert len(result) == 1
             assert result[0] is mock_tool_instance
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_analyze_image_tool_validate_url_access(self):
+        """
+        Test that AnalyzeImageTool receives validate_url_access callback that
+        properly calls validate_urls_access with user_id.
+        """
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "AnalyzeImageTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vlm_model') as mock_get_vlm_model, \
+                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
+                patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "AnalyzeImageTool",
+                    "name": "analyze_image",
+                    "description": "Analyze image tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vlm_model.return_value = "mock_vlm_model"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_123")
+
+            assert len(result) == 1
+            assert "validate_url_access" in result[0].metadata
+            assert callable(result[0].metadata["validate_url_access"])
+
+            # Test that the callback properly wraps validate_urls_access
+            mock_validate.reset_mock()
+            test_urls = ["s3://bucket/image.jpg"]
+            result[0].metadata["validate_url_access"](test_urls)
+            mock_validate.assert_called_once_with(test_urls, "user_123")
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_analyze_text_file_tool_validate_url_access(self):
+        """
+        Test that AnalyzeTextFileTool receives validate_url_access callback that
+        properly calls validate_urls_access with user_id.
+        """
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "AnalyzeTextFileTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
+                patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "AnalyzeTextFileTool",
+                    "name": "analyze_text_file",
+                    "description": "Analyze text file tool",
+                    "inputs": "array",
+                    "output_type": "array",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_llm_model.return_value = "mock_llm_model"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_456")
+
+            assert len(result) == 1
+            assert "validate_url_access" in result[0].metadata
+            assert callable(result[0].metadata["validate_url_access"])
+
+            # Test that the callback properly wraps validate_urls_access
+            mock_validate.reset_mock()
+            test_urls = ["s3://bucket/document.pdf"]
+            result[0].metadata["validate_url_access"](test_urls)
+            mock_validate.assert_called_once_with(test_urls, "user_456")
 
 
 class TestCreateAgentConfig:
@@ -2422,7 +2513,7 @@ class TestCreateAgentRunInfo:
 
             # Verify that other functions were called correctly
             mock_join_query.assert_called_once_with(
-                minio_files=[], query="test query")
+                minio_files=[], query="test query", history=[])
             mock_create_models.assert_called_once_with("tenant_1")
             mock_create_agent.assert_called_once_with(
                 agent_id="agent_1",
@@ -2927,7 +3018,7 @@ class TestJoinMinioFileDescriptionToQuery:
 
         result = await join_minio_file_description_to_query(minio_files, query)
 
-        expected = "User uploaded files. The file information is as follows:\nFile name: 1.pdf, S3 URL: s3://nexent/1.pdf\nFile name: 2.pdf, S3 URL: s3://nexent/2.pdf\n\nUser wants to answer questions based on the information in the above files: test query"
+        expected = "User uploaded files. The file information is as follows:\nFile name: 1.pdf, S3 URL: s3://nexent/1.pdf  [permanent]\n\nFile name: 2.pdf, S3 URL: s3://nexent/2.pdf  [permanent]\n\nUser wants to answer questions based on the information in the above files: test query"
         assert result == expected
 
     @pytest.mark.asyncio
@@ -2962,6 +3053,98 @@ class TestJoinMinioFileDescriptionToQuery:
         result = await join_minio_file_description_to_query(minio_files, query)
 
         assert result == "test query"
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_deduplication_current(self):
+        """Test that duplicate files in current message are de-duplicated by URL"""
+        minio_files = [
+            {"url": "/nexent/1.pdf", "name": "1.pdf"},
+            {"url": "/nexent/1.pdf", "name": "1.pdf"},  # Duplicate URL
+            {"url": "/nexent/2.pdf", "name": "2.pdf"},
+        ]
+        query = "test query"
+
+        result = await join_minio_file_description_to_query(minio_files, query)
+
+        # Count occurrences of "File name: 1.pdf" which should appear exactly once
+        assert result.count("File name: 1.pdf") == 1
+        assert result.count("File name: 2.pdf") == 1
+        # Total file description blocks should be 2, not 3
+        assert result.count("S3 URL:") == 2
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_deduplication_history(self):
+        """Test that files in history are de-duplicated against current message"""
+        minio_files = [{"url": "/nexent/1.pdf", "name": "1.pdf"}]
+        history = [
+            {"minio_files": [{"url": "/nexent/1.pdf", "name": "1.pdf"}]},  # Same URL as current
+            {"minio_files": [{"url": "/nexent/2.pdf", "name": "2.pdf"}]},
+        ]
+        query = "test query"
+
+        result = await join_minio_file_description_to_query(minio_files, query, history)
+
+        # Count occurrences of "File name:" which should appear exactly once for each unique file
+        assert result.count("File name: 1.pdf") == 1
+        assert result.count("File name: 2.pdf") == 1
+        # Total file description blocks should be 2, not 3
+        assert result.count("S3 URL:") == 2
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_max_files(self):
+        """Test that file list is truncated when exceeding max_files limit"""
+        minio_files = [
+            {"url": f"/nexent/file_{i}.pdf", "name": f"file_{i}.pdf"}
+            for i in range(10)
+        ]
+        query = "test query"
+
+        result = await join_minio_file_description_to_query(minio_files, query, max_files=5)
+
+        for i in range(5):
+            assert f"file_{i}.pdf" in result
+        for i in range(5, 10):
+            assert f"file_{i}.pdf" not in result
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_max_chars(self):
+        """Test that file descriptions are truncated when exceeding max_chars limit"""
+        # Each file description is roughly 72 chars
+        # With prefix (~56) and suffix (~100), fixed overhead is ~156 chars
+        # Setting max_chars=100 should prevent ANY file from being included
+        # (since even one file needs ~72 + 156 = 228 chars)
+        minio_files = [
+            {"url": f"/nexent/file_{i}.pdf", "name": f"file_{i}.pdf"}
+            for i in range(10)
+        ]
+        query = "test query"
+
+        # Very small limit - should result in no files being included
+        result = await join_minio_file_description_to_query(minio_files, query, max_chars=100)
+        assert result == "test query"
+
+        # Reasonable limit - should include some files
+        # With 500 chars, we can fit: 500 - 156 = 344 available chars
+        # Each file is ~72 chars, so we can fit ~4 files
+        result = await join_minio_file_description_to_query(minio_files, query, max_chars=500)
+        # Should include at least some files but not all 10
+        assert "file_0.pdf" in result
+        assert result.count("File name:") < 10
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_current_files_priority(self):
+        """Test that current message files appear before history files when deduping"""
+        minio_files = [{"url": "/nexent/1.pdf", "name": "current_1.pdf"}]
+        history = [
+            {"minio_files": [{"url": "/nexent/2.pdf", "name": "history_2.pdf"}]},
+        ]
+        query = "test query"
+
+        result = await join_minio_file_description_to_query(minio_files, query, history)
+
+        pos_current = result.find("current_1.pdf")
+        pos_history = result.find("history_2.pdf")
+        assert pos_current < pos_history, "Current message files should appear before history files"
 
 
 class TestPreparePromptTemplates:
