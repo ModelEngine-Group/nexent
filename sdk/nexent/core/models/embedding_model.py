@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import requests
 
-from ...monitor.monitoring import record_model_call
+from nexent.monitor.monitoring import record_model_call
 
 
 class BaseEmbedding(ABC):
