@@ -1133,6 +1133,41 @@ const messageHandlers: MessageHandler[] = [
     ),
   },
 
+  // max_steps_reached type processor - max steps warning
+  {
+    canHandle: (message) => message.type === chatConfig.messageTypes.MAX_STEPS_REACHED,
+    render: (message, t) => {
+      let maxStepsData = { completedSteps: 0, maxSteps: 0, message: "" };
+
+      try {
+        if (typeof message.content === "string") {
+          maxStepsData = JSON.parse(message.content);
+        } else if (typeof message.content === "object") {
+          maxStepsData = message.content;
+        }
+      } catch (error) {
+        return null;
+      }
+
+      return (
+        <div
+          style={{
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            color: "#d97706",
+            fontWeight: 500,
+            borderRadius: "0.25rem",
+            paddingTop: "0.5rem",
+          }}
+        >
+          <span>{t("chatStreamHandler.maxStepsNotification", { completedSteps: maxStepsData.completedSteps })}</span>
+        </div>
+      );
+    },
+  },
+
   // virtual type processor - virtual message (do not display content, only as a card container)
   {
     canHandle: (message) => message.type === "virtual",

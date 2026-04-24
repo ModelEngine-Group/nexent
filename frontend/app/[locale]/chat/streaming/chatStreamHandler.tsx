@@ -863,6 +863,47 @@ export const handleStreamResponse = async (
                   lastContentType = chatConfig.contentTypes.PREPROCESS;
                   break;
 
+                case chatConfig.messageTypes.MAX_STEPS_REACHED:
+                  // Parse the max steps reached event data
+                  try {
+                    const maxStepsData = JSON.parse(messageContent);
+                    const completedSteps = maxStepsData.completedSteps || 0;
+
+                    // If there's no currentStep, create one
+                    if (!currentStep) {
+                      currentStep = {
+                        id: `step-max-steps-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                        title: t("chatStreamHandler.maxStepsReached"),
+                        content: "",
+                        expanded: true,
+                        contents: [],
+                        metrics: "",
+                        thinking: { content: "", expanded: true },
+                        code: { content: "", expanded: true },
+                        output: { content: "", expanded: true },
+                      };
+                    }
+
+                    // Store the max steps info in the step
+                    currentStep.maxStepsInfo = {
+                      completedSteps: completedSteps,
+                      maxSteps: maxStepsData.maxSteps || 0,
+                      message: t("chatStreamHandler.maxStepsNotification", { completedSteps })
+                    };
+
+                    // Add the max steps content to current step's contents
+                    currentStep.contents.push({
+                      id: `max-steps-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                      type: chatConfig.messageTypes.MAX_STEPS_REACHED,
+                      content: messageContent,
+                      expanded: true,
+                      timestamp: Date.now(),
+                    });
+                  } catch (e) {
+                    log.error(t("chatStreamHandler.parseMaxStepsDataFailed"), e);
+                  }
+                  break;
+
                 default:
                   // Process other types of messages
                   break;

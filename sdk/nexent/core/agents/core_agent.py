@@ -559,6 +559,13 @@ You have been provided with these additional arguments, that you can access usin
             final_answer = "<user_break>"
 
         if not returned_final_answer and self.step_number == max_steps + 1:
+            max_steps_data = json.dumps({
+                "completedSteps": self.step_number - 1,
+                "maxSteps": max_steps,
+                "message": ""
+            })
+            self.observer.add_message(
+                self.agent_name, ProcessType.MAX_STEPS_REACHED, max_steps_data)
             final_answer = self._handle_max_steps_reached(task)
             yield action_step
         yield FinalAnswerStep(handle_agent_output_types(final_answer))
