@@ -690,9 +690,6 @@ class RecordModelCallContext:
         except Exception:
             pass
 
-        # noinspection PyMethodMayBeStatic
-        return False  # context manager protocol: False = do not suppress exceptions
-
 
 class _MonitoredStreamIterator:
 
