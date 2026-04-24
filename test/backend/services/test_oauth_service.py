@@ -3,7 +3,9 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+test_dir = os.path.dirname(__file__)
+backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
+sys.path.insert(0, backend_dir)
 
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -76,6 +78,7 @@ GITHUB_DEF = _FakeOAuthProviderDefinition(
         "client_secret": "client_secret",
         "code": "code",
         "grant_type": "grant_type",
+        "redirect_uri": "redirect_uri",
     },
     token_extra_params={},
     token_error_key="error",
@@ -88,7 +91,6 @@ GITHUB_DEF = _FakeOAuthProviderDefinition(
         "id": "id",
         "email": "email",
         "username": "login",
-        "avatar_url": "avatar_url",
     },
     userinfo_needs_email_fetch=True,
     userinfo_email_url="https://api.github.com/user/emails",
@@ -131,7 +133,6 @@ WECHAT_DEF = _FakeOAuthProviderDefinition(
         "id": "openid",
         "email": "",
         "username": "nickname",
-        "avatar_url": "headimgurl",
     },
     userinfo_needs_email_fetch=False,
     userinfo_email_url=None,
@@ -180,12 +181,71 @@ import services.oauth_service as oauth_service_module
 from services.oauth_service import (
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
+    exchange_code_for_provider_token,
     get_authorize_url,
     get_enabled_providers,
+    get_provider_user_info,
     get_supported_providers,
     list_linked_accounts,
+    parse_state,
     unlink_account,
+    _resolve_field,
+    _build_ssl_context,
 )
+
+
+class TestParseState(unittest.TestCase):
+    def test_parses_full_state_with_link_user_id(self):
+        result = parse_state("github:random_token:user-123")
+        self.assertEqual(result["provider"], "github")
+        self.assertEqual(result["token"], "random_token")
+        self.assertEqual(result["link_user_id"], "user-123")
+
+    def test_parses_state_without_link_user_id(self):
+        result = parse_state("github:random_token")
+        self.assertEqual(result["provider"], "github")
+        self.assertEqual(result["token"], "random_token")
+        self.assertEqual(result["link_user_id"], "")
+
+    def test_parses_minimal_state(self):
+        result = parse_state("github")
+        self.assertEqual(result["provider"], "github")
+        self.assertEqual(result["token"], "")
+        self.assertEqual(result["link_user_id"], "")
+
+
+class TestResolveField(unittest.TestCase):
+    def test_resolves_simple_field(self):
+        data = {"id": "12345", "email": "test@example.com"}
+        result = _resolve_field(data, "id")
+        self.assertEqual(result, "12345")
+
+    def test_resolves_nested_field(self):
+        data = {"attributes": {"userId": "abc"}}
+        result = _resolve_field(data, "attributes.userId")
+        self.assertEqual(result, "abc")
+
+    def test_returns_none_for_missing_field(self):
+        data = {"id": "12345"}
+        result = _resolve_field(data, "email")
+        self.assertIsNone(result)
+
+    def test_returns_none_for_missing_nested_field(self):
+        data = {"attributes": {"name": "test"}}
+        result = _resolve_field(data, "attributes.userId")
+        self.assertIsNone(result)
+
+
+class TestBuildSSLContext(unittest.TestCase):
+    def test_returns_default_context_when_verify_enabled(self):
+        ctx = _build_ssl_context()
+        self.assertEqual(ctx.verify_mode, 2)
+
+    def test_returns_no_verify_context_when_disabled(self):
+        with patch.object(oauth_service_module, "OAUTH_SSL_VERIFY", False):
+            ctx = _build_ssl_context()
+            self.assertEqual(ctx.verify_mode, 0)
+            self.assertEqual(ctx.check_hostname, False)
 
 
 class TestGetSupportedProviders(unittest.TestCase):
@@ -257,6 +317,20 @@ class TestGetAuthorizeUrl(unittest.TestCase):
         self.assertIn("redirect_uri=", url)
         self.assertIn("state=github", url)
 
+    def test_returns_github_authorize_url_with_link_user_id(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_OAUTH_CLIENT_ID": "gh_test_id",
+                "GITHUB_OAUTH_CLIENT_SECRET": "gh_test_secret",
+            },
+            clear=False,
+        ):
+            url = get_authorize_url("github", link_user_id="user-123")
+
+        self.assertIn("github.com/login/oauth/authorize", url)
+        self.assertIn("user-123", url)
+
     def test_returns_wechat_authorize_url(self):
         env = {
             "WECHAT_OAUTH_APP_ID": "wx_test_id",
@@ -282,6 +356,18 @@ class TestGetAuthorizeUrl(unittest.TestCase):
         ):
             with self.assertRaises(_OAuthProviderError):
                 get_authorize_url("github")
+
+
+class TestExchangeCodeForProviderToken(unittest.TestCase):
+    def test_raises_for_unsupported_provider(self):
+        with self.assertRaises(_OAuthProviderError):
+            exchange_code_for_provider_token("google", "code123")
+
+
+class TestGetProviderUserInfo(unittest.TestCase):
+    def test_raises_for_unsupported_provider(self):
+        with self.assertRaises(_OAuthProviderError):
+            get_provider_user_info("google", "token123")
 
 
 class TestCreateOrUpdateOAuthAccount(unittest.TestCase):
@@ -422,7 +508,6 @@ class TestListLinkedAccounts(unittest.TestCase):
                 "provider": "github",
                 "provider_username": "octocat",
                 "provider_email": "octo@github.com",
-                "provider_avatar_url": "https://avatar.url",
                 "create_time": "2025-01-01T00:00:00",
             }
         ]

@@ -172,6 +172,65 @@ class TestAuthorize(unittest.TestCase):
         oauth_service_mock.get_authorize_url.side_effect = None
 
 
+class TestLink(unittest.TestCase):
+    def test_redirects_to_provider_with_link_user_id(self):
+        oauth_service_mock.reset_mock()
+        oauth_service_mock.get_authorize_url.return_value = (
+            "https://github.com/login/oauth/authorize?client_id=test_id&state=github:token:user-1"
+        )
+
+        response = client.get(
+            "/user/oauth/link?provider=github",
+            headers={"Authorization": "Bearer valid_token"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.FOUND)
+        self.assertIn("github.com", response.headers["location"])
+        oauth_service_mock.get_authorize_url.assert_called_once_with("github", link_user_id="user-1")
+
+    def test_returns_401_without_auth(self):
+        response = client.get("/user/oauth/link?provider=github")
+
+        self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+
+    @patch("apps.oauth_app.get_current_user_id")
+    def test_returns_401_for_invalid_token(self, mock_get_user):
+        mock_get_user.side_effect = _UnauthorizedError("Invalid token")
+
+        response = client.get(
+            "/user/oauth/link?provider=github",
+            headers={"Authorization": "Bearer invalid"},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+        mock_get_user.side_effect = None
+
+    def test_returns_400_for_unsupported_provider(self):
+        oauth_service_mock.get_authorize_url.side_effect = _OAuthProviderError(
+            "Unsupported provider"
+        )
+
+        response = client.get(
+            "/user/oauth/link?provider=google",
+            headers={"Authorization": "Bearer valid_token"},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        oauth_service_mock.get_authorize_url.side_effect = None
+
+    def test_returns_500_on_unexpected_error(self):
+        oauth_service_mock.get_authorize_url.side_effect = Exception("Unexpected")
+
+        response = client.get(
+            "/user/oauth/link?provider=github",
+            headers={"Authorization": "Bearer valid_token"},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.INTERNAL_SERVER_ERROR)
+        oauth_service_mock.get_authorize_url.side_effect = None
+
+
 class TestCallback(unittest.TestCase):
     def test_returns_error_when_provider_error(self):
         response = client.get(
@@ -304,6 +363,107 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(data["data"]["oauth_error"], "callback_failed")
 
         oauth_service_mock.exchange_code_for_provider_token.side_effect = None
+
+    def test_success_with_link_user_id_binding(self):
+        """Callback with link_user_id should bind OAuth to that user directly."""
+        oauth_service_mock.reset_mock()
+        database_oauth_mock.reset_mock()
+        oauth_service_mock.parse_state.return_value = {
+            "provider": "github",
+            "token": "tok",
+            "link_user_id": "existing-user-uuid",
+        }
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {
+            "access_token": "ghu_provider_token",
+        }
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "12345",
+            "email": "octocat@github.com",
+            "username": "octocat",
+        }
+        oauth_service_mock.ensure_user_tenant_exists.return_value = {
+            "user_id": "existing-user-uuid",
+            "tenant_id": "t-1",
+        }
+        oauth_service_mock.create_or_update_oauth_account.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "existing-user-uuid",
+        }
+        auth_utils_mock.generate_session_jwt.return_value = "eyJ.bind.jwt"
+
+        response = client.get(
+            "/user/oauth/callback?provider=github&code=bind_code&state=github:tok:existing-user-uuid"
+        )
+
+        if response.status_code != HTTPStatus.OK:
+            print("Response:", response.json())
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        data = response.json()
+        self.assertEqual(data["data"]["user"]["id"], "existing-user-uuid")
+        self.assertEqual(data["data"]["user"]["email"], "octocat@github.com")
+
+        # Should NOT call database lookup when link_user_id is present
+        database_oauth_mock.get_oauth_account_by_provider.assert_not_called()
+
+        # Should bind to the specified user
+        oauth_service_mock.create_or_update_oauth_account.assert_called_once_with(
+            user_id="existing-user-uuid",
+            provider="github",
+            provider_user_id="12345",
+            email="octocat@github.com",
+            username="octocat",
+        )
+
+    def test_success_with_already_bound_oauth_account(self):
+        """Callback with existing binding should use that user_id without Supabase lookup."""
+        oauth_service_mock.reset_mock()
+        database_oauth_mock.reset_mock()
+        auth_utils_mock.reset_mock()
+        auth_utils_mock.get_current_user_id.return_value = ("user-1", "t-1")
+        auth_utils_mock.get_jwt_expiry_seconds.return_value = 3600
+        auth_utils_mock.calculate_expires_at.return_value = 1735689600
+        auth_utils_mock.generate_session_jwt.return_value = "eyJ.bound.jwt"
+        oauth_service_mock.parse_state.return_value = {
+            "provider": "github",
+            "token": "tok",
+            "link_user_id": "",
+        }
+        database_oauth_mock.get_oauth_account_by_provider.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "bound-user-uuid",
+        }
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {
+            "access_token": "ghu_provider_token",
+        }
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "12345",
+            "email": "octocat@github.com",
+            "username": "octocat",
+        }
+        oauth_service_mock.ensure_user_tenant_exists.return_value = {
+            "user_id": "bound-user-uuid",
+            "tenant_id": "t-1",
+        }
+        oauth_service_mock.create_or_update_oauth_account.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "bound-user-uuid",
+        }
+
+        response = client.get(
+            "/user/oauth/callback?provider=github&code=login_code&state=github:tok"
+        )
+
+        if response.status_code != HTTPStatus.OK:
+            print("Response:", response.json())
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        data = response.json()
+        self.assertEqual(data["data"]["user"]["id"], "bound-user-uuid")
+
+        auth_utils_mock.get_supabase_admin_client.assert_not_called()
+        oauth_service_mock.create_or_update_oauth_account.assert_called_once()
 
 
 class TestGetAccounts(unittest.TestCase):
