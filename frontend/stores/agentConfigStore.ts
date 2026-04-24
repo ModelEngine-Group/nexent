@@ -40,6 +40,7 @@ export type EditableAgent = Pick<
   | "ingroup_permission"
 > & {
   skills: Skill[];
+  external_sub_agent_id_list?: number[];
 };
 
 interface AgentConfigStoreState {
@@ -88,6 +89,11 @@ interface AgentConfigStoreState {
    * Update sub_agent_id_list (Component B).
    */
   updateSubAgentIds: (ids: number[]) => void;
+
+  /**
+   * Update external_sub_agent_id_list.
+   */
+  updateExternalSubAgentIds: (ids: number[]) => void;
 
   /**
    * Update business info (Component C top):
@@ -421,6 +427,16 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       return {
         editedAgent,
         hasUnsavedChanges,
+      };
+    });
+  },
+
+  updateExternalSubAgentIds: (ids) => {
+    set((state) => {
+      const editedAgent = { ...state.editedAgent, external_sub_agent_id_list: ids };
+      return {
+        editedAgent,
+        hasUnsavedChanges: true,
       };
     });
   },

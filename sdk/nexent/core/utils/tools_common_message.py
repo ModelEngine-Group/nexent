@@ -15,6 +15,7 @@ class ToolSign(Enum):
     FILE_OPERATION = "f"      # File operation tool identifier
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
     MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
+    DATABASE_OPERATION = "z"  # Database operation tool identifier
 
 
 # Tool sign mapping for backward compatibility
@@ -29,6 +30,7 @@ TOOL_SIGN_MAPPING = {
     "file_operation": ToolSign.FILE_OPERATION.value,
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,
+    "database_operation": ToolSign.DATABASE_OPERATION.value,
 }
 
 # Reverse mapping for lookup
@@ -42,6 +44,7 @@ class ToolCategory(Enum):
     EMAIL = "email"
     TERMINAL = "terminal"
     MULTIMODAL = "multimodal"
+    DATABASE = "database"
 
 
 @dataclass

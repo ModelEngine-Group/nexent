@@ -14,11 +14,10 @@ from services.tool_configuration_service import (
     list_all_tools,
     load_last_tool_config_impl,
     validate_tool_impl,
-    import_openapi_json,
-    list_outer_api_tools,
-    get_outer_api_tool,
-    delete_outer_api_tool,
-    _refresh_outer_api_tools_in_mcp,
+    import_openapi_service,
+    list_openapi_services,
+    delete_openapi_service,
+    _refresh_openapi_services_in_mcp,
 )
 from utils.auth_utils import get_current_user_id
 
@@ -142,128 +141,137 @@ async def validate_tool(
 
 
 # --------------------------------------------------
-# Outer API Tools (OpenAPI to MCP Conversion)
+# OpenAPI Service Management (using from_openapi)
 # --------------------------------------------------
 
-@router.post("/import_openapi")
-async def import_openapi_api(
-    openapi_json: Dict[str, Any] = Body(...),
+@router.post("/openapi_service")
+async def import_openapi_service_api(
+    openapi_service_request: Dict[str, Any] = Body(...),
     authorization: Optional[str] = Header(None)
 ):
     """
-    Import OpenAPI JSON and convert tools to MCP format.
-    This will sync tools with the database (update existing, create new, delete removed).
-    After import, refreshes the MCP server to register new tools.
+    Import OpenAPI JSON as an MCP service using FastMCP.from_openapi().
+
+    All tools from the same OpenAPI spec will be grouped under the same
+    mcp_service_name. When refreshing, all tools are registered together.
+
+    Request Body:
+        service_name: MCP service name for grouping tools
+        server_url: Base URL of the REST API server
+        openapi_json: Complete OpenAPI JSON specification
+        service_description: Optional service description
+        force_update: If True, replace all existing tools for this service
     """
+    service_name = openapi_service_request.get("service_name")
+    server_url = openapi_service_request.get("server_url")
+    openapi_json = openapi_service_request.get("openapi_json")
+    service_description = openapi_service_request.get("service_description")
+    force_update = openapi_service_request.get("force_update", False)
+
+    if not service_name:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="service_name is required"
+        )
+    if not server_url:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="server_url is required"
+        )
+    if not openapi_json:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="openapi_json is required"
+        )
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        result = import_openapi_json(openapi_json, tenant_id, user_id)
+        result = import_openapi_service(
+            service_name=service_name,
+            openapi_json=openapi_json,
+            server_url=server_url,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            service_description=service_description,
+            force_update=force_update
+        )
 
-        mcp_result = _refresh_outer_api_tools_in_mcp(tenant_id)
+        mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
         result["mcp_refresh"] = mcp_result
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
-                "message": "OpenAPI import successful",
+                "message": "OpenAPI service import successful",
                 "status": "success",
                 "data": result
             }
         )
-    except Exception as e:
-        logger.error(f"Failed to import OpenAPI: {e}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to import OpenAPI: {str(e)}"
-        )
-
-
-@router.get("/outer_api_tools")
-async def list_outer_api_tools_api(
-    authorization: Optional[str] = Header(None)
-):
-    """
-    List all outer API tools for the current tenant.
-    """
-    try:
-        _, tenant_id = get_current_user_id(authorization)
-        tools = list_outer_api_tools(tenant_id)
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={
-                "message": "success",
-                "data": tools
-            }
-        )
-    except Exception as e:
-        logger.error(f"Failed to list outer API tools: {e}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list outer API tools: {str(e)}"
-        )
-
-
-@router.get("/outer_api_tools/{tool_id}")
-async def get_outer_api_tool_api(
-    tool_id: int,
-    authorization: Optional[str] = Header(None)
-):
-    """
-    Get a specific outer API tool by ID.
-    """
-    try:
-        _, tenant_id = get_current_user_id(authorization)
-        tool = get_outer_api_tool(tool_id, tenant_id)
-        if tool is None:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND,
-                detail="Tool not found"
-            )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={
-                "message": "success",
-                "data": tool
-            }
-        )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get outer API tool: {e}")
+        logger.error(f"Failed to import OpenAPI service: {e}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get outer API tool: {str(e)}"
+            detail=f"Failed to import OpenAPI service: {str(e)}"
         )
 
 
-@router.delete("/outer_api_tools/{tool_id}")
-async def delete_outer_api_tool_api(
-    tool_id: int,
+@router.get("/openapi_services")
+async def list_openapi_services_api(
     authorization: Optional[str] = Header(None)
 ):
     """
-    Delete an outer API tool.
+    List all OpenAPI services for the current tenant.
+    """
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        services = list_openapi_services(tenant_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "success",
+                "data": services
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to list OpenAPI services: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list OpenAPI services: {str(e)}"
+        )
+
+
+@router.delete("/openapi_service/{service_name}")
+async def delete_openapi_service_api(
+    service_name: str,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Delete an OpenAPI service (all tools belonging to it).
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        deleted = delete_outer_api_tool(tool_id, tenant_id, user_id)
+        deleted = delete_openapi_service(service_name, tenant_id, user_id)
         if not deleted:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail="Tool not found"
+                detail="Service not found"
             )
+        # Refresh MCP service to reflect the deletion
+        mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
-                "message": "Tool deleted successfully",
-                "status": "success"
+                "message": "Service deleted successfully",
+                "status": "success",
+                "mcp_refresh": mcp_result
             }
         )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete outer API tool: {e}")
+        logger.error(f"Failed to delete OpenAPI service: {e}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete outer API tool: {str(e)}"
+            detail=f"Failed to delete OpenAPI service: {str(e)}"
         )

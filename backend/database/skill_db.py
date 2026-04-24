@@ -352,11 +352,12 @@ def delete_skill(skill_name: str, updated_by: Optional[str] = None) -> bool:
         updated_by: User ID of the user performing the delete
 
     Returns:
-        True if deleted successfully
+        True if deleted successfully, False if skill not found or already deleted
     """
     with get_db_session() as session:
         skill = session.query(SkillInfo).filter(
-            SkillInfo.skill_name == skill_name
+            SkillInfo.skill_name == skill_name,
+            SkillInfo.delete_flag != 'Y'
         ).first()
 
         if not skill:

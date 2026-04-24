@@ -173,6 +173,8 @@ services:
         max-file: "3"    # Maximum number of log files to keep
     networks:
       - nexent
+    ports:
+      - "5013:5013"  # Northbound API port exposed for external A2A access
     entrypoint: ["/bin/bash", "-c", "python backend/northbound_service.py"]
 
   nexent-web:

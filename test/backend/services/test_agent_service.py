@@ -58,6 +58,9 @@ sys.modules['database.group_db'] = MagicMock()
 sys.modules['database.user_tenant_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
 
+# Mock a2a_agent_db (referenced by agent_service.py)
+sys.modules['database.a2a_agent_db'] = MagicMock()
+
 # Mock services submodules
 sys.modules['services'] = MagicMock()
 sys.modules['services.conversation_management_service'] = MagicMock()
@@ -3684,8 +3687,9 @@ def test_stop_agent_tasks(mock_preprocess_manager, mock_agent_run_manager):
     mock_agent_run_manager.stop_agent_run.return_value = False
     mock_preprocess_manager.stop_preprocess_tasks.return_value = False
     result = stop_agent_tasks(123, "test_user")
-    assert result["status"] == "error"
+    assert result["status"] == "success"
     assert "no running agent or preprocess tasks found" in result["message"]
+    assert result.get("already_stopped") is True
 
 
 @patch('backend.services.agent_service.search_agent_id_by_agent_name')

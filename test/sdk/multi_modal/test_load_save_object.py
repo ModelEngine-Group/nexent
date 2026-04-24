@@ -7,10 +7,10 @@ import pytest
 from sdk.nexent.multi_modal import load_save_object as lso
 
 
-def make_manager(client: Any = None) -> lso.LoadSaveObjectManager:
+def make_manager(client: Any = None, validate_url_access: Any = None) -> lso.LoadSaveObjectManager:
     if client is None:
         client = object()
-    return lso.LoadSaveObjectManager(storage_client=client)
+    return lso.LoadSaveObjectManager(storage_client=client, validate_url_access=validate_url_access)
 
 
 def test_get_client_returns_configured_storage():
@@ -441,3 +441,318 @@ async def test_save_object_supports_async_functions(monkeypatch):
     result = await handler()
     assert result == "s3://bucket/object"
     upload_mock.assert_called_once()
+
+
+# ============================================================================
+# Tests for new code coverage (lines 29-40, 135-139, 185-209)
+# ============================================================================
+
+
+def test_init_stores_validate_url_access():
+    """Test that __init__ (lines 29-40) stores the validate_url_access callback."""
+    def my_validator(urls):
+        pass
+
+    manager = make_manager(validate_url_access=my_validator)
+    assert manager._validate_url_access is my_validator
+
+
+def test_init_validate_url_access_defaults_to_none():
+    """Test that validate_url_access defaults to None when not provided."""
+    manager = make_manager()
+    assert manager._validate_url_access is None
+
+
+def test_load_object_with_validate_url_access_success(monkeypatch):
+    """Test load_object (lines 185-209) with successful URL validation."""
+    manager = make_manager()
+    validate_mock = MagicMock()
+    download_mock = MagicMock(return_value=b"file-bytes")
+
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["image"])
+    def handler(image):
+        return image
+
+    result = handler("https://example.com/img.png")
+
+    validate_mock.assert_not_called()
+    assert result == b"file-bytes"
+
+
+def test_load_object_validates_urls_before_download(monkeypatch):
+    """Test that URL validation happens before downloading (lines 200-208)."""
+    def my_validator(urls):
+        assert "https://example.com/img.png" in urls
+        raise PermissionError("Access denied")
+
+    manager = make_manager(validate_url_access=my_validator)
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["image"])
+    def handler(image):
+        return image
+
+    with pytest.raises(PermissionError, match="Access denied"):
+        handler("https://example.com/img.png")
+
+    download_mock.assert_not_called()
+
+
+def test_load_object_validates_urls_with_other_exception(monkeypatch):
+    """Test that non-PermissionError exceptions from validator raise PermissionError (lines 206-208)."""
+    def my_validator(urls):
+        raise ValueError("Some validation error")
+
+    manager = make_manager(validate_url_access=my_validator)
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["image"])
+    def handler(image):
+        return image
+
+    with pytest.raises(PermissionError, match="URL access validation failed"):
+        handler("https://example.com/img.png")
+
+
+def test_load_object_collects_urls_from_list(monkeypatch):
+    """Test that URLs are collected from list arguments (lines 195-198)."""
+    collected_urls = []
+
+    def my_validator(urls):
+        collected_urls.extend(urls)
+
+    manager = make_manager(validate_url_access=my_validator)
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["images"])
+    def handler(images):
+        return images
+
+    result = handler(["https://example.com/a.png", "https://example.com/b.png"])
+
+    assert len(collected_urls) == 2
+    assert "https://example.com/a.png" in collected_urls
+    assert "https://example.com/b.png" in collected_urls
+
+
+def test_load_object_collects_urls_from_tuple(monkeypatch):
+    """Test that URLs are collected from tuple arguments (lines 195-198)."""
+    collected_urls = []
+
+    def my_validator(urls):
+        collected_urls.extend(urls)
+
+    manager = make_manager(validate_url_access=my_validator)
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["images"])
+    def handler(images):
+        return images
+
+    result = handler(("https://a.com/1.png", "https://b.com/2.png"))
+
+    assert len(collected_urls) == 2
+    assert "https://a.com/1.png" in collected_urls
+    assert "https://b.com/2.png" in collected_urls
+
+
+def test_load_object_collects_urls_from_multiple_params(monkeypatch):
+    """Test URL collection across multiple parameters (lines 186-198)."""
+    collected_urls = []
+
+    def my_validator(urls):
+        collected_urls.extend(urls)
+
+    manager = make_manager(validate_url_access=my_validator)
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["image", "mask"])
+    def handler(image, mask):
+        return image, mask
+
+    result = handler("https://example.com/img.png", "https://example.com/mask.png")
+
+    assert len(collected_urls) == 2
+    assert "https://example.com/img.png" in collected_urls
+    assert "https://example.com/mask.png" in collected_urls
+
+
+def test_load_object_no_validation_when_callback_none(monkeypatch):
+    """Test that validation is skipped when validate_url_access is None (line 201)."""
+    manager = make_manager(validate_url_access=None)
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["image"])
+    def handler(image):
+        return image
+
+    result = handler("https://example.com/img.png")
+    assert result == b"file-bytes"
+
+
+def test_load_object_no_validation_when_not_callable(monkeypatch):
+    """Test that validation is skipped when validate_url_access is not callable (line 201)."""
+    manager = make_manager(validate_url_access="not-a-callable")
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["image"])
+    def handler(image):
+        return image
+
+    result = handler("https://example.com/img.png")
+    assert result == b"file-bytes"
+
+
+def test_load_object_with_validate_url_access_and_s3_url(monkeypatch):
+    """Test URL validation with S3 URLs (lines 186-198)."""
+    collected_urls = []
+
+    def my_validator(urls):
+        collected_urls.extend(urls)
+
+    manager = make_manager(validate_url_access=my_validator)
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "s3" if url.startswith("s3://") else None)
+
+    @manager.load_object(input_names=["file"])
+    def handler(file):
+        return file
+
+    result = handler("s3://bucket/path/to/file.bin")
+
+    assert len(collected_urls) == 1
+    assert "s3://bucket/path/to/file.bin" in collected_urls
+
+
+def test_load_object_tool_instance_from_bound_args(monkeypatch):
+    """Test load_object extracts tool instance from bound args (lines 135-139)."""
+    manager = make_manager()
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    class ToolWithMethod:
+        @manager.load_object(input_names=["image"])
+        def process(self, image):
+            return image
+
+    tool = ToolWithMethod()
+    result = tool.process("https://example.com/img.png")
+
+    download_mock.assert_called_once()
+    assert result == b"file-bytes"
+
+
+def test_load_object_validates_empty_url_list(monkeypatch):
+    """Test that empty collections don't trigger validation (line 195)."""
+    validate_called = False
+
+    def my_validator(urls):
+        nonlocal validate_called
+        validate_called = True
+
+    manager = make_manager(validate_url_access=my_validator)
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+
+    @manager.load_object(input_names=["items"])
+    def handler(items):
+        return items
+
+    result = handler([])
+
+    assert not validate_called
+    assert result == []
+
+
+def test_load_object_validation_called_with_duplicates(monkeypatch):
+    """Test that duplicate URLs are all included in validation (lines 195-198)."""
+    collected_urls = []
+
+    def my_validator(urls):
+        collected_urls.extend(urls)
+
+    manager = make_manager(validate_url_access=my_validator)
+    download_mock = MagicMock(side_effect=[b"a", b"b"])
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["images"])
+    def handler(images):
+        return images
+
+    result = handler(["https://example.com/same.png", "https://example.com/same.png"])
+
+    assert len(collected_urls) == 2
+    assert collected_urls.count("https://example.com/same.png") == 2
+
+
+def test_download_file_unsupported_url_type_raises(monkeypatch):
+    """Test that unsupported URL type raises ValueError (line 90)."""
+    class _Response:
+        def __init__(self):
+            self.content = b"binary"
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(lso.requests, "get", lambda url, timeout: _Response())
+    manager = make_manager()
+
+    result = manager.download_file_from_url("ftp://example.com/file.png", url_type="ftp")
+    assert result is None
+
+
+def test_load_object_transformer_returns_none_raises_error(monkeypatch):
+    """Test that transformer returning None raises ValueError (line 147-148)."""
+    def transformer(_data: bytes):
+        return None
+
+    manager = make_manager()
+    monkeypatch.setattr(
+        manager, "download_file_from_url",
+        MagicMock(return_value=None)
+    )
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["image"], input_data_transformer=[transformer])
+    def handler(image):
+        return image
+
+    with pytest.raises(ValueError, match="Failed to download file from URL"):
+        handler("https://example.com/test.png")
+
+
+def test_process_value_handles_none_in_list(monkeypatch):
+    """Test that None values in lists are handled correctly (line 170)."""
+    manager = make_manager()
+    download_mock = MagicMock(return_value=b"file-bytes")
+    monkeypatch.setattr(manager, "download_file_from_url", download_mock)
+    monkeypatch.setattr(lso, "is_url", lambda url: "https" if url.startswith("https://") else None)
+
+    @manager.load_object(input_names=["items"])
+    def handler(items):
+        return items
+
+    result = handler([None, "https://example.com/img.png"])
+
+    assert result[0] is None
+    assert result[1] == b"file-bytes"

@@ -223,16 +223,80 @@ MessageObserver = _module_mocks["sdk.nexent.core.utils.observer"].MessageObserve
 # ----------------------------------------------------------------------------
 
 def test_parse_code_blobs_run_format():
-    """Test parse_code_blobs with ```<RUN>\\ncontent\\n```<END_CODE> pattern."""
+    """Test parse_code_blobs with <code>...</code> pattern (new format)."""
     text = """Here is some code:
-```<RUN>
+<code>
 print("Hello World")
 x = 42
-```<END_CODE>
+</code>
 And some more text."""
 
     result = core_agent_module.parse_code_blobs(text)
     expected = "print(\"Hello World\")\nx = 42"
+    assert result == expected
+
+
+def test_parse_code_blobs_run_format_with_newline():
+    """Test parse_code_blobs with <code>\\ncontent\\n</code> pattern."""
+    text = """Here is some code:
+<code>
+print("Hello World")
+x = 42
+</code>
+And some more text."""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "print(\"Hello World\")\nx = 42"
+    assert result == expected
+
+
+def test_parse_code_blobs_run_format_without_newline():
+    """Test parse_code_blobs with <code>content</code> pattern (no newlines)."""
+    text = """Here is some code:
+<code>print("Hello")</code>
+And some more text."""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = 'print("Hello")'
+    assert result == expected
+
+
+def test_parse_code_blobs_multiple_code_blocks():
+    """Test parse_code_blobs with multiple <code> blocks."""
+    text = """<code>
+first_block()
+</code>
+<code>
+second_block()
+</code>"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "first_block()\n\nsecond_block()"
+    assert result == expected
+
+
+def test_parse_code_blobs_incomplete_code_tag():
+    """Test parse_code_blobs when <code> tag has no closing </code>."""
+    text = """Here is some code:
+<code>
+incomplete code without closing tag"""
+
+    # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
+    with pytest.raises(ValueError):
+        core_agent_module.parse_code_blobs(text)
+
+
+def test_parse_code_blobs_multiple_code_blocks_one_incomplete():
+    """Test parse_code_blobs with multiple <code> blocks where one has no closing tag."""
+    text = """<code>
+first_block()
+</code>
+<code>
+second_block"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    # Only complete blocks are extracted
+    expected = "first_block()"
     assert result == expected
 
 
@@ -246,6 +310,31 @@ And some more text."""
 
     result = core_agent_module.parse_code_blobs(text)
     expected = "print(\"Hello World\")"
+    assert result == expected
+
+
+def test_parse_code_blobs_run_incomplete_no_closing_backticks():
+    """Test parse_code_blobs when ```<RUN> tag has no closing ```."""
+    text = """Here is some code:
+```<RUN>
+incomplete code without closing backticks"""
+
+    # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
+    with pytest.raises(ValueError):
+        core_agent_module.parse_code_blobs(text)
+
+
+def test_parse_code_blobs_multiple_run_blocks_one_incomplete():
+    """Test parse_code_blobs with multiple ```<RUN> blocks where one has no closing ```."""
+    text = """```<RUN>
+first_block()
+```
+```<RUN>
+second_block"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    # Only complete blocks are extracted
+    expected = "first_block()"
     assert result == expected
 
 
@@ -361,6 +450,48 @@ But this should not match."""
     assert "executable code block pattern" in str(exc_info.value)
 
 
+def test_parse_code_blobs_py_block_no_closing_backticks():
+    """Test parse_code_blobs when ```py block has no closing ```."""
+    text = """```py
+incomplete code without closing backticks"""
+
+    # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
+    with pytest.raises(ValueError):
+        core_agent_module.parse_code_blobs(text)
+
+
+def test_parse_code_blobs_python_block_no_closing_backticks():
+    """Test parse_code_blobs when ```python block has no closing ```."""
+    text = """```python
+incomplete code without closing backticks"""
+
+    # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
+    with pytest.raises(ValueError):
+        core_agent_module.parse_code_blobs(text)
+
+
+def test_parse_code_blobs_py_with_newline_after_fence():
+    """Test parse_code_blobs skips newline after ```py\\n."""
+    text = """```py
+print("hello")
+```"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = 'print("hello")'
+    assert result == expected
+
+
+def test_parse_code_blobs_python_with_newline_after_fence():
+    """Test parse_code_blobs skips newline after ```python\\n."""
+    text = """```python
+print("hello")
+```"""
+
+    result = core_agent_module.parse_code_blobs(text)
+    expected = 'print("hello")'
+    assert result == expected
+
+
 def test_parse_code_blobs_single_line():
     """Test parse_code_blobs with single line content."""
     text = """Single line:
@@ -394,8 +525,26 @@ The result is 8."""
 # Tests for convert_code_format function
 # ----------------------------------------------------------------------------
 
+def test_convert_code_format_display_new_format():
+    """Validate convert_code_format correctly transforms new <DISPLAY:language>...</DISPLAY> format to standard markdown."""
+    original_text = """Here is code:
+<DISPLAY:python>
+print('hello')
+</DISPLAY>
+And some more text."""
+
+    expected_text = """Here is code:
+```python
+print('hello')
+```
+And some more text."""
+
+    transformed = core_agent_module.convert_code_format(original_text)
+    assert transformed == expected_text
+
+
 def test_convert_code_format_display_replacements():
-    """Validate convert_code_format correctly transforms <DISPLAY:language> format to standard markdown."""
+    """Validate convert_code_format correctly transforms legacy <DISPLAY:language> format to standard markdown."""
     original_text = """Here is code:
 ```<DISPLAY:python>
 print('hello')
@@ -473,13 +622,13 @@ print('hello')
 
 
 def test_convert_code_format_multiple_displays():
-    """Test convert_code_format with multiple DISPLAY blocks."""
-    original_text = """```<DISPLAY:python>
+    """Test convert_code_format with multiple DISPLAY blocks (both new and legacy format)."""
+    original_text = """<DISPLAY:python>
 first()
-```<END_DISPLAY_CODE>
-```<DISPLAY:javascript>
+</DISPLAY>
+<DISPLAY:javascript>
 second()
-```<END_DISPLAY_CODE>"""
+</DISPLAY>"""
 
     expected_text = """```python
 first()
@@ -528,8 +677,8 @@ def test_final_answer_error_creation():
 
 def test_parse_code_blobs_whitespace_variation():
     """Test parse_code_blobs with different whitespace patterns."""
-    text = """```python   
-print("hello")   
+    text = """```python
+print("hello")
 ```"""
     result = core_agent_module.parse_code_blobs(text)
     expected = 'print("hello")'
@@ -696,7 +845,7 @@ More text."""
 def test_parse_code_blobs_whitespace_only_run_block():
     """Test parse_code_blobs with whitespace-only RUN block."""
     text = """```<RUN>
-   
+
 ```<END_CODE>"""
 
     result = core_agent_module.parse_code_blobs(text)
@@ -803,4 +952,169 @@ new_code()
 
     assert "```python" in transformed
     assert "code:python" not in transformed
+    assert "<DISPLAY:" not in transformed
+
+
+# ----------------------------------------------------------------------------
+# Additional edge case tests for convert_code_format to improve coverage
+# ----------------------------------------------------------------------------
+
+def test_convert_code_format_single_backtick_display():
+    """Test convert_code_format with single backtick prefix."""
+    text = """` <DISPLAY:python>
+print('hello')
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "<DISPLAY:" not in transformed
+
+
+def test_convert_code_format_double_backtick_display():
+    """Test convert_code_format with double backtick prefix."""
+    text = """`` <DISPLAY:python>
+print('hello')
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "``python" in transformed
+    assert "<DISPLAY:" not in transformed
+
+
+def test_convert_code_format_multiple_displays_mixed():
+    """Test convert_code_format with mixed display formats."""
+    text = """<DISPLAY:python>
+first()
+</DISPLAY>
+```<DISPLAY:javascript>
+second()
+```<END_DISPLAY_CODE>
+```code:ruby
+third()
+```"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "```javascript" in transformed
+    assert "```ruby" in transformed
+
+
+def test_convert_code_format_code_colon_format():
+    """Test convert_code_format with code:language format."""
+    text = """```code:python
+print('hello')
+```"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "code:" not in transformed
+
+
+def test_convert_code_format_empty_content():
+    """Test convert_code_format with empty content."""
+    text = """<DISPLAY:python>
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "</DISPLAY>" not in transformed
+
+
+def test_convert_code_format_unicode_in_display():
+    """Test convert_code_format preserves unicode in display blocks."""
+    text = """<DISPLAY:python>
+def hello():
+    return "你好世界"
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "你好世界" in transformed
+
+
+def test_convert_code_format_special_chars_in_display():
+    """Test convert_code_format preserves special characters."""
+    text = '''<DISPLAY:python>
+x = "!@#$%^&*()"
+y = 'single quotes'
+z = "double quotes"
+</DISPLAY>'''
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "!@#$%^&*()" in transformed
+
+
+def test_convert_code_format_nested_display():
+    """Test convert_code_format with nested-like content."""
+    text = """<DISPLAY:python>
+def foo():
+    return "<DISPLAY:text>" * 5
+</DISPLAY>"""
+    transformed = core_agent_module.convert_code_format(text)
+    assert "```python" in transformed
+    assert "<DISPLAY:" not in transformed
+
+
+def test_convert_code_format_closing_tag_only():
+    """Test convert_code_format with orphaned closing tags."""
+    text = """Some text
+</DISPLAY>
+More text"""
+    transformed = core_agent_module.convert_code_format(text)
+    # Should not replace orphan closing tag
+    assert "</DISPLAY>" not in transformed
+
+
+def test_convert_code_format_mixed_backtick_counts():
+    """Test convert_code_format with different backtick counts in opening."""
+    text1 = """` <DISPLAY:python>
+print('one')
+</DISPLAY>"""
+    text2 = """`` <DISPLAY:python>
+print('two')
+</DISPLAY>"""
+    text3 = """```<DISPLAY:python>
+print('three')
+</DISPLAY>"""
+
+    t1 = core_agent_module.convert_code_format(text1)
+    t2 = core_agent_module.convert_code_format(text2)
+    t3 = core_agent_module.convert_code_format(text3)
+
+    assert "`python" in t1
+    assert "``python" in t2
+    assert "```python" in t3
+
+
+def test_convert_code_format_end_display_code_only():
+    """Test convert_code_format with orphaned END_DISPLAY_CODE."""
+    text = """Some text
+```<END_DISPLAY_CODE>
+More text"""
+    transformed = core_agent_module.convert_code_format(text)
+    # Should replace the orphaned END_DISPLAY_CODE
+    assert "```<END_DISPLAY_CODE>" not in transformed
+
+
+def test_convert_code_format_end_code_only():
+    """Test convert_code_format with orphaned END_CODE."""
+    text = """Some text
+```<END_CODE>
+More text"""
+    transformed = core_agent_module.convert_code_format(text)
+    # Should replace the orphaned END_CODE
+    assert "```<END_CODE>" not in transformed
+
+
+def test_convert_code_format_complex_real_world():
+    """Test convert_code_format with complex real-world output."""
+    text = """Here is the result of my analysis:
+
+```<DISPLAY:python>
+import json
+data = {"result": "success", "value": 42}
+print(json.dumps(data, indent=2))
+```<END_DISPLAY_CODE>
+
+This code demonstrates how to work with JSON in Python."""
+
+    transformed = core_agent_module.convert_code_format(text)
+
+    assert "```python" in transformed
+    assert "import json" in transformed
+    assert "```<END_DISPLAY_CODE>" not in transformed
     assert "<DISPLAY:" not in transformed
