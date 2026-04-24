@@ -130,6 +130,7 @@ def _create_mock_modules():
         MODEL_OUTPUT_DEEP_THINKING = "MODEL_OUTPUT_DEEP_THINKING"
         MODEL_OUTPUT_THINKING = "MODEL_OUTPUT_THINKING"
         MODEL_OUTPUT_CODE = "MODEL_OUTPUT_CODE"
+        MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
 
     class MessageObserver:
         def __init__(self):
