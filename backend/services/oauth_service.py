@@ -27,7 +27,6 @@ from database.oauth_account_db import (
     insert_oauth_account,
     list_oauth_accounts_by_user_id,
     reactivate_oauth_account,
-    rebind_oauth_account,
     update_oauth_account_tokens,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id, insert_user_tenant
@@ -265,13 +264,8 @@ def create_or_update_oauth_account(
 
     if existing:
         if existing.get("user_id") != user_id:
-            rebind_oauth_account(
-                provider=provider,
-                provider_user_id=provider_user_id,
-                new_user_id=user_id,
-                provider_email=email,
-                provider_username=username,
-                tenant_id=tenant_id or DEFAULT_TENANT_ID,
+            raise OAuthLinkError(
+                f"This {provider} account is already bound to another user"
             )
         else:
             update_oauth_account_tokens(

@@ -49,7 +49,10 @@ exceptions_mock.UnauthorizedError = _UnauthorizedError
 sys.modules["consts.exceptions"] = exceptions_mock
 
 sys.modules["database"] = MagicMock()
-sys.modules["database.oauth_account_db"] = MagicMock()
+database_oauth_mock = MagicMock()
+database_oauth_mock.get_oauth_account_by_provider = MagicMock(return_value=None)
+database_oauth_mock.get_soft_deleted_oauth_account = MagicMock(return_value=None)
+sys.modules["database.oauth_account_db"] = database_oauth_mock
 sys.modules["database.user_tenant_db"] = MagicMock()
 sys.modules["database.client"] = MagicMock()
 sys.modules["database.db_models"] = MagicMock()
@@ -194,7 +197,10 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(data["data"]["oauth_error"], "unsupported_provider")
 
     def test_success_returns_session_data(self):
-        oauth_service_mock.get_oauth_account_by_provider.return_value = None
+        oauth_service_mock.reset_mock()
+        oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
+        database_oauth_mock.get_oauth_account_by_provider.return_value = None
+        database_oauth_mock.get_soft_deleted_oauth_account.return_value = None
         oauth_service_mock.exchange_code_for_provider_token.return_value = {
             "access_token": "ghu_provider_token_123",
         }
@@ -234,7 +240,10 @@ class TestCallback(unittest.TestCase):
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
     def test_success_creates_new_user_when_not_found(self):
-        oauth_service_mock.get_oauth_account_by_provider.return_value = None
+        oauth_service_mock.reset_mock()
+        oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
+        database_oauth_mock.get_oauth_account_by_provider.return_value = None
+        database_oauth_mock.get_soft_deleted_oauth_account.return_value = None
         oauth_service_mock.exchange_code_for_provider_token.return_value = {
             "access_token": "ghu_provider_token_456",
         }

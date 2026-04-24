@@ -338,6 +338,7 @@ class TestCreateOrUpdateOAuthAccount(unittest.TestCase):
         self.assertEqual(result["user_id"], "user-1")
 
     def test_updates_existing_account(self):
+        oauth_account_db_mock.reset_mock()
         oauth_account_db_mock.get_oauth_account_by_provider.side_effect = [
             {"provider": "github", "provider_user_id": "12345", "user_id": "user-1"},
             {
@@ -358,30 +359,25 @@ class TestCreateOrUpdateOAuthAccount(unittest.TestCase):
         oauth_account_db_mock.update_oauth_account_tokens.assert_called_once()
         self.assertTrue(result.get("updated"))
 
-    def test_rebinds_when_user_id_changed(self):
-        oauth_account_db_mock.get_oauth_account_by_provider.side_effect = [
-            {"provider": "github", "provider_user_id": "12345", "user_id": "old-user"},
-            {"provider": "github", "provider_user_id": "12345", "user_id": "new-user"},
-        ]
+    def test_raises_when_already_bound_to_other_user(self):
+        oauth_account_db_mock.reset_mock()
+        oauth_account_db_mock.get_oauth_account_by_provider.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "old-user",
+        }
 
-        result = create_or_update_oauth_account(
-            user_id="new-user",
-            provider="github",
-            provider_user_id="12345",
-            email="octo@github.com",
-            username="octocat",
-        )
+        with self.assertRaises(_OAuthLinkError):
+            create_or_update_oauth_account(
+                user_id="new-user",
+                provider="github",
+                provider_user_id="12345",
+                email="octo@github.com",
+                username="octocat",
+            )
 
-        oauth_account_db_mock.rebind_oauth_account.assert_called_once_with(
-            provider="github",
-            provider_user_id="12345",
-            new_user_id="new-user",
-            provider_email="octo@github.com",
-            provider_username="octocat",
-            tenant_id="default-tenant-id",
-        )
         oauth_account_db_mock.update_oauth_account_tokens.assert_not_called()
-        self.assertEqual(result["user_id"], "new-user")
+        oauth_account_db_mock.insert_oauth_account.assert_not_called()
 
 
 class TestEnsureUserTenantExists(unittest.TestCase):
