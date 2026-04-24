@@ -76,6 +76,10 @@ async def _perform_connectivity_check(
 
     connectivity: bool
 
+    # For embedding models, append /embeddings to the base URL
+    if model_type in ("embedding", "multi_embedding"):
+        model_base_url = f"{model_base_url.rstrip('/')}/embeddings"
+
     # Test connectivity based on different model types
     if model_type == "embedding":
         connectivity = len(await OpenAICompatibleEmbedding(

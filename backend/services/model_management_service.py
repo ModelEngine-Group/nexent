@@ -76,6 +76,8 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
 
         # If embedding or multi_embedding, set max_tokens via embedding dimension check
         if model_data.get("model_type") in ("embedding", "multi_embedding"):
+            base_url = model_data.get("base_url", "").rstrip("/")
+            model_data["base_url"] = f"{base_url}/embeddings"
             model_data["max_tokens"] = await embedding_dimension_check(model_data)
             # Set default chunk_batch if not provided
             if model_data.get("chunk_batch") is None:
