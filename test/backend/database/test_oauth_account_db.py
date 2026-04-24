@@ -58,23 +58,30 @@ from database.oauth_account_db import (
     insert_oauth_account,
     list_oauth_accounts_by_user_id,
     reactivate_oauth_account,
+    rebind_oauth_account,
+    soft_delete_all_oauth_accounts_by_user_id,
     update_oauth_account_tokens,
 )
 
 
 def _make_mock_session():
     session = MagicMock()
+    query_mock = MagicMock()
+    filter_mock = MagicMock()
+    session.query.return_value = query_mock
+    query_mock.filter.return_value = filter_mock
+    
     mock_get_db_session.return_value.__enter__ = MagicMock(return_value=session)
     mock_get_db_session.return_value.__exit__ = MagicMock(return_value=False)
-    return session
+    return session, query_mock, filter_mock
 
 
 class TestInsertOAuthAccount(unittest.TestCase):
     def test_insert_and_return_dict(self):
-        mock_session = _make_mock_session()
+        session, query, filter_mock = _make_mock_session()
         mock_account = MagicMock()
-        mock_session.add = MagicMock()
-        mock_session.flush = MagicMock()
+        session.add = MagicMock()
+        session.flush = MagicMock()
         client_mock.as_dict.return_value = {
             "provider": "github",
             "provider_user_id": "12345",
@@ -88,18 +95,16 @@ class TestInsertOAuthAccount(unittest.TestCase):
             provider_email="test@github.com",
         )
 
-        mock_session.add.assert_called_once()
-        mock_session.flush.assert_called_once()
+        session.add.assert_called_once()
+        session.flush.assert_called_once()
         self.assertEqual(result["provider"], "github")
 
 
 class TestGetOAuthAccountByProvider(unittest.TestCase):
     def test_returns_dict_when_found(self):
-        mock_session = _make_mock_session()
+        session, query, filter_mock = _make_mock_session()
         mock_account = MagicMock()
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            mock_account
-        )
+        filter_mock.first.return_value = mock_account
         client_mock.as_dict.return_value = {
             "provider": "github",
             "provider_user_id": "12345",
@@ -111,8 +116,8 @@ class TestGetOAuthAccountByProvider(unittest.TestCase):
         self.assertEqual(result["provider"], "github")
 
     def test_returns_none_when_not_found(self):
-        mock_session = _make_mock_session()
-        mock_session.query.return_value.filter.return_value.first.return_value = None
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.first.return_value = None
 
         result = get_oauth_account_by_provider("github", "nonexistent")
 
@@ -121,11 +126,9 @@ class TestGetOAuthAccountByProvider(unittest.TestCase):
 
 class TestListOAuthAccountsByUserId(unittest.TestCase):
     def test_returns_list_of_dicts(self):
-        mock_session = _make_mock_session()
+        session, query, filter_mock = _make_mock_session()
         mock_account = MagicMock()
-        mock_session.query.return_value.filter.return_value.all.return_value = [
-            mock_account
-        ]
+        filter_mock.all.return_value = [mock_account]
         client_mock.as_dict.return_value = {"provider": "github", "user_id": "user-1"}
 
         result = list_oauth_accounts_by_user_id("user-1")
@@ -133,8 +136,8 @@ class TestListOAuthAccountsByUserId(unittest.TestCase):
         self.assertEqual(len(result), 1)
 
     def test_returns_empty_list(self):
-        mock_session = _make_mock_session()
-        mock_session.query.return_value.filter.return_value.all.return_value = []
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.all.return_value = []
 
         result = list_oauth_accounts_by_user_id("user-1")
 
@@ -143,11 +146,9 @@ class TestListOAuthAccountsByUserId(unittest.TestCase):
 
 class TestUpdateOAuthAccountTokens(unittest.TestCase):
     def test_updates_and_returns_true(self):
-        mock_session = _make_mock_session()
+        session, query, filter_mock = _make_mock_session()
         mock_account = MagicMock()
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            mock_account
-        )
+        filter_mock.first.return_value = mock_account
 
         result = update_oauth_account_tokens(
             provider="github",
@@ -159,37 +160,26 @@ class TestUpdateOAuthAccountTokens(unittest.TestCase):
         self.assertEqual(mock_account.provider_username, "new_name")
 
     def test_returns_false_when_not_found(self):
-        mock_session = _make_mock_session()
-        mock_session.query.return_value.filter.return_value.first.return_value = None
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.first.return_value = None
 
         result = update_oauth_account_tokens("github", "nonexistent")
 
         self.assertFalse(result)
 
     def test_skips_none_fields(self):
-        mock_session = _make_mock_session()
+        session, query, filter_mock = _make_mock_session()
         mock_account = MagicMock()
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            mock_account
-        )
+        filter_mock.first.return_value = mock_account
 
         update_oauth_account_tokens("github", "12345")
-
-        # No fields should have been set since all were None
-        self.assertFalse(
-            hasattr(mock_account, "provider_username")
-            and mock_account.provider_username is not None
-            and mock_account.provider_username != mock_account.provider_username
-        )
 
 
 class TestDeleteOAuthAccount(unittest.TestCase):
     def test_soft_deletes_and_returns_true(self):
-        mock_session = _make_mock_session()
+        session, query, filter_mock = _make_mock_session()
         mock_account = MagicMock()
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            mock_account
-        )
+        filter_mock.first.return_value = mock_account
 
         result = delete_oauth_account("user-1", "github")
 
@@ -197,8 +187,8 @@ class TestDeleteOAuthAccount(unittest.TestCase):
         self.assertEqual(mock_account.delete_flag, "Y")
 
     def test_returns_false_when_not_found(self):
-        mock_session = _make_mock_session()
-        mock_session.query.return_value.filter.return_value.first.return_value = None
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.first.return_value = None
 
         result = delete_oauth_account("user-1", "github")
 
@@ -207,12 +197,10 @@ class TestDeleteOAuthAccount(unittest.TestCase):
 
 class TestReactivateOAuthAccount(unittest.TestCase):
     def test_reactivates_and_returns_true(self):
-        mock_session = _make_mock_session()
+        session, query, filter_mock = _make_mock_session()
         mock_account = MagicMock()
         mock_account.delete_flag = "Y"
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            mock_account
-        )
+        filter_mock.first.return_value = mock_account
 
         result = reactivate_oauth_account(
             provider="github",
@@ -227,8 +215,8 @@ class TestReactivateOAuthAccount(unittest.TestCase):
         self.assertEqual(mock_account.user_id, "user-2")
 
     def test_returns_false_when_not_found(self):
-        mock_session = _make_mock_session()
-        mock_session.query.return_value.filter.return_value.first.return_value = None
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.first.return_value = None
 
         result = reactivate_oauth_account("github", "12345", "user-1")
 
@@ -237,18 +225,133 @@ class TestReactivateOAuthAccount(unittest.TestCase):
 
 class TestCountOAuthAccountsByUserId(unittest.TestCase):
     def test_returns_correct_count(self):
-        mock_session = _make_mock_session()
-        mock_session.query.return_value.filter.return_value.count.return_value = 3
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.count.return_value = 3
 
         result = count_oauth_accounts_by_user_id("user-1")
 
         self.assertEqual(result, 3)
 
     def test_returns_zero_when_no_accounts(self):
-        mock_session = _make_mock_session()
-        mock_session.query.return_value.filter.return_value.count.return_value = 0
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.count.return_value = 0
 
         result = count_oauth_accounts_by_user_id("user-1")
+
+        self.assertEqual(result, 0)
+
+
+class TestGetSoftDeletedOAuthAccount(unittest.TestCase):
+    def test_returns_dict_when_soft_deleted_found(self):
+        session, query, filter_mock = _make_mock_session()
+        mock_account = MagicMock()
+        mock_account.delete_flag = "Y"
+        filter_mock.first.return_value = mock_account
+        client_mock.as_dict.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "user-1",
+            "delete_flag": "Y",
+        }
+
+        result = get_soft_deleted_oauth_account("github", "12345")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["delete_flag"], "Y")
+        self.assertEqual(result["provider"], "github")
+
+    def test_returns_none_when_not_soft_deleted(self):
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.first.return_value = None
+
+        result = get_soft_deleted_oauth_account("github", "12345")
+
+        self.assertIsNone(result)
+
+    def test_returns_none_when_not_found(self):
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.first.return_value = None
+
+        result = get_soft_deleted_oauth_account("github", "nonexistent")
+
+        self.assertIsNone(result)
+
+
+class TestRebindOAuthAccount(unittest.TestCase):
+    def test_rebinds_to_new_user(self):
+        session, query, filter_mock = _make_mock_session()
+        mock_account = MagicMock()
+        mock_account.delete_flag = "N"
+        filter_mock.first.return_value = mock_account
+        client_mock.as_dict.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "new-user",
+        }
+
+        result = rebind_oauth_account(
+            provider="github",
+            provider_user_id="12345",
+            new_user_id="new-user",
+            provider_email="new@email.com",
+            provider_username="newname",
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(mock_account.user_id, "new-user")
+        self.assertEqual(mock_account.provider_email, "new@email.com")
+        self.assertEqual(mock_account.provider_username, "newname")
+        self.assertEqual(mock_account.updated_by, "new-user")
+
+    def test_rebinds_keeps_existing_email_when_none_provided(self):
+        session, query, filter_mock = _make_mock_session()
+        mock_account = MagicMock()
+        mock_account.delete_flag = "N"
+        mock_account.provider_email = "existing@email.com"
+        mock_account.provider_username = "existingname"
+        filter_mock.first.return_value = mock_account
+        client_mock.as_dict.return_value = {"provider": "github", "user_id": "new-user"}
+
+        result = rebind_oauth_account(
+            provider="github",
+            provider_user_id="12345",
+            new_user_id="new-user",
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(mock_account.provider_email, "existing@email.com")
+
+    def test_returns_false_when_not_found(self):
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.first.return_value = None
+
+        result = rebind_oauth_account("github", "nonexistent", "new-user")
+
+        self.assertFalse(result)
+
+
+class TestSoftDeleteAllOAuthAccountsByUserId(unittest.TestCase):
+    def test_soft_deletes_all_accounts(self):
+        session, query, filter_mock = _make_mock_session()
+        mock_account1 = MagicMock()
+        mock_account1.delete_flag = "N"
+        mock_account2 = MagicMock()
+        mock_account2.delete_flag = "N"
+        filter_mock.all.return_value = [mock_account1, mock_account2]
+
+        result = soft_delete_all_oauth_accounts_by_user_id("user-1", deleted_by="admin")
+
+        self.assertEqual(result, 2)
+        self.assertEqual(mock_account1.delete_flag, "Y")
+        self.assertEqual(mock_account2.delete_flag, "Y")
+        self.assertEqual(mock_account1.updated_by, "admin")
+        self.assertEqual(mock_account2.updated_by, "admin")
+
+    def test_returns_zero_when_no_accounts(self):
+        session, query, filter_mock = _make_mock_session()
+        filter_mock.all.return_value = []
+
+        result = soft_delete_all_oauth_accounts_by_user_id("user-1", "admin")
 
         self.assertEqual(result, 0)
 

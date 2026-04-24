@@ -558,5 +558,210 @@ class TestDeleteAccount(unittest.TestCase):
         oauth_service_mock.unlink_account.side_effect = None
 
 
+class TestCallbackPagination(unittest.TestCase):
+    def test_finds_user_on_second_page(self):
+        oauth_service_mock.reset_mock()
+        database_oauth_mock.reset_mock()
+        auth_utils_mock.reset_mock()
+        auth_utils_mock.get_current_user_id.return_value = ("user-1", "t-1")
+        auth_utils_mock.get_jwt_expiry_seconds.return_value = 3600
+        auth_utils_mock.calculate_expires_at.return_value = 1735689600
+        auth_utils_mock.generate_session_jwt.return_value = "eyJ.page2.jwt"
+        oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
+        database_oauth_mock.get_oauth_account_by_provider.return_value = None
+        database_oauth_mock.get_soft_deleted_oauth_account.return_value = None
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {"access_token": "ghu_token"}
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "12345",
+            "email": "page2user@github.com",
+            "username": "page2user",
+        }
+        oauth_service_mock.ensure_user_tenant_exists.return_value = {"user_id": "page2-uuid", "tenant_id": "t-1"}
+        oauth_service_mock.create_or_update_oauth_account.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "page2-uuid",
+        }
+
+        mock_page1_user = MagicMock()
+        mock_page1_user.id = "user-page1"
+        mock_page1_user.email = "other@github.com"
+        mock_page2_user = MagicMock()
+        mock_page2_user.id = "page2-uuid"
+        mock_page2_user.email = "page2user@github.com"
+
+        mock_page1_resp = MagicMock()
+        mock_page1_resp.users = [mock_page1_user]
+        mock_page1_resp.__len__ = lambda self: 1
+
+        mock_page2_resp = MagicMock()
+        mock_page2_resp.users = [mock_page2_user]
+        mock_page2_resp.__len__ = lambda self: 1
+
+        mock_admin_client = MagicMock()
+        mock_admin_client.auth.admin.list_users.side_effect = [mock_page1_resp, mock_page2_resp]
+        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
+
+        response = client.get("/user/oauth/callback?provider=github&code=page2_code&state=github:tok")
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        data = response.json()
+        self.assertEqual(data["data"]["user"]["email"], "page2user@github.com")
+
+        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+
+    def test_stops_pagination_when_less_than_100_users(self):
+        oauth_service_mock.reset_mock()
+        database_oauth_mock.reset_mock()
+        auth_utils_mock.reset_mock()
+        auth_utils_mock.get_current_user_id.return_value = ("user-1", "t-1")
+        auth_utils_mock.get_jwt_expiry_seconds.return_value = 3600
+        auth_utils_mock.calculate_expires_at.return_value = 1735689600
+        auth_utils_mock.generate_session_jwt.return_value = "eyJ.new.jwt"
+        oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
+        database_oauth_mock.get_oauth_account_by_provider.return_value = None
+        database_oauth_mock.get_soft_deleted_oauth_account.return_value = None
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {"access_token": "ghu_token"}
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "67890",
+            "email": "newuser@github.com",
+            "username": "newuser",
+        }
+        oauth_service_mock.ensure_user_tenant_exists.return_value = {"user_id": "new-uuid", "tenant_id": "t-1"}
+        oauth_service_mock.create_or_update_oauth_account.return_value = {
+            "provider": "github",
+            "provider_user_id": "67890",
+            "user_id": "new-uuid",
+        }
+
+        mock_empty_resp = MagicMock()
+        mock_empty_resp.users = []
+        mock_empty_resp.__len__ = lambda self: 0
+
+        mock_new_user = MagicMock()
+        mock_new_user.id = "new-uuid"
+
+        mock_admin_client = MagicMock()
+        mock_admin_client.auth.admin.list_users.return_value = mock_empty_resp
+        mock_admin_client.auth.admin.create_user.return_value = MagicMock(user=mock_new_user)
+        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
+
+        response = client.get("/user/oauth/callback?provider=github&code=short_page_code&state=github:tok")
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        mock_admin_client.auth.admin.list_users.assert_called_once()
+
+        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+
+
+class TestCallbackEmailFallback(unittest.TestCase):
+    def test_creates_user_with_oauth_fallback_email(self):
+        oauth_service_mock.reset_mock()
+        database_oauth_mock.reset_mock()
+        auth_utils_mock.reset_mock()
+        auth_utils_mock.get_current_user_id.return_value = ("user-1", "t-1")
+        auth_utils_mock.get_jwt_expiry_seconds.return_value = 3600
+        auth_utils_mock.calculate_expires_at.return_value = 1735689600
+        auth_utils_mock.generate_session_jwt.return_value = "eyJ.noemail.jwt"
+        oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
+        database_oauth_mock.get_oauth_account_by_provider.return_value = None
+        database_oauth_mock.get_soft_deleted_oauth_account.return_value = None
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {"access_token": "ghu_token"}
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "99999",
+            "email": "",
+            "username": "noemail_user",
+        }
+        oauth_service_mock.ensure_user_tenant_exists.return_value = {"user_id": "noemail-uuid", "tenant_id": "t-1"}
+        oauth_service_mock.create_or_update_oauth_account.return_value = {
+            "provider": "github",
+            "provider_user_id": "99999",
+            "user_id": "noemail-uuid",
+        }
+
+        mock_empty_resp = MagicMock()
+        mock_empty_resp.users = []
+        mock_empty_resp.__len__ = lambda self: 0
+
+        mock_new_user = MagicMock()
+        mock_new_user.id = "noemail-uuid"
+
+        mock_admin_client = MagicMock()
+        mock_admin_client.auth.admin.list_users.return_value = mock_empty_resp
+        mock_admin_client.auth.admin.create_user.return_value = MagicMock(user=mock_new_user)
+        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
+
+        response = client.get("/user/oauth/callback?provider=github&code=noemail_code&state=github:tok")
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        data = response.json()
+        self.assertIn("@oauth.nexent", data["data"]["user"]["email"])
+
+        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+
+
+class TestDeleteAccountMetadata(unittest.TestCase):
+    def test_handles_get_user_exception_gracefully(self):
+        oauth_service_mock.reset_mock()
+        oauth_service_mock.count_oauth_accounts_by_user_id.return_value = 2
+        oauth_service_mock.unlink_account.return_value = True
+
+        mock_admin = MagicMock()
+        mock_admin.auth.admin.get_user_by_id.side_effect = Exception("User lookup failed")
+        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin
+
+        response = client.delete(
+            "/user/oauth/accounts/github",
+            headers={"Authorization": "Bearer valid_token"},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+
+        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+
+    def test_unlinks_with_password_auth_detected(self):
+        oauth_service_mock.reset_mock()
+        oauth_service_mock.count_oauth_accounts_by_user_id.return_value = 1
+        oauth_service_mock.unlink_account.return_value = True
+
+        mock_identity = MagicMock()
+        mock_identity.provider = "email"
+
+        mock_user = MagicMock()
+        mock_user.identities = [mock_identity]
+        mock_user.app_metadata = MagicMock()
+        mock_user.app_metadata.get = MagicMock(return_value="email")
+
+        mock_user_resp = MagicMock()
+        mock_user_resp.user = mock_user
+
+        mock_admin = MagicMock()
+        mock_admin.auth.admin.get_user_by_id.return_value = mock_user_resp
+        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin
+
+        response = client.delete(
+            "/user/oauth/accounts/github",
+            headers={"Authorization": "Bearer valid_token"},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+
+        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+
+
+class TestGetAccounts(unittest.TestCase):
+    def test_returns_500_on_service_error(self):
+        oauth_service_mock.list_linked_accounts.side_effect = Exception("Database error")
+
+        response = client.get(
+            "/user/oauth/accounts",
+            headers={"Authorization": "Bearer valid_token"},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        oauth_service_mock.list_linked_accounts.side_effect = None
+
+
 if __name__ == "__main__":
     unittest.main()
