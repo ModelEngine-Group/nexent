@@ -514,7 +514,7 @@ class A2AServerService:
         """Extract and store user message parts."""
         user_parts = message_obj.get("parts", [])
         if not user_parts and message_obj.get("text"):
-            user_parts = [{"type": "text", "text": message_obj.get("text")}]
+            user_parts = [{"text": message_obj.get("text")}]
         a2a_agent_db.create_message(
             task_id=task_id,
             role="ROLE_USER",
@@ -524,7 +524,7 @@ class A2AServerService:
 
     def _store_agent_response(self, task_id: Optional[str], accumulated_text: str, endpoint_id: str) -> None:
         """Store agent response and update task state."""
-        agent_parts = [{"type": "text", "text": accumulated_text, "mediaType": "text/plain"}] if accumulated_text else []
+        agent_parts = [{"text": accumulated_text, "mediaType": "text/plain"}] if accumulated_text else []
         a2a_agent_db.create_message(
             task_id=task_id,
             role="ROLE_AGENT",
@@ -540,7 +540,7 @@ class A2AServerService:
 
     def _store_error_response(self, task_id: Optional[str], error: str, endpoint_id: str) -> None:
         """Store error message and update task state on failure."""
-        error_parts = [{"type": "text", "text": f"Error: {error}", "mediaType": "text/plain"}]
+        error_parts = [{"text": f"Error: {error}", "mediaType": "text/plain"}]
         a2a_agent_db.create_message(
             task_id=task_id,
             role="ROLE_AGENT",

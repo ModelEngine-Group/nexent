@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import shutil
-from typing import Optional
 from pydantic import Field
 from smolagents.tools import Tool
 
@@ -47,30 +46,35 @@ class MoveItemTool(Tool):
 
     tool_sign = ToolSign.FILE_OPERATION.value  # File operation tool identifier
 
-    def __init__(self, 
+    def __init__(self,
                  init_path: str = Field(description="Initial workspace path", default="/mnt/nexent"),
                  observer: MessageObserver = Field(description="Message observer", default=None, exclude=True)):
         """Initialize the MoveItemTool.
-        
+
         Args:
             init_path (str): Initial workspace path for file operations. Defaults to "/mnt/nexent".
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
+
+        Raises:
+            ValueError: If init_path is provided but empty.
         """
         super().__init__()
-        self.init_path = os.path.abspath(init_path)
+        if init_path is not None and init_path.strip() == "":
+            raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
+        self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
         self.running_prompt_zh = "正在移动文件/文件夹..."
         self.running_prompt_en = "Moving file/directory..."
 
     def _validate_path(self, file_path: str) -> str:
         """Validate and resolve file path within the workspace.
-        
+
         Args:
             file_path (str): Input file path
-            
+
         Returns:
             str: Validated absolute path
-            
+
         Raises:
             Exception: If path is outside workspace or invalid
         """
@@ -80,16 +84,16 @@ class MoveItemTool(Tool):
         else:
             # Treat as relative path from init_path
             abs_path = os.path.abspath(os.path.join(self.init_path, file_path))
-        
+
         # Normalize path to resolve any '..' or '.' components
         abs_path = os.path.normpath(abs_path)
-        
+
         # Check if the path is within the allowed workspace
         if not abs_path.startswith(self.init_path):
             raise Exception(f"Permission denied: File operations are restricted to the workspace directory '{self.init_path}'. "
                           f"Attempted path '{abs_path}' is outside the allowed area. "
                           f"Please use relative paths within the workspace.")
-        
+
         return abs_path
 
     def forward(self, source_path: str, destination_path: str) -> str:
@@ -110,7 +114,7 @@ class MoveItemTool(Tool):
             # Validate and resolve paths within workspace
             abs_source_path = self._validate_path(source_path)
             abs_destination_path = self._validate_path(destination_path)
-            
+
             # Check if source exists
             if not os.path.exists(abs_source_path):
                 raise Exception(f"Source does not exist: {source_path}")
@@ -122,12 +126,14 @@ class MoveItemTool(Tool):
             # Get source metadata before moving
             source_name = os.path.basename(abs_source_path)
             is_directory = os.path.isdir(abs_source_path)
-            
+
             # Calculate size before moving
             if is_directory:
                 total_size = 0
-                total_items = 0
+                # Initialize to 1 to count the directory itself
+                total_items = 1
                 for root, dirs, files in os.walk(abs_source_path):
+                    # Count subdirectories and files within the directory
                     total_items += len(dirs) + len(files)
                     for file in files:
                         try:
@@ -149,12 +155,12 @@ class MoveItemTool(Tool):
             shutil.move(abs_source_path, abs_destination_path)
 
             logger.info(f"Successfully moved {'directory' if is_directory else 'file'}: {abs_source_path} -> {abs_destination_path}")
-            
+
             # Prepare success message
             # Show relative paths in response for better UX
             relative_source = os.path.relpath(abs_source_path, self.init_path)
             relative_destination = os.path.relpath(abs_destination_path, self.init_path)
-            
+
             success_msg = {
                 "status": "success",
                 "source_path": relative_source,
@@ -174,18 +180,18 @@ class MoveItemTool(Tool):
             logger.error(f"Source not found: {source_path}, error: {e}")
             error_msg = f"Source not found: {source_path}. The file or directory may have already been moved or deleted."
             raise Exception(error_msg)
-        
+
         except PermissionError as e:
             logger.error(f"Permission denied when moving: {source_path} -> {destination_path}, error: {e}")
             error_msg = f"Permission denied: Cannot move from {source_path} to {destination_path}. Check file/directory permissions."
             raise Exception(error_msg)
-        
+
         except OSError as e:
             logger.error(f"OS error when moving: {source_path} -> {destination_path}, error: {e}")
             error_msg = f"OS error: Cannot move from {source_path} to {destination_path}. {str(e)}"
             raise Exception(error_msg)
-        
+
         except Exception as e:
             logger.error(f"Unexpected error when moving: {source_path} -> {destination_path}, error: {e}")
             error_msg = f"Failed to move item: {str(e)}"
-            raise Exception(error_msg) 
+            raise Exception(error_msg)

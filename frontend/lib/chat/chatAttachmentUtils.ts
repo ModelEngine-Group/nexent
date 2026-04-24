@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
-import { FilePreview } from "@/types/chat";
+import type { FileAttachment, FilePreview } from "@/types/chat";
 import log from "@/lib/logger";
 
 /**
@@ -40,10 +40,11 @@ export const uploadAttachments = async (
 ): Promise<{
   uploadedFileUrls: Record<string, string>;
   objectNames: Record<string, string>;
+  presignedUrls: Record<string, string>;
   error?: string;
 }> => {
   if (attachments.length === 0) {
-    return { uploadedFileUrls: {}, objectNames: {} };
+    return { uploadedFileUrls: {}, objectNames: {}, presignedUrls: {} };
   }
 
   try {
@@ -53,22 +54,28 @@ export const uploadAttachments = async (
 
     const uploadedFileUrls: Record<string, string> = {};
     const objectNames: Record<string, string> = {};
+    const presignedUrls: Record<string, string> = {};
 
     if (uploadResult.success_count > 0) {
       uploadResult.results.forEach((result) => {
         if (result.success) {
           uploadedFileUrls[result.file_name] = result.url;
           objectNames[result.file_name] = result.object_name;
+          // Store presigned URL for external MCP tool access
+          if (result.presigned_url) {
+            presignedUrls[result.file_name] = result.presigned_url;
+          }
         }
       });
     }
 
-    return { uploadedFileUrls, objectNames };
+    return { uploadedFileUrls, objectNames, presignedUrls };
   } catch (error) {
     log.error(t("chatPreprocess.fileUploadFailed"), error);
     return {
       uploadedFileUrls: {},
       objectNames: {},
+      presignedUrls: {},
       error: error instanceof Error ? error.message : String(error),
     };
   }
@@ -80,8 +87,10 @@ export const uploadAttachments = async (
 export const createMessageAttachments = (
   attachments: FilePreview[],
   uploadedFileUrls: Record<string, string>,
-  fileUrls: Record<string, string>
-): { type: string; name: string; size: number; url?: string }[] => {
+  fileUrls: Record<string, string>,
+  objectNames?: Record<string, string>,
+  presignedUrls?: Record<string, string>
+): FileAttachment[] => {
   return attachments.map((attachment) => ({
     type: attachment.type,
     name: attachment.file.name,
@@ -91,6 +100,8 @@ export const createMessageAttachments = (
       (attachment.type === "image"
         ? attachment.previewUrl
         : fileUrls[attachment.id]),
+    object_name: objectNames?.[attachment.file.name],
+    presigned_url: presignedUrls?.[attachment.file.name],
   }));
 };
 

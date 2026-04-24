@@ -622,6 +622,46 @@ class TestExternalA2AAgentProxy:
             {"messages": [{"role": "ROLE_USER", "parts": [{"type": "text", "text": "u"}]}]}
         ) is None
 
+    def test_find_agent_text_in_messages_part_without_type_field(self):
+        """Test _find_agent_text_in_messages extracts text when part has no type field."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "messages": [
+                {"role": "ROLE_AGENT", "parts": [{"text": "response without type"}]},
+            ]
+        }
+        assert proxy._find_agent_text_in_messages(result) == "response without type"
+
+    def test_find_agent_text_in_messages_part_type_not_text(self):
+        """Test _find_agent_text_in_messages extracts text even when type is not 'text'."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "messages": [
+                {"role": "ROLE_AGENT", "parts": [{"type": "image", "text": "caption text"}]},
+            ]
+        }
+        assert proxy._find_agent_text_in_messages(result) == "caption text"
+
+    def test_find_agent_text_in_messages_agent_with_empty_parts(self):
+        """Test _find_agent_text_in_messages returns None when agent has empty parts."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "messages": [
+                {"role": "ROLE_AGENT", "parts": []},
+            ]
+        }
+        assert proxy._find_agent_text_in_messages(result) is None
+
+    def test_find_agent_text_in_messages_agent_parts_without_text_field(self):
+        """Test _find_agent_text_in_messages returns None when agent parts have no text."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "messages": [
+                {"role": "ROLE_AGENT", "parts": [{"type": "image", "data": "abc123"}]},
+            ]
+        }
+        assert proxy._find_agent_text_in_messages(result) is None
+
     def test_find_text_in_status_message_dict_parts(self):
         """Test _find_text_in_status_message extracts text from dict parts."""
         proxy = ExternalA2AAgentProxy(self._make_info())
@@ -645,6 +685,46 @@ class TestExternalA2AAgentProxy:
         assert proxy._find_text_in_status_message({}) is None
         assert proxy._find_text_in_status_message({"status": {}}) is None
 
+    def test_find_text_in_status_message_part_without_type_field(self):
+        """Test _find_text_in_status_message extracts text when part has no type field."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "status": {
+                "message": {"parts": [{"text": "status text no type"}]}
+            }
+        }
+        assert proxy._find_text_in_status_message(result) == "status text no type"
+
+    def test_find_text_in_status_message_part_type_not_text(self):
+        """Test _find_text_in_status_message extracts text even when type is not 'text'."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "status": {
+                "message": {"parts": [{"type": "file", "text": "file description"}]}
+            }
+        }
+        assert proxy._find_text_in_status_message(result) == "file description"
+
+    def test_find_text_in_status_message_dict_empty_parts(self):
+        """Test _find_text_in_status_message returns str(message) when parts is empty."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "status": {
+                "message": {"parts": []}
+            }
+        }
+        assert proxy._find_text_in_status_message(result) == "{'parts': []}"
+
+    def test_find_text_in_status_message_dict_parts_without_text_field(self):
+        """Test _find_text_in_status_message returns str(message) when parts have no text."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        result = {
+            "status": {
+                "message": {"parts": [{"type": "image", "data": "abc123"}]}
+            }
+        }
+        assert proxy._find_text_in_status_message(result) == "{'parts': [{'type': 'image', 'data': 'abc123'}]}"
+
     def test_extract_text_from_message_object_agent_role(self):
         """Test _extract_text_from_message_object returns text for ROLE_AGENT."""
         proxy = ExternalA2AAgentProxy(self._make_info())
@@ -655,6 +735,30 @@ class TestExternalA2AAgentProxy:
         """Test _extract_text_from_message_object returns None for non-agent roles."""
         proxy = ExternalA2AAgentProxy(self._make_info())
         msg = {"role": "ROLE_USER", "parts": [{"type": "text", "text": "user text"}]}
+        assert proxy._extract_text_from_message_object(msg) is None
+
+    def test_extract_text_from_message_object_part_without_type_field(self):
+        """Test _extract_text_from_message_object extracts text when part has no type field."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        msg = {"role": "ROLE_AGENT", "parts": [{"text": "agent text no type"}]}
+        assert proxy._extract_text_from_message_object(msg) == "agent text no type"
+
+    def test_extract_text_from_message_object_part_type_not_text(self):
+        """Test _extract_text_from_message_object extracts text even when type is not 'text'."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        msg = {"role": "ROLE_AGENT", "parts": [{"type": "audio", "text": "transcript text"}]}
+        assert proxy._extract_text_from_message_object(msg) == "transcript text"
+
+    def test_extract_text_from_message_object_empty_parts(self):
+        """Test _extract_text_from_message_object returns None when parts is empty."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        msg = {"role": "ROLE_AGENT", "parts": []}
+        assert proxy._extract_text_from_message_object(msg) is None
+
+    def test_extract_text_from_message_object_parts_without_text_field(self):
+        """Test _extract_text_from_message_object returns None when parts have no text."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        msg = {"role": "ROLE_AGENT", "parts": [{"type": "image", "data": "abc123"}]}
         assert proxy._extract_text_from_message_object(msg) is None
 
     def test_extract_text_from_response_jsonrpc_message(self):
@@ -699,6 +803,46 @@ class TestExternalA2AAgentProxy:
         with pytest.raises(RuntimeError, match="Something went wrong"):
             proxy.extract_text_from_response(response)
 
+    def test_extract_text_from_response_jsonrpc_message_part_without_type(self):
+        """Test extract_text_from_response extracts text from result.message part with no type field."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        response = {
+            "result": {
+                "message": {
+                    "role": "ROLE_AGENT",
+                    "parts": [{"text": "jsonrpc text no type"}]
+                }
+            }
+        }
+        assert proxy.extract_text_from_response(response) == "jsonrpc text no type"
+
+    def test_extract_text_from_response_falls_back_to_messages_part_without_type(self):
+        """Test extract_text_from_response falls back to messages when message has no text part."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        response = {
+            "result": {
+                "message": {
+                    "role": "ROLE_AGENT",
+                    "parts": [{"type": "image", "data": "abc"}]
+                },
+                "messages": [
+                    {"role": "ROLE_AGENT", "parts": [{"text": "from messages no type"}]}
+                ]
+            }
+        }
+        assert proxy.extract_text_from_response(response) == "from messages no type"
+
+    def test_extract_text_from_response_falls_back_to_status_part_without_type(self):
+        """Test extract_text_from_response falls back to status.message part with no type field."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        response = {
+            "result": {
+                "messages": [{"role": "ROLE_USER", "parts": [{"text": "user"}]}],
+                "status": {"message": {"parts": [{"text": "from status no type"}]}}
+            }
+        }
+        assert proxy.extract_text_from_response(response) == "from status no type"
+
     def test_extract_text_from_response_fallback_json_dumps(self):
         """Test extract_text_from_response falls back to json.dumps for unknown structure."""
         proxy = ExternalA2AAgentProxy(self._make_info())
@@ -732,6 +876,24 @@ class TestExternalA2AAgentProxy:
         result = proxy._extract_text_from_parts(parts, accumulated)
         assert result == "actual text"
         assert accumulated == ["actual text"]
+
+    def test_extract_text_from_parts_part_without_type_field(self):
+        """Test _extract_text_from_parts extracts text from part with no type field."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        accumulated = []
+        parts = [{"text": "no type field"}]
+        result = proxy._extract_text_from_parts(parts, accumulated)
+        assert result == "no type field"
+        assert accumulated == ["no type field"]
+
+    def test_extract_text_from_parts_part_type_not_text(self):
+        """Test _extract_text_from_parts extracts text even when type is not 'text'."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        accumulated = []
+        parts = [{"type": "video", "text": "video transcript"}]
+        result = proxy._extract_text_from_parts(parts, accumulated)
+        assert result == "video transcript"
+        assert accumulated == ["video transcript"]
 
     def test_extract_text_from_status_message_dict(self):
         """Test _extract_text_from_status_message with dict message."""
@@ -1082,6 +1244,36 @@ class TestExternalA2AAgentProxy:
             results.append(text)
 
         assert results == []
+
+    @pytest.mark.asyncio
+    async def test_extract_text_from_events_artifact_part_without_type_field(self):
+        """Test extract_text_from_events extracts text from artifact part with no type field."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+
+        async def _events():
+            yield {"artifactUpdate": {"artifact": {"parts": [{"text": "no type chunk"}]}}}
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}
+
+        results = []
+        async for text in proxy.extract_text_from_events(_events()):
+            results.append(text)
+
+        assert results == ["no type chunk"]
+
+    @pytest.mark.asyncio
+    async def test_extract_text_from_events_artifact_part_type_not_text_but_has_text(self):
+        """Test extract_text_from_events extracts text from part with non-text type but text field present."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+
+        async def _events():
+            yield {"artifactUpdate": {"artifact": {"parts": [{"type": "image", "text": "alt description"}]}}}
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}
+
+        results = []
+        async for text in proxy.extract_text_from_events(_events()):
+            results.append(text)
+
+        assert results == ["alt description"]
 
     @pytest.mark.asyncio
     async def test_extract_text_from_events_multiple_artifacts_with_completed(self):

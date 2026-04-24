@@ -128,10 +128,16 @@ class GlobalConfig(BaseModel):
 
 
 # Request models
+class HistoryItem(BaseModel):
+    role: str
+    content: str
+    minio_files: Optional[List[Dict[str, Any]]] = None
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
-    history: Optional[List[Dict]] = None
+    history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
