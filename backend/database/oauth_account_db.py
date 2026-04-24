@@ -200,3 +200,21 @@ def count_oauth_accounts_by_user_id(user_id: str) -> int:
             )
             .count()
         )
+
+
+def soft_delete_all_oauth_accounts_by_user_id(user_id: str, deleted_by: str) -> int:
+    with get_db_session() as session:
+        result = (
+            session.query(UserOAuthAccount)
+            .filter(
+                UserOAuthAccount.user_id == user_id,
+                UserOAuthAccount.delete_flag == "N",
+            )
+            .all()
+        )
+        count = 0
+        for account in result:
+            account.delete_flag = "Y"
+            account.updated_by = deleted_by
+            count += 1
+        return count
