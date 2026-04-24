@@ -54,8 +54,10 @@ from database.oauth_account_db import (
     count_oauth_accounts_by_user_id,
     delete_oauth_account,
     get_oauth_account_by_provider,
+    get_soft_deleted_oauth_account,
     insert_oauth_account,
     list_oauth_accounts_by_user_id,
+    reactivate_oauth_account,
     update_oauth_account_tokens,
 )
 
@@ -182,7 +184,7 @@ class TestUpdateOAuthAccountTokens(unittest.TestCase):
 
 
 class TestDeleteOAuthAccount(unittest.TestCase):
-    def test_deletes_and_returns_true(self):
+    def test_soft_deletes_and_returns_true(self):
         mock_session = _make_mock_session()
         mock_account = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = (
@@ -192,13 +194,43 @@ class TestDeleteOAuthAccount(unittest.TestCase):
         result = delete_oauth_account("user-1", "github")
 
         self.assertTrue(result)
-        mock_session.delete.assert_called_once_with(mock_account)
+        self.assertEqual(mock_account.delete_flag, "Y")
 
     def test_returns_false_when_not_found(self):
         mock_session = _make_mock_session()
         mock_session.query.return_value.filter.return_value.first.return_value = None
 
         result = delete_oauth_account("user-1", "github")
+
+        self.assertFalse(result)
+
+
+class TestReactivateOAuthAccount(unittest.TestCase):
+    def test_reactivates_and_returns_true(self):
+        mock_session = _make_mock_session()
+        mock_account = MagicMock()
+        mock_account.delete_flag = "Y"
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            mock_account
+        )
+
+        result = reactivate_oauth_account(
+            provider="github",
+            provider_user_id="12345",
+            user_id="user-2",
+            provider_email="new@email.com",
+            provider_username="newname",
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(mock_account.delete_flag, "N")
+        self.assertEqual(mock_account.user_id, "user-2")
+
+    def test_returns_false_when_not_found(self):
+        mock_session = _make_mock_session()
+        mock_session.query.return_value.filter.return_value.first.return_value = None
+
+        result = reactivate_oauth_account("github", "12345", "user-1")
 
         self.assertFalse(result)
 

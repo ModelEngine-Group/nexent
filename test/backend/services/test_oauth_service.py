@@ -286,7 +286,9 @@ class TestGetAuthorizeUrl(unittest.TestCase):
 
 class TestCreateOrUpdateOAuthAccount(unittest.TestCase):
     def test_creates_new_account_when_none_exists(self):
+        oauth_account_db_mock.reset_mock()
         oauth_account_db_mock.get_oauth_account_by_provider.return_value = None
+        oauth_account_db_mock.get_soft_deleted_oauth_account.return_value = None
         oauth_account_db_mock.insert_oauth_account.return_value = {
             "provider": "github",
             "provider_user_id": "12345",
@@ -301,6 +303,39 @@ class TestCreateOrUpdateOAuthAccount(unittest.TestCase):
 
         oauth_account_db_mock.insert_oauth_account.assert_called_once()
         self.assertEqual(result["provider"], "github")
+
+    def test_reactivates_soft_deleted_account(self):
+        oauth_account_db_mock.reset_mock()
+        oauth_account_db_mock.get_oauth_account_by_provider.side_effect = [
+            None,
+            {"provider": "github", "provider_user_id": "12345", "user_id": "user-1"},
+        ]
+        oauth_account_db_mock.get_soft_deleted_oauth_account.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "user-1",
+            "delete_flag": "Y",
+        }
+        oauth_account_db_mock.reactivate_oauth_account.return_value = True
+
+        result = create_or_update_oauth_account(
+            user_id="user-1",
+            provider="github",
+            provider_user_id="12345",
+            email="octo@github.com",
+            username="octocat",
+        )
+
+        oauth_account_db_mock.reactivate_oauth_account.assert_called_once_with(
+            provider="github",
+            provider_user_id="12345",
+            user_id="user-1",
+            provider_email="octo@github.com",
+            provider_username="octocat",
+            tenant_id="default-tenant-id",
+        )
+        oauth_account_db_mock.insert_oauth_account.assert_not_called()
+        self.assertEqual(result["user_id"], "user-1")
 
     def test_updates_existing_account(self):
         oauth_account_db_mock.get_oauth_account_by_provider.side_effect = [

@@ -4,7 +4,6 @@ import os
 import secrets
 import ssl
 import urllib.request
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, quote
 
@@ -24,16 +23,16 @@ from database.oauth_account_db import (
     count_oauth_accounts_by_user_id,
     delete_oauth_account,
     get_oauth_account_by_provider,
+    get_soft_deleted_oauth_account,
     insert_oauth_account,
     list_oauth_accounts_by_user_id,
+    reactivate_oauth_account,
     rebind_oauth_account,
     update_oauth_account_tokens,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id, insert_user_tenant
 
 logger = logging.getLogger(__name__)
-
-_state_store: Dict[str, float] = {}
 
 
 def _build_ssl_context() -> ssl.SSLContext:
@@ -110,7 +109,6 @@ def get_authorize_url(provider: str, link_user_id: str = "") -> str:
         state = f"{provider}:{random_token}:{link_user_id}"
     else:
         state = f"{provider}:{random_token}"
-    _state_store[state] = datetime.now().timestamp()
 
     client_id = os.getenv(definition.client_id_env, "")
     redirect_uri = (
@@ -283,6 +281,19 @@ def create_or_update_oauth_account(
             )
         updated = get_oauth_account_by_provider(provider, provider_user_id)
         return updated if updated else existing
+
+    soft_deleted = get_soft_deleted_oauth_account(provider, provider_user_id)
+    if soft_deleted:
+        reactivate_oauth_account(
+            provider=provider,
+            provider_user_id=provider_user_id,
+            user_id=user_id,
+            provider_email=email,
+            provider_username=username,
+            tenant_id=tenant_id or DEFAULT_TENANT_ID,
+        )
+        reactivated = get_oauth_account_by_provider(provider, provider_user_id)
+        return reactivated if reactivated else {"provider": provider, "provider_user_id": provider_user_id, "user_id": user_id}
 
     return insert_oauth_account(
         user_id=user_id,
