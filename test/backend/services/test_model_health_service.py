@@ -34,12 +34,16 @@ sys.modules['nexent.core.models'] = MockModule()
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
 
 # Mock rerank_model module with proper class exports
+
+
 class MockBaseRerank:
     pass
+
 
 class MockOpenAICompatibleRerank(MockBaseRerank):
     def __init__(self, *args, **kwargs):
         pass
+
 
 rerank_module = MockModule()
 rerank_module.BaseRerank = MockBaseRerank
@@ -51,12 +55,16 @@ sys.modules['services'] = MockModule()
 sys.modules['services.voice_service'] = MockModule()
 
 # Define the ModelConnectStatusEnum for testing
+
+
 class ModelConnectStatusEnum:
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
     DETECTING = "detecting"
 
 # Define a ModelResponse class for testing
+
+
 class ModelResponse:
     def __init__(self, code, message="", data=None):
         self.code = code
@@ -276,7 +284,8 @@ async def test_perform_connectivity_check_tts():
 
         # Assert
         assert result is True
-        mock_service_instance.check_voice_connectivity.assert_called_once_with("tts")
+        mock_service_instance.check_voice_connectivity.assert_called_once_with(
+            "tts")
 
 
 @pytest.mark.asyncio
@@ -300,7 +309,8 @@ async def test_perform_connectivity_check_stt():
 
         # Assert
         assert result is True
-        mock_service_instance.check_voice_connectivity.assert_called_once_with("stt")
+        mock_service_instance.check_voice_connectivity.assert_called_once_with(
+            "stt")
 
 
 @pytest.mark.asyncio
@@ -308,7 +318,8 @@ async def test_perform_connectivity_check_rerank():
     # Setup - mock the rerank model
     with mock.patch("backend.services.model_health_service.OpenAICompatibleRerank") as mock_rerank:
         mock_rerank_instance = mock.MagicMock()
-        mock_rerank_instance.connectivity_check = mock.AsyncMock(return_value=True)
+        mock_rerank_instance.connectivity_check = mock.AsyncMock(
+            return_value=True)
         mock_rerank.return_value = mock_rerank_instance
 
         # Execute
@@ -394,6 +405,7 @@ async def test_perform_connectivity_check_base_url_normalization_127001():
             api_key="test-key",
             ssl_verify=True
         )
+
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_unsupported_type():
@@ -817,3 +829,67 @@ async def test_embedding_dimension_check_wrapper_value_error():
         mock_logger.error.assert_called_once_with(
             "Error checking embedding dimension: Unsupported model type"
         )
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_llm_sets_monitoring_operation():
+    with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
+            mock.patch("backend.services.model_health_service.OpenAIModel") as mock_model, \
+            mock.patch("backend.services.model_health_service.set_monitoring_operation") as mock_set_op:
+        mock_observer_instance = mock.MagicMock()
+        mock_observer.return_value = mock_observer_instance
+
+        mock_model_instance = mock.MagicMock()
+        mock_model_instance.check_connectivity = mock.AsyncMock(
+            return_value=True)
+        mock_model.return_value = mock_model_instance
+
+        await _perform_connectivity_check(
+            "gpt-4", "llm", "https://api.openai.com", "test-key",
+            display_name="GPT-4",
+        )
+
+        mock_set_op.assert_called_once_with(
+            "connectivity_check", display_name="GPT-4"
+        )
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_vlm_sets_monitoring_operation():
+    with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
+            mock.patch("backend.services.model_health_service.OpenAIVLModel") as mock_model, \
+            mock.patch("backend.services.model_health_service.set_monitoring_operation") as mock_set_op:
+        mock_observer_instance = mock.MagicMock()
+        mock_observer.return_value = mock_observer_instance
+
+        mock_model_instance = mock.MagicMock()
+        mock_model_instance.check_connectivity = mock.AsyncMock(
+            return_value=True)
+        mock_model.return_value = mock_model_instance
+
+        await _perform_connectivity_check(
+            "gpt-4-vision", "vlm", "https://api.openai.com", "test-key",
+            display_name="Vision",
+        )
+
+        mock_set_op.assert_called_once_with(
+            "connectivity_check", display_name="Vision"
+        )
+
+
+@pytest.mark.asyncio
+async def test_check_model_connectivity_sets_monitoring_context():
+    with mock.patch("backend.services.model_health_service.get_model_by_display_name") as mock_get_model, \
+            mock.patch("backend.services.model_health_service.update_model_record"), \
+            mock.patch("backend.services.model_health_service._perform_connectivity_check",
+                       new=mock.AsyncMock(return_value=True)), \
+            mock.patch("backend.services.model_health_service.set_monitoring_context") as mock_set_ctx:
+        mock_get_model.return_value = {
+            "model_id": 1, "model_repo": "openai", "model_name": "gpt-4",
+            "model_type": "llm", "base_url": "https://api.openai.com",
+            "api_key": "test-key", "ssl_verify": True,
+        }
+
+        await check_model_connectivity("GPT-4", tenant_id="t-42")
+
+        mock_set_ctx.assert_called_once_with(tenant_id="t-42")

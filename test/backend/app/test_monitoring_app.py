@@ -130,3 +130,26 @@ class TestListModelsEndpoint:
         assert response.status_code == 200
         body = response.json()
         assert body["code"] == 0
+
+    @patch("apps.monitoring_app._query_model_metrics_from_db", return_value=[])
+    @patch("apps.monitoring_app.get_current_user_id", return_value=("u-1", "t-1"))
+    def test_endpoint_returns_empty_data(self, mock_auth, mock_query, client):
+        response = client.get(
+            "/monitoring/models",
+            params={"time_range": "24h"},
+            headers={"Authorization": "Bearer test"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == 0
+        assert body["data"] == []
+
+    @patch("apps.monitoring_app._query_model_metrics_from_db", side_effect=Exception("db down"))
+    @patch("apps.monitoring_app.get_current_user_id", return_value=("u-1", "t-1"))
+    def test_endpoint_returns_500_on_exception(self, mock_auth, mock_query, client):
+        response = client.get(
+            "/monitoring/models",
+            params={"time_range": "24h"},
+            headers={"Authorization": "Bearer test"},
+        )
+        assert response.status_code == 500
