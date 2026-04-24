@@ -1,28 +1,9 @@
 import pytest
 import requests
-import importlib.util
 import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
-# Dynamically load the module directly by file path to avoid importing sdk/nexent/__init__
-MODULE_NAME = "embedding_model_under_test"
-MODULE_PATH = (
-    Path(__file__).resolve().parents[4]
-    / "sdk"
-    / "nexent"
-    / "core"
-    / "models"
-    / "embedding_model.py"
-)
-spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
-embedding_model_module = importlib.util.module_from_spec(spec)
-sys.modules[MODULE_NAME] = embedding_model_module
-assert spec and spec.loader
-spec.loader.exec_module(embedding_model_module)
-
-OpenAICompatibleEmbedding = embedding_model_module.OpenAICompatibleEmbedding
-JinaEmbedding = embedding_model_module.JinaEmbedding
+from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding
 
 class DummyResponse:
     def __init__(self, status_code=200, json_data=None):
