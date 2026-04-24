@@ -1,5 +1,3 @@
-import type { McpTool } from "@/types/agentConfig";
-
 export enum McpTab {
   LOCAL = "local",
   MCP_REGISTRY = "mcp_registry",
@@ -239,3 +237,37 @@ export interface AddMcpRuntimeFromConfigPayload {
   mcpServers: Record<string, AddMcpRuntimeServerPayload>;
 }
 
+// ---------------------------------------------------------------------------
+// Feature-local draft interfaces (kept here so components/hooks share shape)
+// ---------------------------------------------------------------------------
+
+/**
+ * Form state owned by the local-add section. Components manage this directly;
+ * the shared shape makes it easy to pass the whole draft into a submit helper.
+ */
+export interface LocalAddMcpDraft {
+  name: string;
+  description: string;
+  transportType: McpTransportType;
+  serverUrl: string;
+  authorizationToken: string;
+  containerConfigJson: string;
+  containerPort: number | undefined;
+  tags: string[];
+}
+
+/**
+ * Form state for the community quick-add confirmation modal.
+ */
+export interface CommunityQuickAddDraft {
+  name: string;
+  description: string;
+  transportType: McpTransportType;
+  serverUrl: string;
+  authorizationToken: string;
+  containerConfigJson: string;
+  containerPort: number | undefined;
+  tags: string[];
+  version?: string;
+  registryJson?: Record<string, unknown>;
+}

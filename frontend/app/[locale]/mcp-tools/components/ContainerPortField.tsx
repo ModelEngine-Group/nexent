@@ -1,37 +1,29 @@
-import { App, Button, InputNumber } from "antd";
+import { Button, InputNumber } from "antd";
 import { LoadingOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortAvailability";
 
-type ContainerPortFieldProps = {
+interface ContainerPortFieldProps {
   scope: string;
   enabled?: boolean;
   containerPort: number | undefined;
   setContainerPort: (value: number | undefined) => void;
-  t: (key: string, params?: Record<string, unknown>) => string;
-};
+}
 
 export default function ContainerPortField({
   scope,
   enabled = true,
   containerPort,
   setContainerPort,
-  t,
 }: ContainerPortFieldProps) {
-  const { message } = App.useApp();
-  const {
-    containerPortCheckLoading,
-    containerPortAvailable,
-    containerPortSuggesting,
-    handleSuggestContainerPort,
-  } = useContainerPortAvailability({
-    scope,
-    enabled,
-    containerPort,
-    setContainerPort,
-    t,
-    message,
-    logTag: `ContainerPortField:${scope}`,
-  });
+  const { t } = useTranslation("common");
+  const { portCheckLoading, portAvailable, suggesting, suggestPort } =
+    useContainerPortAvailability({
+      scope,
+      enabled,
+      containerPort,
+      setContainerPort,
+    });
 
   return (
     <label className="block text-sm text-slate-500">
@@ -39,7 +31,9 @@ export default function ContainerPortField({
       <div className="mt-2 flex gap-2">
         <InputNumber
           value={containerPort}
-          onChange={(value) => setContainerPort(value === null ? undefined : value)}
+          onChange={(value) =>
+            setContainerPort(value === null ? undefined : value)
+          }
           min={1}
           max={65535}
           controls={false}
@@ -47,22 +41,24 @@ export default function ContainerPortField({
           placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
         />
         <Button
-          onClick={handleSuggestContainerPort}
-          loading={containerPortSuggesting}
-          disabled={containerPortCheckLoading || containerPortSuggesting}
+          onClick={suggestPort}
+          loading={suggesting}
+          disabled={portCheckLoading || suggesting}
           className="rounded-full"
         >
           {t("mcpTools.addModal.suggestPort")}
         </Button>
       </div>
-      {containerPort && containerPortCheckLoading ? (
+      {containerPort && portCheckLoading ? (
         <p className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500">
           <LoadingOutlined className="animate-spin" />
           {t("mcpTools.addModal.portChecking")}...
         </p>
       ) : containerPort ? (
-        <p className={`mt-2 text-xs ${containerPortAvailable ? "text-emerald-600" : "text-rose-600"}`}>
-          {containerPortAvailable
+        <p
+          className={`mt-2 text-xs ${portAvailable ? "text-emerald-600" : "text-rose-600"}`}
+        >
+          {portAvailable
             ? t("mcpTools.addModal.portAvailable", { port: containerPort })
             : t("mcpTools.addModal.portOccupied", { port: containerPort })}
         </p>

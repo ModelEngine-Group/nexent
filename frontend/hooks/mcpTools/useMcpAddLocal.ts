@@ -1,0 +1,112 @@
+"use client";
+
+import { useState } from "react";
+import { App } from "antd";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
+import log from "@/lib/logger";
+import {
+  addContainerMcpToolService,
+  addMcpToolService,
+  resolveContainerServerInfo,
+} from "@/services/mcpToolsService";
+import { updateToolList } from "@/services/mcpService";
+import { ensureContainerPortAvailableOnce } from "./useContainerPortAvailability";
+import { MCP_TAB, MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
+import type { LocalAddMcpDraft } from "@/types/mcpTools";
+import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+
+interface UseMcpAddLocalParams {
+  onSuccess: () => void;
+}
+
+/**
+ * Submission mutation for the "Add local MCP" form. The component owns the
+ * draft; this hook only cares about the network call + cache invalidation.
+ */
+export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
+  const { message } = App.useApp();
+  const { t } = useTranslation("common");
+  const queryClient = useQueryClient();
+  const [submitting, setSubmitting] = useState(false);
+
+  const translate = (key: string, params?: Record<string, unknown>) =>
+    String(t(key, params));
+
+  const submit = async (draft: LocalAddMcpDraft): Promise<boolean> => {
+    const trimmedName = draft.name.trim();
+    if (!trimmedName) {
+      message.warning(translate("mcpTools.add.validate.nameRequired"));
+      return false;
+    }
+
+    const isContainer = draft.transportType === MCP_TRANSPORT_TYPE.CONTAINER;
+    if (isContainer) {
+      const ok = await ensureContainerPortAvailableOnce({
+        containerPort: draft.containerPort,
+        message,
+        translate,
+      });
+      if (!ok) return false;
+    }
+
+    setSubmitting(true);
+    try {
+      if (isContainer) {
+        const resolved = await resolveContainerServerInfo({
+          transportType: draft.transportType,
+          serviceUrl: draft.serverUrl,
+          containerPort: draft.containerPort,
+          containerConfigJson: draft.containerConfigJson,
+        });
+        if (!resolved.data.mcpConfig) {
+          message.error(translate("mcpTools.add.error.containerJsonInvalid"));
+          return false;
+        }
+
+        await addContainerMcpToolService({
+          name: trimmedName,
+          description: draft.description,
+          tags: draft.tags,
+          source: "local",
+          authorization_token: draft.authorizationToken.trim() || undefined,
+          port: draft.containerPort as number,
+          mcp_config: resolved.data.mcpConfig,
+        });
+      } else {
+        await addMcpToolService({
+          name: trimmedName,
+          description: draft.description,
+          source: MCP_TAB.LOCAL,
+          transport_type: draft.transportType,
+          server_url: draft.serverUrl.trim(),
+          authorization_token: draft.authorizationToken.trim() || undefined,
+          tags: draft.tags,
+        });
+      }
+
+      message.success(translate("mcpTools.add.success"));
+      queryClient.invalidateQueries({
+        queryKey: MCP_TOOLS_QUERY_KEYS.services,
+      });
+      queryClient.invalidateQueries({
+        queryKey: MCP_TOOLS_QUERY_KEYS.tagStats,
+      });
+      try {
+        await updateToolList();
+      } catch (error) {
+        log.error("[useMcpAddLocal] Failed to refresh tool list", { error });
+      }
+      onSuccess();
+      return true;
+    } catch (error) {
+      log.error("[useMcpAddLocal] Failed to add service", { error });
+      message.error(translate("mcpTools.add.failed"));
+      return false;
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return { submit, submitting };
+}

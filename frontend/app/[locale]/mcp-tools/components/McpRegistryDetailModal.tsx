@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button, Modal } from "antd";
+import { useTranslation } from "react-i18next";
 import { MCP_REGISTRY_SERVER_STATUS } from "@/const/mcpTools";
 import {
   extractRegistryLinks,
@@ -9,40 +10,51 @@ import {
 } from "@/lib/mcpTools";
 import type { RegistryMcpCard } from "@/types/mcpTools";
 
-interface Props {
+interface McpRegistryDetailModalProps {
   service: RegistryMcpCard;
-  t: (key: string, params?: Record<string, unknown>) => string;
   onClose: () => void;
-  onQuickAddFromRegistry: (service: RegistryMcpCard) => void;
+  onQuickAdd: (service: RegistryMcpCard) => void;
 }
 
 export default function McpRegistryDetailModal({
   service,
-  t,
   onClose,
-  onQuickAddFromRegistry: onQuickAddFromRegistry,
-}: Props) {
+  onQuickAdd,
+}: McpRegistryDetailModalProps) {
+  const { t } = useTranslation("common");
   const [showServerJsonModal, setShowServerJsonModal] = useState(false);
   const server = service.server;
-  const officialMeta = ((service._meta as Record<string, unknown> | undefined)?.["io.modelcontextprotocol.registry/official"] || {}) as Record<string, unknown>;
+  const officialMeta = ((
+    service._meta as Record<string, unknown> | undefined
+  )?.["io.modelcontextprotocol.registry/official"] || {}) as Record<
+    string,
+    unknown
+  >;
   const { websiteUrl, repositoryUrl } = extractRegistryLinks(server);
   const serverJsonPretty = toPrettyRegistryJson(server);
   const hasServerJson = Boolean(server && Object.keys(server).length > 0);
 
   const displayRemotes = Array.isArray(server.remotes) ? server.remotes : [];
   const displayPackages = Array.isArray(server.packages)
-    ? server.packages.filter((pkg): pkg is Record<string, unknown> => Boolean(pkg) && typeof pkg === "object")
+    ? server.packages.filter(
+        (pkg): pkg is Record<string, unknown> =>
+          Boolean(pkg) && typeof pkg === "object"
+      )
     : [];
 
   const normalizeHeaderItems = (headers: unknown[]) => {
-    return headers.filter((header): header is Record<string, unknown> => Boolean(header) && typeof header === "object");
+    return headers.filter(
+      (header): header is Record<string, unknown> =>
+        Boolean(header) && typeof header === "object"
+    );
   };
 
   const hasRenderableValue = (value: unknown) => {
     if (value === null || value === undefined) return false;
     if (typeof value === "string") return value.trim().length > 0;
     if (Array.isArray(value)) return value.length > 0;
-    if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+    if (typeof value === "object")
+      return Object.keys(value as Record<string, unknown>).length > 0;
     return true;
   };
 
@@ -98,7 +110,8 @@ export default function McpRegistryDetailModal({
       runtimeHint: "mcpTools.registry.packageField.runtimeHint",
       registryBaseUrl: "mcpTools.registry.packageField.registryBaseUrl",
       fileSha256: "mcpTools.registry.packageField.fileSha256",
-      environmentVariables: "mcpTools.registry.packageField.environmentVariables",
+      environmentVariables:
+        "mcpTools.registry.packageField.environmentVariables",
       runtimeArguments: "mcpTools.registry.packageField.runtimeArguments",
       packageArguments: "mcpTools.registry.packageField.packageArguments",
       transport: "mcpTools.registry.packageField.transport",
@@ -119,7 +132,10 @@ export default function McpRegistryDetailModal({
 
   const normalizeRecordItems = (items: unknown) => {
     if (!Array.isArray(items)) return [] as Record<string, unknown>[];
-    return items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+    return items.filter(
+      (item): item is Record<string, unknown> =>
+        Boolean(item) && typeof item === "object"
+    );
   };
 
   const renderFieldRows = (
@@ -129,7 +145,9 @@ export default function McpRegistryDetailModal({
     excludedKeys: string[] = []
   ) => {
     const excluded = new Set(excludedKeys);
-    const entries = Object.entries(record).filter(([key, value]) => !excluded.has(key) && hasRenderableValue(value));
+    const entries = Object.entries(record).filter(
+      ([key, value]) => !excluded.has(key) && hasRenderableValue(value)
+    );
     if (entries.length === 0) {
       return <p className="text-[11px] text-slate-400">-</p>;
     }
@@ -137,7 +155,9 @@ export default function McpRegistryDetailModal({
       <div className="mt-1 space-y-1 text-[11px] text-slate-600">
         {entries.map(([fieldKey, fieldValue]) => (
           <div key={`${keyPath}-${fieldKey}`}>
-            <span className="font-medium text-slate-700">{labelResolver(fieldKey)}:</span>{" "}
+            <span className="font-medium text-slate-700">
+              {labelResolver(fieldKey)}:
+            </span>{" "}
             {renderStructuredValue(fieldValue, `${keyPath}-${fieldKey}`)}
           </div>
         ))}
@@ -162,9 +182,19 @@ export default function McpRegistryDetailModal({
             ? titleResolver(item, index)
             : t("mcpTools.registry.variableFallback", { index: index + 1 });
           return (
-            <div key={`${keyPath}-${index}`} className="rounded-md border border-slate-200 bg-white p-2">
-              <p className="break-all text-xs font-medium text-slate-900">{itemTitle}</p>
-              {renderFieldRows(item, labelResolver, `${keyPath}-${index}`, excludedKeys)}
+            <div
+              key={`${keyPath}-${index}`}
+              className="rounded-md border border-slate-200 bg-white p-2"
+            >
+              <p className="break-all text-xs font-medium text-slate-900">
+                {itemTitle}
+              </p>
+              {renderFieldRows(
+                item,
+                labelResolver,
+                `${keyPath}-${index}`,
+                excludedKeys
+              )}
             </div>
           );
         })}
@@ -172,8 +202,15 @@ export default function McpRegistryDetailModal({
     );
   };
 
-  const renderStructuredValue = (value: unknown, keyPath: string): React.ReactNode => {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+  const renderStructuredValue = (
+    value: unknown,
+    keyPath: string
+  ): React.ReactNode => {
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
       return <span className="break-all">{formatHeaderFieldValue(value)}</span>;
     }
 
@@ -184,8 +221,13 @@ export default function McpRegistryDetailModal({
       return (
         <div className="mt-1 space-y-1">
           {value.map((item, index) => (
-            <div key={`${keyPath}-${index}`} className="rounded border border-slate-200 bg-slate-50 p-2">
-              <div className="mb-1 text-[11px] font-medium text-slate-500">#{index + 1}</div>
+            <div
+              key={`${keyPath}-${index}`}
+              className="rounded border border-slate-200 bg-slate-50 p-2"
+            >
+              <div className="mb-1 text-[11px] font-medium text-slate-500">
+                #{index + 1}
+              </div>
               {renderStructuredValue(item, `${keyPath}-${index}`)}
             </div>
           ))}
@@ -194,7 +236,9 @@ export default function McpRegistryDetailModal({
     }
 
     if (value && typeof value === "object") {
-      const entries = Object.entries(value as Record<string, unknown>).filter(([, nested]) => hasRenderableValue(nested));
+      const entries = Object.entries(value as Record<string, unknown>).filter(
+        ([, nested]) => hasRenderableValue(nested)
+      );
       if (entries.length === 0) {
         return <span className="text-slate-400">-</span>;
       }
@@ -226,7 +270,10 @@ export default function McpRegistryDetailModal({
 
     return Object.entries(variables)
       .filter(([, value]) => Boolean(value) && typeof value === "object")
-      .map(([key, value]) => ({ key, config: value as Record<string, unknown> }));
+      .map(([key, value]) => ({
+        key,
+        config: value as Record<string, unknown>,
+      }));
   };
 
   const officialStatus = String(officialMeta.status || "").toLowerCase();
@@ -234,14 +281,14 @@ export default function McpRegistryDetailModal({
     officialStatus === MCP_REGISTRY_SERVER_STATUS.ACTIVE
       ? "bg-emerald-100 text-emerald-700"
       : officialStatus === MCP_REGISTRY_SERVER_STATUS.DEPRECATED
-      ? "bg-amber-100 text-amber-700"
-      : "bg-slate-100 text-slate-600";
+        ? "bg-amber-100 text-amber-700"
+        : "bg-slate-100 text-slate-600";
   const statusTextKey =
     officialStatus === MCP_REGISTRY_SERVER_STATUS.ACTIVE
       ? "mcpTools.registry.status.active"
       : officialStatus === MCP_REGISTRY_SERVER_STATUS.DEPRECATED
-      ? "mcpTools.registry.status.deprecated"
-      : "mcpTools.registry.status.unknown";
+        ? "mcpTools.registry.status.deprecated"
+        : "mcpTools.registry.status.unknown";
 
   return (
     <>
@@ -261,10 +308,16 @@ export default function McpRegistryDetailModal({
           <div className="border-b border-slate-100 px-6 py-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="break-all text-2xl font-semibold text-slate-900">{server.name}</h3>
-                <p className="mt-1 text-sm text-slate-500">{formatRegistryVersion(server.version || "")}</p>
+                <h3 className="break-all text-2xl font-semibold text-slate-900">
+                  {server.name}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {formatRegistryVersion(server.version || "")}
+                </p>
               </div>
-              <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${statusClassName}`}>
+              <span
+                className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${statusClassName}`}
+              >
                 {t(statusTextKey)}
               </span>
             </div>
@@ -273,13 +326,17 @@ export default function McpRegistryDetailModal({
           <div className="px-6 py-5 space-y-4">
             <p className="text-sm text-slate-700">{server.description || ""}</p>
 
-            <p className="text-xs text-slate-500">{formatRegistryDate(String(officialMeta.publishedAt || ""))}</p>
+            <p className="text-xs text-slate-500">
+              {formatRegistryDate(String(officialMeta.publishedAt || ""))}
+            </p>
 
             {websiteUrl || repositoryUrl ? (
               <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                 {websiteUrl ? (
                   <div className="flex flex-wrap gap-2">
-                    <span className="text-slate-500">{t("mcpTools.registry.website")}</span>
+                    <span className="text-slate-500">
+                      {t("mcpTools.registry.website")}
+                    </span>
                     <a
                       href={websiteUrl}
                       target="_blank"
@@ -293,7 +350,9 @@ export default function McpRegistryDetailModal({
 
                 {repositoryUrl ? (
                   <div className="flex flex-wrap gap-2">
-                    <span className="text-slate-500">{t("mcpTools.registry.repository")}</span>
+                    <span className="text-slate-500">
+                      {t("mcpTools.registry.repository")}
+                    </span>
                     <a
                       href={repositoryUrl}
                       target="_blank"
@@ -309,56 +368,99 @@ export default function McpRegistryDetailModal({
 
             {displayRemotes.length > 0 ? (
               <div className="space-y-2">
-                <p className="text-sm font-semibold text-slate-900">{t("mcpTools.registry.remotes")}</p>
+                <p className="text-sm font-semibold text-slate-900">
+                  {t("mcpTools.registry.remotes")}
+                </p>
                 <div className="space-y-2">
                   {displayRemotes.map((remote, index) => {
                     const remoteRecord = remote as Record<string, unknown>;
                     const remoteHeaders = resolveRemoteHeaders(remoteRecord);
-                    const remoteVariables = resolveRemoteVariables(remoteRecord);
+                    const remoteVariables =
+                      resolveRemoteVariables(remoteRecord);
                     const remoteType = String(remoteRecord.type || "");
                     const remoteUrl = String(remoteRecord.url || "");
 
                     return (
-                      <div key={`${server.name}-${remoteUrl}-${index}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-                        <p className="font-medium text-slate-900">{remoteType || t("mcpTools.registry.remoteFallback")}</p>
+                      <div
+                        key={`${server.name}-${remoteUrl}-${index}`}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      >
+                        <p className="font-medium text-slate-900">
+                          {remoteType || t("mcpTools.registry.remoteFallback")}
+                        </p>
                         <p className="break-all text-slate-600">{remoteUrl}</p>
                         {remoteHeaders.length > 0 ? (
-                        <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
-                          <p className="text-xs font-semibold text-slate-700">{t("mcpTools.registry.remoteHeaders")}</p>
-                          {remoteHeaders.map((header, headerIndex) => (
-                            <div key={`${server.name}-${remoteUrl}-${String(header.name || headerIndex)}-${headerIndex}`} className="rounded-md border border-slate-200 bg-white p-2">
-                              <p className="break-all text-xs font-medium text-slate-900">
-                                {typeof header.name === "string" && header.name.trim()
-                                  ? header.name
-                                  : t("mcpTools.registry.headerFallback", { index: headerIndex + 1 })}
-                              </p>
-                              <div className="mt-1 space-y-1 text-[11px] text-slate-600">
-                                {Object.entries(header)
-                                  .filter(([key, value]) => key !== "name" && hasRenderableValue(value))
-                                  .map(([key, value]) => (
-                                    <div key={`${server.name}-${remoteUrl}-${headerIndex}-${key}`}>
-                                      <span className="font-medium text-slate-700">{getHeaderFieldLabel(key)}:</span>{" "}
-                                      {renderStructuredValue(value, `${server.name}-${remoteUrl}-${headerIndex}-${key}`)}
-                                    </div>
-                                  ))}
+                          <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
+                            <p className="text-xs font-semibold text-slate-700">
+                              {t("mcpTools.registry.remoteHeaders")}
+                            </p>
+                            {remoteHeaders.map((header, headerIndex) => (
+                              <div
+                                key={`${server.name}-${remoteUrl}-${String(header.name || headerIndex)}-${headerIndex}`}
+                                className="rounded-md border border-slate-200 bg-white p-2"
+                              >
+                                <p className="break-all text-xs font-medium text-slate-900">
+                                  {typeof header.name === "string" &&
+                                  header.name.trim()
+                                    ? header.name
+                                    : t("mcpTools.registry.headerFallback", {
+                                        index: headerIndex + 1,
+                                      })}
+                                </p>
+                                <div className="mt-1 space-y-1 text-[11px] text-slate-600">
+                                  {Object.entries(header)
+                                    .filter(
+                                      ([key, value]) =>
+                                        key !== "name" &&
+                                        hasRenderableValue(value)
+                                    )
+                                    .map(([key, value]) => (
+                                      <div
+                                        key={`${server.name}-${remoteUrl}-${headerIndex}-${key}`}
+                                      >
+                                        <span className="font-medium text-slate-700">
+                                          {getHeaderFieldLabel(key)}:
+                                        </span>{" "}
+                                        {renderStructuredValue(
+                                          value,
+                                          `${server.name}-${remoteUrl}-${headerIndex}-${key}`
+                                        )}
+                                      </div>
+                                    ))}
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
+                            ))}
+                          </div>
                         ) : null}
                         {remoteVariables.length > 0 ? (
                           <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
-                            <p className="text-xs font-semibold text-slate-700">{t("mcpTools.registry.remoteVariables")}</p>
+                            <p className="text-xs font-semibold text-slate-700">
+                              {t("mcpTools.registry.remoteVariables")}
+                            </p>
                             {remoteVariables.map((variable, variableIndex) => (
-                              <div key={`${server.name}-${remoteUrl}-${variable.key}-${variableIndex}`} className="rounded-md border border-slate-200 bg-white p-2">
-                                <p className="break-all text-xs font-medium text-slate-900">{variable.key}</p>
+                              <div
+                                key={`${server.name}-${remoteUrl}-${variable.key}-${variableIndex}`}
+                                className="rounded-md border border-slate-200 bg-white p-2"
+                              >
+                                <p className="break-all text-xs font-medium text-slate-900">
+                                  {variable.key}
+                                </p>
                                 <div className="mt-1 space-y-1 text-[11px] text-slate-600">
                                   {Object.entries(variable.config)
-                                    .filter(([, value]) => hasRenderableValue(value))
+                                    .filter(([, value]) =>
+                                      hasRenderableValue(value)
+                                    )
                                     .map(([fieldKey, fieldValue]) => (
-                                      <div key={`${server.name}-${remoteUrl}-${variable.key}-${fieldKey}`}>
-                                        <span className="font-medium text-slate-700">{getVariableFieldLabel(fieldKey)}:</span>{" "}
-                                        {renderStructuredValue(fieldValue, `${server.name}-${remoteUrl}-${variable.key}-${fieldKey}`)}
+                                      <div
+                                        key={`${server.name}-${remoteUrl}-${variable.key}-${fieldKey}`}
+                                      >
+                                        <span className="font-medium text-slate-700">
+                                          {getVariableFieldLabel(fieldKey)}:
+                                        </span>{" "}
+                                        {renderStructuredValue(
+                                          fieldValue,
+                                          `${server.name}-${remoteUrl}-${variable.key}-${fieldKey}`
+                                        )}
                                       </div>
                                     ))}
                                 </div>
@@ -375,25 +477,49 @@ export default function McpRegistryDetailModal({
 
             {displayPackages.length > 0 ? (
               <div className="space-y-2">
-                <p className="text-sm font-semibold text-slate-900">{t("mcpTools.registry.packages")}</p>
+                <p className="text-sm font-semibold text-slate-900">
+                  {t("mcpTools.registry.packages")}
+                </p>
                 <div className="space-y-2">
                   {displayPackages.map((pkg, index) => (
-                    <div key={`${server.name}-${String(pkg.identifier || index)}-${String(pkg.version || "")}-${index}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-                      <p className="font-medium text-slate-900 break-all">{String(pkg.identifier || "-")}</p>
+                    <div
+                      key={`${server.name}-${String(pkg.identifier || index)}-${String(pkg.version || "")}-${index}`}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <p className="font-medium text-slate-900 break-all">
+                        {String(pkg.identifier || "-")}
+                      </p>
                       <div className="mt-1 space-y-1 text-xs text-slate-600">
                         {Object.entries(pkg)
-                          .filter(([fieldKey, value]) => !["transport", "runtimeArguments", "packageArguments", "environmentVariables"].includes(fieldKey) && hasRenderableValue(value))
+                          .filter(
+                            ([fieldKey, value]) =>
+                              ![
+                                "transport",
+                                "runtimeArguments",
+                                "packageArguments",
+                                "environmentVariables",
+                              ].includes(fieldKey) && hasRenderableValue(value)
+                          )
                           .map(([fieldKey, fieldValue]) => (
-                            <div key={`${server.name}-${String(pkg.identifier || index)}-${fieldKey}`}>
-                              <span className="font-medium text-slate-700">{getPackageFieldLabel(fieldKey)}:</span>{" "}
-                              {renderStructuredValue(fieldValue, `${server.name}-${String(pkg.identifier || index)}-${fieldKey}`)}
+                            <div
+                              key={`${server.name}-${String(pkg.identifier || index)}-${fieldKey}`}
+                            >
+                              <span className="font-medium text-slate-700">
+                                {getPackageFieldLabel(fieldKey)}:
+                              </span>{" "}
+                              {renderStructuredValue(
+                                fieldValue,
+                                `${server.name}-${String(pkg.identifier || index)}-${fieldKey}`
+                              )}
                             </div>
                           ))}
                       </div>
 
                       {pkg.transport && typeof pkg.transport === "object" ? (
                         <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
-                          <p className="text-xs font-semibold text-slate-700">{t("mcpTools.registry.packageField.transport")}</p>
+                          <p className="text-xs font-semibold text-slate-700">
+                            {t("mcpTools.registry.packageField.transport")}
+                          </p>
                           <div className="rounded-md border border-slate-200 bg-white p-2">
                             {renderFieldRows(
                               pkg.transport as Record<string, unknown>,
@@ -404,26 +530,41 @@ export default function McpRegistryDetailModal({
                           </div>
                           {renderConfigCards(
                             t("mcpTools.registry.remoteHeaders"),
-                            normalizeRecordItems((pkg.transport as Record<string, unknown>).headers),
+                            normalizeRecordItems(
+                              (pkg.transport as Record<string, unknown>).headers
+                            ),
                             getHeaderFieldLabel,
                             `${server.name}-${String(pkg.identifier || index)}-transport-headers`,
                             (item, headerIndex) =>
                               typeof item.name === "string" && item.name.trim()
                                 ? item.name
-                                : t("mcpTools.registry.headerFallback", { index: headerIndex + 1 }),
+                                : t("mcpTools.registry.headerFallback", {
+                                    index: headerIndex + 1,
+                                  }),
                             ["name"]
                           )}
                           {renderConfigCards(
                             t("mcpTools.registry.remoteVariables"),
-                            Object.entries(((pkg.transport as Record<string, unknown>).variables as Record<string, unknown>) || {})
-                              .filter(([, value]) => Boolean(value) && typeof value === "object")
-                              .map(([key, value]) => ({ key, ...(value as Record<string, unknown>) })),
+                            Object.entries(
+                              ((pkg.transport as Record<string, unknown>)
+                                .variables as Record<string, unknown>) || {}
+                            )
+                              .filter(
+                                ([, value]) =>
+                                  Boolean(value) && typeof value === "object"
+                              )
+                              .map(([key, value]) => ({
+                                key,
+                                ...(value as Record<string, unknown>),
+                              })),
                             getVariableFieldLabel,
                             `${server.name}-${String(pkg.identifier || index)}-transport-variables`,
                             (item, variableIndex) =>
                               typeof item.key === "string" && item.key.trim()
                                 ? item.key
-                                : t("mcpTools.registry.variableFallback", { index: variableIndex + 1 }),
+                                : t("mcpTools.registry.variableFallback", {
+                                    index: variableIndex + 1,
+                                  }),
                             ["key"]
                           )}
                         </div>
@@ -437,7 +578,9 @@ export default function McpRegistryDetailModal({
                         (item, argIndex) =>
                           typeof item.name === "string" && item.name.trim()
                             ? item.name
-                            : t("mcpTools.registry.variableFallback", { index: argIndex + 1 })
+                            : t("mcpTools.registry.variableFallback", {
+                                index: argIndex + 1,
+                              })
                       )}
 
                       {renderConfigCards(
@@ -448,7 +591,9 @@ export default function McpRegistryDetailModal({
                         (item, argIndex) =>
                           typeof item.name === "string" && item.name.trim()
                             ? item.name
-                            : t("mcpTools.registry.variableFallback", { index: argIndex + 1 })
+                            : t("mcpTools.registry.variableFallback", {
+                                index: argIndex + 1,
+                              })
                       )}
 
                       {(() => {
@@ -456,11 +601,15 @@ export default function McpRegistryDetailModal({
                         const envItems = Array.isArray(env)
                           ? normalizeRecordItems(env)
                           : env && typeof env === "object"
-                          ? Object.entries(env as Record<string, unknown>).map(([key, value]) => ({ key, value }))
-                          : [];
+                            ? Object.entries(
+                                env as Record<string, unknown>
+                              ).map(([key, value]) => ({ key, value }))
+                            : [];
 
                         return renderConfigCards(
-                          t("mcpTools.registry.packageField.environmentVariables"),
+                          t(
+                            "mcpTools.registry.packageField.environmentVariables"
+                          ),
                           envItems,
                           getVariableFieldLabel,
                           `${server.name}-${String(pkg.identifier || index)}-environment-variables`,
@@ -468,8 +617,10 @@ export default function McpRegistryDetailModal({
                             typeof item.name === "string" && item.name.trim()
                               ? item.name
                               : typeof item.key === "string" && item.key.trim()
-                              ? item.key
-                              : t("mcpTools.registry.variableFallback", { index: envIndex + 1 }),
+                                ? item.key
+                                : t("mcpTools.registry.variableFallback", {
+                                    index: envIndex + 1,
+                                  }),
                           ["name", "key"]
                         );
                       })()}
@@ -482,11 +633,18 @@ export default function McpRegistryDetailModal({
 
           <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
             {hasServerJson ? (
-              <Button className="rounded-full" onClick={() => setShowServerJsonModal(true)}>
+              <Button
+                className="rounded-full"
+                onClick={() => setShowServerJsonModal(true)}
+              >
                 {t("mcpTools.registry.viewServerJson")}
               </Button>
             ) : null}
-            <Button type="primary" className="rounded-full" onClick={() => onQuickAddFromRegistry(service)}>
+            <Button
+              type="primary"
+              className="rounded-full"
+              onClick={() => onQuickAdd(service)}
+            >
               {t("mcpTools.registry.quickAdd")}
             </Button>
           </div>

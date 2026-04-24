@@ -2,42 +2,50 @@ import { useEffect, useMemo, useState } from "react";
 import { DatePicker, Dropdown, Input, Select, Switch } from "antd";
 import type { MenuProps } from "antd";
 import dayjs from "dayjs";
-import { VERSION_PATTERN } from "@/lib/mcpTools";
+import { useTranslation } from "react-i18next";
+import { VERSION_PATTERN } from "@/const/mcpTools";
 
-interface Props {
-  registrySearchValue: string;
-  registryPage: number;
+interface McpRegistryToolbarProps {
+  search: string;
+  version: string;
+  updatedSince: string;
+  includeDeleted: boolean;
+  page: number;
   resultCount: number;
-  registryVersion: string;
-  registryUpdatedSince: string;
-  registryIncludeDeleted: boolean;
-  onRegistrySearchChange: (value: string) => void;
-  onRegistryVersionChange: (value: string) => void;
-  onRegistryUpdatedSinceChange: (value: string) => void;
-  onRegistryIncludeDeletedChange: (value: boolean) => void;
-  t: (key: string, params?: Record<string, unknown>) => string;
+  onSearchChange: (value: string) => void;
+  onVersionChange: (value: string) => void;
+  onUpdatedSinceChange: (value: string) => void;
+  onIncludeDeletedChange: (value: boolean) => void;
 }
 
 export default function McpRegistryToolbar({
-  registrySearchValue,
-  registryPage,
+  search,
+  version,
+  updatedSince,
+  includeDeleted,
+  page,
   resultCount,
-  registryVersion,
-  registryUpdatedSince,
-  registryIncludeDeleted,
-  onRegistrySearchChange,
-  onRegistryVersionChange,
-  onRegistryUpdatedSinceChange,
-  onRegistryIncludeDeletedChange,
-  t,
-}: Props) {
-  const [registryVersionMode, setRegistryVersionMode] = useState<"all" | "latest" | "custom">("latest");
+  onSearchChange,
+  onVersionChange,
+  onUpdatedSinceChange,
+  onIncludeDeletedChange,
+}: McpRegistryToolbarProps) {
+  const { t } = useTranslation("common");
+  const [versionMode, setVersionMode] = useState<"all" | "latest" | "custom">(
+    "latest"
+  );
   const [customVersion, setCustomVersion] = useState("");
+
   const marketMenuItems: MenuProps["items"] = [
     {
       key: "modelscope",
       label: (
-        <a href="https://www.modelscope.cn/mcp" target="_blank" rel="noreferrer" className="text-[#1677ff] hover:underline">
+        <a
+          href="https://www.modelscope.cn/mcp"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[#1677ff] hover:underline"
+        >
           {t("mcpTools.registry.market.modelscope")}
         </a>
       ),
@@ -45,7 +53,12 @@ export default function McpRegistryToolbar({
     {
       key: "mcp-so",
       label: (
-        <a href="https://mcp.so/" target="_blank" rel="noreferrer" className="text-[#1677ff] hover:underline">
+        <a
+          href="https://mcp.so/"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[#1677ff] hover:underline"
+        >
           {t("mcpTools.registry.market.mcpso")}
         </a>
       ),
@@ -53,54 +66,56 @@ export default function McpRegistryToolbar({
   ];
 
   const updatedSinceDateValue = useMemo(() => {
-    if (!registryUpdatedSince) return null;
-    const parsed = dayjs(registryUpdatedSince);
+    if (!updatedSince) return null;
+    const parsed = dayjs(updatedSince);
     return parsed.isValid() ? parsed : null;
-  }, [registryUpdatedSince]);
+  }, [updatedSince]);
 
-  const customVersionError = customVersion.trim().length > 0 && !VERSION_PATTERN.test(customVersion.trim());
+  const customVersionError =
+    customVersion.trim().length > 0 &&
+    !VERSION_PATTERN.test(customVersion.trim());
 
   useEffect(() => {
-    const value = (registryVersion || "").trim();
+    const value = (version || "").trim();
     if (!value) {
-      setRegistryVersionMode("all");
+      setVersionMode("all");
       setCustomVersion("");
       return;
     }
     if (value.toLowerCase() === "latest") {
-      setRegistryVersionMode("latest");
+      setVersionMode("latest");
       setCustomVersion("");
       return;
     }
-    setRegistryVersionMode("custom");
+    setVersionMode("custom");
     setCustomVersion(value);
-  }, [registryVersion]);
+  }, [version]);
 
   const handleVersionModeChange = (mode: "all" | "latest" | "custom") => {
-    setRegistryVersionMode(mode);
+    setVersionMode(mode);
     if (mode === "all") {
       setCustomVersion("");
-      onRegistryVersionChange("");
+      onVersionChange("");
       return;
     }
     if (mode === "latest") {
       setCustomVersion("");
-      onRegistryVersionChange("latest");
+      onVersionChange("latest");
       return;
     }
     setCustomVersion("");
-    onRegistryVersionChange("");
+    onVersionChange("");
   };
 
   const handleCustomVersionChange = (value: string) => {
     setCustomVersion(value);
     const trimmed = value.trim();
     if (!trimmed) {
-      onRegistryVersionChange("");
+      onVersionChange("");
       return;
     }
     if (VERSION_PATTERN.test(trimmed)) {
-      onRegistryVersionChange(trimmed);
+      onVersionChange(trimmed);
     }
   };
 
@@ -108,16 +123,20 @@ export default function McpRegistryToolbar({
     <div className="space-y-5">
       <div className="flex items-center gap-3">
         <Input
-          value={registrySearchValue}
-          onChange={(event) => onRegistrySearchChange(event.target.value)}
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t("mcpTools.registry.searchPlaceholder")}
           size="large"
           className="w-full rounded-2xl"
         />
         <div className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-          {t("mcpTools.registry.pageResult", { page: registryPage, count: resultCount })}
+          {t("mcpTools.registry.pageResult", { page, count: resultCount })}
         </div>
-        <Dropdown menu={{ items: marketMenuItems }} trigger={["hover"]} placement="bottomRight">
+        <Dropdown
+          menu={{ items: marketMenuItems }}
+          trigger={["hover"]}
+          placement="bottomRight"
+        >
           <span className="cursor-pointer whitespace-nowrap text-sm font-medium text-[#1677ff] hover:underline">
             {t("mcpTools.registry.market.more")}
           </span>
@@ -128,8 +147,8 @@ export default function McpRegistryToolbar({
         <label className="text-xs text-slate-500">
           {t("mcpTools.registry.versionFilter")}
           <Select
-            value={registryVersionMode}
-            onChange={(value) => handleVersionModeChange(value)}
+            value={versionMode}
+            onChange={handleVersionModeChange}
             className="mt-1 w-full"
             options={[
               { label: t("mcpTools.registry.versionAll"), value: "all" },
@@ -142,7 +161,9 @@ export default function McpRegistryToolbar({
           {t("mcpTools.registry.updatedSince")}
           <DatePicker
             value={updatedSinceDateValue}
-            onChange={(value) => onRegistryUpdatedSinceChange(value ? value.toISOString() : "")}
+            onChange={(value) =>
+              onUpdatedSinceChange(value ? value.toISOString() : "")
+            }
             showTime
             allowClear
             className="mt-1 w-full"
@@ -151,14 +172,18 @@ export default function McpRegistryToolbar({
         </label>
         <div className="flex items-end justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2">
           <div>
-            <p className="text-xs text-slate-500">{t("mcpTools.registry.includeDeleted")}</p>
-            <p className="text-xs text-slate-400">{t("mcpTools.registry.includeDeletedDesc")}</p>
+            <p className="text-xs text-slate-500">
+              {t("mcpTools.registry.includeDeleted")}
+            </p>
+            <p className="text-xs text-slate-400">
+              {t("mcpTools.registry.includeDeletedDesc")}
+            </p>
           </div>
-          <Switch checked={registryIncludeDeleted} onChange={onRegistryIncludeDeletedChange} />
+          <Switch checked={includeDeleted} onChange={onIncludeDeletedChange} />
         </div>
       </div>
 
-      {registryVersionMode === "custom" ? (
+      {versionMode === "custom" ? (
         <label className="block text-xs text-slate-500">
           {t("mcpTools.registry.customVersion")}
           <Input
@@ -169,7 +194,9 @@ export default function McpRegistryToolbar({
             className="mt-1 rounded-xl"
           />
           {customVersionError ? (
-            <span className="mt-1 inline-block text-xs text-rose-500">{t("mcpTools.registry.customVersionError")}</span>
+            <span className="mt-1 inline-block text-xs text-rose-500">
+              {t("mcpTools.registry.customVersionError")}
+            </span>
           ) : null}
         </label>
       ) : null}

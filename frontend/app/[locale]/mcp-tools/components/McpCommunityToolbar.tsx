@@ -1,44 +1,47 @@
 import { Input, Select } from "antd";
+import { useTranslation } from "react-i18next";
+import type { McpTagStat } from "@/types/mcpTools";
+import type { CommunityTransportFilter } from "@/hooks/mcpTools/useMcpCommunityBrowser";
 
-interface Props {
-  communitySearchValue: string;
-  communityTransportTypeFilter: "all" | "http" | "sse" | "container";
-  communityTagFilter: string;
-  communityTagStats: Array<{ tag: string; count: number }>;
-  communityPage: number;
+interface McpCommunityToolbarProps {
+  search: string;
+  transport: CommunityTransportFilter;
+  tag: string;
+  tagStats: McpTagStat[];
+  page: number;
   resultCount: number;
-  onCommunitySearchChange: (value: string) => void;
-  onCommunityTransportTypeFilterChange: (value: "all" | "http" | "sse" | "container") => void;
-  onCommunityTagFilterChange: (value: string) => void;
-  t: (key: string, params?: Record<string, unknown>) => string;
+  onSearchChange: (value: string) => void;
+  onTransportChange: (value: CommunityTransportFilter) => void;
+  onTagChange: (value: string) => void;
 }
 
 export default function McpCommunityToolbar({
-  communitySearchValue,
-  communityTransportTypeFilter,
-  communityTagFilter,
-  communityTagStats,
-  communityPage,
+  search,
+  transport,
+  tag,
+  tagStats,
+  page,
   resultCount,
-  onCommunitySearchChange,
-  onCommunityTransportTypeFilterChange,
-  onCommunityTagFilterChange,
-  t,
-}: Props) {
+  onSearchChange,
+  onTransportChange,
+  onTagChange,
+}: McpCommunityToolbarProps) {
+  const { t } = useTranslation("common");
+
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <Input
-          value={communitySearchValue}
-          onChange={(event) => onCommunitySearchChange(event.target.value)}
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t("mcpTools.community.searchPlaceholder")}
           size="large"
           className="w-full rounded-2xl"
         />
         <Select
           size="large"
-          value={communityTransportTypeFilter}
-          onChange={onCommunityTransportTypeFilterChange}
+          value={transport}
+          onChange={onTransportChange}
           className="w-full"
           options={[
             { value: "all", label: t("mcpTools.page.transportFilter.all") },
@@ -49,12 +52,12 @@ export default function McpCommunityToolbar({
         />
         <Select
           size="large"
-          value={communityTagFilter}
-          onChange={onCommunityTagFilterChange}
+          value={tag}
+          onChange={onTagChange}
           className="w-full"
           options={[
             { value: "all", label: t("mcpTools.page.tagFilter.all") },
-            ...communityTagStats.map((item) => ({
+            ...tagStats.map((item) => ({
               value: item.tag,
               label: `${item.tag} (${item.count})`,
             })),
@@ -63,7 +66,7 @@ export default function McpCommunityToolbar({
       </div>
       <div className="flex items-center gap-3">
         <div className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-          {t("mcpTools.community.pageResult", { page: communityPage, count: resultCount })}
+          {t("mcpTools.community.pageResult", { page, count: resultCount })}
         </div>
       </div>
     </div>

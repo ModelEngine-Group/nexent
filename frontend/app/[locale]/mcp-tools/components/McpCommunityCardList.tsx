@@ -1,31 +1,32 @@
 import { Button } from "antd";
+import { useTranslation } from "react-i18next";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import McpCommunityCard from "./McpCommunityCard";
 
-interface Props {
-  communityLoading: boolean;
+interface McpCommunityCardListProps {
+  loading: boolean;
   services: CommunityMcpCard[];
-  hasPrevCommunityPage: boolean;
-  hasNextCommunityPage: boolean;
-  onPrevCommunityPage: () => void;
-  onNextCommunityPage: () => void;
-  onSelectCommunityService: (service: CommunityMcpCard) => void;
-  onQuickAddFromCommunity: (service: CommunityMcpCard) => void;
-  t: (key: string, params?: Record<string, unknown>) => string;
+  hasPrevPage: boolean;
+  hasNextPage: boolean;
+  onPrevPage: () => void;
+  onNextPage: () => void;
+  onSelect: (service: CommunityMcpCard) => void;
+  onQuickAdd: (service: CommunityMcpCard) => void;
 }
 
 export default function McpCommunityCardList({
-  communityLoading,
+  loading,
   services,
-  hasPrevCommunityPage,
-  hasNextCommunityPage,
-  onPrevCommunityPage,
-  onNextCommunityPage,
-  onSelectCommunityService,
-  onQuickAddFromCommunity,
-  t,
-}: Props) {
-  if (communityLoading) {
+  hasPrevPage,
+  hasNextPage,
+  onPrevPage,
+  onNextPage,
+  onSelect,
+  onQuickAdd,
+}: McpCommunityCardListProps) {
+  const { t } = useTranslation("common");
+
+  if (loading) {
     return (
       <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-slate-500">
         {t("mcpTools.community.loading")}
@@ -48,18 +49,25 @@ export default function McpCommunityCardList({
           <McpCommunityCard
             key={`${service.name}::${service.version || "-"}::${service.publishedAt || "-"}::${index}`}
             service={service}
-            t={t}
-            onSelectCommunityService={onSelectCommunityService}
-            onQuickAddFromCommunity={onQuickAddFromCommunity}
+            onSelect={onSelect}
+            onQuickAdd={onQuickAdd}
           />
         ))}
       </div>
 
       <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
-        <Button className="rounded-full" onClick={onPrevCommunityPage} disabled={!hasPrevCommunityPage || communityLoading}>
+        <Button
+          className="rounded-full"
+          onClick={onPrevPage}
+          disabled={!hasPrevPage || loading}
+        >
           {t("mcpTools.community.prevPage")}
         </Button>
-        <Button className="rounded-full" onClick={onNextCommunityPage} disabled={!hasNextCommunityPage || communityLoading}>
+        <Button
+          className="rounded-full"
+          onClick={onNextPage}
+          disabled={!hasNextPage || loading}
+        >
           {t("mcpTools.community.nextPage")}
         </Button>
       </div>

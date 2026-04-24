@@ -1,31 +1,32 @@
 import { Button } from "antd";
+import { useTranslation } from "react-i18next";
 import type { RegistryMcpCard } from "@/types/mcpTools";
 import McpRegistryCard from "./McpRegistryCard";
 
-interface Props {
-  registryLoading: boolean;
+interface McpRegistryCardListProps {
+  loading: boolean;
   services: RegistryMcpCard[];
-  hasPrevRegistryPage: boolean;
-  hasNextRegistryPage: boolean;
-  onPrevRegistryPage: () => void;
-  onNextRegistryPage: () => void;
-  onSelectRegistryService: (service: RegistryMcpCard) => void;
-  onQuickAddFromRegistry: (service: RegistryMcpCard) => void;
-  t: (key: string, params?: Record<string, unknown>) => string;
+  hasPrevPage: boolean;
+  hasNextPage: boolean;
+  onPrevPage: () => void;
+  onNextPage: () => void;
+  onSelect: (service: RegistryMcpCard) => void;
+  onQuickAdd: (service: RegistryMcpCard) => void;
 }
 
 export default function McpRegistryCardList({
-  registryLoading,
+  loading,
   services,
-  hasPrevRegistryPage,
-  hasNextRegistryPage,
-  onPrevRegistryPage,
-  onNextRegistryPage,
-  onSelectRegistryService,
-  onQuickAddFromRegistry,
-  t,
-}: Props) {
-  if (registryLoading) {
+  hasPrevPage,
+  hasNextPage,
+  onPrevPage,
+  onNextPage,
+  onSelect,
+  onQuickAdd,
+}: McpRegistryCardListProps) {
+  const { t } = useTranslation("common");
+
+  if (loading) {
     return (
       <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-slate-500">
         {t("mcpTools.registry.loading")}
@@ -48,18 +49,25 @@ export default function McpRegistryCardList({
           <McpRegistryCard
             key={`${service.name}::${service.version || "-"}::${service.publishedAt || "-"}::${index}`}
             service={service}
-            t={t}
-            onSelectRegistryService={onSelectRegistryService}
-            onQuickAddFromRegistry={onQuickAddFromRegistry}
+            onSelect={onSelect}
+            onQuickAdd={onQuickAdd}
           />
         ))}
       </div>
 
       <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
-        <Button className="rounded-full" onClick={onPrevRegistryPage} disabled={!hasPrevRegistryPage || registryLoading}>
+        <Button
+          className="rounded-full"
+          onClick={onPrevPage}
+          disabled={!hasPrevPage || loading}
+        >
           {t("mcpTools.registry.prevPage")}
         </Button>
-        <Button className="rounded-full" onClick={onNextRegistryPage} disabled={!hasNextRegistryPage || registryLoading}>
+        <Button
+          className="rounded-full"
+          onClick={onNextPage}
+          disabled={!hasNextPage || loading}
+        >
           {t("mcpTools.registry.nextPage")}
         </Button>
       </div>
