@@ -106,6 +106,18 @@ config:
     telemetrySampleRate: "1.0"
     slowRequestThresholdSeconds: "5.0"
     slowTokenRateThreshold: "10.0"
+  oauth:
+    githubClientId: ""
+    githubClientSecret: ""
+    enableWechat: "false"
+    wechatClientId: ""
+    wechatClientSecret: ""
+    gdeUrl: ""
+    gdeClientId: ""
+    gdeClientSecret: ""
+    sslVerify: "true"
+    caBundle: ""
+    callbackBaseUrl: "http://localhost:3000"
 
 # Secrets used by common templates
 secrets:
