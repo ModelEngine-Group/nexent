@@ -599,6 +599,32 @@ class UserTokenUsageLog(TableBase):
     meta_data = Column(JSONB, doc="Additional metadata for this usage log entry, stored as JSON")
 
 
+class UserOAuthAccount(TableBase):
+    __tablename__ = "user_oauth_account_t"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_user_id", name="uq_oauth_provider_user"),
+        {"schema": SCHEMA},
+    )
+
+    oauth_account_id = Column(
+        Integer,
+        Sequence("user_oauth_account_t_oauth_account_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="OAuth account ID, primary key",
+    )
+    user_id = Column(String(100), nullable=False, doc="Supabase user UUID")
+    provider = Column(
+        String(30), nullable=False, doc="OAuth provider name: github, wechat"
+    )
+    provider_user_id = Column(
+        String(200), nullable=False, doc="User ID from the OAuth provider"
+    )
+    provider_email = Column(String(255), doc="Email address from the OAuth provider")
+    provider_username = Column(String(200), doc="Display name from the OAuth provider")
+    tenant_id = Column(String(100), doc="Tenant ID at time of linking")
+
+
 class SkillInfo(TableBase):
     """
     Skill information table - stores skill metadata and content.
