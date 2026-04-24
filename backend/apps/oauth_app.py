@@ -7,6 +7,7 @@ from typing import Optional
 
 from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedError
 from consts.oauth_providers import get_all_provider_definitions
+from database.oauth_account_db import get_oauth_account_by_provider
 from services.oauth_service import (
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
@@ -15,12 +16,12 @@ from services.oauth_service import (
     get_enabled_providers,
     get_provider_user_info,
     list_linked_accounts,
-    unlink_account,
+    unlink_account, parse_state,
 )
 from utils.auth_utils import (
     calculate_expires_at,
     generate_session_jwt,
-    get_current_user_id,
+    get_current_user_id, get_supabase_admin_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -116,8 +117,6 @@ async def callback(
             },
         )
 
-    from services.oauth_service import parse_state
-
     state_info = parse_state(state)
     link_user_id = state_info.get("link_user_id", "")
 
@@ -134,9 +133,6 @@ async def callback(
         provider_user_id = user_info["id"]
         email = user_info["email"]
         username = user_info["username"]
-
-        from utils.auth_utils import get_supabase_admin_client
-        from services.oauth_service import get_oauth_account_by_provider
 
         if link_user_id:
             supabase_user_id = link_user_id
@@ -263,7 +259,6 @@ async def delete_account(provider: str, authorization: Optional[str] = Header(No
         user_id, _ = get_current_user_id(authorization)
 
         has_password_auth = False
-        from utils.auth_utils import get_supabase_admin_client
 
         admin_client = get_supabase_admin_client()
         if admin_client:
