@@ -541,6 +541,29 @@ class SkillInfo(TableBase):
                     doc="Skill source: official, custom, etc.")
 
 
+class PromptTemplateInfo(TableBase):
+    """
+    Prompt template information table - stores tenant-level prompt generation templates.
+    """
+    __tablename__ = "ag_prompt_template_t"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "template_name", name="uq_prompt_template_tenant_name"),
+        {"schema": SCHEMA},
+    )
+
+    template_id = Column(Integer, Sequence("ag_prompt_template_t_template_id_seq", schema=SCHEMA),
+                         primary_key=True, nullable=False, autoincrement=True, doc="Prompt template ID")
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID for multi-tenancy isolation")
+    template_name = Column(String(100), nullable=False, doc="Prompt template unique name within a tenant")
+    description = Column(String(1000), doc="Prompt template description")
+    template_type = Column(String(50), nullable=False, default="prompt_generate",
+                           doc="Template type, currently mainly prompt_generate")
+    content_zh = Column(Text, nullable=False, doc="Chinese YAML content for the template")
+    content_en = Column(Text, nullable=False, doc="English YAML content for the template")
+    source = Column(String(30), nullable=False, default="custom",
+                    doc="Template source: builtin, custom")
+
+
 class SkillToolRelation(TableBase):
     """
     Skill-Tool relation table - many-to-many relationship between skills and tools.

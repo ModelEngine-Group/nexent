@@ -1,4 +1,4 @@
--- 1. Create custom Schema (if not exists)
+﻿-- 1. Create custom Schema (if not exists)
 CREATE SCHEMA IF NOT EXISTS nexent;
 
 -- 2. Switch to the Schema (subsequent operations default to this Schema)
@@ -190,7 +190,7 @@ COMMENT ON COLUMN "model_record_t"."used_token" IS 'Number of tokens already use
 COMMENT ON COLUMN "model_record_t".expected_chunk_size IS 'Expected chunk size for embedding models, used during document chunking';
 COMMENT ON COLUMN "model_record_t".maximum_chunk_size IS 'Maximum chunk size for embedding models, used during document chunking';
 COMMENT ON COLUMN "model_record_t"."display_name" IS 'Model name displayed directly in frontend, customized by user';
-COMMENT ON COLUMN "model_record_t"."connect_status" IS 'Model connectivity status from last check, optional values: "检测中"、"可用"、"不可用"';
+COMMENT ON COLUMN "model_record_t"."connect_status" IS 'Model connectivity status from last check, optional values: "妫€娴嬩腑"銆?鍙敤"銆?涓嶅彲鐢?';
 COMMENT ON COLUMN "model_record_t"."ssl_verify" IS 'Whether to verify SSL certificates when connecting to this model API. Default is true. Set to false for local services without SSL support.';
 COMMENT ON COLUMN "model_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "model_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
@@ -966,6 +966,7 @@ INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, cre
 VALUES ('user_id', 'tenant_id', 'SPEED', '', 'system', 'system')
 ON CONFLICT (user_id, tenant_id) DO NOTHING;
 
+
 -- Create the ag_tenant_agent_version_t table for agent version management
 CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_version_t (
     id BIGSERIAL PRIMARY KEY,
@@ -1067,6 +1068,51 @@ COMMENT ON COLUMN nexent.user_token_usage_log_t.update_time IS 'Update time, aud
 COMMENT ON COLUMN nexent.user_token_usage_log_t.created_by IS 'Creator ID, audit field';
 COMMENT ON COLUMN nexent.user_token_usage_log_t.updated_by IS 'Last updater ID, audit field';
 COMMENT ON COLUMN nexent.user_token_usage_log_t.delete_flag IS 'Soft delete flag, Y means deleted';
+
+
+-- Create the ag_prompt_template_t table in the nexent schema
+CREATE TABLE IF NOT EXISTS nexent.ag_prompt_template_t (
+    template_id SERIAL4 PRIMARY KEY NOT NULL,
+    tenant_id VARCHAR(100) NOT NULL,
+    template_name VARCHAR(100) NOT NULL,
+    description VARCHAR(1000),
+    template_type VARCHAR(50) DEFAULT 'prompt_generate' NOT NULL,
+    content_zh TEXT NOT NULL,
+    content_en TEXT NOT NULL,
+    source VARCHAR(30) DEFAULT 'custom' NOT NULL,
+    created_by VARCHAR(100),
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    CONSTRAINT uq_prompt_template_tenant_name UNIQUE (tenant_id, template_name)
+);
+
+ALTER TABLE nexent.ag_prompt_template_t OWNER TO "root";
+
+COMMENT ON TABLE nexent.ag_prompt_template_t IS 'Prompt template information table - stores tenant-level prompt generation templates.';
+
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_id IS 'Prompt template ID';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.tenant_id IS 'Tenant ID for multi-tenancy isolation';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_name IS 'Prompt template unique name within a tenant';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.description IS 'Prompt template description';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_type IS 'Template type, currently mainly prompt_generate';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.content_zh IS 'Chinese YAML content for the template';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.content_en IS 'English YAML content for the template';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.source IS 'Template source: builtin, custom';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.create_time IS 'Creation timestamp';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.update_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.delete_flag IS 'Soft delete flag: Y/N';
+
+CREATE INDEX IF NOT EXISTS idx_ag_prompt_template_t_tenant_type
+ON nexent.ag_prompt_template_t (tenant_id, template_type)
+WHERE delete_flag = 'N';
+
+CREATE INDEX IF NOT EXISTS idx_ag_prompt_template_t_template_id
+ON nexent.ag_prompt_template_t (template_id)
+WHERE delete_flag = 'N';
 
 -- Create the ag_skill_info_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
@@ -1230,3 +1276,7 @@ WHERE delete_flag = 'N';
 CREATE INDEX IF NOT EXISTS idx_ag_outer_api_services_mcp_service_name
 ON nexent.ag_outer_api_services (mcp_service_name)
 WHERE delete_flag = 'N';
+
+
+
+

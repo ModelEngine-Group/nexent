@@ -2,7 +2,7 @@ import json
 import logging
 import queue
 import threading
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from jinja2 import StrictUndefined, Template
 
@@ -23,13 +23,26 @@ from services.agent_service import (
     _generate_unique_display_name_with_suffix
 )
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import get_prompt_generate_prompt_template
+from utils.prompt_template_utils import (
+    get_prompt_optimize_prompt_template,
+)
+from services.prompt_template_service import get_prompt_template_payload
 
 # Configure logging
 logger = logging.getLogger("prompt_service")
 
 
-def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None):
+def gen_system_prompt_streamable(
+    agent_id: int,
+    model_id: int,
+    task_description: str,
+    user_id: str,
+    tenant_id: str,
+    language: str,
+    template_id: Optional[int] = None,
+    tool_ids: Optional[List[int]] = None,
+    sub_agent_ids: Optional[List[int]] = None
+):
     try:
         for system_prompt in generate_and_save_system_prompt_impl(
             agent_id=agent_id,
@@ -38,6 +51,7 @@ def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description:
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,
+            template_id=template_id,
             tool_ids=tool_ids,
             sub_agent_ids=sub_agent_ids
         ):
@@ -51,8 +65,45 @@ def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description:
             error_code = e.error_code
             error_message = e.message
         else:
-            error_code = ErrorCode.MODEL_PROMPT_GENERATION_FAILED
-            error_message = ErrorMessage.get_message(error_code)
+            error_code = ErrorCode.COMMON_VALIDATION_ERROR
+            error_message = str(e) or ErrorMessage.get_message(error_code)
+        yield f"data: {json.dumps({'success': False, 'error': {'code': error_code.value, 'message': error_message}}, ensure_ascii=False)}\n\n"
+
+
+def gen_optimize_prompt_streamable(agent_id: int,
+                                   model_id: int,
+                                   task_description: str,
+                                   prompt_type: str,
+                                   original_content: str,
+                                   feedback: str,
+                                   user_id: str,
+                                   tenant_id: str,
+                                   language: str,
+                                   tool_ids: Optional[List[int]] = None,
+                                   sub_agent_ids: Optional[List[int]] = None):
+    try:
+        for optimized_prompt in optimize_prompt_streamable_impl(
+            agent_id=agent_id,
+            model_id=model_id,
+            task_description=task_description,
+            prompt_type=prompt_type,
+            original_content=original_content,
+            feedback=feedback,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+            tool_ids=tool_ids,
+            sub_agent_ids=sub_agent_ids
+        ):
+            yield f"data: {json.dumps({'success': True, 'data': optimized_prompt}, ensure_ascii=False)}\n\n"
+    except Exception as e:
+        logger.error(f"Error optimizing prompt: {e}")
+        if isinstance(e, AppException):
+            error_code = e.error_code
+            error_message = e.message
+        else:
+            error_code = ErrorCode.COMMON_VALIDATION_ERROR
+            error_message = str(e) or ErrorMessage.get_message(error_code)
         yield f"data: {json.dumps({'success': False, 'error': {'code': error_code.value, 'message': error_message}}, ensure_ascii=False)}\n\n"
 
 
@@ -62,6 +113,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                          user_id: str,
                                          tenant_id: str,
                                          language: str,
+                                         template_id: Optional[int] = None,
                                          tool_ids: Optional[List[int]] = None,
                                          sub_agent_ids: Optional[List[int]] = None):
     # Get description of tool and agent from frontend-provided IDs
@@ -95,6 +147,13 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         sub_agent_info_list = get_enabled_sub_agent_description_for_generate_prompt(
             tenant_id=tenant_id, agent_id=agent_id)
 
+    prompt_template_payload = get_prompt_template_payload(
+        tenant_id=tenant_id,
+        language=language,
+        template_id=template_id
+    )
+    prompt_for_generate = prompt_template_payload["content"]
+
     # 1. Real-time streaming push
     final_results = {"duty": "", "constraint": "", "few_shots": "", "agent_var_name": "", "agent_display_name": "",
                      "agent_description": ""}
@@ -114,7 +173,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
 
     # Collect results and yield non-name fields immediately, but hold name fields for duplicate checking
     for result_data in generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id,
-                                              model_id, language):
+                                              model_id, prompt_for_generate, language):
         result_type = result_data["type"]
         final_results[result_type] = result_data["content"]
 
@@ -142,6 +201,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                 model_id=model_id,
                                 tenant_id=tenant_id,
                                 language=language,
+                                prompt_template=prompt_for_generate,
                                 agents_cache=all_agents,
                                 exclude_agent_id=agent_id
                             )
@@ -183,6 +243,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                 model_id=model_id,
                                 tenant_id=tenant_id,
                                 language=language,
+                                prompt_template=prompt_for_generate,
                                 agents_cache=all_agents,
                                 exclude_agent_id=agent_id
                             )
@@ -223,10 +284,76 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         raise Exception("Failed to generate prompt content.")
 
 
-def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, model_id: int, language: str = LANGUAGE["ZH"]):
-    """Main function for generating system prompts"""
-    prompt_for_generate = get_prompt_generate_prompt_template(language)
+def optimize_prompt_streamable_impl(agent_id: int,
+                                    model_id: int,
+                                    task_description: str,
+                                    prompt_type: str,
+                                    original_content: str,
+                                    feedback: str,
+                                    user_id: str,
+                                    tenant_id: str,
+                                    language: str,
+                                    tool_ids: Optional[List[int]] = None,
+                                    sub_agent_ids: Optional[List[int]] = None):
+    del user_id
+    normalized_feedback = feedback.strip()
+    if not normalized_feedback:
+        raise ValueError("Feedback is required for prompt optimization.")
 
+    normalized_original_content = original_content.strip()
+    if not normalized_original_content:
+        raise ValueError("Original prompt content is required for optimization.")
+
+    tool_info_list, sub_agent_info_list = _resolve_prompt_resources(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        tool_ids=tool_ids,
+        sub_agent_ids=sub_agent_ids
+    )
+    prompt_for_optimize = get_prompt_optimize_prompt_template(language)
+    optimize_user_prompt = join_info_for_optimize_prompt(
+        prompt_for_optimize=prompt_for_optimize,
+        sub_agent_info_list=sub_agent_info_list,
+        task_description=task_description,
+        tool_info_list=tool_info_list,
+        original_content=normalized_original_content,
+        feedback=normalized_feedback,
+        prompt_type=prompt_type,
+        language=language
+    )
+    system_prompt = get_optimize_prompt_system_prompt(
+        prompt_for_optimize=prompt_for_optimize,
+        prompt_type=prompt_type
+    )
+
+    final_content = normalize_prompt_content(
+        call_llm_for_system_prompt(
+            model_id=model_id,
+            user_prompt=optimize_user_prompt,
+            system_prompt=system_prompt,
+            tenant_id=tenant_id
+        )
+    )
+    if not final_content:
+        raise Exception("Failed to optimize prompt content.")
+
+    yield {
+        "type": "optimized_content",
+        "content": final_content,
+        "is_complete": True
+    }
+
+
+def generate_system_prompt(
+    sub_agent_info_list,
+    task_description,
+    tool_info_list,
+    tenant_id: str,
+    model_id: int,
+    prompt_for_generate: Dict[str, Any],
+    language: str = LANGUAGE["ZH"]
+):
+    """Main function for generating system prompts"""
     # Prepare content for generating system prompts
     content = join_info_for_generate_system_prompt(
         prompt_for_generate=prompt_for_generate,
@@ -368,6 +495,95 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
         "assistant_description": assistant_description
     })
     return content
+
+
+def join_info_for_optimize_prompt(prompt_for_optimize,
+                                  sub_agent_info_list,
+                                  task_description,
+                                  tool_info_list,
+                                  original_content: str,
+                                  feedback: str,
+                                  prompt_type: str,
+                                  language: str = LANGUAGE["ZH"]):
+    input_label = "Inputs" if language == 'en' else "接受输入"
+    output_label = "Output type" if language == 'en' else "返回输出类型"
+    prompt_label_mapping = {
+        "duty": "Agent Role" if language == 'en' else "智能体角色",
+        "constraint": "Usage Requirements" if language == 'en' else "使用要求",
+        "few_shots": "Examples" if language == 'en' else "示例"
+    }
+
+    tool_description = "\n".join(
+        [f"- {tool['name']}: {tool['description']} \n {input_label}: {tool['inputs']}\n {output_label}: {tool['output_type']}"
+         for tool in tool_info_list])
+    assistant_description = "\n".join(
+        [f"- {sub_agent_info['name']}: {sub_agent_info['description']}" for sub_agent_info in sub_agent_info_list])
+
+    return Template(prompt_for_optimize["OPTIMIZE_USER_PROMPT"], undefined=StrictUndefined).render({
+        "task_description": task_description,
+        "tool_description": tool_description,
+        "assistant_description": assistant_description,
+        "original_content": original_content,
+        "feedback": feedback,
+        "prompt_label": prompt_label_mapping.get(prompt_type, prompt_type)
+    })
+
+
+def get_optimize_prompt_system_prompt(prompt_for_optimize, prompt_type: str) -> str:
+    prompt_mapping = {
+        "duty": prompt_for_optimize["OPTIMIZE_DUTY_SYSTEM_PROMPT"],
+        "constraint": prompt_for_optimize["OPTIMIZE_CONSTRAINT_SYSTEM_PROMPT"],
+        "few_shots": prompt_for_optimize["OPTIMIZE_FEW_SHOTS_SYSTEM_PROMPT"],
+    }
+    if prompt_type not in prompt_mapping:
+        raise ValueError(f"Unsupported prompt type for optimization: {prompt_type}")
+    return prompt_mapping[prompt_type]
+
+
+def normalize_prompt_content(content: str) -> str:
+    normalized_lines = [line.rstrip() for line in content.replace("\r\n", "\n").split("\n")]
+    collapsed_lines = []
+    previous_blank = False
+
+    for line in normalized_lines:
+        is_blank = line.strip() == ""
+        if is_blank and previous_blank:
+            continue
+        collapsed_lines.append(line)
+        previous_blank = is_blank
+
+    normalized_content = "\n".join(collapsed_lines).strip()
+    return normalized_content
+
+
+def _resolve_prompt_resources(agent_id: int,
+                              tenant_id: str,
+                              tool_ids: Optional[List[int]] = None,
+                              sub_agent_ids: Optional[List[int]] = None):
+    if tool_ids and len(tool_ids) > 0:
+        tool_info_list = query_tools_by_ids(tool_ids)
+        logger.debug(f"Using frontend-provided tool IDs: {tool_ids}")
+    else:
+        logger.debug("No tools selected (empty tool_ids list)")
+        tool_info_list = get_enabled_tool_description_for_generate_prompt(
+            tenant_id=tenant_id, agent_id=agent_id)
+
+    if sub_agent_ids and len(sub_agent_ids) > 0:
+        sub_agent_info_list = []
+        for sub_agent_id in sub_agent_ids:
+            try:
+                sub_agent_info = search_agent_info_by_agent_id(
+                    agent_id=sub_agent_id, tenant_id=tenant_id)
+                sub_agent_info_list.append(sub_agent_info)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to get sub-agent info for agent_id {sub_agent_id}: {str(e)}")
+    else:
+        logger.debug("No sub-agents selected (empty sub_agent_ids list)")
+        sub_agent_info_list = get_enabled_sub_agent_description_for_generate_prompt(
+            tenant_id=tenant_id, agent_id=agent_id)
+
+    return tool_info_list, sub_agent_info_list
 
 
 def get_enabled_tool_description_for_generate_prompt(agent_id: int, tenant_id: str):

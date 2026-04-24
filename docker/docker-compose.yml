@@ -1,4 +1,4 @@
-x-es-vars: &es-vars
+﻿x-es-vars: &es-vars
   ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
 x-minio-vars: &minio-vars
   MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
@@ -88,6 +88,7 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - ${ROOT_DIR}/scripts/sync_user_supabase2pg.py:/opt/sync_user_supabase2pg.py:ro
+      - ${ROOT_DIR}/scripts/seed_prompt_templates.py:/opt/seed_prompt_templates.py:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
       <<: [*minio-vars, *es-vars]
@@ -331,3 +332,4 @@ networks:
 
 volumes:
   redis_data:
+

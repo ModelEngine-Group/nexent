@@ -9,29 +9,15 @@ from consts.const import LANGUAGE
 logger = logging.getLogger("prompt_template_utils")
 
 
-def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kwargs) -> Dict[str, Any]:
-    """
-    Get prompt template
-
-    Args:
-        template_type: Template type, supports the following values:
-            - 'prompt_generate': Prompt generation template
-            - 'agent': Agent template including manager and managed agents
-            - 'generate_title': Title generation template
-            - 'document_summary': Document summary template (Map stage)
-            - 'cluster_summary_reduce': Cluster summary reduce template (Reduce stage)
-        language: Language code ('zh' or 'en')
-        **kwargs: Additional parameters, for agent type need to pass is_manager parameter
-
-    Returns:
-        dict: Loaded prompt template
-    """
-
-    # Define template path mapping
-    template_paths = {
+def _get_template_paths() -> Dict[str, Any]:
+    return {
         'prompt_generate': {
             LANGUAGE["ZH"]: 'backend/prompts/utils/prompt_generate_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/utils/prompt_generate_en.yaml'
+        },
+        'prompt_optimize': {
+            LANGUAGE["ZH"]: 'backend/prompts/utils/prompt_optimize_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/utils/prompt_optimize_en.yaml'
         },
         'agent': {
             LANGUAGE["ZH"]: {
@@ -61,10 +47,17 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         }
     }
 
+
+def _resolve_template_absolute_path(
+    template_type: str,
+    language: str = LANGUAGE["ZH"],
+    **kwargs
+) -> str:
+    template_paths = _get_template_paths()
+
     if template_type not in template_paths:
         raise ValueError(f"Unsupported template type: {template_type}")
 
-    # Get template path
     if template_type == 'agent':
         is_manager = kwargs.get('is_manager', False)
         agent_type = 'manager' if is_manager else 'managed'
@@ -72,15 +65,45 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
     else:
         template_path = template_paths[template_type][language]
 
-    # Get the directory of this file and construct absolute path
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # Go up one level from utils to backend, then use the template path
     backend_dir = os.path.dirname(current_dir)
-    absolute_template_path = os.path.join(backend_dir, template_path.replace('backend/', ''))
-    
-    # Read and return template content
+    return os.path.join(backend_dir, template_path.replace('backend/', ''))
+
+
+def get_prompt_template_text(
+    template_type: str,
+    language: str = LANGUAGE["ZH"],
+    **kwargs
+) -> str:
+    absolute_template_path = _resolve_template_absolute_path(
+        template_type,
+        language,
+        **kwargs
+    )
     with open(absolute_template_path, 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
+        return f.read()
+
+
+def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kwargs) -> Dict[str, Any]:
+    """
+    Get prompt template
+
+    Args:
+        template_type: Template type, supports the following values:
+            - 'prompt_generate': Prompt generation template
+            - 'prompt_optimize': Prompt optimization template
+            - 'agent': Agent template including manager and managed agents
+            - 'generate_title': Title generation template
+            - 'document_summary': Document summary template (Map stage)
+            - 'cluster_summary_reduce': Cluster summary reduce template (Reduce stage)
+        language: Language code ('zh' or 'en')
+        **kwargs: Additional parameters, for agent type need to pass is_manager parameter
+
+    Returns:
+        dict: Loaded prompt template
+    """
+
+    return yaml.safe_load(get_prompt_template_text(template_type, language, **kwargs))
 
 
 # For backward compatibility, keep original function names as wrapper functions
@@ -97,6 +120,19 @@ def get_prompt_generate_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[
     return get_prompt_template('prompt_generate', language)
 
 
+def get_prompt_generate_prompt_template_text(language: str = LANGUAGE["ZH"]) -> str:
+    """
+    Get raw prompt generation template text.
+
+    Args:
+        language: Language code ('zh' or 'en')
+
+    Returns:
+        str: Raw YAML template text
+    """
+    return get_prompt_template_text('prompt_generate', language)
+
+
 def get_agent_prompt_template(is_manager: bool, language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
     """
     Get agent prompt template
@@ -109,6 +145,19 @@ def get_agent_prompt_template(is_manager: bool, language: str = LANGUAGE["ZH"]) 
         dict: Loaded prompt template configuration
     """
     return get_prompt_template('agent', language, is_manager=is_manager)
+
+
+def get_prompt_optimize_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
+    """
+    Get prompt optimization prompt template
+
+    Args:
+        language: Language code ('zh' or 'en')
+
+    Returns:
+        dict: Loaded prompt optimization template configuration
+    """
+    return get_prompt_template('prompt_optimize', language)
 
 
 def get_generate_title_prompt_template(language: str = 'zh') -> Dict[str, Any]:

@@ -248,10 +248,41 @@ class GeneratePromptRequest(BaseModel):
     task_description: str
     agent_id: int
     model_id: int
+    template_id: Optional[int] = None
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
+
+
+class OptimizePromptRequest(BaseModel):
+    task_description: str
+    agent_id: int
+    model_id: int
+    prompt_type: str
+    original_content: str
+    feedback: str
+    tool_ids: Optional[List[int]] = Field(
+        None, description="Optional: tool IDs from frontend (takes precedence over database query)")
+    sub_agent_ids: Optional[List[int]] = Field(
+        None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
+
+
+class PromptTemplateCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    content_zh: str
+    content_en: Optional[str] = ""
+    template_type: Optional[str] = "prompt_generate"
+    source: Optional[str] = "custom"
+
+
+class PromptTemplateUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    content_zh: Optional[str] = None
+    content_en: Optional[str] = None
+    source: Optional[str] = None
 
 
 class GenerateTitleRequest(BaseModel):

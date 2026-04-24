@@ -17,15 +17,16 @@ import {
   App,
 } from "antd";
 import type { TabsProps } from "antd";
-import { Zap, Maximize2 } from "lucide-react";
+import { Sparkles, Maximize2, Zap, Settings2 } from "lucide-react";
 
 import log from "@/lib/logger";
 import { AgentProfileInfo, AgentBusinessInfo } from "@/types/agentConfig";
+import type { PromptTemplateItem } from "@/types/agentConfig";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
   GENERATE_PROMPT_STREAM_TYPES,
 } from "@/const/agentConfig";
-import { generatePromptStream } from "@/services/promptService";
+import { fetchPromptTemplates, generatePromptStream, optimizePromptStream } from "@/services/promptService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -36,6 +37,7 @@ import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
+import PromptTemplateManageModal from "./PromptTemplateManageModal";
 
 const { TextArea } = Input;
 
@@ -107,6 +109,12 @@ export default function AgentGenerateDetail({
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
+  const [expandModalMode, setExpandModalMode] = useState<"edit" | "optimize">("edit");
+  const [optimizeLoading, setOptimizeLoading] = useState(false);
+  const [optimizedPromptContent, setOptimizedPromptContent] = useState("");
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplateItem[]>([]);
+  const [selectedPromptTemplateId, setSelectedPromptTemplateId] = useState<number | undefined>(undefined);
+  const [promptTemplateModalOpen, setPromptTemplateModalOpen] = useState(false);
 
   // Only show "no edit permission" tooltip when the panel is active and agent is read-only.
   // Note: when no agent is selected, AgentInfoComp shows an overlay and we should not show
@@ -161,6 +169,22 @@ export default function AgentGenerateDetail({
     businessLogicModelName: "",
     businessLogicModelId: 0,
   });
+
+  const refreshPromptTemplates = async () => {
+    try {
+      const templates = await fetchPromptTemplates();
+      setPromptTemplates(templates);
+      setSelectedPromptTemplateId((prev) => {
+        if (prev && templates.some((item) => item.template_id === prev)) {
+          return prev;
+        }
+        return templates[0]?.template_id;
+      });
+    } catch (error) {
+      log.error("Failed to fetch prompt templates:", error);
+      message.error(t("businessLogic.template.manage.loadError"));
+    }
+  };
 
   const normalizeNumberArray = (value: unknown): number[] => {
     const arr = Array.isArray(value) ? value : [];
@@ -289,6 +313,11 @@ export default function AgentGenerateDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editable, currentAgentId, groups, allowedGroupIds, user?.role]);
 
+  useEffect(() => {
+    void refreshPromptTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
     updateBusinessInfo({
@@ -320,19 +349,45 @@ export default function AgentGenerateDetail({
   const handleOpenExpandModal = (type: 'duty' | 'constraint' | 'few-shots') => {
     if (!editable) return;
     setExpandModalType(type);
+    setExpandModalMode("edit");
+    setOptimizedPromptContent("");
+    setExpandModalOpen(true);
+  };
+
+  const handleOpenOptimizeModal = (type: 'duty' | 'constraint' | 'few-shots') => {
+    if (!editable) return;
+    setExpandModalType(type);
+    setExpandModalMode("optimize");
+    setOptimizedPromptContent("");
     setExpandModalOpen(true);
   };
 
   const renderExpandButton = (type: "duty" | "constraint" | "few-shots") => {
     return wrapNoEditTooltipInline(
-      <Button
-        onClick={() => handleOpenExpandModal(type)}
-        title={t("systemPrompt.button.expand")}
-        icon={<Maximize2 size={12} />}
-        size="small"
-        type="text"
-        disabled={!editable || isGenerating}
-      />
+      <div className="flex items-center gap-2">
+        <Button
+          onClick={() => handleOpenOptimizeModal(type)}
+          title={t("promptOptimize.button.trigger")}
+          icon={<Sparkles size={14} />}
+          size="small"
+          type="text"
+          className="h-6 rounded-full border border-slate-200/80 bg-white px-2.5 text-sm text-slate-700 shadow-none hover:border-slate-300 hover:bg-slate-50"
+          disabled={!editable || isGenerating}
+        >
+          {t("promptOptimize.button.trigger")}
+        </Button>
+        <Tooltip title={t("systemPrompt.button.expand")}>
+          <Button
+            onClick={() => handleOpenExpandModal(type)}
+            title={t("systemPrompt.button.expand")}
+            icon={<Maximize2 size={13} />}
+            size="small"
+            type="text"
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200/70 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+            disabled={!editable || isGenerating}
+          />
+        </Tooltip>
+      </div>
     );
   };
 
@@ -376,6 +431,43 @@ export default function AgentGenerateDetail({
   const handleCloseExpandModal = () => {
     setExpandModalOpen(false);
     setExpandModalType(null);
+    setExpandModalMode("edit");
+    setOptimizeLoading(false);
+    setOptimizedPromptContent("");
+  };
+
+  const renderPromptTab = (
+    type: "duty" | "constraint" | "few-shots",
+    fieldName: "dutyPrompt" | "constraintPrompt" | "fewShotsPrompt",
+    placeholder: string,
+    onBlurUpdate: (value: string) => void
+  ) => {
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <div className="flex h-8 items-center justify-between border-b border-slate-200/70 bg-slate-50/35 px-2.5">
+          <div className="truncate text-xs font-medium uppercase tracking-[0.06em] text-slate-500">
+            {placeholder}
+          </div>
+          <div className="shrink-0">
+            {renderExpandButton(type)}
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+          <Form
+            form={form}
+            layout="vertical"
+            className="h-full agent-config-form"
+            disabled={isGenerating}
+          >
+            {renderPromptEditor(
+              fieldName,
+              placeholder,
+              onBlurUpdate
+              )}
+            </Form>
+          </div>
+      </div>
+    );
   };
 
   const handleSaveExpandModal = (content: string) => {
@@ -420,6 +512,103 @@ export default function AgentGenerateDetail({
       default:
         return "";
     }
+  };
+
+  const getOptimizePromptType = () => {
+    switch (expandModalType) {
+      case "duty":
+        return "duty";
+      case "constraint":
+        return "constraint";
+      case "few-shots":
+        return "few_shots";
+      default:
+        return null;
+    }
+  };
+
+  const handleOptimizePrompt = async (feedback: string) => {
+    if (!expandModalType) return;
+
+    const originalContent = getExpandModalContent();
+    if (!originalContent.trim()) {
+      message.error(t("promptOptimize.message.originalRequired"));
+      return;
+    }
+
+    if (!businessInfo.businessDescription.trim()) {
+      message.error(t("businessLogic.config.error.businessDescriptionRequired"));
+      return;
+    }
+
+    if (!businessInfo.businessLogicModelId) {
+      message.error(t("businessLogic.config.message.selectModelRequired"));
+      return;
+    }
+
+    const promptType = getOptimizePromptType();
+    if (!promptType) {
+      message.error(t("promptOptimize.message.optimizeFailed"));
+      return;
+    }
+
+    setOptimizeLoading(true);
+    setOptimizedPromptContent("");
+
+    try {
+      await optimizePromptStream(
+        {
+          agent_id: currentAgentId || 0,
+          task_description: businessInfo.businessDescription,
+          model_id: businessInfo.businessLogicModelId.toString(),
+          prompt_type: promptType,
+          original_content: originalContent,
+          feedback,
+          sub_agent_ids: editedAgent.sub_agent_id_list,
+          tool_ids: Array.isArray(editedAgent.tools)
+            ? editedAgent.tools.map((tool: any) =>
+              typeof tool === "object" && tool.id !== undefined ? tool.id : tool
+            )
+            : [],
+        },
+        (data) => {
+          setOptimizedPromptContent(data.content);
+        },
+        (error) => {
+          log.error("Optimize prompt stream error:", error);
+          let errorMessage = t("promptOptimize.message.optimizeFailed");
+          if (error?.code) {
+            const i18nKey = `errorCode.${error.code}`;
+            const translated = t(i18nKey);
+            if (translated !== i18nKey) {
+              errorMessage = translated;
+            } else if (error?.message) {
+              errorMessage = error.message;
+            }
+          } else if (error?.message) {
+            errorMessage = error.message;
+          }
+          message.error(errorMessage);
+          setOptimizeLoading(false);
+        },
+        () => {
+          setOptimizeLoading(false);
+        }
+      );
+    } catch (error) {
+      log.error("Optimize prompt error:", error);
+      message.error(t("promptOptimize.message.optimizeFailed"));
+      setOptimizeLoading(false);
+    }
+  };
+
+  const handleApplyOptimizedPrompt = () => {
+    if (!optimizedPromptContent.trim()) {
+      message.error(t("promptOptimize.message.optimizedRequired"));
+      return;
+    }
+    handleSaveExpandModal(optimizedPromptContent);
+    message.success(t("promptOptimize.message.applySuccess"));
   };
 
   // Generic validator for agent field uniqueness - use local agent list instead of API call
@@ -474,6 +663,11 @@ export default function AgentGenerateDetail({
       return;
     }
 
+    if (!selectedPromptTemplateId) {
+      message.error(t("businessLogic.template.selectRequired"));
+      return;
+    }
+
     setIsGenerating(true);
     setActiveTab("few-shots");
     try {
@@ -482,6 +676,7 @@ export default function AgentGenerateDetail({
           agent_id: currentAgentId || 0,
           task_description: businessInfo.businessDescription,
           model_id: businessInfo.businessLogicModelId.toString(),
+          template_id: selectedPromptTemplateId,
           sub_agent_ids: editedAgent.sub_agent_id_list,
           tool_ids: Array.isArray(editedAgent.tools)
             ? editedAgent.tools.map((tool: any) =>
@@ -611,6 +806,27 @@ export default function AgentGenerateDetail({
     label: model.displayName || model.name,
     disabled: model.connect_status !== "available",
   }));
+
+  const promptTemplateSelectOptions = promptTemplates.map((template) => ({
+    value: template.template_id,
+    label: template.name,
+  }));
+
+  const controlRowStyle: React.CSSProperties = {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    minWidth: 0,
+  };
+
+  const controlSelectStyle: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: "300px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  };
 
   // Tab items configuration
   const tabItems = [
@@ -854,70 +1070,31 @@ export default function AgentGenerateDetail({
     {
       key: "duty",
       label: t("systemPrompt.card.duty.title"),
-      children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full relative">
-          <div className="absolute top-2 right-2 z-10">
-            {renderExpandButton("duty")}
-          </div>
-          <Form
-            form={form}
-            layout="vertical"
-            className="h-full agent-config-form"
-            disabled={isGenerating}
-          >
-            {renderPromptEditor(
-              "dutyPrompt",
-              t("systemPrompt.card.duty.title"),
-              (value) => updateProfileInfo({ duty_prompt: value })
-            )}
-          </Form>
-        </div>
+      children: renderPromptTab(
+        "duty",
+        "dutyPrompt",
+        t("systemPrompt.card.duty.title"),
+        (value) => updateProfileInfo({ duty_prompt: value })
       ),
     },
     {
       key: "constraint",
       label: t("systemPrompt.card.constraint.title"),
-      children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full relative">
-          <div className="absolute top-2 right-2 z-10">
-            {renderExpandButton("constraint")}
-          </div>
-          <Form
-            form={form}
-            layout="vertical"
-            className="h-full agent-config-form"
-            disabled={isGenerating}
-          >
-            {renderPromptEditor(
-              "constraintPrompt",
-              t("systemPrompt.card.constraint.title"),
-              (value) => updateProfileInfo({ constraint_prompt: value })
-            )}
-          </Form>
-        </div>
+      children: renderPromptTab(
+        "constraint",
+        "constraintPrompt",
+        t("systemPrompt.card.constraint.title"),
+        (value) => updateProfileInfo({ constraint_prompt: value })
       ),
     },
     {
       key: "few-shots",
       label: t("systemPrompt.card.fewShots.title"),
-      children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full relative">
-          <div className="absolute top-2 right-2 z-10">
-            {renderExpandButton("few-shots")}
-          </div>
-          <Form
-            form={form}
-            layout="vertical"
-            className="h-full agent-config-form"
-            disabled={isGenerating}
-          >
-            {renderPromptEditor(
-              "fewShotsPrompt",
-              t("systemPrompt.card.fewShots.title"),
-              (value) => updateProfileInfo({ few_shots_prompt: value })
-            )}
-          </Form>
-        </div>
+      children: renderPromptTab(
+        "few-shots",
+        "fewShotsPrompt",
+        t("systemPrompt.card.fewShots.title"),
+        (value) => updateProfileInfo({ few_shots_prompt: value })
       ),
     },
   ];
@@ -969,8 +1146,37 @@ export default function AgentGenerateDetail({
               )}
 
               {/* Control area */}
-              <Flex style={{ width: "100%" }} align="center">
-                <div style={{ flex: 1, display: "flex", alignItems: "center", minWidth: 0 }}>
+              <Flex style={{ width: "100%" }} align="center" vertical gap={12}>
+                <div style={controlRowStyle}>
+                  <span className="text-xs text-gray-600 mr-3">
+                    {t("businessLogic.template.label")}:
+                  </span>
+                  <Select
+                    value={selectedPromptTemplateId}
+                    onChange={(value) => setSelectedPromptTemplateId(value)}
+                    placeholder={t("businessLogic.template.placeholder")}
+                    options={promptTemplateSelectOptions}
+                    size="middle"
+                    disabled={!editable || isGenerating}
+                    style={controlSelectStyle}
+                  />
+                  <div style={{ marginLeft: 12 }}>
+                    {wrapNoEditTooltipInline(
+                      <Button
+                        type="primary"
+                        size="middle"
+                        onClick={() => setPromptTemplateModalOpen(true)}
+                        disabled={!editable || isGenerating}
+                        icon={<Settings2 size={16} />}
+                      >
+                        <span className="button-text-full">
+                          {t("businessLogic.template.manage.add")}
+                        </span>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div style={controlRowStyle}>
                   <span className="text-xs text-gray-600 mr-3">
                     {t("model.type.llm")}:
                   </span>
@@ -982,32 +1188,25 @@ export default function AgentGenerateDetail({
                     options={modelSelectOptions}
                     size="middle"
                     disabled={!editable || isGenerating}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      maxWidth: '300px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap'
-                    }}
+                    style={controlSelectStyle}
                   />
-                </div>
-                <div style={{ marginLeft: 12 }}>
-                  {wrapNoEditTooltipInline(
-                    <Button
-                      type="primary"
-                      size="middle"
-                      onClick={handleGenerateAgent}
-                      disabled={!editable || loadingModels || isGenerating}
-                      icon={<Zap size={16} />}
-                    >
-                      <span className="button-text-full">
-                        {isGenerating
-                          ? t("businessLogic.config.button.generating")
-                          : t("businessLogic.config.button.generatePrompt")}
-                      </span>
-                    </Button>
-                  )}
+                  <div style={{ marginLeft: 12 }}>
+                    {wrapNoEditTooltipInline(
+                      <Button
+                        type="primary"
+                        size="middle"
+                        onClick={handleGenerateAgent}
+                        disabled={!editable || loadingModels || isGenerating}
+                        icon={<Zap size={16} />}
+                      >
+                        <span className="button-text-full">
+                          {isGenerating
+                            ? t("businessLogic.config.button.generating")
+                            : t("businessLogic.config.button.generatePrompt")}
+                        </span>
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </Flex>
             </Card>
@@ -1114,6 +1313,17 @@ export default function AgentGenerateDetail({
         content={getExpandModalContent()}
         onClose={handleCloseExpandModal}
         onSave={handleSaveExpandModal}
+        mode={expandModalMode}
+        optimizeLoading={optimizeLoading}
+        optimizedContent={optimizedPromptContent}
+        onOptimize={handleOptimizePrompt}
+        onApplyOptimized={handleApplyOptimizedPrompt}
+      />
+      <PromptTemplateManageModal
+        open={promptTemplateModalOpen}
+        templates={promptTemplates}
+        onClose={() => setPromptTemplateModalOpen(false)}
+        onRefresh={refreshPromptTemplates}
       />
     </Flex>
   );

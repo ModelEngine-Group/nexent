@@ -265,9 +265,14 @@ export interface ExpandEditModalProps {
   open: boolean;
   title: string;
   content: string;
-  index: number;
   onClose: () => void;
   onSave: (content: string) => void;
+  readOnly?: boolean;
+  mode?: "edit" | "optimize";
+  optimizeLoading?: boolean;
+  optimizedContent?: string;
+  onOptimize?: (feedback: string) => void;
+  onApplyOptimized?: () => void;
 }
 
 // AgentDebugging component props interface
@@ -400,8 +405,20 @@ export interface GeneratePromptParams {
   agent_id: number;
   task_description: string;
   model_id: string;
+  template_id?: number;
   tool_ids?: number[]; // Optional: tool IDs selected in frontend (takes precedence over database query)
   sub_agent_ids?: number[]; // Optional: sub-agent IDs selected in frontend (takes precedence over database query)
+}
+
+export interface OptimizePromptParams {
+  agent_id: number;
+  task_description: string;
+  model_id: string;
+  prompt_type: "duty" | "constraint" | "few_shots";
+  original_content: string;
+  feedback: string;
+  tool_ids?: number[];
+  sub_agent_ids?: number[];
 }
 
 /**
@@ -411,4 +428,22 @@ export interface StreamResponseData {
   type: (typeof GENERATE_PROMPT_STREAM_TYPES)[keyof typeof GENERATE_PROMPT_STREAM_TYPES];
   content: string;
   is_complete: boolean;
+}
+
+export interface OptimizePromptStreamData {
+  type: "optimized_content";
+  content: string;
+  is_complete: boolean;
+}
+
+export interface PromptTemplateItem {
+  template_id: number;
+  name: string;
+  description?: string;
+  template_type?: string;
+  content_zh: string;
+  content_en?: string;
+  source?: string;
+  create_time?: string;
+  update_time?: string;
 }

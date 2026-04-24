@@ -304,6 +304,7 @@ def _regenerate_agent_value_with_llm(
     model_id: int,
     tenant_id: str,
     language: str,
+    prompt_template: Optional[Dict] = None,
     system_prompt_key: str,
     user_prompt_key: str,
     default_system_prompt: str,
@@ -313,7 +314,7 @@ def _regenerate_agent_value_with_llm(
     """
     Shared helper to regenerate agent-related values with an LLM.
     """
-    prompt_template = get_prompt_generate_prompt_template(language)
+    prompt_template = prompt_template or get_prompt_generate_prompt_template(language)
     system_prompt = _render_prompt_template(
         prompt_template.get(system_prompt_key, ""),
         original_value=original_value
@@ -369,6 +370,7 @@ def _regenerate_agent_name_with_llm(
     model_id: int,
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
+    prompt_template: Optional[Dict] = None,
     agents_cache: list[dict] | None = None,
     exclude_agent_id: int | None = None
 ) -> str:
@@ -379,6 +381,7 @@ def _regenerate_agent_name_with_llm(
         model_id=model_id,
         tenant_id=tenant_id,
         language=language,
+        prompt_template=prompt_template,
         system_prompt_key="AGENT_NAME_REGENERATE_SYSTEM_PROMPT",
         user_prompt_key="AGENT_NAME_REGENERATE_USER_PROMPT",
         default_system_prompt=(
@@ -410,6 +413,7 @@ def _regenerate_agent_display_name_with_llm(
     model_id: int,
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
+    prompt_template: Optional[Dict] = None,
     agents_cache: list[dict] | None = None,
     exclude_agent_id: int | None = None
 ) -> str:
@@ -420,6 +424,7 @@ def _regenerate_agent_display_name_with_llm(
         model_id=model_id,
         tenant_id=tenant_id,
         language=language,
+        prompt_template=prompt_template,
         system_prompt_key="AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT",
         user_prompt_key="AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT",
         default_system_prompt=(
