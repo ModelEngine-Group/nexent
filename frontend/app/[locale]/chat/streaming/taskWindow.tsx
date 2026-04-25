@@ -40,9 +40,12 @@ import { useConfig } from "@/hooks/useConfig";
  */
 const convertToMarkdownCodeFences = (content: string): string => {
   // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
-  content = content.replace(/<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g, (_match, language, code) => {
-    return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
-  });
+  content = content.replace(
+    /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
+    (_match, language, code) => {
+      return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+    }
+  );
 
   // Step 2: Handle complete <code>...</code> blocks
   content = content.replace(/<code>([\s\S]*?)<\/code>/g, (_match, code) => {
@@ -52,9 +55,12 @@ const convertToMarkdownCodeFences = (content: string): string => {
   // Step 3: Handle incomplete tags during streaming
   // <DISPLAY:language> without closing </DISPLAY> → ```language\n (open fence)
   // Only match if there's no closing tag later in the content
-  content = content.replace(/<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g, (_match, language) => {
-    return `\`\`\`${language}\n`;
-  });
+  content = content.replace(
+    /<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g,
+    (_match, language) => {
+      return `\`\`\`${language}\n`;
+    }
+  );
 
   // <code> without closing </code> → ```python\n (open fence)
   // Only match if there's no closing tag later in the content
@@ -114,7 +120,10 @@ const extractCodeInfo = (
   // Remove "代码：" or "Code:" prefix if present
   if (processed.startsWith("代码：") || processed.startsWith("代码:")) {
     processed = processed.substring(4);
-  } else if (processed.toLowerCase().startsWith("code：") || processed.toLowerCase().startsWith("code:")) {
+  } else if (
+    processed.toLowerCase().startsWith("code：") ||
+    processed.toLowerCase().startsWith("code:")
+  ) {
     processed = processed.substring(4);
   }
 
@@ -123,9 +132,10 @@ const extractCodeInfo = (
   if (codeStart !== -1) {
     const contentStart = codeStart + "<code>".length;
     const codeEnd = processed.indexOf("</code>", contentStart);
-    processed = codeEnd !== -1
-      ? processed.substring(contentStart, codeEnd)
-      : processed.substring(contentStart);
+    processed =
+      codeEnd !== -1
+        ? processed.substring(contentStart, codeEnd)
+        : processed.substring(contentStart);
     processed = stripIncompleteEndMarkers(processed);
     processed = stripTrailingMarkers(processed);
     return { codeContent: processed.trim(), language: "python" };
@@ -136,12 +146,16 @@ const extractCodeInfo = (
   if (displayStart !== -1) {
     const langEnd = processed.indexOf(">", displayStart);
     if (langEnd !== -1) {
-      const language = processed.substring(displayStart + "<DISPLAY:".length, langEnd);
+      const language = processed.substring(
+        displayStart + "<DISPLAY:".length,
+        langEnd
+      );
       const contentStart = langEnd + 1;
       const displayEnd = processed.indexOf("</DISPLAY>", contentStart);
-      processed = displayEnd !== -1
-        ? processed.substring(contentStart, displayEnd)
-        : processed.substring(contentStart);
+      processed =
+        displayEnd !== -1
+          ? processed.substring(contentStart, displayEnd)
+          : processed.substring(contentStart);
       processed = stripIncompleteEndMarkers(processed);
       processed = stripTrailingMarkers(processed);
       const displayUserIdx = processed.indexOf("[已展示给用户]");
@@ -155,16 +169,26 @@ const extractCodeInfo = (
   // 3. LEGACY ```<DISPLAY:language> format with backticks
   const legacyDisplayStart = processed.indexOf("```<DISPLAY:");
   if (legacyDisplayStart !== -1) {
-    const langEnd = processed.indexOf(">", legacyDisplayStart + "```<DISPLAY:".length);
+    const langEnd = processed.indexOf(
+      ">",
+      legacyDisplayStart + "```<DISPLAY:".length
+    );
     if (langEnd !== -1) {
-      const language = processed.substring(legacyDisplayStart + "```<DISPLAY:".length, langEnd);
+      const language = processed.substring(
+        legacyDisplayStart + "```<DISPLAY:".length,
+        langEnd
+      );
       const contentStart = langEnd + 1;
-      const endCodeIdx = processed.indexOf("```<END_DISPLAY_CODE>", contentStart);
+      const endCodeIdx = processed.indexOf(
+        "```<END_DISPLAY_CODE>",
+        contentStart
+      );
       const endCodeIdx2 = processed.indexOf("<END_DISPLAY_CODE>", contentStart);
       const endPos = endCodeIdx !== -1 ? endCodeIdx : endCodeIdx2;
-      processed = endPos !== -1
-        ? processed.substring(contentStart, endPos)
-        : processed.substring(contentStart);
+      processed =
+        endPos !== -1
+          ? processed.substring(contentStart, endPos)
+          : processed.substring(contentStart);
       processed = stripIncompleteEndMarkers(processed);
       processed = stripTrailingMarkers(processed);
       const displayUserIdx = processed.indexOf("[已展示给用户]");
@@ -182,9 +206,10 @@ const extractCodeInfo = (
     const endCodeIdx = processed.indexOf("```<END_CODE>", contentStart);
     const endCodeIdx2 = processed.indexOf("<END_CODE>", contentStart);
     const endPos = endCodeIdx !== -1 ? endCodeIdx : endCodeIdx2;
-    processed = endPos !== -1
-      ? processed.substring(contentStart, endPos)
-      : processed.substring(contentStart);
+    processed =
+      endPos !== -1
+        ? processed.substring(contentStart, endPos)
+        : processed.substring(contentStart);
     processed = stripIncompleteEndMarkers(processed);
     processed = stripTrailingMarkers(processed);
     return { codeContent: processed.trim(), language: "python" };
@@ -202,14 +227,22 @@ const extractCodeInfo = (
     const colonIdx = processed.lastIndexOf(":");
     return {
       codeContent: "",
-      language: colonIdx !== -1 ? (processed.substring(colonIdx + 1) || "python") : "python",
+      language:
+        colonIdx !== -1
+          ? processed.substring(colonIdx + 1) || "python"
+          : "python",
     };
   }
 
-  const incompleteWithBackticks = /^```\s*<[A-Z]*(:[a-z0-9]*)?$/.test(processed);
+  const incompleteWithBackticks = /^```\s*<[A-Z]*(:[a-z0-9]*)?$/.test(
+    processed
+  );
   if (incompleteWithBackticks) {
     const colonIdx = processed.lastIndexOf(":");
-    const lang = colonIdx !== -1 ? processed.substring(colonIdx + 1).replace(/[`\s<>]/g, "") : "";
+    const lang =
+      colonIdx !== -1
+        ? processed.substring(colonIdx + 1).replace(/[`\s<>]/g, "")
+        : "";
     return { codeContent: "", language: lang || "python" };
   }
 
@@ -218,7 +251,10 @@ const extractCodeInfo = (
   if (inlineDisplayIdx !== -1) {
     const langEnd = processed.indexOf(">", inlineDisplayIdx);
     if (langEnd !== -1) {
-      const language = processed.substring(inlineDisplayIdx + "<DISPLAY:".length, langEnd);
+      const language = processed.substring(
+        inlineDisplayIdx + "<DISPLAY:".length,
+        langEnd
+      );
       const contentStart = langEnd + 1;
       processed = processed.substring(contentStart);
       processed = stripIncompleteEndMarkers(processed);
@@ -495,7 +531,9 @@ const messageHandlers: MessageHandler[] = [
         try {
           if (site.sourceType === "datamate") {
             if (!context?.appConfig?.modelEngineEnabled) {
-              antdMessage.error("DataMate download not available: ModelEngine is not enabled");
+              antdMessage.error(
+                "DataMate download not available: ModelEngine is not enabled"
+              );
               return;
             }
             if (
@@ -1133,6 +1171,46 @@ const messageHandlers: MessageHandler[] = [
     ),
   },
 
+  // max_steps_reached type processor - max steps warning
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.MAX_STEPS_REACHED,
+    render: (message, t) => {
+      let maxStepsData = { completedSteps: 0, maxSteps: 0, message: "" };
+
+      try {
+        if (typeof message.content === "string") {
+          maxStepsData = JSON.parse(message.content);
+        } else if (typeof message.content === "object") {
+          maxStepsData = message.content;
+        }
+      } catch (error) {
+        return null;
+      }
+
+      return (
+        <div
+          style={{
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            color: "#d97706",
+            fontWeight: 500,
+            borderRadius: "0.25rem",
+            paddingTop: "0.5rem",
+          }}
+        >
+          <span>
+            {t("taskWindow.maxStepsReached", {
+              completedSteps: maxStepsData.completedSteps,
+            })}
+          </span>
+        </div>
+      );
+    },
+  },
+
   // virtual type processor - virtual message (do not display content, only as a card container)
   {
     canHandle: (message) => message.type === "virtual",
@@ -1224,7 +1302,11 @@ interface TaskWindowProps {
   defaultExpanded?: boolean;
 }
 
-function TaskWindowInner({ messages, isStreaming = false, defaultExpanded = true }: TaskWindowProps) {
+function TaskWindowInner({
+  messages,
+  isStreaming = false,
+  defaultExpanded = true,
+}: TaskWindowProps) {
   const { t } = useTranslation("common");
   const { appConfig } = useConfig();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -1595,14 +1677,18 @@ function TaskWindowInner({ messages, isStreaming = false, defaultExpanded = true
   );
 }
 
-function areEqualTaskWindow(prev: TaskWindowProps, next: TaskWindowProps): boolean {
+function areEqualTaskWindow(
+  prev: TaskWindowProps,
+  next: TaskWindowProps
+): boolean {
   if (prev.isStreaming !== next.isStreaming) return false;
   if (prev.messages.length !== next.messages.length) return false;
   // During streaming the last message grows in content without the array length changing.
   if (prev.messages.length > 0) {
     const prevLast = prev.messages[prev.messages.length - 1];
     const nextLast = next.messages[next.messages.length - 1];
-    if (prevLast.id !== nextLast.id || prevLast.content !== nextLast.content) return false;
+    if (prevLast.id !== nextLast.id || prevLast.content !== nextLast.content)
+      return false;
   }
   // defaultExpanded is only meaningful on initial mount; exclude from equality check.
   return true;

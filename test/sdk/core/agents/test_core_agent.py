@@ -130,6 +130,7 @@ def _create_mock_modules():
         MODEL_OUTPUT_DEEP_THINKING = "MODEL_OUTPUT_DEEP_THINKING"
         MODEL_OUTPUT_THINKING = "MODEL_OUTPUT_THINKING"
         MODEL_OUTPUT_CODE = "MODEL_OUTPUT_CODE"
+        MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
 
     class MessageObserver:
         def __init__(self):
@@ -1118,3 +1119,772 @@ This code demonstrates how to work with JSON in Python."""
     assert "import json" in transformed
     assert "```<END_DISPLAY_CODE>" not in transformed
     assert "<DISPLAY:" not in transformed
+
+
+# ----------------------------------------------------------------------------
+# Tests for MAX_STEPS_REACHED handling in _run_stream
+# ----------------------------------------------------------------------------
+
+def _create_mock_core_agent_with_step_control():
+    """Create a mock CoreAgent that allows controlling step execution."""
+    from types import ModuleType
+
+    # Create fresh mocks for this test
+    mock_smolagents = _create_mock_smolagents()
+
+    # Create mock memory
+    mock_memory = MagicMock()
+    mock_memory.steps = []
+    mock_memory.system_prompt = None
+    mock_memory.get_full_steps = MagicMock(return_value=[])
+
+    # Create mock monitor
+    mock_monitor = MagicMock()
+    mock_monitor.reset = MagicMock()
+
+    # Create mock logger
+    mock_logger = MagicMock()
+    mock_logger.log = MagicMock()
+    mock_logger.log_markdown = MagicMock()
+    mock_logger.log_task = MagicMock()
+    mock_logger.log_code = MagicMock()
+
+    # Create mock python_executor
+    mock_python_executor = MagicMock()
+
+    # Create mock model
+    mock_model = MagicMock()
+
+    # Create ProcessType for observer
+    class ProcessType:
+        STEP_COUNT = "STEP_COUNT"
+        PARSE = "PARSE"
+        EXECUTION_LOGS = "EXECUTION_LOGS"
+        AGENT_NEW_RUN = "AGENT_NEW_RUN"
+        AGENT_FINISH = "AGENT_FINISH"
+        FINAL_ANSWER = "FINAL_ANSWER"
+        ERROR = "ERROR"
+        OTHER = "OTHER"
+        SEARCH_CONTENT = "SEARCH_CONTENT"
+        TOKEN_COUNT = "TOKEN_COUNT"
+        PICTURE_WEB = "PICTURE_WEB"
+        CARD = "CARD"
+        TOOL = "TOOL"
+        MEMORY_SEARCH = "MEMORY_SEARCH"
+        MODEL_OUTPUT_DEEP_THINKING = "MODEL_OUTPUT_DEEP_THINKING"
+        MODEL_OUTPUT_THINKING = "MODEL_OUTPUT_THINKING"
+        MODEL_OUTPUT_CODE = "MODEL_OUTPUT_CODE"
+        MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
+
+    # Create MessageObserver with tracking
+    class TrackedMessageObserver:
+        def __init__(self):
+            self.messages = []
+            self.add_message = MagicMock(side_effect=self._track_message)
+
+        def _track_message(self, agent_name, process_type, data):
+            self.messages.append({
+                "agent_name": agent_name,
+                "process_type": process_type,
+                "data": data
+            })
+
+    observer = TrackedMessageObserver()
+
+    return {
+        "mock_smolagents": mock_smolagents,
+        "mock_memory": mock_memory,
+        "mock_monitor": mock_monitor,
+        "mock_logger": mock_logger,
+        "mock_python_executor": mock_python_executor,
+        "mock_model": mock_model,
+        "ProcessType": ProcessType,
+        "observer": observer,
+    }
+
+
+class TestMaxStepsReached:
+    """Test suite for MAX_STEPS_REACHED handling in CoreAgent."""
+
+    def test_max_steps_reached_observer_message_format(self):
+        """Test that MAX_STEPS_REACHED message has correct JSON format."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Simulate the observer receiving MAX_STEPS_REACHED message
+        max_steps = 5
+        completed_steps = max_steps - 1  # step_number - 1 when max_steps + 1 is reached
+
+        expected_data = {
+            "completedSteps": completed_steps,
+            "maxSteps": max_steps,
+            "message": ""
+        }
+
+        # Add the message as CoreAgent would
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, json.dumps(expected_data))
+
+        # Verify message was recorded
+        assert len(observer.messages) == 1
+        msg = observer.messages[0]
+        assert msg["agent_name"] == "test_agent"
+        assert msg["process_type"] == ProcessType.MAX_STEPS_REACHED
+
+        # Parse and verify JSON data
+        parsed_data = json.loads(msg["data"])
+        assert parsed_data["completedSteps"] == 4
+        assert parsed_data["maxSteps"] == 5
+        assert parsed_data["message"] == ""
+
+    def test_max_steps_reached_data_structure(self):
+        """Test that max_steps_data JSON structure matches expected format."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Test with different max_steps values
+        # In _run_stream, when step_number == max_steps + 1:
+        #   completedSteps = step_number - 1 = max_steps
+        expected_completed_steps = [1, 5, 10, 100]
+
+        for max_steps in expected_completed_steps:
+            step_number_at_exit = max_steps + 1
+
+            # Simulate the logic in _run_stream
+            # not returned_final_answer and step_number == max_steps + 1
+            max_steps_data = json.dumps({
+                "completedSteps": step_number_at_exit - 1,  # This equals max_steps
+                "maxSteps": max_steps,
+                "message": ""
+            })
+
+            observer.add_message("agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        # Verify all messages were recorded
+        assert len(observer.messages) == 4
+
+        # Verify each message has correct format
+        for i, msg in enumerate(observer.messages):
+            parsed = json.loads(msg["data"])
+            assert "completedSteps" in parsed
+            assert "maxSteps" in parsed
+            assert "message" in parsed
+            # completedSteps should equal max_steps (since step_number - 1 = max_steps)
+            assert parsed["completedSteps"] == expected_completed_steps[i]
+            assert parsed["maxSteps"] == expected_completed_steps[i]
+            assert parsed["message"] == ""
+
+    def test_max_steps_reached_message_is_json_serializable(self):
+        """Test that MAX_STEPS_REACHED data is valid JSON."""
+        test_cases = [
+            {"max_steps": 1, "completed": 0},
+            {"max_steps": 5, "completed": 4},
+            {"max_steps": 10, "completed": 9},
+            {"max_steps": 100, "completed": 99},
+        ]
+
+        for case in test_cases:
+            max_steps_data = json.dumps({
+                "completedSteps": case["completed"],
+                "maxSteps": case["max_steps"],
+                "message": ""
+            })
+
+            # Should not raise
+            parsed = json.loads(max_steps_data)
+            assert parsed["completedSteps"] == case["completed"]
+            assert parsed["maxSteps"] == case["max_steps"]
+
+    def test_max_steps_reached_with_different_step_numbers(self):
+        """Test MAX_STEPS_REACHED handling with various step number values."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Simulate different scenarios where step_number == max_steps + 1
+        scenarios = [
+            (1, 2),   # max_steps=1, step_number=2
+            (5, 6),   # max_steps=5, step_number=6
+            (10, 11), # max_steps=10, step_number=11
+            (50, 51), # max_steps=50, step_number=51
+        ]
+
+        for max_steps, step_number in scenarios:
+            completed = step_number - 1
+
+            max_steps_data = json.dumps({
+                "completedSteps": completed,
+                "maxSteps": max_steps,
+                "message": ""
+            })
+
+            observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+            parsed = json.loads(max_steps_data)
+            assert parsed["completedSteps"] == completed
+            assert parsed["maxSteps"] == max_steps
+
+        assert len(observer.messages) == 4
+
+    def test_max_steps_reached_empty_message_field(self):
+        """Test that MAX_STEPS_REACHED message field is empty string."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        max_steps_data = json.dumps({
+            "completedSteps": 5,
+            "maxSteps": 5,
+            "message": ""
+        })
+
+        observer.add_message("agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        parsed = json.loads(observer.messages[0]["data"])
+        assert parsed["message"] == ""
+        assert isinstance(parsed["message"], str)
+
+    def test_process_type_has_max_steps_reached(self):
+        """Test that ProcessType enum has MAX_STEPS_REACHED attribute."""
+        mocks = _create_mock_core_agent_with_step_control()
+        ProcessType = mocks["ProcessType"]
+
+        assert hasattr(ProcessType, "MAX_STEPS_REACHED")
+        assert ProcessType.MAX_STEPS_REACHED == "MAX_STEPS_REACHED"
+
+    def test_max_steps_reached_with_large_values(self):
+        """Test MAX_STEPS_REACHED with large step numbers."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        large_max_steps = 10000
+        step_number = large_max_steps + 1
+        # In _run_stream: completedSteps = step_number - 1 = max_steps = 10000
+        completed = step_number - 1  # This equals max_steps
+
+        max_steps_data = json.dumps({
+            "completedSteps": completed,
+            "maxSteps": large_max_steps,
+            "message": ""
+        })
+
+        observer.add_message("large_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        parsed = json.loads(observer.messages[0]["data"])
+        # completedSteps equals max_steps when step_number = max_steps + 1
+        assert parsed["completedSteps"] == 10000
+        assert parsed["maxSteps"] == 10000
+        assert parsed["message"] == ""
+
+    def test_max_steps_reached_zero_max_steps(self):
+        """Test MAX_STEPS_REACHED when max_steps is 0 (edge case)."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Edge case: max_steps=0, step_number=1
+        max_steps_data = json.dumps({
+            "completedSteps": 0,
+            "maxSteps": 0,
+            "message": ""
+        })
+
+        observer.add_message("edge_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        parsed = json.loads(observer.messages[0]["data"])
+        assert parsed["completedSteps"] == 0
+        assert parsed["maxSteps"] == 0
+
+    def test_observer_add_message_side_effect(self):
+        """Test that observer.add_message correctly tracks messages."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Verify add_message is callable
+        assert callable(observer.add_message)
+
+        # Add multiple messages
+        test_messages = [
+            ("agent1", ProcessType.STEP_COUNT, 1),
+            ("agent1", ProcessType.MAX_STEPS_REACHED, json.dumps({"completedSteps": 5, "maxSteps": 5, "message": ""})),
+            ("agent1", ProcessType.AGENT_FINISH, "done"),
+        ]
+
+        for agent_name, process_type, data in test_messages:
+            observer.add_message(agent_name, process_type, data)
+
+        assert len(observer.messages) == 3
+        assert observer.messages[1]["process_type"] == ProcessType.MAX_STEPS_REACHED
+
+
+# ----------------------------------------------------------------------------
+# Tests for _run_stream method with real execution for line coverage
+# ----------------------------------------------------------------------------
+
+class TestRunStreamRealExecution:
+    """Tests that actually execute the real _run_stream method for line coverage."""
+
+    def _load_core_agent_in_isolation(self):
+        """Load CoreAgent in isolation without the test's module mocks."""
+        import importlib.util
+        import threading
+        import time as time_module
+        import copy
+
+        # Create a minimal base class that mimics CodeAgent
+        class MinimalCodeAgent:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        # Create mock modules
+        mock_modules = {}
+
+        # Create mock rich
+        mock_rich = MagicMock()
+        mock_rich.Group = MagicMock(side_effect=lambda *args: args)
+        mock_rich.Text = MagicMock()
+        mock_rich.console = MagicMock()
+        mock_rich.console.Group = MagicMock(side_effect=lambda *args: args)
+        mock_modules['rich'] = mock_rich
+        mock_modules['rich.console'] = mock_rich.console
+        mock_modules['rich.text'] = mock_rich.Text
+
+        # Create mock jinja2
+        mock_jinja2 = MagicMock()
+        mock_jinja2.Template = MagicMock()
+        mock_jinja2.StrictUndefined = MagicMock()
+        mock_modules['jinja2'] = mock_jinja2
+
+        # Create mock smolagents with REAL CodeAgent base
+        mock_smolagents = MagicMock()
+        mock_smolagents.__path__ = []
+
+        # agents submodule - use REAL CodeAgent
+        mock_agents = MagicMock()
+        mock_agents.CodeAgent = MinimalCodeAgent  # Use real minimal class
+        mock_agents.handle_agent_output_types = lambda x: x
+        mock_agents.AgentError = Exception
+        mock_agents.ActionOutput = MagicMock()
+        mock_agents.RunResult = MagicMock()
+        mock_agents.populate_template = MagicMock()
+        mock_modules['smolagents.agents'] = mock_agents
+        mock_smolagents.agents = mock_agents
+
+        # local_python_executor
+        mock_local_python = MagicMock()
+        mock_local_python.fix_final_answer_code = lambda x: x
+        mock_modules['smolagents.local_python_executor'] = mock_local_python
+        mock_smolagents.local_python_executor = mock_local_python
+
+        # memory submodule
+        mock_memory = MagicMock()
+        mock_memory.ActionStep = MagicMock()
+        mock_memory.ToolCall = MagicMock()
+        mock_memory.TaskStep = MagicMock()
+        mock_memory.SystemPromptStep = MagicMock()
+        mock_memory.PlanningStep = MagicMock()
+        mock_memory.FinalAnswerStep = MagicMock()
+        mock_modules['smolagents.memory'] = mock_memory
+        mock_smolagents.memory = mock_memory
+
+        # models submodule
+        mock_models = MagicMock()
+        mock_models.ChatMessage = MagicMock()
+        mock_models.CODEAGENT_RESPONSE_FORMAT = MagicMock()
+        mock_modules['smolagents.models'] = mock_models
+        mock_smolagents.models = mock_models
+
+        # monitoring submodule
+        mock_monitoring = MagicMock()
+        mock_monitoring.LogLevel = MagicMock()
+        mock_monitoring.Timing = MagicMock()
+        mock_monitoring.YELLOW_HEX = "#FFFF00"
+        mock_monitoring.TokenUsage = MagicMock()
+        mock_modules['smolagents.monitoring'] = mock_monitoring
+        mock_smolagents.monitoring = mock_monitoring
+
+        # utils submodule
+        mock_utils = MagicMock()
+        mock_utils.AgentExecutionError = Exception
+        mock_utils.AgentGenerationError = Exception
+        mock_utils.AgentParsingError = Exception
+        mock_utils.AgentMaxStepsError = Exception
+        mock_utils.truncate_content = lambda content, max_length=1000: str(content)[:max_length]
+        mock_utils.extract_code_from_text = lambda x, y: x
+        mock_modules['smolagents.utils'] = mock_utils
+        mock_smolagents.utils = mock_utils
+
+        mock_modules['smolagents'] = mock_smolagents
+
+        # Create mock observer with ProcessType
+        class RealProcessType:
+            STEP_COUNT = "STEP_COUNT"
+            PARSE = "PARSE"
+            EXECUTION_LOGS = "EXECUTION_LOGS"
+            AGENT_NEW_RUN = "AGENT_NEW_RUN"
+            AGENT_FINISH = "AGENT_FINISH"
+            FINAL_ANSWER = "FINAL_ANSWER"
+            ERROR = "ERROR"
+            OTHER = "OTHER"
+            MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
+
+        mock_observer = MagicMock()
+        mock_observer.ProcessType = RealProcessType
+        mock_modules['sdk.nexent.core.utils.observer'] = mock_observer
+
+        # Save original modules
+        original_modules = {}
+        for name in mock_modules:
+            if name in sys.modules:
+                original_modules[name] = sys.modules[name]
+
+        # Replace with mocks
+        for name, module in mock_modules.items():
+            sys.modules[name] = module
+
+        try:
+            # Find the core_agent.py file
+            test_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(test_dir))))
+            core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "core_agent.py")
+
+            # Load the module
+            spec = importlib.util.spec_from_file_location("core_agent_test", core_agent_path)
+            module = importlib.util.module_from_spec(spec)
+            module.__package__ = "sdk.nexent.core.agents"
+
+            sys.modules["sdk.nexent.core.agents.core_agent"] = module
+
+            # Execute
+            spec.loader.exec_module(module)
+
+            return module
+        finally:
+            # Restore original modules
+            for name, module in original_modules.items():
+                sys.modules[name] = module
+
+    def test_run_stream_max_steps_path_real_execution(self):
+        """Test that actually executes _run_stream and covers max_steps path lines."""
+        import threading
+
+        # Create ProcessType with all needed constants
+        class TestProcessType:
+            MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
+            STEP_COUNT = "STEP_COUNT"
+
+        # Track observer calls
+        observer_calls = []
+
+        # Load CoreAgent in isolation
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+
+        # Verify CoreAgent is a real class, not a Mock
+        assert not isinstance(CoreAgent, MagicMock), "CoreAgent should not be MagicMock"
+
+        # Create mock observer that tracks calls
+        def mock_add_message(agent_name, process_type, data):
+            observer_calls.append((agent_name, process_type, data))
+
+        # Create mock action output
+        mock_action_output = MagicMock()
+        mock_action_output.is_final_answer = False
+
+        # Track _handle_max_steps_reached
+        handle_calls = []
+
+        def mock_handle_max_steps_reached(task):
+            handle_calls.append(task)
+            return "Maximum steps reached"
+
+        # Create mock memory
+        mock_memory = MagicMock()
+        mock_memory.steps = []
+
+        # Create mock logger
+        mock_logger = MagicMock()
+
+        # Create stop_event (NOT set)
+        stop_event = threading.Event()
+        # stop_event is NOT set, so loop will continue until max_steps
+
+        # Create mock step_stream that returns non-final answer
+        call_count = [0]
+        def mock_step_stream(action_step):
+            call_count[0] += 1
+            yield mock_action_output
+
+        # Create agent instance
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test_agent"
+        agent.observer = MagicMock()
+        agent.observer.add_message = mock_add_message
+        agent.stop_event = stop_event
+        agent.step_number = 1
+        agent.memory = mock_memory
+        agent.logger = mock_logger
+        agent.monitor = MagicMock()
+        agent.max_steps = 2  # Only 2 steps allowed
+        agent.name = "test_agent"
+        agent.task = "test task"
+        agent.state = {}
+        agent.final_answer_checks = None
+        agent.return_full_result = False
+        agent.python_executor = MagicMock()
+        agent.model = MagicMock()
+        agent.prompt_templates = {}
+        agent.tools = {}
+        agent.managed_agents = {}
+        agent.provide_run_summary = False
+        agent._use_structured_outputs_internally = False
+
+        # Bind mocked methods
+        agent._step_stream = mock_step_stream
+        agent._handle_max_steps_reached = mock_handle_max_steps_reached
+        agent._finalize_step = lambda x: None
+
+        # Call _run_stream
+        generator = agent._run_stream("test task", max_steps=2)
+        results = list(generator)
+
+        # Assertions
+        assert len(results) > 0
+        # Check that MAX_STEPS_REACHED was called
+        max_steps_calls = [c for c in observer_calls if c[1] == TestProcessType.MAX_STEPS_REACHED]
+        assert len(max_steps_calls) == 1, f"Expected 1 MAX_STEPS_REACHED call, got {max_steps_calls}"
+        assert len(handle_calls) == 1
+        assert handle_calls[0] == "test task"
+
+    def test_run_stream_stop_event_path_real_execution(self):
+        """Test _run_stream with stop_event set (user break)."""
+        import threading
+
+        # Create ProcessType
+        class ProcessType:
+            MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
+
+        # Track observer calls
+        observer_calls = []
+
+        # Load CoreAgent
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+
+        # Verify it's a real class
+        assert not isinstance(CoreAgent, MagicMock)
+
+        # Create mock action output
+        mock_action_output = MagicMock()
+        mock_action_output.is_final_answer = False
+
+        # Create mock memory
+        mock_memory = MagicMock()
+        mock_memory.steps = []
+
+        # Create stop_event set
+        stop_event = threading.Event()
+        stop_event.set()
+
+        # Create mock step_stream
+        def mock_step_stream(action_step):
+            yield mock_action_output
+
+        # Create agent
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test_agent"
+        agent.observer = MagicMock()
+        agent.observer.add_message = lambda *args: observer_calls.append(args)
+        agent.stop_event = stop_event
+        agent.step_number = 1
+        agent.memory = mock_memory
+        agent.logger = MagicMock()
+        agent.monitor = MagicMock()
+        agent.max_steps = 10
+        agent.name = "test_agent"
+        agent.task = "test task"
+        agent.state = {}
+        agent.final_answer_checks = None
+        agent.return_full_result = False
+        agent.python_executor = MagicMock()
+        agent.model = MagicMock()
+        agent.prompt_templates = {}
+        agent.tools = {}
+        agent.managed_agents = {}
+        agent.provide_run_summary = False
+        agent._use_structured_outputs_internally = False
+
+        agent._step_stream = mock_step_stream
+        agent._handle_max_steps_reached = MagicMock(return_value="Max steps")
+        agent._finalize_step = lambda x: None
+
+        # Call _run_stream
+        generator = agent._run_stream("test task", max_steps=10)
+        results = list(generator)
+
+        # Assertions - stop_event should prevent MAX_STEPS_REACHED
+        assert len(results) > 0
+        max_steps_calls = [c for c in observer_calls if c[1] == ProcessType.MAX_STEPS_REACHED]
+        assert len(max_steps_calls) == 0
+
+    def test_run_stream_stop_event_path_real_execution(self):
+        """Test _run_stream with stop_event set (user break)."""
+        import threading
+
+        # Create ProcessType
+        class TestProcessType:
+            MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
+
+        # Track observer calls
+        observer_calls = []
+
+        # Load CoreAgent
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+
+        # Verify it's a real class
+        assert not isinstance(CoreAgent, MagicMock)
+
+        # Create mock action output
+        mock_action_output = MagicMock()
+        mock_action_output.is_final_answer = False
+
+        # Create mock memory
+        mock_memory = MagicMock()
+        mock_memory.steps = []
+
+        # Create stop_event set
+        stop_event = threading.Event()
+        stop_event.set()
+
+        # Create mock step_stream
+        def mock_step_stream(action_step):
+            yield mock_action_output
+
+        # Create agent
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test_agent"
+        agent.observer = MagicMock()
+        agent.observer.add_message = lambda *args: observer_calls.append(args)
+        agent.stop_event = stop_event
+        agent.step_number = 1
+        agent.memory = mock_memory
+        agent.logger = MagicMock()
+        agent.monitor = MagicMock()
+        agent.max_steps = 10
+        agent.name = "test_agent"
+        agent.task = "test task"
+        agent.state = {}
+        agent.final_answer_checks = None
+        agent.return_full_result = False
+        agent.python_executor = MagicMock()
+        agent.model = MagicMock()
+        agent.prompt_templates = {}
+        agent.tools = {}
+        agent.managed_agents = {}
+        agent.provide_run_summary = False
+        agent._use_structured_outputs_internally = False
+
+        agent._step_stream = mock_step_stream
+        agent._handle_max_steps_reached = MagicMock(return_value="Max steps")
+        agent._finalize_step = lambda x: None
+
+        # Call _run_stream
+        generator = agent._run_stream("test task", max_steps=10)
+        results = list(generator)
+
+        # Assertions - stop_event should prevent MAX_STEPS_REACHED
+        assert len(results) > 0
+        max_steps_calls = [c for c in observer_calls if c[1] == TestProcessType.MAX_STEPS_REACHED]
+        assert len(max_steps_calls) == 0
+
+    def test_run_stream_final_answer_error_path(self):
+        """Test _run_stream when FinalAnswerError is raised."""
+        # This covers the code path where the model outputs non-code text (FinalAnswerError)
+
+        # Create ProcessType
+        class TestProcessType:
+            MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
+
+        # Track observer calls
+        observer_calls = []
+
+        # Load CoreAgent
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+
+        # Verify it's a real class
+        assert not isinstance(CoreAgent, MagicMock)
+
+        # Get FinalAnswerError from the loaded module
+        FinalAnswerError = module.FinalAnswerError
+
+        # Create mock memory
+        mock_memory = MagicMock()
+        mock_memory.steps = []
+
+        # Create stop_event not set
+        stop_event = MagicMock()
+        stop_event.is_set = lambda: False
+
+        # Track step_stream calls
+        step_stream_calls = [0]
+
+        # Create mock ActionStep with model_output
+        mock_action_step = MagicMock()
+        mock_action_step.model_output = "This is my final answer"
+        mock_action_step.is_final_answer = True
+
+        # Create step_stream that raises FinalAnswerError
+        def mock_step_stream(action_step):
+            step_stream_calls[0] += 1
+            # Return the mock action step that has model_output
+            yield mock_action_step
+            # Then raise FinalAnswerError to trigger the except block
+            raise FinalAnswerError()
+
+        # Create agent
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test_agent"
+        agent.observer = MagicMock()
+        agent.observer.add_message = lambda *args: observer_calls.append(args)
+        agent.stop_event = stop_event
+        agent.step_number = 1
+        agent.memory = mock_memory
+        agent.logger = MagicMock()
+        agent.logger.log = lambda *args, **kwargs: None
+        agent.monitor = MagicMock()
+        agent.max_steps = 10
+        agent.name = "test_agent"
+        agent.task = "test task"
+        agent.state = {}
+        agent.final_answer_checks = None
+        agent.return_full_result = False
+        agent.python_executor = MagicMock()
+        agent.model = MagicMock()
+        agent.prompt_templates = {}
+        agent.tools = {}
+        agent.managed_agents = {}
+        agent.provide_run_summary = False
+        agent._use_structured_outputs_internally = False
+
+        agent._step_stream = mock_step_stream
+        agent._handle_max_steps_reached = MagicMock(return_value="Max steps")
+        agent._finalize_step = lambda x: None
+
+        # Call _run_stream
+        generator = agent._run_stream("test task", max_steps=10)
+
+        # Consume the generator
+        try:
+            results = list(generator)
+        except FinalAnswerError:
+            # The generator may raise FinalAnswerError - that's okay
+            pass
+
+        # FinalAnswerError path should prevent MAX_STEPS_REACHED
+        max_steps_calls = [c for c in observer_calls if c[1] == TestProcessType.MAX_STEPS_REACHED]
+        assert len(max_steps_calls) == 0

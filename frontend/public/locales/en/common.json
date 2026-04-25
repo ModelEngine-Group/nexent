@@ -87,6 +87,7 @@
   "extractMsg.unknownTitle": "Unknown Title",
   "extractMsg.noContentDescription": "No content description",
   "extractMsg.cannotParseSearchPlaceholder": "Cannot parse search placeholder content:",
+  "extractMsg.cannotParseMaxStepsData": "Cannot parse max steps data:",
 
   "chatHeader.doubleClickToEdit": "Double-click to edit title",
 
@@ -250,6 +251,8 @@
   "chatStreamFinalMessage.generatingAudio": "Generating audio...",
   "chatStreamFinalMessage.stopPlaying": "Stop Playing",
   "chatStreamFinalMessage.audioGenerationFailed": "Audio generation failed",
+  "chatStreamFinalMessage.maxStepsReached": "Step Limit",
+  "chatStreamFinalMessage.maxStepsMessage": "Completed {{completedSteps}} steps. Below is a summary of work done. To get complete results, try increasing the step limit.",
 
   "chatStreamHandler.codePrefix": "Code: ",
   "chatStreamHandler.callingTool": "Calling tool...",
@@ -264,7 +267,11 @@
   "chatStreamHandler.generateTitleFailed": "Failed to generate title:",
   "chatStreamHandler.streamResponseError": "Error processing streaming response:",
   "chatStreamHandler.userInterrupted": "Chat ended by user.",
+  "chatStreamHandler.maxStepsReached": "Step Limit",
+  "chatStreamHandler.maxStepsNotification": "Max steps limit reached ({{completedSteps}} steps). Below is a summary of work done. To get complete results, try increasing the step limit.",
+  "chatStreamHandler.parseMaxStepsDataFailed": "Failed to parse max steps data:",
 
+  "taskWindow.maxStepsReached": "Max steps limit reached ({{completedSteps}} steps), summarizing current work...",
   "taskWindow.unknownSource": "Unknown Source",
   "taskWindow.knowledgeFile": "Knowledge Base File",
   "taskWindow.urlParseError": "URL parsing error:",
