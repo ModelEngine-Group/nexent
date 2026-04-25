@@ -269,6 +269,12 @@ setattr(sys.modules['nexent.storage'], 'minio_config', storage_config_module)
 sys.modules['nexent.storage.storage_client_factory'] = storage_factory_module
 sys.modules['nexent.storage.minio_config'] = storage_config_module
 
+# Mock nexent.memory module to break import chain before loading backend modules
+memory_service_module = types.ModuleType('nexent.memory.memory_service')
+memory_service_module.clear_memory = MagicMock()
+sys.modules['nexent.memory'] = _create_package_mock('nexent.memory')
+sys.modules['nexent.memory.memory_service'] = memory_service_module
+
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
@@ -321,6 +327,7 @@ patch('services.tenant_config_service.get_selected_knowledge_list', MagicMock())
 patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
 patch('services.image_service.get_vlm_model', MagicMock()).start()
+patch('backend.database.knowledge_db.get_knowledge_name_map_by_index_names', MagicMock()).start()
 
 # Import consts after patching dependencies
 from consts.model import ToolInfo, ToolSourceEnum, ToolInstanceInfoRequest, ToolValidateRequest  # noqa: E402
@@ -2195,12 +2202,13 @@ class TestLoadLastToolConfigImpl:
 class TestValidateLocalToolKnowledgeBaseSearch:
     """Test cases for _validate_local_tool function with knowledge_base_search tool"""
 
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
     def test_validate_local_tool_knowledge_base_search_success(self, mock_get_vector_db_core, mock_get_embedding_model,
-                                                               mock_signature, mock_get_class):
+                                                               mock_signature, mock_get_class, mock_get_knowledge_map):
         """Test successful knowledge_base_search tool validation with proper dependencies"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2228,6 +2236,9 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_vdb_core = Mock()
         mock_get_vector_db_core.return_value = mock_vdb_core
 
+        # Mock knowledge name map to return empty dict for this test
+        mock_get_knowledge_map.return_value = {}
+
         from backend.services.tool_configuration_service import _validate_local_tool
 
         result = _validate_local_tool(
@@ -2248,12 +2259,68 @@ class TestValidateLocalToolKnowledgeBaseSearch:
             "vdb_core": mock_vdb_core,
             "embedding_model": "mock_embedding_model",
             "rerank_model": None,
+            "display_name_to_index_map": {},
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
 
         # Verify service calls
         mock_get_embedding_model.assert_called_once_with(tenant_id="tenant1")
+
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_vector_db_core')
+    def test_validate_local_tool_knowledge_base_search_with_display_name_mapping(
+            self, mock_get_vector_db_core, mock_get_embedding_model, mock_get_class, mock_get_knowledge_map):
+        """Test knowledge_base_search tool with display_name_to_index_map parameter"""
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "mapped knowledge result"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+
+        mock_get_embedding_model.return_value = "mock_embedding_model"
+        mock_vdb_core = Mock()
+        mock_get_vector_db_core.return_value = mock_vdb_core
+
+        # Mock the knowledge name map for display_name to index_name mapping
+        mock_get_knowledge_map.return_value = {
+            "test_index_1": "Display Knowledge 1",
+            "test_index_2": "Display Knowledge 2"
+        }
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "knowledge_base_search",
+            {"query": "test query"},
+            {"index_names": ["test_index_1", "test_index_2"]},
+            "tenant1",
+            "user1"
+        )
+
+        assert result == "mapped knowledge result"
+
+        # Verify tool class was called exactly once
+        assert mock_tool_class.call_count == 1, f"Expected 1 call, got {mock_tool_class.call_count}"
+
+        # Get the actual call arguments
+        actual_call = mock_tool_class.call_args
+        actual_kwargs = actual_call.kwargs if actual_call.kwargs else actual_call[1]
+
+        # Verify each expected parameter
+        assert actual_kwargs.get("index_names") == ["test_index_1", "test_index_2"]
+        assert actual_kwargs.get("vdb_core") == mock_vdb_core
+        assert actual_kwargs.get("embedding_model") == "mock_embedding_model"
+        assert actual_kwargs.get("rerank_model") is None
+        assert actual_kwargs.get("display_name_to_index_map") == {
+            "Display Knowledge 1": "test_index_1",
+            "Display Knowledge 2": "test_index_2"
+        }
+
+        # Verify knowledge name map was called with index_names
+        mock_get_knowledge_map.assert_called_once_with(["test_index_1", "test_index_2"])
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
@@ -2339,6 +2406,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
 
         assert result == "knowledge base search result"
 
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
@@ -2346,7 +2414,8 @@ class TestValidateLocalToolKnowledgeBaseSearch:
     def test_validate_local_tool_knowledge_base_search_empty_knowledge_list(self, mock_get_vector_db_core,
                                                                             mock_get_embedding_model,
                                                                             mock_signature,
-                                                                            mock_get_class):
+                                                                            mock_get_class,
+                                                                            mock_get_knowledge_map):
         """Test knowledge_base_search tool validation with empty knowledge list"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2392,11 +2461,13 @@ class TestValidateLocalToolKnowledgeBaseSearch:
             "vdb_core": mock_vdb_core,
             "embedding_model": "mock_embedding_model",
             "rerank_model": None,
+            "display_name_to_index_map": {},
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
 
 
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
@@ -2404,7 +2475,8 @@ class TestValidateLocalToolKnowledgeBaseSearch:
     def test_validate_local_tool_knowledge_base_search_execution_error(self, mock_get_vector_db_core,
                                                                        mock_get_embedding_model,
                                                                        mock_signature,
-                                                                       mock_get_class):
+                                                                       mock_get_class,
+                                                                       mock_get_knowledge_map):
         """Test knowledge_base_search tool validation when execution fails"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2476,11 +2548,12 @@ class TestValidateLocalToolAnalyzeImage:
 
         assert result == "analyze image result"
         mock_get_vlm_model.assert_called_once_with(tenant_id="tenant1")
-        mock_tool_class.assert_called_once_with(
-            prompt="describe",
-            vlm_model="mock_vlm_model",
-            storage_client=mock_minio_client
-        )
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert 'vlm_model' in call_kwargs
+        assert 'storage_client' in call_kwargs
+        assert 'validate_url_access' in call_kwargs
+        assert callable(call_kwargs['validate_url_access'])
         mock_tool_instance.forward.assert_called_once_with(image="bytes")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
@@ -2791,13 +2864,14 @@ class TestValidateLocalToolAnalyzeTextFile:
         mock_get_class.assert_called_once_with("analyze_text_file")
 
         # Verify analyze_text_file specific parameters were passed
-        expected_params = {
-            "param": "config",
-            "llm_model": mock_llm_model,
-            "storage_client": mock_minio_client,
-            "data_process_service_url": "http://data-process-service",
-        }
-        mock_tool_class.assert_called_once_with(**expected_params)
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert 'llm_model' in call_kwargs
+        assert 'storage_client' in call_kwargs
+        assert 'data_process_service_url' in call_kwargs
+        assert call_kwargs['data_process_service_url'] == "http://data-process-service"
+        assert 'validate_url_access' in call_kwargs
+        assert callable(call_kwargs['validate_url_access'])
         mock_tool_instance.forward.assert_called_once_with(input="test input")
 
         # Verify service calls

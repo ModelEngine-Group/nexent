@@ -397,7 +397,7 @@ class ExternalA2AAgentProxy:
         for msg in messages:
             if msg.get("role") == "ROLE_AGENT":
                 for part in msg.get("parts", []):
-                    if part.get("type") == "text" and part.get("text"):
+                    if part.get("text"):
                         return part["text"]
         return None
 
@@ -409,7 +409,7 @@ class ExternalA2AAgentProxy:
             return None
         if isinstance(message, dict):
             for part in message.get("parts", []):
-                if part.get("type") == "text" and part.get("text"):
+                if part.get("text"):
                     return part["text"]
         return str(message)
 
@@ -417,11 +417,11 @@ class ExternalA2AAgentProxy:
         """Extract text from a message object (common in JSON-RPC responses).
 
         A2A JSON-RPC Message response:
-            {"messageId": "...", "role": "ROLE_AGENT", "parts": [{"type": "text", "text": "...", "mediaType": "..."}]}
+            {"messageId": "...", "role": "ROLE_AGENT", "parts": [{"text": "...", "mediaType": "..."}]}
         """
         if message_obj.get("role") == "ROLE_AGENT":
             for part in message_obj.get("parts", []):
-                if part.get("type") == "text" and part.get("text"):
+                if part.get("text"):
                     return part["text"]
         return None
 
@@ -462,7 +462,7 @@ class ExternalA2AAgentProxy:
     def _extract_text_from_parts(self, parts: List[Dict[str, Any]], accumulated: List[str]) -> Optional[str]:
         """Extract text from parts list, appending only new text to accumulated list."""
         for part in parts:
-            if part.get("type") == "text" and part.get("text"):
+            if part.get("text"):
                 text = part["text"]
                 if text and text not in accumulated:
                     accumulated.append(text)

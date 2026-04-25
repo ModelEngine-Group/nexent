@@ -83,6 +83,7 @@ export interface ToolParam {
   type: "string" | "number" | "boolean" | "array" | "object" | "Optional";
   required: boolean;
   value?: any;
+  default?: any;
   description?: string;
   description_zh?: string;
 }

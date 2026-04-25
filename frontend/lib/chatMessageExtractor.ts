@@ -296,6 +296,7 @@ export function extractUserMsgFromResponse(
         size: item.size || 0,
         object_name: item.object_name,
         url: item.url,
+        presigned_url: item.presigned_url,  // Preserve presigned_url for MCP tool access
         description: item.description,
       };
     });

@@ -69,6 +69,12 @@ SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
 
 
+# OAuth Configuration
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
+OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
+
+
 # ===== To be migrated to frontend configuration =====
 # Email Configuration
 IMAP_SERVER = os.getenv('IMAP_SERVER')
@@ -345,4 +351,4 @@ NORTHBOUND_EXTERNAL_URL = _northbound_url.rstrip("/") if _northbound_url else "h
 
 
 # APP Version
-APP_VERSION = "v2.0.1"
+APP_VERSION = "v2.0.2"
