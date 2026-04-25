@@ -86,9 +86,23 @@ class KnowledgeBaseSearchTool(Tool):
             description="The rerank model to use", default=None, exclude=True
         ),
         vdb_core: VectorDatabaseCore = Field(
-            description="Vector database client", default=None, exclude=True
-        ),
+            description="Vector database client", default=None, exclude=True),
+        display_name_to_index_map: dict = Field(
+            description="Mapping from display_name (knowledge_name) to index_name",
+            default_factory=dict, exclude=True),
     ):
+        """Initialize the KBSearchTool.
+
+        Args:
+            top_k (int, optional): Number of results to return. Defaults to 3.
+            observer (MessageObserver, optional): Message observer instance. Defaults to None.
+            display_name_to_index_map (dict, optional): Mapping from display_name to index_name.
+                When LLM passes display_name as index_names parameter, it will be converted
+                to the actual index_name for ES queries.
+
+        Raises:
+            ValueError: If language is not supported
+        """
         super().__init__()
         self.top_k = top_k
         self.observer = observer
@@ -100,6 +114,7 @@ class KnowledgeBaseSearchTool(Tool):
         self.rerank_model_name = rerank_model_name
         self.rerank_model = rerank_model
         self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
+        self.display_name_to_index_map = display_name_to_index_map
 
         self.record_ops = 1
         self.running_prompt_zh = "知识库检索中..."
@@ -121,9 +136,41 @@ class KnowledgeBaseSearchTool(Tool):
             return [str(name).strip() for name in raw_index_names if str(name).strip()]
         return []
 
+    def _convert_to_index_names(self, names: List[str]) -> List[str]:
+        """Convert display names (knowledge_name) to index names if necessary.
+
+        When LLM passes display_name as the index_names parameter,
+        this method converts it to the actual index_name for ES queries.
+
+        Args:
+            names: List of names that could be either display_name or index_name
+
+        Returns:
+            List of actual index_names for ES queries
+        """
+        display_map = self.display_name_to_index_map
+        if isinstance(display_map, FieldInfo):
+            if display_map.default_factory is not None:
+                display_map = display_map.default_factory()
+            else:
+                display_map = display_map.default
+        if not display_map:
+            return names
+
+        converted_names = []
+        for name in names:
+            if name in display_map:
+                converted_names.append(display_map[name])
+            else:
+                converted_names.append(name)
+        return converted_names
+
     def forward(self, query: str) -> str:
         # index_names is configured in tool init params, not runtime inputs
         search_index_names = self._resolve_index_names()
+
+        # Convert display names to index names if necessary
+        search_index_names = self._convert_to_index_names(search_index_names)
 
         # Use the instance search_mode
         search_mode = self.search_mode
@@ -137,17 +184,39 @@ class KnowledgeBaseSearchTool(Tool):
             search_index_names,
         )
 
-        if not search_index_names:
-            return json.dumps(
-                "No knowledge base selected. No relevant information found.",
-                ensure_ascii=False,
-            )
+        # Compute effective top_k for initial search:
+        # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
+        # Note: smolagents Tool may not expand Field defaults, so use getattr with FieldInfo fallback.
+        effective_top_k = self.top_k
+        is_rerank = self.rerank
+        if isinstance(effective_top_k, FieldInfo):
+            if effective_top_k.default_factory is not None:
+                effective_top_k = effective_top_k.default_factory()
+            else:
+                effective_top_k = effective_top_k.default
+        if isinstance(is_rerank, FieldInfo):
+            if is_rerank.default_factory is not None:
+                is_rerank = is_rerank.default_factory()
+            else:
+                is_rerank = is_rerank.default
+        if is_rerank:
+            effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
 
-        top_k = int(self._resolve_field_value(self.top_k, 3))
-        rerank_enabled = bool(self._resolve_field_value(self.rerank, False))
-        effective_top_k = (
-            top_k * RERANK_OVERSEARCH_MULTIPLIER if rerank_enabled else top_k
-        )
+        if len(search_index_names) == 0:
+            return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
+
+        if search_mode == "hybrid":
+            kb_search_data = self.search_hybrid(
+                query=query, index_names=search_index_names, top_k=effective_top_k)
+        elif search_mode == "accurate":
+            kb_search_data = self.search_accurate(
+                query=query, index_names=search_index_names, top_k=effective_top_k)
+        elif search_mode == "semantic":
+            kb_search_data = self.search_semantic(
+                query=query, index_names=search_index_names, top_k=effective_top_k)
+        else:
+            raise Exception(
+                f"Invalid search mode: {search_mode}, only support: hybrid, accurate, semantic")
 
         kb_search_data = self._run_search(
             query=query,

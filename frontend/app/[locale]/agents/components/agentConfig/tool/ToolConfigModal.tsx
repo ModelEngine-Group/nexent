@@ -757,6 +757,19 @@ export default function ToolConfigModal({
     hasUserModifiedDatamateUrl,
   ]);
 
+    // Apply default values for init parameters (e.g., init_path)
+  const applyInitParamDefaults = useCallback((params: ToolParam[]): ToolParam[] => {
+    return params.map((param) => {
+      // Handle init_path: use default "/mnt/nexent" if value is empty or not set
+      if (param.name === "init_path" && param.default) {
+        if (!param.value || param.value.trim() === "") {
+          return { ...param, value: param.default };
+        }
+      }
+      return param;
+    });
+  }, []);
+
   // Initialize form values for non-datamate tools
   useEffect(() => {
     // Skip if it's datamate_search tool (handled by other useEffects above)
@@ -765,7 +778,8 @@ export default function ToolConfigModal({
     }
 
     // Initialize form values
-    const paramsWithRerank = withRerankParams(initialParams, tool?.name);
+    const paramsWithDefaults = applyInitParamDefaults(initialParams);
+    const paramsWithRerank = withRerankParams(paramsWithDefaults, tool?.name);
     setCurrentParams(paramsWithRerank);
     const formValues: Record<string, any> = {};
     paramsWithRerank.forEach((param, index) => {
@@ -808,7 +822,7 @@ export default function ToolConfigModal({
         }
       }
     }
-  }, [initialParams, toolRequiresKbSelection, tool?.name, form]);
+  }, [initialParams, toolRequiresKbSelection, tool?.name, form, applyInitParamDefaults]);
 
   // Sync selectedKbDisplayNames when knowledgeBases or selectedKbIds changes
   useEffect(() => {
@@ -1590,6 +1604,20 @@ export default function ToolConfigModal({
                             t("knowledgeBase.error.invalidUrlFormat")
                           );
                         }
+                      },
+                    });
+                  }
+
+                  // Add init_path validation - non-empty string if provided
+                  if (param.name === "init_path") {
+                    rules.push({
+                      validator: async (_: any, value: any) => {
+                        if (!value || value.trim() === "") {
+                          return Promise.reject(
+                            t("toolConfig.validation.initPathEmpty")
+                          );
+                        }
+                        return Promise.resolve();
                       },
                     });
                   }

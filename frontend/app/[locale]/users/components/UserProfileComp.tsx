@@ -35,6 +35,7 @@ import { useAuthenticationContext } from "@/components/providers/AuthenticationP
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useMemo } from "react";
 import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
+import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection";
 import log from "@/lib/logger";
 import {
   getUserTokens,
@@ -587,6 +588,11 @@ export default function UserProfileComp() {
         loading={isLoading}
         disabled={isAdminOrSuperAdmin}
       />
+
+      {/* OAuth Linked Accounts */}
+      <div className="w-full mt-4">
+        <OAuthAccountsSection />
+      </div>
     </Flex>
   );
 }

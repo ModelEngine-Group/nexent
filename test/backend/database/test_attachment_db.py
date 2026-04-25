@@ -133,15 +133,17 @@ class TestGenerateObjectName:
 class TestUploadFile:
     """Test cases for upload_file function"""
 
+    @patch('backend.database.attachment_db.get_file_url')
     @patch('backend.database.attachment_db.os.path.exists')
     @patch('backend.database.attachment_db.os.path.getsize')
     @patch('backend.database.attachment_db.os.path.basename')
-    def test_upload_file_success(self, mock_basename, mock_getsize, mock_exists):
-        """Test successful file upload"""
+    def test_upload_file_success(self, mock_basename, mock_getsize, mock_exists, mock_get_file_url):
+        """Test successful file upload with presigned URL"""
         mock_basename.return_value = 'test.txt'
         mock_exists.return_value = True
         mock_getsize.return_value = 1024
         minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/test.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url?signature=xxx'}
         
         result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket')
         
@@ -150,6 +152,9 @@ class TestUploadFile:
         assert result['file_name'] == 'test.txt'
         assert result['file_size'] == 1024
         assert 'url' in result
+        assert 'presigned_url' in result
+        assert result['presigned_url'] == 'http://minio:9000/presigned-url?signature=xxx'
+        assert result['presigned_url_expires_in'] == 86400
         assert 'upload_time' in result
         minio_client_mock.upload_file.assert_called_once_with(
             '/path/to/test.txt', 'attachments/test.txt', 'bucket'
@@ -159,13 +164,15 @@ class TestUploadFile:
     @patch('backend.database.attachment_db.os.path.getsize')
     @patch('backend.database.attachment_db.os.path.basename')
     @patch('backend.database.attachment_db.generate_object_name')
-    def test_upload_file_auto_generate_object_name(self, mock_generate, mock_basename, mock_getsize, mock_exists):
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_file_auto_generate_object_name(self, mock_get_file_url, mock_generate, mock_basename, mock_getsize, mock_exists):
         """Test upload_file auto-generates object name when not provided"""
         mock_basename.return_value = 'test.txt'
         mock_exists.return_value = True
         mock_getsize.return_value = 1024
         mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
         minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/20240101120000_abc123.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
         
         result = upload_file('/path/to/test.txt', None, 'bucket')
         
@@ -189,30 +196,76 @@ class TestUploadFile:
         assert result['success'] is False
         assert result['error'] == 'Upload failed'
         assert 'url' not in result
+        assert 'presigned_url' not in result
 
     @patch('backend.database.attachment_db.os.path.exists')
     @patch('backend.database.attachment_db.os.path.getsize')
     @patch('backend.database.attachment_db.os.path.basename')
-    def test_upload_file_nonexistent_file(self, mock_basename, mock_getsize, mock_exists):
-        """Test upload_file with nonexistent file"""
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_file_without_presigned_url(self, mock_get_file_url, mock_basename, mock_getsize, mock_exists):
+        """Test upload_file when generate_presigned_url is False"""
         mock_basename.return_value = 'test.txt'
-        mock_exists.return_value = False
-        mock_getsize.return_value = 0
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
         minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/test.txt')
         
-        result = upload_file('/path/to/nonexistent.txt', 'attachments/test.txt', 'bucket')
+        result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket', generate_presigned_url=False)
         
+        assert result['success'] is True
+        assert 'url' in result
+        assert 'presigned_url' not in result
+        mock_get_file_url.assert_not_called()
+
+    @patch('backend.database.attachment_db.os.path.exists')
+    @patch('backend.database.attachment_db.os.path.getsize')
+    @patch('backend.database.attachment_db.os.path.basename')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_file_custom_presigned_url_expires(self, mock_get_file_url, mock_basename, mock_getsize, mock_exists):
+        """Test upload_file with custom presigned URL expiration"""
+        mock_basename.return_value = 'test.txt'
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/test.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        
+        result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket', presigned_url_expires=7200)
+        
+        assert result['success'] is True
+        assert result['presigned_url_expires_in'] == 7200
+        mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
+
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.os.path.exists')
+    @patch('backend.database.attachment_db.os.path.getsize')
+    @patch('backend.database.attachment_db.os.path.basename')
+    def test_upload_file_nonexistent_file(self, mock_basename, mock_getsize, mock_exists, mock_get_file_url):
+        """Test upload_file handles nonexistent local file gracefully"""
+        mock_basename.return_value = 'missing.txt'
+        mock_exists.return_value = False
+        mock_getsize.return_value = 1024
+        minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/missing.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        
+        result = upload_file('/path/to/missing.txt', 'attachments/missing.txt', 'bucket')
+        
+        assert result['success'] is True
         assert result['file_size'] == 0
+        assert result['file_name'] == 'missing.txt'
+        assert 'url' in result
+        assert 'presigned_url' in result
+        mock_getsize.assert_not_called()
 
 
 class TestUploadFileobj:
     """Test cases for upload_fileobj function"""
 
     @patch('backend.database.attachment_db.generate_object_name')
-    def test_upload_fileobj_success(self, mock_generate):
-        """Test successful file object upload"""
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_fileobj_success(self, mock_get_file_url, mock_generate):
+        """Test successful file object upload with presigned URL"""
         mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
         minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/20240101120000_abc123.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url?signature=xxx'}
         
         file_obj = BytesIO(b'test data')
         result = upload_fileobj(file_obj, 'test.txt', 'bucket', 'attachments')
@@ -222,9 +275,13 @@ class TestUploadFileobj:
         assert result['file_name'] == 'test.txt'
         assert result['file_size'] == len(b'test data')
         assert 'url' in result
+        assert 'presigned_url' in result
+        assert result['presigned_url'] == 'http://minio:9000/presigned-url?signature=xxx'
+        assert result['presigned_url_expires_in'] == 86400
         assert 'upload_time' in result
         mock_generate.assert_called_once_with('test.txt', prefix='attachments')
         minio_client_mock.upload_fileobj.assert_called_once()
+        mock_get_file_url.assert_called_once()
 
     @patch('backend.database.attachment_db.generate_object_name')
     def test_upload_fileobj_failure(self, mock_generate):
@@ -238,21 +295,59 @@ class TestUploadFileobj:
         assert result['success'] is False
         assert result['error'] == 'Upload failed'
         assert 'url' not in result
+        assert 'presigned_url' not in result
 
     @patch('backend.database.attachment_db.generate_object_name')
-    def test_upload_fileobj_preserves_file_position(self, mock_generate):
-        """Test upload_fileobj preserves original file position"""
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_fileobj_preserves_file_position(self, mock_get_file_url, mock_generate):
+        """Test upload_fileobj reads full content and preserves original file position"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        
+        file_obj = BytesIO(b'full test data content')
+        original_pos = 4
+        file_obj.seek(original_pos)
+        
+        captured_data = {}
+        def capture_upload(file_obj_arg, object_name, bucket):
+            captured_data['content'] = file_obj_arg.read()
+            return (True, '/bucket/attachments/test.txt')
+        minio_client_mock.upload_fileobj.side_effect = capture_upload
+        
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+        
+        assert captured_data['content'] == b'full test data content'
+        assert file_obj.tell() == original_pos
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_fileobj_without_presigned_url(self, mock_get_file_url, mock_generate):
+        """Test upload_fileobj when generate_presigned_url is False"""
         mock_generate.return_value = 'attachments/test.txt'
         minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
         
         file_obj = BytesIO(b'test data')
-        original_pos = 4
-        file_obj.seek(original_pos)
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket', generate_presigned_url=False)
         
-        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+        assert result['success'] is True
+        assert 'url' in result
+        assert 'presigned_url' not in result
+        mock_get_file_url.assert_not_called()
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_fileobj_custom_presigned_url_expires(self, mock_get_file_url, mock_generate):
+        """Test upload_fileobj with custom presigned URL expiration"""
+        mock_generate.return_value = 'attachments/test.txt'
+        minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
         
-        # File position should be restored
-        assert file_obj.tell() == original_pos
+        file_obj = BytesIO(b'test data')
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket', presigned_url_expires=7200)
+        
+        assert result['success'] is True
+        assert result['presigned_url_expires_in'] == 7200
+        mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
 
 
 class TestDownloadFile:

@@ -178,14 +178,14 @@ class MinioClient:
         self._ensure_initialized()
         return self._storage_client.download_file(object_name, file_path, bucket)
 
-    def get_file_url(self, object_name: str, bucket: Optional[str] = None, expires: int = 3600) -> Tuple[bool, str]:
+    def get_file_url(self, object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Tuple[bool, str]:
         """
         Get presigned URL for file
 
         Args:
             object_name: Object name
             bucket: Bucket name, if not specified use default bucket
-            expires: URL expiration time in seconds
+            expires: URL expiration time in seconds (default 86400 = 24 hours)
 
         Returns:
             Tuple[bool, str]: (Success status, Presigned URL or error message)

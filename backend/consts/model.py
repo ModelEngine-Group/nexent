@@ -52,6 +52,52 @@ class UserDeleteRequest(BaseModel):
     new_owner_id: Optional[str] = None
 
 
+class OAuthProviderDefinition(BaseModel):
+    name: str
+    display_name: str
+    icon: str
+
+    authorize_url: str
+    authorize_method: str = "GET"
+    authorize_params: Dict[str, str] = {}
+    authorize_fragment: str = ""
+    authorize_param_map: Dict[str, str] = {
+        "client_id": "client_id",
+        "redirect_uri": "redirect_uri",
+        "scope": "scope",
+        "state": "state",
+    }
+    encode_redirect_uri: bool = False
+
+    token_url: str
+    token_method: str = "POST"
+    token_params_map: Dict[str, str] = {
+        "client_id": "client_id",
+        "client_secret": "client_secret",
+        "code": "code",
+        "grant_type": "grant_type",
+    }
+    token_extra_params: Dict[str, str] = {}
+    token_error_key: Optional[str] = None
+    token_error_message_key: Optional[str] = None
+    token_response_id_key: Optional[str] = None
+
+    userinfo_url: str
+    userinfo_auth_scheme: str = "Bearer"
+    userinfo_params: Dict[str, str] = {}
+    userinfo_field_map: Dict[str, str] = {
+        "id": "id",
+        "email": "email",
+        "username": "login",
+    }
+    userinfo_needs_email_fetch: bool = False
+    userinfo_email_url: Optional[str] = None
+
+    client_id_env: str
+    client_secret_env: str
+    enabled_check: Optional[str] = None
+
+
 # Response models for model management
 class ModelResponse(BaseModel):
     code: int = 200
@@ -128,13 +174,21 @@ class GlobalConfig(BaseModel):
 
 
 # Request models
+class HistoryItem(BaseModel):
+    role: str
+    content: str
+    minio_files: Optional[List[Dict[str, Any]]] = None
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
-    history: Optional[List[Dict]] = None
+    history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
+    model_id: Optional[int] = None
+    version_no: Optional[int] = None
     is_debug: Optional[bool] = False
 
 
