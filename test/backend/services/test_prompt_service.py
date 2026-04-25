@@ -1445,6 +1445,44 @@ class TestPromptService(unittest.TestCase):
         # Should be called with deduplicated list
         mock_get_knowledge_map.assert_called_once_with(["index-1", "index-2"])
 
+    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    def test_get_knowledge_base_display_names_query_tool_instance_exception(
+        self,
+        mock_query_tool_instance,
+        mock_get_knowledge_map,
+    ):
+        """Test get_knowledge_base_display_names handles query_tool_instances_by_id exception gracefully (lines 445-446)"""
+        from backend.services.prompt_service import get_knowledge_base_display_names
+
+        # Setup - two knowledge_base_search tools
+        tool_info_list = [
+            {"tool_id": 1, "name": "knowledge_base_search"},
+            {"tool_id": 2, "name": "knowledge_base_search"},
+        ]
+
+        # First tool instance query fails with exception
+        mock_query_tool_instance.side_effect = [
+            Exception("Database connection error"),
+            {"params": {"index_names": ["index-2"]}},  # Second tool succeeds
+        ]
+        mock_get_knowledge_map.return_value = {
+            "index-2": "kafka"
+        }
+
+        # Execute - should handle exception gracefully and continue processing
+        result = get_knowledge_base_display_names(
+            tool_info_list=tool_info_list,
+            agent_id=123,
+            tenant_id="tenant-abc"
+        )
+
+        # Assert - should still return results from the tool that succeeded
+        self.assertEqual(result, ["kafka"])
+        # Should have tried both tools
+        self.assertEqual(mock_query_tool_instance.call_count, 2)
+        mock_get_knowledge_map.assert_called_once_with(["index-2"])
+
     @patch('backend.services.prompt_service.generate_and_save_system_prompt_impl')
     def test_gen_system_prompt_streamable_knowledge_base_flow(self, mock_generate_impl):
         """Test gen_system_prompt_streamable with knowledge base configuration"""
