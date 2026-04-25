@@ -298,7 +298,8 @@ async def upload_to_minio(files: List[UploadFile], folder: str, user_id: Optiona
             result = upload_fileobj(
                 file_obj=file_obj,
                 file_name=f.filename or "",
-                prefix=actual_folder
+                prefix=actual_folder,
+                file_size=len(file_content)
             )
 
             # Reset file pointer for potential re-reading

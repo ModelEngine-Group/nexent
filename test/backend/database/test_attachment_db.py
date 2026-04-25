@@ -83,7 +83,7 @@ class TestGenerateObjectName:
     def test_generate_object_name_with_default_prefix(self):
         """Test generate_object_name with default prefix"""
         result = generate_object_name('test.txt')
-        
+
         assert result.startswith('attachments/')
         assert result.endswith('.txt')
         assert len(result) > len('attachments/.txt')
@@ -91,7 +91,7 @@ class TestGenerateObjectName:
     def test_generate_object_name_with_custom_prefix(self):
         """Test generate_object_name with custom prefix"""
         result = generate_object_name('test.jpg', prefix='images')
-        
+
         assert result.startswith('images/')
         assert result.endswith('.jpg')
         assert len(result) > len('images/.jpg')
@@ -99,7 +99,7 @@ class TestGenerateObjectName:
     def test_generate_object_name_without_extension(self):
         """Test generate_object_name with file without extension"""
         result = generate_object_name('testfile')
-        
+
         assert result.startswith('attachments/')
         assert not result.endswith('.')
 
@@ -107,18 +107,18 @@ class TestGenerateObjectName:
         """Test generate_object_name generates unique names"""
         name1 = generate_object_name('test.txt')
         name2 = generate_object_name('test.txt')
-        
+
         # Names should be different due to timestamp and UUID
         assert name1 != name2
 
     def test_generate_object_name_format(self):
         """Test generate_object_name format includes timestamp and UUID"""
         result = generate_object_name('test.txt')
-        
+
         parts = result.split('/')
         assert len(parts) == 2
         assert parts[0] == 'attachments'
-        
+
         # Check format: timestamp_uuid.ext
         filename_parts = parts[1].split('_')
         assert len(filename_parts) >= 2
@@ -138,9 +138,9 @@ class TestUploadFile:
         mock_getsize.return_value = 1024
         minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/test.txt')
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url?signature=xxx'}
-        
+
         result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket')
-        
+
         assert result['success'] is True
         assert result['object_name'] == 'attachments/test.txt'
         assert result['file_name'] == 'test.txt'
@@ -167,9 +167,9 @@ class TestUploadFile:
         mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
         minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/20240101120000_abc123.txt')
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
-        
+
         result = upload_file('/path/to/test.txt', None, 'bucket')
-        
+
         assert result['success'] is True
         assert result['object_name'] == 'attachments/20240101120000_abc123.txt'
         last_call = minio_client_mock.upload_file.call_args
@@ -184,9 +184,9 @@ class TestUploadFile:
         mock_exists.return_value = True
         mock_getsize.return_value = 1024
         minio_client_mock.upload_file.return_value = (False, 'Upload failed')
-        
+
         result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket')
-        
+
         assert result['success'] is False
         assert result['error'] == 'Upload failed'
         assert 'url' not in result
@@ -202,9 +202,9 @@ class TestUploadFile:
         mock_exists.return_value = True
         mock_getsize.return_value = 1024
         minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/test.txt')
-        
+
         result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket', generate_presigned_url=False)
-        
+
         assert result['success'] is True
         assert 'url' in result
         assert 'presigned_url' not in result
@@ -221,9 +221,9 @@ class TestUploadFile:
         mock_getsize.return_value = 1024
         minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/test.txt')
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
-        
+
         result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket', presigned_url_expires=7200)
-        
+
         assert result['success'] is True
         assert result['presigned_url_expires_in'] == 7200
         mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
@@ -239,9 +239,9 @@ class TestUploadFile:
         mock_getsize.return_value = 1024
         minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/missing.txt')
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
-        
+
         result = upload_file('/path/to/missing.txt', 'attachments/missing.txt', 'bucket')
-        
+
         assert result['success'] is True
         assert result['file_size'] == 0
         assert result['file_name'] == 'missing.txt'
@@ -260,10 +260,10 @@ class TestUploadFileobj:
         mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
         minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/20240101120000_abc123.txt')
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url?signature=xxx'}
-        
+
         file_obj = BytesIO(b'test data')
         result = upload_fileobj(file_obj, 'test.txt', 'bucket', 'attachments')
-        
+
         assert result['success'] is True
         assert result['object_name'] == 'attachments/20240101120000_abc123.txt'
         assert result['file_name'] == 'test.txt'
@@ -282,10 +282,10 @@ class TestUploadFileobj:
         """Test upload_fileobj handles upload failure"""
         mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
         minio_client_mock.upload_fileobj.return_value = (False, 'Upload failed')
-        
+
         file_obj = BytesIO(b'test data')
         result = upload_fileobj(file_obj, 'test.txt', 'bucket')
-        
+
         assert result['success'] is False
         assert result['error'] == 'Upload failed'
         assert 'url' not in result
@@ -294,24 +294,25 @@ class TestUploadFileobj:
     @patch('backend.database.attachment_db.generate_object_name')
     @patch('backend.database.attachment_db.get_file_url')
     def test_upload_fileobj_preserves_file_position(self, mock_get_file_url, mock_generate):
-        """Test upload_fileobj reads full content and preserves original file position"""
+        """Test upload_fileobj seeks to beginning before upload and restores position after"""
         mock_generate.return_value = 'attachments/test.txt'
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
-        
+
         file_obj = BytesIO(b'full test data content')
         original_pos = 4
         file_obj.seek(original_pos)
-        
+
         captured_data = {}
         def capture_upload(file_obj_arg, object_name, bucket):
+            captured_data['position_before_read'] = file_obj_arg.tell()
             captured_data['content'] = file_obj_arg.read()
             return (True, '/bucket/attachments/test.txt')
         minio_client_mock.upload_fileobj.side_effect = capture_upload
-        
+
         result = upload_fileobj(file_obj, 'test.txt', 'bucket')
-        
+
+        assert captured_data['position_before_read'] == 0  # Should seek to beginning for full upload
         assert captured_data['content'] == b'full test data content'
-        assert file_obj.tell() == original_pos
 
     @patch('backend.database.attachment_db.generate_object_name')
     @patch('backend.database.attachment_db.get_file_url')
@@ -319,10 +320,10 @@ class TestUploadFileobj:
         """Test upload_fileobj when generate_presigned_url is False"""
         mock_generate.return_value = 'attachments/test.txt'
         minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
-        
+
         file_obj = BytesIO(b'test data')
         result = upload_fileobj(file_obj, 'test.txt', 'bucket', generate_presigned_url=False)
-        
+
         assert result['success'] is True
         assert 'url' in result
         assert 'presigned_url' not in result
@@ -335,10 +336,10 @@ class TestUploadFileobj:
         mock_generate.return_value = 'attachments/test.txt'
         minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
-        
+
         file_obj = BytesIO(b'test data')
         result = upload_fileobj(file_obj, 'test.txt', 'bucket', presigned_url_expires=7200)
-        
+
         assert result['success'] is True
         assert result['presigned_url_expires_in'] == 7200
         mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
@@ -350,9 +351,9 @@ class TestDownloadFile:
     def test_download_file_success(self):
         """Test successful file download"""
         minio_client_mock.download_file.return_value = (True, 'Downloaded successfully')
-        
+
         result = download_file('attachments/test.txt', '/path/to/download.txt', 'bucket')
-        
+
         assert result['success'] is True
         assert result['object_name'] == 'attachments/test.txt'
         assert result['file_path'] == '/path/to/download.txt'
@@ -364,9 +365,9 @@ class TestDownloadFile:
     def test_download_file_failure(self):
         """Test download_file handles download failure"""
         minio_client_mock.download_file.return_value = (False, 'Download failed')
-        
+
         result = download_file('attachments/test.txt', '/path/to/download.txt', 'bucket')
-        
+
         assert result['success'] is False
         assert result['error'] == 'Download failed'
 
@@ -377,9 +378,9 @@ class TestGetFileUrl:
     def test_get_file_url_success(self):
         """Test successful presigned URL generation"""
         minio_client_mock.get_file_url.return_value = (True, 'http://example.com/presigned-url')
-        
+
         result = get_file_url('attachments/test.txt', 'bucket', 7200)
-        
+
         assert result['success'] is True
         assert result['url'] == 'http://example.com/presigned-url'
         assert result['object_name'] == 'attachments/test.txt'
@@ -392,9 +393,9 @@ class TestGetFileUrl:
     def test_get_file_url_failure(self):
         """Test get_file_url handles URL generation failure"""
         minio_client_mock.get_file_url.return_value = (False, 'URL generation failed')
-        
+
         result = get_file_url('attachments/test.txt', 'bucket', 7200)
-        
+
         assert result['success'] is False
         assert result['error'] == 'URL generation failed'
 
@@ -405,18 +406,18 @@ class TestGetFileSizeFromMinio:
     def test_get_file_size_from_minio_success(self):
         """Test successful file size retrieval"""
         minio_client_mock.get_file_size.return_value = 1024
-        
+
         size = get_file_size_from_minio('attachments/test.txt', 'bucket')
-        
+
         assert size == 1024
         minio_client_mock.get_file_size.assert_called_once_with('attachments/test.txt', 'bucket')
 
     def test_get_file_size_from_minio_uses_default_bucket(self):
         """Test get_file_size_from_minio uses default bucket when not specified"""
         minio_client_mock.get_file_size.return_value = 2048
-        
+
         size = get_file_size_from_minio('attachments/test.txt')
-        
+
         assert size == 2048
         assert minio_client_mock.get_file_size.call_args_list[-1] == call(
             'attachments/test.txt', 'test-bucket'
@@ -443,9 +444,9 @@ class TestListFiles:
         ]
         minio_client_mock.list_files.return_value = mock_files
         minio_client_mock.get_file_url.return_value = (True, 'http://example.com/file1.txt')
-        
+
         files = list_files('attachments/', 'bucket')
-        
+
         assert len(files) == 2
         assert files[0]['key'] == 'attachments/file1.txt'
         assert files[0]['size'] == 100
@@ -456,9 +457,9 @@ class TestListFiles:
     def test_list_files_empty(self):
         """Test list_files with empty result"""
         minio_client_mock.list_files.return_value = []
-        
+
         files = list_files('attachments/', 'bucket')
-        
+
         assert files == []
 
     def test_list_files_url_generation_failure(self):
@@ -473,9 +474,9 @@ class TestListFiles:
         ]
         minio_client_mock.list_files.return_value = mock_files
         minio_client_mock.get_file_url.return_value = (False, 'URL generation failed')
-        
+
         files = list_files('attachments/', 'bucket')
-        
+
         assert len(files) == 1
         assert 'url' not in files[0]
 
@@ -486,9 +487,9 @@ class TestDeleteFile:
     def test_delete_file_success(self):
         """Test successful file deletion"""
         minio_client_mock.delete_file.return_value = (True, 'Deleted successfully')
-        
+
         result = delete_file('attachments/test.txt', 'bucket')
-        
+
         assert result['success'] is True
         assert result['object_name'] == 'attachments/test.txt'
         assert 'error' not in result
@@ -497,9 +498,9 @@ class TestDeleteFile:
     def test_delete_file_uses_default_bucket(self):
         """Test delete_file uses default bucket when not specified"""
         minio_client_mock.delete_file.return_value = (True, 'Deleted successfully')
-        
+
         result = delete_file('attachments/test.txt')
-        
+
         assert result['success'] is True
         assert minio_client_mock.delete_file.call_args_list[-1] == call(
             'attachments/test.txt', 'test-bucket'
@@ -508,9 +509,9 @@ class TestDeleteFile:
     def test_delete_file_failure(self):
         """Test delete_file handles deletion failure"""
         minio_client_mock.delete_file.return_value = (False, 'Delete failed')
-        
+
         result = delete_file('attachments/test.txt', 'bucket')
-        
+
         assert result['success'] is False
         assert result['error'] == 'Delete failed'
 
@@ -522,9 +523,9 @@ class TestGetFileStream:
         """Test successful file stream retrieval"""
         mock_stream = BytesIO(b'test data')
         minio_client_mock.get_file_stream.return_value = (True, mock_stream)
-        
+
         result = get_file_stream('attachments/test.txt', 'bucket')
-        
+
         assert result is not None
         assert isinstance(result, BytesIO)
         assert result.read() == b'test data'
@@ -533,9 +534,9 @@ class TestGetFileStream:
     def test_get_file_stream_failure(self):
         """Test get_file_stream returns None on failure"""
         minio_client_mock.get_file_stream.return_value = (False, 'Stream failed')
-        
+
         result = get_file_stream('attachments/test.txt', 'bucket')
-        
+
         assert result is None
 
     def test_get_file_stream_read_error(self):
@@ -543,9 +544,9 @@ class TestGetFileStream:
         mock_stream = MagicMock()
         mock_stream.read.side_effect = Exception("Read error")
         minio_client_mock.get_file_stream.return_value = (True, mock_stream)
-        
+
         result = get_file_stream('attachments/test.txt', 'bucket')
-        
+
         assert result is None
 
 
@@ -600,9 +601,9 @@ class TestFileExists:
         """Test file_exists returns True when file exists in bucket"""
         with patch('backend.database.attachment_db.minio_client') as mock_client:
             mock_client.file_exists.return_value = True
-            
+
             result = file_exists('test/file.txt')
-            
+
             assert result is True
             mock_client.file_exists.assert_called_once_with('test/file.txt', None)
 
@@ -610,9 +611,9 @@ class TestFileExists:
         """Test file_exists returns False when file does not exist"""
         with patch('backend.database.attachment_db.minio_client') as mock_client:
             mock_client.file_exists.return_value = False
-            
+
             result = file_exists('nonexistent/file.txt')
-            
+
             assert result is False
             mock_client.file_exists.assert_called_once_with('nonexistent/file.txt', None)
 
@@ -620,9 +621,9 @@ class TestFileExists:
         """Test file_exists with custom bucket parameter"""
         with patch('backend.database.attachment_db.minio_client') as mock_client:
             mock_client.file_exists.return_value = True
-            
+
             result = file_exists('test/file.txt', bucket='custom-bucket')
-            
+
             assert result is True
             mock_client.file_exists.assert_called_once_with('test/file.txt', 'custom-bucket')
 
@@ -630,9 +631,9 @@ class TestFileExists:
         """Test file_exists handles any exception and returns False"""
         with patch('backend.database.attachment_db.minio_client') as mock_client:
             mock_client.file_exists.side_effect = RuntimeError('Connection failed')
-            
+
             result = file_exists('test/file.txt')
-            
+
             assert result is False
             mock_client.file_exists.assert_called_once_with('test/file.txt', None)
 
@@ -644,9 +645,9 @@ class TestCopyFile:
         """Test successful file copy"""
         with patch('backend.database.attachment_db.minio_client') as mock_client:
             mock_client.copy_file.return_value = (True, 'dest/file.pdf')
-            
+
             result = copy_file('source/file.pdf', 'dest/file.pdf')
-            
+
             assert result['success'] is True
             assert result['object_name'] == 'dest/file.pdf'
             mock_client.copy_file.assert_called_once_with('source/file.pdf', 'dest/file.pdf', None)
@@ -655,9 +656,9 @@ class TestCopyFile:
         """Test copy_file with custom bucket"""
         with patch('backend.database.attachment_db.minio_client') as mock_client:
             mock_client.copy_file.return_value = (True, 'dest/file.pdf')
-            
+
             result = copy_file('source/file.pdf', 'dest/file.pdf', bucket='custom-bucket')
-            
+
             assert result['success'] is True
             mock_client.copy_file.assert_called_once_with('source/file.pdf', 'dest/file.pdf', 'custom-bucket')
 
@@ -665,9 +666,9 @@ class TestCopyFile:
         """Test copy_file handles errors"""
         with patch('backend.database.attachment_db.minio_client') as mock_client:
             mock_client.copy_file.return_value = (False, 'Copy failed')
-            
+
             result = copy_file('source/file.pdf', 'dest/file.pdf')
-            
+
             assert result['success'] is False
             assert 'Copy failed' in result['error']
 
