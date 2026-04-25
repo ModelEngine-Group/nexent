@@ -106,6 +106,24 @@ class OpenAIModel(OpenAIServerModel):
 
         try:
             for chunk in current_request:
+                # Check if the chunk is a valid streaming response
+                if not hasattr(chunk, 'choices'):
+                    # Determine the type of invalid response
+                    if hasattr(chunk, 'id') and hasattr(chunk, 'model'):
+                        # Non-streaming response - convert it
+                        logger.warning(
+                            f"Received non-streaming response instead of stream. "
+                            f"Response ID: {getattr(chunk, 'id', 'N/A')}"
+                        )
+                        return self._handle_non_streaming_response(chunk)
+                    else:
+                        # Invalid response format - raise descriptive error
+                        chunk_str = str(chunk)
+                        logger.error(f"Invalid API response format: {chunk_str[:500]}")
+                        raise ValueError(
+                            f"LLM API returned invalid response format: {chunk_str[:200]}"
+                        )
+
                 new_token = chunk.choices[0].delta.content
                 reasoning_content = getattr(
                     chunk.choices[0].delta, 'reasoning_content', None)
@@ -187,6 +205,59 @@ class OpenAIModel(OpenAIServerModel):
             if "context_length_exceeded" in str(e):
                 raise ValueError(f"Token limit exceeded: {str(e)}")
             raise e
+
+    def _handle_non_streaming_response(self, response) -> ChatMessage:
+        """
+        Handle non-streaming response by extracting content directly.
+
+        Args:
+            response: The non-streaming API response
+
+        Returns:
+            ChatMessage: The complete model response
+        """
+        if not hasattr(response, 'choices') or not response.choices:
+            raise ValueError("Non-streaming response has no choices")
+
+        choice = response.choices[0]
+
+        # Extract content from message
+        content = ""
+        if hasattr(choice, 'message') and choice.message:
+            content = getattr(choice.message, 'content', "") or ""
+        elif hasattr(choice, 'delta') and choice.delta:
+            content = getattr(choice.delta, 'content', "") or ""
+
+        # Extract role
+        role = "assistant"
+        if hasattr(choice, 'message') and choice.message:
+            role = getattr(choice.message, 'role', "assistant") or "assistant"
+        elif hasattr(choice, 'delta') and choice.delta:
+            role = getattr(choice.delta, 'role', "assistant") or "assistant"
+
+        # Extract token usage
+        input_tokens = 0
+        output_tokens = 0
+        if hasattr(response, 'usage') and response.usage:
+            usage = response.usage
+            input_tokens = getattr(usage, 'prompt_tokens', 0)
+            output_tokens = getattr(usage, 'completion_tokens', 0)
+            self.last_input_token_count = input_tokens
+            self.last_output_token_count = output_tokens
+
+        # Send tokens to observer for consistency
+        if content:
+            self.observer.add_model_new_token(content)
+        self.observer.flush_remaining_tokens()
+
+        message = ChatMessage.from_dict(
+            ChatCompletionMessage(role=role, content=content).model_dump(
+                include={"role", "content", "tool_calls"}
+            )
+        )
+        message.raw = response
+        message.role = MessageRole.ASSISTANT
+        return message
 
     async def check_connectivity(self) -> bool:
         """
