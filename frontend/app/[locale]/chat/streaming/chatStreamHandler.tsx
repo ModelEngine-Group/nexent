@@ -77,7 +77,9 @@ export const handleStreamResponse = async (
   const decoder = new TextDecoder();
   let buffer = "";
 
-  // Used to accumulate different types of content
+  // Guard flag to prevent duplicate title generation
+  // null = not applicable (existing conversation), true = not started, false = already scheduled
+  let titleGenerationGuard: boolean | null = isNewConversation ? true : null;
 
   // Create an empty step object
   let currentStep: AgentStep = {
@@ -94,40 +96,43 @@ export const handleStreamResponse = async (
 
   // Generate conversation title immediately when stream starts (for new conversations)
   // This runs in parallel with the streaming response
-  if (isNewConversation) {
-    // Use setTimeout to ensure the user message has been added to state
+  if (titleGenerationGuard === true) {
+    // Mark as scheduled immediately to prevent duplicate calls
+    titleGenerationGuard = false;
+
+    // Capture user message at this point to avoid setMessages callback issues
+    let capturedUserMessage: string | null = null;
+    setMessages((prevMessages) => {
+      const firstUserMessage = prevMessages.find(
+        (msg) => msg.role === MESSAGE_ROLES.USER
+      );
+      if (firstUserMessage?.content) {
+        capturedUserMessage = firstUserMessage.content;
+      }
+      return prevMessages;
+    });
+
     setTimeout(async () => {
-      try {
-        // Get the current messages to find the user's question
-        setMessages((prevMessages) => {
-          const firstUserMessage = prevMessages.find(
-            (msg) => msg.role === MESSAGE_ROLES.USER
-          );
-          if (firstUserMessage?.content) {
-            // Call the generate title from question interface
-            conversationService
-              .generateTitle({
-                conversation_id: currentConversationId,
-                question: firstUserMessage.content,
-              })
-              .then((title: string) => {
-                if (title) {
-                  setConversationTitle(title);
-                }
-                // Update the conversation list
-                fetchConversationList();
-              })
-              .catch((error: Error) => {
-                log.error(
-                  t("chatStreamHandler.generateTitleFailed"),
-                  error
-                );
-              });
-          }
-          return prevMessages;
-        });
-      } catch (error) {
-        log.error(t("chatStreamHandler.generateTitleFailed"), error);
+      // Use captured message directly instead of setMessages callback
+      if (capturedUserMessage) {
+        conversationService
+          .generateTitle({
+            conversation_id: currentConversationId,
+            question: capturedUserMessage,
+          })
+          .then((title: string) => {
+            if (title) {
+              setConversationTitle(title);
+            }
+            // Update the conversation list
+            fetchConversationList();
+          })
+          .catch((error: Error) => {
+            log.error(
+              t("chatStreamHandler.generateTitleFailed"),
+              error
+            );
+          });
       }
     }, 0);
   }

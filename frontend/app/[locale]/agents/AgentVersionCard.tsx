@@ -522,6 +522,7 @@ export function VersionCardItem({
         currentVersionNo={currentVersionNo}
         compareData={compareData}
         onCancel={() => setCompareModalOpen(false)}
+        agentId={agentId}
         showRollback
         rollbackLoading={rollbackLoading}
         onRollbackConfirm={handleRollbackConfirm}

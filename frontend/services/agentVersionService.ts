@@ -114,6 +114,46 @@ export interface FetchAgentVersionListResult {
 export interface VersionPublishRequest {
   version_name?: string;
   release_note?: string;
+  publish_as_a2a?: boolean;
+}
+
+/**
+ * A2A Agent info returned from publish
+ */
+export interface A2AAgentInfo {
+  id: number;
+  agent_id: number;
+  endpoint_id: string;
+  user_id: string;
+  tenant_id: string;
+  name: string;
+  description?: string;
+  version?: string;
+  agent_url?: string;
+  is_enabled?: boolean;
+  streaming?: boolean;
+  supported_interfaces?: any[];
+  card_overrides?: any;
+  published_at?: string;
+}
+
+/**
+ * A2A Agent Card info for frontend display
+ */
+export interface A2AAgentCard {
+  endpoint_id: string;
+  name: string;
+  description?: string;
+  version?: string;
+  streaming?: boolean;
+  agent_card_url: string;
+  rest_endpoints: {
+    message_send: string;
+    message_stream: string;
+    tasks_get: string;
+  };
+  jsonrpc_url: string;
+  jsonrpc_methods: string[];
 }
 
 /**
@@ -122,7 +162,7 @@ export interface VersionPublishRequest {
 export interface VersionPublishResponse {
   success: boolean;
   message: string;
-  data?: AgentVersion;
+  data?: AgentVersion & { a2a_agent?: A2AAgentInfo; a2a_agent_card?: A2AAgentCard };
 }
 
 /**
@@ -329,7 +369,7 @@ export async function publishVersion(
       throw new Error(`Request failed: ${response.status}`);
     }
 
-    const data: AgentVersion = await response.json();
+    const data = await response.json();
     return {
       success: true,
       message: "Version published successfully",
