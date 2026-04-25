@@ -680,5 +680,48 @@ class TestConversationManagementService(unittest.TestCase):
             123, "Python Tips", self.user_id)
 
 
+class TestCallLlmForTitleMonitoring(unittest.TestCase):
+    """Verify call_llm_for_title sets monitoring context and operation."""
+
+    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.tenant_config_manager')
+    @patch('backend.services.conversation_management_service.set_monitoring_operation')
+    @patch('backend.services.conversation_management_service.set_monitoring_context')
+    def test_sets_monitoring_context_with_tenant_id(
+            self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
+        mock_config_mgr.get_model_config.return_value = {
+            "model_repo": "openai", "model_name": "gpt-4",
+            "base_url": "http://x", "api_key": "k",
+            "display_name": "GPT-4",
+        }
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_model_cls.return_value = mock_llm
+
+        call_llm_for_title("hello?", "tenant-123", "en")
+
+        mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id=None)
+
+    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.tenant_config_manager')
+    @patch('backend.services.conversation_management_service.set_monitoring_operation')
+    @patch('backend.services.conversation_management_service.set_monitoring_context')
+    def test_sets_monitoring_operation_with_display_name(
+            self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
+        mock_config_mgr.get_model_config.return_value = {
+            "model_repo": "openai", "model_name": "gpt-4",
+            "base_url": "http://x", "api_key": "k",
+            "display_name": "GPT-4",
+        }
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_model_cls.return_value = mock_llm
+
+        call_llm_for_title("hello?", "tenant-123", "zh")
+
+        mock_op.assert_called_once_with(
+            "title_generation", display_name="GPT-4")
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -628,3 +628,58 @@ def test_jina_get_multimodal_embeddings_missing_data_key(monkeypatch):
     emb = JinaEmbedding(api_key="k")
     with pytest.raises(KeyError):
         emb.get_multimodal_embeddings([{"text": "t"}], with_metadata=False, timeout=1)
+
+
+# ---------------------------------------------------------------------------
+# Tests for record_model_call monitoring wrapper
+# ---------------------------------------------------------------------------
+
+
+def test_openai_get_embeddings_calls_record_model_call(mocker):
+    """OpenAICompatibleEmbedding.get_embeddings calls record_model_call with correct args."""
+    mock_ctx = mocker.MagicMock()
+    mock_ctx.__enter__ = mocker.MagicMock(return_value=None)
+    mock_ctx.__exit__ = mocker.MagicMock(return_value=False)
+    mock_record = mocker.patch(
+        "nexent.core.models.embedding_model.record_model_call",
+        return_value=mock_ctx,
+    )
+    mock_resp = Mock()
+    mock_resp.raise_for_status = Mock()
+    mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2]}]}
+    mocker.patch("requests.post", return_value=mock_resp)
+
+    emb = OpenAICompatibleEmbedding(
+        model_name="text-emb-3",
+        base_url="https://api.example.com",
+        api_key="k",
+        embedding_dim=2,
+        ssl_verify=True,
+    )
+    emb.get_embeddings(["hello"], with_metadata=False, timeout=5)
+
+    mock_record.assert_called_once_with(
+        "embedding", "text-emb-3", display_name="text-emb-3"
+    )
+
+
+def test_jina_get_embeddings_calls_record_model_call(mocker):
+    """JinaEmbedding.get_multimodal_embeddings calls record_model_call with correct args."""
+    mock_ctx = mocker.MagicMock()
+    mock_ctx.__enter__ = mocker.MagicMock(return_value=None)
+    mock_ctx.__exit__ = mocker.MagicMock(return_value=False)
+    mock_record = mocker.patch(
+        "nexent.core.models.embedding_model.record_model_call",
+        return_value=mock_ctx,
+    )
+    mock_resp = Mock()
+    mock_resp.raise_for_status = Mock()
+    mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2]}]}
+    mocker.patch("requests.post", return_value=mock_resp)
+
+    emb = JinaEmbedding(api_key="k", ssl_verify=True)
+    emb.get_multimodal_embeddings([{"text": "hi"}], with_metadata=False, timeout=5)
+
+    mock_record.assert_called_once_with(
+        "multi_embedding", emb.model, display_name=emb.model
+    )

@@ -8772,3 +8772,44 @@ async def test_update_agent_info_impl_skill_update_exception(
 
     with pytest.raises(ValueError, match="Failed to update agent skills"):
         await update_agent_info_impl(mock_request, authorization="Bearer token")
+
+
+# ---------------------------------------------------------------------------
+# Monitoring instrumentation tests for agent_service
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.set_monitoring_context")
+@patch("backend.services.agent_service._resolve_user_tenant_language")
+@patch("backend.services.agent_service.build_memory_context")
+@patch('backend.services.agent_service.save_messages')
+@patch("backend.services.agent_service.generate_stream_with_memory")
+async def test_run_agent_stream_sets_monitoring_context(
+        mock_generate_stream, mock_save_messages, mock_build_mem_ctx,
+        mock_resolve, mock_set_ctx, mock_agent_request, mock_http_request):
+    """run_agent_stream calls set_monitoring_context with resolved identity."""
+    mock_resolve.return_value = ("resolved-uid", "resolved-tid", "en")
+    mock_agent_request.agent_id = 42
+    mock_agent_request.conversation_id = 99
+
+    async def fake_stream():
+        yield "chunk"
+
+    mock_generate_stream.return_value = fake_stream()
+
+    await run_agent_stream(
+        mock_agent_request, mock_http_request, "Bearer token")
+
+    mock_set_ctx.assert_called_once_with(
+        tenant_id="resolved-tid",
+        user_id="resolved-uid",
+        agent_id=42,
+        conversation_id=99,
+    )
+
+
+def test_generate_stream_with_memory_decorated():
+    """generate_stream_with_memory exists as callable after module import."""
+    from backend.services.agent_service import generate_stream_with_memory
+    assert callable(generate_stream_with_memory)
