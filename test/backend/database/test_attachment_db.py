@@ -344,6 +344,80 @@ class TestUploadFileobj:
         assert result['presigned_url_expires_in'] == 7200
         mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
 
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.minio_client')
+    def test_upload_fileobj_file_size_calculation_valueerror_sets_zero(self, mock_client, mock_get_file_url, mock_generate):
+        """Test upload_fileobj handles ValueError during file size calculation by setting file_size=0"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+
+        file_obj = MagicMock()
+        file_obj.tell.side_effect = ValueError("Not a valid file")
+        # First seek (in try block) succeeds, second seek (in except block) fails
+        file_obj.seek.side_effect = [None, ValueError("Seek not supported")]
+
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert result['success'] is True
+        assert result['file_size'] == 0
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.minio_client')
+    def test_upload_fileobj_file_size_calculation_ioerror_sets_zero(self, mock_client, mock_get_file_url, mock_generate):
+        """Test upload_fileobj handles IOError during file size calculation by setting file_size=0"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+
+        file_obj = MagicMock()
+        file_obj.tell.side_effect = IOError("IO error")
+        # First seek (in try block) succeeds, second seek (in except block) fails
+        file_obj.seek.side_effect = [None, IOError("IO error")]
+
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert result['success'] is True
+        assert result['file_size'] == 0
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.minio_client')
+    def test_upload_fileobj_restore_position_valueerror_ignored(self, mock_client, mock_get_file_url, mock_generate):
+        """Test upload_fileobj ignores ValueError when restoring file position after upload"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+
+        file_obj = MagicMock()
+        file_obj.tell.return_value = 0
+        # seek(0, SEEK_END) succeeds, seek(0) in try block succeeds, seek(0) in finally block fails
+        file_obj.seek.side_effect = [None, None, ValueError("File is closed")]
+
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert result['success'] is True
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.minio_client')
+    def test_upload_fileobj_restore_position_ioerror_ignored(self, mock_client, mock_get_file_url, mock_generate):
+        """Test upload_fileobj ignores IOError when restoring file position after upload"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+
+        file_obj = MagicMock()
+        file_obj.tell.return_value = 0
+        # seek(0, SEEK_END) succeeds, seek(0) in try block succeeds, seek(0) in finally block fails
+        file_obj.seek.side_effect = [None, None, IOError("IO error on close")]
+
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert result['success'] is True
+
 
 class TestDownloadFile:
     """Test cases for download_file function"""
