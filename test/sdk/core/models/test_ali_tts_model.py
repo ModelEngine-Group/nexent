@@ -13,17 +13,49 @@ import sys as _sys
 
 _mock_websockets = MagicMock()
 _mock_websockets.connect = MagicMock()
+_mock_websockets.exceptions = MagicMock()
+
+_mock_aiofiles = MagicMock()
 
 
 class _MockConnectionClosedError(Exception):
-    pass
+    def __init__(self, code, reason):
+        self.code = code
+        self.reason = reason
+        super().__init__(reason)
 
 
 _mock_websockets.exceptions.ConnectionClosedError = _MockConnectionClosedError
 _mock_websockets.exceptions.WebSocketException = Exception
 
-if "websockets" not in _sys.modules:
-    _sys.modules["websockets"] = _mock_websockets
+
+class _MockAsyncContextManager:
+    def __init__(self, mock_file):
+        self.mock_file = mock_file
+
+    async def __aenter__(self):
+        return self.mock_file
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return None
+
+
+def _mock_aiofiles_open(*args, **kwargs):
+    mock_file = AsyncMock()
+    mock_file.read = AsyncMock(return_value=b"mock_data")
+    return _MockAsyncContextManager(mock_file)
+
+
+_mock_aiofiles.open = _mock_aiofiles_open
+
+_module_mocks = {
+    "websockets": _mock_websockets,
+    "aiofiles": _mock_aiofiles,
+}
+
+for mod_name, mock_obj in _module_mocks.items():
+    if mod_name not in _sys.modules:
+        _sys.modules[mod_name] = mock_obj
 
 from sdk.nexent.core.models.ali_tts_model import (
     AliTTSModel,
@@ -392,6 +424,24 @@ class TestAliTTSModel:
         chunks = [c async for c in result]
         assert chunks == [b"chunk1", b"chunk2"]
 
+    @pytest.mark.asyncio
+    async def test_generate_speech_cosyvoice_non_streaming(self, cosy_model):
+        """Test generate_speech for CosyVoice non-streaming."""
+        cosy_model._generate_cosyvoice_non_streaming = AsyncMock(return_value=b"audio_data")
+        result = await cosy_model.generate_speech("hello", stream=False)
+        assert result == b"audio_data"
+
+    @pytest.mark.asyncio
+    async def test_generate_speech_cosyvoice_streaming(self, cosy_model):
+        """Test generate_speech for CosyVoice streaming."""
+        async def fake_gen():
+            yield b"chunk1"
+            yield b"chunk2"
+        cosy_model._generate_cosyvoice_streaming = MagicMock(return_value=fake_gen())
+        result = await cosy_model.generate_speech("hello", stream=True)
+        chunks = [c async for c in result]
+        assert chunks == [b"chunk1", b"chunk2"]
+
     def test_is_tts_result_successful_valid(self, cosy_model):
         """Test _is_tts_result_successful with valid result."""
         assert cosy_model._is_tts_result_successful(b"audio_data") is True
@@ -413,10 +463,400 @@ class TestAliTTSModel:
         """Test _log_error_diagnostics with auth error."""
         cosy_model._log_error_diagnostics("Error 401: unauthorized")
 
+    def test_log_error_diagnostics_task_session(self, cosy_model):
+        """Test _log_error_diagnostics with task/session error."""
+        cosy_model._log_error_diagnostics("Error: task-started timeout")
+
     def test_extract_tts_error_message(self, cosy_model):
         """Test _extract_tts_error_message."""
         msg = cosy_model._extract_tts_error_message(b"error message")
         assert "error message" in msg
+
+
+class TestAliTTSCosyVoiceAsync:
+    """Test CosyVoice async methods in AliTTSModel."""
+
+    @pytest.fixture
+    def cosy_config(self):
+        """Create a CosyVoice config."""
+        return AliTTSConfig(api_key="test_key", model="cosyvoice-v2", voice="longxiaochun_v2")
+
+    @pytest.fixture
+    def cosy_model(self, cosy_config):
+        """Create a CosyVoice model instance."""
+        return AliTTSModel(cosy_config)
+
+    @pytest.mark.asyncio
+    async def test_cosyvoice_wait_for_task_started_success(self, cosy_model):
+        """Test _cosyvoice_wait_for_task_started with successful task start."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"header": {"event": "task-started", "task_id": "task_1"}}),
+        ])
+
+        result = await cosy_model._cosyvoice_wait_for_task_started(mock_ws)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_cosyvoice_wait_for_task_started_failure(self, cosy_model):
+        """Test _cosyvoice_wait_for_task_started with task failure."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"header": {"event": "task-failed", "error_message": "Task failed"}}),
+        ])
+
+        with pytest.raises(AliTTSError):
+            await cosy_model._cosyvoice_wait_for_task_started(mock_ws)
+
+    @pytest.mark.asyncio
+    async def test_cosyvoice_receive_audio_binary(self, cosy_model):
+        """Test _cosyvoice_receive_audio with binary audio data."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            b"audio_chunk_1",
+            b"audio_chunk_2",
+            json.dumps({"header": {"event": "task-finished"}}),
+        ])
+
+        chunks = []
+        buffer = bytearray()
+        async for chunk in cosy_model._cosyvoice_receive_audio(mock_ws, buffer=buffer, yield_chunks=True):
+            chunks.append(chunk)
+
+        assert len(chunks) == 2
+        assert len(buffer) > 0
+
+    @pytest.mark.asyncio
+    async def test_cosyvoice_receive_audio_timeout(self, cosy_model):
+        """Test _cosyvoice_receive_audio with timeout."""
+        import asyncio
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            b"audio_chunk",
+            asyncio.TimeoutError(),
+        ])
+
+        chunks = []
+        buffer = bytearray()
+        async for chunk in cosy_model._cosyvoice_receive_audio(mock_ws, buffer=buffer, yield_chunks=True):
+            chunks.append(chunk)
+
+        assert len(chunks) == 1
+
+    @pytest.mark.asyncio
+    async def test_cosyvoice_receive_audio_task_failed(self, cosy_model):
+        """Test _cosyvoice_receive_audio with task-failed event."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"header": {"event": "task-failed", "error_message": "Task failed"}}),
+        ])
+
+        with pytest.raises(AliTTSError):
+            async for _ in cosy_model._cosyvoice_receive_audio(mock_ws):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_generate_cosyvoice_non_streaming_success(self, cosy_model):
+        """Test _generate_cosyvoice_non_streaming with successful response."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"header": {"event": "task-started"}}),
+            b"audio_data",
+            json.dumps({"header": {"event": "task-finished"}}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            result = await cosy_model._generate_cosyvoice_non_streaming(
+                "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+            )
+
+        assert isinstance(result, bytes)
+
+    @pytest.mark.asyncio
+    async def test_generate_cosyvoice_non_streaming_error(self, cosy_model):
+        """Test _generate_cosyvoice_non_streaming with AliTTSError."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"header": {"event": "task-failed", "error_message": "Task failed"}}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            with pytest.raises(AliTTSError):
+                await cosy_model._generate_cosyvoice_non_streaming(
+                    "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+                )
+
+    @pytest.mark.asyncio
+    async def test_generate_cosyvoice_streaming_success(self, cosy_model):
+        """Test _generate_cosyvoice_streaming with successful response."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"header": {"event": "task-started"}}),
+            b"audio_chunk",
+            json.dumps({"header": {"event": "task-finished"}}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            chunks = []
+            async for chunk in cosy_model._generate_cosyvoice_streaming(
+                "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+            ):
+                chunks.append(chunk)
+
+        assert len(chunks) >= 1
+
+
+class TestAliTTSQwenAsync:
+    """Test Qwen Realtime async methods in AliTTSModel."""
+
+    @pytest.fixture
+    def qwen_config(self):
+        """Create a Qwen Realtime config."""
+        return AliTTSConfig(api_key="test_key", model="qwen-tts", voice="Cherry")
+
+    @pytest.fixture
+    def qwen_model(self, qwen_config):
+        """Create a Qwen Realtime model instance."""
+        return AliTTSModel(qwen_config)
+
+    @pytest.mark.asyncio
+    async def test_qwen_wait_for_session_created_success(self, qwen_model):
+        """Test _qwen_wait_for_session_created with successful session."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created"}),
+        ])
+
+        result = await qwen_model._qwen_wait_for_session_created(mock_ws)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_qwen_wait_for_session_created_error(self, qwen_model):
+        """Test _qwen_wait_for_session_created with error."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "error", "error": {"message": "Session error"}}),
+        ])
+
+        with pytest.raises(AliTTSError):
+            await qwen_model._qwen_wait_for_session_created(mock_ws)
+
+    @pytest.mark.asyncio
+    async def test_qwen_receive_audio_with_delta(self, qwen_model):
+        """Test _qwen_receive_audio with audio delta events."""
+        audio_data = b"test_audio"
+        encoded = base64.b64encode(audio_data).decode('utf-8')
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "response.audio.delta", "delta": encoded}),
+            json.dumps({"type": "session.finished"}),
+        ])
+
+        chunks = []
+        buffer = bytearray()
+        async for chunk in qwen_model._qwen_receive_audio(mock_ws, buffer=buffer, yield_chunks=True):
+            chunks.append(chunk)
+
+        assert len(chunks) == 1
+        assert chunks[0] == audio_data
+        assert len(buffer) == len(audio_data)
+
+    @pytest.mark.asyncio
+    async def test_qwen_receive_audio_binary(self, qwen_model):
+        """Test _qwen_receive_audio with binary data."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            b"binary_audio",
+            json.dumps({"type": "response.audio.done"}),
+        ])
+
+        chunks = []
+        buffer = bytearray()
+        async for chunk in qwen_model._qwen_receive_audio(mock_ws, buffer=buffer, yield_chunks=True):
+            chunks.append(chunk)
+
+        assert len(chunks) == 1
+        assert chunks[0] == b"binary_audio"
+
+    @pytest.mark.asyncio
+    async def test_qwen_receive_audio_error(self, qwen_model):
+        """Test _qwen_receive_audio with error event."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "error", "error": {"message": "Service error"}}),
+        ])
+
+        with pytest.raises(AliTTSError):
+            async for _ in qwen_model._qwen_receive_audio(mock_ws):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_qwen_receive_audio_timeout(self, qwen_model):
+        """Test _qwen_receive_audio with timeout."""
+        import asyncio
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "response.audio.delta", "delta": base64.b64encode(b"chunk").decode()}),
+            asyncio.TimeoutError(),
+        ])
+
+        chunks = []
+        async for chunk in qwen_model._qwen_receive_audio(mock_ws, yield_chunks=True):
+            chunks.append(chunk)
+
+        assert len(chunks) == 1
+
+    @pytest.mark.asyncio
+    async def test_generate_qwen_realtime_non_streaming_success(self, qwen_model):
+        """Test _generate_qwen_realtime_non_streaming with successful response."""
+        audio_data = b"test_audio"
+        encoded = base64.b64encode(audio_data).decode('utf-8')
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created"}),
+            json.dumps({"type": "response.audio.delta", "delta": encoded}),
+            json.dumps({"type": "response.audio.done"}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            result = await qwen_model._generate_qwen_realtime_non_streaming(
+                "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+            )
+
+        assert isinstance(result, bytes)
+
+    @pytest.mark.asyncio
+    async def test_generate_qwen_realtime_non_streaming_error(self, qwen_model):
+        """Test _generate_qwen_realtime_non_streaming with AliTTSError."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "error", "error": {"message": "Session error"}}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            with pytest.raises(AliTTSError):
+                await qwen_model._generate_qwen_realtime_non_streaming(
+                    "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+                )
+
+    @pytest.mark.asyncio
+    async def test_generate_qwen_realtime_streaming_success(self, qwen_model):
+        """Test _generate_qwen_realtime_streaming with successful response."""
+        audio_data = b"test_audio"
+        encoded = base64.b64encode(audio_data).decode('utf-8')
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created"}),
+            json.dumps({"type": "response.audio.delta", "delta": encoded}),
+            json.dumps({"type": "response.audio.done"}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            chunks = []
+            async for chunk in qwen_model._generate_qwen_realtime_streaming(
+                "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+            ):
+                chunks.append(chunk)
+
+        assert len(chunks) >= 1
+
+
+class TestAliTTSConnectivity:
+    """Test connectivity check methods in AliTTSModel."""
+
+    @pytest.fixture
+    def cosy_config(self):
+        """Create a CosyVoice config."""
+        return AliTTSConfig(api_key="test_key", model="cosyvoice-v2", voice="longxiaochun_v2")
+
+    @pytest.fixture
+    def qwen_config(self):
+        """Create a Qwen Realtime config."""
+        return AliTTSConfig(api_key="test_key", model="qwen-tts", voice="Cherry")
+
+    @pytest.fixture
+    def cosy_model(self, cosy_config):
+        """Create a CosyVoice model instance."""
+        return AliTTSModel(cosy_config)
+
+    @pytest.fixture
+    def qwen_model(self, qwen_config):
+        """Create a Qwen Realtime model instance."""
+        return AliTTSModel(qwen_config)
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_cosyvoice_success(self, cosy_model):
+        """Test check_connectivity for CosyVoice with successful response."""
+        cosy_model._generate_cosyvoice_non_streaming = AsyncMock(return_value=b"audio_data")
+        result = await cosy_model.check_connectivity()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_qwen_success(self, qwen_model):
+        """Test check_connectivity for Qwen with successful response."""
+        qwen_model._generate_qwen_realtime_non_streaming = AsyncMock(return_value=b"audio_data")
+        result = await qwen_model.check_connectivity()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_failure(self, cosy_model):
+        """Test check_connectivity with failure."""
+        cosy_model._generate_cosyvoice_non_streaming = AsyncMock(return_value=b"")
+        result = await cosy_model.check_connectivity()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_error(self, cosy_model):
+        """Test check_connectivity with AliTTSError."""
+        cosy_model._generate_cosyvoice_non_streaming = AsyncMock(
+            side_effect=AliTTSError("Service error")
+        )
+        result = await cosy_model.check_connectivity()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_exception(self, cosy_model):
+        """Test check_connectivity with general exception."""
+        cosy_model._generate_cosyvoice_non_streaming = AsyncMock(
+            side_effect=Exception("Network error")
+        )
+        result = await cosy_model.check_connectivity()
+        assert result is False
 
 
 class TestAliTTSConstants:

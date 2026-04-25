@@ -12,6 +12,29 @@ import wave
 
 import sys as _sys
 
+# Add mocks before any imports
+_mock_aiofiles = MagicMock()
+
+
+class _MockAsyncContextManager:
+    def __init__(self, mock_file):
+        self.mock_file = mock_file
+
+    async def __aenter__(self):
+        return self.mock_file
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return None
+
+
+def _mock_aiofiles_open(*args, **kwargs):
+    mock_file = AsyncMock()
+    mock_file.read = AsyncMock(return_value=b"mock_data")
+    return _MockAsyncContextManager(mock_file)
+
+
+_mock_aiofiles.open = _mock_aiofiles_open
+
 _mock_websockets = MagicMock()
 _mock_websockets.connect = MagicMock()
 _mock_websockets.exceptions = MagicMock()
@@ -26,6 +49,25 @@ class _MockConnectionClosedError(Exception):
 
 _mock_websockets.exceptions.ConnectionClosedError = _MockConnectionClosedError
 _mock_websockets.exceptions.WebSocketException = Exception
+
+# Set up websockets mock
+_mock_websockets.connect = MagicMock()
+
+_module_mocks = {
+    "websockets": _mock_websockets,
+    "aiofiles": _mock_aiofiles,
+}
+
+# Apply mocks before any imports that could trigger SDK imports
+for mod_name, mock_obj in _module_mocks.items():
+    if mod_name not in _sys.modules:
+        _sys.modules[mod_name] = mock_obj
+
+from sdk.nexent.core.models.ali_stt_model import (
+    AliSTTModel,
+    AliSTTConfig,
+    TranscriptionResult,
+)
 
 _mock_aiofiles = MagicMock()
 
@@ -467,3 +509,136 @@ class TestAliSTTModel:
         """Test _extract_stt_error_message with empty error."""
         msg = ali_model._extract_stt_error_message({})
         assert "Unknown error" in msg
+
+
+class TestAliSTTModelAsync:
+    """Test async methods in AliSTTModel."""
+
+    @pytest.fixture
+    def ali_config(self):
+        """Create a test Ali STT configuration."""
+        config = AliSTTConfig(api_key="test_key", language="zh")
+        return config
+
+    @pytest.fixture
+    def ali_model(self, ali_config):
+        """Create a test Ali STT model instance."""
+        return AliSTTModel(ali_config, "/path/to/test/audio.pcm")
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_error(self, ali_model):
+        """Test _handle_stt_event with error event."""
+        mock_ws = AsyncMock()
+        transcription_texts = []
+        result = await ali_model._handle_stt_event(
+            {"event": "error", "error": "Test error"},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is True
+        mock_ws.send_json.assert_called_once_with({"error": "Test error"})
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_speech_started(self, ali_model):
+        """Test _handle_stt_event with speech_started event."""
+        mock_ws = AsyncMock()
+        transcription_texts = []
+        result = await ali_model._handle_stt_event(
+            {"event": "input_audio_buffer.speech_started"},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is False
+        mock_ws.send_json.assert_called_once_with({"vad": "started"})
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_speech_stopped(self, ali_model):
+        """Test _handle_stt_event with speech_stopped event."""
+        mock_ws = AsyncMock()
+        transcription_texts = []
+        result = await ali_model._handle_stt_event(
+            {"event": "input_audio_buffer.speech_stopped"},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is False
+        mock_ws.send_json.assert_called_once_with({"vad": "stopped"})
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_transcription_text(self, ali_model):
+        """Test _handle_stt_event with transcription text."""
+        mock_ws = AsyncMock()
+        transcription_texts = []
+        result = await ali_model._handle_stt_event(
+            {"event": "conversation.item.input_audio_transcription.text", "text": "Hello"},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is False
+        assert "Hello" in transcription_texts
+        mock_ws.send_json.assert_called_once_with({"text": "Hello", "is_final": False})
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_transcription_completed(self, ali_model):
+        """Test _handle_stt_event with transcription completed."""
+        mock_ws = AsyncMock()
+        transcription_texts = []
+        result = await ali_model._handle_stt_event(
+            {"event": "conversation.item.input_audio_transcription.completed", "text": "World"},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is False
+        assert "World" in transcription_texts
+        mock_ws.send_json.assert_called_once_with({"text": "World", "is_final": True})
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_session_finished(self, ali_model):
+        """Test _handle_stt_event with session finished."""
+        mock_ws = AsyncMock()
+        transcription_texts = ["First", "Second"]
+        result = await ali_model._handle_stt_event(
+            {"event": "session.finished", "transcript": "Combined text"},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is True
+        mock_ws.send_json.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_session_created(self, ali_model):
+        """Test _handle_stt_event with session.created."""
+        mock_ws = AsyncMock()
+        transcription_texts = []
+        result = await ali_model._handle_stt_event(
+            {"event": "session.created"},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is False
+        mock_ws.send_json.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_unhandled(self, ali_model):
+        """Test _handle_stt_event with unhandled event type."""
+        mock_ws = AsyncMock()
+        transcription_texts = []
+        result = await ali_model._handle_stt_event(
+            {"event": "unknown.event"},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_send_exception(self, ali_model):
+        """Test _handle_stt_event when send_json raises exception."""
+        mock_ws = AsyncMock()
+        mock_ws.send_json.side_effect = Exception("Connection error")
+        transcription_texts = []
+        result = await ali_model._handle_stt_event(
+            {"event": "error", "error": "Test"},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is True
