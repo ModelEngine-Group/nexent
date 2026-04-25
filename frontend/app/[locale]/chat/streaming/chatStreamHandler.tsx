@@ -128,42 +128,8 @@ export const handleStreamResponse = async (
             fetchConversationList();
           })
           .catch((error: Error) => {
-            log.error(
-              t("chatStreamHandler.generateTitleFailed"),
-              error
-            );
+            log.error(t("chatStreamHandler.generateTitleFailed"), error);
           });
-  if (isNewConversation) {
-    // Use setTimeout to ensure the user message has been added to state
-    setTimeout(async () => {
-      try {
-        // Get the current messages to find the user's question
-        setMessages((prevMessages) => {
-          const firstUserMessage = prevMessages.find(
-            (msg) => msg.role === MESSAGE_ROLES.USER
-          );
-          if (firstUserMessage?.content) {
-            // Call the generate title from question interface
-            conversationService
-              .generateTitle({
-                conversation_id: currentConversationId,
-                question: firstUserMessage.content,
-              })
-              .then((title: string) => {
-                if (title) {
-                  setConversationTitle(title);
-                }
-                // Update the conversation list
-                fetchConversationList();
-              })
-              .catch((error: Error) => {
-                log.error(t("chatStreamHandler.generateTitleFailed"), error);
-              });
-          }
-          return prevMessages;
-        });
-      } catch (error) {
-        log.error(t("chatStreamHandler.generateTitleFailed"), error);
       }
     }, 0);
   }

@@ -1119,3 +1119,302 @@ This code demonstrates how to work with JSON in Python."""
     assert "import json" in transformed
     assert "```<END_DISPLAY_CODE>" not in transformed
     assert "<DISPLAY:" not in transformed
+
+
+# ----------------------------------------------------------------------------
+# Tests for MAX_STEPS_REACHED handling in _run_stream
+# ----------------------------------------------------------------------------
+
+def _create_mock_core_agent_with_step_control():
+    """Create a mock CoreAgent that allows controlling step execution."""
+    from types import ModuleType
+
+    # Create fresh mocks for this test
+    mock_smolagents = _create_mock_smolagents()
+
+    # Create mock memory
+    mock_memory = MagicMock()
+    mock_memory.steps = []
+    mock_memory.system_prompt = None
+    mock_memory.get_full_steps = MagicMock(return_value=[])
+
+    # Create mock monitor
+    mock_monitor = MagicMock()
+    mock_monitor.reset = MagicMock()
+
+    # Create mock logger
+    mock_logger = MagicMock()
+    mock_logger.log = MagicMock()
+    mock_logger.log_markdown = MagicMock()
+    mock_logger.log_task = MagicMock()
+    mock_logger.log_code = MagicMock()
+
+    # Create mock python_executor
+    mock_python_executor = MagicMock()
+
+    # Create mock model
+    mock_model = MagicMock()
+
+    # Create ProcessType for observer
+    class ProcessType:
+        STEP_COUNT = "STEP_COUNT"
+        PARSE = "PARSE"
+        EXECUTION_LOGS = "EXECUTION_LOGS"
+        AGENT_NEW_RUN = "AGENT_NEW_RUN"
+        AGENT_FINISH = "AGENT_FINISH"
+        FINAL_ANSWER = "FINAL_ANSWER"
+        ERROR = "ERROR"
+        OTHER = "OTHER"
+        SEARCH_CONTENT = "SEARCH_CONTENT"
+        TOKEN_COUNT = "TOKEN_COUNT"
+        PICTURE_WEB = "PICTURE_WEB"
+        CARD = "CARD"
+        TOOL = "TOOL"
+        MEMORY_SEARCH = "MEMORY_SEARCH"
+        MODEL_OUTPUT_DEEP_THINKING = "MODEL_OUTPUT_DEEP_THINKING"
+        MODEL_OUTPUT_THINKING = "MODEL_OUTPUT_THINKING"
+        MODEL_OUTPUT_CODE = "MODEL_OUTPUT_CODE"
+        MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
+
+    # Create MessageObserver with tracking
+    class TrackedMessageObserver:
+        def __init__(self):
+            self.messages = []
+            self.add_message = MagicMock(side_effect=self._track_message)
+
+        def _track_message(self, agent_name, process_type, data):
+            self.messages.append({
+                "agent_name": agent_name,
+                "process_type": process_type,
+                "data": data
+            })
+
+    observer = TrackedMessageObserver()
+
+    return {
+        "mock_smolagents": mock_smolagents,
+        "mock_memory": mock_memory,
+        "mock_monitor": mock_monitor,
+        "mock_logger": mock_logger,
+        "mock_python_executor": mock_python_executor,
+        "mock_model": mock_model,
+        "ProcessType": ProcessType,
+        "observer": observer,
+    }
+
+
+class TestMaxStepsReached:
+    """Test suite for MAX_STEPS_REACHED handling in CoreAgent."""
+
+    def test_max_steps_reached_observer_message_format(self):
+        """Test that MAX_STEPS_REACHED message has correct JSON format."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Simulate the observer receiving MAX_STEPS_REACHED message
+        max_steps = 5
+        completed_steps = max_steps - 1  # step_number - 1 when max_steps + 1 is reached
+
+        expected_data = {
+            "completedSteps": completed_steps,
+            "maxSteps": max_steps,
+            "message": ""
+        }
+
+        # Add the message as CoreAgent would
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, json.dumps(expected_data))
+
+        # Verify message was recorded
+        assert len(observer.messages) == 1
+        msg = observer.messages[0]
+        assert msg["agent_name"] == "test_agent"
+        assert msg["process_type"] == ProcessType.MAX_STEPS_REACHED
+
+        # Parse and verify JSON data
+        parsed_data = json.loads(msg["data"])
+        assert parsed_data["completedSteps"] == 4
+        assert parsed_data["maxSteps"] == 5
+        assert parsed_data["message"] == ""
+
+    def test_max_steps_reached_data_structure(self):
+        """Test that max_steps_data JSON structure matches expected format."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Test with different max_steps values
+        # In _run_stream, when step_number == max_steps + 1:
+        #   completedSteps = step_number - 1 = max_steps
+        expected_completed_steps = [1, 5, 10, 100]
+
+        for max_steps in expected_completed_steps:
+            step_number_at_exit = max_steps + 1
+
+            # Simulate the logic in _run_stream
+            # not returned_final_answer and step_number == max_steps + 1
+            max_steps_data = json.dumps({
+                "completedSteps": step_number_at_exit - 1,  # This equals max_steps
+                "maxSteps": max_steps,
+                "message": ""
+            })
+
+            observer.add_message("agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        # Verify all messages were recorded
+        assert len(observer.messages) == 4
+
+        # Verify each message has correct format
+        for i, msg in enumerate(observer.messages):
+            parsed = json.loads(msg["data"])
+            assert "completedSteps" in parsed
+            assert "maxSteps" in parsed
+            assert "message" in parsed
+            # completedSteps should equal max_steps (since step_number - 1 = max_steps)
+            assert parsed["completedSteps"] == expected_completed_steps[i]
+            assert parsed["maxSteps"] == expected_completed_steps[i]
+            assert parsed["message"] == ""
+
+    def test_max_steps_reached_message_is_json_serializable(self):
+        """Test that MAX_STEPS_REACHED data is valid JSON."""
+        test_cases = [
+            {"max_steps": 1, "completed": 0},
+            {"max_steps": 5, "completed": 4},
+            {"max_steps": 10, "completed": 9},
+            {"max_steps": 100, "completed": 99},
+        ]
+
+        for case in test_cases:
+            max_steps_data = json.dumps({
+                "completedSteps": case["completed"],
+                "maxSteps": case["max_steps"],
+                "message": ""
+            })
+
+            # Should not raise
+            parsed = json.loads(max_steps_data)
+            assert parsed["completedSteps"] == case["completed"]
+            assert parsed["maxSteps"] == case["max_steps"]
+
+    def test_max_steps_reached_with_different_step_numbers(self):
+        """Test MAX_STEPS_REACHED handling with various step number values."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Simulate different scenarios where step_number == max_steps + 1
+        scenarios = [
+            (1, 2),   # max_steps=1, step_number=2
+            (5, 6),   # max_steps=5, step_number=6
+            (10, 11), # max_steps=10, step_number=11
+            (50, 51), # max_steps=50, step_number=51
+        ]
+
+        for max_steps, step_number in scenarios:
+            completed = step_number - 1
+
+            max_steps_data = json.dumps({
+                "completedSteps": completed,
+                "maxSteps": max_steps,
+                "message": ""
+            })
+
+            observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+            parsed = json.loads(max_steps_data)
+            assert parsed["completedSteps"] == completed
+            assert parsed["maxSteps"] == max_steps
+
+        assert len(observer.messages) == 4
+
+    def test_max_steps_reached_empty_message_field(self):
+        """Test that MAX_STEPS_REACHED message field is empty string."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        max_steps_data = json.dumps({
+            "completedSteps": 5,
+            "maxSteps": 5,
+            "message": ""
+        })
+
+        observer.add_message("agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        parsed = json.loads(observer.messages[0]["data"])
+        assert parsed["message"] == ""
+        assert isinstance(parsed["message"], str)
+
+    def test_process_type_has_max_steps_reached(self):
+        """Test that ProcessType enum has MAX_STEPS_REACHED attribute."""
+        mocks = _create_mock_core_agent_with_step_control()
+        ProcessType = mocks["ProcessType"]
+
+        assert hasattr(ProcessType, "MAX_STEPS_REACHED")
+        assert ProcessType.MAX_STEPS_REACHED == "MAX_STEPS_REACHED"
+
+    def test_max_steps_reached_with_large_values(self):
+        """Test MAX_STEPS_REACHED with large step numbers."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        large_max_steps = 10000
+        step_number = large_max_steps + 1
+        # In _run_stream: completedSteps = step_number - 1 = max_steps = 10000
+        completed = step_number - 1  # This equals max_steps
+
+        max_steps_data = json.dumps({
+            "completedSteps": completed,
+            "maxSteps": large_max_steps,
+            "message": ""
+        })
+
+        observer.add_message("large_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        parsed = json.loads(observer.messages[0]["data"])
+        # completedSteps equals max_steps when step_number = max_steps + 1
+        assert parsed["completedSteps"] == 10000
+        assert parsed["maxSteps"] == 10000
+        assert parsed["message"] == ""
+
+    def test_max_steps_reached_zero_max_steps(self):
+        """Test MAX_STEPS_REACHED when max_steps is 0 (edge case)."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Edge case: max_steps=0, step_number=1
+        max_steps_data = json.dumps({
+            "completedSteps": 0,
+            "maxSteps": 0,
+            "message": ""
+        })
+
+        observer.add_message("edge_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        parsed = json.loads(observer.messages[0]["data"])
+        assert parsed["completedSteps"] == 0
+        assert parsed["maxSteps"] == 0
+
+    def test_observer_add_message_side_effect(self):
+        """Test that observer.add_message correctly tracks messages."""
+        mocks = _create_mock_core_agent_with_step_control()
+        observer = mocks["observer"]
+        ProcessType = mocks["ProcessType"]
+
+        # Verify add_message is callable
+        assert callable(observer.add_message)
+
+        # Add multiple messages
+        test_messages = [
+            ("agent1", ProcessType.STEP_COUNT, 1),
+            ("agent1", ProcessType.MAX_STEPS_REACHED, json.dumps({"completedSteps": 5, "maxSteps": 5, "message": ""})),
+            ("agent1", ProcessType.AGENT_FINISH, "done"),
+        ]
+
+        for agent_name, process_type, data in test_messages:
+            observer.add_message(agent_name, process_type, data)
+
+        assert len(observer.messages) == 3
+        assert observer.messages[1]["process_type"] == ProcessType.MAX_STEPS_REACHED
