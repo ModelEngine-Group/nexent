@@ -124,6 +124,7 @@ def publish_version_impl(
         'source_type': source_type,
         'source_version_no': source_version_no,
         'status': STATUS_RELEASED,
+        'is_a2a': publish_as_a2a,
         'created_by': user_id,
     }
     version_id = insert_version(version_data)
