@@ -9,6 +9,31 @@ from test.common.test_mocks import bootstrap_test_env
 
 env_state = bootstrap_test_env()
 consts_const = env_state["mock_const"]
+
+# Mock consts.model module with HistoryItem class
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
+
+class HistoryItem(BaseModel):
+    role: str
+    content: str
+    minio_files: Optional[List[Dict[str, Any]]] = None
+
+
+class AgentHistory(BaseModel):
+    role: str
+    content: str
+
+
+consts_model_module = types.ModuleType("consts.model")
+consts_model_module.HistoryItem = HistoryItem
+sys.modules["consts.model"] = consts_model_module
+
+# Also add model to consts module attributes
+consts_module = sys.modules.get("consts")
+if consts_module:
+    setattr(consts_module, "model", consts_model_module)
+
 TEST_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = TEST_ROOT.parent
 
@@ -80,7 +105,16 @@ sys.modules['database.client'] = _create_stub_module(
 # Mock external dependencies before imports
 mock_message_observer = MagicMock()
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
+    "nexent.core.agents.agent_model",
+    AgentHistory=AgentHistory,
+    ModelConfig=MagicMock(),
+    AgentConfig=MagicMock(),
+    ToolConfig=MagicMock(),
+    ExternalA2AAgentConfig=MagicMock(),
+    AgentRunInfo=MagicMock(),
+    MessageObserver=MagicMock(),
+)
 sys.modules['smolagents.agents'] = MagicMock()
 sys.modules['smolagents.utils'] = MagicMock()
 sys.modules['services.remote_mcp_service'] = MagicMock()
@@ -195,7 +229,12 @@ from backend.agents.create_agent_info import (
     _extract_url_from_card,
     _build_external_agent_config,
     _get_external_a2a_agents,
+    _format_minio_files_for_content,
+    _convert_history_with_minio_files,
 )
+
+# Import HistoryItem for testing (from mocked consts.model)
+HistoryItem = sys.modules["consts.model"].HistoryItem
 
 # Import constants for testing
 from consts.const import MODEL_CONFIG_MAPPING
@@ -4062,6 +4101,301 @@ class TestFilterMcpServersAndTools:
         result = filter_mcp_servers_and_tools(mock_agent_config, mcp_info_dict)
 
         assert result == []
+
+
+class TestFormatMinioFilesForContent:
+    """Tests for the _format_minio_files_for_content function"""
+
+    def test_format_minio_files_for_content_none_input(self):
+        """Test case for None input returns empty string"""
+        result = _format_minio_files_for_content(None)
+        assert result == ""
+
+    def test_format_minio_files_for_content_empty_list(self):
+        """Test case for empty list returns empty string"""
+        result = _format_minio_files_for_content([])
+        assert result == ""
+
+    def test_format_minio_files_for_content_non_list_input(self):
+        """Test case for non-list input returns empty string"""
+        result = _format_minio_files_for_content("not a list")
+        assert result == ""
+        result = _format_minio_files_for_content(123)
+        assert result == ""
+        result = _format_minio_files_for_content({"url": "test"})
+        assert result == ""
+
+    def test_format_minio_files_for_content_single_file_with_presigned_url(self):
+        """Test case for single file with presigned_url"""
+        minio_files = [
+            {"url": "bucket/file.txt", "name": "file.txt", "presigned_url": "http://presigned.url"}
+        ]
+        result = _format_minio_files_for_content(minio_files)
+        assert result == "\n[Attached files]:\n  - file.txt: s3:/bucket/file.txt (download: http://presigned.url)"
+
+    def test_format_minio_files_for_content_single_file_without_presigned_url(self):
+        """Test case for single file without presigned_url"""
+        minio_files = [
+            {"url": "bucket/file.txt", "name": "file.txt"}
+        ]
+        result = _format_minio_files_for_content(minio_files)
+        assert result == "\n[Attached files]:\n  - file.txt: s3:/bucket/file.txt"
+
+    def test_format_minio_files_for_content_multiple_files(self):
+        """Test case for multiple files"""
+        minio_files = [
+            {"url": "bucket/file1.txt", "name": "file1.txt"},
+            {"url": "bucket/file2.txt", "name": "file2.txt", "presigned_url": "http://presigned2.url"},
+            {"url": "bucket/file3.txt", "name": "file3.txt"}
+        ]
+        result = _format_minio_files_for_content(minio_files)
+        assert "  - file1.txt: s3:/bucket/file1.txt" in result
+        assert "  - file2.txt: s3:/bucket/file2.txt (download: http://presigned2.url)" in result
+        assert "  - file3.txt: s3:/bucket/file3.txt" in result
+        assert result.startswith("\n[Attached files]:\n")
+
+    def test_format_minio_files_for_content_exceeds_max_files(self):
+        """Test case when files exceed max_files limit"""
+        minio_files = [
+            {"url": f"bucket/file{i}.txt", "name": f"file{i}.txt"}
+            for i in range(25)
+        ]
+        result = _format_minio_files_for_content(minio_files, max_files=20)
+        assert "... (and 5 more files)" in result
+        assert result.count("  - ") == 21  # 20 files + 1 truncation line
+
+    def test_format_minio_files_for_content_exceeds_max_files_with_presigned(self):
+        """Test case when files with presigned urls exceed max_files limit"""
+        minio_files = [
+            {"url": f"bucket/file{i}.txt", "name": f"file{i}.txt", "presigned_url": f"http://url{i}"}
+            for i in range(10)
+        ]
+        result = _format_minio_files_for_content(minio_files, max_files=5)
+        assert "... (and 5 more files)" in result
+        assert "  - file0.txt" in result
+        assert "download: http://url0" in result
+
+    def test_format_minio_files_for_content_file_missing_url(self):
+        """Test case for file with missing url is skipped"""
+        minio_files = [
+            {"name": "file1.txt"},
+            {"url": "bucket/file2.txt", "name": "file2.txt"}
+        ]
+        result = _format_minio_files_for_content(minio_files)
+        assert "  - file2.txt: s3:/bucket/file2.txt" in result
+        assert "file1.txt" not in result
+
+    def test_format_minio_files_for_content_file_missing_name(self):
+        """Test case for file with missing name is skipped"""
+        minio_files = [
+            {"url": "bucket/file1.txt"},
+            {"url": "bucket/file2.txt", "name": "file2.txt"}
+        ]
+        result = _format_minio_files_for_content(minio_files)
+        assert "  - file2.txt: s3:/bucket/file2.txt" in result
+        assert "file1.txt" not in result
+
+    def test_format_minio_files_for_content_file_empty_url(self):
+        """Test case for file with empty url is skipped"""
+        minio_files = [
+            {"url": "", "name": "file1.txt"},
+            {"url": "bucket/file2.txt", "name": "file2.txt"}
+        ]
+        result = _format_minio_files_for_content(minio_files)
+        assert "  - file2.txt: s3:/bucket/file2.txt" in result
+        assert "file1.txt" not in result
+
+    def test_format_minio_files_for_content_file_empty_name(self):
+        """Test case for file with empty name is skipped"""
+        minio_files = [
+            {"url": "bucket/file1.txt", "name": ""},
+            {"url": "bucket/file2.txt", "name": "file2.txt"}
+        ]
+        result = _format_minio_files_for_content(minio_files)
+        assert "  - file2.txt: s3:/bucket/file2.txt" in result
+        assert "file1.txt" not in result
+
+    def test_format_minio_files_for_content_non_dict_file(self):
+        """Test case for non-dict file entries are skipped"""
+        minio_files = [
+            "not a dict",
+            123,
+            None,
+            {"url": "bucket/file.txt", "name": "file.txt"}
+        ]
+        result = _format_minio_files_for_content(minio_files)
+        assert "  - file.txt: s3:/bucket/file.txt" in result
+        assert "not a dict" not in result
+        assert "123" not in result
+
+    def test_format_minio_files_for_content_all_files_invalid(self):
+        """Test case when all files are invalid returns empty string"""
+        minio_files = [
+            {"name": "file1.txt"},
+            {"url": "bucket/file2.txt"},
+            "invalid"
+        ]
+        result = _format_minio_files_for_content(minio_files)
+        assert result == ""
+
+    def test_format_minio_files_for_content_custom_max_files(self):
+        """Test case with custom max_files parameter"""
+        minio_files = [
+            {"url": f"bucket/file{i}.txt", "name": f"file{i}.txt"}
+            for i in range(10)
+        ]
+        result = _format_minio_files_for_content(minio_files, max_files=3)
+        assert "... (and 7 more files)" in result
+        assert result.count("  - ") == 4  # 3 files + 1 truncation line
+
+
+class TestConvertHistoryWithMinioFiles:
+    """Tests for the _convert_history_with_minio_files function"""
+
+    def test_convert_history_with_minio_files_none_input(self):
+        """Test case for None input returns None"""
+        result = _convert_history_with_minio_files(None)
+        assert result is None
+
+    def test_convert_history_with_minio_files_empty_list(self):
+        """Test case for empty list returns empty list"""
+        result = _convert_history_with_minio_files([])
+        assert result == []
+
+    def test_convert_history_with_minio_files_single_item_no_minio_files(self):
+        """Test case for single history item without minio_files"""
+        history = [
+            HistoryItem(role="user", content="Hello", minio_files=None)
+        ]
+        result = _convert_history_with_minio_files(history)
+        assert len(result) == 1
+        assert result[0].role == "user"
+        assert result[0].content == "Hello"
+
+    def test_convert_history_with_minio_files_single_item_with_minio_files(self):
+        """Test case for single history item with minio_files"""
+        minio_files = [
+            {"url": "bucket/file.txt", "name": "file.txt", "presigned_url": "http://presigned.url"}
+        ]
+        history = [
+            HistoryItem(role="user", content="Hello", minio_files=minio_files)
+        ]
+        result = _convert_history_with_minio_files(history)
+        assert len(result) == 1
+        assert result[0].role == "user"
+        assert "Hello" in result[0].content
+        assert "[Attached files]" in result[0].content
+        assert "file.txt: s3:/bucket/file.txt" in result[0].content
+        assert "download: http://presigned.url" in result[0].content
+
+    def test_convert_history_with_minio_files_multiple_items_mixed(self):
+        """Test case for multiple history items with/without minio_files"""
+        history = [
+            HistoryItem(role="user", content="Hello", minio_files=None),
+            HistoryItem(
+                role="user",
+                content="With file",
+                minio_files=[{"url": "bucket/f1.txt", "name": "f1.txt"}]
+            ),
+            HistoryItem(role="assistant", content="Response", minio_files=None),
+        ]
+        result = _convert_history_with_minio_files(history)
+        assert len(result) == 3
+        assert result[0].content == "Hello"
+        assert "With file" in result[1].content
+        assert "[Attached files]" in result[1].content
+        assert result[2].content == "Response"
+
+    def test_convert_history_with_minio_files_item_with_empty_content(self):
+        """Test case for history item with minio_files but empty content"""
+        minio_files = [
+            {"url": "bucket/file.txt", "name": "file.txt"}
+        ]
+        history = [
+            HistoryItem(role="user", content="", minio_files=minio_files)
+        ]
+        result = _convert_history_with_minio_files(history)
+        assert len(result) == 1
+        assert result[0].content.startswith("\n[Attached files]")
+        assert "file.txt" in result[0].content
+
+    def test_convert_history_with_minio_files_item_with_empty_minio_files_list(self):
+        """Test case for history item with empty minio_files list"""
+        history = [
+            HistoryItem(role="user", content="Hello", minio_files=[])
+        ]
+        result = _convert_history_with_minio_files(history)
+        assert len(result) == 1
+        assert result[0].content == "Hello"
+
+    def test_convert_history_with_minio_files_item_with_invalid_minio_files(self):
+        """Test case for history item with invalid minio_files entries"""
+        minio_files = [
+            {"name": "no_url"},
+            {"url": "bucket/file.txt", "name": "file.txt"}
+        ]
+        history = [
+            HistoryItem(role="user", content="Hello", minio_files=minio_files)
+        ]
+        result = _convert_history_with_minio_files(history)
+        assert len(result) == 1
+        assert "Hello" in result[0].content
+        assert "file.txt" in result[0].content
+
+    def test_convert_history_with_minio_files_multiple_files_in_single_item(self):
+        """Test case for single history item with multiple minio_files"""
+        minio_files = [
+            {"url": "bucket/file1.txt", "name": "file1.txt", "presigned_url": "http://url1"},
+            {"url": "bucket/file2.txt", "name": "file2.txt"},
+            {"url": "bucket/file3.txt", "name": "file3.txt", "presigned_url": "http://url3"}
+        ]
+        history = [
+            HistoryItem(role="user", content="Check these files", minio_files=minio_files)
+        ]
+        result = _convert_history_with_minio_files(history)
+        assert len(result) == 1
+        assert "Check these files" in result[0].content
+        assert "file1.txt" in result[0].content
+        assert "file2.txt" in result[0].content
+        assert "file3.txt" in result[0].content
+
+    def test_convert_history_with_minio_files_assistant_role(self):
+        """Test case for assistant role history item"""
+        minio_files = [
+            {"url": "bucket/doc.pdf", "name": "doc.pdf"}
+        ]
+        history = [
+            HistoryItem(role="assistant", content="Here is the document", minio_files=minio_files)
+        ]
+        result = _convert_history_with_minio_files(history)
+        assert len(result) == 1
+        assert result[0].role == "assistant"
+        assert "Here is the document" in result[0].content
+
+    def test_convert_history_with_minio_files_all_items_have_minio_files(self):
+        """Test case where all history items have minio_files"""
+        history = [
+            HistoryItem(
+                role="user",
+                content="First",
+                minio_files=[{"url": "bucket/f1.txt", "name": "f1.txt"}]
+            ),
+            HistoryItem(
+                role="assistant",
+                content="Second",
+                minio_files=[{"url": "bucket/f2.txt", "name": "f2.txt", "presigned_url": "http://f2"}]
+            ),
+            HistoryItem(
+                role="user",
+                content="Third",
+                minio_files=[{"url": "bucket/f3.txt", "name": "f3.txt"}]
+            ),
+        ]
+        result = _convert_history_with_minio_files(history)
+        assert len(result) == 3
+        assert "f1.txt" in result[0].content
+        assert "f2.txt" in result[1].content
+        assert "f3.txt" in result[2].content
 
 
 if __name__ == "__main__":
