@@ -57,7 +57,11 @@ export default function AgentInfoComp({
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
 
   const handlePublishClick = () => {
-    setIsPublishModalOpen(true);
+    saveGuard.saveWithModal().then((success) => {
+      if (success) {
+        setIsPublishModalOpen(true);
+      }
+    });
   };
 
   const handlePublished = () => {

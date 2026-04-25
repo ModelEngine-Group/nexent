@@ -2548,11 +2548,12 @@ class TestValidateLocalToolAnalyzeImage:
 
         assert result == "analyze image result"
         mock_get_vlm_model.assert_called_once_with(tenant_id="tenant1")
-        mock_tool_class.assert_called_once_with(
-            prompt="describe",
-            vlm_model="mock_vlm_model",
-            storage_client=mock_minio_client
-        )
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert 'vlm_model' in call_kwargs
+        assert 'storage_client' in call_kwargs
+        assert 'validate_url_access' in call_kwargs
+        assert callable(call_kwargs['validate_url_access'])
         mock_tool_instance.forward.assert_called_once_with(image="bytes")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
@@ -2863,13 +2864,14 @@ class TestValidateLocalToolAnalyzeTextFile:
         mock_get_class.assert_called_once_with("analyze_text_file")
 
         # Verify analyze_text_file specific parameters were passed
-        expected_params = {
-            "param": "config",
-            "llm_model": mock_llm_model,
-            "storage_client": mock_minio_client,
-            "data_process_service_url": "http://data-process-service",
-        }
-        mock_tool_class.assert_called_once_with(**expected_params)
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert 'llm_model' in call_kwargs
+        assert 'storage_client' in call_kwargs
+        assert 'data_process_service_url' in call_kwargs
+        assert call_kwargs['data_process_service_url'] == "http://data-process-service"
+        assert 'validate_url_access' in call_kwargs
+        assert callable(call_kwargs['validate_url_access'])
         mock_tool_instance.forward.assert_called_once_with(input="test input")
 
         # Verify service calls

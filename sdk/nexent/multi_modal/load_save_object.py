@@ -2,7 +2,7 @@ import functools
 import inspect
 import logging
 from io import BytesIO
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional
 import requests
 
 from .utils import (
@@ -20,14 +20,24 @@ logger = logging.getLogger("multi_modal")
 class LoadSaveObjectManager:
     """
     Provide load/save decorators that operate on a specific storage client.
-    
+
     The manager can be instantiated with a storage client and exposes decorator
     factories for `load_object` and `save_object`. A default module-level manager
     is also provided for backwards compatibility with existing helper functions.
     """
 
-    def __init__(self, storage_client: Any):
+    def __init__(self, storage_client: Any, validate_url_access: callable = None):
+        """
+        Initialize LoadSaveObjectManager.
+
+        Args:
+            storage_client: Storage client for S3 operations
+            validate_url_access: Optional callback function to validate URL access permissions.
+                                 The callback receives a list of URLs and should raise
+                                 PermissionError if access is denied.
+        """
         self._storage_client = storage_client
+        self._validate_url_access = validate_url_access
 
     def _get_client(self) -> Any:
         """
@@ -122,6 +132,11 @@ class LoadSaveObjectManager:
         def decorator(func: Callable):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
+                # Find the tool instance (self) from bound args
+                tool_instance = None
+                if args:
+                    tool_instance = args[0]
+
                 def _transform_single_value(param_name: str, value: Any,
                                             transformer: Optional[Callable[[bytes], Any]]) -> Any:
                     if isinstance(value, str):
@@ -166,6 +181,31 @@ class LoadSaveObjectManager:
                 sig = inspect.signature(func)
                 bound_args = sig.bind(*args, **kwargs)
                 bound_args.apply_defaults()
+
+                # Collect all URLs to validate before downloading
+                all_urls_to_validate: List[str] = []
+                for i, param_name in enumerate(input_names):
+                    if param_name not in bound_args.arguments:
+                        continue
+
+                    original_data = bound_args.arguments[param_name]
+                    if original_data is None:
+                        continue
+
+                    if isinstance(original_data, (list, tuple)):
+                        all_urls_to_validate.extend([url for url in original_data if isinstance(url, str) and is_url(url)])
+                    elif isinstance(original_data, str) and is_url(original_data):
+                        all_urls_to_validate.append(original_data)
+
+                # Validate URL access before downloading any files
+                if all_urls_to_validate and self._validate_url_access is not None and callable(self._validate_url_access):
+                    try:
+                        self._validate_url_access(all_urls_to_validate)
+                    except PermissionError:
+                        raise
+                    except Exception as e:
+                        logger.error(f"[load_object] URL validation failed: {e}")
+                        raise PermissionError(f"URL access validation failed: {e}")
 
                 for i, param_name in enumerate(input_names):
                     if param_name not in bound_args.arguments:

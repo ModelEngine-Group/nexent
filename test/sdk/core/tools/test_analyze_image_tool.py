@@ -239,7 +239,87 @@ class TestAnalyzeImageToolEdgeCases:
             )
 
             mock_manager_class.assert_called_once_with(
-                storage_client=mock_storage_client)
+                storage_client=mock_storage_client,
+                validate_url_access=None
+            )
+
+    def test_load_save_object_manager_with_validate_url_access_callable(
+        self, mock_vlm_model, mock_storage_client
+    ):
+        """Test that callable validate_url_access is passed to LoadSaveObjectManager."""
+        with patch('sdk.nexent.core.tools.analyze_image_tool.LoadSaveObjectManager') as mock_manager_class:
+            mock_manager_instance = MagicMock()
+            mock_manager_class.return_value = mock_manager_instance
+            mock_manager_instance.load_object.return_value = lambda x: x
+
+            validate_callback = MagicMock()
+
+            tool = AnalyzeImageTool(
+                observer=MagicMock(),
+                vlm_model=mock_vlm_model,
+                storage_client=mock_storage_client,
+                validate_url_access=validate_callback,
+            )
+
+            mock_manager_class.assert_called_once_with(
+                storage_client=mock_storage_client,
+                validate_url_access=validate_callback
+            )
+
+    def test_load_save_object_manager_validate_url_access_not_callable(
+        self, mock_vlm_model, mock_storage_client
+    ):
+        """Test that non-callable validate_url_access is converted to None."""
+        with patch('sdk.nexent.core.tools.analyze_image_tool.LoadSaveObjectManager') as mock_manager_class:
+            mock_manager_instance = MagicMock()
+            mock_manager_class.return_value = mock_manager_instance
+            mock_manager_instance.load_object.return_value = lambda x: x
+
+            tool = AnalyzeImageTool(
+                observer=MagicMock(),
+                vlm_model=mock_vlm_model,
+                storage_client=mock_storage_client,
+                validate_url_access="not_a_callable",
+            )
+
+            mock_manager_class.assert_called_once_with(
+                storage_client=mock_storage_client,
+                validate_url_access=None
+            )
+
+    def test_load_save_object_manager_validate_url_access_lambda(
+        self, mock_vlm_model, mock_storage_client
+    ):
+        """Test that lambda validate_url_access is passed to LoadSaveObjectManager."""
+        with patch('sdk.nexent.core.tools.analyze_image_tool.LoadSaveObjectManager') as mock_manager_class:
+            mock_manager_instance = MagicMock()
+            mock_manager_class.return_value = mock_manager_instance
+            mock_manager_instance.load_object.return_value = lambda x: x
+
+            validate_callback = lambda url: True
+
+            tool = AnalyzeImageTool(
+                observer=MagicMock(),
+                vlm_model=mock_vlm_model,
+                storage_client=mock_storage_client,
+                validate_url_access=validate_callback,
+            )
+
+            mock_manager_class.assert_called_once_with(
+                storage_client=mock_storage_client,
+                validate_url_access=validate_callback
+            )
+
+    def test_init_param_descriptions_has_validate_url_access(self, mock_vlm_model, mock_storage_client):
+        """Test that init_param_descriptions includes validate_url_access."""
+        tool = AnalyzeImageTool(
+            observer=MagicMock(),
+            vlm_model=mock_vlm_model,
+            storage_client=mock_storage_client,
+        )
+
+        assert "validate_url_access" in tool.init_param_descriptions
+        assert "Callback function to validate URL access permissions (passed to LoadSaveObjectManager)" in tool.init_param_descriptions["validate_url_access"]["description"]
 
     def test_observer_add_message_called(self, tool, mock_vlm_model, mock_prompt_loader):
         """Test that observer.add_message is called with running prompt."""

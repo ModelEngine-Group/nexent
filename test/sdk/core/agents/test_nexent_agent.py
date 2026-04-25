@@ -1034,6 +1034,7 @@ def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
         llm_model="llm_model_obj",
         storage_client="storage_client_obj",
         data_process_service_url="DATA_PROCESS_SERVICE",
+        validate_url_access=None,
         prompt="describe this",
     )
     assert result == mock_analyze_tool_instance
@@ -1074,46 +1075,7 @@ def test_create_local_tool_analyze_image_tool(nexent_agent_instance):
         observer=nexent_agent_instance.observer,
         vlm_model="vlm_model_obj",
         storage_client="storage_client_obj",
-        prompt="describe this",
-    )
-    assert result == mock_analyze_tool_instance
-
-
-def test_create_local_tool_analyze_image_tool(nexent_agent_instance):
-    """Test AnalyzeImageTool creation injects observer and metadata."""
-    mock_analyze_tool_class = MagicMock()
-    mock_analyze_tool_instance = MagicMock()
-    mock_analyze_tool_class.return_value = mock_analyze_tool_instance
-
-    tool_config = ToolConfig(
-        class_name="AnalyzeImageTool",
-        name="analyze_image",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={"prompt": "describe this"},
-        source="local",
-        metadata={
-            "vlm_model": "vlm_model_obj",
-            "storage_client": "storage_client_obj",
-        },
-    )
-
-    original_value = nexent_agent.__dict__.get("AnalyzeImageTool")
-    nexent_agent.__dict__["AnalyzeImageTool"] = mock_analyze_tool_class
-
-    try:
-        result = nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        if original_value is not None:
-            nexent_agent.__dict__["AnalyzeImageTool"] = original_value
-        elif "AnalyzeImageTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["AnalyzeImageTool"]
-
-    mock_analyze_tool_class.assert_called_once_with(
-        observer=nexent_agent_instance.observer,
-        vlm_model="vlm_model_obj",
-        storage_client="storage_client_obj",
+        validate_url_access=None,
         prompt="describe this",
     )
     assert result == mock_analyze_tool_instance
@@ -2432,6 +2394,229 @@ class TestCreateLocalToolAnalyze:
         assert call_kwargs["storage_client"] == "storage"
         assert call_kwargs["param1"] == "value1"
         assert result == mock_tool_instance
+
+    def test_create_local_tool_analyze_text_file_with_validate_url_access_none(self, nexent_agent_instance):
+        """Test AnalyzeTextFileTool creation with validate_url_access not in metadata (None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeTextFileTool",
+            name="analyze_text",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"prompt": "describe this"},
+            source="local",
+            metadata={
+                "llm_model": ["gpt-4"],
+                "storage_client": "storage",
+                "data_process_service_url": "http://service.com"
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeTextFileTool")
+        nexent_agent.__dict__["AnalyzeTextFileTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeTextFileTool"] = original_value
+            elif "AnalyzeTextFileTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeTextFileTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] is None
+
+    def test_create_local_tool_analyze_text_file_with_validate_url_access_callable(self, nexent_agent_instance):
+        """Test AnalyzeTextFileTool creation with validate_url_access as callable."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        def mock_validate_func(url):
+            return True
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeTextFileTool",
+            name="analyze_text",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"prompt": "describe this"},
+            source="local",
+            metadata={
+                "llm_model": ["gpt-4"],
+                "storage_client": "storage",
+                "data_process_service_url": "http://service.com",
+                "validate_url_access": mock_validate_func
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeTextFileTool")
+        nexent_agent.__dict__["AnalyzeTextFileTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeTextFileTool"] = original_value
+            elif "AnalyzeTextFileTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeTextFileTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] == mock_validate_func
+
+    def test_create_local_tool_analyze_text_file_with_validate_url_access_not_callable(self, nexent_agent_instance):
+        """Test AnalyzeTextFileTool creation with non-callable validate_url_access (should be None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeTextFileTool",
+            name="analyze_text",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"prompt": "describe this"},
+            source="local",
+            metadata={
+                "llm_model": ["gpt-4"],
+                "storage_client": "storage",
+                "data_process_service_url": "http://service.com",
+                "validate_url_access": "not_a_callable_string"
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeTextFileTool")
+        nexent_agent.__dict__["AnalyzeTextFileTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeTextFileTool"] = original_value
+            elif "AnalyzeTextFileTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeTextFileTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] is None
+
+    def test_create_local_tool_analyze_image_with_validate_url_access_none(self, nexent_agent_instance):
+        """Test AnalyzeImageTool creation with validate_url_access not in metadata (None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeImageTool",
+            name="analyze_image",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"param1": "value1"},
+            source="local",
+            metadata={
+                "vlm_model": ["gpt-4-vision"],
+                "storage_client": "storage"
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeImageTool")
+        nexent_agent.__dict__["AnalyzeImageTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeImageTool"] = original_value
+            elif "AnalyzeImageTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeImageTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] is None
+
+    def test_create_local_tool_analyze_image_with_validate_url_access_callable(self, nexent_agent_instance):
+        """Test AnalyzeImageTool creation with validate_url_access as callable."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        def mock_validate_func(url):
+            return True
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeImageTool",
+            name="analyze_image",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"param1": "value1"},
+            source="local",
+            metadata={
+                "vlm_model": ["gpt-4-vision"],
+                "storage_client": "storage",
+                "validate_url_access": mock_validate_func
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeImageTool")
+        nexent_agent.__dict__["AnalyzeImageTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeImageTool"] = original_value
+            elif "AnalyzeImageTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeImageTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] == mock_validate_func
+
+    def test_create_local_tool_analyze_image_with_validate_url_access_not_callable(self, nexent_agent_instance):
+        """Test AnalyzeImageTool creation with non-callable validate_url_access (should be None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeImageTool",
+            name="analyze_image",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"param1": "value1"},
+            source="local",
+            metadata={
+                "vlm_model": ["gpt-4-vision"],
+                "storage_client": "storage",
+                "validate_url_access": 12345
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeImageTool")
+        nexent_agent.__dict__["AnalyzeImageTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeImageTool"] = original_value
+            elif "AnalyzeImageTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeImageTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] is None
 
 
 class TestCreateLocalToolClassNotFound:
