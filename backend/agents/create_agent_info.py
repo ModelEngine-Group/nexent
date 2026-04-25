@@ -25,12 +25,12 @@ from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id
 from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
+from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE
-import re
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
@@ -358,11 +358,15 @@ async def create_agent_config(
             if "KnowledgeBaseSearchTool" == tool.class_name:
                 index_names = tool.params.get("index_names")
                 if index_names:
+                    # Reuse the index_name -> display_name mapping from tool.metadata
+                    # (already computed in create_tool_config_list to avoid redundant DB query)
+                    index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
                     for index_name in index_names:
                         try:
+                            display_name = index_name_to_display_map.get(index_name, index_name)
                             message = ElasticSearchService().get_summary(index_name=index_name)
                             summary = message.get("summary", "")
-                            knowledge_base_summary += f"**{index_name}**: {summary}\n\n"
+                            knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
                         except Exception as e:
                             logger.warning(
                                 f"Failed to get summary for knowledge base {index_name}: {e}")
@@ -458,10 +462,24 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                     tenant_id=tenant_id, model_name=rerank_model_name
                 )
 
+            # Build display_name to index_name mapping for LLM parameter conversion
+            # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
+            index_names = param_dict.get("index_names", [])
+            display_name_to_index_map = {}
+            index_name_to_display_map = {}
+            if index_names:
+                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                # Reverse the mapping: display_name (knowledge_name) -> index_name
+                for idx_name, kb_name in knowledge_name_map.items():
+                    display_name_to_index_map[kb_name] = idx_name
+                    index_name_to_display_map[idx_name] = kb_name
+
             tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
                 "rerank_model": rerank_model,
+                "display_name_to_index_map": display_name_to_index_map,
+                "index_name_to_display_map": index_name_to_display_map,
             }
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
             rerank = param_dict.get("rerank", False)

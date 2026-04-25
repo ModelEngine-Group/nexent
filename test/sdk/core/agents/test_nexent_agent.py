@@ -880,6 +880,122 @@ def test_create_local_tool_knowledge_base_search_tool_with_none_defaults(nexent_
     assert result == mock_kb_tool_instance
 
 
+def test_create_local_tool_knowledge_base_with_display_name_map(nexent_agent_instance):
+    """Test KnowledgeBaseSearchTool creation sets display_name_to_index_map from metadata."""
+    mock_kb_tool_class = MagicMock()
+    mock_kb_tool_instance = MagicMock()
+    mock_kb_tool_class.return_value = mock_kb_tool_instance
+
+    display_name_map = {
+        "Knowledge A": "es_index_knowledge_a",
+        "Knowledge B": "es_index_knowledge_b",
+    }
+
+    tool_config = ToolConfig(
+        class_name="KnowledgeBaseSearchTool",
+        name="knowledge_base_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 10},
+        source="local",
+        metadata={
+            "vdb_core": "mock_vdb_core",
+            "embedding_model": "mock_embedding_model",
+            "rerank_model": "mock_rerank_model",
+            "display_name_to_index_map": display_name_map,
+        },
+    )
+
+    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
+    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
+
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
+        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
+
+    # Verify display_name_to_index_map was set correctly from metadata
+    assert result.display_name_to_index_map == display_name_map
+    assert result.vdb_core == "mock_vdb_core"
+    assert result.embedding_model == "mock_embedding_model"
+    assert result.rerank_model == "mock_rerank_model"
+
+
+def test_create_local_tool_knowledge_base_with_empty_display_name_map(nexent_agent_instance):
+    """Test KnowledgeBaseSearchTool creation handles empty display_name_to_index_map."""
+    mock_kb_tool_class = MagicMock()
+    mock_kb_tool_instance = MagicMock()
+    mock_kb_tool_class.return_value = mock_kb_tool_instance
+
+    tool_config = ToolConfig(
+        class_name="KnowledgeBaseSearchTool",
+        name="knowledge_base_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 10},
+        source="local",
+        metadata={
+            "vdb_core": "mock_vdb_core",
+            "embedding_model": "mock_embedding_model",
+            "display_name_to_index_map": {},
+        },
+    )
+
+    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
+    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
+
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
+        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
+
+    # Verify empty display_name_to_index_map was set
+    assert result.display_name_to_index_map == {}
+
+
+def test_create_local_tool_knowledge_base_without_metadata(nexent_agent_instance):
+    """Test KnowledgeBaseSearchTool creation handles missing metadata."""
+    mock_kb_tool_class = MagicMock()
+    mock_kb_tool_instance = MagicMock()
+    mock_kb_tool_class.return_value = mock_kb_tool_instance
+
+    tool_config = ToolConfig(
+        class_name="KnowledgeBaseSearchTool",
+        name="knowledge_base_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 10},
+        source="local",
+        metadata=None,
+    )
+
+    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
+    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
+
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
+        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
+
+    # Verify defaults were set when metadata is None
+    assert result.display_name_to_index_map == {}
+    assert result.vdb_core is None
+    assert result.embedding_model is None
+    assert result.rerank_model is None
+
+
 def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
     """Test AnalyzeTextFileTool creation injects observer and metadata."""
     mock_analyze_tool_class = MagicMock()
