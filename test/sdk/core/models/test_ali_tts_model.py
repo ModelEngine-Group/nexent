@@ -7,9 +7,15 @@ import pytest
 import asyncio
 import base64
 import json
+import os
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import sys as _sys
+# Add SDK to path before imports
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_sdk_dir = os.path.abspath(os.path.join(_current_dir, "../../../sdk"))
+if _sdk_dir not in sys.path:
+    sys.path.insert(0, _sdk_dir)
 
 _mock_websockets = MagicMock()
 _mock_websockets.connect = MagicMock()
@@ -54,10 +60,10 @@ _module_mocks = {
 }
 
 for mod_name, mock_obj in _module_mocks.items():
-    if mod_name not in _sys.modules:
-        _sys.modules[mod_name] = mock_obj
+    if mod_name not in sys.modules:
+        sys.modules[mod_name] = mock_obj
 
-from sdk.nexent.core.models.ali_tts_model import (
+from nexent.core.models.ali_tts_model import (
     AliTTSModel,
     AliTTSConfig,
     AliTTSError,
@@ -871,3 +877,340 @@ class TestAliTTSConstants:
         """Test QWEN_REALTIME_API_URL constant."""
         assert "dashscope.aliyuncs.com" in QWEN_REALTIME_API_URL
         assert "realtime" in QWEN_REALTIME_API_URL.lower()
+
+
+class TestAliTTSModelAdditional:
+    """Additional tests for AliTTSModel edge cases."""
+
+    @pytest.fixture
+    def cosy_config(self):
+        """Create a CosyVoice config."""
+        return AliTTSConfig(api_key="test_key", model="cosyvoice-v2", voice="longxiaochun_v2")
+
+    @pytest.fixture
+    def qwen_config(self):
+        """Create a Qwen Realtime config."""
+        return AliTTSConfig(api_key="test_key", model="qwen-tts", voice="Cherry")
+
+    @pytest.fixture
+    def cosy_model(self, cosy_config):
+        """Create a CosyVoice model instance."""
+        return AliTTSModel(cosy_config)
+
+    @pytest.fixture
+    def qwen_model(self, qwen_config):
+        """Create a Qwen Realtime model instance."""
+        return AliTTSModel(qwen_config)
+
+    def test_get_api_url_with_realtime_in_model(self, qwen_config):
+        """Test get_api_url when model name contains qwen but URL is not set."""
+        config = AliTTSConfig(api_key="key", model="qwen-tts-v1", ws_url=None)
+        assert "/realtime" in config.get_api_url()
+
+    def test_get_websocket_url_cosyvoice_no_params(self, cosy_model):
+        """Test get_websocket_url for CosyVoice without query params."""
+        url = cosy_model.get_websocket_url()
+        assert "dashscope" in url
+        assert "?" not in url
+
+    def test_get_websocket_url_qwen_with_existing_params(self, qwen_model):
+        """Test get_websocket_url for Qwen when URL already has params."""
+        qwen_model.config.ws_url = "wss://example.com/realtime?other=param"
+        url = qwen_model.get_websocket_url()
+        assert "other=param" in url
+        assert "model=" in url
+
+    def test_cosyvoice_parse_event_task_started_with_chars(self, cosy_model):
+        """Test _cosyvoice_parse_event with task-finished containing usage."""
+        message = json.dumps({
+            "header": {"event": "task-finished", "task_id": "task_1"},
+            "payload": {"usage": {"characters": 500}}
+        })
+        event = cosy_model._cosyvoice_parse_event(message)
+        assert event["type"] == "task-finished"
+        assert event["characters"] == 500
+
+    def test_cosyvoice_parse_event_task_finished_no_usage(self, cosy_model):
+        """Test _cosyvoice_parse_event with task-finished but no usage."""
+        message = json.dumps({
+            "header": {"event": "task-finished", "task_id": "task_1"},
+            "payload": {}
+        })
+        event = cosy_model._cosyvoice_parse_event(message)
+        assert event["type"] == "task-finished"
+        assert event.get("characters") is None
+
+    def test_qwen_parse_event_with_raw_data(self, qwen_model):
+        """Test _qwen_parse_event extracts raw data."""
+        message = json.dumps({
+            "type": "session.created",
+            "session": {"id": "sess_123"}
+        })
+        event = qwen_model._qwen_parse_event(message)
+        assert event["type"] == "session.created"
+        assert "raw" in event
+
+    @pytest.mark.asyncio
+    async def test_qwen_receive_audio_response_done(self, qwen_model):
+        """Test _qwen_receive_audio with response.done event (not terminal)."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "response.done"}),
+            json.dumps({"type": "response.audio.done"}),
+        ])
+
+        chunks = []
+        buffer = bytearray()
+        async for chunk in qwen_model._qwen_receive_audio(mock_ws, buffer=buffer, yield_chunks=True):
+            chunks.append(chunk)
+
+        assert len(chunks) == 0
+
+    @pytest.mark.asyncio
+    async def test_qwen_receive_audio_error_with_code(self, qwen_model):
+        """Test _qwen_receive_audio with error event containing code."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "error", "error": {"code": "INVALID_REQUEST", "message": "Bad request"}}),
+        ])
+
+        with pytest.raises(AliTTSError):
+            async for _ in qwen_model._qwen_receive_audio(mock_ws, yield_chunks=True):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_cosyvoice_receive_audio_empty_buffer(self, cosy_model):
+        """Test _cosyvoice_receive_audio with timeout but empty buffer."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            asyncio.TimeoutError(),
+        ])
+
+        chunks = []
+        buffer = bytearray()
+        async for chunk in cosy_model._cosyvoice_receive_audio(mock_ws, buffer=buffer, yield_chunks=True):
+            chunks.append(chunk)
+
+        assert len(chunks) == 0
+
+    @pytest.mark.asyncio
+    async def test_cosyvoice_receive_audio_binary_and_event(self, cosy_model):
+        """Test _cosyvoice_receive_audio with mixed binary and event messages."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            b"first_chunk",
+            json.dumps({"header": {"event": "task-started"}}),
+            b"second_chunk",
+            json.dumps({"header": {"event": "task-finished"}}),
+        ])
+
+        chunks = []
+        buffer = bytearray()
+        async for chunk in cosy_model._cosyvoice_receive_audio(mock_ws, buffer=buffer, yield_chunks=True):
+            chunks.append(chunk)
+
+        assert len(chunks) == 2
+        assert b"first_chunk" in buffer
+        assert b"second_chunk" in buffer
+
+    @pytest.mark.asyncio
+    async def test_generate_cosyvoice_non_streaming_empty_audio(self, cosy_model):
+        """Test _generate_cosyvoice_non_streaming when no audio is received."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"header": {"event": "task-started"}}),
+            json.dumps({"header": {"event": "task-finished"}}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            result = await cosy_model._generate_cosyvoice_non_streaming(
+                "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+            )
+
+        assert result == b""
+
+    @pytest.mark.asyncio
+    async def test_generate_cosyvoice_non_streaming_generic_exception(self, cosy_model):
+        """Test _generate_cosyvoice_non_streaming with generic exception."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"header": {"event": "task-started"}}),
+            json.dumps({"header": {"event": "task-finished"}}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=Exception("Generic error"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            with pytest.raises(Exception):
+                await cosy_model._generate_cosyvoice_non_streaming(
+                    "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+                )
+
+    @pytest.mark.asyncio
+    async def test_generate_cosyvoice_streaming_with_exception(self, cosy_model):
+        """Test _generate_cosyvoice_streaming with generic exception."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"header": {"event": "task-started"}}),
+            json.dumps({"header": {"event": "task-finished"}}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=Exception("Connection error"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            with pytest.raises(Exception):
+                async for _ in cosy_model._generate_cosyvoice_streaming(
+                    "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+                ):
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_generate_qwen_realtime_non_streaming_empty_audio(self, qwen_model):
+        """Test _generate_qwen_realtime_non_streaming when no audio is received."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created"}),
+            json.dumps({"type": "response.audio.done"}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            result = await qwen_model._generate_qwen_realtime_non_streaming(
+                "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+            )
+
+        assert result == b""
+
+    @pytest.mark.asyncio
+    async def test_generate_qwen_realtime_non_streaming_generic_exception(self, qwen_model):
+        """Test _generate_qwen_realtime_non_streaming with generic exception."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created"}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=Exception("Connection error"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            with pytest.raises(Exception):
+                await qwen_model._generate_qwen_realtime_non_streaming(
+                    "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+                )
+
+    @pytest.mark.asyncio
+    async def test_generate_qwen_realtime_streaming_generic_exception(self, qwen_model):
+        """Test _generate_qwen_realtime_streaming with generic exception."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created"}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=Exception("Connection error"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            with pytest.raises(Exception):
+                async for _ in qwen_model._generate_qwen_realtime_streaming(
+                    "Hello", "wss://example.com", {"Authorization": "Bearer test"}
+                ):
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_qwen_receive_audio_session_finished_terminal(self, qwen_model):
+        """Test _qwen_receive_audio with session.finished (terminal event)."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "response.audio.delta", "delta": base64.b64encode(b"chunk").decode()}),
+            json.dumps({"type": "session.finished"}),
+        ])
+
+        chunks = []
+        buffer = bytearray()
+        async for chunk in qwen_model._qwen_receive_audio(mock_ws, buffer=buffer, yield_chunks=True):
+            chunks.append(chunk)
+
+        assert len(chunks) == 1
+        assert b"chunk" in buffer
+
+    def test_log_error_diagnostics_unknown(self, cosy_model):
+        """Test _log_error_diagnostics with unknown error."""
+        cosy_model._log_error_diagnostics("Unknown error message")
+
+    def test_is_tts_result_successful_with_error_dict(self, cosy_model):
+        """Test _is_tts_result_successful with error in dict."""
+        assert cosy_model._is_tts_result_successful({"error": "Failed"}) is False
+
+    def test_is_tts_result_successful_with_audio_key(self, cosy_model):
+        """Test _is_tts_result_successful with audio key in dict."""
+        assert cosy_model._is_tts_result_successful({"audio": "data"}) is True
+
+    def test_is_tts_result_successful_with_text_key(self, cosy_model):
+        """Test _is_tts_result_successful with text key in dict."""
+        assert cosy_model._is_tts_result_successful({"text": "speech"}) is True
+
+    def test_extract_tts_error_message_from_dict(self, cosy_model):
+        """Test _extract_tts_error_message with dict containing message."""
+        msg = cosy_model._extract_tts_error_message({"message": "Custom message"})
+        assert "Custom message" in msg
+
+    @pytest.mark.asyncio
+    async def test_qwen_wait_for_session_created_with_bytes(self, qwen_model):
+        """Test _qwen_wait_for_session_created skips binary messages."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            b"binary_data",
+            json.dumps({"type": "session.created"}),
+        ])
+
+        result = await qwen_model._qwen_wait_for_session_created(mock_ws)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_qwen_wait_for_session_created_error_code(self, qwen_model):
+        """Test _qwen_wait_for_session_created extracts error code."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "error", "error": {"code": "AUTH_FAILED", "message": "Auth error"}}),
+        ])
+
+        with pytest.raises(AliTTSError) as exc_info:
+            await qwen_model._qwen_wait_for_session_created(mock_ws)
+        assert "AUTH_FAILED" in str(exc_info.value) or "Auth error" in str(exc_info.value)
+
+    def test_qwen_parse_event_unknown_type(self, qwen_model):
+        """Test _qwen_parse_event with unknown event type."""
+        message = json.dumps({"type": "unknown.event"})
+        event = qwen_model._qwen_parse_event(message)
+        assert event["type"] == "unknown.event"
+
+    @pytest.mark.asyncio
+    async def test_cosyvoice_wait_for_task_started_with_bytes(self, cosy_model):
+        """Test _cosyvoice_wait_for_task_started skips binary messages."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            b"binary_data",
+            json.dumps({"header": {"event": "task-started"}}),
+        ])
+
+        result = await cosy_model._cosyvoice_wait_for_task_started(mock_ws)
+        assert result is True
