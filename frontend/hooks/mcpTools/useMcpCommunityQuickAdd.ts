@@ -11,7 +11,7 @@ import {
   resolveContainerServerInfo,
 } from "@/services/mcpToolsService";
 import { updateToolList } from "@/services/mcpService";
-import { ensureContainerPortAvailableOnce } from "./useContainerPortAvailability";
+import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { MCP_TAB, MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
 import type {
   CommunityMcpCard,
@@ -58,11 +58,6 @@ export function useMcpCommunityQuickAdd({
   const [draft, setDraft] = useState<CommunityQuickAddDraft | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const translate = useCallback(
-    (key: string, params?: Record<string, unknown>) => String(t(key, params)),
-    [t]
-  );
-
   const open = useCallback((service: CommunityMcpCard) => {
     setSource(service);
     setDraft(draftFromSource(service));
@@ -81,18 +76,19 @@ export function useMcpCommunityQuickAdd({
     if (!draft || !source) return;
     const name = draft.name.trim();
     if (!name) {
-      message.warning(translate("mcpTools.add.validate.nameRequired"));
+      message.warning(t("mcpTools.add.validate.nameRequired"));
       return;
     }
 
     const isContainer = draft.transportType === MCP_TRANSPORT_TYPE.CONTAINER;
     if (isContainer) {
-      const ok = await ensureContainerPortAvailableOnce({
-        containerPort: draft.containerPort,
-        message,
-        translate,
-      });
-      if (!ok) return;
+      const available = await checkContainerPortAvailable(draft.containerPort);
+      if (!available) {
+        message.error(
+          t("mcpTools.addModal.portOccupied", { port: draft.containerPort })
+        );
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -105,7 +101,7 @@ export function useMcpCommunityQuickAdd({
           containerConfigJson: draft.containerConfigJson,
         });
         if (!resolved.data.mcpConfig) {
-          message.error(translate("mcpTools.add.error.containerJsonInvalid"));
+          message.error(t("mcpTools.add.error.containerJsonInvalid"));
           return;
         }
         await addContainerMcpToolService({
@@ -132,7 +128,7 @@ export function useMcpCommunityQuickAdd({
         });
       }
 
-      message.success(translate("mcpTools.add.success"));
+      message.success(t("mcpTools.add.success"));
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
@@ -152,11 +148,11 @@ export function useMcpCommunityQuickAdd({
       log.error("[useMcpCommunityQuickAdd] Failed to add community service", {
         error,
       });
-      message.error(translate("mcpTools.add.failed"));
+      message.error(t("mcpTools.add.failed"));
     } finally {
       setSubmitting(false);
     }
-  }, [close, draft, message, onSuccess, queryClient, source, translate]);
+  }, [close, draft, message, onSuccess, queryClient, source, t]);
 
   return {
     visible: Boolean(source),

@@ -1,17 +1,91 @@
 import type { McpServer } from "@/types/agentConfig";
 import type {
+  McpContainerStatus,
+  McpHealthStatus,
   McpServiceItem,
+  McpTransportType,
   RegistryMcpCard,
   RegistryPackageArgumentInput,
   RegistryQuickAddOption,
   RegistryRemoteVariable,
 } from "@/types/mcpTools";
+import { McpRegistryServerStatus } from "@/types/mcpTools";
 import {
+  MCP_CONTAINER_STATUS,
   MCP_HEALTH_STATUS,
   MCP_SERVICE_STATUS,
   MCP_TAB,
   MCP_TRANSPORT_TYPE,
 } from "@/const/mcpTools";
+
+// ---------------------------------------------------------------------------
+// Label resolvers (used by cards / detail modals)
+// ---------------------------------------------------------------------------
+
+/** i18n key for the label shown next to a service's `source` enum. */
+export const getSourceLabelKey = (source: McpServiceItem["source"]): string => {
+  if (source === MCP_TAB.LOCAL) return "mcpTools.source.local";
+  if (source === MCP_TAB.COMMUNITY) return "mcpTools.source.community";
+  return "mcpTools.source.registry";
+};
+
+/** i18n key for the label shown next to a service's `transportType` enum. */
+export const getTransportLabelKey = (
+  transportType: McpTransportType | string
+): string => {
+  if (transportType === MCP_TRANSPORT_TYPE.HTTP)
+    return "mcpTools.serverType.http";
+  if (transportType === MCP_TRANSPORT_TYPE.SSE)
+    return "mcpTools.serverType.sse";
+  return "mcpTools.serverType.container";
+};
+
+/** i18n key for a service's `healthStatus`. */
+export const getHealthStatusKey = (status: McpHealthStatus): string => {
+  if (status === MCP_HEALTH_STATUS.HEALTHY) return "mcpTools.health.healthy";
+  if (status === MCP_HEALTH_STATUS.UNHEALTHY)
+    return "mcpTools.health.unhealthy";
+  return "mcpTools.health.unchecked";
+};
+
+/** i18n key for a service's container `containerStatus`. */
+export const getContainerStatusKey = (
+  status: McpContainerStatus | undefined
+): string => {
+  if (status === MCP_CONTAINER_STATUS.RUNNING)
+    return "mcpTools.containerStatus.running";
+  if (status === MCP_CONTAINER_STATUS.STOPPED)
+    return "mcpTools.containerStatus.stopped";
+  return "mcpTools.containerStatus.unknown";
+};
+
+/** Colour + text key used by the registry/community status pill. */
+export const getRegistryStatusBadge = (
+  status: string | undefined,
+  textKeyVariant: "registry" | "community" = "registry"
+): { className: string; textKey: string } => {
+  const normalized = String(status || "").toLowerCase();
+  const base =
+    textKeyVariant === "registry"
+      ? "mcpTools.registry.status"
+      : "mcpTools.community.status";
+  if (normalized === McpRegistryServerStatus.ACTIVE) {
+    return {
+      className: "bg-emerald-100 text-emerald-700",
+      textKey: `${base}.active`,
+    };
+  }
+  if (normalized === McpRegistryServerStatus.DEPRECATED) {
+    return {
+      className: "bg-amber-100 text-amber-700",
+      textKey: `${base}.deprecated`,
+    };
+  }
+  return {
+    className: "bg-slate-100 text-slate-600",
+    textKey: `${base}.unknown`,
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Service list helpers
@@ -167,34 +241,40 @@ const extractInnerMessage = (detailText: string): string => {
   return raw;
 };
 
+type HealthCheckErrorMessages = {
+  healthFailed: string;
+  http401: string;
+  http503: string;
+  timeoutTitle: string;
+  errorTitle: string;
+  timeoutMessage: string;
+};
+
 /**
  * Parse an unknown health-check error into a stable { title, detail } pair
- * that the UI can render without any fallback logic.
+ * that the UI can render without any fallback logic. Callers supply
+ * already-translated strings so this helper stays translation-free.
  */
 export const parseHealthCheckError = (
   error: unknown,
-  translate: (key: string) => string
+  messages: HealthCheckErrorMessages
 ): { title: string; detail: string; isTimeout: boolean } => {
   const rawErrorText =
     error instanceof Error ? String(error.message || "") : "";
   const backendDetail = extractBackendDetail(rawErrorText);
   const inner = extractInnerMessage(backendDetail);
 
-  let normalized = inner || translate("mcpTools.service.healthFailed");
+  let normalized = inner || messages.healthFailed;
   if (normalized.includes("401")) {
-    normalized = translate("mcpTools.service.health.http401");
+    normalized = messages.http401;
   } else if (normalized.includes("503")) {
-    normalized = translate("mcpTools.service.health.http503");
+    normalized = messages.http503;
   }
 
   const isTimeout = normalized === "MCP_HEALTH_TIMEOUT";
   return {
-    title: isTimeout
-      ? translate("mcpTools.service.healthTimeoutTitle")
-      : translate("mcpTools.service.healthErrorTitle"),
-    detail: isTimeout
-      ? translate("mcpTools.service.healthTimeoutMessage")
-      : normalized,
+    title: isTimeout ? messages.timeoutTitle : messages.errorTitle,
+    detail: isTimeout ? messages.timeoutMessage : normalized,
     isTimeout,
   };
 };

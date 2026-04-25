@@ -1,8 +1,8 @@
 import { Button } from "antd";
 import { useTranslation } from "react-i18next";
-import { MCP_REGISTRY_SERVER_STATUS } from "@/const/mcpTools";
 import { formatRegistryDate, formatRegistryVersion } from "@/lib/mcpTools";
 import type { RegistryMcpCard } from "@/types/mcpTools";
+import RegistryStatusBadge from "./shared/RegistryStatusBadge";
 
 interface McpRegistryCardProps {
   service: RegistryMcpCard;
@@ -23,19 +23,6 @@ export default function McpRegistryCard({
     string,
     unknown
   >;
-  const officialStatus = String(officialMeta.status || "").toLowerCase();
-  const statusClassName =
-    officialStatus === MCP_REGISTRY_SERVER_STATUS.ACTIVE
-      ? "bg-emerald-100 text-emerald-700"
-      : officialStatus === MCP_REGISTRY_SERVER_STATUS.DEPRECATED
-        ? "bg-amber-100 text-amber-700"
-        : "bg-slate-100 text-slate-600";
-  const statusTextKey =
-    officialStatus === MCP_REGISTRY_SERVER_STATUS.ACTIVE
-      ? "mcpTools.registry.status.active"
-      : officialStatus === MCP_REGISTRY_SERVER_STATUS.DEPRECATED
-        ? "mcpTools.registry.status.deprecated"
-        : "mcpTools.registry.status.unknown";
 
   return (
     <div
@@ -46,11 +33,9 @@ export default function McpRegistryCard({
         <h3 className="min-w-0 break-all text-base font-semibold text-slate-900">
           {server.name}
         </h3>
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusClassName}`}
-        >
-          {t(statusTextKey)}
-        </span>
+        <RegistryStatusBadge
+          status={officialMeta.status as string | undefined}
+        />
       </div>
 
       <div className="mt-2 flex items-center gap-2">

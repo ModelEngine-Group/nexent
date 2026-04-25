@@ -6,23 +6,26 @@ import {
   fetchCommunityMcpCards,
   fetchCommunityMcpTagStats,
 } from "@/services/mcpToolsService";
-import type { CommunityMcpCard, McpTagStat } from "@/types/mcpTools";
-import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import type {
+  CommunityMcpCard,
+  McpTagStat,
+  McpTransportFilter,
+} from "@/types/mcpTools";
+import { FILTER_ALL } from "@/types/mcpTools";
+import { MCP_SEARCH_DEBOUNCE_MS, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
-const SEARCH_DEBOUNCE_MS = 350;
-
-export type CommunityTransportFilter = "all" | "http" | "sse" | "container";
+export type CommunityTransportFilter = McpTransportFilter;
 
 interface CommunityFilters {
   search: string;
-  transport: CommunityTransportFilter;
+  transport: McpTransportFilter;
   tag: string;
 }
 
 const INITIAL_FILTERS: CommunityFilters = {
   search: "",
-  transport: "all",
-  tag: "all",
+  transport: FILTER_ALL,
+  tag: FILTER_ALL,
 };
 
 /**
@@ -42,7 +45,7 @@ export function useMcpCommunityBrowser(enabled: boolean) {
   useEffect(() => {
     const timer = window.setTimeout(
       () => setDebouncedSearch(filters.search),
-      SEARCH_DEBOUNCE_MS
+      MCP_SEARCH_DEBOUNCE_MS
     );
     return () => window.clearTimeout(timer);
   }, [filters.search]);
@@ -65,8 +68,8 @@ export function useMcpCommunityBrowser(enabled: boolean) {
       const result = await fetchCommunityMcpCards({
         search: debouncedSearch || undefined,
         transportType:
-          filters.transport === "all" ? undefined : filters.transport,
-        tag: filters.tag === "all" ? undefined : filters.tag,
+          filters.transport === FILTER_ALL ? undefined : filters.transport,
+        tag: filters.tag === FILTER_ALL ? undefined : filters.tag,
         cursor: cursorHistory[pageIndex],
       });
       return result.data;

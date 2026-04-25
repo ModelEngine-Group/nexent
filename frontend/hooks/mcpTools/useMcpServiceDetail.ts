@@ -110,9 +110,14 @@ export function useMcpServiceDetail({
       invalidateServices();
     } catch (error) {
       log.error("[useMcpServiceDetail] Health check failed", { error });
-      const { title, detail } = parseHealthCheckError(error, (key) =>
-        String(t(key))
-      );
+      const { title, detail } = parseHealthCheckError(error, {
+        healthFailed: t("mcpTools.service.healthFailed"),
+        http401: t("mcpTools.service.health.http401"),
+        http503: t("mcpTools.service.health.http503"),
+        timeoutTitle: t("mcpTools.service.healthTimeoutTitle"),
+        errorTitle: t("mcpTools.service.healthErrorTitle"),
+        timeoutMessage: t("mcpTools.service.healthTimeoutMessage"),
+      });
       setHealthError({ visible: true, title, detail });
       setDraft((prev) =>
         prev ? { ...prev, healthStatus: MCP_HEALTH_STATUS.UNHEALTHY } : prev

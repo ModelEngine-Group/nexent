@@ -27,6 +27,29 @@ export enum McpContainerStatus {
   UNKNOWN = "unknown",
 }
 
+/** Sentinel value used by toolbar `Select`s to mean "no filter applied". */
+export const FILTER_ALL = "all";
+export type FilterAll = typeof FILTER_ALL;
+
+/** Source-filter for the main service list (all | local | registry | community). */
+export type McpSourceFilter = McpTab | FilterAll;
+/** Transport-filter for toolbars (all | http | sse | container). */
+export type McpTransportFilter = McpTransportType | FilterAll;
+
+/** Version-selection modes of the registry toolbar. */
+export enum McpVersionFilterMode {
+  ALL = "all",
+  LATEST = "latest",
+  CUSTOM = "custom",
+}
+
+/** Server status reported by the MCP registry / community entries. */
+export enum McpRegistryServerStatus {
+  ACTIVE = "active",
+  DEPRECATED = "deprecated",
+  UNKNOWN = "unknown",
+}
+
 export interface RegistryServerPayload {
   name: string;
   version?: string;

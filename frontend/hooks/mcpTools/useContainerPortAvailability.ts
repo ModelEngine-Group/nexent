@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { App } from "antd";
 import { useQuery } from "@tanstack/react-query";
-import type { MessageInstance } from "antd/es/message/interface";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
 import {
@@ -12,38 +11,16 @@ import {
 const PORT_CHECK_DEBOUNCE_MS = 350;
 const PORT_CHECK_STALE_TIME_MS = 10_000;
 
-type EnsureContainerPortAvailableParams = {
-  containerPort: number | undefined;
-  message: MessageInstance;
-  translate: (key: string, params?: Record<string, unknown>) => string;
-};
-
 /**
- * Standalone helper to validate a container port right before a submit. Callers
- * pass the already-bound `message` and translator so this can run outside of a
- * component render cycle.
+ * Checks whether a container port is available. Returns `false` when the port
+ * is undefined or already occupied. Callers are responsible for showing any
  */
-export async function ensureContainerPortAvailableOnce({
-  containerPort,
-  message,
-  translate,
-}: EnsureContainerPortAvailableParams): Promise<boolean> {
-  if (typeof containerPort !== "number") {
-    return false;
-  }
-
-  const portCheck = await checkMcpContainerPortConflictService({
-    port: containerPort,
-  });
-
-  if (!portCheck.data.available) {
-    message.error(
-      translate("mcpTools.addModal.portOccupied", { port: containerPort })
-    );
-    return false;
-  }
-
-  return true;
+export async function checkContainerPortAvailable(
+  port: number | undefined
+): Promise<boolean> {
+  if (typeof port !== "number") return false;
+  const result = await checkMcpContainerPortConflictService({ port });
+  return result.data.available;
 }
 
 type UseContainerPortAvailabilityParams = {

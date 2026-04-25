@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
-import { Form, Input, Modal, Select, Tag } from "antd";
+import { Form, Input, Modal, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpTransportType } from "@/types/mcpTools";
-import { isHttpUrl } from "@/lib/mcpTools";
+import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
 import { useMcpCommunityQuickAdd } from "@/hooks/mcpTools/useMcpCommunityQuickAdd";
 import McpCommunityToolbar from "./McpCommunityToolbar";
 import McpCommunityCardList from "./McpCommunityCardList";
 import McpCommunityDetailModal from "./McpCommunityDetailModal";
 import ContainerPortField from "./ContainerPortField";
+import TagEditor from "./shared/TagEditor";
 
 interface AddMcpServiceCommunitySectionProps {
   active: boolean;
@@ -74,6 +75,7 @@ interface CommunityQuickAddModalProps {
 
 function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
   const { t } = useTranslation("common");
+  const rules = useMcpFormRules();
   const [form] = Form.useForm();
   const [tagInput, setTagInput] = useState("");
   const { visible, source, draft, submitting } = controller;
@@ -156,18 +158,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
           label={t("mcpTools.addModal.name")}
           name="name"
           className="mb-0 text-sm text-slate-500"
-          rules={[
-            {
-              required: true,
-              whitespace: true,
-              message: t("mcpTools.add.validate.nameRequired"),
-            },
-            {
-              type: "string",
-              max: 100,
-              message: t("mcpTools.add.validate.nameMaxLength"),
-            },
-          ]}
+          rules={rules.name}
         >
           <Input
             value={draft.name}
@@ -183,13 +174,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
           label={t("mcpTools.addModal.description")}
           name="description"
           className="mb-0 text-sm text-slate-500"
-          rules={[
-            {
-              type: "string",
-              max: 5000,
-              message: t("mcpTools.add.validate.descriptionMaxLength"),
-            },
-          ]}
+          rules={rules.description}
         >
           <Input.TextArea
             value={draft.description}
@@ -206,12 +191,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
           label={t("mcpTools.addModal.serverType")}
           name="transportType"
           className="mb-0 text-sm text-slate-500"
-          rules={[
-            {
-              required: true,
-              message: t("mcpTools.add.validate.transportTypeRequired"),
-            },
-          ]}
+          rules={rules.transportType}
         >
           <Select
             value={draft.transportType}
@@ -244,23 +224,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
               label={t("mcpTools.addModal.serverUrl")}
               name="serverUrl"
               className="mb-0 text-sm text-slate-500"
-              rules={[
-                {
-                  validator: async (_rule, value) => {
-                    const text = String(value || "").trim();
-                    if (!text)
-                      throw new Error(
-                        t("mcpTools.add.validate.httpUrlRequired")
-                      );
-                    if (text.length > 500)
-                      throw new Error(
-                        t("mcpTools.add.validate.httpUrlMaxLength")
-                      );
-                    if (!isHttpUrl(text))
-                      throw new Error(t("mcpTools.add.validate.httpUrlFormat"));
-                  },
-                },
-              ]}
+              rules={rules.httpUrl}
             >
               <Input
                 value={draft.serverUrl}
@@ -275,15 +239,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
               label={t("mcpTools.addModal.bearerTokenOptional")}
               name="authorizationToken"
               className="mb-0 text-sm text-slate-500"
-              rules={[
-                {
-                  type: "string",
-                  max: 500,
-                  message: t(
-                    "mcpTools.add.validate.authorizationTokenMaxLength"
-                  ),
-                },
-              ]}
+              rules={rules.authToken}
             >
               <Input
                 value={draft.authorizationToken}
@@ -304,24 +260,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
               label={t("mcpTools.addModal.containerConfig")}
               name="containerConfigJson"
               className="mb-0 text-sm text-slate-500"
-              rules={[
-                {
-                  validator: async (_rule, value) => {
-                    const text = String(value || "").trim();
-                    if (!text)
-                      throw new Error(
-                        t("mcpTools.add.validate.containerConfigRequired")
-                      );
-                    try {
-                      JSON.parse(text);
-                    } catch {
-                      throw new Error(
-                        t("mcpTools.add.error.containerJsonInvalid")
-                      );
-                    }
-                  },
-                },
-              ]}
+              rules={rules.containerConfig}
             >
               <Input.TextArea
                 value={draft.containerConfigJson}
@@ -340,23 +279,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
             <Form.Item
               name="containerPort"
               className="mb-0"
-              rules={[
-                {
-                  validator: async (_rule, value) => {
-                    if (value === undefined || value === null || value === "") {
-                      throw new Error(
-                        t("mcpTools.add.validate.containerRequired")
-                      );
-                    }
-                    const port = Number(value);
-                    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-                      throw new Error(
-                        t("mcpTools.add.validate.containerPortRange")
-                      );
-                    }
-                  },
-                },
-              ]}
+              rules={rules.containerPort}
             >
               <div>
                 <ContainerPortField
@@ -372,37 +295,14 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
           </div>
         )}
 
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            {t("mcpTools.addModal.tags")}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {draft.tags.map((tag, index) => (
-              <span key={`${tag}-${index}`} className="relative inline-flex">
-                <Tag className="rounded-full px-3 py-1 m-0 leading-none">
-                  {tag}
-                </Tag>
-                <button
-                  type="button"
-                  onClick={() => removeTag(index)}
-                  className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] text-slate-500 transition hover:bg-slate-300 hover:text-slate-700"
-                  aria-label={t("mcpTools.addModal.removeTagAria", { tag })}
-                >
-                  x
-                </button>
-              </span>
-            ))}
-            <Input
-              size="small"
-              value={tagInput}
-              onChange={(event) => setTagInput(event.target.value)}
-              onPressEnter={addTag}
-              onBlur={addTag}
-              placeholder={t("mcpTools.addModal.tagInputPlaceholder")}
-              className="w-40 rounded-full"
-            />
-          </div>
-        </div>
+        <TagEditor
+          title={t("mcpTools.addModal.tags")}
+          tags={draft.tags}
+          tagInput={tagInput}
+          onTagInputChange={setTagInput}
+          onAddTag={addTag}
+          onRemoveTag={removeTag}
+        />
       </Form>
     </Modal>
   );

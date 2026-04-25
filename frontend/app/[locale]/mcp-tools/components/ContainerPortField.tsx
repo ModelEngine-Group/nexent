@@ -1,6 +1,7 @@
 import { Button, InputNumber } from "antd";
 import { LoadingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { MCP_PORT_RANGE } from "@/const/mcpTools";
 import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortAvailability";
 
 interface ContainerPortFieldProps {
@@ -34,8 +35,8 @@ export default function ContainerPortField({
           onChange={(value) =>
             setContainerPort(value === null ? undefined : value)
           }
-          min={1}
-          max={65535}
+          min={MCP_PORT_RANGE.MIN}
+          max={MCP_PORT_RANGE.MAX}
           controls={false}
           className="w-full"
           placeholder={t("mcpTools.addModal.containerPortPlaceholder")}

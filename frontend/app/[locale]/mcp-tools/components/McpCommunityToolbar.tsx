@@ -1,17 +1,18 @@
 import { Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
-import type { McpTagStat } from "@/types/mcpTools";
-import type { CommunityTransportFilter } from "@/hooks/mcpTools/useMcpCommunityBrowser";
+import { MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
+import type { McpTagStat, McpTransportFilter } from "@/types/mcpTools";
+import { FILTER_ALL } from "@/types/mcpTools";
 
 interface McpCommunityToolbarProps {
   search: string;
-  transport: CommunityTransportFilter;
+  transport: McpTransportFilter;
   tag: string;
   tagStats: McpTagStat[];
   page: number;
   resultCount: number;
   onSearchChange: (value: string) => void;
-  onTransportChange: (value: CommunityTransportFilter) => void;
+  onTransportChange: (value: McpTransportFilter) => void;
   onTagChange: (value: string) => void;
 }
 
@@ -44,10 +45,22 @@ export default function McpCommunityToolbar({
           onChange={onTransportChange}
           className="w-full"
           options={[
-            { value: "all", label: t("mcpTools.page.transportFilter.all") },
-            { value: "http", label: t("mcpTools.serverType.http") },
-            { value: "sse", label: t("mcpTools.serverType.sse") },
-            { value: "container", label: t("mcpTools.serverType.container") },
+            {
+              value: FILTER_ALL,
+              label: t("mcpTools.page.transportFilter.all"),
+            },
+            {
+              value: MCP_TRANSPORT_TYPE.HTTP,
+              label: t("mcpTools.serverType.http"),
+            },
+            {
+              value: MCP_TRANSPORT_TYPE.SSE,
+              label: t("mcpTools.serverType.sse"),
+            },
+            {
+              value: MCP_TRANSPORT_TYPE.CONTAINER,
+              label: t("mcpTools.serverType.container"),
+            },
           ]}
         />
         <Select
@@ -56,7 +69,7 @@ export default function McpCommunityToolbar({
           onChange={onTagChange}
           className="w-full"
           options={[
-            { value: "all", label: t("mcpTools.page.tagFilter.all") },
+            { value: FILTER_ALL, label: t("mcpTools.page.tagFilter.all") },
             ...tagStats.map((item) => ({
               value: item.tag,
               label: `${item.tag} (${item.count})`,

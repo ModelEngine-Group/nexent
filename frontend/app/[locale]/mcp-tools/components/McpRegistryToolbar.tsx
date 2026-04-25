@@ -4,6 +4,7 @@ import type { MenuProps } from "antd";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import { VERSION_PATTERN } from "@/const/mcpTools";
+import { McpVersionFilterMode } from "@/types/mcpTools";
 
 interface McpRegistryToolbarProps {
   search: string;
@@ -31,8 +32,8 @@ export default function McpRegistryToolbar({
   onIncludeDeletedChange,
 }: McpRegistryToolbarProps) {
   const { t } = useTranslation("common");
-  const [versionMode, setVersionMode] = useState<"all" | "latest" | "custom">(
-    "latest"
+  const [versionMode, setVersionMode] = useState<McpVersionFilterMode>(
+    McpVersionFilterMode.LATEST
   );
   const [customVersion, setCustomVersion] = useState("");
 
@@ -78,32 +79,30 @@ export default function McpRegistryToolbar({
   useEffect(() => {
     const value = (version || "").trim();
     if (!value) {
-      setVersionMode("all");
+      setVersionMode(McpVersionFilterMode.ALL);
       setCustomVersion("");
       return;
     }
     if (value.toLowerCase() === "latest") {
-      setVersionMode("latest");
+      setVersionMode(McpVersionFilterMode.LATEST);
       setCustomVersion("");
       return;
     }
-    setVersionMode("custom");
+    setVersionMode(McpVersionFilterMode.CUSTOM);
     setCustomVersion(value);
   }, [version]);
 
-  const handleVersionModeChange = (mode: "all" | "latest" | "custom") => {
+  const handleVersionModeChange = (mode: McpVersionFilterMode) => {
     setVersionMode(mode);
-    if (mode === "all") {
-      setCustomVersion("");
+    setCustomVersion("");
+    if (mode === McpVersionFilterMode.ALL) {
       onVersionChange("");
       return;
     }
-    if (mode === "latest") {
-      setCustomVersion("");
+    if (mode === McpVersionFilterMode.LATEST) {
       onVersionChange("latest");
       return;
     }
-    setCustomVersion("");
     onVersionChange("");
   };
 
@@ -151,9 +150,18 @@ export default function McpRegistryToolbar({
             onChange={handleVersionModeChange}
             className="mt-1 w-full"
             options={[
-              { label: t("mcpTools.registry.versionAll"), value: "all" },
-              { label: t("mcpTools.registry.versionLatest"), value: "latest" },
-              { label: t("mcpTools.registry.versionCustom"), value: "custom" },
+              {
+                label: t("mcpTools.registry.versionAll"),
+                value: McpVersionFilterMode.ALL,
+              },
+              {
+                label: t("mcpTools.registry.versionLatest"),
+                value: McpVersionFilterMode.LATEST,
+              },
+              {
+                label: t("mcpTools.registry.versionCustom"),
+                value: McpVersionFilterMode.CUSTOM,
+              },
             ]}
           />
         </label>
@@ -183,7 +191,7 @@ export default function McpRegistryToolbar({
         </div>
       </div>
 
-      {versionMode === "custom" ? (
+      {versionMode === McpVersionFilterMode.CUSTOM ? (
         <label className="block text-xs text-slate-500">
           {t("mcpTools.registry.customVersion")}
           <Input

@@ -4,9 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchRegistryMcpCards } from "@/services/mcpToolsService";
 import type { RegistryMcpCard } from "@/types/mcpTools";
-import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
-
-const SEARCH_DEBOUNCE_MS = 350;
+import { MCP_SEARCH_DEBOUNCE_MS, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
 interface RegistryFilters {
   search: string;
@@ -40,7 +38,7 @@ export function useMcpRegistryBrowser(enabled: boolean) {
   useEffect(() => {
     const timer = window.setTimeout(
       () => setDebouncedSearch(filters.search),
-      SEARCH_DEBOUNCE_MS
+      MCP_SEARCH_DEBOUNCE_MS
     );
     return () => window.clearTimeout(timer);
   }, [filters.search]);

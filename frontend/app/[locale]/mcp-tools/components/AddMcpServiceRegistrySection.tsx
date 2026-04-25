@@ -6,6 +6,7 @@ import type {
   RegistryPackageArgumentInput,
   RegistryRemoteVariable,
 } from "@/types/mcpTools";
+import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useMcpRegistryBrowser } from "@/hooks/mcpTools/useMcpRegistryBrowser";
 import { useMcpRegistryQuickAdd } from "@/hooks/mcpTools/useMcpRegistryQuickAdd";
 import McpRegistryToolbar from "./McpRegistryToolbar";
@@ -22,7 +23,6 @@ export default function AddMcpServiceRegistrySection({
   active,
   onAdded,
 }: AddMcpServiceRegistrySectionProps) {
-  const { t } = useTranslation("common");
   const [selected, setSelected] = useState<RegistryMcpCard | null>(null);
   const browser = useMcpRegistryBrowser(active);
   const quickAdd = useMcpRegistryQuickAdd({ onSuccess: onAdded });
@@ -69,18 +69,19 @@ export default function AddMcpServiceRegistrySection({
         />
       ) : null}
 
-      <QuickAddPickerModal controller={quickAdd} t={t} />
+      <QuickAddPickerModal controller={quickAdd} />
     </>
   );
 }
 
 interface QuickAddPickerModalProps {
   controller: ReturnType<typeof useMcpRegistryQuickAdd>;
-  t: (key: string, params?: Record<string, unknown>) => string;
 }
 
-function QuickAddPickerModal({ controller, t }: QuickAddPickerModalProps) {
+function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
+  const { t } = useTranslation("common");
   const [form] = Form.useForm();
+  const rules = useMcpFormRules();
   const {
     visible,
     candidate,
@@ -134,25 +135,10 @@ function QuickAddPickerModal({ controller, t }: QuickAddPickerModalProps) {
             <Form.Item
               name={field.formKey}
               className="mb-0"
-              rules={[
-                ...(field.isRequired
-                  ? [
-                      {
-                        required: true,
-                        whitespace: true,
-                        message: t(
-                          "mcpTools.registry.quickAddPicker.variableRequiredMissing",
-                          { key: field.label || field.key }
-                        ),
-                      },
-                    ]
-                  : []),
-                {
-                  type: "string",
-                  max: 2000,
-                  message: t("mcpTools.registry.quickAddPicker.fieldMaxLength"),
-                },
-              ]}
+              rules={rules.quickAddField(
+                field.label || field.key,
+                Boolean(field.isRequired)
+              )}
             >
               <Input
                 value={values[field.formKey || ""] || ""}
@@ -219,25 +205,7 @@ function QuickAddPickerModal({ controller, t }: QuickAddPickerModalProps) {
             <Form.Item
               name={arg.formKey}
               className="mb-0"
-              rules={[
-                ...(arg.isRequired
-                  ? [
-                      {
-                        required: true,
-                        whitespace: true,
-                        message: t(
-                          "mcpTools.registry.quickAddPicker.variableRequiredMissing",
-                          { key: arg.label }
-                        ),
-                      },
-                    ]
-                  : []),
-                {
-                  type: "string",
-                  max: 2000,
-                  message: t("mcpTools.registry.quickAddPicker.fieldMaxLength"),
-                },
-              ]}
+              rules={rules.quickAddField(arg.label, Boolean(arg.isRequired))}
             >
               <Input
                 value={values[arg.formKey] || ""}
@@ -349,31 +317,7 @@ function QuickAddPickerModal({ controller, t }: QuickAddPickerModalProps) {
                 <Form.Item
                   name="containerPort"
                   className="mb-0"
-                  rules={[
-                    {
-                      validator: async (_rule, value) => {
-                        if (
-                          value === undefined ||
-                          value === null ||
-                          value === ""
-                        ) {
-                          throw new Error(
-                            t("mcpTools.add.validate.containerRequired")
-                          );
-                        }
-                        const port = Number(value);
-                        if (
-                          !Number.isInteger(port) ||
-                          port < 1 ||
-                          port > 65535
-                        ) {
-                          throw new Error(
-                            t("mcpTools.add.validate.containerPortRange")
-                          );
-                        }
-                      },
-                    },
-                  ]}
+                  rules={rules.containerPort}
                 >
                   <div>
                     <ContainerPortField

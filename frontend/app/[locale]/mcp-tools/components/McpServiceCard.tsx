@@ -1,11 +1,8 @@
 import { Button } from "antd";
 import { useTranslation } from "react-i18next";
-import {
-  MCP_TRANSPORT_TYPE,
-  MCP_SERVICE_STATUS,
-  MCP_TAB,
-} from "@/const/mcpTools";
+import { MCP_SERVICE_STATUS } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
+import { getSourceLabelKey, getTransportLabelKey } from "@/lib/mcpTools";
 
 interface McpServiceCardProps {
   service: McpServiceItem;
@@ -13,20 +10,6 @@ interface McpServiceCardProps {
   onToggleEnable: (service: McpServiceItem) => void;
   toggleLoading?: boolean;
 }
-
-const sourceLabelKey = (source: McpServiceItem["source"]) => {
-  if (source === MCP_TAB.LOCAL) return "mcpTools.source.local";
-  if (source === MCP_TAB.COMMUNITY) return "mcpTools.source.community";
-  return "mcpTools.source.registry";
-};
-
-const transportLabelKey = (transportType: McpServiceItem["transportType"]) => {
-  if (transportType === MCP_TRANSPORT_TYPE.HTTP)
-    return "mcpTools.serverType.http";
-  if (transportType === MCP_TRANSPORT_TYPE.SSE)
-    return "mcpTools.serverType.sse";
-  return "mcpTools.serverType.container";
-};
 
 export default function McpServiceCard({
   service,
@@ -72,10 +55,10 @@ export default function McpServiceCard({
 
       <div className="mt-4 flex flex-wrap gap-2">
         <span className="rounded-full bg-amber-100 text-amber-700 px-2.5 py-1 text-xs font-medium">
-          {t(sourceLabelKey(service.source))}
+          {t(getSourceLabelKey(service.source))}
         </span>
         <span className="rounded-full bg-green-100 text-green-700 px-2.5 py-1 text-xs font-medium">
-          {t(transportLabelKey(service.transportType))}
+          {t(getTransportLabelKey(service.transportType))}
         </span>
         {service.tags.map((tag) => (
           <span

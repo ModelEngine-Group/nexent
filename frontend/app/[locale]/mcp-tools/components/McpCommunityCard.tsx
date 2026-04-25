@@ -1,11 +1,12 @@
 import { Button } from "antd";
 import { useTranslation } from "react-i18next";
 import {
-  MCP_TRANSPORT_TYPE,
-  MCP_REGISTRY_SERVER_STATUS,
-} from "@/const/mcpTools";
-import { formatRegistryDate, formatRegistryVersion } from "@/lib/mcpTools";
+  formatRegistryDate,
+  formatRegistryVersion,
+  getTransportLabelKey,
+} from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
+import RegistryStatusBadge from "./shared/RegistryStatusBadge";
 
 interface McpCommunityCardProps {
   service: CommunityMcpCard;
@@ -19,24 +20,7 @@ export default function McpCommunityCard({
   onQuickAdd,
 }: McpCommunityCardProps) {
   const { t } = useTranslation("common");
-  const statusClassName =
-    service.status === MCP_REGISTRY_SERVER_STATUS.ACTIVE
-      ? "bg-emerald-100 text-emerald-700"
-      : service.status === MCP_REGISTRY_SERVER_STATUS.DEPRECATED
-        ? "bg-amber-100 text-amber-700"
-        : "bg-slate-100 text-slate-600";
-  const statusTextKey =
-    service.status === MCP_REGISTRY_SERVER_STATUS.ACTIVE
-      ? "mcpTools.community.status.active"
-      : service.status === MCP_REGISTRY_SERVER_STATUS.DEPRECATED
-        ? "mcpTools.community.status.deprecated"
-        : "mcpTools.community.status.unknown";
-  const transportLabel =
-    service.transportType === MCP_TRANSPORT_TYPE.HTTP
-      ? t("mcpTools.serverType.http")
-      : service.transportType === MCP_TRANSPORT_TYPE.SSE
-        ? t("mcpTools.serverType.sse")
-        : t("mcpTools.serverType.container");
+  const transportLabel = t(getTransportLabelKey(service.transportType));
 
   return (
     <div
@@ -47,11 +31,7 @@ export default function McpCommunityCard({
         <h3 className="min-w-0 break-all text-base font-semibold text-slate-900">
           {service.name}
         </h3>
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusClassName}`}
-        >
-          {t(statusTextKey)}
-        </span>
+        <RegistryStatusBadge status={service.status} variant="community" />
       </div>
 
       <div className="mt-2 flex items-center gap-2">

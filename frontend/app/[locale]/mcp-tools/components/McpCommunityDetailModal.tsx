@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { Button, Modal } from "antd";
 import { useTranslation } from "react-i18next";
-import { MCP_REGISTRY_SERVER_STATUS } from "@/const/mcpTools";
 import {
   extractRegistryLinks,
   formatRegistryDate,
   formatRegistryVersion,
+  getTransportLabelKey,
   toPrettyRegistryJson,
 } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
+import RegistryStatusBadge from "./shared/RegistryStatusBadge";
 
 interface McpCommunityDetailModalProps {
   service: CommunityMcpCard;
@@ -39,26 +40,8 @@ export default function McpCommunityDetailModal({
   const hasConfigJson = Boolean(
     service.configJson && Object.keys(service.configJson).length > 0
   );
-  const serverTypeText =
-    service.transportType === "sse"
-      ? t("mcpTools.serverType.sse")
-      : service.transportType === "container"
-        ? t("mcpTools.serverType.container")
-        : t("mcpTools.serverType.http");
+  const serverTypeText = t(getTransportLabelKey(service.transportType));
   const sourceText = t("mcpTools.source.community");
-
-  const statusClassName =
-    service.status === MCP_REGISTRY_SERVER_STATUS.ACTIVE
-      ? "bg-emerald-100 text-emerald-700"
-      : service.status === MCP_REGISTRY_SERVER_STATUS.DEPRECATED
-        ? "bg-amber-100 text-amber-700"
-        : "bg-slate-100 text-slate-600";
-  const statusTextKey =
-    service.status === MCP_REGISTRY_SERVER_STATUS.ACTIVE
-      ? "mcpTools.community.status.active"
-      : service.status === MCP_REGISTRY_SERVER_STATUS.DEPRECATED
-        ? "mcpTools.community.status.deprecated"
-        : "mcpTools.community.status.unknown";
 
   return (
     <>
@@ -138,11 +121,11 @@ export default function McpCommunityDetailModal({
                 <span className="text-slate-500">
                   {t("mcpTools.detail.status")}
                 </span>
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClassName}`}
-                >
-                  {t(statusTextKey)}
-                </span>
+                <RegistryStatusBadge
+                  status={service.status}
+                  variant="community"
+                  className="px-3 py-1 text-xs"
+                />
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">

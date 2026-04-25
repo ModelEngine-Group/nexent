@@ -10,7 +10,7 @@ import {
   addMcpToolService,
 } from "@/services/mcpToolsService";
 import { updateToolList } from "@/services/mcpService";
-import { ensureContainerPortAvailableOnce } from "./useContainerPortAvailability";
+import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { MCP_TAB } from "@/const/mcpTools";
 import {
   buildInitialQuickAddValues,
@@ -52,11 +52,6 @@ export function useMcpRegistryQuickAdd({
   );
   const [submitting, setSubmitting] = useState(false);
 
-  const translate = useCallback(
-    (key: string, params?: Record<string, unknown>) => String(t(key, params)),
-    [t]
-  );
-
   const selectedOption = useMemo(
     () => options.find((option) => option.key === selectedKey) || null,
     [options, selectedKey]
@@ -66,7 +61,7 @@ export function useMcpRegistryQuickAdd({
     (service: RegistryMcpCard) => {
       const nextOptions = resolveQuickAddOptions(service);
       if (nextOptions.length === 0) {
-        message.info(translate("mcpTools.registry.quickAddUnsupported"));
+        message.info(t("mcpTools.registry.quickAddUnsupported"));
         return;
       }
       setCandidate(service);
@@ -76,7 +71,7 @@ export function useMcpRegistryQuickAdd({
       setValues(buildInitialQuickAddValues(nextOptions[0]));
       setContainerPort(undefined);
     },
-    [message, translate]
+    [message, t]
   );
 
   const close = useCallback(() => {
@@ -102,7 +97,7 @@ export function useMcpRegistryQuickAdd({
 
   const confirm = useCallback(async () => {
     if (!candidate || !selectedOption) return;
-    const tags = ["quick-add"];
+    const tags: string[] = [];
 
     const allFields = [
       ...(selectedOption.remoteVariables || []),
@@ -114,7 +109,7 @@ export function useMcpRegistryQuickAdd({
     const missingField = findMissingRequiredField(allFields, values);
     if (missingField) {
       message.warning(
-        translate("mcpTools.registry.quickAddPicker.variableRequiredMissing", {
+        t("mcpTools.registry.quickAddPicker.variableRequiredMissing", {
           key: missingField.key,
         })
       );
@@ -124,18 +119,19 @@ export function useMcpRegistryQuickAdd({
     setSubmitting(true);
     try {
       if (selectedOption.transportType === "container") {
-        const ok = await ensureContainerPortAvailableOnce({
-          containerPort,
-          message,
-          translate,
-        });
-        if (!ok) return;
+        const available = await checkContainerPortAvailable(containerPort);
+        if (!available) {
+          message.error(
+            t("mcpTools.addModal.portOccupied", { port: containerPort })
+          );
+          return;
+        }
 
         const runtimeCommand = inferContainerRuntimeCommand(
           selectedOption.packageRegistryType
         );
         if (!runtimeCommand) {
-          message.error(translate("mcpTools.registry.quickAddUnsupported"));
+          message.error(t("mcpTools.registry.quickAddUnsupported"));
           return;
         }
         const runtimeArgs = resolveRuntimeArgs(selectedOption, values);
@@ -172,10 +168,9 @@ export function useMcpRegistryQuickAdd({
         const finalUrl = resolveHttpServerUrl(selectedOption, values);
         if (!finalUrl || hasUnresolvedUrlTemplate(finalUrl)) {
           message.warning(
-            translate(
-              "mcpTools.registry.quickAddPicker.variableRequiredMissing",
-              { key: "url" }
-            )
+            t("mcpTools.registry.quickAddPicker.variableRequiredMissing", {
+              key: "url",
+            })
           );
           return;
         }
@@ -200,7 +195,7 @@ export function useMcpRegistryQuickAdd({
         });
       }
 
-      message.success(translate("mcpTools.add.success"));
+      message.success(t("mcpTools.add.success"));
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
@@ -220,7 +215,7 @@ export function useMcpRegistryQuickAdd({
       log.error("[useMcpRegistryQuickAdd] Failed to add from registry", {
         error,
       });
-      message.error(translate("mcpTools.add.failed"));
+      message.error(t("mcpTools.add.failed"));
     } finally {
       setSubmitting(false);
     }
@@ -232,7 +227,7 @@ export function useMcpRegistryQuickAdd({
     onSuccess,
     queryClient,
     selectedOption,
-    translate,
+    t,
     values,
   ]);
 

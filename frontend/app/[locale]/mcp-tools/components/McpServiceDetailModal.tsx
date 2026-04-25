@@ -1,26 +1,21 @@
 import { useEffect, useState } from "react";
-import { App, Modal, Input, Button, Form, Tag } from "antd";
+import { App, Modal, Input, Button, Form } from "antd";
 import { useTranslation } from "react-i18next";
-import {
-  MCP_CONTAINER_STATUS,
-  MCP_HEALTH_STATUS,
-  MCP_TRANSPORT_TYPE,
-  MCP_SERVICE_STATUS,
-  MCP_TAB,
-} from "@/const/mcpTools";
-import type {
-  McpContainerStatus,
-  McpHealthStatus,
-  McpServiceItem,
-} from "@/types/mcpTools";
+import { MCP_TRANSPORT_TYPE, MCP_SERVICE_STATUS } from "@/const/mcpTools";
+import type { McpServiceItem } from "@/types/mcpTools";
 import {
   extractRegistryLinks,
-  isHttpUrl,
+  getContainerStatusKey,
+  getHealthStatusKey,
+  getSourceLabelKey,
+  getTransportLabelKey,
   toPrettyRegistryJson,
 } from "@/lib/mcpTools";
+import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useMcpServiceDetail } from "@/hooks/mcpTools/useMcpServiceDetail";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
+import TagEditor from "./shared/TagEditor";
 
 interface McpServiceDetailModalProps {
   selectedService: McpServiceItem | null;
@@ -28,47 +23,6 @@ interface McpServiceDetailModalProps {
   onToggleEnable: (service: McpServiceItem) => void;
   isToggleLoading: (mcpId?: number) => boolean;
 }
-
-const resolveHealthStatusLabel = (
-  status: McpHealthStatus,
-  t: (key: string) => string
-): string => {
-  if (status === MCP_HEALTH_STATUS.HEALTHY) return t("mcpTools.health.healthy");
-  if (status === MCP_HEALTH_STATUS.UNHEALTHY)
-    return t("mcpTools.health.unhealthy");
-  return t("mcpTools.health.unchecked");
-};
-
-const resolveContainerStatusLabel = (
-  status: McpContainerStatus | undefined,
-  t: (key: string) => string
-): string => {
-  if (status === MCP_CONTAINER_STATUS.RUNNING)
-    return t("mcpTools.containerStatus.running");
-  if (status === MCP_CONTAINER_STATUS.STOPPED)
-    return t("mcpTools.containerStatus.stopped");
-  return t("mcpTools.containerStatus.unknown");
-};
-
-const resolveSourceLabel = (
-  source: McpServiceItem["source"],
-  t: (key: string) => string
-): string => {
-  if (source === MCP_TAB.LOCAL) return t("mcpTools.source.local");
-  if (source === MCP_TAB.COMMUNITY) return t("mcpTools.source.community");
-  return t("mcpTools.source.registry");
-};
-
-const resolveTransportLabel = (
-  transportType: McpServiceItem["transportType"],
-  t: (key: string) => string
-): string => {
-  if (transportType === MCP_TRANSPORT_TYPE.HTTP)
-    return t("mcpTools.serverType.http");
-  if (transportType === MCP_TRANSPORT_TYPE.SSE)
-    return t("mcpTools.serverType.sse");
-  return t("mcpTools.serverType.container");
-};
 
 export default function McpServiceDetailModal({
   selectedService,
@@ -78,7 +32,7 @@ export default function McpServiceDetailModal({
 }: McpServiceDetailModalProps) {
   const { modal } = App.useApp();
   const { t } = useTranslation("common");
-  const translate = (key: string) => String(t(key));
+  const rules = useMcpFormRules();
   const [form] = Form.useForm();
   const [logsOpen, setLogsOpen] = useState(false);
   const [showServerJson, setShowServerJson] = useState(false);
@@ -174,18 +128,7 @@ export default function McpServiceDetailModal({
                 label={t("mcpTools.detail.name")}
                 name="name"
                 className="mb-0 text-sm text-slate-500"
-                rules={[
-                  {
-                    required: true,
-                    whitespace: true,
-                    message: t("mcpTools.add.validate.nameRequired"),
-                  },
-                  {
-                    type: "string",
-                    max: 100,
-                    message: t("mcpTools.add.validate.nameMaxLength"),
-                  },
-                ]}
+                rules={rules.name}
               >
                 <Input
                   value={draft.name}
@@ -201,18 +144,15 @@ export default function McpServiceDetailModal({
                 label={t("mcpTools.detail.description")}
                 name="description"
                 className="mb-0"
-                rules={[
-                  {
-                    type: "string",
-                    max: 5000,
-                    message: t("mcpTools.add.validate.descriptionMaxLength"),
-                  },
-                ]}
+                rules={rules.description}
               >
                 <Input.TextArea
                   value={draft.description}
                   onChange={(event) => {
-                    detail.setDraft({ ...draft, description: event.target.value });
+                    detail.setDraft({
+                      ...draft,
+                      description: event.target.value,
+                    });
                     form.setFieldValue("description", event.target.value);
                   }}
                   autoSize={{ minRows: 1, maxRows: 24 }}
@@ -224,25 +164,7 @@ export default function McpServiceDetailModal({
                 label={t("mcpTools.detail.serverUrl")}
                 name="serverUrl"
                 className="mb-0 text-sm text-slate-500"
-                rules={[
-                  {
-                    validator: async (_rule, value) => {
-                      const text = String(value || "").trim();
-                      if (!text)
-                        throw new Error(
-                          t("mcpTools.add.validate.httpUrlRequired")
-                        );
-                      if (text.length > 500)
-                        throw new Error(
-                          t("mcpTools.add.validate.httpUrlMaxLength")
-                        );
-                      if (!isHttpUrl(text))
-                        throw new Error(
-                          t("mcpTools.add.validate.httpUrlFormat")
-                        );
-                    },
-                  },
-                ]}
+                rules={rules.httpUrl}
               >
                 <Input
                   value={draft.serverUrl}
@@ -262,15 +184,7 @@ export default function McpServiceDetailModal({
                   label={t("mcpTools.detail.bearerTokenOptional")}
                   name="authorizationToken"
                   className="mb-0 text-sm text-slate-500"
-                  rules={[
-                    {
-                      type: "string",
-                      max: 500,
-                      message: t(
-                        "mcpTools.add.validate.authorizationTokenMaxLength"
-                      ),
-                    },
-                  ]}
+                  rules={rules.authToken}
                 >
                   <Input
                     value={draft.authorizationToken ?? ""}
@@ -294,11 +208,11 @@ export default function McpServiceDetailModal({
             <div className="grid gap-3 text-sm text-slate-700">
               <DetailRow
                 label={t("mcpTools.detail.source")}
-                value={resolveSourceLabel(draft.source, translate)}
+                value={t(getSourceLabelKey(draft.source))}
               />
               <DetailRow
                 label={t("mcpTools.detail.serverType")}
-                value={resolveTransportLabel(draft.transportType, translate)}
+                value={t(getTransportLabelKey(draft.transportType))}
               />
               {draft.version ? (
                 <DetailRow
@@ -332,7 +246,7 @@ export default function McpServiceDetailModal({
                 </span>
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-slate-800">
-                    {resolveHealthStatusLabel(draft.healthStatus, translate)}
+                    {t(getHealthStatusKey(draft.healthStatus))}
                   </span>
                   <Button
                     size="small"
@@ -350,10 +264,7 @@ export default function McpServiceDetailModal({
               {draft.transportType === MCP_TRANSPORT_TYPE.CONTAINER ? (
                 <DetailRow
                   label={t("mcpTools.detail.containerStatus")}
-                  value={resolveContainerStatusLabel(
-                    draft.containerStatus,
-                    translate
-                  )}
+                  value={t(getContainerStatusKey(draft.containerStatus))}
                 />
               ) : null}
             </div>
@@ -406,40 +317,16 @@ export default function McpServiceDetailModal({
               </div>
             </div>
 
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                {t("mcpTools.detail.tags")}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {draft.tags.map((tag, index) => (
-                  <span
-                    key={`${tag}-${index}`}
-                    className="relative inline-flex"
-                  >
-                    <Tag className="rounded-full px-3 py-1 m-0 leading-none">
-                      {tag}
-                    </Tag>
-                    <button
-                      type="button"
-                      onClick={() => detail.removeTag(index)}
-                      className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] text-slate-500 transition hover:bg-slate-300 hover:text-slate-700"
-                      aria-label={t("mcpTools.detail.removeTagAria", { tag })}
-                    >
-                      x
-                    </button>
-                  </span>
-                ))}
-                <Input
-                  size="small"
-                  value={detail.tagInput}
-                  onChange={(event) => detail.setTagInput(event.target.value)}
-                  onPressEnter={detail.addTag}
-                  onBlur={detail.addTag}
-                  placeholder={t("mcpTools.detail.tagInputPlaceholder")}
-                  className="w-40 rounded-full"
-                />
-              </div>
-            </div>
+            <TagEditor
+              title={t("mcpTools.detail.tags")}
+              tags={draft.tags}
+              tagInput={detail.tagInput}
+              onTagInputChange={detail.setTagInput}
+              onAddTag={detail.addTag}
+              onRemoveTag={detail.removeTag}
+              removeAriaKey="mcpTools.detail.removeTagAria"
+              placeholderKey="mcpTools.detail.tagInputPlaceholder"
+            />
           </div>
 
           <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">

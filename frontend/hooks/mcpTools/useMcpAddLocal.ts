@@ -11,7 +11,7 @@ import {
   resolveContainerServerInfo,
 } from "@/services/mcpToolsService";
 import { updateToolList } from "@/services/mcpService";
-import { ensureContainerPortAvailableOnce } from "./useContainerPortAvailability";
+import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { MCP_TAB, MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
@@ -30,24 +30,22 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
   const queryClient = useQueryClient();
   const [submitting, setSubmitting] = useState(false);
 
-  const translate = (key: string, params?: Record<string, unknown>) =>
-    String(t(key, params));
-
   const submit = async (draft: LocalAddMcpDraft): Promise<boolean> => {
     const trimmedName = draft.name.trim();
     if (!trimmedName) {
-      message.warning(translate("mcpTools.add.validate.nameRequired"));
+      message.warning(t("mcpTools.add.validate.nameRequired"));
       return false;
     }
 
     const isContainer = draft.transportType === MCP_TRANSPORT_TYPE.CONTAINER;
     if (isContainer) {
-      const ok = await ensureContainerPortAvailableOnce({
-        containerPort: draft.containerPort,
-        message,
-        translate,
-      });
-      if (!ok) return false;
+      const available = await checkContainerPortAvailable(draft.containerPort);
+      if (!available) {
+        message.error(
+          t("mcpTools.addModal.portOccupied", { port: draft.containerPort })
+        );
+        return false;
+      }
     }
 
     setSubmitting(true);
@@ -60,7 +58,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           containerConfigJson: draft.containerConfigJson,
         });
         if (!resolved.data.mcpConfig) {
-          message.error(translate("mcpTools.add.error.containerJsonInvalid"));
+          message.error(t("mcpTools.add.error.containerJsonInvalid"));
           return false;
         }
 
@@ -85,7 +83,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
         });
       }
 
-      message.success(translate("mcpTools.add.success"));
+      message.success(t("mcpTools.add.success"));
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
@@ -101,7 +99,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       return true;
     } catch (error) {
       log.error("[useMcpAddLocal] Failed to add service", { error });
-      message.error(translate("mcpTools.add.failed"));
+      message.error(t("mcpTools.add.failed"));
       return false;
     } finally {
       setSubmitting(false);

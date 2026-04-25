@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Input, Select } from "antd";
+import { Button, Input } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import log from "@/lib/logger";
@@ -13,6 +13,7 @@ import AddMcpServiceModal from "./components/AddMcpServiceModal";
 import MyCommunityMcpModal from "./components/MyCommunityMcpModal";
 import McpServiceCard from "./components/McpServiceCard";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
+import McpServicesFilterBar from "./components/McpServicesFilterBar";
 
 export default function McpToolsPage() {
   const { t } = useTranslation("common");
@@ -101,48 +102,15 @@ export default function McpToolsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <Select
-              size="large"
-              value={list.filters.source}
-              onChange={(value) => list.updateFilter("source", value)}
-              className="w-full"
-              options={[
-                { value: "all", label: t("mcpTools.page.sourceFilter.all") },
-                { value: "local", label: t("mcpTools.source.local") },
-                { value: "mcp_registry", label: t("mcpTools.source.registry") },
-                { value: "community", label: t("mcpTools.source.community") },
-              ]}
-            />
-            <Select
-              size="large"
-              value={list.filters.transport}
-              onChange={(value) => list.updateFilter("transport", value)}
-              className="w-full"
-              options={[
-                { value: "all", label: t("mcpTools.page.transportFilter.all") },
-                { value: "http", label: t("mcpTools.serverType.http") },
-                { value: "sse", label: t("mcpTools.serverType.sse") },
-                {
-                  value: "container",
-                  label: t("mcpTools.serverType.container"),
-                },
-              ]}
-            />
-            <Select
-              size="large"
-              value={list.filters.tag}
-              onChange={(value) => list.updateFilter("tag", value)}
-              className="w-full"
-              options={[
-                { value: "all", label: t("mcpTools.page.tagFilter.all") },
-                ...list.tagStats.map((item) => ({
-                  value: item.tag,
-                  label: `${item.tag} (${item.count})`,
-                })),
-              ]}
-            />
-          </div>
+          <McpServicesFilterBar
+            source={list.filters.source}
+            transport={list.filters.transport}
+            tag={list.filters.tag}
+            tagStats={list.tagStats}
+            onSourceChange={(value) => list.updateFilter("source", value)}
+            onTransportChange={(value) => list.updateFilter("transport", value)}
+            onTagChange={(value) => list.updateFilter("tag", value)}
+          />
 
           {list.loading ? (
             <div className="rounded-3xl border border-dashed border-slate-200 bg-white/60 px-6 py-10 text-center text-slate-500">
