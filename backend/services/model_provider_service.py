@@ -136,9 +136,21 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         if provider == ProviderEnum.DASHSCOPE.value:
             model_dict["base_url"] = f"{model_url.replace('compatible-mode/v1','api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
         else:
-            model_dict["base_url"] = f"{model_url.rstrip('/')}/rerank" 
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/rerank"
+    elif model["model_type"] == "image_generation":
+        # For image generation models, append the images endpoint
+        # Note: For Silicon provider, the base_url should be /images/generations (not /v1/images/generations)
+        # because SILICON_BASE_URL already includes /v1/
+        if provider == ProviderEnum.SILICON.value:
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/images/generations"
+        elif provider == ProviderEnum.DASHSCOPE.value:
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/services/image/generation"
+        elif provider == ProviderEnum.MODELENGINE.value:
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/images/generations"
+        else:
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/images/generations"
     else:
-        # For non-embedding models
+        # For non-embedding models (llm, vlm, image_understanding, video_understanding)
         if provider == ProviderEnum.MODELENGINE.value:
             # Ensure ModelEngine models have the full API path
             model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}"
@@ -168,20 +180,25 @@ def merge_existing_model_tokens(model_list: List[dict], tenant_id: str, provider
     Returns:
         List[dict]: Merged model list
     """
+    # Safety check: return early if model_list is None or not a list
+    if not model_list or not isinstance(model_list, list):
+        return model_list or []
+
     if model_type == "embedding" or model_type == "multi_embedding":
         return model_list
 
     existing_model_list = get_models_by_tenant_factory_type(
         tenant_id, provider, model_type)
 
-    if not model_list or not existing_model_list:
+    # Safety check: return early if existing_model_list is None or empty
+    if not existing_model_list or not isinstance(existing_model_list, list):
         return model_list
 
     # Create a mapping table for existing models for quick lookup
     existing_model_map = {}
     for existing_model in existing_model_list:
-        model_full_name = existing_model["model_repo"] + \
-            "/" + existing_model["model_name"]
+        model_full_name = existing_model.get("model_repo", "") + \
+            "/" + existing_model.get("model_name", "")
         existing_model_map[model_full_name] = existing_model
 
     # Iterate through the model list, if the model exists in the existing model list, add max_tokens attribute

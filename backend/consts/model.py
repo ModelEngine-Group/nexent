@@ -109,6 +109,9 @@ class ModelConfig(BaseModel):
     vlm: SingleModelConfig
     stt: SingleModelConfig
     tts: SingleModelConfig
+    imageUnderstanding: Optional[SingleModelConfig] = None
+    imageGeneration: Optional[SingleModelConfig] = None
+    videoUnderstanding: Optional[SingleModelConfig] = None
 
 
 class AppConfig(BaseModel):

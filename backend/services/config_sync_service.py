@@ -42,8 +42,11 @@ def handle_model_config(tenant_id: str, user_id: str, config_key: str, model_id:
         model_id: Model ID
         tenant_config_dict: Tenant configuration dictionary
     """
+    logger.info(f"handle_model_config: tenant_id={tenant_id}, config_key={config_key}, model_id={model_id}")
+    
     # Delete the config if the model_id is None
     if model_id is None:
+        logger.warning(f"No model_id found for config_key={config_key}, will delete existing config if any")
         if config_key in tenant_config_dict:
             tenant_config_manager.delete_single_config(tenant_id, config_key)
         return
@@ -96,10 +99,26 @@ async def save_config_impl(config, tenant_id, user_id):
             continue
 
         model_display_name = model_config.get("displayName")
+        logger.info(f"Processing model config - type: {model_type}, displayName: {model_display_name}, tenant_id: {tenant_id}")
+
+        if not model_display_name:
+            logger.warning(f"No displayName for model type {model_type}, skipping")
+            continue
 
         config_key = get_env_key(model_type) + "_ID"
-        model_id = get_model_id_by_display_name(
-            model_display_name, tenant_id)
+        logger.info(f"Looking up model_id for display_name: '{model_display_name}', tenant_id: '{tenant_id}'")
+        
+        # Check if model exists in the database
+        from database.model_management_db import get_model_by_display_name
+        model_record = get_model_by_display_name(model_display_name, tenant_id)
+        
+        if not model_record:
+            logger.error(f"Model with display_name '{model_display_name}' not found in tenant '{tenant_id}'. "
+                        f"Model must be created in Model Management first before it can be selected in configuration.")
+            continue
+            
+        model_id = model_record.get("model_id")
+        logger.info(f"Found model_id: {model_id} for display_name: {model_display_name}")
 
         handle_model_config(tenant_id, user_id, config_key,
                             model_id, tenant_config_dict)

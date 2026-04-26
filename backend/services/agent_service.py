@@ -881,7 +881,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
         logger.error(f"Failed to update agent tools: {str(e)}")
         raise ValueError(f"Failed to update agent tools: {str(e)}")
 
-    # Handle enabled skills saving when provided
+    # Handle enabled skills saving when provided (optional - skip if skill tables don't exist)
     try:
         if request.enabled_skill_ids is not None and agent_id is not None:
             enabled_set = set(request.enabled_skill_ids)
@@ -927,8 +927,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                     user_id=user_id
                 )
     except Exception as e:
-        logger.error(f"Failed to update agent skills: {str(e)}")
-        raise ValueError(f"Failed to update agent skills: {str(e)}")
+        # Skill tables may not exist - log and skip silently
+        logger.warning(f"Skill operations skipped (tables may not exist): {str(e)}")
 
     # Handle related agents saving when provided
     try:
@@ -980,7 +980,10 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
-        skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
+        try:
+            skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
+        except Exception as e:
+            logger.warning(f"Skill deletion skipped (tables may not exist): {str(e)}")
 
         # Clean up all memory data related to the agent
         await clear_agent_memory(agent_id, tenant_id, user_id)

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload } from "lucide-react";
+import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload, FileAudio, FileVideo } from "lucide-react";
 import {
   FileImageFilled,
   FilePdfFilled,
@@ -12,6 +12,7 @@ import {
   Html5Filled,
   CodeFilled,
   FileUnknownFilled,
+  AudioFilled,
 } from "@ant-design/icons";
 
 import { Input } from "@/components/ui/input";
@@ -277,6 +278,16 @@ const getFileIcon = (file: File) => {
 
   if (chatConfig.fileIcons.json.includes(extension)) {
     return <CodeFilled size={iconSize} color="#f1c40f" />;
+  }
+
+  // Audio file
+  if (fileType.startsWith("audio/") || chatConfig.fileIcons.audio.includes(extension)) {
+    return <AudioFilled size={iconSize} color="#9b59b6" />;
+  }
+
+  // Video file
+  if (fileType.startsWith("video/") || chatConfig.fileIcons.video.includes(extension)) {
+    return <FileVideo size={iconSize} color="#e91e63" />;
   }
 
   // Default file icon
@@ -755,6 +766,16 @@ export function ChatInput({
         file.type.startsWith("image/") ||
         chatConfig.imageExtensions.includes(extension);
 
+      // Supported audio file types
+      const isAudio =
+        file.type.startsWith("audio/") ||
+        chatConfig.audioExtensions.includes(extension);
+
+      // Supported video file types
+      const isVideo =
+        file.type.startsWith("video/") ||
+        chatConfig.videoExtensions.includes(extension);
+
       // Supported document file types
       const isDocument =
         chatConfig.documentExtensions.includes(extension) ||
@@ -767,14 +788,24 @@ export function ChatInput({
         file.type === "text/csv" ||
         file.type === "text/plain";
 
-      if (isImage || isDocument || isSupportedTextFile) {
+      if (isImage || isDocument || isSupportedTextFile || isAudio || isVideo) {
+        // Determine attachment type
+        let attachmentType = chatConfig.filePreviewTypes.file;
+        if (isImage) {
+          attachmentType = chatConfig.filePreviewTypes.image;
+        } else if (isAudio) {
+          attachmentType = chatConfig.filePreviewTypes.audio;
+        } else if (isVideo) {
+          attachmentType = chatConfig.filePreviewTypes.video;
+        }
+
         // Create a preview URL for images
         const previewUrl = isImage ? URL.createObjectURL(file) : undefined;
 
         newAttachments.push({
           id: fileId,
           file,
-          type: isImage ? chatConfig.filePreviewTypes.image : chatConfig.filePreviewTypes.file,
+          type: attachmentType,
           fileType: file.type,
           extension,
           previewUrl,
@@ -904,6 +935,40 @@ export function ChatInput({
                           title={attachment.file.name}
                         >
                           {attachment.file.name || t("chatInput.image")}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {formatFileSize(attachment.file.size)}
+                        </span>
+                      </div>
+                    </div>
+                  ) : attachment.type === chatConfig.filePreviewTypes.audio ? (
+                    <div className="flex items-center gap-3 w-full">
+                      <div className="w-10 h-10 flex-shrink-0 flex items-center justify-center bg-purple-100 rounded-md">
+                        <AudioFilled size={24} color="#9b59b6" />
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <span
+                          className="text-sm truncate block max-w-[110px] font-medium"
+                          title={attachment.file.name}
+                        >
+                          {attachment.file.name}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {formatFileSize(attachment.file.size)}
+                        </span>
+                      </div>
+                    </div>
+                  ) : attachment.type === chatConfig.filePreviewTypes.video ? (
+                    <div className="flex items-center gap-3 w-full">
+                      <div className="w-10 h-10 flex-shrink-0 flex items-center justify-center bg-pink-100 rounded-md">
+                        <FileVideo size={24} color="#e91e63" />
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <span
+                          className="text-sm truncate block max-w-[110px] font-medium"
+                          title={attachment.file.name}
+                        >
+                          {attachment.file.name}
                         </span>
                         <span className="text-xs text-gray-500">
                           {formatFileSize(attachment.file.size)}
@@ -1066,7 +1131,7 @@ export function ChatInput({
                 id="file-upload-regular"
                 className="hidden"
                 onChange={handleFileUpload}
-                accept={`image/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
+                accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
                 multiple
               />
             </Button>
@@ -1185,6 +1250,12 @@ export function ChatInput({
     const isImage =
       fileType.startsWith("image/") ||
       chatConfig.imageExtensions.includes(extension);
+    const isAudio =
+      fileType.startsWith("audio/") ||
+      chatConfig.audioExtensions.includes(extension);
+    const isVideo =
+      fileType.startsWith("video/") ||
+      chatConfig.videoExtensions.includes(extension);
     const isDocument =
       chatConfig.documentExtensions.includes(extension) ||
       fileType === "application/pdf" ||
@@ -1194,7 +1265,7 @@ export function ChatInput({
       fileType === "text/csv" ||
       fileType === "text/plain";
 
-    return !(isImage || isDocument || isSupportedTextFile);
+    return !(isImage || isDocument || isSupportedTextFile || isAudio || isVideo);
   });
 
   // Regular mode, keep the original rendering logic

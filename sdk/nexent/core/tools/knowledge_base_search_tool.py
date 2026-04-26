@@ -8,7 +8,7 @@ from pydantic.fields import FieldInfo
 from ...vector_database.base import VectorDatabaseCore
 from ..models.embedding_model import BaseEmbedding
 from ..models.rerank_model import BaseRerank
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
@@ -121,7 +121,8 @@ class KnowledgeBaseSearchTool(Tool):
 
         # Send tool run message
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+            observer_lang = get_observer_lang(self.observer)
+            running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(

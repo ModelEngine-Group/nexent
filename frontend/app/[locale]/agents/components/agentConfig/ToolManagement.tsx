@@ -36,6 +36,8 @@ const TOOLS_REQUIRING_EMBEDDING = [
 // Tool types that require VLM model
 const TOOLS_REQUIRING_VLM = [
   "analyze_image",
+  "analyze_video",
+  "analyze_audio",
 ];
 
 function getToolKbType(

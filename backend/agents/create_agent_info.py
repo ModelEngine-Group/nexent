@@ -20,7 +20,7 @@ from services.remote_mcp_service import get_remote_mcp_server_list
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
-from services.image_service import get_vlm_model
+from services.image_service import get_vlm_model, get_video_understanding_model
 from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
 from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
@@ -482,8 +482,24 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                 "data_process_service_url": DATA_PROCESS_SERVICE
             }
         elif tool_config.class_name == "AnalyzeImageTool":
+            vlm_model = get_vlm_model(tenant_id=tenant_id)
+            logger.info(f"AnalyzeImageTool metadata - VLM model: {vlm_model}, tenant_id: {tenant_id}")
             tool_config.metadata = {
-                "vlm_model": get_vlm_model(tenant_id=tenant_id),
+                "vlm_model": vlm_model,
+                "storage_client": minio_client,
+            }
+        elif tool_config.class_name == "AnalyzeVideoTool":
+            video_model = get_video_understanding_model(tenant_id=tenant_id)
+            logger.info(f"AnalyzeVideoTool metadata - video model: {video_model}, tenant_id: {tenant_id}")
+            tool_config.metadata = {
+                "vlm_model": video_model,
+                "storage_client": minio_client,
+            }
+        elif tool_config.class_name == "AnalyzeAudioTool":
+            video_model = get_video_understanding_model(tenant_id=tenant_id)
+            logger.info(f"AnalyzeAudioTool metadata - video model: {video_model}, tenant_id: {tenant_id}")
+            tool_config.metadata = {
+                "vlm_model": video_model,
                 "storage_client": minio_client,
             }
 
@@ -558,7 +574,26 @@ async def join_minio_file_description_to_query(minio_files, query):
         file_descriptions = []
         for file in minio_files:
             if isinstance(file, dict) and "url" in file and file["url"] and "name" in file and file["name"]:
-                file_descriptions.append(f"File name: {file['name']}, S3 URL: s3:/{file['url']}")
+                file_name = file['name']
+                file_url = f"s3:/{file['url']}"
+                file_type = file.get('type', '')
+
+                # Determine file category based on extension or type
+                file_lower = file_name.lower()
+                is_video = any(ext in file_lower for ext in ['.mp4', '.avi', '.mov', '.webm', '.mkv', '.flv', '.wmv', '.mpeg', '.mpg', 'video/'])
+                is_audio = any(ext in file_lower for ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac', '.wma', '.opus', 'audio/']) or file_type.startswith('audio/')
+                is_image = any(ext in file_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', 'image/']) or file_type.startswith('image/')
+
+                # Add file category hint for the agent
+                if is_video:
+                    file_descriptions.append(f"Video file: {file_name}, S3 URL: {file_url} (use analyze_video tool to understand this video)")
+                elif is_audio:
+                    file_descriptions.append(f"Audio file: {file_name}, S3 URL: {file_url} (use analyze_audio tool to understand this audio)")
+                elif is_image:
+                    file_descriptions.append(f"Image file: {file_name}, S3 URL: {file_url}")
+                else:
+                    file_descriptions.append(f"File name: {file_name}, S3 URL: {file_url}")
+
         if file_descriptions:
             final_query = "User uploaded files. The file information is as follows:\n"
             final_query += "\n".join(file_descriptions) + "\n\n"

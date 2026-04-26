@@ -15,7 +15,7 @@ from typing import Any, List, Optional, Tuple
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ....core.utils.observer import MessageObserver, ProcessType
+from ....core.utils.observer import MessageObserver, ProcessType, get_observer_lang
 
 
 logger = logging.getLogger("sql_database_base")
@@ -123,9 +123,10 @@ class SqlDatabaseBaseTool(Tool):
         """
         try:
             if self.observer:
+                observer_lang = get_observer_lang(self.observer)
                 running_prompt = (
                     self.running_prompt_zh
-                    if self.observer.lang == "zh"
+                    if observer_lang == "zh"
                     else self.running_prompt_en
                 )
                 self.observer.add_message("", ProcessType.TOOL, running_prompt)

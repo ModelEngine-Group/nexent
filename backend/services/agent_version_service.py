@@ -99,20 +99,23 @@ def publish_version_impl(
         insert_relation_snapshot(rel_snapshot)
 
     # Get skill instances from draft (version_no=0)
-    from database import skill_db as skill_db_module
-    skills_draft = skill_db_module.query_skill_instances_by_agent_id(
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        version_no=0
-    )
+    try:
+        from database import skill_db as skill_db_module
+        skills_draft = skill_db_module.query_skill_instances_by_agent_id(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=0
+        )
 
-    # Insert skill instance snapshots
-    for skill in skills_draft:
-        skill_snapshot = skill.copy()
-        skill_snapshot.pop('version_no', None)
-        skill_snapshot['version_no'] = new_version_no
-        _remove_audit_fields_for_insert(skill_snapshot)
-        insert_skill_snapshot(skill_snapshot)
+        # Insert skill instance snapshots
+        for skill in skills_draft:
+            skill_snapshot = skill.copy()
+            skill_snapshot.pop('version_no', None)
+            skill_snapshot['version_no'] = new_version_no
+            _remove_audit_fields_for_insert(skill_snapshot)
+            insert_skill_snapshot(skill_snapshot)
+    except Exception as e:
+        logger.warning(f"Skill snapshot creation skipped (table may not exist): {str(e)}")
 
     # Create version metadata
     version_data = {
@@ -269,14 +272,17 @@ def get_version_detail_impl(
     result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_snapshot]
 
     # Get skill instances for this version (from ag_skill_instance_t with version_no)
-    from database import skill_db as skill_db_module
-    skills_snapshot = skill_db_module.query_skill_instances_by_agent_id(
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        version_no=version_no
-    )
-    # Add enabled skills to result
-    result['skills'] = [s for s in skills_snapshot if s.get('enabled', True)]
+    try:
+        from database import skill_db as skill_db_module
+        skills_snapshot = skill_db_module.query_skill_instances_by_agent_id(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no
+        )
+        result['skills'] = [s for s in skills_snapshot if s.get('enabled', True)]
+    except Exception as e:
+        logger.warning(f"Skills query skipped (table may not exist): {str(e)}")
+        result['skills'] = []
 
     # Get model name from model_id
     if result.get('model_id') is not None and result['model_id'] != 0:
@@ -669,8 +675,6 @@ def _get_version_detail_or_draft(
     Get version detail for published versions, or draft data for version 0.
     Returns structured agent info similar to get_version_detail_impl.
     """
-    from database import skill_db as skill_db_module
-
     result: Dict[str, Any] = {}
 
     if version_no == 0:
@@ -689,12 +693,17 @@ def _get_version_detail_or_draft(
         result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_draft]
 
         # Get draft skill instances (version_no=0)
-        skills_draft = skill_db_module.query_skill_instances_by_agent_id(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=0
-        )
-        result['skills'] = [s for s in skills_draft if s.get('enabled', True)]
+        try:
+            from database import skill_db as skill_db_module
+            skills_draft = skill_db_module.query_skill_instances_by_agent_id(
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                version_no=0
+            )
+            result['skills'] = [s for s in skills_draft if s.get('enabled', True)]
+        except Exception as e:
+            logger.warning(f"Skills query skipped (table may not exist): {str(e)}")
+            result['skills'] = []
 
         result['version'] = {
             'version_name': 'Draft',

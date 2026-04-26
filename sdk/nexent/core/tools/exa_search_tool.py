@@ -7,7 +7,7 @@ from exa_py import Exa
 from smolagents.tools import Tool
 from pydantic import Field
 
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ..utils.tools_common_message import SearchResultTextMessage, ToolSign, ToolCategory
 
 # Get logger instance
@@ -83,7 +83,8 @@ class ExaSearchTool(Tool):
 
         # Send tool running message
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang=="zh" else self.running_prompt_en
+            observer_lang = get_observer_lang(self.observer)
+            running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(

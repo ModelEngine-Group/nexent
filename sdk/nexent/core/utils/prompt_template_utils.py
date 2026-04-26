@@ -20,6 +20,14 @@ template_paths = {
     'analyze_file': {
         LANGUAGE["ZH"]: 'core/prompts/analyze_file_zh.yaml',
         LANGUAGE["EN"]: 'core/prompts/analyze_file_en.yaml'
+    },
+    'analyze_video': {
+        LANGUAGE["ZH"]: 'core/prompts/analyze_video_zh.yaml',
+        LANGUAGE["EN"]: 'core/prompts/analyze_video_en.yaml'
+    },
+    'analyze_audio': {
+        LANGUAGE["ZH"]: 'core/prompts/analyze_audio_zh.yaml',
+        LANGUAGE["EN"]: 'core/prompts/analyze_audio_en.yaml'
     }
 }
 

@@ -14,7 +14,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ...core.models import OpenAIVLModel
-from ...core.utils.observer import MessageObserver, ProcessType
+from ...core.utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ...core.utils.prompt_template_utils import get_prompt_template
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
 from ...storage import MinIOStorageClient
@@ -40,12 +40,14 @@ class AnalyzeImageTool(Tool):
         "image_urls_list": {
             "type": "array",
             "description": "List of image URLs (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs.",
-            "description_zh": "列表形式输入图片 URL（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。"
+            "description_zh": "列表形式输入图片 URL（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。",
+            "nullable": True
         },
         "query": {
             "type": "string",
             "description": "User's question to guide the analysis",
-            "description_zh": "用户的问题，用于指导分析"
+            "description_zh": "用户的问题，用于指导分析",
+            "nullable": True
         }
     }
 
@@ -85,7 +87,7 @@ class AnalyzeImageTool(Tool):
         self.storage_client = storage_client
 
         # Determine if the language is Chinese for internationalization
-        self._is_chinese = bool(observer and observer.lang == "zh")
+        self._is_chinese = bool(observer and get_observer_lang(observer) == "zh")
 
         # Create LoadSaveObjectManager with the storage client
         self.mm = LoadSaveObjectManager(storage_client=self.storage_client)
@@ -97,7 +99,7 @@ class AnalyzeImageTool(Tool):
         self.running_prompt_zh = "正在分析图片..."
         self.running_prompt_en = "Analyzing image..."
 
-    def _forward_impl(self, image_urls_list: List[bytes], query: str) -> List[str]:
+    def _forward_impl(self, image_urls_list: List[bytes] = None, query: str = None) -> List[str]:
         """
         Analyze images identified by S3 URL, HTTP URL, or HTTPS URL and return the identified text.
 
@@ -139,7 +141,7 @@ class AnalyzeImageTool(Tool):
             raise ValueError("image_urls must contain at least one image")
 
         # Load prompts from yaml file
-        language = self.observer.lang if self.observer else "en"
+        language = get_observer_lang(self.observer) if self.observer else "en"
         prompts = get_prompt_template(
             template_type='analyze_image', language=language)
         system_prompt = Template(

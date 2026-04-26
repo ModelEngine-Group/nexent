@@ -4,7 +4,7 @@ import os
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("create_directory_tool")
@@ -101,7 +101,8 @@ class CreateDirectoryTool(Tool):
         try:
             # Send tool run message if observer is available
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+                observer_lang = get_observer_lang(self.observer)
+                running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
                 self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "folder-plus", "text": f"Creating directory {directory_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
@@ -126,7 +127,8 @@ class CreateDirectoryTool(Tool):
                     raise Exception(f"Path already exists but is not a directory: {directory_path}")
                 logger.info(f"Directory already exists: {abs_path}")
                 if self.observer:
-                    info_msg = f"目录已存在: {directory_path}" if self.observer.lang == "zh" else f"Directory already exists: {directory_path}"
+                    observer_lang = get_observer_lang(self.observer)
+                    info_msg = f"目录已存在: {directory_path}" if observer_lang == "zh" else f"Directory already exists: {directory_path}"
                     self.observer.add_message("", ProcessType.OTHER, info_msg)
 
             # Create directory with parents if they don't exist

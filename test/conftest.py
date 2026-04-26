@@ -3,7 +3,38 @@ Global test configuration for third-party component environment variables.
 
 This file sets up environment variables for external services used in tests.
 """
+import sys
+from unittest.mock import MagicMock
 import os
+
+
+# Mock mem0 before any imports to avoid import errors
+mem0_mock = MagicMock()
+sys.modules['mem0'] = mem0_mock
+sys.modules['mem0.memory'] = MagicMock()
+sys.modules['mem0.memory.main'] = MagicMock()
+sys.modules['mem0.embeddings'] = MagicMock()
+sys.modules['mem0.embeddings.base'] = MagicMock()
+sys.modules['mem0.embeddings.base'].EmbeddingBase = MagicMock
+sys.modules['mem0.configs'] = MagicMock()
+sys.modules['mem0.configs.embeddings'] = MagicMock()
+sys.modules['mem0.configs.embeddings.base'] = MagicMock()
+sys.modules['mem0.configs.embeddings.base'].BaseEmbedderConfig = MagicMock
+
+# Mock nexent.core.models.embedding_model if it causes issues
+sys.modules['nexent'] = MagicMock()
+sys.modules['nexent.core'] = MagicMock()
+sys.modules['nexent.core.models'] = MagicMock()
+sys.modules['nexent.core.models.embedding_model'] = MagicMock()
+
+# Mock boto3 for storage
+sys.modules['boto3'] = MagicMock()
+sys.modules['botocore'] = MagicMock()
+sys.modules['botocore.client'] = MagicMock()
+sys.modules['botocore.exceptions'] = MagicMock()
+sys.modules['botocore.config'] = MagicMock()
+
+# Note: smolagents is installed in the environment, no need to mock it
 
 
 # MinIO Configuration

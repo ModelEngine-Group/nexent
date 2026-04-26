@@ -8,7 +8,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 import paramiko
 
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("terminal_tool")
@@ -344,7 +344,8 @@ class TerminalTool(Tool):
             str: Command execution result
         """
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+            observer_lang = get_observer_lang(self.observer)
+            running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "terminal", "text": f"Executing: {command}"}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))

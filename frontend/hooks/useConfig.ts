@@ -142,6 +142,9 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
         vlm: transformModelEntry(backendConfig.models.vlm),
         stt: transformModelEntry(backendConfig.models.stt),
         tts: transformModelEntry(backendConfig.models.tts),
+        imageUnderstanding: transformModelEntry(backendConfig.models.imageUnderstanding),
+        imageGeneration: transformModelEntry(backendConfig.models.imageGeneration),
+        videoUnderstanding: transformModelEntry(backendConfig.models.videoUnderstanding),
       }
     : defaultConfig.models;
 
@@ -263,8 +266,12 @@ export function useConfig() {
 
   const config: GlobalConfig = (query.data as GlobalConfig | undefined) ?? defaultConfig;
 
-  // Whether config has selected a VLM model
-  const isVlmAvailable = !!(config?.models?.vlm?.modelName || config?.models?.vlm?.displayName);
+  // Whether config has selected a VLM or multimodal model (vlm, image_understanding, video_understanding)
+  const isVlmAvailable = !!(
+    config?.models?.vlm?.modelName || config?.models?.vlm?.displayName ||
+    config?.models?.imageUnderstanding?.modelName || config?.models?.imageUnderstanding?.displayName ||
+    config?.models?.videoUnderstanding?.modelName || config?.models?.videoUnderstanding?.displayName
+  );
 
   // Whether config has selected an Embedding model
   const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);

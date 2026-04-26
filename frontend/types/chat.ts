@@ -259,7 +259,7 @@ export interface ConversationListItem {
 export interface FilePreview {
   id: string;
   file: File;
-  type: "image" | "file";
+  type: "image" | "file" | "audio" | "video";
   fileType?: string;
   extension?: string;
   previewUrl?: string;

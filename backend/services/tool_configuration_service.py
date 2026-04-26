@@ -38,7 +38,7 @@ from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model
 from services.vectordatabase_service import get_embedding_model, get_rerank_model, get_vector_db_core
 from database.client import minio_client
-from services.image_service import get_vlm_model
+from services.image_service import get_vlm_model, get_video_understanding_model
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
@@ -733,6 +733,28 @@ def _validate_local_tool(
             }
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_image":
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
+            image_to_text_model = get_vlm_model(tenant_id=tenant_id)
+            params = {
+                **instantiation_params,
+                'vlm_model': image_to_text_model,
+                'storage_client': minio_client
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name == "analyze_video":
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
+            video_model = get_video_understanding_model(tenant_id=tenant_id)
+            params = {
+                **instantiation_params,
+                'vlm_model': video_model,
+                'storage_client': minio_client
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name == "analyze_audio":
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")

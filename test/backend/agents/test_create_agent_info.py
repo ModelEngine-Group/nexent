@@ -108,7 +108,9 @@ sys.modules['langchain_core.tools'] = MagicMock()
 services_module = _create_stub_module("services")
 sys.modules['services'] = services_module
 sys.modules['services.image_service'] = _create_stub_module(
-    "services.image_service", get_vlm_model=MagicMock(return_value="stub_vlm")
+    "services.image_service",
+    get_vlm_model=MagicMock(return_value="stub_vlm"),
+    get_video_understanding_model=MagicMock(return_value="stub_video_model")
 )
 sys.modules['services.memory_config_service'] = MagicMock()
 # Extend services hierarchy with additional stubs
@@ -652,6 +654,78 @@ class TestCreateToolConfigList:
             mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1")
             assert mock_tool_instance.metadata == {
                 "vlm_model": "mock_vlm_model",
+                "storage_client": mock_minio_client
+            }
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_analyze_video_tool(self):
+        """Ensure AnalyzeVideoTool receives video understanding model metadata."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "AnalyzeVideoTool"
+        mock_tool_config.return_value = mock_tool_instance
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_video_understanding_model') as mock_get_video_model, \
+                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "AnalyzeVideoTool",
+                    "name": "analyze_video",
+                    "description": "Analyze video tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [{"name": "prompt", "default": "describe"}],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_video_model.return_value = "mock_video_model"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+            mock_get_video_model.assert_called_once_with(tenant_id="tenant_1")
+            assert mock_tool_instance.metadata == {
+                "vlm_model": "mock_video_model",
+                "storage_client": mock_minio_client
+            }
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_analyze_audio_tool(self):
+        """Ensure AnalyzeAudioTool receives video understanding model metadata (same as video tool)."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "AnalyzeAudioTool"
+        mock_tool_config.return_value = mock_tool_instance
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_video_understanding_model') as mock_get_video_model, \
+                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "AnalyzeAudioTool",
+                    "name": "analyze_audio",
+                    "description": "Analyze audio tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [{"name": "prompt", "default": "describe"}],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_video_model.return_value = "mock_video_model_for_audio"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+            mock_get_video_model.assert_called_once_with(tenant_id="tenant_1")
+            assert mock_tool_instance.metadata == {
+                "vlm_model": "mock_video_model_for_audio",
                 "storage_client": mock_minio_client
             }
 

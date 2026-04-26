@@ -11,7 +11,7 @@ from jinja2 import Template, StrictUndefined
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ...core.utils.observer import MessageObserver, ProcessType
+from ...core.utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ...core.utils.prompt_template_utils import get_prompt_template
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
 from ...storage import MinIOStorageClient
@@ -38,12 +38,14 @@ class AnalyzeTextFileTool(Tool):
         "file_url_list": {
             "type": "array",
             "description": "List of file URLs (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs.",
-            "description_zh": "文件 URL 列表（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。"
+            "description_zh": "文件 URL 列表（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。",
+            "nullable": True
         },
         "query": {
             "type": "string",
             "description": "User's question to guide the analysis",
-            "description_zh": "用户的问题，用于指导分析"
+            "description_zh": "用户的问题，用于指导分析",
+            "nullable": True
         }
     }
 
@@ -118,7 +120,8 @@ class AnalyzeTextFileTool(Tool):
         """
         # Send tool run message
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+            observer_lang = get_observer_lang(self.observer)
+            running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
 
         if file_url_list is None:

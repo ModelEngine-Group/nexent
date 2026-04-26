@@ -54,16 +54,7 @@ dependencies = [
     "pymssql>=2.2.11",
 ]
 
-[tool.uv]
-override-dependencies = [
-    "pymongo==999.0.0",
-    "psycopg2-binary==999.0.0",
-    "redis==999.0.0",
-    "neo4j==999.0.0",
-    "chromadb==999.0.0",
-    "pinecone-client==999.0.0",
-    "weaviate-client==999.0.0",
-]
+
 
 [project.optional-dependencies]
 quality = [

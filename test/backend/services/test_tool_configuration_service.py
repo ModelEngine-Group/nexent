@@ -121,6 +121,19 @@ sys.modules['nexent.core.agents'] = _create_package_mock('nexent.core.agents')
 sys.modules['nexent.core.agents.agent_model'] = MagicMock()
 sys.modules['nexent.core.models'] = _create_package_mock('nexent.core.models')
 
+# Mock nexent.memory module for user_service imports
+sys.modules['nexent.memory'] = _create_package_mock('nexent.memory')
+memory_service_module = types.ModuleType('nexent.memory.memory_service')
+memory_service_module.clear_memory = MagicMock()
+memory_service_module.search_memory_in_levels = MagicMock()
+memory_service_module.add_memory_in_levels = MagicMock()
+sys.modules['nexent.memory.memory_service'] = memory_service_module
+setattr(sys.modules['nexent.memory'], 'memory_service', memory_service_module)
+
+# Mock elasticsearch module before patching
+elasticsearch_mock = MagicMock()
+sys.modules['elasticsearch'] = elasticsearch_mock
+
 
 class MockMessageObserver:
     """Lightweight stand-in for nexent.MessageObserver."""
@@ -268,6 +281,18 @@ setattr(sys.modules['nexent.storage'],
 setattr(sys.modules['nexent.storage'], 'minio_config', storage_config_module)
 sys.modules['nexent.storage.storage_client_factory'] = storage_factory_module
 sys.modules['nexent.storage.minio_config'] = storage_config_module
+
+# Mock jsonref before importing tool_configuration_service
+jsonref_mock = types.ModuleType('jsonref')
+jsonref_mock.replace_refs = MagicMock(return_value={})
+sys.modules['jsonref'] = jsonref_mock
+
+# Mock mcpadapt.smolagents_adapter before importing tool_configuration_service
+mcpadapt_mock = types.ModuleType('mcpadapt')
+sys.modules['mcpadapt'] = mcpadapt_mock
+smolagents_adapter_mock = types.ModuleType('mcpadapt.smolagents_adapter')
+smolagents_adapter_mock._sanitize_function_name = MagicMock(return_value="sanitized_tool_name")
+sys.modules['mcpadapt.smolagents_adapter'] = smolagents_adapter_mock
 
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402

@@ -9,9 +9,43 @@ from smolagents.tools import Tool
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
+
+
+def _safe_get_param_value(value):
+    """
+    Safely extract the actual value from a parameter that might be a FieldInfo object.
+    FieldInfo objects from Pydantic Fields have a .default attribute with the actual value.
+    """
+    if value is None:
+        return None
+    # Check if it's a FieldInfo object
+    if hasattr(value, 'default'):
+        return value.default
+    return value
+
+
+def _filter_params(params: dict) -> dict:
+    """
+    Filter out FieldInfo objects and other non-serializable values from params.
+    Returns a clean dictionary suitable for passing to tool constructors.
+    """
+    filtered = {}
+    for k, v in params.items():
+        # Skip None values
+        if v is None:
+            continue
+        # Extract actual value from FieldInfo objects
+        if hasattr(v, 'default'):
+            actual_value = v.default
+            # Only include if it's not PydanticUndefined or other sentinel values
+            if actual_value is not None:
+                filtered[k] = actual_value
+        else:
+            filtered[k] = v
+    return filtered
 
 
 class NexentAgent:
@@ -61,7 +95,7 @@ class NexentAgent:
         return model
 
 
-    def create_local_tool(self, tool_config: ToolConfig):
+    def create_local_tool(self, tool_config: ToolConfig, llm_model=None):
         class_name = tool_config.class_name
         params = tool_config.params
         tool_class = globals().get(class_name)
@@ -74,6 +108,8 @@ class NexentAgent:
                 # due to smolagents.tools.Tool wrapper restrictions
                 filtered_params = {k: v for k, v in params.items()
                                    if k not in ["vdb_core", "embedding_model", "observer", "rerank_model"]}
+                # Also filter out FieldInfo objects
+                filtered_params = _filter_params(filtered_params)
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -89,23 +125,40 @@ class NexentAgent:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()
                                    if k not in ["observer", "rerank_model"]}
+                # Also filter out FieldInfo objects
+                filtered_params = _filter_params(filtered_params)
                 tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
                 tools_obj.rerank_model = tool_config.metadata.get(
                     "rerank_model", None) if tool_config.metadata else None
             elif class_name == "AnalyzeTextFileTool":
+                filtered_params = _filter_params(params)
                 tools_obj = tool_class(observer=self.observer,
-                                       llm_model=tool_config.metadata.get("llm_model", []),
-                                       storage_client=tool_config.metadata.get("storage_client", []),
-                                       data_process_service_url=tool_config.metadata.get("data_process_service_url", []),
-                                       **params)
+                                       llm_model=tool_config.metadata.get("llm_model", None),
+                                       storage_client=tool_config.metadata.get("storage_client", None),
+                                       data_process_service_url=tool_config.metadata.get("data_process_service_url", None),
+                                       **filtered_params)
             elif class_name == "AnalyzeImageTool":
+                filtered_params = _filter_params(params)
                 tools_obj = tool_class(observer=self.observer,
-                                       vlm_model=tool_config.metadata.get("vlm_model", []),
-                                       storage_client=tool_config.metadata.get("storage_client", []),
-                                       **params)
+                                       vlm_model=tool_config.metadata.get("vlm_model", None),
+                                       storage_client=tool_config.metadata.get("storage_client", None),
+                                       **filtered_params)
+            elif class_name == "AnalyzeVideoTool":
+                filtered_params = _filter_params(params)
+                tools_obj = tool_class(observer=self.observer,
+                                       vlm_model=tool_config.metadata.get("vlm_model", None),
+                                       storage_client=tool_config.metadata.get("storage_client", None),
+                                       **filtered_params)
+            elif class_name == "AnalyzeAudioTool":
+                filtered_params = _filter_params(params)
+                tools_obj = tool_class(observer=self.observer,
+                                       vlm_model=tool_config.metadata.get("vlm_model", None),
+                                       storage_client=tool_config.metadata.get("storage_client", None),
+                                       **filtered_params)
             else:
-                tools_obj = tool_class(**params)
+                filtered_params = _filter_params(params)
+                tools_obj = tool_class(**filtered_params)
                 if hasattr(tools_obj, 'observer'):
                     tools_obj.observer = self.observer
             return tools_obj

@@ -1,0 +1,16 @@
+# Audio Understanding Prompt Templates
+# For audio/speech content analysis
+
+system_prompt: |-
+  The user has asked a question: {{ query }}. Please provide a concise and careful description of this audio content from the perspective of answering this question, within 200 words.
+  
+  **Audio Analysis Requirements:**
+  1. Focus on audio content relevant to the user's question
+  2. Describe key content, topics, and main points in the audio
+  3. Keep descriptions concise and clear, highlighting key information
+  4. Avoid irrelevant details, focus on content that helps answer the question
+  5. If it contains speech, try to extract key dialogues or statements
+  6. Maintain objective description, avoid over-interpretation
+
+user_prompt: |
+  Please carefully listen to this audio and describe it from the perspective of answering the user's question.

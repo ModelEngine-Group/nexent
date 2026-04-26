@@ -166,6 +166,20 @@ class MessageObserver:
             ProcessType.MEMORY_SEARCH: default_transformer
         }
 
+    def get_lang(self) -> str:
+        """
+        Safely get the language from observer.
+        Returns 'zh' by default if lang attribute is not accessible.
+        This handles cases where observer might be a FieldInfo or other proxy object.
+        """
+        try:
+            lang = getattr(self, 'lang', 'zh')
+            if not isinstance(lang, str):
+                return 'zh'
+            return lang if lang in ('zh', 'en') else 'zh'
+        except (AttributeError, TypeError):
+            return 'zh'
+
     def add_model_new_token(self, new_token):
         """
         Process streaming tokens with real-time think tag detection and content classification
@@ -332,3 +346,31 @@ class Message:
     # generate json format and convert to string
     def to_json(self):
         return json.dumps({"type": self.message_type.value, "content": self.content}, ensure_ascii=False)
+
+
+def get_observer_lang(observer) -> str:
+    """
+    Safely get the language from an observer object.
+    Returns 'zh' by default if observer is None or lang attribute is not accessible.
+
+    This handles cases where observer might be a FieldInfo or other proxy object
+    that doesn't have a direct 'lang' attribute access.
+
+    Args:
+        observer: The observer object (typically MessageObserver instance)
+
+    Returns:
+        str: 'zh' or 'en'
+    """
+    if observer is None:
+        return 'zh'
+
+    try:
+        lang = getattr(observer, 'lang', None)
+        if lang is None:
+            return 'zh'
+        if not isinstance(lang, str):
+            return 'zh'
+        return lang if lang in ('zh', 'en') else 'zh'
+    except (AttributeError, TypeError):
+        return 'zh'

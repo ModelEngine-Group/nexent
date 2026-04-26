@@ -5,7 +5,7 @@ import shutil
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("delete_directory_tool")
@@ -100,7 +100,8 @@ class DeleteDirectoryTool(Tool):
         try:
             # Send tool run message if observer is available
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+                observer_lang = get_observer_lang(self.observer)
+                running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
                 self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "folder-minus", "text": f"Deleting directory {directory_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
@@ -140,7 +141,8 @@ class DeleteDirectoryTool(Tool):
             if total_items > 100:
                 logger.warning(f"Deleting large directory with {total_items} items: {abs_path}")
                 if self.observer:
-                    warning_msg = f"警告：正在删除包含 {total_items} 个项目的大文件夹" if self.observer.lang == "zh" else f"Warning: Deleting large directory with {total_items} items"
+                    observer_lang = get_observer_lang(self.observer)
+                    warning_msg = f"警告：正在删除包含 {total_items} 个项目的大文件夹" if observer_lang == "zh" else f"Warning: Deleting large directory with {total_items} items"
                     self.observer.add_message("", ProcessType.OTHER, warning_msg)
 
             # Delete the directory and all its contents

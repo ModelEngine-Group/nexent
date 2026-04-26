@@ -4,7 +4,7 @@ import os
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("read_file_tool")
@@ -101,7 +101,8 @@ class ReadFileTool(Tool):
         try:
             # Send tool run message if observer is available
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+                observer_lang = get_observer_lang(self.observer)
+                running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
                 self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "file-text", "text": f"Reading {file_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
@@ -130,7 +131,8 @@ class ReadFileTool(Tool):
             if file_size > max_size:
                 logger.warning(f"Large file detected: {file_size} bytes")
                 if self.observer:
-                    warning_msg = f"大文件警告: {file_size} 字节" if self.observer.lang == "zh" else f"Large file warning: {file_size} bytes"
+                    observer_lang = get_observer_lang(self.observer)
+                    warning_msg = f"大文件警告: {file_size} 字节" if observer_lang == "zh" else f"Large file warning: {file_size} bytes"
                     self.observer.add_message("", ProcessType.OTHER, warning_msg)
 
             # Read file content

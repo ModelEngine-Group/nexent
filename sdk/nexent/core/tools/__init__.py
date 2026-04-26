@@ -21,6 +21,8 @@ from .analyze_image_tool import AnalyzeImageTool
 from .run_skill_script_tool import run_skill_script
 from .read_skill_md_tool import read_skill_md
 from .read_skill_config_tool import read_skill_config
+from .analyze_audio_tool import AnalyzeAudioTool
+from .analyze_video_tool import AnalyzeVideoTool
 
 __all__ = [
     "MySqlTool",
@@ -47,5 +49,7 @@ __all__ = [
     "AnalyzeImageTool",
     "run_skill_script",
     "read_skill_md",
-    "read_skill_config"
+    "read_skill_config",
+    "AnalyzeVideoTool",
+    "AnalyzeAudioTool",
 ]

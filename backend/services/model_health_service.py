@@ -119,6 +119,26 @@ async def _perform_connectivity_check(
             api_key=model_api_key,
             ssl_verify=ssl_verify
         ).check_connectivity()
+    elif model_type in ["image_understanding", "video_understanding"]:
+        # Image understanding and video understanding use the same VLM connectivity check
+        observer = MessageObserver()
+        connectivity = await OpenAIVLModel(
+            observer,
+            model_id=model_name,
+            api_base=model_base_url,
+            api_key=model_api_key,
+            ssl_verify=ssl_verify
+        ).check_connectivity()
+    elif model_type == "image_generation":
+        # Image generation models use text-to-image API connectivity check
+        from nexent.core.models.image_generation_model import OpenAICompatibleImageGeneration
+        img_gen_model = OpenAICompatibleImageGeneration(
+            model_name=model_name,
+            base_url=model_base_url,
+            api_key=model_api_key,
+            ssl_verify=ssl_verify,
+        )
+        connectivity = await img_gen_model.connectivity_check()
     elif model_type in ["tts", "stt"]:
         voice_service = get_voice_service()
         connectivity = await voice_service.check_voice_connectivity(model_type)

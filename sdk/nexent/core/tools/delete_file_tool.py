@@ -4,7 +4,7 @@ import os
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("delete_file_tool")
@@ -94,7 +94,8 @@ class DeleteFileTool(Tool):
         try:
             # Send tool run message if observer is available
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+                observer_lang = get_observer_lang(self.observer)
+                running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
                 self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "trash", "text": f"Deleting {file_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
@@ -124,7 +125,8 @@ class DeleteFileTool(Tool):
             if any(pattern in file_name.lower() for pattern in protected_patterns):
                 logger.warning(f"Attempting to delete potentially important file: {abs_path}")
                 if self.observer:
-                    warning_msg = f"警告：正在删除可能重要的文件: {file_name}" if self.observer.lang == "zh" else f"Warning: Deleting potentially important file: {file_name}"
+                    observer_lang = get_observer_lang(self.observer)
+                    warning_msg = f"警告：正在删除可能重要的文件: {file_name}" if observer_lang == "zh" else f"Warning: Deleting potentially important file: {file_name}"
                     self.observer.add_message("", ProcessType.OTHER, warning_msg)
 
             # Delete the file

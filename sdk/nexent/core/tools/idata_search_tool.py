@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
 
@@ -144,7 +144,8 @@ class IdataSearchTool(Tool):
     ) -> str:
         # Send tool run message
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+            observer_lang = get_observer_lang(self.observer)
+            running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": question}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(

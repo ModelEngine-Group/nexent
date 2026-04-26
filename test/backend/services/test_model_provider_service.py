@@ -1780,7 +1780,7 @@ async def test_modelengine_get_models_missing_host_or_api_key():
 
 @pytest.mark.asyncio
 async def test_silicon_get_models_empty_list():
-    """Silicon provider should return empty list when API returns empty data."""
+    """Silicon provider should return error response when API returns empty data."""
     provider_config = {"model_type": "llm", "api_key": "test-key"}
 
     with mock.patch(
@@ -1802,8 +1802,10 @@ async def test_silicon_get_models_empty_list():
 
         result = await SiliconModelProvider().get_models(provider_config)
 
-        # Should return empty list when API returns empty data
-        assert result == []
+        # Should return error response when API returns empty data
+        assert len(result) == 1
+        assert result[0].get("_error") == "no_models"
+        assert "empty model list" in result[0].get("_message", "")
 
 
 @pytest.mark.asyncio

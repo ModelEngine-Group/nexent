@@ -7,6 +7,9 @@ export const MODEL_TYPES = {
   STT: "stt",
   TTS: "tts",
   VLM: "vlm",
+  IMAGE_UNDERSTANDING: "image_understanding",
+  IMAGE_GENERATION: "image_generation",
+  VIDEO_UNDERSTANDING: "video_understanding",
 } as const;
 
 // Model source constants
@@ -142,6 +145,18 @@ export const CARD_THEMES = {
     backgroundColor: "#ffffff",
   },
   multimodal: {
+    borderColor: "#e6e6e6",
+    backgroundColor: "#ffffff",
+  },
+  image_understanding: {
+    borderColor: "#e6e6e6",
+    backgroundColor: "#ffffff",
+  },
+  image_generation: {
+    borderColor: "#e6e6e6",
+    backgroundColor: "#ffffff",
+  },
+  video_understanding: {
     borderColor: "#e6e6e6",
     backgroundColor: "#ffffff",
   },

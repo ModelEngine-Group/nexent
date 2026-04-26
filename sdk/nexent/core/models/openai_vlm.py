@@ -142,5 +142,84 @@ class OpenAIVLModel(OpenAIModel):
             ChatMessage: Message returned by the model.
         """
         messages = self.prepare_image_message(image_input, system_prompt)
-        # Call __call__ explicitly so instance-level mocks work in tests.
+        return self.__call__(messages=messages, **kwargs)
+
+    def analyze_video(self, video_input: Union[str, BinaryIO],
+            system_prompt: str = "Please describe this video concisely and carefully, within 200 words.", stream: bool = True,
+            **kwargs) -> ChatMessage:
+        """
+        Analyze video content.
+
+        Args:
+            video_input: Video file path or file stream object.
+            system_prompt: System prompt.
+            stream: Whether to output in streaming mode.
+            **kwargs: Other parameters.
+
+        Returns:
+            ChatMessage: Message returned by the model.
+        """
+        import base64
+        import os
+
+        # Encode video to base64
+        if isinstance(video_input, str):
+            with open(video_input, "rb") as video_file:
+                video_base64 = base64.b64encode(video_file.read()).decode('utf-8')
+        else:
+            video_base64 = base64.b64encode(video_input.read()).decode('utf-8')
+
+        # Detect video format
+        video_format = "mp4"  # Default format
+        if isinstance(video_input, str) and os.path.exists(video_input):
+            _, ext = os.path.splitext(video_input)
+            if ext.lower() in ['.mp4', '.avi', '.mov', '.webm', '.mkv', '.flv']:
+                video_format = ext.lower()[1:]
+
+        messages = [
+            {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+            {"role": "user", "content": [
+                {"type": "video_url", "video_url": {"url": f"data:video/{video_format};base64,{video_base64}"}}
+            ]}
+        ]
+        return self.__call__(messages=messages, **kwargs)
+
+    def analyze_audio(self, audio_input: Union[str, BinaryIO],
+            system_prompt: str = "Please describe this audio concisely and carefully, within 200 words.", stream: bool = True,
+            **kwargs) -> ChatMessage:
+        """
+        Analyze audio content.
+
+        Args:
+            audio_input: Audio file path or file stream object.
+            system_prompt: System prompt.
+            stream: Whether to output in streaming mode.
+            **kwargs: Other parameters.
+
+        Returns:
+            ChatMessage: Message returned by the model.
+        """
+        import base64
+        import os
+
+        # Encode audio to base64
+        if isinstance(audio_input, str):
+            with open(audio_input, "rb") as audio_file:
+                audio_base64 = base64.b64encode(audio_file.read()).decode('utf-8')
+        else:
+            audio_base64 = base64.b64encode(audio_input.read()).decode('utf-8')
+
+        # Detect audio format
+        audio_format = "mp3"  # Default format
+        if isinstance(audio_input, str) and os.path.exists(audio_input):
+            _, ext = os.path.splitext(audio_input)
+            if ext.lower() in ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac']:
+                audio_format = ext.lower()[1:]
+
+        messages = [
+            {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+            {"role": "user", "content": [
+                {"type": "audio_url", "audio_url": {"url": f"data:audio/{audio_format};base64,{audio_base64}"}}
+            ]}
+        ]
         return self.__call__(messages=messages, **kwargs)

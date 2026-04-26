@@ -7,7 +7,8 @@ from smolagents import ToolCollection
 
 from .agent_model import AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType
-from ...monitor import get_monitoring_manager
+from nexent.monitor import get_monitoring_manager
+from nexent.core.utils.observer import get_observer_lang
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
@@ -117,7 +118,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
     except Exception as e:
         if "Couldn't connect to the MCP server" in str(e):
-            mcp_connect_error_str = "MCP服务器连接超时。" if agent_run_info.observer.lang == "zh" else "Couldn't connect to the MCP server."
+            observer_lang = get_observer_lang(agent_run_info.observer)
+            mcp_connect_error_str = "MCP服务器连接超时。" if observer_lang == "zh" else "Couldn't connect to the MCP server."
             agent_run_info.observer.add_message(
                 "", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
         else:

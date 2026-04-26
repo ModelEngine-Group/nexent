@@ -34,7 +34,13 @@ export const chatConfig = {
   
   // Supported image file extensions
   imageExtensions: ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"],
-  
+
+  // Supported audio file extensions
+  audioExtensions: ["mp3", "wav", "ogg", "flac", "m4a", "aac", "wma", "opus"],
+
+  // Supported video file extensions
+  videoExtensions: ["mp4", "avi", "mov", "webm", "mkv", "flv", "wmv", "mpeg", "mpg"],
+
   // Supported document file extensions
   documentExtensions: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"],
   
@@ -72,12 +78,20 @@ export const chatConfig = {
 
     // Compressed file
     compressed: ["zip", "rar", "7z", "tar", "gz"],
+
+    // Audio files
+    audio: ["mp3", "wav", "ogg", "flac", "m4a", "aac", "wma", "opus"],
+
+    // Video files
+    video: ["mp4", "avi", "mov", "webm", "mkv", "flv", "wmv", "mpeg", "mpg"],
 },
 
 // File preview type constants
 filePreviewTypes: {
   image: "image" as const,
   file: "file" as const,
+  audio: "audio" as const,
+  video: "video" as const,
 },
 
 // Message type constants

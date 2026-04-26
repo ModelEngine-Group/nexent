@@ -46,6 +46,30 @@ export function useModelList(options?: { enabled?: boolean; staleTime?: number }
 		return models.filter((model) => model.type === "vlm" && model.connect_status === "available");
 	}, [models]);
 
+	const imageUnderstandingModels = useMemo(() => {
+		return models.filter((model) => model.type === "image_understanding");
+	}, [models]);
+
+	const availableImageUnderstandingModels = useMemo(() => {
+		return models.filter((model) => model.type === "image_understanding" && model.connect_status === "available");
+	}, [models]);
+
+	const imageGenerationModels = useMemo(() => {
+		return models.filter((model) => model.type === "image_generation");
+	}, [models]);
+
+	const availableImageGenerationModels = useMemo(() => {
+		return models.filter((model) => model.type === "image_generation" && model.connect_status === "available");
+	}, [models]);
+
+	const videoUnderstandingModels = useMemo(() => {
+		return models.filter((model) => model.type === "video_understanding");
+	}, [models]);
+
+	const availableVideoUnderstandingModels = useMemo(() => {
+		return models.filter((model) => model.type === "video_understanding" && model.connect_status === "available");
+	}, [models]);
+
 	return {
 		...query,
 		models,
@@ -56,6 +80,12 @@ export function useModelList(options?: { enabled?: boolean; staleTime?: number }
 		availableEmbeddingModels,
 		vlmModels,
 		availableVlmModels,
+		imageUnderstandingModels,
+		availableImageUnderstandingModels,
+		imageGenerationModels,
+		availableImageGenerationModels,
+		videoUnderstandingModels,
+		availableVideoUnderstandingModels,
 		invalidate: () => queryClient.invalidateQueries({ queryKey: ["models"] }),
 	};
 }

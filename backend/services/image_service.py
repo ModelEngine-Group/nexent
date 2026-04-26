@@ -31,10 +31,13 @@ async def proxy_image_impl(decoded_url: str):
 
 
 def get_vlm_model(tenant_id: str):
-    # Get the tenant config
+    # Get the tenant config for image understanding
+    logger.info(f"Getting VLM model for tenant_id: {tenant_id}, using key: {MODEL_CONFIG_MAPPING['vlm']}")
     vlm_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["vlm"], tenant_id=tenant_id)
+    logger.info(f"VLM model config result: {vlm_model_config}")
     if not vlm_model_config:
+        logger.warning(f"No VLM model configured for tenant: {tenant_id}")
         return None
     return OpenAIVLModel(
         observer=MessageObserver(),
@@ -47,4 +50,27 @@ def get_vlm_model(tenant_id: str):
         frequency_penalty=0.5,
         max_tokens=512,
         ssl_verify=vlm_model_config.get("ssl_verify", True),
+    )
+
+
+def get_video_understanding_model(tenant_id: str):
+    # Get the tenant config for video understanding
+    logger.info(f"Getting video understanding model for tenant_id: {tenant_id}, using key: {MODEL_CONFIG_MAPPING['videoUnderstanding']}")
+    video_model_config = tenant_config_manager.get_model_config(
+        key=MODEL_CONFIG_MAPPING["videoUnderstanding"], tenant_id=tenant_id)
+    logger.info(f"Video understanding model config result: {video_model_config}")
+    if not video_model_config:
+        logger.warning(f"No video understanding model configured for tenant: {tenant_id}")
+        return None
+    return OpenAIVLModel(
+        observer=MessageObserver(),
+        model_id=get_model_name_from_config(
+            video_model_config) if video_model_config else "",
+        api_base=video_model_config.get("base_url", ""),
+        api_key=video_model_config.get("api_key", ""),
+        temperature=0.7,
+        top_p=0.7,
+        frequency_penalty=0.5,
+        max_tokens=2048,
+        ssl_verify=video_model_config.get("ssl_verify", True),
     )

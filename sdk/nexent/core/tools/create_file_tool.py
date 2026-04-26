@@ -4,7 +4,7 @@ import os
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..utils.observer import MessageObserver, ProcessType
+from ..utils.observer import MessageObserver, ProcessType, get_observer_lang
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("create_file_tool")
@@ -108,7 +108,8 @@ class CreateFileTool(Tool):
         try:
             # Send tool run message if observer is available
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+                observer_lang = get_observer_lang(self.observer)
+                running_prompt = self.running_prompt_zh if observer_lang == "zh" else self.running_prompt_en
                 self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "file-plus", "text": f"Creating {file_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
@@ -130,7 +131,8 @@ class CreateFileTool(Tool):
             if os.path.exists(abs_path):
                 logger.warning(f"File already exists: {abs_path}")
                 if self.observer:
-                    warning_msg = f"文件已存在，将覆盖: {abs_path}" if self.observer.lang == "zh" else f"File already exists, will overwrite: {abs_path}"
+                    observer_lang = get_observer_lang(self.observer)
+                    warning_msg = f"文件已存在，将覆盖: {abs_path}" if observer_lang == "zh" else f"File already exists, will overwrite: {abs_path}"
                     self.observer.add_message("", ProcessType.OTHER, warning_msg)
 
             # Write content to file

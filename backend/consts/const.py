@@ -280,7 +280,10 @@ MODEL_CONFIG_MAPPING = {
     "rerank": "RERANK_ID",
     "vlm": "VLM_ID",
     "stt": "STT_ID",
-    "tts": "TTS_ID"
+    "tts": "TTS_ID",
+    "imageUnderstanding": "IMAGE_UNDERSTANDING_ID",
+    "imageGeneration": "IMAGE_GENERATION_ID",
+    "videoUnderstanding": "VIDEO_UNDERSTANDING_ID",
 }
 
 APP_NAME = "APP_NAME"
