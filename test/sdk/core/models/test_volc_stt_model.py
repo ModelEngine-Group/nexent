@@ -753,3 +753,354 @@ class TestVolcSTTModelStreamingSession:
     async def test_process_streaming_audio(self):
         """Test process_streaming_audio."""
         pass
+
+
+class TestVolcSTTModelExceptionHandling:
+    """Tests for exception handling in process_audio_data."""
+
+    @pytest.fixture
+    def volc_config(self):
+        config = VolcSTTConfig(appid="test_appid", access_token="test_token")
+        return config
+
+    @pytest.fixture
+    def volc_model(self, volc_config):
+        return VolcSTTModel(volc_config, "/path/to/test/audio.pcm")
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_connection_closed_error(self, volc_model):
+        """Test process_audio_data when connection is closed."""
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            _MockConnectionClosedError(1000, "Connection closed")
+        ])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await volc_model.process_audio_data(b"test_audio", 1000)
+            assert "error" in result
+            assert "Connection closed" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_websocket_exception_with_attributes(self, volc_model):
+        """Test WebSocket exception with attributes."""
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+
+        class MockWebSocketException(Exception):
+            def __init__(self, msg):
+                super().__init__(msg)
+                self.status_code = 400
+                self.headers = {"X-Header": "value"}
+                self.response = MagicMock()
+                self.response.text = "Error response"
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=MockWebSocketException("Connection failed"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await volc_model.process_audio_data(b"test_audio", 1000)
+            assert "error" in result
+            assert "WebSocket error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_unexpected_error(self, volc_model):
+        """Test unexpected error."""
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=RuntimeError("Unexpected error"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await volc_model.process_audio_data(b"test_audio", 1000)
+            assert "error" in result
+            assert "Unexpected error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_with_compression_false(self, volc_model):
+        """Test with compression disabled."""
+        volc_model.config.compression = False
+        volc_model.config.streaming = False
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response_data])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await volc_model.process_audio_data(b"test_audio", 1000)
+            assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_with_streaming_enabled(self, volc_model):
+        """Test with streaming enabled."""
+        volc_model.config.streaming = True
+        volc_model.config.seg_duration = 10
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            response_data,
+            response_data,
+            _MockConnectionClosedError(1000, "Closed")
+        ])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await volc_model.process_audio_data(b"test_audio" * 10, 1000)
+            assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_process_audio_file_with_wav_format(self, volc_model):
+        """Test process_audio_file with WAV format."""
+        volc_model.config.format = "wav"
+
+        buffer = BytesIO()
+        with wave.open(buffer, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes(b"\x00\x01" * 16000)
+        wav_data = buffer.getvalue()
+
+        mock_file = AsyncMock()
+        mock_file.read = AsyncMock(return_value=wav_data)
+        mock_file.__aenter__ = AsyncMock(return_value=mock_file)
+        mock_file.__aexit__ = AsyncMock(return_value=None)
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response_data])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_aiofiles, "open", return_value=mock_file):
+            with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+                result = await volc_model.process_audio_file("/test/file.wav")
+                assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_process_audio_file_with_mp3_format(self, volc_model):
+        """Test process_audio_file with MP3 format."""
+        volc_model.config.format = "mp3"
+
+        mp3_data = b"fake_mp3_data" * 100
+        mock_file = AsyncMock()
+        mock_file.read = AsyncMock(return_value=mp3_data)
+        mock_file.__aenter__ = AsyncMock(return_value=mock_file)
+        mock_file.__aexit__ = AsyncMock(return_value=None)
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response_data])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_aiofiles, "open", return_value=mock_file):
+            with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+                result = await volc_model.process_audio_file("/test/file.mp3")
+                assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_process_audio_file_unsupported_format(self, volc_model):
+        """Test process_audio_file with unsupported format raises Exception."""
+        volc_model.config.format = "flac"
+
+        with pytest.raises(Exception) as exc_info:
+            await volc_model.process_audio_file("/test/file.flac")
+        assert "Unsupported format" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_recognize_file(self, volc_model):
+        """Test recognize_file is a wrapper for process_audio_file."""
+        volc_model.config.format = "pcm"
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response_data, response_data])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        mock_file = AsyncMock()
+        mock_file.read = AsyncMock(return_value=b"test_pcm_data")
+        mock_file.__aenter__ = AsyncMock(return_value=mock_file)
+        mock_file.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_aiofiles, "open", return_value=mock_file):
+            with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+                result = await volc_model.recognize_file("/test/file.pcm")
+                assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_parse_response_server_ack_with_extra_data(self, volc_model):
+        """Test parse_response with SERVER_ACK and extra data."""
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (100).to_bytes(4, "big", signed=False)
+        extra_data = b"extra_payload_data"
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + extra_data
+
+        result = volc_model.parse_response(response_data)
+        assert result['seq'] == 1
+        assert result['payload_size'] == 100
+
+    @pytest.mark.asyncio
+    async def test_parse_response_server_error_with_payload(self, volc_model):
+        """Test parse_response with SERVER_ERROR_RESPONSE and payload."""
+        header = bytearray([0x11, 0xF0, 0x00, 0x00])
+        error_code = (500).to_bytes(4, "big", signed=False)
+        payload_size_bytes = (50).to_bytes(4, "big", signed=False)
+        payload = b"error_message"
+        response_data = bytes(header) + error_code + payload_size_bytes + payload
+
+        result = volc_model.parse_response(response_data)
+        assert result['code'] == 500
+        assert result['payload_size'] == 50
+
+    @pytest.mark.asyncio
+    async def test_parse_response_no_payload_message(self, volc_model):
+        """Test parse_response when payload_msg is None."""
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        response_data = bytes(header) + b"\x00" * 4
+
+        result = volc_model.parse_response(response_data)
+        assert 'payload_msg' not in result
+
+    @pytest.mark.asyncio
+    async def test_slice_data_exact_division(self, volc_model):
+        """Test slice_data with exact division."""
+        data = b"12345678901234567890"
+        chunks = list(volc_model.slice_data(data, 5))
+        assert len(chunks) == 4
+        assert chunks[0] == (b"12345", False)
+        assert chunks[1] == (b"67890", False)
+        assert chunks[2] == (b"12345", False)
+        assert chunks[3] == (b"67890", True)
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_no_file_path(self, volc_model):
+        """Test check_connectivity with no audio_file_path."""
+        volc_model.audio_file_path = None
+
+        result = await volc_model.check_connectivity()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_with_file_path(self, volc_model):
+        """Test check_connectivity with audio_file_path set."""
+        volc_model.audio_file_path = "/test/audio.pcm"
+        volc_model.config.format = "pcm"
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response_data, response_data])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        mock_file = AsyncMock()
+        mock_file.read = AsyncMock(return_value=b"test_pcm_data")
+        mock_file.__aenter__ = AsyncMock(return_value=mock_file)
+        mock_file.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_aiofiles, "open", return_value=mock_file):
+            with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+                result = await volc_model.check_connectivity()
+                assert result is True
+
+    @pytest.mark.asyncio
+    async def test_construct_request(self, volc_model):
+        """Test construct_request generates correct request structure."""
+        req = volc_model.construct_request("test-req-id")
+        assert req["user"]["uid"] == volc_model.config.uid
+        assert req["audio"]["format"] == volc_model.config.format
+        assert req["audio"]["sample_rate"] == volc_model.config.rate
+        assert req["request"]["model_name"] == "bigmodel"
+
+    @pytest.mark.asyncio
+    async def test_generate_header_with_compression(self, volc_model):
+        """Test generate_header with explicit compression."""
+        header = volc_model.generate_header(compression_type=GZIP)
+        assert header[0] == 0x11
+        assert header[2] == 0x10 | 0x01
+
+    @pytest.mark.asyncio
+    async def test_generate_before_payload(self, volc_model):
+        """Test generate_before_payload."""
+        payload = volc_model.generate_before_payload(42)
+        assert len(payload) == 4
+        assert int.from_bytes(payload, "big", signed=True) == 42
+
+    @pytest.mark.asyncio
+    async def test_get_websocket_url(self, volc_model):
+        """Test get_websocket_url returns correct URL."""
+        url = volc_model.get_websocket_url()
+        assert url == volc_model.config.ws_url
+
+    @pytest.mark.asyncio
+    async def test_get_auth_headers_with_both_tokens(self, volc_model):
+        """Test get_auth_headers with both access_token and appid."""
+        volc_model.config.access_token = "test_token"
+        volc_model.config.appid = "test_appid"
+        headers = volc_model.get_auth_headers()
+        assert "X-Api-Access-Key" in headers
+        assert "X-Api-App-Key" in headers
+        assert headers["X-Api-Resource-Id"] == volc_model.config.resourceid
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

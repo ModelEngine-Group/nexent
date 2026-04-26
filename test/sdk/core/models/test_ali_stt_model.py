@@ -12,11 +12,27 @@ import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 import wave
 
+# Create a mock ConnectionClosed exception that matches the websockets library interface
+class _MockConnectionClosed(Exception):
+    """Mock for websockets.exceptions.ConnectionClosed."""
+    def __init__(self, code, reason):
+        self.code = code
+        self.reason = reason
+        super().__init__(reason)
+
 # Add SDK to path before imports
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _sdk_dir = os.path.abspath(os.path.join(_current_dir, "../../../sdk"))
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
+
+# Create a mock websockets module with the ConnectionClosed we can use in tests
+_mock_websockets = MagicMock()
+_mock_websockets.connect = MagicMock()
+_mock_websockets.exceptions = MagicMock()
+_mock_websockets.exceptions.ConnectionClosed = _MockConnectionClosed
+_mock_websockets.exceptions.ConnectionClosedError = _MockConnectionClosed
+_mock_websockets.exceptions.WebSocketException = Exception
 
 # Add mocks before any imports
 _mock_aiofiles = MagicMock()
@@ -41,23 +57,6 @@ def _mock_aiofiles_open(*args, **kwargs):
 
 _mock_aiofiles.open = _mock_aiofiles_open
 
-_mock_websockets = MagicMock()
-_mock_websockets.connect = MagicMock()
-_mock_websockets.exceptions = MagicMock()
-
-
-class _MockConnectionClosedError(Exception):
-    def __init__(self, code, reason):
-        self.code = code
-        self.reason = reason
-        super().__init__(reason)
-
-
-_mock_websockets.exceptions.ConnectionClosedError = _MockConnectionClosedError
-_mock_websockets.exceptions.WebSocketException = Exception
-
-# Set up websockets mock
-_mock_websockets.connect = MagicMock()
 
 _module_mocks = {
     "websockets": _mock_websockets,
@@ -993,9 +992,348 @@ class TestAliSTTModelProcessAudioData:
 
 
 class TestAliSTTModelStreamingSession:
-    """Test start_streaming_session method in AliSTTModel - skipped due to complex async loops."""
+    """Test start_streaming_session method in AliSTTModel."""
 
-    @pytest.mark.skip(reason="Streaming session has complex infinite loop - tested manually")
+    @pytest.fixture
+    def ali_config(self):
+        """Create a test Ali STT configuration."""
+        config = AliSTTConfig(api_key="test_key", language="zh")
+        return config
+
+    @pytest.fixture
+    def ali_model(self, ali_config):
+        """Create a test Ali STT model instance."""
+        return AliSTTModel(ali_config, "/path/to/test/audio.pcm")
+
+    @pytest.mark.asyncio
     async def test_start_streaming_session_basic(self, ali_model):
         """Test start_streaming_session with basic communication."""
-        pass
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+            json.dumps({"type": "input_audio_buffer.speech_started"}),
+            json.dumps({"type": "input_audio_buffer.speech_stopped"}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_client_disconnect_before_audio(self, ali_model):
+        """Test when client disconnects before sending audio."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            _MockConnectionClosed(1000, "Client closed")
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_with_transcription(self, ali_model):
+        """Test start_streaming_session with transcription results."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+            json.dumps({"type": "input_audio_buffer.speech_started"}),
+            json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Hello"}),
+            json.dumps({"type": "conversation.item.input_audio_transcription.completed", "text": "Hello world"}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_with_error(self, ali_model):
+        """Test start_streaming_session with error response from STT."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+            json.dumps({"type": "error", "error": "Service error"}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_buffer_committed(self, ali_model):
+        """Test start_streaming_session with input_audio_buffer.committed event."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+            json.dumps({"type": "input_audio_buffer.speech_started"}),
+            json.dumps({"type": "input_audio_buffer.committed"}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_with_item_content(self, ali_model):
+        """Test start_streaming_session with transcription in item content."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+            json.dumps({
+                "type": "conversation.item.input_audio_transcription.text",
+                "item": {"content": [{"transcript": "Transcribed from content"}]}
+            }),
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_client_exception(self, ali_model):
+        """Test when client raises exception during audio receive."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            Exception("Unexpected error"),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_stt_server_exception(self, ali_model):
+        """Test when STT server raises exception."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+            json.dumps({"type": "input_audio_buffer.speech_started"}),
+            Exception("STT server error"),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_general_exception(self, ali_model):
+        """Test with general exception during connection."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=Exception("Connection failed"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_server_connection_closed(self, ali_model):
+        """Test when STT server connection is closed."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+            json.dumps({"type": "input_audio_buffer.speech_started"}),
+            _MockConnectionClosed(1000, "Server closed"),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_client_disconnect(self, ali_model):
+        """Test when client disconnects during streaming."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            _MockConnectionClosed(1000, "Client closed")
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+
+class TestAliSTTModelAdditionalCoverage:
+    """Additional tests for full coverage."""
+
+    @pytest.fixture
+    def ali_config(self):
+        """Create a test Ali STT configuration."""
+        config = AliSTTConfig(api_key="test_key", language="zh")
+        return config
+
+    @pytest.fixture
+    def ali_model(self, ali_config):
+        """Create a test Ali STT model instance."""
+        return AliSTTModel(ali_config, "/path/to/test/audio.pcm")
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_exception_with_traceback(self, ali_model):
+        """Test check_connectivity with exception and traceback logging."""
+        with patch.object(ali_model, 'process_audio_file', side_effect=Exception("Test error")):
+            result = await ali_model.check_connectivity()
+            assert result is False
+
+    def test_extract_stt_error_message_with_payload_error(self, ali_model):
+        """Test _extract_stt_error_message with payload error."""
+        result = {
+            'code': 1001,
+            'payload_msg': {'error': 'Payload error message'}
+        }
+        msg = ali_model._extract_stt_error_message(result)
+        assert "STT service error code: 1001" in msg
+        assert "Payload error message" in msg
+
+    def test_extract_stt_error_message_invalid_type(self, ali_model):
+        """Test _extract_stt_error_message with invalid type."""
+        msg = ali_model._extract_stt_error_message("not a dict")
+        assert "Invalid result type" in msg
+
+    def test_is_stt_result_successful_with_payload_error(self, ali_model):
+        """Test _is_stt_result_successful with payload error."""
+        result = {
+            'payload_msg': {'error': 'Test error'}
+        }
+        assert ali_model._is_stt_result_successful(result) is False
+
+    def test_is_stt_result_successful_with_error_code(self, ali_model):
+        """Test _is_stt_result_successful with error code."""
+        result = {'code': 2000}
+        assert ali_model._is_stt_result_successful(result) is False
+
+    def test_is_stt_result_successful_non_dict(self, ali_model):
+        """Test _is_stt_result_successful with non-dict."""
+        assert ali_model._is_stt_result_successful("string") is False
+        assert ali_model._is_stt_result_successful(None) is False
+
+    def test_parse_response_unknown_event_with_additional_fields(self, ali_model):
+        """Test parse_response with unknown event - extra fields are not copied to result."""
+        response = {
+            "type": "unknown.event",
+            "extra_field": "value",
+            "another_field": 123
+        }
+        result = ali_model.parse_response(response)
+        assert result["event"] == "unknown.event"
+        assert "extra_field" not in result
