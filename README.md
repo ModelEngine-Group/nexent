@@ -99,6 +99,59 @@ Most of all, we need visibility. Star ⭐ and watch the repo, share it with frie
 
    ![Feature 7](./assets/Feature7.png)
 
+
+## ❓ FAQ
+
+### What is Nexent?
+
+Nexent is a zero-code platform for auto-generating production-grade AI agents, built on Harness Engineering principles. It provides unified tools, skills, memory, and orchestration with built-in constraints, feedback loops, and control planes — no complex drag-and-drop required, using pure language to develop any agent you want.
+
+### What is Harness Engineering?
+
+Harness Engineering is Nexent's approach to agent development that emphasizes constraint-driven design, feedback loops, and control planes. Instead of complex orchestration workflows, you describe what you want in natural language, and Nexent automatically generates the agent with appropriate constraints and feedback mechanisms.
+
+### What are the system requirements?
+
+| Resource | Minimum |
+|----------|---------|
+| **CPU**  | 2 cores |
+| **RAM**  | 6 GiB   |
+| **Software** | Docker & Docker Compose installed |
+
+### How do I deploy Nexent?
+
+The easiest way is using Docker Compose:
+```bash
+git clone https://github.com/ModelEngine-Group/nexent.git
+cd nexent/docker
+cp .env.example .env  # fill in necessary configs
+bash deploy.sh
+```
+Then open http://localhost:3000 in your browser.
+
+### What LLM providers does Nexent support?
+
+Nexent supports multiple LLM providers including OpenAI, Anthropic, and local models. Check the [Model Providers page](https://modelengine-group.github.io/nexent/en/getting-started/model-providers.html) for detailed configuration guides.
+
+### Can I use Nexent with my own tools?
+
+Yes! Nexent has an MCP (Model Context Protocol) tool ecosystem. You can drop in existing MCP tools or build custom Python plugins that follow the MCP spec. See the [MCP Ecosystem page](https://modelengine-group.github.io/nexent/en/mcp-ecosystem/overview.html) for details.
+
+### How does the knowledge base work?
+
+Nexent supports personal-grade knowledge bases where you can import files in real time. The system auto-summarizes content and lets agents access both personal and global knowledge instantly, with knowledge-level traceability for every answer.
+
+### Does Nexent support multimodal inputs?
+
+Yes. Nexent understands voice, text, and images. You can speak, type, upload files, or show images to your agents. The platform can also generate new images on demand.
+
+### Where can I get help?
+
+- 📖 [Documentation](https://modelengine-group.github.io/nexent)
+- 💬 [Discord Community](https://discord.gg/tb5H3S3wyv)
+- 🐛 [GitHub Issues](https://github.com/ModelEngine-Group/nexent/issues)
+- 🌐 [Official Website](https://nexent.tech)
+
 # 🌱 MCP Tool Ecosystem
 
 Check our [MCP Ecosystem page](https://modelengine-group.github.io/nexent/en/mcp-ecosystem/overview.html) for detailed information about the MCP tool ecosystem, including community hubs, recommended tools, and integration guides.
