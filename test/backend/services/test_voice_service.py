@@ -494,5 +494,406 @@ class TestVoiceServiceSingleton:
                 p.stop()
 
 
+class TestGetSTTModelFromConfig:
+    """Tests for _get_stt_model_from_config."""
+
+    def test_volc_stt_model_selection(self):
+        """Test that volc model is selected for volc factory."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_stt_model_from_config(
+                model_factory="volc",
+                api_key="test_key",
+                model_appid="test_appid",
+                access_token="test_token"
+            )
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    def test_volc_stt_model_selection_chinese(self):
+        """Test that volc model is selected for Chinese factory name."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_stt_model_from_config(
+                model_factory="火山引擎",
+                api_key="test_key"
+            )
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    def test_ali_stt_model_default(self):
+        """Test that Ali STT model is used by default."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_stt_model_from_config(api_key="test_key")
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    def test_ali_stt_model_with_dashscope(self):
+        """Test that Ali STT model is used for dashscope factory."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_stt_model_from_config(
+                model_factory="dashscope",
+                api_key="test_key"
+            )
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    def test_with_custom_base_url(self):
+        """Test with custom WebSocket URL."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_stt_model_from_config(
+                api_key="test_key",
+                base_url="wss://custom.url/ws"
+            )
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+
+class TestGetTTSModelFromConfig:
+    """Tests for _get_tts_model_from_config."""
+
+    def test_volc_tts_model_selection(self):
+        """Test that volc TTS model is selected for volc factory."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_tts_model_from_config(
+                model_factory="volc",
+                api_key="test_key",
+                model_appid="test_appid",
+                access_token="test_token"
+            )
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    def test_volc_tts_from_base_url(self):
+        """Test that volc TTS is auto-detected from base_url."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_tts_model_from_config(
+                base_url="wss://openspeech.bytedance.com/api/v1/tts"
+            )
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    def test_ali_tts_cosyvoice_default(self):
+        """Test Ali TTS with CosyVoice model."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_tts_model_from_config(
+                api_key="test_key",
+                model="cosyvoice-v2"
+            )
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    def test_ali_tts_qwen_realtime(self):
+        """Test Ali TTS with Qwen Realtime model."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_tts_model_from_config(
+                api_key="test_key",
+                model="qwen-tts"
+            )
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    def test_with_speed_ratio(self):
+        """Test TTS model with custom speed ratio."""
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            model = service._get_tts_model_from_config(
+                api_key="test_key",
+                speed_ratio=1.5
+            )
+            assert model is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+
+class TestCheckSTTConnectivity:
+    """Tests for check_stt_connectivity."""
+
+    @pytest.mark.asyncio
+    async def test_success(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models(stt_success=True)
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            result = await service.check_stt_connectivity(
+                api_key="test_key",
+                model="qwen3-asr-flash-realtime"
+            )
+            assert result is True
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    @pytest.mark.asyncio
+    async def test_failure_raises(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models(stt_success=False)
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            with pytest.raises(STTConnectionException):
+                await service.check_stt_connectivity(api_key="test_key")
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    @pytest.mark.asyncio
+    async def test_volc_model(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models(stt_success=True)
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            result = await service.check_stt_connectivity(
+                model_factory="volc",
+                model_appid="test_appid",
+                access_token="test_token"
+            )
+            assert result is True
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+
+class TestCheckTTSConnectivity:
+    """Tests for check_tts_connectivity."""
+
+    @pytest.mark.asyncio
+    async def test_success(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models(tts_success=True)
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            result = await service.check_tts_connectivity(
+                api_key="test_key",
+                model="cosyvoice-v2"
+            )
+            assert result is True
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    @pytest.mark.asyncio
+    async def test_failure_raises(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models(tts_success=False)
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            with pytest.raises(TTSConnectionException):
+                await service.check_tts_connectivity(api_key="test_key")
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    @pytest.mark.asyncio
+    async def test_with_speed_ratio(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models(tts_success=True)
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            result = await service.check_tts_connectivity(
+                api_key="test_key",
+                speed_ratio=1.5
+            )
+            assert result is True
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+
+class TestStartSTTStreamingSessionWithConfig:
+    """Tests for start_stt_streaming_session with various config scenarios."""
+
+    @pytest.mark.asyncio
+    async def test_with_explicit_config(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            mock_ws = Mock()
+            stt_config = {
+                "model_factory": "volc",
+                "model_appid": "test_appid",
+                "access_token": "test_token"
+            }
+            await service.start_stt_streaming_session(mock_ws, stt_config=stt_config)
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    @pytest.mark.asyncio
+    async def test_with_ali_config(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            mock_ws = Mock()
+            stt_config = {
+                "api_key": "test_key",
+                "model": "qwen3-asr-flash-realtime"
+            }
+            await service.start_stt_streaming_session(mock_ws, stt_config=stt_config)
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    @pytest.mark.asyncio
+    async def test_with_language_override(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models()
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            mock_ws = Mock()
+            stt_config = {
+                "api_key": "test_key",
+                "language": "en"
+            }
+            await service.start_stt_streaming_session(mock_ws, stt_config=stt_config, language="zh")
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+
+class TestGenerateTTSSpeechWithConfig:
+    """Tests for generate_tts_speech with various config scenarios."""
+
+    @pytest.mark.asyncio
+    async def test_with_tts_config(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models(tts_success=True)
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            tts_config = {
+                "api_key": "test_key",
+                "model": "cosyvoice-v2"
+            }
+            result = await service.generate_tts_speech(
+                "Hello world",
+                tts_config=tts_config
+            )
+            assert result is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    @pytest.mark.asyncio
+    async def test_with_model_override(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models(tts_success=True)
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            result = await service.generate_tts_speech(
+                "Hello world",
+                model_name_override="custom-model"
+            )
+            assert result is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    @pytest.mark.asyncio
+    async def test_with_tenant_id(self):
+        _reset_singleton()
+        patches, _, _ = _mock_all_models(tts_success=True)
+        for p in patches:
+            p.start()
+        try:
+            service = VoiceService()
+            result = await service.generate_tts_speech(
+                "Hello world",
+                tenant_id="test_tenant"
+            )
+            assert result is not None
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

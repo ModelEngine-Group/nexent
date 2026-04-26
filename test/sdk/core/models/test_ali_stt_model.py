@@ -447,6 +447,95 @@ class TestAliSTTModel:
             assert result is not None
 
     @pytest.mark.asyncio
+    async def test_process_audio_data_intermediate_transcription(self, ali_model):
+        """Test process_audio_data with intermediate transcription text (not final)."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Partial"}),
+            json.dumps({"type": "session.finished", "transcript": "Final"}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
+
+        assert "text" in result
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_with_callback(self, ali_model):
+        """Test process_audio_data with on_result callback."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "Transcribed"}),
+            json.dumps({"type": "session.finished", "transcript": "Transcribed"}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        callback_results = []
+        async def on_result(text):
+            callback_results.append(text)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            result = await ali_model.process_audio_data(b"audio_data" * 100, 1000, on_result=on_result)
+
+        assert "text" in result
+        assert len(callback_results) > 0
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_callback_intermediate_only(self, ali_model):
+        """Test process_audio_data with callback for intermediate results only."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Partial result"}),
+            json.dumps({"type": "session.finished", "transcript": "Final"}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        callback_results = []
+        async def on_result(text):
+            callback_results.append(text)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            result = await ali_model.process_audio_data(b"audio_data" * 100, 1000, on_result=on_result)
+
+        assert "text" in result
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_return_empty_text(self, ali_model):
+        """Test process_audio_data returns empty text when no transcription."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.finished", "transcript": ""}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
+
+        assert "text" in result
+        assert result.get("text", "") == ""
+
+    @pytest.mark.asyncio
     async def test_process_audio_file_unsupported_format(self, ali_model):
         """Test process_audio_file with unsupported format."""
         mock_file = AsyncMock()
@@ -458,6 +547,25 @@ class TestAliSTTModel:
             ali_model.config.format = "unsupported"
             with pytest.raises(Exception, match="Unsupported format"):
                 await ali_model.process_audio_file("/test/file.unsupported")
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_error_from_result(self, ali_model):
+        """Test process_audio_data with error in result."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "error", "message": "Service error"}),
+        ])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
+
+        assert "error" in result
 
     @pytest.mark.asyncio
     async def test_recognize_file(self, ali_model):

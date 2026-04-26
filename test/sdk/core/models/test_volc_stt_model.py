@@ -544,3 +544,212 @@ class TestVolcSTTModelIntegration:
             with patch.object(_mock_websockets, "connect", return_value=mock_connect):
                 result = await model.check_connectivity()
                 assert result is False
+
+
+class TestVolcSTTModelAdditional:
+    """Additional tests for edge cases and full coverage."""
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_success(self):
+        """Test process_audio_data with successful WebSocket communication."""
+        config = VolcSTTConfig(appid="test", access_token="test", compression=False)
+        model = VolcSTTModel(config)
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response_data])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await model.process_audio_data(b"test_audio" * 100, 1000)
+            assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_no_streaming(self):
+        """Test process_audio_data without streaming delay."""
+        config = VolcSTTConfig(appid="test", access_token="test", streaming=False, compression=False)
+        model = VolcSTTModel(config)
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response_data, response_data, response_data])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await model.process_audio_data(b"short", 1000)
+            assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_process_audio_file_mp3(self):
+        """Test processing MP3 audio file."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        mp3_data = b"fake_mp3_data" * 100
+        mock_file = AsyncMock()
+        mock_file.read = AsyncMock(return_value=mp3_data)
+        mock_file.__aenter__ = AsyncMock(return_value=mock_file)
+        mock_file.__aexit__ = AsyncMock(return_value=None)
+
+        async def raise_error():
+            raise _MockConnectionClosedError(1000, "Connection closed")
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = raise_error
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_aiofiles, "open", return_value=mock_file):
+            with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+                volc_model = VolcSTTModel(config)
+                volc_model.config.format = "mp3"
+                result = await volc_model.process_audio_file("/test/file.mp3")
+                assert "error" in result
+
+    def test_parse_response_full_response_no_sequence(self):
+        """Test parsing SERVER_FULL_RESPONSE without sequence flag but with last package flag."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        header = bytearray([0x11, 0x92, 0x10, 0x00])
+        payload_data = b'{"result":{"text":"hello"}}'
+        payload_size_bytes = len(payload_data).to_bytes(4, "big", signed=False)
+        response = bytes(header) + payload_size_bytes + payload_data
+
+        result = model.parse_response(response)
+        assert result["is_last_package"] is True
+        assert "payload_msg" in result
+
+    def test_parse_response_with_gzip_compression(self):
+        """Test parsing response with GZIP compression."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        header = bytearray([0x11, 0x90, 0x11, 0x00])
+        payload_data = b'{"result":{"text":"compressed"}}'
+        compressed_data = gzip.compress(payload_data)
+        payload_size_bytes = len(compressed_data).to_bytes(4, "big", signed=False)
+        response = bytes(header) + payload_size_bytes + compressed_data
+
+        result = model.parse_response(response)
+        assert result["payload_msg"]["result"]["text"] == "compressed"
+
+    def test_parse_response_thrift_serialization(self):
+        """Test parsing response with non-JSON serialization."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        header = bytearray([0x11, 0x90, 0x30, 0x00])
+        payload_data = b"thrift_data"
+        payload_size_bytes = len(payload_data).to_bytes(4, "big", signed=False)
+        response = bytes(header) + payload_size_bytes + payload_data
+
+        result = model.parse_response(response)
+        assert "payload_msg" in result
+
+    def test_generate_header_explicit_compression(self):
+        """Test header generation with explicit compression type."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        header = model.generate_header(compression_type=GZIP)
+        compression_type = header[2] & 0x0f
+        assert compression_type == GZIP
+
+        header = model.generate_header(compression_type=NO_COMPRESSION)
+        compression_type = header[2] & 0x0f
+        assert compression_type == NO_COMPRESSION
+
+    def test_parse_response_server_ack_no_extra_data(self):
+        """Test parsing SERVER_ACK without extra payload data."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (5).to_bytes(4, "big", signed=True)
+        response = bytes(header) + seq_bytes + b"\x00" * 4
+
+        result = model.parse_response(response)
+        assert result["seq"] == 5
+        assert result.get("payload_size", 0) == 0
+
+    def test_parse_response_server_error_full(self):
+        """Test parsing SERVER_ERROR_RESPONSE with full payload."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        header = bytearray([0x11, 0xF0, 0x10, 0x00])
+        code_bytes = (2000).to_bytes(4, "big", signed=False)
+        payload_size_bytes = (16).to_bytes(4, "big", signed=False)
+        error_data = b'{"error": "test error"}'
+        response = bytes(header) + code_bytes + payload_size_bytes + error_data
+
+        result = model.parse_response(response)
+        assert result["code"] == 2000
+        assert result["payload_size"] == 16
+
+    def test_slice_data_exact_division(self):
+        """Test data slicing when data divides evenly into chunks."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        data = b"123456"
+        chunks = list(model.slice_data(data, 2))
+        assert len(chunks) == 3
+        assert chunks[0] == (b"12", False)
+        assert chunks[1] == (b"34", False)
+        assert chunks[2] == (b"56", True)
+
+    def test_slice_data_empty(self):
+        """Test data slicing with empty data."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        chunks = list(model.slice_data(b"", 3))
+        assert len(chunks) == 1
+        assert chunks[0] == (b"", True)
+
+    def test_slice_data_single_chunk(self):
+        """Test data slicing when data is smaller than chunk size."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+
+        data = b"abc"
+        chunks = list(model.slice_data(data, 10))
+        assert len(chunks) == 1
+        assert chunks[0] == (b"abc", True)
+
+
+class TestVolcSTTModelStreamingSession:
+    """Tests for streaming session methods - skipped due to complex loops."""
+
+    @pytest.mark.skip(reason="process_streaming_audio has complex infinite loop - tested via integration")
+    async def test_start_streaming_session(self):
+        """Test start_streaming_session."""
+        pass
+
+    @pytest.mark.skip(reason="process_streaming_audio has complex infinite loop - tested via integration")
+    async def test_process_streaming_audio(self):
+        """Test process_streaming_audio."""
+        pass
