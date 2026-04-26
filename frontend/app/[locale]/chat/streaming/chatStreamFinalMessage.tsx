@@ -461,10 +461,10 @@ function ChatStreamFinalMessageInner({
                         </Button>
                       </Tooltip>
 
-                      {/* Voice playback button */}
+                      {/* Voice playback button - hidden */}
                       <Tooltip title={ttsButtonContent.tooltip}>
                         <Button
-                          className={`h-8 w-8 rounded-full ${ttsButtonContent.className} transition-all duration-200 shadow-sm`}
+                          className={`hidden h-8 w-8 rounded-full ${ttsButtonContent.className} transition-all duration-200 shadow-sm`}
                           onClick={handleTTSPlay}
                           disabled={
                             ttsStatus === "generating" ||

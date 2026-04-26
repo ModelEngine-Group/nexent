@@ -32,6 +32,7 @@ from database.oauth_account_db import (
     list_oauth_accounts_by_user_id,
     reactivate_oauth_account,
     update_oauth_account_tokens,
+    update_oauth_account_access_token,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id, insert_user_tenant
 
@@ -200,6 +201,7 @@ def exchange_code_for_provider_token(provider: str, code: str) -> Dict[str, Any]
     if definition.token_response_id_key:
         result["openid"] = resp.get(definition.token_response_id_key, "")
 
+    result["raw_response"] = resp
     return result
 
 
@@ -488,6 +490,8 @@ def create_or_update_oauth_account(
     email: Optional[str] = None,
     username: Optional[str] = None,
     tenant_id: Optional[str] = None,
+    access_token: Optional[str] = None,
+    token_expires_at: Optional[Any] = None,
 ) -> Dict[str, Any]:
     existing = get_oauth_account_by_provider(provider, provider_user_id)
 
@@ -502,6 +506,13 @@ def create_or_update_oauth_account(
                 provider_user_id=provider_user_id,
                 provider_username=username,
             )
+            if access_token:
+                update_oauth_account_access_token(
+                    provider=provider,
+                    provider_user_id=provider_user_id,
+                    access_token=access_token,
+                    token_expires_at=token_expires_at,
+                )
         updated = get_oauth_account_by_provider(provider, provider_user_id)
         return updated if updated else existing
 
@@ -515,10 +526,17 @@ def create_or_update_oauth_account(
             provider_username=username,
             tenant_id=tenant_id or DEFAULT_TENANT_ID,
         )
+        if access_token:
+            update_oauth_account_access_token(
+                provider=provider,
+                provider_user_id=provider_user_id,
+                access_token=access_token,
+                token_expires_at=token_expires_at,
+            )
         reactivated = get_oauth_account_by_provider(provider, provider_user_id)
         return reactivated if reactivated else {"provider": provider, "provider_user_id": provider_user_id, "user_id": user_id}
 
-    return insert_oauth_account(
+    result = insert_oauth_account(
         user_id=user_id,
         provider=provider,
         provider_user_id=provider_user_id,
@@ -526,6 +544,14 @@ def create_or_update_oauth_account(
         provider_username=username,
         tenant_id=tenant_id or DEFAULT_TENANT_ID,
     )
+    if access_token:
+        update_oauth_account_access_token(
+            provider=provider,
+            provider_user_id=provider_user_id,
+            access_token=access_token,
+            token_expires_at=token_expires_at,
+        )
+    return result
 
 
 def ensure_user_tenant_exists(user_id: str, email: str) -> Dict[str, Any]:
@@ -564,3 +590,44 @@ def unlink_account(user_id: str, provider: str) -> bool:
     if not success:
         raise OAuthLinkError(f"No linked {provider} account found")
     return True
+
+
+def validate_provider_token(provider: str, access_token: str) -> bool:
+    """Validate if the provider access token is still valid by calling the userinfo endpoint."""
+    try:
+        get_provider_user_info(provider, access_token)
+        return True
+    except Exception as e:
+        logger.warning(f"Provider token validation failed for {provider}: {e}")
+        return False
+
+
+def get_user_oauth_account_by_provider(
+    user_id: str, provider: str
+) -> Optional[Dict[str, Any]]:
+    """Get OAuth account info for a specific user and provider."""
+    accounts = list_oauth_accounts_by_user_id(user_id)
+    for account in accounts:
+        if account.get("provider") == provider:
+            return account
+    return None
+
+
+def sync_sso_token(
+    user_id: str,
+    provider: str,
+    access_token: str,
+    token_expires_at: Optional[Any] = None,
+) -> bool:
+    """Save or update SSO token for a user (called after successful login)."""
+    account = get_user_oauth_account_by_provider(user_id, provider)
+    if not account:
+        logger.debug(f"No OAuth account found for user {user_id} and provider {provider}")
+        return False
+
+    return update_oauth_account_access_token(
+        provider=provider,
+        provider_user_id=account["provider_user_id"],
+        access_token=access_token,
+        token_expires_at=token_expires_at,
+    )

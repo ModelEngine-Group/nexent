@@ -10,6 +10,7 @@ from pydantic import ValidationError as PydanticValidationError
 from consts.model import OAuthCompleteRequest
 from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedError
 from consts.oauth_providers import get_all_provider_definitions
+from consts.const import SSO_ENABLED, SSO_PROVIDER, WORKFLOW_ENABLED, WORKFLOW_URL
 from database.oauth_account_db import get_oauth_account_by_provider
 from services.oauth_service import (
     complete_pending_oauth_account,
@@ -185,12 +186,21 @@ async def callback(
 
         ensure_user_tenant_exists(user_id=supabase_user_id, email=email)
 
+        token_expires_at = None
+        raw_resp = token_data.get("raw_response", {})
+        if "expires_in" in raw_resp:
+            from datetime import datetime, timedelta
+            expires_in = int(raw_resp["expires_in"])
+            token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+
         create_or_update_oauth_account(
             user_id=supabase_user_id,
             provider=provider,
             provider_user_id=provider_user_id,
             email=email,
             username=username,
+            access_token=provider_access_token,
+            token_expires_at=token_expires_at,
         )
 
         expiry_seconds = 3600
@@ -350,3 +360,113 @@ async def delete_account(provider: str, authorization: Optional[str] = Header(No
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to unlink OAuth account",
         )
+
+
+@router.get("/sso/config")
+async def get_sso_config():
+    """Get SSO configuration - whether SSO is enabled and which provider."""
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={
+            "message": "success",
+            "data": {
+                "sso_enabled": SSO_ENABLED,
+                "sso_provider": SSO_PROVIDER if SSO_ENABLED else None,
+            },
+        },
+    )
+
+
+@router.get("/sso/reauthorize")
+async def sso_reauthorize(authorization: Optional[str] = Header(None)):
+    """Get SSO re-authorization URL for users whose token has expired."""
+    if not authorization:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
+
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        if not SSO_ENABLED:
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={"message": "SSO is not enabled", "data": {"sso_enabled": False}},
+            )
+
+        url = get_authorize_url(SSO_PROVIDER, link_user_id=user_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "success",
+                "data": {
+                    "sso_enabled": True,
+                    "provider": SSO_PROVIDER,
+                    "reauthorize_url": url,
+                },
+            },
+        )
+    except UnauthorizedError:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
+    except OAuthProviderError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"SSO re-authorization failed: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to get SSO re-authorization URL",
+        )
+
+
+@router.get("/sso/status")
+async def get_sso_status(authorization: Optional[str] = Header(None)):
+    """Get SSO status for the current logged-in user."""
+    if not authorization:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
+
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        if not SSO_ENABLED:
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    "message": "success",
+                    "data": {"sso_enabled": False, "linked": False},
+                },
+            )
+
+        from services.oauth_service import get_user_oauth_account_by_provider
+        oauth_account = get_user_oauth_account_by_provider(user_id, SSO_PROVIDER)
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "success",
+                "data": {
+                    "sso_enabled": True,
+                    "provider": SSO_PROVIDER,
+                    "linked": oauth_account is not None,
+                    "has_token": oauth_account.get("access_token") is not None if oauth_account else False,
+                },
+            },
+        )
+    except UnauthorizedError:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
+    except Exception as e:
+        logger.error(f"Failed to get SSO status: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to get SSO status",
+        )
+
+
+@router.get("/workflow/config")
+async def get_workflow_config():
+    """Get workflow orchestration configuration."""
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={
+            "message": "success",
+            "data": {
+                "workflow_enabled": WORKFLOW_ENABLED,
+                "workflow_url": WORKFLOW_URL if WORKFLOW_ENABLED else None,
+            },
+        },
+    )

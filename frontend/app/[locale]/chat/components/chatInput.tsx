@@ -871,9 +871,7 @@ export function ChatInput({
         </div>
 
         <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
-          {/* Token usage indicator */}
-          <TokenUsageIndicator latestMetrics={latestMetrics} />
-          {/* Voice to text button */}
+          {/* Voice to text button - hidden */}
           <Tooltip
             title={
               isRecording
@@ -885,7 +883,7 @@ export function ChatInput({
                   type="default"
                   shape="circle"
                   size="middle"
-                  className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+                  className="hidden h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
                   onClick={toggleRecording}
                   disabled={recordingStatus === "connecting" || isStreaming}
             >
@@ -986,7 +984,7 @@ export function ChatInput({
           )}
         </div>
       </div>
-      <div className="mt-1 flex items-center justify-center text-xs text-muted-foreground">
+      <div className="hidden mt-1 flex items-center justify-center text-xs text-muted-foreground">
         <div>
           {recordingStatus === "recording" ? (
             <span className="text-red-500">{t("chatInput.recording")}</span>
