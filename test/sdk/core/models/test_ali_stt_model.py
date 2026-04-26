@@ -7,8 +7,8 @@ import pytest
 import asyncio
 import base64
 import json
-import os
-import sys
+import sys as _sys
+from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 import wave
 
@@ -20,13 +20,7 @@ class _MockConnectionClosed(Exception):
         self.reason = reason
         super().__init__(reason)
 
-# Add SDK to path before imports
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-_sdk_dir = os.path.abspath(os.path.join(_current_dir, "../../../sdk"))
-if _sdk_dir not in sys.path:
-    sys.path.insert(0, _sdk_dir)
-
-# Create a mock websockets module with the ConnectionClosed we can use in tests
+# Create a mock websockets module
 _mock_websockets = MagicMock()
 _mock_websockets.connect = MagicMock()
 _mock_websockets.exceptions = MagicMock()
@@ -34,46 +28,6 @@ _mock_websockets.exceptions.ConnectionClosed = _MockConnectionClosed
 _mock_websockets.exceptions.ConnectionClosedError = _MockConnectionClosed
 _mock_websockets.exceptions.WebSocketException = Exception
 
-# Add mocks before any imports
-_mock_aiofiles = MagicMock()
-
-
-class _MockAsyncContextManager:
-    def __init__(self, mock_file):
-        self.mock_file = mock_file
-
-    async def __aenter__(self):
-        return self.mock_file
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        return None
-
-
-def _mock_aiofiles_open(*args, **kwargs):
-    mock_file = AsyncMock()
-    mock_file.read = AsyncMock(return_value=b"mock_data")
-    return _MockAsyncContextManager(mock_file)
-
-
-_mock_aiofiles.open = _mock_aiofiles_open
-
-
-_module_mocks = {
-    "websockets": _mock_websockets,
-    "aiofiles": _mock_aiofiles,
-}
-
-# Apply mocks before any imports that could trigger SDK imports
-for mod_name, mock_obj in _module_mocks.items():
-    if mod_name not in sys.modules:
-        sys.modules[mod_name] = mock_obj
-
-from nexent.core.models.ali_stt_model import (
-    AliSTTModel,
-    AliSTTConfig,
-    TranscriptionResult,
-)
-
 _mock_aiofiles = MagicMock()
 
 
@@ -101,8 +55,8 @@ _module_mocks = {
     "aiofiles": _mock_aiofiles,
 }
 
-with patch.dict(sys.modules, _module_mocks):
-    from nexent.core.models.ali_stt_model import (
+with patch.dict(_sys.modules, _module_mocks):
+    from sdk.nexent.core.models.ali_stt_model import (
         AliSTTModel,
         AliSTTConfig,
         TranscriptionResult,
@@ -448,19 +402,20 @@ class TestAliSTTModel:
     @pytest.mark.asyncio
     async def test_process_audio_data_intermediate_transcription(self, ali_model):
         """Test process_audio_data with intermediate transcription text (not final)."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Partial"})
+        response3 = json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "Final"})
+        response4 = json.dumps({"type": "session.finished", "transcript": "Final"})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Partial"}),
-            json.dumps({"type": "session.finished", "transcript": "Final"}),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2, response3, response4])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
 
         assert "text" in result
@@ -468,15 +423,15 @@ class TestAliSTTModel:
     @pytest.mark.asyncio
     async def test_process_audio_data_with_callback(self, ali_model):
         """Test process_audio_data with on_result callback."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "Transcribed"})
+        response3 = json.dumps({"type": "session.finished", "transcript": "Transcribed"})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "Transcribed"}),
-            json.dumps({"type": "session.finished", "transcript": "Transcribed"}),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2, response3])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
@@ -484,7 +439,7 @@ class TestAliSTTModel:
         async def on_result(text):
             callback_results.append(text)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data" * 100, 1000, on_result=on_result)
 
         assert "text" in result
@@ -493,15 +448,15 @@ class TestAliSTTModel:
     @pytest.mark.asyncio
     async def test_process_audio_data_callback_intermediate_only(self, ali_model):
         """Test process_audio_data with callback for intermediate results only."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Partial result"})
+        response3 = json.dumps({"type": "session.finished", "transcript": "Final"})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Partial result"}),
-            json.dumps({"type": "session.finished", "transcript": "Final"}),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2, response3])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
@@ -509,7 +464,7 @@ class TestAliSTTModel:
         async def on_result(text):
             callback_results.append(text)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data" * 100, 1000, on_result=on_result)
 
         assert "text" in result
@@ -517,18 +472,18 @@ class TestAliSTTModel:
     @pytest.mark.asyncio
     async def test_process_audio_data_return_empty_text(self, ali_model):
         """Test process_audio_data returns empty text when no transcription."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "session.finished", "transcript": ""})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            json.dumps({"type": "session.finished", "transcript": ""}),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
 
         assert "text" in result
@@ -863,19 +818,19 @@ class TestAliSTTModelProcessAudioData:
     @pytest.mark.asyncio
     async def test_process_audio_data_success(self, ali_model):
         """Test process_audio_data with successful WebSocket communication."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "Hello world"})
+        response3 = json.dumps({"type": "session.finished", "transcript": "Hello world"})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "Hello world"}),
-            json.dumps({"type": "session.finished", "transcript": "Hello world"}),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2, response3])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
 
         assert "text" in result
@@ -883,18 +838,18 @@ class TestAliSTTModelProcessAudioData:
     @pytest.mark.asyncio
     async def test_process_audio_data_error_response(self, ali_model):
         """Test process_audio_data with error response."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "error", "message": "Service error"})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            json.dumps({"type": "error", "message": "Service error"}),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
 
         assert "error" in result
@@ -902,20 +857,20 @@ class TestAliSTTModelProcessAudioData:
     @pytest.mark.asyncio
     async def test_process_audio_data_intermediate_transcription(self, ali_model):
         """Test process_audio_data with intermediate transcription results."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Partial"})
+        response3 = json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "Final"})
+        response4 = json.dumps({"type": "session.finished", "transcript": "Final"})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Partial"}),
-            json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "Final"}),
-            json.dumps({"type": "session.finished", "transcript": "Final"}),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2, response3, response4])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
 
         assert "text" in result
@@ -923,18 +878,17 @@ class TestAliSTTModelProcessAudioData:
     @pytest.mark.asyncio
     async def test_process_audio_data_timeout(self, ali_model):
         """Test process_audio_data with timeout."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            asyncio.TimeoutError(),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, asyncio.TimeoutError()])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data", 1000)
 
         assert "text" in result or "error" in result
@@ -942,11 +896,11 @@ class TestAliSTTModelProcessAudioData:
     @pytest.mark.asyncio
     async def test_process_audio_data_websocket_exception(self, ali_model):
         """Test process_audio_data when WebSocket raises exception."""
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(side_effect=Exception("Connection failed"))
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data", 1000)
 
         assert "error" in result
@@ -954,18 +908,18 @@ class TestAliSTTModelProcessAudioData:
     @pytest.mark.asyncio
     async def test_process_audio_data_empty_transcription(self, ali_model):
         """Test process_audio_data with empty transcription."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "session.finished", "transcript": ""})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            json.dumps({"type": "session.finished", "transcript": ""}),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data", 1000)
 
         assert "text" in result
@@ -974,18 +928,18 @@ class TestAliSTTModelProcessAudioData:
     async def test_process_audio_data_vad_disabled_commit(self, ali_model):
         """Test process_audio_data with VAD disabled triggers commit."""
         ali_model.config.enable_vad = False
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "session.finished", "transcript": "Test"})
+
         mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[
-            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
-            json.dumps({"type": "session.finished", "transcript": "Test"}),
-        ])
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2])
         mock_ws.send = AsyncMock()
 
-        mock_connect = MagicMock()
+        mock_connect = AsyncMock()
         mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_connect.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("websockets.connect", return_value=mock_connect):
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
             result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
 
         assert mock_ws.send.call_count >= 4

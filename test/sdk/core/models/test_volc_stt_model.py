@@ -742,17 +742,118 @@ class TestVolcSTTModelAdditional:
 
 
 class TestVolcSTTModelStreamingSession:
-    """Tests for streaming session methods - skipped due to complex loops."""
+    """Tests for streaming session methods."""
 
-    @pytest.mark.skip(reason="process_streaming_audio has complex infinite loop - tested via integration")
-    async def test_start_streaming_session(self):
-        """Test start_streaming_session."""
-        pass
+    @pytest.fixture
+    def volc_config(self):
+        config = VolcSTTConfig(appid="test_appid", access_token="test_token")
+        return config
 
-    @pytest.mark.skip(reason="process_streaming_audio has complex infinite loop - tested via integration")
-    async def test_process_streaming_audio(self):
-        """Test process_streaming_audio."""
-        pass
+    @pytest.fixture
+    def volc_model(self, volc_config):
+        return VolcSTTModel(volc_config, "/path/to/test/audio.pcm")
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_success(self, volc_model):
+        mock_ws_client = AsyncMock()
+        mock_ws_client.send_json = AsyncMock()
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+        mock_ws_server = AsyncMock()
+        mock_ws_server.send = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[response_data, response_data, _MockConnectionClosedError(1000, "Closed")])
+        mock_ws_server.response_headers = {}
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_exception(self, volc_model):
+        mock_ws_client = AsyncMock()
+        mock_ws_client.send_json = AsyncMock()
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=Exception("Connection failed"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_process_streaming_audio_client_disconnect_early(self, volc_model):
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[_MockConnectionClosedError(1000, "Client closed")])
+        mock_ws_client.send_json = AsyncMock()
+        mock_ws_server = AsyncMock()
+        mock_ws_server.send = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[Exception("Server disconnected")])
+        mock_ws_server.response_headers = {}
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.process_streaming_audio(mock_ws_client, 1000)
+
+    @pytest.mark.asyncio
+    async def test_process_streaming_audio_empty_audio(self, volc_model):
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[b"", _MockConnectionClosedError(1000, "Client closed")])
+        mock_ws_client.send_json = AsyncMock()
+        mock_ws_server = AsyncMock()
+        mock_ws_server.send = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[_MockConnectionClosedError(1000, "Server closed")])
+        mock_ws_server.response_headers = {}
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.process_streaming_audio(mock_ws_client, 1000)
+
+    @pytest.mark.asyncio
+    async def test_process_streaming_audio_exception(self, volc_model):
+        mock_ws_client = AsyncMock()
+        mock_ws_client.send_json = AsyncMock()
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=Exception("Connection failed"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.process_streaming_audio(mock_ws_client, 1000)
+
+    @pytest.mark.asyncio
+    async def test_process_streaming_audio_server_connection_closed(self, volc_model):
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[b"audio_data", _MockConnectionClosedError(1000, "Client closed")])
+        mock_ws_client.send_json = AsyncMock()
+        mock_ws_server = AsyncMock()
+        mock_ws_server.send = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[_MockConnectionClosedError(1000, "Server closed")])
+        mock_ws_server.response_headers = {}
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.process_streaming_audio(mock_ws_client, 1000)
+
+    @pytest.mark.asyncio
+    async def test_process_streaming_audio_send_exception(self, volc_model):
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[b"audio_data", _MockConnectionClosedError(1000, "Client closed")])
+        mock_ws_client.send_json = AsyncMock()
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+        mock_ws_server = AsyncMock()
+        mock_ws_server.send = AsyncMock(side_effect=Exception("Send failed"))
+        mock_ws_server.recv = AsyncMock(side_effect=[response_data, _MockConnectionClosedError(1000, "Server closed")])
+        mock_ws_server.response_headers = {}
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.process_streaming_audio(mock_ws_client, 1000)
 
 
 class TestVolcSTTModelExceptionHandling:
