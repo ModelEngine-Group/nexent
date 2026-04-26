@@ -190,7 +190,7 @@ COMMENT ON COLUMN "model_record_t"."used_token" IS 'Number of tokens already use
 COMMENT ON COLUMN "model_record_t".expected_chunk_size IS 'Expected chunk size for embedding models, used during document chunking';
 COMMENT ON COLUMN "model_record_t".maximum_chunk_size IS 'Maximum chunk size for embedding models, used during document chunking';
 COMMENT ON COLUMN "model_record_t"."display_name" IS 'Model name displayed directly in frontend, customized by user';
-COMMENT ON COLUMN "model_record_t"."connect_status" IS 'Model connectivity status from last check, optional values: "妫€娴嬩腑"銆?鍙敤"銆?涓嶅彲鐢?';
+COMMENT ON COLUMN "model_record_t"."connect_status" IS 'Model connectivity status from last check, optional values: "检测中"、"可用"、"不可用"';
 COMMENT ON COLUMN "model_record_t"."ssl_verify" IS 'Whether to verify SSL certificates when connecting to this model API. Default is true. Set to false for local services without SSL support.';
 COMMENT ON COLUMN "model_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "model_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
@@ -966,7 +966,6 @@ INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, cre
 VALUES ('user_id', 'tenant_id', 'SPEED', '', 'system', 'system')
 ON CONFLICT (user_id, tenant_id) DO NOTHING;
 
-
 -- Create the ag_tenant_agent_version_t table for agent version management
 CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_version_t (
     id BIGSERIAL PRIMARY KEY,
@@ -1276,7 +1275,4 @@ WHERE delete_flag = 'N';
 CREATE INDEX IF NOT EXISTS idx_ag_outer_api_services_mcp_service_name
 ON nexent.ag_outer_api_services (mcp_service_name)
 WHERE delete_flag = 'N';
-
-
-
 

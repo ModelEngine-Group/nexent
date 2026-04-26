@@ -41,7 +41,7 @@ trim_quotes() {
 
 load_options() {
   if [ ! -f "$OPTIONS_FILE" ]; then
-    log "WARN" "鈿欙笍  deploy.options not found, entering interactive configuration mode."
+    log "WARN" "⚙️  deploy.options not found, entering interactive configuration mode."
     : > "$OPTIONS_FILE"
     return
   fi
@@ -98,7 +98,7 @@ prompt_option_value() {
       fi
     fi
 
-    log "WARN" "鈿狅笍  ${key} cannot be empty, please enter a value."
+    log "WARN" "⚠️  ${key} cannot be empty, please enter a value."
   done
 }
 
@@ -110,7 +110,7 @@ require_option() {
     if [ -n "$prompt_msg" ]; then
       prompt_option_value "$key" "$prompt_msg"
     else
-      log "ERROR" "鉂?${key} is missing in deploy.options, add it and rerun."
+      log "ERROR" "❌ ${key} is missing in deploy.options, add it and rerun."
       exit 1
     fi
   fi
@@ -145,7 +145,7 @@ compare_versions() {
 
 collect_upgrade_sqls() {
   if [ ! -d "$SQL_DIR" ]; then
-    log "WARN" "馃摥 SQL directory not found, skipping database upgrade scripts."
+    log "WARN" "📭 SQL directory not found, skipping database upgrade scripts."
     return
   fi
 
@@ -186,13 +186,13 @@ build_deploy_args() {
 
 ensure_docker() {
   if ! command -v docker >/dev/null 2>&1; then
-    log "ERROR" "馃洃 Docker CLI not detected, install Docker before continuing."
+    log "ERROR" "🛑 Docker CLI not detected, install Docker before continuing."
     exit 1
   fi
 }
 
 ensure_postgres_env() {
-  require_file "$ENV_FILE" "馃搧 docker/.env not found; unable to load database credentials."
+  require_file "$ENV_FILE" "📁 docker/.env not found; unable to load database credentials."
   set -a
   source "$ENV_FILE"
   set +a
@@ -203,23 +203,23 @@ ensure_postgres_env() {
 run_deploy() {
   # Stop and remove any existing containers before redeployment
   docker compose -p nexent down -v
-  log "INFO" "馃殌 Starting deploy..."
+  log "INFO" "🚀 Starting deploy..."
   (cd "$SCRIPT_DIR" && cp .env.example .env && bash "$DEPLOY_SCRIPT" "${DEPLOY_ARGS[@]}")
 
 }
 
 run_sql_scripts() {
   if [ "${#UPGRADE_SQL_FILES[@]}" -eq 0 ]; then
-    log "INFO" "馃摥 No database upgrade scripts detected, skipping this step."
+    log "INFO" "📭 No database upgrade scripts detected, skipping this step."
     return
   fi
 
   ensure_postgres_env
 
   for sql_file in "${UPGRADE_SQL_FILES[@]}"; do
-    log "INFO" "馃梼锔? Running database upgrade script $(basename "$sql_file") ..."
+    log "INFO" "🗃️  Running database upgrade script $(basename "$sql_file") ..."
     if ! docker exec -i nexent-postgresql psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 < "$sql_file"; then
-      log "ERROR" "鉂?Failed to execute $(basename "$sql_file"), please verify the script."
+      log "ERROR" "❌ Failed to execute $(basename "$sql_file"), please verify the script."
       exit 1
     fi
   done
@@ -277,34 +277,34 @@ check_version_spans_v180() {
 # Execute the v1.8.0 user metadata sync script
 run_v180_sync_script() {
   if [ ! -f "$V180_SCRIPT" ]; then
-    log "WARN" "鈿狅笍  v180_sync_user_metadata.sh not found, skipping v1.8.0 metadata sync."
+    log "WARN" "⚠️  v180_sync_user_metadata.sh not found, skipping v1.8.0 metadata sync."
     return
   fi
 
-  log "INFO" "馃梽锔? Detected version span includes v1.8.0, executing user metadata sync script..."
+  log "INFO" "🗄️  Detected version span includes v1.8.0, executing user metadata sync script..."
 
   if ! bash "$V180_SCRIPT"; then
-    log "ERROR" "鉂?Failed to execute v180_sync_user_metadata.sh, please verify the script."
+    log "ERROR" "❌ Failed to execute v180_sync_user_metadata.sh, please verify the script."
     exit 1
   fi
 
-  log "INFO" "鉁?v1.8.0 user metadata sync completed successfully."
+  log "INFO" "✅ v1.8.0 user metadata sync completed successfully."
 }
 
 
 prompt_deploy_options() {
   # Only prompt for options that already exist in DEPLOY_OPTIONS
   if [[ -n "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}" ]]; then
-    echo "馃殌 Please select deployment version:"
-    echo "   1) 鈿★笍  Speed version - Lightweight deployment with essential features"
-    echo "   2) 馃幆  Full version - Full-featured deployment with all capabilities"
+    echo "🚀 Please select deployment version:"
+    echo "   1) ⚡️  Speed version - Lightweight deployment with essential features"
+    echo "   2) 🎯  Full version - Full-featured deployment with all capabilities"
     prompt_option_value "VERSION_CHOICE" "Enter your choice [1/2] (default: ${DEPLOY_OPTIONS[VERSION_CHOICE]:-1})" "${DEPLOY_OPTIONS[VERSION_CHOICE]:-1}" "text"
   fi
   if [[ -n "${DEPLOY_OPTIONS[MODE_CHOICE]:-}" ]]; then
-    echo "馃帥锔? Please select deployment mode:"
-    echo "   1) 馃洜锔? Development mode - Expose all service ports for debugging"
-    echo "   2) 馃彈锔? Infrastructure mode - Only start infrastructure services"
-    echo "   3) 馃殌 Production mode - Only expose port 3000 for security"
+    echo "🎛️  Please select deployment mode:"
+    echo "   1) 🛠️  Development mode - Expose all service ports for debugging"
+    echo "   2) 🏗️  Infrastructure mode - Only start infrastructure services"
+    echo "   3) 🚀 Production mode - Only expose port 3000 for security"
     prompt_option_value "MODE_CHOICE" "Enter your choice [1/2/3] (default: ${DEPLOY_OPTIONS[MODE_CHOICE]:-1})" "${DEPLOY_OPTIONS[MODE_CHOICE]:-1}" "text"
   fi
   if [[ -n "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}" ]]; then
@@ -365,17 +365,17 @@ main() {
 
   NEW_APP_VERSION="$(get_const_app_version)"
   if [ -z "$NEW_APP_VERSION" ]; then
-    log "ERROR" "鉂?Unable to parse APP_VERSION from const.py, please verify the file."
+    log "ERROR" "❌ Unable to parse APP_VERSION from const.py, please verify the file."
     exit 1
   fi
 
-  log "INFO" "馃摝 Current version: $CURRENT_APP_VERSION"
-  log "INFO" "馃幆 Target version: $NEW_APP_VERSION"
+  log "INFO" "📦 Current version: $CURRENT_APP_VERSION"
+  log "INFO" "🎯 Target version: $NEW_APP_VERSION"
 
   local cmp_result
   cmp_result="$(compare_versions "$NEW_APP_VERSION" "$CURRENT_APP_VERSION")"
   if [ "$cmp_result" -le 0 ]; then
-    log "INFO" "馃毇 Target version ($NEW_APP_VERSION) is not higher than current version ($CURRENT_APP_VERSION), upgrade aborted."
+    log "INFO" "🚫 Target version ($NEW_APP_VERSION) is not higher than current version ($CURRENT_APP_VERSION), upgrade aborted."
     exit 1
   fi
 
@@ -397,21 +397,21 @@ main() {
     fi
 
     # Display current deployment options in a readable format
-    log "INFO" "馃搵 Current deployment options:"
+    log "INFO" "📋 Current deployment options:"
     echo ""
     for key in "${!DEPLOY_OPTIONS[@]}"; do
       value="${DEPLOY_OPTIONS[$key]}"
       desc=$(_get_option_description "$key")
       value_desc=$(_get_option_value_description "$key" "$value")
-      printf "   鈥?%-${max_desc_width}s : %s\n" "$desc" "$value_desc"
+      printf "   • %-${max_desc_width}s : %s\n" "$desc" "$value_desc"
     done
     echo ""
 
-    read -rp "馃攧 Do you want to inherit previous deployment options? [Y/N] (default: Y): " inherit_choice
+    read -rp "🔄 Do you want to inherit previous deployment options? [Y/N] (default: Y): " inherit_choice
     inherit_choice="${inherit_choice:-Y}"
     inherit_choice="$(trim_quotes "$inherit_choice")"
     if [[ "$inherit_choice" =~ ^[Nn]$ ]]; then
-      log "INFO" "馃摑 Starting configuration..."
+      log "INFO" "📝 Starting configuration..."
       # Prompt for deployment options with existing values as defaults
       prompt_deploy_options
     fi
@@ -433,8 +433,4 @@ main() {
 }
 
 main "$@"
-
-
-
-
 
