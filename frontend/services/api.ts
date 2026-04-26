@@ -32,8 +32,11 @@ export const API_ENDPOINTS = {
     pending: `${API_BASE_URL}/user/oauth/pending`,
     complete: `${API_BASE_URL}/user/oauth/complete`,
     accounts: `${API_BASE_URL}/user/oauth/accounts`,
-    unlink: (provider: string) =>
-      `${API_BASE_URL}/user/oauth/accounts/${provider}`,
+    unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
+    ssoConfig: `${API_BASE_URL}/user/oauth/sso/config`,
+    ssoStatus: `${API_BASE_URL}/user/oauth/sso/status`,
+    ssoReauthorize: `${API_BASE_URL}/user/oauth/sso/reauthorize`,
+    workflowConfig: `${API_BASE_URL}/user/oauth/workflow/config`,
   },
   cas: {
     config: `${API_BASE_URL}/user/cas/config`,

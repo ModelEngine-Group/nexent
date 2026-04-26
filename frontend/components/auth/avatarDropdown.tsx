@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
 import {
@@ -19,6 +19,8 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
 import { USER_ROLES } from "@/const/auth";
+import { oauthService } from "@/services/oauthService";
+import log from "@/lib/logger";
 import { DeleteAccountModal } from "./DeleteAccountModal";
 
 export function AvatarDropdown() {
@@ -27,6 +29,7 @@ export function AvatarDropdown() {
     useAuthenticationContext();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [ssoConfig, setSsoConfig] = useState<{ sso_enabled: boolean; sso_provider: string } | null>(null);
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
@@ -48,6 +51,18 @@ export function AvatarDropdown() {
         return t("auth.user");
     }
   };
+
+  useEffect(() => {
+    const fetchSSOConfig = async () => {
+      try {
+        const config = await oauthService.getSSOConfig();
+        setSsoConfig(config);
+      } catch (error) {
+        log.error("Failed to fetch SSO config:", error);
+      }
+    };
+    fetchSSOConfig();
+  }, []);
 
   // Show loading while authentication is in progress
   if (isLoading) {
@@ -79,10 +94,19 @@ export function AvatarDropdown() {
         label: t("auth.login"),
         onClick: () => {
           setDropdownOpen(false);
-          openLoginModal();
+          if (ssoConfig?.sso_enabled) {
+            const provider = ssoConfig.sso_provider || "default";
+            oauthService.startOAuthLogin(provider);
+          } else {
+            openLoginModal();
+          }
         },
       },
-      {
+    ];
+
+    // Only show register button when SSO is disabled
+    if (!ssoConfig?.sso_enabled) {
+      items.push({
         key: "register",
         icon: <UserRoundPlus size={16} />,
         label: t("auth.register"),
@@ -90,8 +114,8 @@ export function AvatarDropdown() {
           setDropdownOpen(false);
           openRegisterModal();
         },
-      },
-    ];
+      });
+    }
 
     return (
       <ConfigProvider getPopupContainer={() => document.body}>

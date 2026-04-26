@@ -3,16 +3,18 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Card, Modal, message } from "antd";
-import { Github, Unlink, Link2, Plus } from "lucide-react";
+import { Github, Unlink, Link2, Plus, RefreshCw, ExternalLink } from "lucide-react";
 
 import {
   oauthService,
   type OAuthAccount,
   type OAuthProvider,
 } from "@/services/oauthService";
+import log from "@/lib/logger";
 
 const providerIcons: Record<string, React.ReactNode> = {
   github: <Github size={20} />,
+  gde: <ExternalLink size={20} />,
 };
 
 interface ProviderRow {
@@ -26,8 +28,10 @@ export function OAuthAccountsSection() {
   const { t } = useTranslation("common");
   const [accounts, setAccounts] = useState<OAuthAccount[]>([]);
   const [enabledProviders, setEnabledProviders] = useState<OAuthProvider[]>([]);
+  const [ssoConfig, setSsoConfig] = useState<{ sso_enabled: boolean; sso_provider: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [unlinkTarget, setUnlinkTarget] = useState<OAuthAccount | null>(null);
+  const [reauthorizing, setReauthorizing] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -35,13 +39,20 @@ export function OAuthAccountsSection() {
 
   const loadData = async () => {
     setLoading(true);
-    const [linked, providers] = await Promise.all([
-      oauthService.getLinkedAccounts(),
-      oauthService.getEnabledProviders(),
-    ]);
-    setAccounts(linked);
-    setEnabledProviders(providers);
-    setLoading(false);
+    try {
+      const [linked, providers, sso] = await Promise.all([
+        oauthService.getLinkedAccounts(),
+        oauthService.getEnabledProviders(),
+        oauthService.getSSOConfig(),
+      ]);
+      setAccounts(linked);
+      setEnabledProviders(providers);
+      setSsoConfig(sso);
+    } catch (error) {
+      log.error("Failed to load OAuth data:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleUnlink = async () => {
@@ -57,6 +68,23 @@ export function OAuthAccountsSection() {
       }
     } finally {
       setUnlinkTarget(null);
+    }
+  };
+
+  const handleReauthorize = async (provider: string) => {
+    setReauthorizing(true);
+    try {
+      const result = await oauthService.reauthorizeSSO();
+      if (result?.reauthorize_url) {
+        window.location.href = result.reauthorize_url;
+      } else {
+        message.error(t("auth.reauthorizeFailed"));
+      }
+    } catch (error) {
+      log.error("Failed to reauthorize SSO:", error);
+      message.error(t("auth.reauthorizeFailed"));
+    } finally {
+      setReauthorizing(false);
     }
   };
 
@@ -104,15 +132,28 @@ export function OAuthAccountsSection() {
                 </div>
               </div>
               {row.linked ? (
-                <Button
-                  type="link"
-                  danger
-                  size="small"
-                  icon={<Unlink size={14} />}
-                  onClick={() => setUnlinkTarget(row.account!)}
-                >
-                  {t("auth.unlinkAccount")}
-                </Button>
+                <div className="flex items-center gap-2">
+                  {row.name === ssoConfig?.sso_provider && (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<RefreshCw size={14} />}
+                      onClick={() => handleReauthorize(row.name)}
+                      loading={reauthorizing}
+                    >
+                      {t("auth.reauthorize")}
+                    </Button>
+                  )}
+                  <Button
+                    type="link"
+                    danger
+                    size="small"
+                    icon={<Unlink size={14} />}
+                    onClick={() => setUnlinkTarget(row.account!)}
+                  >
+                    {t("auth.unlinkAccount")}
+                  </Button>
+                </div>
               ) : (
                 <Button
                   size="small"

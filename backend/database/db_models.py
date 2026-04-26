@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
@@ -946,6 +946,8 @@ class UserOAuthAccount(TableBase):
     provider_username = Column(
         String(200), doc="Display name from the OAuth provider")
     tenant_id = Column(String(100), doc="Tenant ID at time of linking")
+    access_token = Column(Text, doc="OAuth access token for SSO auto-login")
+    token_expires_at = Column(DateTime(timezone=True), doc="Access token expiration time")
 
 
 class UserCasSession(TableBase):

@@ -89,6 +89,14 @@ OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 
+# SSO Auto-Login Configuration (for third-party OAuth providers like GDE)
+SSO_ENABLED = os.getenv("SSO_ENABLED", "false").lower() == "true"
+SSO_PROVIDER = os.getenv("SSO_PROVIDER", "gde")  # Default provider for SSO
+
+# Workflow Orchestration Configuration
+WORKFLOW_ENABLED = os.getenv("WORKFLOW_ENABLED", "false").lower() == "true"
+WORKFLOW_URL = os.getenv("WORKFLOW_URL", "")  # URL to redirect to for workflow orchestration
+
 
 # CAS SSO Configuration
 CAS_ENABLED = os.getenv("CAS_ENABLED", "false").lower() in ("true", "1", "yes", "on")

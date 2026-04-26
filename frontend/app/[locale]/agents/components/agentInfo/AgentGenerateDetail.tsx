@@ -1046,7 +1046,7 @@ export default function AgentGenerateDetail({}) {
                               {
                                 type: "number",
                                 min: 1,
-                                max: 30,
+                                max: 100,
                                 message: t("businessLogic.config.maxSteps"),
                               },
                             ]}

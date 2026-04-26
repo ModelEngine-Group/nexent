@@ -12,6 +12,8 @@ import { authEvents, authEventUtils } from "@/lib/authEvents";
 import { authFlowState } from "@/lib/authFlow";
 import { casService } from "@/services/casService";
 import { AuthenticationUIReturn, RegisterModalOptions } from "@/types/auth";
+import { oauthService } from "@/services/oauthService";
+import log from "@/lib/logger";
 
 /**
  * Custom hook for authentication UI management
@@ -46,6 +48,19 @@ export function useAuthenticationUI({
   const [isAuthPromptModalOpen, setIsAuthPromptModalOpen] = useState(false);
   const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] =
     useState(false);
+  const [ssoConfig, setSsoConfig] = useState<{ sso_enabled: boolean; sso_provider: string } | null>(null);
+
+  useEffect(() => {
+    const fetchSSOConfig = async () => {
+      try {
+        const config = await oauthService.getSSOConfig();
+        setSsoConfig(config);
+      } catch (error) {
+        log.error("Failed to fetch SSO config:", error);
+      }
+    };
+    fetchSSOConfig();
+  }, []);
 
   const handleUnauthenticatedModalClose = () => {
     // Only emit back to home event and redirect if user is not authenticated
@@ -153,7 +168,6 @@ export function useAuthenticationUI({
       setRegisterModalOptions(null);
     };
 
-    // Add event listener using type-safe auth events
     const cleanup = authEvents.on(
       AUTH_EVENTS.SESSION_EXPIRED,
       handleSessionExpired
@@ -163,7 +177,6 @@ export function useAuthenticationUI({
       handleRegisterSuccess
     );
 
-    // Return cleanup function
     return () => {
       cleanup();
       cleanupRegister();
@@ -217,19 +230,26 @@ export function useAuthenticationUI({
   }, [isOAuthCompletePage]);
 
   // Route guard for unauthenticated users - check when pathname changes
+  // When SSO is enabled, skip showing auth prompt modal and let user browse freely
   useEffect(() => {
     if (isSpeedMode) return;
     if (isOAuthCompletePage) return;
     if (isSharePage) return;
     // Skip while checking auth state
     if (isAuthChecking) return;
-    // Skip if user is authenticated
     if (isAuthenticated) return;
-    // Skip if session expired modal is already showing (avoid duplicate modals)
     if (isSessionExpiredModalOpen) return;
     if (isLoginModalOpen) return;
     if (isRegisterModalOpen) return;
     let cancelled = false;
+
+    // If SSO config is still loading or SSO is enabled, skip showing auth prompt modal
+    if (ssoConfig === null || ssoConfig?.sso_enabled) {
+      return;
+    }
+
+    openAuthPromptModal();
+  }, [pathname, isAuthenticated, isSpeedMode, isAuthChecking, isSessionExpiredModalOpen, openAuthPromptModal, isOAuthCompletePage, ssoConfig]);
 
     redirectToCasIfForced(effectivePath).then((redirected) => {
       if (!cancelled && !redirected) {
