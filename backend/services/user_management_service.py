@@ -41,7 +41,10 @@ from consts.exceptions import (
     UserRegistrationException,
     UnauthorizedError,
     ValidationError,
+    SSO_ENABLED,
+    SSO_PROVIDER
 )
+from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 
@@ -54,6 +57,52 @@ from services.invitation_service import use_invitation_code, check_invitation_av
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
 from services.skill_service import init_skill_list_for_tenant
+from services.oauth_service import (
+    get_user_oauth_account_by_provider,
+    validate_provider_token,
+    sync_sso_token,
+    get_authorize_url,
+    exchange_code_for_provider_token,
+    get_provider_user_info,
+)
+
+
+async def sync_sso_after_login(user_id: str, email: str) -> Optional[Dict[str, Any]]:
+    """
+    Sync SSO token after user login via email/password.
+    If SSO is enabled and user has a linked OAuth account, validate and sync the token.
+    Returns SSO info dict if user has SSO binding, None otherwise.
+    """
+    if not SSO_ENABLED:
+        return None
+
+    provider = SSO_PROVIDER
+    oauth_account = get_user_oauth_account_by_provider(user_id, provider)
+    if not oauth_account:
+        logging.debug(f"User {user_id} has no linked {provider} account for SSO")
+        return None
+
+    stored_token = oauth_account.get("access_token")
+    if not stored_token:
+        logging.debug(f"User {user_id} has {provider} binding but no stored token")
+        return None
+
+    token_valid = validate_provider_token(provider, stored_token)
+    if token_valid:
+        logging.info(f"SSO token valid for user {user_id} ({provider})")
+        return {
+            "provider": provider,
+            "sso_status": "valid",
+            "needs_reauth": False,
+        }
+
+    logging.info(f"SSO token expired for user {user_id}, attempting re-authorization")
+    return {
+        "provider": provider,
+        "sso_status": "token_expired",
+        "needs_reauth": True,
+        "oauth_account": oauth_account,
+    }
 
 
 logging.getLogger("user_management_service").setLevel(logging.DEBUG)
@@ -396,7 +445,7 @@ async def signin_user(email: EmailStr,
     logging.info(
         f"User {email} logged in successfully, session validity is {expiry_seconds} seconds, role: {user_role}")
 
-    return {
+    result = {
         "message": f"Login successful, session validity is {expiry_seconds} seconds",
         "data": {
             "user": {
@@ -412,6 +461,12 @@ async def signin_user(email: EmailStr,
             }
         }
     }
+
+    sso_info = await sync_sso_after_login(response.user.id, email)
+    if sso_info:
+        result["data"]["sso"] = sso_info
+
+    return result
 
 
 async def refresh_user_token(authorization, refresh_token: str):

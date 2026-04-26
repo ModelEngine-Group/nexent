@@ -40,6 +40,7 @@ from utils.file_management_utils import save_upload_file
 from nexent import MessageObserver
 from nexent.multi_modal.utils import parse_s3_url
 from nexent.core.models import OpenAILongContextModel
+from nexent.multi_modal.utils import parse_s3_url
 
 # Create upload directory
 upload_dir = Path(UPLOAD_FOLDER)

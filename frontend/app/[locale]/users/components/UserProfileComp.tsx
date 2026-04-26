@@ -36,6 +36,7 @@ import { useGroupList } from "@/hooks/group/useGroupList";
 import { useMemo } from "react";
 import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
 import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection";
+import { SSOStatusBanner } from "@/components/settings/SSOStatusBanner";
 import log from "@/lib/logger";
 import { authService } from "@/services/authService";
 import { getPasswordChecks, getStrengthLevel } from "@/lib/utils";
@@ -700,6 +701,7 @@ export default function UserProfileComp() {
 
       {/* OAuth Linked Accounts */}
       <div className="w-full mt-4">
+        <SSOStatusBanner />
         <OAuthAccountsSection />
       </div>
     </Flex>

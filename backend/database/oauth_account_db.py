@@ -137,6 +137,38 @@ def update_oauth_account_tokens(
         return True
 
 
+def update_oauth_account_access_token(
+    provider: str,
+    provider_user_id: str,
+    access_token: str,
+    token_expires_at: Optional[Any] = None,
+) -> bool:
+    """Update the OAuth access token for a provider account (used for SSO)."""
+    with get_db_session() as session:
+        result = (
+            session.query(UserOAuthAccount)
+            .filter(
+                UserOAuthAccount.provider == provider,
+                UserOAuthAccount.provider_user_id == provider_user_id,
+                UserOAuthAccount.delete_flag == "N",
+            )
+            .first()
+        )
+        if not result:
+            logger.warning(
+                f"OAuth account not found for provider={provider}, "
+                f"provider_user_id={provider_user_id}"
+            )
+            return False
+
+        result.access_token = access_token
+        if token_expires_at is not None:
+            result.token_expires_at = token_expires_at
+
+        session.flush()
+        return True
+
+
 def delete_oauth_account(user_id: str, provider: str) -> bool:
     with get_db_session() as session:
         result = (

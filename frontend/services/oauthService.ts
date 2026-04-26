@@ -78,6 +78,19 @@ function getOAuthErrorKey(errorMessage: string, status?: number): OAuthErrorKey 
   return "auth.oauthCompleteFailed";
 }
 
+export interface SSOCheckResult {
+  sso_enabled: boolean;
+  provider: string;
+  linked: boolean;
+  has_token: boolean;
+}
+
+export interface SSOReauthorizeResult {
+  sso_enabled: boolean;
+  provider: string;
+  reauthorize_url: string | null;
+}
+
 export const oauthService = {
   getEnabledProviders: async (): Promise<OAuthProvider[]> => {
     try {
@@ -182,6 +195,51 @@ export const oauthService = {
     } catch (error) {
       log.error(`Failed to unlink ${provider} account:`, error);
       return false;
+    }
+  },
+
+  getSSOConfig: async (): Promise<{ sso_enabled: boolean; sso_provider: string } | null> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.oauth.ssoConfig);
+      if (!response.ok) {
+        log.warn("Failed to fetch SSO config");
+        return null;
+      }
+      const data = await response.json();
+      return data.data || null;
+    } catch (error) {
+      log.error("Failed to fetch SSO config:", error);
+      return null;
+    }
+  },
+
+  getSSOStatus: async (): Promise<SSOCheckResult | null> => {
+    try {
+      const response = await fetchWithAuth(API_ENDPOINTS.oauth.ssoStatus);
+      if (!response.ok) {
+        log.warn("Failed to fetch SSO status");
+        return null;
+      }
+      const data = await response.json();
+      return data.data || null;
+    } catch (error) {
+      log.error("Failed to fetch SSO status:", error);
+      return null;
+    }
+  },
+
+  reauthorizeSSO: async (): Promise<SSOReauthorizeResult | null> => {
+    try {
+      const response = await fetchWithAuth(API_ENDPOINTS.oauth.ssoReauthorize);
+      if (!response.ok) {
+        log.warn("Failed to reauthorize SSO");
+        return null;
+      }
+      const data = await response.json();
+      return data.data || null;
+    } catch (error) {
+      log.error("Failed to reauthorize SSO:", error);
+      return null;
     }
   },
 };

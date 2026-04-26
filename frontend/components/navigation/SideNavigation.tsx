@@ -18,11 +18,13 @@ import {
   Puzzle,
   Activity,
   Building2,
+  Workflow,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
+import { useWorkflowConfig } from "@/hooks/useWorkflowConfig";
 import { SIDER_CONFIG } from "@/const/layoutConstants";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
@@ -79,6 +81,7 @@ export function SideNavigation({
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { isSpeedMode } = useDeployment();
+  const { data: workflowConfig } = useWorkflowConfig();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -160,6 +163,22 @@ export function SideNavigation({
   // Generate menu items from accessible routes
   const menuItems: MenuProps["items"] = accessibleMenuItems.map(createMenuItem);
 
+  // Add workflow menu item if enabled (only for authenticated users)
+  const workflowMenuItem = isAuthenticated && workflowConfig?.workflow_enabled && workflowConfig?.workflow_url
+    ? {
+        key: "workflow-orchestration",
+        icon: <Workflow className="w-4 h-4" />,
+        label: t("sidebar.workflowOrchestration"),
+        onClick: () => {
+          window.open(workflowConfig.workflow_url!, "_blank");
+        },
+      }
+    : null;
+
+  const allMenuItems = workflowMenuItem
+    ? [...menuItems, workflowMenuItem]
+    : menuItems;
+
   return (
     <ConfigProvider>
       <div className="relative">
@@ -176,7 +195,7 @@ export function SideNavigation({
               mode="inline"
               inlineCollapsed={isCollapsed}
               selectedKeys={[selectedKey]}
-              items={menuItems}
+              items={allMenuItems}
               className="bg-transparent border-r-0 h-full"
             />
           </div>
