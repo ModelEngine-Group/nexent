@@ -116,7 +116,7 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
   ) => {
     if (!fields.length) return null;
     return (
-      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
         <p className="text-sm font-medium text-slate-800">{t(titleKey)}</p>
         {fields.map((field) => (
           <label
@@ -146,7 +146,7 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
                   controller.setValue(field.formKey || "", event.target.value);
                   form.setFieldValue(field.formKey, event.target.value);
                 }}
-                className="mt-2 w-full rounded-xl"
+                className="mt-2 w-full rounded-md"
                 placeholder={
                   field.placeholder ||
                   field.default ||
@@ -181,7 +181,7 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
   ) => {
     if (!args.length) return null;
     return (
-      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
         <p className="text-sm font-medium text-slate-800">{title}</p>
         {args.map((arg) => (
           <label
@@ -213,7 +213,7 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
                   controller.setValue(arg.formKey, event.target.value);
                   form.setFieldValue(arg.formKey, event.target.value);
                 }}
-                className="mt-2 w-full rounded-xl"
+                className="mt-2 w-full rounded-md"
                 placeholder={
                   arg.default ||
                   arg.format ||
@@ -290,7 +290,7 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
                 <Radio
                   key={option.key}
                   value={option.key}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                  className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
                 >
                   <div className="space-y-1">
                     <p className="text-xs text-slate-500">{sourceLabel}</p>
@@ -313,7 +313,7 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
         ) : (
           <>
             {selectedOption?.transportType === "container" ? (
-              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
                 <Form.Item
                   name="containerPort"
                   className="mb-0"
@@ -365,12 +365,9 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
         )}
 
         <div className="flex justify-end gap-2">
-          <Button className="rounded-full" onClick={controller.close}>
-            {t("common.cancel")}
-          </Button>
+          <Button onClick={controller.close}>{t("common.cancel")}</Button>
           <Button
             type="primary"
-            className="rounded-full"
             loading={submitting}
             disabled={!selectedKey || unsupportedOci}
             onClick={handleConfirm}

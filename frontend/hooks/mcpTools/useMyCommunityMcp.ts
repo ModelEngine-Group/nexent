@@ -19,7 +19,6 @@ export interface MyCommunityEditDraft {
   description: string;
   version: string;
   tags: string[];
-  tagInput: string;
 }
 
 const draftFromItem = (item: CommunityMcpCard): MyCommunityEditDraft | null => {
@@ -30,7 +29,6 @@ const draftFromItem = (item: CommunityMcpCard): MyCommunityEditDraft | null => {
     description: item.description || "",
     version: item.version || "",
     tags: item.tags || [],
-    tagInput: "",
   };
 };
 
@@ -88,13 +86,12 @@ export function useMyCommunityMcp(enabled: boolean) {
     setEditDraft((prev) => (prev ? { ...prev, ...patch } : prev));
   }, []);
 
-  const addDraftTag = useCallback(() => {
+  const addDraftTag = useCallback((tag: string) => {
+    const next = tag.trim();
+    if (!next) return;
     setEditDraft((prev) => {
-      if (!prev) return prev;
-      const nextTag = prev.tagInput.trim();
-      if (!nextTag) return { ...prev, tagInput: "" };
-      if (prev.tags.includes(nextTag)) return { ...prev, tagInput: "" };
-      return { ...prev, tags: [...prev.tags, nextTag], tagInput: "" };
+      if (!prev || prev.tags.includes(next)) return prev;
+      return { ...prev, tags: [...prev.tags, next] };
     });
   }, []);
 

@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -10,6 +16,7 @@ import {
   healthcheckMcpToolService,
   listMcpRuntimeTools,
   publishCommunityMcpTool,
+  updateCommunityMcpTool,
   updateMcpToolService,
 } from "@/services/mcpToolsService";
 import { updateToolList } from "@/services/mcpService";
@@ -22,12 +29,6 @@ import { MCP_HEALTH_STATUS, MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import type { McpTool } from "@/types/agentConfig";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
-
-interface HealthErrorState {
-  visible: boolean;
-  title: string;
-  detail: string;
-}
 
 interface ToolsModalState {
   visible: boolean;
@@ -53,13 +54,7 @@ export function useMcpServiceDetail({
   const queryClient = useQueryClient();
 
   const [draft, setDraft] = useState<McpServiceItem | null>(null);
-  const [tagInput, setTagInput] = useState("");
   const [healthChecking, setHealthChecking] = useState(false);
-  const [healthError, setHealthError] = useState<HealthErrorState>({
-    visible: false,
-    title: "",
-    detail: "",
-  });
   const [toolsState, setToolsState] = useState<ToolsModalState>({
     visible: false,
     tools: [],
@@ -71,7 +66,6 @@ export function useMcpServiceDetail({
 
   useEffect(() => {
     setDraft(selectedService ? { ...selectedService } : null);
-    setTagInput("");
   }, [selectedService]);
 
   const invalidateServices = useCallback(() => {
@@ -79,18 +73,14 @@ export function useMcpServiceDetail({
     queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.tagStats });
   }, [queryClient]);
 
-  const addTag = useCallback(() => {
+  const addTag = useCallback((tag: string) => {
+    const next = tag.trim();
+    if (!next) return;
     setDraft((prev) => {
-      if (!prev) return prev;
-      const next = tagInput.trim();
-      if (!next || prev.tags.includes(next)) {
-        setTagInput("");
-        return prev;
-      }
-      setTagInput("");
+      if (!prev || prev.tags.includes(next)) return prev;
       return { ...prev, tags: [...prev.tags, next] };
     });
-  }, [tagInput]);
+  }, []);
 
   const removeTag = useCallback((index: number) => {
     setDraft((prev) =>
@@ -110,7 +100,7 @@ export function useMcpServiceDetail({
       invalidateServices();
     } catch (error) {
       log.error("[useMcpServiceDetail] Health check failed", { error });
-      const { title, detail } = parseHealthCheckError(error, {
+      const parsed = parseHealthCheckError(error, {
         healthFailed: t("mcpTools.service.healthFailed"),
         http401: t("mcpTools.service.health.http401"),
         http503: t("mcpTools.service.health.http503"),
@@ -118,7 +108,27 @@ export function useMcpServiceDetail({
         errorTitle: t("mcpTools.service.healthErrorTitle"),
         timeoutMessage: t("mcpTools.service.healthTimeoutMessage"),
       });
-      setHealthError({ visible: true, title, detail });
+      message.open({
+        type: "error",
+        content: createElement(
+          "div",
+          { className: "max-w-[min(100%,22rem)] text-left" },
+          createElement(
+            "div",
+            { className: "font-medium text-sm" },
+            parsed.title
+          ),
+          createElement(
+            "pre",
+            {
+              className:
+                "mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-all text-xs text-slate-600",
+            },
+            parsed.detail
+          )
+        ),
+        duration: 10,
+      });
       setDraft((prev) =>
         prev ? { ...prev, healthStatus: MCP_HEALTH_STATUS.UNHEALTHY } : prev
       );
@@ -159,10 +169,6 @@ export function useMcpServiceDetail({
     setToolsState({ visible: false, tools: [] });
   }, []);
 
-  const closeHealthError = useCallback(() => {
-    setHealthError({ visible: false, title: "", detail: "" });
-  }, []);
-
   const hasUnsavedChanges = useMemo(() => {
     if (!draft || !selectedService) return false;
     return (
@@ -171,7 +177,8 @@ export function useMcpServiceDetail({
       draft.serverUrl.trim() !== selectedService.serverUrl ||
       !isSameStringArray(draft.tags, selectedService.tags) ||
       (draft.authorizationToken ?? "") !==
-        (selectedService.authorizationToken ?? "")
+        (selectedService.authorizationToken ?? "") ||
+      (draft.version ?? "") !== (selectedService.version ?? "")
     );
   }, [draft, selectedService]);
 
@@ -205,7 +212,7 @@ export function useMcpServiceDetail({
         tags: nextTags,
         authorization_token: nextToken || undefined,
       });
-      message.success(t("mcpTools.service.updated"));
+      message.success(t("mcpTools.service.saveSuccess"));
       invalidateServices();
       try {
         await updateToolList();
@@ -216,7 +223,7 @@ export function useMcpServiceDetail({
       }
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to save service", { error });
-      message.error(t("mcpTools.service.updateFailed"));
+      message.error(t("mcpTools.service.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -246,35 +253,83 @@ export function useMcpServiceDetail({
     }
   }, [invalidateServices, message, onClose, selectedService, t]);
 
-  const publish = useCallback(async () => {
-    if (!selectedService || selectedService.mcpId < 0) return;
-    setPublishing(true);
-    try {
-      await publishCommunityMcpTool(selectedService.mcpId);
-      message.success(t("mcpTools.community.publishSuccess"));
-      queryClient.invalidateQueries({
-        queryKey: MCP_TOOLS_QUERY_KEYS.myCommunity,
-      });
-    } catch (error) {
-      log.error("[useMcpServiceDetail] Publish failed", { error });
-      message.error(t("mcpTools.community.publishFailed"));
-    } finally {
-      setPublishing(false);
-    }
-  }, [message, queryClient, selectedService, t]);
+  /**
+   * Publishes the current service and, if the caller-provided draft differs
+   * from the source (in name / description / version / tags), patches the
+   * freshly created community entry — without ever mutating the local
+   * service.
+   */
+  const publish = useCallback(
+    async (override?: {
+      name?: string;
+      description?: string;
+      version?: string;
+      tags?: string[];
+    }) => {
+      if (!selectedService || selectedService.mcpId < 0) return false;
+      setPublishing(true);
+      try {
+        const result = await publishCommunityMcpTool(selectedService.mcpId);
+        const communityId = result.data?.community_id;
+
+        const sourceName = (selectedService.name || "").trim();
+        const sourceDesc = selectedService.description || "";
+        const sourceVersion = (selectedService.version ?? "").trim();
+        const sourceTags = selectedService.tags || [];
+
+        const editedName = (override?.name ?? sourceName).trim();
+        const editedDesc = override?.description ?? sourceDesc;
+        const editedVersion = (override?.version ?? sourceVersion).trim();
+        const editedTags = override?.tags ?? sourceTags;
+
+        const dirty =
+          communityId &&
+          (editedName !== sourceName ||
+            editedDesc !== sourceDesc ||
+            editedVersion !== sourceVersion ||
+            !isSameStringArray(editedTags, sourceTags));
+
+        if (dirty) {
+          try {
+            await updateCommunityMcpTool({
+              community_id: communityId,
+              name: editedName,
+              description: editedDesc,
+              tags: editedTags,
+              version: editedVersion || undefined,
+            });
+          } catch (error) {
+            log.error(
+              "[useMcpServiceDetail] Publish succeeded but follow-up update failed",
+              { error }
+            );
+          }
+        }
+
+        message.success(t("mcpTools.community.publishSuccess"));
+        queryClient.invalidateQueries({
+          queryKey: MCP_TOOLS_QUERY_KEYS.myCommunity,
+        });
+        return true;
+      } catch (error) {
+        log.error("[useMcpServiceDetail] Publish failed", { error });
+        message.error(t("mcpTools.community.publishFailed"));
+        return false;
+      } finally {
+        setPublishing(false);
+      }
+    },
+    [message, queryClient, selectedService, t]
+  );
 
   return {
     draft,
     setDraft,
-    tagInput,
-    setTagInput,
     addTag,
     removeTag,
     hasUnsavedChanges,
     healthChecking,
     runHealthCheck,
-    healthError,
-    closeHealthError,
     toolsState,
     loadingTools,
     loadTools,

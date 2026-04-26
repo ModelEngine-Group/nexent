@@ -26,7 +26,7 @@ export default function RegistryStatusBadge({
   const badge = getRegistryStatusBadge(status, variant);
   return (
     <span
-      className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${badge.className} ${className}`}
+      className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${badge.className} ${className}`}
     >
       {t(badge.textKey)}
     </span>

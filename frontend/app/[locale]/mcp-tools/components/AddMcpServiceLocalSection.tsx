@@ -21,11 +21,9 @@ export default function AddMcpServiceLocalSection({
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
   const [draft, setDraft] = useState<LocalAddMcpDraft>(INITIAL_LOCAL_ADD_DRAFT);
-  const [tagInput, setTagInput] = useState("");
   const { submit, submitting } = useMcpAddLocal({
     onSuccess: () => {
       setDraft(INITIAL_LOCAL_ADD_DRAFT);
-      setTagInput("");
       form.resetFields();
       onAdded();
     },
@@ -51,9 +49,8 @@ export default function AddMcpServiceLocalSection({
     },
   });
 
-  const addTag = () => {
-    const next = tagInput.trim();
-    setTagInput("");
+  const addTag = (tag: string) => {
+    const next = (tag || "").trim();
     if (!next || draft.tags.includes(next)) return;
     patchDraft({ tags: [...draft.tags, next] });
   };
@@ -91,7 +88,7 @@ export default function AddMcpServiceLocalSection({
           className="mb-0 text-sm text-slate-500"
           rules={rules.name}
         >
-          <Input {...bindField("name")} className="mt-2 w-full rounded-2xl" />
+          <Input {...bindField("name")} className="mt-2 w-full rounded-md" />
         </Form.Item>
 
         <Form.Item
@@ -103,7 +100,7 @@ export default function AddMcpServiceLocalSection({
           <Input.TextArea
             {...bindField("description")}
             autoSize={{ minRows: 1, maxRows: 20 }}
-            className="mt-2 w-full rounded-2xl"
+            className="mt-2 w-full rounded-md"
           />
         </Form.Item>
 
@@ -148,7 +145,7 @@ export default function AddMcpServiceLocalSection({
             >
               <Input
                 {...bindField("serverUrl")}
-                className="mt-2 w-full rounded-2xl"
+                className="mt-2 w-full rounded-md"
                 placeholder={t("mcpTools.addModal.serverUrl")}
               />
             </Form.Item>
@@ -160,13 +157,13 @@ export default function AddMcpServiceLocalSection({
             >
               <Input
                 {...bindField("authorizationToken")}
-                className="mt-2 w-full rounded-2xl"
+                className="mt-2 w-full rounded-md"
                 placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
               />
             </Form.Item>
           </div>
         ) : (
-          <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
             <Form.Item
               label={t("mcpTools.addModal.containerConfig")}
               name="containerConfigJson"
@@ -203,20 +200,13 @@ export default function AddMcpServiceLocalSection({
         <TagEditor
           title={t("mcpTools.addModal.tags")}
           tags={draft.tags}
-          tagInput={tagInput}
-          onTagInputChange={setTagInput}
-          onAddTag={addTag}
+          onAddTag={(tag) => addTag(tag || "")}
           onRemoveTag={removeTag}
         />
       </Form>
 
       <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
-        <Button
-          type="primary"
-          className="rounded-full"
-          onClick={handleSubmit}
-          loading={submitting}
-        >
+        <Button type="primary" onClick={handleSubmit} loading={submitting}>
           {t("mcpTools.addModal.saveAndAdd")}
         </Button>
       </div>

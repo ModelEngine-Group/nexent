@@ -1,27 +1,27 @@
+import { useEffect, useRef, useState } from "react";
 import { Input, Tag } from "antd";
+import { PlusOutlined } from "@ant-design/icons";
+import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
 
 interface TagEditorProps {
   /** Optional heading shown above the tag list. */
   title?: string;
   tags: string[];
-  tagInput: string;
-  onTagInputChange: (value: string) => void;
-  onAddTag: () => void;
+  /** Owned input value (when undefined, the editor manages it internally). */
+  tagInput?: string;
+  onTagInputChange?: (value: string) => void;
+  onAddTag: (value?: string) => void;
   onRemoveTag: (index: number) => void;
-  /**
-   * i18n key used for the remove-button `aria-label`. Defaults to the key used
-   * by the add-service flows; the detail flow overrides this so the label
-   * matches the surrounding copy.
-   */
   removeAriaKey?: string;
   placeholderKey?: string;
 }
 
 /**
- * Reusable tag editor: renders the current tag chips (each with a little
- * remove cross) plus an inline input that commits on Enter/blur. Every MCP
- * form that accepts tags uses this component so they all behave identically.
+ * Reusable tag editor with default AntD Tag styles. Tags are added through a
+ * "+" affordance that toggles an inline input, instead of an always-visible
+ * input pill — this matches AntD's recommended pattern and keeps the row
+ * tidy when no tags are present.
  */
 export default function TagEditor({
   title,
@@ -34,6 +34,27 @@ export default function TagEditor({
   placeholderKey = "mcpTools.addModal.tagInputPlaceholder",
 }: TagEditorProps) {
   const { t } = useTranslation("common");
+  const isControlled = tagInput !== undefined;
+  const [internalValue, setInternalValue] = useState("");
+  const value = isControlled ? (tagInput ?? "") : internalValue;
+  const setValue = (next: string) => {
+    if (isControlled) onTagInputChange?.(next);
+    else setInternalValue(next);
+  };
+
+  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<InputRef>(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const commit = () => {
+    const next = value.trim();
+    if (next) onAddTag(next);
+    setValue("");
+    setEditing(false);
+  };
+
   return (
     <div>
       {title ? (
@@ -41,29 +62,43 @@ export default function TagEditor({
           {title}
         </p>
       ) : null}
-      <div className={`${title ? "mt-2 " : ""}flex flex-wrap gap-2`}>
+      <div
+        className={`${title ? "mt-2 " : ""}flex flex-wrap items-center gap-2`}
+      >
         {tags.map((tag, index) => (
-          <span key={`${tag}-${index}`} className="relative inline-flex">
-            <Tag className="rounded-full px-3 py-1 m-0 leading-none">{tag}</Tag>
-            <button
-              type="button"
-              onClick={() => onRemoveTag(index)}
-              className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] text-slate-500 transition hover:bg-slate-300 hover:text-slate-700"
-              aria-label={t(removeAriaKey, { tag })}
-            >
-              x
-            </button>
-          </span>
+          <Tag
+            key={`${tag}-${index}`}
+            closable
+            closeIcon
+            onClose={(event) => {
+              event.preventDefault();
+              onRemoveTag(index);
+            }}
+            aria-label={t(removeAriaKey, { tag })}
+            className="m-0"
+          >
+            {tag}
+          </Tag>
         ))}
-        <Input
-          size="small"
-          value={tagInput}
-          onChange={(event) => onTagInputChange(event.target.value)}
-          onPressEnter={onAddTag}
-          onBlur={onAddTag}
-          placeholder={t(placeholderKey)}
-          className="w-40 rounded-full"
-        />
+        {editing ? (
+          <Input
+            ref={inputRef}
+            size="small"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onPressEnter={commit}
+            onBlur={commit}
+            placeholder={t(placeholderKey)}
+            className="w-32"
+          />
+        ) : (
+          <Tag
+            onClick={() => setEditing(true)}
+            className="m-0 cursor-pointer border-dashed bg-transparent"
+          >
+            <PlusOutlined /> {t("common.add")}
+          </Tag>
+        )}
       </div>
     </div>
   );

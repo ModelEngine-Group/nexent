@@ -77,7 +77,6 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
   const { t } = useTranslation("common");
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
-  const [tagInput, setTagInput] = useState("");
   const { visible, source, draft, submitting } = controller;
 
   useEffect(() => {
@@ -93,10 +92,6 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
     });
   }, [visible, draft, form]);
 
-  useEffect(() => {
-    if (!visible) setTagInput("");
-  }, [visible]);
-
   if (!draft) {
     return (
       <Modal
@@ -108,18 +103,10 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
     );
   }
 
-  const addTag = () => {
-    const next = tagInput.trim();
-    if (!next) {
-      setTagInput("");
-      return;
-    }
-    if (draft.tags.includes(next)) {
-      setTagInput("");
-      return;
-    }
+  const addTag = (tag: string) => {
+    const next = (tag || "").trim();
+    if (!next || draft.tags.includes(next)) return;
     controller.updateDraft({ tags: [...draft.tags, next] });
-    setTagInput("");
   };
 
   const removeTag = (index: number) => {
@@ -166,7 +153,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
               controller.updateDraft({ name: event.target.value });
               form.setFieldValue("name", event.target.value);
             }}
-            className="mt-2 w-full rounded-2xl"
+            className="mt-2 w-full rounded-md"
           />
         </Form.Item>
 
@@ -183,7 +170,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
               form.setFieldValue("description", event.target.value);
             }}
             autoSize={{ minRows: 1, maxRows: 24 }}
-            className="mt-2 w-full rounded-2xl"
+            className="mt-2 w-full rounded-md"
           />
         </Form.Item>
 
@@ -232,7 +219,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
                   controller.updateDraft({ serverUrl: event.target.value });
                   form.setFieldValue("serverUrl", event.target.value);
                 }}
-                className="mt-2 w-full rounded-2xl"
+                className="mt-2 w-full rounded-md"
               />
             </Form.Item>
             <Form.Item
@@ -249,13 +236,13 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
                   });
                   form.setFieldValue("authorizationToken", event.target.value);
                 }}
-                className="mt-2 w-full rounded-2xl"
+                className="mt-2 w-full rounded-md"
                 placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
               />
             </Form.Item>
           </div>
         ) : (
-          <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
             <Form.Item
               label={t("mcpTools.addModal.containerConfig")}
               name="containerConfigJson"
@@ -298,9 +285,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
         <TagEditor
           title={t("mcpTools.addModal.tags")}
           tags={draft.tags}
-          tagInput={tagInput}
-          onTagInputChange={setTagInput}
-          onAddTag={addTag}
+          onAddTag={(tag) => addTag(tag || "")}
           onRemoveTag={removeTag}
         />
       </Form>

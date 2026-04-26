@@ -13,7 +13,7 @@ const PORT_CHECK_STALE_TIME_MS = 10_000;
 
 /**
  * Checks whether a container port is available. Returns `false` when the port
- * is undefined or already occupied. Callers are responsible for showing any
+ * is undefined or already occupied.
  */
 export async function checkContainerPortAvailable(
   port: number | undefined
@@ -34,7 +34,6 @@ type UseContainerPortAvailabilityParams = {
 
 /**
  * Owns the port-availability query and the "suggest next free port" mutation.
- * Keeps i18n and toasts internal so the component only renders state.
  */
 export function useContainerPortAvailability({
   scope,

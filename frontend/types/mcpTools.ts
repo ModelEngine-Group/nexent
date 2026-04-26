@@ -162,7 +162,7 @@ export interface CommunityMcpCard {
   version?: string;
   description: string;
   status: string;
-  publishedAt: string;
+  createdAt: string;
   updatedAt?: string;
   remotes: Array<{ type: string; url: string }>;
   packages: Array<Record<string, unknown>>;

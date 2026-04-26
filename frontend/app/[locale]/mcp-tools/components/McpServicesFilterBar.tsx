@@ -19,9 +19,9 @@ interface McpServicesFilterBarProps {
 }
 
 /**
- * Three-column filter bar shown at the top of the MCP services listing page.
- * Kept as a standalone component so the page file only wires state and the
- * option lists (which are largely static) stay out of the page body.
+ * Compact 3-pill filter bar designed to sit inline with the search input on
+ * desktop. Each select is fixed-width so the whole row stays balanced
+ * regardless of locale length.
  */
 export default function McpServicesFilterBar({
   source,
@@ -35,12 +35,12 @@ export default function McpServicesFilterBar({
   const { t } = useTranslation("common");
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+    <div className="flex flex-wrap gap-2">
       <Select
         size="large"
         value={source}
         onChange={onSourceChange}
-        className="w-full"
+        className="min-w-[140px] flex-1 lg:flex-none lg:w-36"
         options={[
           { value: FILTER_ALL, label: t("mcpTools.page.sourceFilter.all") },
           { value: MCP_TAB.LOCAL, label: t("mcpTools.source.local") },
@@ -55,7 +55,7 @@ export default function McpServicesFilterBar({
         size="large"
         value={transport}
         onChange={onTransportChange}
-        className="w-full"
+        className="min-w-[140px] flex-1 lg:flex-none lg:w-36"
         options={[
           { value: FILTER_ALL, label: t("mcpTools.page.transportFilter.all") },
           {
@@ -76,7 +76,7 @@ export default function McpServicesFilterBar({
         size="large"
         value={tag}
         onChange={onTagChange}
-        className="w-full"
+        className="min-w-[140px] flex-1 lg:flex-none lg:w-40"
         options={[
           { value: FILTER_ALL, label: t("mcpTools.page.tagFilter.all") },
           ...tagStats.map((item) => ({

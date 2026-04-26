@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { App, Modal, Input, Button, Form } from "antd";
 import { useTranslation } from "react-i18next";
-import { MCP_TRANSPORT_TYPE, MCP_SERVICE_STATUS } from "@/const/mcpTools";
+import {
+  MCP_HEALTH_STATUS,
+  MCP_SERVICE_STATUS,
+  MCP_TRANSPORT_TYPE,
+} from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import {
   extractRegistryLinks,
@@ -16,6 +20,7 @@ import { useMcpServiceDetail } from "@/hooks/mcpTools/useMcpServiceDetail";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import TagEditor from "./shared/TagEditor";
+import PublishConfirmModal from "./PublishConfirmModal";
 
 interface McpServiceDetailModalProps {
   selectedService: McpServiceItem | null;
@@ -37,6 +42,7 @@ export default function McpServiceDetailModal({
   const [logsOpen, setLogsOpen] = useState(false);
   const [showServerJson, setShowServerJson] = useState(false);
   const [showConfigJson, setShowConfigJson] = useState(false);
+  const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
 
   const detail = useMcpServiceDetail({ selectedService, onClose });
   const { draft } = detail;
@@ -136,7 +142,7 @@ export default function McpServiceDetailModal({
                     detail.setDraft({ ...draft, name: event.target.value });
                     form.setFieldValue("name", event.target.value);
                   }}
-                  className="mt-2 w-full rounded-2xl"
+                  className="mt-2 w-full rounded-md"
                 />
               </Form.Item>
 
@@ -156,7 +162,7 @@ export default function McpServiceDetailModal({
                     form.setFieldValue("description", event.target.value);
                   }}
                   autoSize={{ minRows: 1, maxRows: 24 }}
-                  className="mt-2 w-full rounded-2xl"
+                  className="mt-2 w-full rounded-md"
                 />
               </Form.Item>
 
@@ -175,7 +181,7 @@ export default function McpServiceDetailModal({
                     });
                     form.setFieldValue("serverUrl", event.target.value);
                   }}
-                  className="mt-2 w-full rounded-2xl"
+                  className="mt-2 w-full rounded-md"
                 />
               </Form.Item>
 
@@ -198,7 +204,7 @@ export default function McpServiceDetailModal({
                         event.target.value
                       );
                     }}
-                    className="mt-2 w-full rounded-2xl"
+                    className="mt-2 w-full rounded-md"
                     placeholder={t("mcpTools.detail.bearerTokenPlaceholder")}
                   />
                 </Form.Item>
@@ -214,12 +220,6 @@ export default function McpServiceDetailModal({
                 label={t("mcpTools.detail.serverType")}
                 value={t(getTransportLabelKey(draft.transportType))}
               />
-              {draft.version ? (
-                <DetailRow
-                  label={t("mcpTools.detail.version")}
-                  value={draft.version}
-                />
-              ) : null}
               {websiteUrl ? (
                 <DetailLink
                   label={t("mcpTools.detail.website")}
@@ -232,25 +232,36 @@ export default function McpServiceDetailModal({
                   href={repositoryUrl}
                 />
               ) : null}
-              <DetailRow
-                label={t("mcpTools.detail.status")}
-                value={
-                  draft.status === MCP_SERVICE_STATUS.ENABLED
+              <div className="flex items-center justify-between gap-3">
+                <span className="shrink-0 text-slate-500">
+                  {t("mcpTools.detail.status")}
+                </span>
+                <span className="flex items-center gap-2 font-medium text-slate-800">
+                  <StatusLamp
+                    variant={
+                      draft.status === MCP_SERVICE_STATUS.ENABLED
+                        ? "success"
+                        : "neutral"
+                    }
+                  />
+                  {draft.status === MCP_SERVICE_STATUS.ENABLED
                     ? t("mcpTools.status.enabled")
-                    : t("mcpTools.status.disabled")
-                }
-              />
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">
+                    : t("mcpTools.status.disabled")}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="shrink-0 text-slate-500">
                   {t("mcpTools.detail.health")}
                 </span>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-slate-800">
+                <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+                  <span className="flex items-center gap-2 font-medium text-slate-800">
+                    <StatusLamp
+                      variant={healthLampVariant(draft.healthStatus)}
+                    />
                     {t(getHealthStatusKey(draft.healthStatus))}
                   </span>
                   <Button
                     size="small"
-                    className="rounded-full"
                     autoInsertSpace={false}
                     onClick={detail.runHealthCheck}
                     loading={detail.healthChecking}
@@ -278,7 +289,6 @@ export default function McpServiceDetailModal({
                 draft.containerId ? (
                   <Button
                     size="small"
-                    className="rounded-full"
                     autoInsertSpace={false}
                     onClick={() => setLogsOpen(true)}
                   >
@@ -288,7 +298,6 @@ export default function McpServiceDetailModal({
                 {hasRegistryJson ? (
                   <Button
                     size="small"
-                    className="rounded-full"
                     autoInsertSpace={false}
                     onClick={() => setShowServerJson(true)}
                   >
@@ -298,7 +307,6 @@ export default function McpServiceDetailModal({
                 {hasConfigJson ? (
                   <Button
                     size="small"
-                    className="rounded-full"
                     autoInsertSpace={false}
                     onClick={() => setShowConfigJson(true)}
                   >
@@ -307,7 +315,6 @@ export default function McpServiceDetailModal({
                 ) : null}
                 <Button
                   size="small"
-                  className="rounded-full"
                   autoInsertSpace={false}
                   loading={detail.loadingTools}
                   onClick={detail.loadTools}
@@ -320,9 +327,7 @@ export default function McpServiceDetailModal({
             <TagEditor
               title={t("mcpTools.detail.tags")}
               tags={draft.tags}
-              tagInput={detail.tagInput}
-              onTagInputChange={detail.setTagInput}
-              onAddTag={detail.addTag}
+              onAddTag={(tag) => detail.addTag(tag || "")}
               onRemoveTag={detail.removeTag}
               removeAriaKey="mcpTools.detail.removeTagAria"
               placeholderKey="mcpTools.detail.tagInputPlaceholder"
@@ -332,30 +337,23 @@ export default function McpServiceDetailModal({
           <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
             <Button
               danger
-              className="rounded-full"
               autoInsertSpace={false}
               loading={detail.deleting}
               onClick={handleDeleteClick}
             >
               {t("common.delete")}
             </Button>
-            <Button
-              className="rounded-full"
-              loading={detail.saving}
-              onClick={handleSave}
-            >
+            <Button loading={detail.saving} onClick={handleSave}>
               {t("mcpTools.detail.save")}
             </Button>
             <Button
-              className="rounded-full"
               loading={detail.publishing}
-              onClick={detail.publish}
+              onClick={() => setPublishConfirmOpen(true)}
             >
               {t("mcpTools.community.publish")}
             </Button>
             <Button
               type="primary"
-              className="rounded-full"
               autoInsertSpace={false}
               loading={isToggleLoading(selectedService.mcpId)}
               disabled={isToggleLoading(selectedService.mcpId)}
@@ -377,19 +375,6 @@ export default function McpServiceDetailModal({
         serverName={draft.name || String(t("mcpTools.service.defaultName"))}
       />
 
-      <Modal
-        open={detail.healthError.visible}
-        title={detail.healthError.title}
-        onCancel={detail.closeHealthError}
-        onOk={detail.closeHealthError}
-        okText={t("common.confirm")}
-        cancelButtonProps={{ style: { display: "none" } }}
-      >
-        <pre className="max-h-[40vh] overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-50 p-3 text-xs text-slate-700">
-          {detail.healthError.detail}
-        </pre>
-      </Modal>
-
       {showServerJson && hasRegistryJson ? (
         <Modal
           open
@@ -399,10 +384,13 @@ export default function McpServiceDetailModal({
           width={960}
           onCancel={() => setShowServerJson(false)}
           title={t("mcpTools.registry.serverJsonTitle", { name: draft.name })}
+          styles={{ body: { paddingTop: 8 } }}
         >
-          <pre className="max-h-[65vh] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
-            {toPrettyRegistryJson(draft.registryJson)}
-          </pre>
+          <div className="rounded-md border border-slate-200 bg-slate-50">
+            <pre className="max-h-[65vh] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-800">
+              {toPrettyRegistryJson(draft.registryJson)}
+            </pre>
+          </div>
         </Modal>
       ) : null}
 
@@ -415,10 +403,13 @@ export default function McpServiceDetailModal({
           width={960}
           onCancel={() => setShowConfigJson(false)}
           title={t("mcpTools.detail.configJsonTitle", { name: draft.name })}
+          styles={{ body: { paddingTop: 8 } }}
         >
-          <pre className="max-h-[65vh] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
-            {toPrettyRegistryJson(draft.configJson)}
-          </pre>
+          <div className="rounded-md border border-slate-200 bg-slate-50">
+            <pre className="max-h-[65vh] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-800">
+              {toPrettyRegistryJson(draft.configJson)}
+            </pre>
+          </div>
         </Modal>
       ) : null}
 
@@ -430,8 +421,45 @@ export default function McpServiceDetailModal({
           containerId={draft.containerId}
         />
       ) : null}
+
+      <PublishConfirmModal
+        open={publishConfirmOpen}
+        source={selectedService}
+        publishing={detail.publishing}
+        onCancel={() => setPublishConfirmOpen(false)}
+        onConfirm={async (override) => {
+          const ok = await detail.publish(override);
+          if (ok) setPublishConfirmOpen(false);
+        }}
+      />
     </>
   );
+}
+
+type StatusLampVariant = "success" | "neutral" | "danger";
+
+/** Green / grey / red dot for run-state and health at a glance. */
+function StatusLamp({ variant }: { variant: StatusLampVariant }) {
+  const cls =
+    variant === "success"
+      ? "bg-emerald-500 shadow-[0_0_0_1px_rgba(16,185,129,0.35),0_0_8px_rgba(16,185,129,0.25)]"
+      : variant === "danger"
+        ? "bg-rose-500 shadow-[0_0_0_1px_rgba(244,63,94,0.35),0_0_8px_rgba(244,63,94,0.2)]"
+        : "bg-slate-300";
+  return (
+    <span
+      className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${cls}`}
+      aria-hidden
+    />
+  );
+}
+
+function healthLampVariant(
+  health: McpServiceItem["healthStatus"]
+): StatusLampVariant {
+  if (health === MCP_HEALTH_STATUS.HEALTHY) return "success";
+  if (health === MCP_HEALTH_STATUS.UNHEALTHY) return "danger";
+  return "neutral";
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {

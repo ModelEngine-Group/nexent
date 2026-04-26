@@ -60,6 +60,9 @@ export const MCP_PORT_RANGE = { MIN: 1, MAX: 65535 } as const;
 /** Debounce for all text-filter inputs on MCP browsers. */
 export const MCP_SEARCH_DEBOUNCE_MS = 350;
 
+export const MCP_GRID_CARD_OUTER =
+  "group flex h-56 w-full min-h-56 max-h-56 shrink-0 cursor-pointer flex-col overflow-hidden rounded-md border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md";
+
 /** Default blank state for the local-add form. */
 export const INITIAL_LOCAL_ADD_DRAFT: LocalAddMcpDraft = {
   name: "",

@@ -175,7 +175,7 @@ export default function McpRegistryDetailModal({
   ) => {
     if (!items.length) return null;
     return (
-      <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
+      <div className="mt-2 space-y-2 rounded-md border border-slate-100 bg-slate-50 p-2">
         <p className="text-xs font-semibold text-slate-700">{title}</p>
         {items.map((item, index) => {
           const itemTitle = titleResolver
@@ -223,7 +223,7 @@ export default function McpRegistryDetailModal({
           {value.map((item, index) => (
             <div
               key={`${keyPath}-${index}`}
-              className="rounded border border-slate-200 bg-slate-50 p-2"
+              className="rounded-md border border-slate-200 bg-slate-50 p-2"
             >
               <div className="mb-1 text-[11px] font-medium text-slate-500">
                 #{index + 1}
@@ -243,7 +243,7 @@ export default function McpRegistryDetailModal({
         return <span className="text-slate-400">-</span>;
       }
       return (
-        <div className="mt-1 space-y-1 rounded border border-slate-200 bg-slate-50 p-2">
+        <div className="mt-1 space-y-1 rounded-md border border-slate-200 bg-slate-50 p-2">
           {entries.map(([nestedKey, nestedValue]) => (
             <div key={`${keyPath}-${nestedKey}`}>
               <span className="font-medium text-slate-700">{nestedKey}:</span>{" "}
@@ -316,7 +316,7 @@ export default function McpRegistryDetailModal({
             </p>
 
             {websiteUrl || repositoryUrl ? (
-              <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <div className="grid grid-cols-1 gap-3 rounded-md border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                 {websiteUrl ? (
                   <div className="flex flex-wrap gap-2">
                     <span className="text-slate-500">
@@ -368,14 +368,14 @@ export default function McpRegistryDetailModal({
                     return (
                       <div
                         key={`${server.name}-${remoteUrl}-${index}`}
-                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
                       >
                         <p className="font-medium text-slate-900">
                           {remoteType || t("mcpTools.registry.remoteFallback")}
                         </p>
                         <p className="break-all text-slate-600">{remoteUrl}</p>
                         {remoteHeaders.length > 0 ? (
-                          <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
+                          <div className="mt-2 space-y-2 rounded-md border border-slate-100 bg-slate-50 p-2">
                             <p className="text-xs font-semibold text-slate-700">
                               {t("mcpTools.registry.remoteHeaders")}
                             </p>
@@ -418,7 +418,7 @@ export default function McpRegistryDetailModal({
                           </div>
                         ) : null}
                         {remoteVariables.length > 0 ? (
-                          <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
+                          <div className="mt-2 space-y-2 rounded-md border border-slate-100 bg-slate-50 p-2">
                             <p className="text-xs font-semibold text-slate-700">
                               {t("mcpTools.registry.remoteVariables")}
                             </p>
@@ -469,7 +469,7 @@ export default function McpRegistryDetailModal({
                   {displayPackages.map((pkg, index) => (
                     <div
                       key={`${server.name}-${String(pkg.identifier || index)}-${String(pkg.version || "")}-${index}`}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
                     >
                       <p className="font-medium text-slate-900 break-all">
                         {String(pkg.identifier || "-")}
@@ -501,7 +501,7 @@ export default function McpRegistryDetailModal({
                       </div>
 
                       {pkg.transport && typeof pkg.transport === "object" ? (
-                        <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
+                        <div className="mt-2 space-y-2 rounded-md border border-slate-100 bg-slate-50 p-2">
                           <p className="text-xs font-semibold text-slate-700">
                             {t("mcpTools.registry.packageField.transport")}
                           </p>
@@ -618,18 +618,11 @@ export default function McpRegistryDetailModal({
 
           <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
             {hasServerJson ? (
-              <Button
-                className="rounded-full"
-                onClick={() => setShowServerJsonModal(true)}
-              >
+              <Button onClick={() => setShowServerJsonModal(true)}>
                 {t("mcpTools.registry.viewServerJson")}
               </Button>
             ) : null}
-            <Button
-              type="primary"
-              className="rounded-full"
-              onClick={() => onQuickAdd(service)}
-            >
+            <Button type="primary" onClick={() => onQuickAdd(service)}>
               {t("mcpTools.registry.quickAdd")}
             </Button>
           </div>
@@ -646,7 +639,7 @@ export default function McpRegistryDetailModal({
           onCancel={() => setShowServerJsonModal(false)}
           title={t("mcpTools.registry.serverJsonTitle", { name: server.name })}
         >
-          <pre className="max-h-[65vh] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+          <pre className="max-h-[65vh] overflow-auto rounded-md bg-slate-950 p-4 text-xs text-slate-100">
             {serverJsonPretty}
           </pre>
         </Modal>

@@ -45,7 +45,6 @@ export default function ContainerPortField({
           onClick={suggestPort}
           loading={suggesting}
           disabled={portCheckLoading || suggesting}
-          className="rounded-full"
         >
           {t("mcpTools.addModal.suggestPort")}
         </Button>

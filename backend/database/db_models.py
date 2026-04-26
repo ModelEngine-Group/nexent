@@ -467,7 +467,6 @@ class McpCommunityRecord(TableBase):
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
-    last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 
 class UserTenant(TableBase):
     """

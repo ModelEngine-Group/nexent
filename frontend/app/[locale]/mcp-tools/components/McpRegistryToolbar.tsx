@@ -3,7 +3,6 @@ import { DatePicker, Dropdown, Input, Select, Switch } from "antd";
 import type { MenuProps } from "antd";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
-import { VERSION_PATTERN } from "@/const/mcpTools";
 import { McpVersionFilterMode } from "@/types/mcpTools";
 
 interface McpRegistryToolbarProps {
@@ -19,6 +18,11 @@ interface McpRegistryToolbarProps {
   onIncludeDeletedChange: (value: boolean) => void;
 }
 
+/**
+ * Two-line toolbar for the registry browser:
+ *   row 1 — search input + 3 compact filters
+ *   row 2 — paginated result count + "more markets" dropdown
+ */
 export default function McpRegistryToolbar({
   search,
   version,
@@ -35,7 +39,6 @@ export default function McpRegistryToolbar({
   const [versionMode, setVersionMode] = useState<McpVersionFilterMode>(
     McpVersionFilterMode.LATEST
   );
-  const [customVersion, setCustomVersion] = useState("");
 
   const marketMenuItems: MenuProps["items"] = [
     {
@@ -72,83 +75,35 @@ export default function McpRegistryToolbar({
     return parsed.isValid() ? parsed : null;
   }, [updatedSince]);
 
-  const customVersionError =
-    customVersion.trim().length > 0 &&
-    !VERSION_PATTERN.test(customVersion.trim());
-
   useEffect(() => {
-    const value = (version || "").trim();
-    if (!value) {
-      setVersionMode(McpVersionFilterMode.ALL);
-      setCustomVersion("");
-      return;
-    }
-    if (value.toLowerCase() === "latest") {
-      setVersionMode(McpVersionFilterMode.LATEST);
-      setCustomVersion("");
-      return;
-    }
-    setVersionMode(McpVersionFilterMode.CUSTOM);
-    setCustomVersion(value);
+    const value = (version || "").trim().toLowerCase();
+    if (!value) setVersionMode(McpVersionFilterMode.ALL);
+    else if (value === "latest") setVersionMode(McpVersionFilterMode.LATEST);
+    else setVersionMode(McpVersionFilterMode.LATEST);
   }, [version]);
 
   const handleVersionModeChange = (mode: McpVersionFilterMode) => {
     setVersionMode(mode);
-    setCustomVersion("");
-    if (mode === McpVersionFilterMode.ALL) {
-      onVersionChange("");
-      return;
-    }
-    if (mode === McpVersionFilterMode.LATEST) {
-      onVersionChange("latest");
-      return;
-    }
-    onVersionChange("");
-  };
-
-  const handleCustomVersionChange = (value: string) => {
-    setCustomVersion(value);
-    const trimmed = value.trim();
-    if (!trimmed) {
-      onVersionChange("");
-      return;
-    }
-    if (VERSION_PATTERN.test(trimmed)) {
-      onVersionChange(trimmed);
-    }
+    onVersionChange(mode === McpVersionFilterMode.LATEST ? "latest" : "");
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <Input
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t("mcpTools.registry.searchPlaceholder")}
           size="large"
-          className="w-full rounded-2xl"
+          allowClear
+          className="w-full rounded-md lg:flex-1"
         />
-        <div className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-          {t("mcpTools.registry.pageResult", { page, count: resultCount })}
-        </div>
-        <Dropdown
-          menu={{ items: marketMenuItems }}
-          trigger={["hover"]}
-          placement="bottomRight"
-        >
-          <span className="cursor-pointer whitespace-nowrap text-sm font-medium text-[#1677ff] hover:underline">
-            {t("mcpTools.registry.market.more")}
-          </span>
-        </Dropdown>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <label className="text-xs text-slate-500">
-          {t("mcpTools.registry.versionFilter")}
+        <div className="flex flex-wrap gap-2 lg:flex-none">
           <Select
+            size="large"
             value={versionMode}
             onChange={handleVersionModeChange}
-            className="mt-1 w-full"
+            className="min-w-[120px] flex-1 lg:flex-none lg:w-32"
             options={[
               {
                 label: t("mcpTools.registry.versionAll"),
@@ -158,56 +113,45 @@ export default function McpRegistryToolbar({
                 label: t("mcpTools.registry.versionLatest"),
                 value: McpVersionFilterMode.LATEST,
               },
-              {
-                label: t("mcpTools.registry.versionCustom"),
-                value: McpVersionFilterMode.CUSTOM,
-              },
             ]}
           />
-        </label>
-        <label className="text-xs text-slate-500">
-          {t("mcpTools.registry.updatedSince")}
           <DatePicker
+            size="large"
             value={updatedSinceDateValue}
             onChange={(value) =>
               onUpdatedSinceChange(value ? value.toISOString() : "")
             }
-            showTime
             allowClear
-            className="mt-1 w-full"
+            className="min-w-[160px] flex-1 lg:flex-none lg:w-44"
             placeholder={t("mcpTools.registry.updatedSincePlaceholder")}
           />
-        </label>
-        <div className="flex items-end justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2">
-          <div>
-            <p className="text-xs text-slate-500">
+          <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5">
+            <span className="text-xs text-slate-500">
               {t("mcpTools.registry.includeDeleted")}
-            </p>
-            <p className="text-xs text-slate-400">
-              {t("mcpTools.registry.includeDeletedDesc")}
-            </p>
+            </span>
+            <Switch
+              size="small"
+              checked={includeDeleted}
+              onChange={onIncludeDeletedChange}
+            />
           </div>
-          <Switch checked={includeDeleted} onChange={onIncludeDeletedChange} />
         </div>
       </div>
 
-      {versionMode === McpVersionFilterMode.CUSTOM ? (
-        <label className="block text-xs text-slate-500">
-          {t("mcpTools.registry.customVersion")}
-          <Input
-            value={customVersion}
-            onChange={(event) => handleCustomVersionChange(event.target.value)}
-            placeholder={t("mcpTools.registry.customVersionPlaceholder")}
-            status={customVersionError ? "error" : ""}
-            className="mt-1 rounded-xl"
-          />
-          {customVersionError ? (
-            <span className="mt-1 inline-block text-xs text-rose-500">
-              {t("mcpTools.registry.customVersionError")}
-            </span>
-          ) : null}
-        </label>
-      ) : null}
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-slate-400">
+          {t("mcpTools.registry.pageResult", { page, count: resultCount })}
+        </span>
+        <Dropdown
+          menu={{ items: marketMenuItems }}
+          trigger={["hover"]}
+          placement="bottomRight"
+        >
+          <span className="cursor-pointer text-xs font-medium text-[#1677ff] hover:underline">
+            {t("mcpTools.registry.market.more")}
+          </span>
+        </Dropdown>
+      </div>
     </div>
   );
 }

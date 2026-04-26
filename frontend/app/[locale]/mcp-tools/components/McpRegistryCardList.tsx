@@ -28,7 +28,7 @@ export default function McpRegistryCardList({
 
   if (loading) {
     return (
-      <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-slate-500">
+      <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-slate-500">
         {t("mcpTools.registry.loading")}
       </div>
     );
@@ -36,7 +36,7 @@ export default function McpRegistryCardList({
 
   if (services.length === 0) {
     return (
-      <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-slate-500">
+      <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-slate-500">
         {t("mcpTools.registry.empty")}
       </div>
     );
@@ -44,7 +44,7 @@ export default function McpRegistryCardList({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 max-h-[55vh] overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {services.map((service, index) => (
           <McpRegistryCard
             key={`${service.name}::${service.version || "-"}::${service.publishedAt || "-"}::${index}`}
@@ -56,18 +56,10 @@ export default function McpRegistryCardList({
       </div>
 
       <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
-        <Button
-          className="rounded-full"
-          onClick={onPrevPage}
-          disabled={!hasPrevPage || loading}
-        >
+        <Button onClick={onPrevPage} disabled={!hasPrevPage || loading}>
           {t("mcpTools.registry.prevPage")}
         </Button>
-        <Button
-          className="rounded-full"
-          onClick={onNextPage}
-          disabled={!hasNextPage || loading}
-        >
+        <Button onClick={onNextPage} disabled={!hasNextPage || loading}>
           {t("mcpTools.registry.nextPage")}
         </Button>
       </div>

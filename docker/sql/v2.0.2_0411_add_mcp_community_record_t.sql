@@ -19,7 +19,6 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_community_record_t (
     config_json JSON,
     tags TEXT[],
     description TEXT,
-    last_sync_time TIMESTAMP WITHOUT TIME ZONE,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -42,7 +41,6 @@ COMMENT ON COLUMN nexent.mcp_community_record_t.transport_type IS 'Transport typ
 COMMENT ON COLUMN nexent.mcp_community_record_t.config_json IS 'Public-shareable MCP configuration JSON';
 COMMENT ON COLUMN nexent.mcp_community_record_t.tags IS 'Tags';
 COMMENT ON COLUMN nexent.mcp_community_record_t.description IS 'Description';
-COMMENT ON COLUMN nexent.mcp_community_record_t.last_sync_time IS 'Last sync time';
 COMMENT ON COLUMN nexent.mcp_community_record_t.create_time IS 'Creation time';
 COMMENT ON COLUMN nexent.mcp_community_record_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.mcp_community_record_t.created_by IS 'Creator ID';

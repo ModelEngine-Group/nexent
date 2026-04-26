@@ -25,27 +25,37 @@ export default function AddMcpServiceModal({
 
   if (!open) return null;
 
+  /** Fixed body height + inner scroll: avoids size jump on tab/transport change and prevents overflow. */
+  const bodyFrame = "min(95vh, 900px)";
+
   return (
     <Modal
       open
       footer={null}
       closable
       centered
-      width={tab === MCP_TAB.LOCAL ? 900 : 1200}
+      width={1100}
       onCancel={onClose}
       styles={{
-        mask: { background: "rgba(15,23,42,0.6)", backdropFilter: "blur(2px)" },
-        body: { padding: 0 },
+        mask: { background: "rgba(4, 4, 4, 0.6)", backdropFilter: "blur(2px)" },
+        body: {
+          padding: 0,
+          display: "flex",
+          flexDirection: "column",
+          height: bodyFrame,
+          maxHeight: bodyFrame,
+          overflow: "hidden",
+        },
       }}
     >
-      <div>
-        <div className="border-b border-slate-100 px-6 py-5">
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
+        <div className="shrink-0 border-b border-slate-100 px-6 py-5">
           <h2 className="text-2xl font-semibold text-slate-900">
             {t("mcpTools.addModal.title")}
           </h2>
         </div>
 
-        <div className="px-6 pt-4">
+        <div className="shrink-0 px-6 pt-4">
           <Segmented
             value={tab}
             onChange={(value) => setTab(value as McpTab)}
@@ -60,22 +70,24 @@ export default function AddMcpServiceModal({
                 value: MCP_TAB.COMMUNITY,
               },
             ]}
-            className="h-9 rounded-full border border-slate-200 bg-slate-100 p-[2px] text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-full [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:leading-[30px] [&_.ant-segmented-thumb]:rounded-full [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
+            className="h-9 rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:leading-[30px] [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
           />
         </div>
 
-        <AddMcpServiceLocalSection
-          active={tab === MCP_TAB.LOCAL}
-          onAdded={onClose}
-        />
-        <AddMcpServiceRegistrySection
-          active={tab === MCP_TAB.MCP_REGISTRY}
-          onAdded={onClose}
-        />
-        <AddMcpServiceCommunitySection
-          active={tab === MCP_TAB.COMMUNITY}
-          onAdded={onClose}
-        />
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+          <AddMcpServiceLocalSection
+            active={tab === MCP_TAB.LOCAL}
+            onAdded={onClose}
+          />
+          <AddMcpServiceRegistrySection
+            active={tab === MCP_TAB.MCP_REGISTRY}
+            onAdded={onClose}
+          />
+          <AddMcpServiceCommunitySection
+            active={tab === MCP_TAB.COMMUNITY}
+            onAdded={onClose}
+          />
+        </div>
       </div>
     </Modal>
   );

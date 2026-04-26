@@ -70,7 +70,7 @@ export default function McpCommunityDetailModal({
                 <p className="text-sm text-slate-500">
                   {t("mcpTools.detail.name")}
                 </p>
-                <p className="mt-1 break-all rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
+                <p className="mt-1 break-all rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
                   {service.name || "-"}
                 </p>
               </div>
@@ -78,7 +78,7 @@ export default function McpCommunityDetailModal({
                 <p className="text-sm text-slate-500">
                   {t("mcpTools.detail.description")}
                 </p>
-                <p className="mt-1 whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
+                <p className="mt-1 whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
                   {service.description || "-"}
                 </p>
               </div>
@@ -86,7 +86,7 @@ export default function McpCommunityDetailModal({
                 <p className="text-sm text-slate-500">
                   {t("mcpTools.detail.serverUrl")}
                 </p>
-                <p className="mt-1 break-all rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
+                <p className="mt-1 break-all rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
                   {service.serverUrl || "-"}
                 </p>
               </div>
@@ -132,9 +132,17 @@ export default function McpCommunityDetailModal({
                   {t("mcpTools.community.publishedAt")}
                 </span>
                 <span className="font-medium text-slate-800">
-                  {formatRegistryDate(service.publishedAt || "")}
+                  {formatRegistryDate(service.createdAt)}
                 </span>
               </div>
+              { service.updatedAt ? <div className="flex items-center justify-between">
+                <span className="text-slate-500">
+                  {t("mcpTools.detail.updatedAt")}
+                </span>
+                <span className="font-medium text-slate-800">
+                  {formatRegistryDate(service.updatedAt)}
+                </span>
+              </div> : null}
               {websiteUrl ? (
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-slate-500">
@@ -176,7 +184,7 @@ export default function McpCommunityDetailModal({
                   {(service.tags || []).map((tag) => (
                     <span
                       key={`${service.name}-${tag}`}
-                      className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700"
+                      className="rounded-md bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700"
                     >
                       {tag}
                     </span>
@@ -194,7 +202,7 @@ export default function McpCommunityDetailModal({
                   {hasServerJson ? (
                     <Button
                       size="small"
-                      className="rounded-full"
+                      className="rounded-md"
                       autoInsertSpace={false}
                       onClick={() => setShowServerJsonModal(true)}
                     >
@@ -204,7 +212,7 @@ export default function McpCommunityDetailModal({
                   {hasConfigJson ? (
                     <Button
                       size="small"
-                      className="rounded-full"
+                      className="rounded-md"
                       autoInsertSpace={false}
                       onClick={() => setShowConfigJsonModal(true)}
                     >
@@ -219,7 +227,7 @@ export default function McpCommunityDetailModal({
           <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
             <Button
               type="primary"
-              className="rounded-full"
+              className="rounded-md"
               onClick={() => onQuickAdd(service)}
             >
               {t("mcpTools.community.quickAdd")}
@@ -240,7 +248,7 @@ export default function McpCommunityDetailModal({
             name: service.name,
           })}
         >
-          <pre className="max-h-[65vh] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+          <pre className="max-h-[65vh] overflow-auto rounded-md bg-slate-950 p-4 text-xs text-slate-100">
             {serverJsonPretty}
           </pre>
         </Modal>
@@ -256,7 +264,7 @@ export default function McpCommunityDetailModal({
           onCancel={() => setShowConfigJsonModal(false)}
           title={t("mcpTools.detail.configJsonTitle", { name: service.name })}
         >
-          <pre className="max-h-[65vh] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+          <pre className="max-h-[65vh] overflow-auto rounded-md bg-slate-950 p-4 text-xs text-slate-100">
             {configJsonPretty}
           </pre>
         </Modal>
