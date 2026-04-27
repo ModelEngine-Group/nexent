@@ -1,18 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(grep -A 30 \"class UserTokenUsageLog\\\\|__tablename__ = \\\\\"user_token_usage_log_t\\\\\"\" C:\\\\\\\\Users\\\\\\\\18270\\\\\\\\workspace\\\\\\\\nexent\\\\\\\\backend\\\\\\\\database\\\\\\\\db_models.py)",
-      "Bash(xargs grep *)",
-      "Bash(find /c/Users/18270/workspace/nexent -name \"*.py\" -type f -exec grep -l \"class ActionStep\" {} \\\\;)",
-      "Bash(python3 -c \"from smolagents.memory import ActionStep; import inspect; print\\(inspect.signature\\(ActionStep.__init__\\)\\)\")",
-      "Bash(python3 -c \"from smolagents.memory import ActionStep; a = dir\\(ActionStep\\); print\\([x for x in a if 'dur' in x or 'timing' in x]\\)\")",
-      "Bash(.venv/bin/python3 -c ' *)",
-      "Bash(/home/feiran/nexent/backend/.venv/bin/pip install *)",
-      "Bash(find /home/feiran/nexent/backend -name \"*.py\" -type f ! -path \"*.venv*\" -exec grep -l \"run_agent_stream\" {} \\\\;)",
-      "Bash(python3 -c \"import smolagents; import os; print\\(os.path.dirname\\(smolagents.__file__\\)\\)\")",
-      "Read(//usr/**)",
-      "Bash(pip show *)",
-      "Bash(pip3 show *)"
-    ]
+    "allow": []
   }
 }
