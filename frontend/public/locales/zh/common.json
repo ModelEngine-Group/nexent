@@ -1062,6 +1062,8 @@
   "skillManagement.form.existingSkillHint": "* 检测到已有技能，即将覆写更新",
   "skillManagement.form.newSkillHint": "* 检测到新技能",
   "skillManagement.form.chatPlaceholder": "想要创建什么样的技能？",
+  "skillManagement.form.multiTurnPlaceholder": "继续修改这个技能...",
+  "skillManagement.stopGenerating": "停止生成",
   "skillManagement.form.recentSkills": "最近修改",
   "skillManagement.form.recentSkillsHint": "点击选择一个最近修改的技能",
   "skillManagement.mode.create": "创建",

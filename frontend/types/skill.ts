@@ -66,9 +66,12 @@ export interface ExistingSkill {
 /**
  * Result of parsing a skill draft from AI response
  */
-export interface CreateSimpleSkillRequest {
+export interface CreateSkillStreamRequest {
   user_request: string;
   existing_skill?: ExistingSkill;
+  complexity?: string;
+  language?: string;
+  files?: SkillFileContent[];
 }
 
 /**
@@ -112,3 +115,24 @@ export type SkillCreationMode = "create" | "update";
  * Skill build tab type
  */
 export type SkillBuildTab = "interactive" | "upload";
+
+/**
+ * Skill file content for tabbed editing
+ */
+export interface SkillFileContent {
+  path: string;
+  content: string;
+}
+
+/**
+ * Result of parsing streaming skill content
+ */
+export interface SkillContentParseResult {
+  skillTabs: SkillFileContent[];
+  newTabContent: string;
+  newTabPath: string;
+  summaryContent: string;
+  activeTab: string;
+  summaryStarted: boolean;
+  done: boolean;
+}
