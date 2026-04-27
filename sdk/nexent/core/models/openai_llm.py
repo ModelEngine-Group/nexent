@@ -106,10 +106,13 @@ class OpenAIModel(OpenAIServerModel):
 
         try:
             for chunk in current_request:
-                # Check if the chunk is a valid streaming response
-                if not hasattr(chunk, 'choices'):
-                    # Determine the type of invalid response
-                    if hasattr(chunk, 'id') and hasattr(chunk, 'model'):
+                # Check if this is a valid streaming response
+                has_choices = hasattr(chunk, 'choices') and chunk.choices
+                has_delta = has_choices and hasattr(chunk.choices[0], 'delta')
+
+                if not has_delta:
+                    # Either no choices, empty choices, or non-streaming response
+                    if has_choices and hasattr(chunk, 'id') and hasattr(chunk, 'model'):
                         # Non-streaming response - convert it
                         logger.warning(
                             f"Received non-streaming response instead of stream. "
