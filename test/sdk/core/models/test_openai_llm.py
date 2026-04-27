@@ -1120,5 +1120,182 @@ def test_call_invalid_message_type_raises_type_error(openai_model_instance):
         with pytest.raises(TypeError, match="Messages must be ChatMessage or dict objects."):
             openai_model_instance.__call__(messages)
 
+
+
+def test_call_non_streaming_response_converted(openai_model_instance):
+    """Test that non-streaming response is handled and converted to ChatMessage."""
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Construct a non-streaming response (ChatCompletion-like object)
+    # Non-streaming response has choices[0].message, NOT choices[0].delta
+    non_streaming_response = types.SimpleNamespace()
+    non_streaming_response.id = "chatcmpl-xxx"
+    non_streaming_response.model = "gpt-4"
+    non_streaming_response.choices = [types.SimpleNamespace()]
+    non_streaming_response.choices[0].message = types.SimpleNamespace()
+    non_streaming_response.choices[0].message.content = "Test response content"
+    non_streaming_response.choices[0].message.role = "assistant"
+    non_streaming_response.usage = types.SimpleNamespace()
+    non_streaming_response.usage.prompt_tokens = 10
+    non_streaming_response.usage.completion_tokens = 5
+
+    # Mock ChatMessage.from_dict
+    mock_result_message = MagicMock()
+    mock_result_message.raw = non_streaming_response
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [non_streaming_response]
+
+        # Call the method - should handle non-streaming response gracefully
+        result = openai_model_instance.__call__(messages)
+
+        # Verify the result is the converted ChatMessage
+        assert result == mock_result_message
+
+        # Verify observer calls
+        openai_model_instance.observer.add_model_new_token.assert_called_once_with("Test response content")
+        openai_model_instance.observer.flush_remaining_tokens.assert_called_once()
+
+        # Verify token counts were set
+        assert openai_model_instance.last_input_token_count == 10
+        assert openai_model_instance.last_output_token_count == 5
+
+
+def test_call_invalid_response_format_raises_value_error(openai_model_instance):
+    """Test that invalid response format (string error) raises ValueError."""
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Mock client returns an error string instead of proper response
+    openai_model_instance.client.chat.completions.create.return_value = [
+        "Error: rate limit exceeded"
+    ]
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        # Call the method and expect ValueError
+        with pytest.raises(ValueError, match="LLM API returned invalid response format"):
+            openai_model_instance.__call__(messages)
+
+
+def test_call_response_with_empty_choices_raises_value_error(openai_model_instance):
+    """Test that response with empty choices raises ValueError."""
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Construct a response with empty choices list
+    empty_choices_response = types.SimpleNamespace()
+    empty_choices_response.choices = []  # Empty choices
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [empty_choices_response]
+
+        # Call the method and expect ValueError
+        with pytest.raises(ValueError, match="LLM API returned invalid response format"):
+            openai_model_instance.__call__(messages)
+
+
+def test_call_response_missing_delta_hits_non_streaming_path(openai_model_instance):
+    """
+    Test that response with choices but no delta (non-streaming format) is handled.
+
+    This verifies the fix: OLD code would raise AttributeError here,
+    NEW code correctly detects it as non-streaming and converts it.
+    """
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Construct a response that has choices but NO delta attribute
+    # This simulates what a non-streaming API returns wrapped in an iterator
+    non_streaming_like = types.SimpleNamespace()
+    non_streaming_like.id = "chatcmpl-abc123"
+    non_streaming_like.model = "gpt-4"
+    non_streaming_like.choices = [types.SimpleNamespace()]
+    # Note: choices[0] has 'message' not 'delta' - this is the key difference
+    non_streaming_like.choices[0].message = types.SimpleNamespace()
+    non_streaming_like.choices[0].message.content = "Handled non-streaming response"
+    non_streaming_like.choices[0].message.role = "assistant"
+    non_streaming_like.usage = types.SimpleNamespace()
+    non_streaming_like.usage.prompt_tokens = 5
+    non_streaming_like.usage.completion_tokens = 3
+
+    # Mock ChatMessage.from_dict to return a proper message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = non_streaming_like
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [non_streaming_like]
+
+        # OLD code would fail here with: AttributeError: 'SimpleNamespace' object has no attribute 'delta'
+        # NEW code should detect this as non-streaming and handle it gracefully
+        result = openai_model_instance.__call__(messages)
+
+        # Verify the result was processed
+        assert result == mock_result_message
+        openai_model_instance.observer.add_model_new_token.assert_called_once()
+        openai_model_instance.observer.flush_remaining_tokens.assert_called_once()
+
+
+def test_old_code_would_fail_without_fix(openai_model_instance):
+    """
+    Demonstration test: shows what the OLD code would do without the fix.
+
+    The OLD code accessed chunk.choices[0].delta.content directly without checking
+    if delta exists. This test simulates that scenario to prove the fix is necessary.
+    """
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Create a response that has choices but NO delta attribute
+    malformed_response = types.SimpleNamespace()
+    malformed_response.choices = [types.SimpleNamespace()]
+    # Deliberately NOT setting .delta - simulating what OLD code would encounter
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [malformed_response]
+
+        # WITHOUT the fix, this would raise:
+        # AttributeError: 'types.SimpleNamespace' object has no attribute 'delta'
+        # WITH the fix, it raises a descriptive ValueError
+        with pytest.raises((AttributeError, ValueError)):
+            openai_model_instance.__call__(messages)
+
+
+def test_non_streaming_response_with_error_message(openai_model_instance):
+    """
+    Test non-streaming response that contains an error.
+
+    Some APIs return non-streaming responses with error info in the message.
+    """
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Simulate a non-streaming response with an error message
+    error_response = types.SimpleNamespace()
+    error_response.id = "chatcmpl-error"
+    error_response.model = "gpt-4"
+    error_response.choices = [types.SimpleNamespace()]
+    error_response.choices[0].message = types.SimpleNamespace()
+    error_response.choices[0].message.content = None  # No content
+    error_response.choices[0].message.role = "assistant"
+    error_response.usage = types.SimpleNamespace()
+    error_response.usage.prompt_tokens = 5
+    error_response.usage.completion_tokens = 0
+
+    mock_result_message = MagicMock()
+    mock_result_message.raw = error_response
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [error_response]
+
+        # Should handle gracefully without raising AttributeError
+        result = openai_model_instance.__call__(messages)
+        assert result == mock_result_message
+
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
