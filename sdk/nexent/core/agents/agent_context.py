@@ -190,6 +190,12 @@ class ContextManager:
 
 
 
+    def _is_observation_step(self, action: ActionStep) -> bool:
+        return action is not None and hasattr(action, 'observations') and action.observations is not None
+
+    def _is_tool_call_step(self, action: ActionStep) -> bool:
+        return action is not None and hasattr(action, 'tool_calls') and action.tool_calls is not None
+
     def _trim_actions_to_budget(
         self, actions: List[ActionStep], task_text: str, max_tokens: int,
     ) -> List[ActionStep]:
@@ -201,21 +207,23 @@ class ContextManager:
 
         if _total_tokens(actions) <= max_tokens:
             return list(actions)
+
         for drop in range(1, len(actions) + 1):
             remaining = actions[drop:]
             if not remaining:
                 break
-            if remaining and hasattr(remaining[0], 'observations') and remaining[0].observations is not None:
-                if drop > 0 and hasattr(actions[drop-1], 'tool_calls') and actions[drop-1].tool_calls is not None:    
-                    continue
+            if self._is_observation_step(remaining[0]) and self._is_tool_call_step(actions[drop - 1]):
+                continue
             if _total_tokens(remaining) <= max_tokens:
                 return list(remaining)
-            
+
+        return self._fallback_trim_actions(actions)
+
+    def _fallback_trim_actions(self, actions: List[ActionStep]) -> List[ActionStep]:
         last_action = actions[-1]
-        
-        if len(actions) >= 2 and hasattr(last_action, 'observations') and last_action.observations is not None:
+        if len(actions) >= 2 and self._is_observation_step(last_action):
             prev_action = actions[-2]
-            if hasattr(prev_action, 'tool_calls') and prev_action.tool_calls is not None:
+            if self._is_tool_call_step(prev_action):
                 logger.warning(
                     "Fallback limit triggered: Retaining the last complete ToolCall + Observation pair intact. "
                     "This may exceed the token budget, and downstream truncation will be relied upon."
@@ -638,53 +646,64 @@ class ContextManager:
         if action_budget_chars is None:
             action_budget_chars = self.config.max_memory_step_length
 
-        # Generate raw text segments for each step
+        entries = self._build_step_entries(steps, fmt)
+        raw_text = "\n\n".join(task + action for task, action in entries)
+        if self._estimate_text_tokens(raw_text) <= max_tokens:
+            return raw_text
+
+        return self._truncate_entries_to_budget(entries, max_tokens, min_budget_chars, task_budget_chars, action_budget_chars)
+
+    def _build_step_entries(self, steps: List, fmt: str) -> List[Tuple[str, str]]:
         entries = []
         for step in steps:
             if fmt == "action":
                 text = f"[Step {step.step_number or '?'}]\n{self._render_action_step(step)}"
                 entries.append(("", text))
-            else:  # pair format
+            else:
                 task_step, action_step = step
                 task_str = f"user: {task_step.task or ''}\nassistant: "
                 action_str = self._render_action_step(action_step)
                 entries.append((task_str, action_str))
+        return entries
 
-        raw_text = "\n\n".join(task + action for task, action in entries)
-        if self._estimate_text_tokens(raw_text) <= max_tokens:
-            return raw_text
-
-        # Truncation helper: keep beginning + truncation marker
-        def truncate(text: str, max_len: int, mark="...[Truncated]"):
-            if len(text) <= max_len:
-                return text
-            return text[:max_len - len(mark)] + mark
-
-        # Iteratively reduce both budgets until total token count meets requirement
+    def _truncate_entries_to_budget(
+        self, entries: List[Tuple[str, str]], max_tokens: int,
+        min_budget_chars: int, task_budget_chars: int, action_budget_chars: int,
+    ) -> str:
         t_budget = task_budget_chars
         a_budget = action_budget_chars
+        all_text = ""
 
         while True:
-            parts = []
-            for task_str, action_str in entries:
-                task_trunc = truncate(task_str, t_budget) if task_str else ""
-                action_trunc = truncate(action_str, a_budget)
-                parts.append(task_trunc + action_trunc)
-
+            parts = [self._truncate_entry(e, t_budget, a_budget) for e in entries]
             all_text = "\n\n".join(parts)
 
             if self._estimate_text_tokens(all_text) <= max_tokens:
                 break
 
-            # Reduce budget: prioritize reducing action budget, then task budget
-            if a_budget > min_budget_chars:
-                a_budget = max(min_budget_chars, int(a_budget * 0.8))
-            elif t_budget > min_budget_chars:
-                t_budget = max(min_budget_chars, int(t_budget * 0.8))
-            else:
+            t_budget, a_budget = self._reduce_budgets(t_budget, a_budget, min_budget_chars)
+            if t_budget == min_budget_chars and a_budget == min_budget_chars:
                 break
 
         return all_text
+
+    def _truncate_entry(self, entry: Tuple[str, str], task_budget: int, action_budget: int) -> str:
+        task_str, action_str = entry
+        task_trunc = self._truncate_text(task_str, task_budget) if task_str else ""
+        action_trunc = self._truncate_text(action_str, action_budget)
+        return task_trunc + action_trunc
+
+    def _truncate_text(self, text: str, max_len: int, mark: str = "...[Truncated]") -> str:
+        if len(text) <= max_len:
+            return text
+        return text[:max_len - len(mark)] + mark
+
+    def _reduce_budgets(self, t_budget: int, a_budget: int, min_budget: int) -> Tuple[int, int]:
+        if a_budget > min_budget:
+            return t_budget, max(min_budget, int(a_budget * 0.8))
+        if t_budget > min_budget:
+            return max(min_budget, int(t_budget * 0.8)), a_budget
+        return t_budget, a_budget
 
     def _actions_to_text_with_limit(self, actions: List[ActionStep], prefill_tokens: int = 0) -> str:
         rendered_steps = []

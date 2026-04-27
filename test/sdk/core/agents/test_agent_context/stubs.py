@@ -15,9 +15,7 @@ from unittest.mock import MagicMock
 from dataclasses import dataclass
 
 
-# ──────────────────────────────────────────────────────────────
 # Stub: smolagents.models
-# ──────────────────────────────────────────────────────────────
 
 class _MessageRole:
     USER      = "user"

@@ -228,7 +228,7 @@ export const handleStreamResponse = async (
                   try {
                     const metricsData = JSON.parse(messageContent);
                     const metricsStepId = `step-${metricsData.step_number}`;
-                    
+
                     // If currentStep matches the metrics step number, set directly
                     if (currentStep && currentStep.id === metricsStepId) {
                       currentStep.metrics = metricsData;
@@ -310,7 +310,7 @@ export const handleStreamResponse = async (
                     lastModelOutputIndex >= 0 &&
                     currentStep.contents[lastModelOutputIndex] &&
                     currentStep.contents[lastModelOutputIndex].subType ===
-                      "thinking";
+                    "thinking";
 
                   if (shouldAppendThinking) {
                     // Append to existing thinking content
@@ -357,7 +357,7 @@ export const handleStreamResponse = async (
                     lastModelOutputIndex >= 0 &&
                     currentStep.contents[lastModelOutputIndex] &&
                     currentStep.contents[lastModelOutputIndex].subType ===
-                      "deep_thinking";
+                    "deep_thinking";
 
                   if (shouldAppendDeep) {
                     // Append to existing deep_thinking content
@@ -408,11 +408,11 @@ export const handleStreamResponse = async (
                     // Only append if the last content type was MODEL_OUTPUT_CODE and we have a valid index
                     const shouldAppendCode =
                       lastContentType ===
-                        chatConfig.contentTypes.MODEL_OUTPUT_CODE &&
+                      chatConfig.contentTypes.MODEL_OUTPUT_CODE &&
                       lastCodeOutputIndex >= 0 &&
                       currentStep.contents[lastCodeOutputIndex] &&
                       currentStep.contents[lastCodeOutputIndex].type ===
-                        chatConfig.messageTypes.MODEL_OUTPUT_CODE;
+                      chatConfig.messageTypes.MODEL_OUTPUT_CODE;
 
                     if (shouldAppendCode) {
                       const codeOutput =
@@ -840,7 +840,7 @@ export const handleStreamResponse = async (
                           try {
                             const evt = new Event("nexent:new-memory");
                             window.dispatchEvent(evt);
-                          } catch (_) {}
+                          } catch (_) { }
                           break;
                         case "<MEM_FAILED>":
                           m.message = t("chatStreamHandler.memoryFailed");
@@ -911,7 +911,7 @@ export const handleStreamResponse = async (
                         content: "",
                         expanded: true,
                         contents: [],
-                        metrics: "",
+                        metrics: null,
                         thinking: { content: "", expanded: true },
                         code: { content: "", expanded: true },
                         output: { content: "", expanded: true },
@@ -976,7 +976,7 @@ export const handleStreamResponse = async (
                         steps.push(currentStep);
                       }
                     }
-                    
+
                     // Apply any pending metrics to existing steps
                     pendingMetrics.forEach((metrics, stepId) => {
                       const pendingStepIndex = steps.findIndex((s) => s.id === stepId);
@@ -985,7 +985,7 @@ export const handleStreamResponse = async (
                         pendingMetrics.delete(stepId);
                       }
                     });
-                    
+
                     updatedMsg.steps = steps;
                   }
 
@@ -998,7 +998,7 @@ export const handleStreamResponse = async (
                 return newMessages;
               });
             }
-          } catch (parseError) {}
+          } catch (parseError) { }
         }
       }
     }
