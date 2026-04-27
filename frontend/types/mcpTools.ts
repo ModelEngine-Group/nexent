@@ -174,6 +174,26 @@ export interface McpServiceItem {
   authorizationToken?: string;
 }
 
+export interface McpServerListItem {
+  service_name: string;
+  mcp_url: string;
+  status: boolean;
+  permission: string;
+  mcp_id: number;
+  container_id?: string | null;
+  description?: string;
+  enabled?: boolean;
+  source?: string;
+  update_time?: string;
+  tags?: string[];
+  container_port?: number | null;
+  registry_json?: Record<string, unknown> | null;
+  config_json?: Record<string, unknown> | null;
+  health_status?: McpHealthStatus;
+  container_status?: McpContainerStatus;
+  authorization_token?: string;
+}
+
 export interface McpTagStat {
   tag: string;
   count: number;

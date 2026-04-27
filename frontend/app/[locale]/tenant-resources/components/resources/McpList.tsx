@@ -98,6 +98,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const [addingContainer, setAddingContainer] = useState(false);
   const [containerConfigJson, setContainerConfigJson] = useState("");
   const [containerPort, setContainerPort] = useState<number | undefined>(undefined);
+  const [containerServiceName, setContainerServiceName] = useState("");
   const [logsModalVisible, setLogsModalVisible] = useState(false);
   const [currentContainerId, setCurrentContainerId] = useState("");
 
@@ -265,8 +266,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
 
     setUpdatingServer(true);
     const result = await handleUpdateServer(
-      editingServer.service_name,
-      editingServer.mcp_url,
+      editingServer.mcp_id,
       name.trim(),
       url.trim(),
       authorizationToken
@@ -304,10 +304,11 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     }
 
     setAddingContainer(true);
-    const result = await handleAddContainer(config, containerPort);
+    const result = await handleAddContainer(config, containerPort, containerServiceName.trim() || undefined);
     if (result.success) {
       setContainerConfigJson("");
       setContainerPort(undefined);
+      setContainerServiceName("");
       setAddModalVisible(false);
       message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addContainerSuccess"));
     } else {
@@ -497,8 +498,27 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       title: t("mcpConfig.serverList.column.url"),
       dataIndex: "mcp_url",
       key: "mcp_url",
-      width: "35%",
+      width: "30%",
       ellipsis: true,
+    },
+    {
+      title: t("mcpConfig.serverList.column.enabled"),
+      key: "enabled",
+      width: "10%",
+      render: (_: any, record: McpServer) => {
+        const isEnabled = record.enabled;
+        return isEnabled ? (
+          <Tag color="#229954" variant="solid">
+            {t("mcpConfig.serverList.enabled.yes")}
+          </Tag>
+        ) : (
+          <Tooltip title={t("mcpConfig.serverList.enabled.tooltip")}>
+            <Tag color="#AEB6BF" variant="solid" style={{ cursor: "pointer" }}>
+              {t("mcpConfig.serverList.enabled.no")}
+            </Tag>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t("mcpConfig.serverList.column.status"),
@@ -528,7 +548,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     {
       title: t("mcpConfig.serverList.column.action"),
       key: "action",
-      width: "25%",
+      width: "20%",
       render: (_: any, record: McpServer) => {
         const key = `${record.service_name}__${record.mcp_url}`;
         return (
@@ -735,7 +755,6 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             size="small"
             pagination={{ pageSize: 7 }}
             locale={{ emptyText: t("mcpConfig.serverList.empty") }}
-            scroll={{ x: true }}
           />
         </div>
 
@@ -853,7 +872,16 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                       style={{ fontFamily: "monospace", fontSize: 12 }}
                     />
                     <div className="flex items-center gap-2">
-                      <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.port")}:</Text>
+                      <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.serviceName")}:</Text>
+                      <Input
+                        placeholder={t("mcpConfig.addContainer.serviceNamePlaceholder")}
+                        value={containerServiceName}
+                        onChange={(e) => setContainerServiceName(e.target.value)}
+                        style={{ width: 150 }}
+                        maxLength={20}
+                        disabled={actionsLocked}
+                      />
+                      <Text style={{ minWidth: 60 }}>{t("mcpConfig.addContainer.port")}:</Text>
                       <InputNumber
                         placeholder={t("mcpConfig.addContainer.portPlaceholder")}
                         value={containerPort}
@@ -862,20 +890,20 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         }}
                         min={1}
                         max={65535}
-                        style={{ width: 150 }}
+                        style={{ width: 120 }}
                         disabled={actionsLocked}
                         controls={false}
                       />
                       <div className="flex-1" />
                       <Button
-                          type="primary"
-                          onClick={onAddContainer}
-                          loading={addingContainer || updatingTools}
-                          disabled={actionsLocked}
-                          icon={addingContainer || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
-                        >
-                          {t("mcpConfig.addContainer.button.add")}
-                        </Button>
+                        type="primary"
+                        onClick={onAddContainer}
+                        loading={addingContainer || updatingTools}
+                        disabled={actionsLocked}
+                        icon={addingContainer || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
+                      >
+                        {t("mcpConfig.addContainer.button.add")}
+                      </Button>
                     </div>
                   </Space>
                 </Card>

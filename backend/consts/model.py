@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, field_validator
 from nexent.core.agents.agent_model import ToolConfig
 
 
@@ -976,3 +976,170 @@ class SkillCreateInteractiveRequest(BaseModel):
     existing_skill: Optional[Dict[str, Any]] = None
     complexity: Optional[str] = "simple"
     language: Optional[str] = "zh"
+
+
+# ---------------------------------------------------------------------------
+# MCP Management Data Models
+# ---------------------------------------------------------------------------
+
+class MCPSourceType(str, Enum):
+    """MCP source type enumeration"""
+    LOCAL = "local"
+    MCP_REGISTRY = "mcp_registry"
+    COMMUNITY = "community"
+
+
+class AddMcpServiceRequest(BaseModel):
+    """Request model for adding an MCP service"""
+    name: str = Field(..., min_length=1, description="MCP service name")
+    server_url: str = Field(..., min_length=1, description="MCP server URL")
+    description: Optional[str] = Field(None, description="MCP service description")
+    source: MCPSourceType = Field(default=MCPSourceType.LOCAL, description="MCP source type")
+    tags: List[str] = Field(default_factory=list, description="MCP tags")
+    authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
+    registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
+
+    @field_validator("name", "server_url", "description", "authorization_token", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
+class AddContainerMcpServiceRequest(BaseModel):
+    """Request model for adding a container-based MCP service"""
+    name: str = Field(..., min_length=1, description="MCP service name")
+    description: Optional[str] = Field(None, description="MCP service description")
+    source: MCPSourceType = Field(default=MCPSourceType.LOCAL, description="MCP source type")
+    tags: List[str] = Field(default_factory=list, description="MCP tags")
+    authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    port: int = Field(..., ge=1, le=65535, description="Host port for the container")
+    mcp_config: MCPConfigRequest = Field(..., description="MCP server configuration")
+
+    @field_validator("name", "description", "authorization_token", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
+class UpdateMcpServiceRequest(BaseModel):
+    """Request model for updating an MCP service"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID")
+    name: str = Field(..., min_length=1, description="New MCP service name")
+    description: Optional[str] = Field(None, description="MCP service description")
+    server_url: str = Field(..., min_length=1, description="New MCP server URL")
+    tags: List[str] = Field(default_factory=list, description="MCP tags")
+    authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+
+    @field_validator("name", "server_url", "description", "authorization_token", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
+class EnableMcpServiceRequest(BaseModel):
+    """Request model for enabling an MCP service"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to enable")
+
+
+class DisableMcpServiceRequest(BaseModel):
+    """Request model for disabling an MCP service"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to disable")
+
+
+class HealthcheckMcpServiceRequest(BaseModel):
+    """Request model for checking MCP service health"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to health check")
+
+
+class ListMcpToolsRequest(BaseModel):
+    """Request model for listing MCP service tools"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID")
+
+
+class PortConflictCheckRequest(BaseModel):
+    """Request model for checking port availability"""
+    port: int = Field(..., ge=1, le=65535, description="Port number to check")
+
+
+class ListMcpServicesQuery(BaseModel):
+    """Query parameters for listing MCP services"""
+    tag: Optional[str] = Field(None, description="Filter by tag")
+
+    @field_validator("tag", mode="before")
+    @classmethod
+    def _strip_tag(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class RegistryListQuery(BaseModel):
+    """Query parameters for listing MCP registry services"""
+    search: Optional[str] = Field(None, description="Search keyword")
+    include_deleted: bool = Field(default=False, description="Include deleted records")
+    updated_since: Optional[str] = Field(None, description="Filter by update time")
+    version: Optional[str] = Field(None, description="Filter by version")
+    cursor: Optional[str] = Field(None, description="Pagination cursor")
+    limit: int = Field(default=30, ge=1, le=100, description="Items per page")
+
+    @field_validator("search", "updated_since", "version", "cursor", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class CommunityListRequest(BaseModel):
+    """Request model for listing community MCP services"""
+    search: Optional[str] = Field(None, description="Search keyword")
+    tag: Optional[str] = Field(None, description="Filter by tag")
+    cursor: Optional[str] = Field(None, description="Pagination cursor")
+    limit: int = Field(default=30, ge=1, le=100, description="Items per page")
+
+    @field_validator("search", "tag", "cursor", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class CommunityPublishRequest(BaseModel):
+    """Request model for publishing MCP to community"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to publish")
+
+
+class CommunityUpdateRequest(BaseModel):
+    """Request model for updating community MCP service"""
+    community_id: int = Field(..., gt=0, description="Community record ID")
+    name: Optional[str] = Field(default=None, min_length=1, description="New MCP service name")
+    description: Optional[str] = Field(None, description="MCP service description")
+    tags: List[str] = Field(default_factory=list, description="MCP tags")
+    version: Optional[str] = Field(None, description="MCP version")
+    registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+
+    @field_validator("name", "description", "version", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class DeleteMcpServiceRequest(BaseModel):
+    """Request model for deleting an MCP service"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to delete")

@@ -134,7 +134,7 @@ export const checkMcpContainerPortConflictService = async (payload: {
   port: number;
 }) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.portCheck, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.portCheck, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -151,7 +151,7 @@ export const checkMcpContainerPortConflictService = async (payload: {
 
 export const suggestMcpContainerPortService = async () => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.portSuggest, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.portSuggest, {
       method: "POST",
     });
     const data = await parseJson<ApiEnvelope<{ port: number }>>(response);
@@ -224,7 +224,7 @@ export const resolveContainerServerInfo = async (params: {
 
 export const addContainerMcpToolService = async (payload: AddContainerMcpToolPayload) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.addContainer, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.addContainer, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -240,27 +240,16 @@ export const addContainerMcpToolService = async (payload: AddContainerMcpToolPay
 };
 
 export const listMcpTools = async (params?: { tag?: string }) => {
-  try {
-    const query = new URLSearchParams();
-    if (params?.tag?.trim()) {
-      query.set("tag", params.tag.trim());
-    }
-    const url = query.size > 0 ? `${API_ENDPOINTS.mcpTools.list}?${query.toString()}` : API_ENDPOINTS.mcpTools.list;
-    const response = await fetchWithAuth(url);
-    const data = await parseJson<ApiEnvelope<McpServiceItem[]>>(response);
-    if (data.status !== "success") {
-      throw new Error("Failed to load MCP services");
-    }
-    return { success: true, data: data.data } as McpToolsApiResult<McpServiceItem[]>;
-  } catch (error) {
-    log.error("listMcpTools failed", error);
-    throw error;
-  }
+  // This function now returns data from getMcpServerList in mcpService.ts
+  // The frontend should use getMcpServerList from mcpService.ts instead
+  // This export is kept for backward compatibility
+  const { getMcpServerList } = await import('./mcpService');
+  return getMcpServerList();
 };
 
 export const fetchMcpTagStats = async () => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.tagsStats);
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.tagsStats);
     const data = await parseJson<ApiEnvelope<McpTagStat[]>>(response);
     if (data.status !== "success") {
       throw new Error("Failed to load MCP tag stats");
@@ -391,7 +380,7 @@ export const deleteCommunityMcpTool = async (communityId: number) => {
 
 export const addMcpToolService = async (payload: AddMcpServicePayload) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.add, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.add, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -408,7 +397,7 @@ export const addMcpToolService = async (payload: AddMcpServicePayload) => {
 
 export const updateMcpToolService = async (payload: UpdateMcpServicePayload) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.update, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.update, {
       method: "PUT",
       body: JSON.stringify(payload),
     });
@@ -425,7 +414,7 @@ export const updateMcpToolService = async (payload: UpdateMcpServicePayload) => 
 
 export const enableMcpToolService = async (payload: ToggleMcpServicePayload) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.enable, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.enable, {
       method: "POST",
       body: JSON.stringify({ mcp_id: payload.mcp_id }),
     });
@@ -442,7 +431,7 @@ export const enableMcpToolService = async (payload: ToggleMcpServicePayload) => 
 
 export const disableMcpToolService = async (payload: ToggleMcpServicePayload) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.disable, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.disable, {
       method: "POST",
       body: JSON.stringify({ mcp_id: payload.mcp_id }),
     });
@@ -459,7 +448,7 @@ export const disableMcpToolService = async (payload: ToggleMcpServicePayload) =>
 
 export const healthcheckMcpToolService = async (payload: HealthcheckMcpServicePayload) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.healthcheck, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.healthcheck, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -478,7 +467,7 @@ export const healthcheckMcpToolService = async (payload: HealthcheckMcpServicePa
 
 export const deleteMcpToolService = async (mcpId: number) => {
   try {
-    const response = await fetchWithAuth(`${API_ENDPOINTS.mcpTools.delete}?mcp_id=${encodeURIComponent(String(mcpId))}`, {
+    const response = await fetchWithAuth(`${API_ENDPOINTS.mcp.delete}?mcp_id=${encodeURIComponent(String(mcpId))}`, {
       method: "DELETE",
     });
     const data = await parseJson<ApiEnvelope>(response);
@@ -494,7 +483,7 @@ export const deleteMcpToolService = async (mcpId: number) => {
 
 export const listMcpRuntimeTools = async (mcpId: number) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.tools, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.tools, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

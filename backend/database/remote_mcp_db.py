@@ -17,16 +17,31 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
     :param tenant_id: Tenant ID
     :param user_id: User ID
     :return: Created MCP record
+
+    Note: Only fields defined in the McpRecord model are inserted.
+    Fields like 'transport_type' and 'version' are not part of McpRecord
+    and will be ignored.
     """
+    # Filter to only include fields that exist in the model
+    # McpRecord fields: mcp_id, tenant_id, user_id, mcp_name, mcp_server, status,
+    # container_id, container_port, authorization_token, source, registry_json,
+    # config_json, enabled, tags, description, create_time, update_time, created_by, updated_by, delete_flag
+    allowed_fields = {
+        'mcp_name', 'mcp_server', 'status', 'container_id', 'container_port',
+        'authorization_token', 'source', 'registry_json', 'config_json',
+        'enabled', 'tags', 'description'
+    }
+
+    filtered_data = {k: v for k, v in mcp_data.items() if k in allowed_fields and v is not None}
+    filtered_data.update({
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "created_by": user_id,
+        "updated_by": user_id,
+        "delete_flag": "N"
+    })
     with get_db_session() as session:
-        mcp_data.update({
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "created_by": user_id,
-            "updated_by": user_id,
-            "delete_flag": "N"
-        })
-        new_mcp = McpRecord(**filter_property(mcp_data, McpRecord))
+        new_mcp = McpRecord(**filtered_data)
         session.add(new_mcp)
 
 
@@ -147,7 +162,6 @@ def update_mcp_record_manage_fields_by_id(
     description: str | None,
     tags: List[str] | None,
     source: str | None,
-    transport_type: str | None,
     authorization_token: str | None,
     config_json: Dict[str, Any] | None,
 ) -> None:
@@ -163,7 +177,6 @@ def update_mcp_record_manage_fields_by_id(
                 "description": description,
                 "tags": tags or [],
                 "source": source,
-                "transport_type": transport_type,
                 "authorization_token": authorization_token,
                 "config_json": config_json,
                 "updated_by": user_id,

@@ -436,14 +436,11 @@ class McpRecord(TableBase):
         default=None,
     )
     source = Column(String(30), doc="Source type: local/mcp_registry/community")
-    version = Column(String(50), doc="MCP version")
     registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
-    transport_type = Column(String(30), doc="Transport type: streamable-http/sse/container")
     config_json = Column(JSON, doc="MCP config data")
     enabled = Column(Boolean, default=True, doc="Enabled")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
-    last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
 
 
 class McpCommunityRecord(TableBase):

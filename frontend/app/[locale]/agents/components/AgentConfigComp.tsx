@@ -171,18 +171,16 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
               >
                 {t("toolManagement.refresh.button.refresh")}
               </Button>
-              {showLegacyMcpConfig ? (
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<Plug size={16} />}
-                  onClick={() => setIsMcpModalOpen(true)}
-                  className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
-                  title={t("toolManagement.mcp.title")}
-                >
-                  {t("toolManagement.mcp.button")}
-                </Button>
-              ) : null}
+              <Button
+                type="text"
+                size="small"
+                icon={<Plug size={16} />}
+                onClick={() => setIsMcpModalOpen(true)}
+                className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
+                title={t("toolManagement.mcp.title")}
+              >
+                {t("toolManagement.mcp.button")}
+              </Button>
             </Flex>
           </Col>
         </Row>
