@@ -1678,8 +1678,9 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
+        agent.context_manager = None
+        agent.step_metrics = []
 
-        # Bind mocked methods
         agent._step_stream = mock_step_stream
         agent._handle_max_steps_reached = mock_handle_max_steps_reached
         agent._finalize_step = lambda x: None
@@ -1907,6 +1908,8 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
+        agent.context_manager = None
+        agent.step_metrics = []
 
         agent._step_stream = mock_step_stream
         agent._handle_max_steps_reached = MagicMock(return_value="Max steps")
