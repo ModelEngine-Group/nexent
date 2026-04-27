@@ -217,6 +217,7 @@ class CoreAgent(CodeAgent):
         self._history_step_count = 0  # For ContextManager, record boundary for compression
         self.context_manager: ContextManager = None 
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
+        self._last_uncompressed_est = 0
 
     def _log_model_call_parameters(self, input_messages: List[ChatMessage], stop_sequences: List[str], additional_args: Dict[str, Any]) -> None:
         """
@@ -282,6 +283,15 @@ Additional Args:
             self.agent_name, ProcessType.STEP_COUNT, self.step_number)
 
         memory_messages = self.write_memory_to_messages()
+
+        chars_per_token = (
+            self.context_manager.config.chars_per_token
+            if self.context_manager
+            else 1.5
+        )
+        self._last_uncompressed_est = msg_token_count(
+            memory_messages, chars_per_token
+        )
 
         input_messages = memory_messages.copy()
         # import pdb; pdb.set_trace()
@@ -590,11 +600,16 @@ You have been provided with these additional arguments, that you can access usin
                 "calls": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
+                "cache_hits": 0,
+                "cache_types": [],
             },
             "memory_state": {
                 "estimated_input_tokens": 0,
                 "estimated_output_tokens": 0,
-            }
+            },
+            "uncompressed_mem_est_input": 0,
+            "cache_hit": False,
+            "cache_types": [],
         }
 
         # 1. Main model tokens
@@ -606,6 +621,15 @@ You have been provided with these additional arguments, that you can access usin
         if self.context_manager and self.context_manager.config.enabled:
             comp_stats = self.context_manager.get_step_compression_stats()
             metric["compression"].update(comp_stats)
+            metric["cache_hit"] = comp_stats.get("cache_hits", 0) > 0
+            metric["cache_types"] = comp_stats.get("cache_types", [])
+        else:
+            metric["compression"] = {
+                "calls": 0, "input_tokens": 0, "output_tokens": 0,
+                "cache_hits": 0, "cache_types": [],
+            }
+            metric["cache_hit"] = False
+            metric["cache_types"] = []
 
         # 3. Current memory estimated length
         chars_per_token = (
@@ -619,5 +643,21 @@ You have been provided with these additional arguments, that you can access usin
         metric["memory_state"]["estimated_output_tokens"] = msg_token_count(
             action_step.model_output_message, chars_per_token
         )
+
+        # 4. Uncompressed memory estimation
+        metric["uncompressed_mem_est_input"] = getattr(
+            self, "_last_uncompressed_est", 0
+        )
+        self._last_uncompressed_est = 0
+
+        # 5. Compression ratio
+        uncompressed = metric["uncompressed_mem_est_input"]
+        compressed = metric["memory_state"]["estimated_input_tokens"]
+        if uncompressed > 0:
+            metric["compression_ratio"] = round(
+                (1 - compressed / uncompressed) * 100, 1
+            )
+        else:
+            metric["compression_ratio"] = 0.0
 
         self.step_metrics.append(metric)

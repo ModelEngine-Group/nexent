@@ -7,6 +7,7 @@ from datetime import datetime
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig
+from nexent.core.agents.agent_context import ContextManagerConfig
 from nexent.memory.memory_service import search_memory_in_levels
 
 from services.file_management_service import get_llm_model
@@ -400,6 +401,9 @@ async def create_agent_config(
         model_name = model_info["display_name"] if model_info is not None else "main_model"
     else:
         model_name = "main_model"
+    cm_config = ContextManagerConfig(
+        enabled=True,
+    )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         description="undefined" if agent_info["description"] is None else agent_info["description"],
@@ -414,7 +418,8 @@ async def create_agent_config(
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
         managed_agents=managed_agents,
-        external_a2a_agents=external_a2a_agents
+        external_a2a_agents=external_a2a_agents,
+        context_manager_config=cm_config
     )
     return agent_config
 

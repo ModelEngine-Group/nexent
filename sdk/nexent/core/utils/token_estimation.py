@@ -145,41 +145,21 @@ def estimate_tokens(
 ) -> int:
     """Estimate total token count in an AgentMemory.
 
-    Prefers using the last known ActionStep ``input_tokens`` as baseline,
-    then adds incremental estimation for steps added after that.
-
-    Note: do not naively sum ``input_tokens`` of every step, because each
-    step's ``input_tokens`` is already a cumulative value (includes all
-    previous steps).
+    Collects ALL messages (system prompt + all steps) into one flat list,
+    then calls estimate_tokens_text exactly once. This eliminates per-step
+    int() truncation drift and keeps the result consistent with
+    msg_token_count(flat_list).
     """
-    last_known_tokens = 0
-    last_known_idx = -1
-    for i, step in enumerate(memory.steps):
-        if isinstance(step, ActionStep) and step.token_usage:
-            last_known_tokens = step.token_usage.input_tokens
-            last_known_idx = i
+    all_msgs = []
+    if memory.system_prompt:
+        all_msgs.extend(memory.system_prompt.to_messages())
+    for step in memory.steps:
+        all_msgs.extend(step.to_messages())
 
-    if last_known_tokens > 0:
-        incremental_text = ""
-        incremental_fallback_chars = 0
-        for step in memory.steps[last_known_idx + 1 :]:
-            msgs = step.to_messages()
-            t = _extract_text_from_messages(msgs)
-            if t is not None:
-                incremental_text += t
-            else:
-                incremental_fallback_chars += msg_char_count(msgs)
-        incremental_tokens = (
-            estimate_tokens_text(incremental_text) if incremental_text else 0
-        )
-        if incremental_fallback_chars:
-            incremental_tokens += int(
-                incremental_fallback_chars / chars_per_token
-            )
-        return last_known_tokens + incremental_tokens
-
-    total_tokens = estimate_tokens_for_system_prompt(memory) + estimate_tokens_for_steps(memory.steps)
-    return total_tokens
+    text = _extract_text_from_messages(all_msgs)
+    if text is not None:
+        return estimate_tokens_text(text)
+    return int(msg_char_count(all_msgs) / chars_per_token)
 
 def estimate_tokens_for_system_prompt(
     memory: AgentMemory, chars_per_token: float = 1.5

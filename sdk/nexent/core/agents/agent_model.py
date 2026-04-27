@@ -61,6 +61,10 @@ class AgentConfig(BaseModel):
         description="External A2A agents called via HTTP requests",
         default=[]
     )
+    context_manager_config: Optional[Any] = Field(
+        description="Context manager configuration for conversation-level memory compression",
+        default=None
+    )
 
 
 class AgentHistory(BaseModel):

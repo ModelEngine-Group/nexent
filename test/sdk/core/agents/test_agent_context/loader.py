@@ -119,34 +119,10 @@ def _build_token_estimation_stub() -> ModuleType:
 
     def estimate_tokens(memory, chars_per_token=1.5):
         """
-        Collect ALL messages into one string, then call estimate_tokens_text
-        exactly once.  This eliminates per-step int() truncation drift and
+        Collect ALL messages into one flat list, then call estimate_tokens_text
+        exactly once. This eliminates per-step int() truncation drift and
         keeps the result consistent with msg_token_count(flat_list).
         """
-        # fast-path: use known token_usage from the most recent step that has it
-        last_known_tokens = 0
-        last_known_idx    = -1
-        for i, step in enumerate(memory.steps):
-            if hasattr(step, "token_usage") and step.token_usage:
-                last_known_tokens = step.token_usage.input_tokens
-                last_known_idx    = i
-
-        if last_known_tokens > 0:
-            incremental_text  = ""
-            incremental_chars = 0
-            for step in memory.steps[last_known_idx + 1:]:
-                msgs = step.to_messages()
-                t    = _extract_text_from_messages(msgs)
-                if t is not None:
-                    incremental_text += t
-                else:
-                    incremental_chars += msg_char_count(msgs)
-            incremental = estimate_tokens_text(incremental_text) if incremental_text else 0
-            if incremental_chars:
-                incremental += int(incremental_chars / chars_per_token)
-            return last_known_tokens + incremental
-
-        # slow-path: gather every message into one flat string, one int() truncation
         all_msgs = []
         if memory.system_prompt:
             all_msgs.extend(memory.system_prompt.to_messages())

@@ -54,10 +54,6 @@ class AgentRunManager:
                 self._conversation_run_counts[conv_key] = max(
                     0, self._conversation_run_counts.get(conv_key, 0) - 1
                 )
-                if self._conversation_run_counts.get(conv_key, 0) == 0:
-                    self._conversation_context_managers.pop(conv_key, None)
-                    logger.info(
-                        f"Auto-cleared ContextManager for conversation_id: {conv_key} as no active runs remain")
                 logger.info(
                     f"unregister agent run instance, user_id: {user_id}, conversation_id: {conversation_id}")
             else:
