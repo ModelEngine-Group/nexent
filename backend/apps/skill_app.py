@@ -92,18 +92,10 @@ async def create_skill_from_file(
     - Single SKILL.md file: Extracts metadata and saves directly
     - ZIP archive: Contains SKILL.md plus scripts/assets folders
     """
-    try:
-        logger.info(f"[Skill Upload] Authorization header present: {authorization is not None}")
-        if authorization:
-            logger.info(f"[Skill Upload] Auth header prefix: {authorization[:20] if len(authorization) > 20 else authorization}...")
-        
+    try:        
         user_id, tenant_id = get_current_user_id(authorization)
-        logger.info(f"[Skill Upload] User authenticated: user_id={user_id}, tenant_id={tenant_id}")
-        
         service = SkillService()
-
         content = await file.read()
-        logger.info(f"[Skill Upload] File received: filename={file.filename}, size={len(content)} bytes, content_type={file.content_type}")
 
         file_type = "auto"
         if file.filename:
@@ -111,7 +103,6 @@ async def create_skill_from_file(
                 file_type = "zip"
             elif file.filename.endswith(".md"):
                 file_type = "md"
-        logger.info(f"[Skill Upload] Detected file type: {file_type}")
 
         skill = service.create_skill_from_file(
             file_content=content,
@@ -121,19 +112,18 @@ async def create_skill_from_file(
             user_id=user_id,
             tenant_id=tenant_id
         )
-        logger.info(f"[Skill Upload] Success: skill created with id={skill.get('id', 'N/A')}")
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
-        logger.warning(f"[Skill Upload] Unauthorized: {e}")
+        logger.warning(f"Unauthorized: {e}")
         raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
         error_msg = str(e).lower()
-        logger.warning(f"[Skill Upload] SkillException: {e}")
+        logger.warning(f"SkillException: {e}")
         if "already exists" in error_msg:
             raise HTTPException(status_code=409, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"[Skill Upload] Unexpected error: {type(e).__name__}: {e}", exc_info=True)
+        logger.error(f"Unexpected error: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

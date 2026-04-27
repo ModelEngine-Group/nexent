@@ -157,9 +157,6 @@ export async function fetchSkillsList(): Promise<SkillListItem[]> {
     throw new Error(res.message || "Failed to fetch skills");
   }
   const rows = res.data || [];
-  // #region agent debug log
-  (window as any).__debug_skills_mapped = rows.map((s: Record<string, unknown>) => ({ name: s.name, tags: s.tags }));
-  // #endregion
   return rows.map((s: Record<string, unknown>) => {
     const rawId = s.skill_id;
     const skillId =
@@ -411,7 +408,7 @@ export function createSkillContentParser(): {
     // Check for SKILL close
     const skillCloseIdx = buffer.indexOf(SKILL_CLOSE);
     // Check for FILE open
-    const fileOpenMatch = buffer.match(FILE_OPEN_PATTERN);
+    const fileOpenMatch = FILE_OPEN_PATTERN.exec(buffer);
     // Check for FILE close
     const fileCloseIdx = buffer.indexOf(FILE_CLOSE);
 
@@ -425,7 +422,7 @@ export function createSkillContentParser(): {
     if (skillCloseIdx !== -1) {
       foundTags.push({ type: "skill_close", tag: SKILL_CLOSE, index: skillCloseIdx });
     }
-    if (fileOpenMatch && fileOpenMatch.index !== undefined) {
+    if (fileOpenMatch?.index !== undefined) {
       foundTags.push({ type: "file_open", tag: fileOpenMatch[0], path: fileOpenMatch[1], index: fileOpenMatch.index });
     }
     if (fileCloseIdx !== -1) {
@@ -512,7 +509,7 @@ export function createSkillContentParser(): {
             }
             // Create new tab for the file
             const filePath = tagInfo.path || "file.txt";
-            if (!skillTabs.find(t => t.path === filePath)) {
+            if (!skillTabs.some(t => t.path === filePath)) {
               skillTabs.push({ path: filePath, content: "" });
             }
             activeTab = filePath;

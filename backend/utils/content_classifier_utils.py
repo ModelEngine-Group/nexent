@@ -39,90 +39,99 @@ class ContentClassifier:
     def classify(self, chunk: str) -> List[Dict[str, Any]]:
         """Process streaming chunk and return list of classified events."""
         results = []
-
-        # Append chunk to current buffer
         self.buffer += chunk
 
-        # Process buffer until we can't complete more operations
         while self.buffer:
-            # Check if buffer starts with a potential tag
             if self.buffer.startswith("<"):
-                # Look for closing > in buffer
                 if ">" not in self.buffer:
-                    # Incomplete tag, wait for more content
                     break
-
-                gt_pos = self.buffer.index(">")
-                potential_tag = self.buffer[:gt_pos + 1]
-
-                # Try to match known tags
-                matched = self._match_known_tag_with_buffer(potential_tag)
-                if matched:
-                    # Check DoS limit BEFORE incrementing
-                    if self.tag_count >= self.MAX_TAG_COUNT:
-                        break
-                    self.tag_count += 1
-
-                    # Content immediately after tag (before next < or end of buffer)
-                    content_after_tag = self.buffer[gt_pos + 1:]
-                    self.buffer = ""
-
-                    # Handle the matched tag
-                    event = self._handle_tag(matched)
-                    if event:
-                        results.append(event)
-
-                    # Process content after tag
-                    if content_after_tag:
-                        # If content contains another tag start, only process until that point
-                        if "<" in content_after_tag:
-                            next_tag_pos = content_after_tag.index("<")
-                            immediate_content = content_after_tag[:next_tag_pos]
-                            if immediate_content:
-                                event = self._create_event(immediate_content)
-                                if event:
-                                    results.append(event)
-                            # Keep the rest (including the <) for next iteration
-                            self.buffer = content_after_tag[next_tag_pos:]
-                        else:
-                            # No more tags in content, emit all
-                            event = self._create_event(content_after_tag)
-                            if event:
-                                results.append(event)
-                    continue
-
-                # Tag doesn't match any known pattern
-                # Check if it's too long (potential DoS)
-                if len(potential_tag) > self.MAX_TAG_LENGTH:
-                    # Emit < as content and retry
-                    event = self._create_event("<")
-                    if event:
-                        results.append(event)
-                    self.buffer = self.buffer[1:]
-                    continue
-
-                # Not a recognized tag, emit < and continue processing
-                event = self._create_event("<")
-                if event:
-                    results.append(event)
-                self.buffer = self.buffer[1:]
-                continue
-
-            # No tag start, emit buffered content
-            # Emit in chunks for efficiency, not character-by-character
-            if len(self.buffer) > 1:
-                emit_len = min(len(self.buffer), 64)  # Emit up to 64 chars at a time
-                event = self._create_event(self.buffer[:emit_len])
-                if event:
-                    results.append(event)
-                self.buffer = self.buffer[emit_len:]
+                results.extend(self._process_tag_start())
             else:
-                # Single character
-                event = self._create_event(self.buffer)
-                if event:
-                    results.append(event)
-                self.buffer = ""
+                results.extend(self._process_non_tag_content())
 
+        return results
+
+    def _process_tag_start(self) -> List[Dict[str, Any]]:
+        """Process buffer when it starts with '<' - extracts and handles tags."""
+        results = []
+        gt_pos = self.buffer.index(">")
+        potential_tag = self.buffer[:gt_pos + 1]
+        matched = self._match_known_tag_with_buffer(potential_tag)
+
+        if matched:
+            results.extend(self._handle_matched_tag(gt_pos, potential_tag, matched))
+        elif len(potential_tag) > self.MAX_TAG_LENGTH:
+            results.extend(self._emit_dos_protected_content())
+        else:
+            results.extend(self._emit_potential_tag_start())
+
+        return results
+
+    def _handle_matched_tag(self, gt_pos: int, potential_tag: str, matched_tag: str) -> List[Dict[str, Any]]:
+        """Handle a successfully matched tag and process following content."""
+        results = []
+        if self.tag_count >= self.MAX_TAG_COUNT:
+            self.buffer = self.buffer[gt_pos + 1:]
+            return results
+
+        self.tag_count += 1
+        content_after_tag = self.buffer[gt_pos + 1:]
+        self.buffer = ""
+
+        event = self._handle_tag(matched_tag)
+        if event:
+            results.append(event)
+
+        if content_after_tag:
+            results.extend(self._process_content_after_tag(content_after_tag))
+
+        return results
+
+    def _process_content_after_tag(self, content: str) -> List[Dict[str, Any]]:
+        """Process content following a tag, handling embedded tag starts."""
+        results = []
+        if "<" not in content:
+            event = self._create_event(content)
+            if event:
+                results.append(event)
+            return results
+
+        next_tag_pos = content.index("<")
+        immediate_content = content[:next_tag_pos]
+        if immediate_content:
+            event = self._create_event(immediate_content)
+            if event:
+                results.append(event)
+
+        self.buffer = content[next_tag_pos:]
+        return results
+
+    def _emit_dos_protected_content(self) -> List[Dict[str, Any]]:
+        """Handle content that exceeds max tag length (DoS protection)."""
+        results = []
+        event = self._create_event("<")
+        if event:
+            results.append(event)
+        self.buffer = self.buffer[1:]
+        return results
+
+    def _emit_potential_tag_start(self) -> List[Dict[str, Any]]:
+        """Handle buffer starting with '<' that doesn't match any known tag."""
+        results = []
+        event = self._create_event("<")
+        if event:
+            results.append(event)
+        self.buffer = self.buffer[1:]
+        return results
+
+    def _process_non_tag_content(self) -> List[Dict[str, Any]]:
+        """Process buffered content that doesn't start with '<'."""
+        results = []
+        emit_len = min(len(self.buffer), 64)
+        event = self._create_event(self.buffer[:emit_len])
+        if event:
+            results.append(event)
+        self.buffer = self.buffer[emit_len:]
         return results
 
     def _match_known_tag_with_buffer(self, buffer_content: str) -> Optional[str]:
@@ -163,16 +172,15 @@ class ContentClassifier:
             self.state = "skill_body"
             return None
 
-        elif tag == "</SKILL>":
-            self.state = "summary"
-            return None
-
         elif tag == "<SUMMARY>":
             self.state = "summary"
             return None
 
-        elif tag == "</SUMMARY>":
-            self.state = "others"
+        elif tag == "</SUMMARY>" or tag == "</SKILL>":
+            if tag == "</SKILL>":
+                self.state = "summary"
+            else:
+                self.state = "others"
             return None
 
         elif tag == "<FILE>":
