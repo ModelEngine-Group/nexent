@@ -57,7 +57,7 @@ function setAuthCookies(res, session) {
   const cookies = [];
 
   const expiresInSeconds = session.expires_in_seconds || 3600;
-  
+
   const refreshTokenMaxAge = expiresInSeconds * 10;
 
   if (session.access_token) {
@@ -305,7 +305,7 @@ app.prepare().then(() => {
           pathname.startsWith("/api/memory/") ||
           pathname.startsWith("/api/file/storage") ||
           pathname.startsWith("/api/file/preprocess") ||
-          pathname.startsWith("/api/skills/create-simple");
+          pathname.startsWith("/api/skills/create");
         const target = isRuntime ? RUNTIME_HTTP_BACKEND : HTTP_BACKEND;
         proxy.web(req, res, { target, changeOrigin: true });
       }
