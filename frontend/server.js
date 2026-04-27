@@ -57,7 +57,7 @@ function setAuthCookies(res, session) {
   const cookies = [];
 
   const expiresInSeconds = session.expires_in_seconds || 3600;
-  
+
   const refreshTokenMaxAge = expiresInSeconds * 10;
 
   if (session.access_token) {
@@ -199,7 +199,7 @@ function forwardAuthRequest(req, res, targetUrl) {
 
               const isOAuthCallback = req.parsedPathname === "/api/user/oauth/callback";
               if (isOAuthCallback) {
-                res.writeHead(302, { Location: "/chat" });
+                res.writeHead(302, { Location: "/" });
                 res.end();
                 return;
               }
