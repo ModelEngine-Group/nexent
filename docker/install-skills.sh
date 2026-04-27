@@ -304,7 +304,7 @@ install_skills() {
 
   echo ""
   echo "   📊 Installation Summary:"
-  echo "      ⏭️  Skipped (already installed): $skip_count"
+  echo "     ⏭️  Skipped: $skip_count"
   echo "      ✅ Success: $success_count"
   echo "      ❌ Failed: $fail_count"
   echo ""
