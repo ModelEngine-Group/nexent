@@ -977,6 +977,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_version_t (
     source_version_no INTEGER NULL,
     source_type VARCHAR(30) NULL,
     status VARCHAR(30) DEFAULT 'RELEASED',
+    is_a2a BOOLEAN DEFAULT FALSE,
     created_by VARCHAR(100) NOT NULL,
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(100),
@@ -1003,6 +1004,7 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.release_note IS 'Release note
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.source_version_no IS 'Source version number. If this version is a rollback, record the source version number.';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.source_type IS 'Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish).';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.status IS 'Version status: RELEASED / DISABLED / ARCHIVED';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.is_a2a IS 'Whether this version is published as an A2A Server agent';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.created_by IS 'User who published this version';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.create_time IS 'Version creation timestamp';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.updated_by IS 'Last user who updated this version';

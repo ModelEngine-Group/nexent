@@ -493,6 +493,7 @@ class AgentVersion(TableBase):
     source_version_no = Column(Integer, doc="Source version number. If this version is a rollback, record the source version")
     source_type = Column(String(30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
     status = Column(String(30), default="RELEASED", doc="Version status: RELEASED / DISABLED / ARCHIVED")
+    is_a2a = Column(Boolean, default=False, doc="Whether this version is published as an A2A Server agent")
 
 
 class UserTokenInfo(TableBase):

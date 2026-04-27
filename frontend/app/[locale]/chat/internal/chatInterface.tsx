@@ -238,6 +238,8 @@ export function ChatInterface() {
     let shouldResetButtonStates = true;
 
     // If in new conversation state, switch to conversation state after sending message
+    // Save the value to local variable before state update for title generation logic
+    let shouldGenerateTitle = conversationManagement.isNewConversation;
     if (conversationManagement.isNewConversation) {
       conversationManagement.setIsNewConversation(false);
     }
@@ -565,14 +567,13 @@ export function ChatInterface() {
       resetTimeout();
 
       // Call streaming processing function to handle response
-      // Compatible with both function and direct assignment
       await handleStreamResponse(
         reader,
         setCurrentSessionMessagesFactory(id),
         resetTimeout,
         stepIdCounter,
         setIsSwitchedConversation,
-        conversationManagement.isNewConversation,
+        shouldGenerateTitle,
         conversationManagement.setConversationTitle,
         conversationManagement.fetchConversationList,
         id,

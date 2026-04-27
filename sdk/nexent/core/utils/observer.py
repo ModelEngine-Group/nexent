@@ -26,6 +26,7 @@ class ProcessType(Enum):
     CARD = "card"  # content that needs to be rendered by the front end using cards
     TOOL = "tool"  # tool name
     MEMORY_SEARCH = "memory_search"  # memory search status
+    MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
 
 
 # message transformer base class
@@ -163,7 +164,8 @@ class MessageObserver:
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
             ProcessType.TOOL: default_transformer,
-            ProcessType.MEMORY_SEARCH: default_transformer
+            ProcessType.MEMORY_SEARCH: default_transformer,
+            ProcessType.MAX_STEPS_REACHED: default_transformer
         }
 
     def add_model_new_token(self, new_token):

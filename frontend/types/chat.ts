@@ -24,7 +24,8 @@ export interface StepContent {
         typeof chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER |
         typeof chatConfig.messageTypes.VIRTUAL |
         typeof chatConfig.messageTypes.MEMORY_SEARCH |
-        typeof chatConfig.messageTypes.PREPROCESS
+        typeof chatConfig.messageTypes.PREPROCESS |
+        typeof chatConfig.messageTypes.MAX_STEPS_REACHED
   content: string
   expanded: boolean
   timestamp: number
@@ -37,19 +38,24 @@ export interface StepContent {
   }
 }
 
+export interface MaxStepsInfo {
+  completedSteps: number
+  maxSteps: number
+  message: string
+}
+
 export interface AgentStep {
   id: string
   title: string
   content: string
   expanded: boolean
   metrics: string
-  // Support for both formats
   thinking: StepSection
   code: StepSection
   output: StepSection
-  // New format content array
   contents: StepContent[]
   parsingContent?: string
+  maxStepsInfo?: MaxStepsInfo
 }
 
 // Agent related types - imported from agentConfig
@@ -104,15 +110,24 @@ export interface ChatAttachmentProps {
   className?: string;
 }
 
-// File preview drawer props
-export interface FilePreviewProps {
-  open: boolean;
+type RemoteFilePreviewSource = {
+  source?: "remote";
   objectName: string;
   fileName: string;
   fileType?: string;
   fileSize?: number;
+};
+
+type LocalFilePreviewSource = {
+  source: "local";
+  file: File;
+};
+
+// File preview drawer props
+export type FilePreviewProps = {
+  open: boolean;
   onClose: () => void;
-}
+} & (RemoteFilePreviewSource | LocalFilePreviewSource);
 
 // Main chat message type
 export interface ChatMessageType {

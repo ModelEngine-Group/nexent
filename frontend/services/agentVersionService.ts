@@ -53,6 +53,7 @@ export interface AgentVersion {
   source_type: string;
   source_version_no: number;
   status: string;
+  is_a2a: boolean;
   create_time: string;
   update_time: string;
 }

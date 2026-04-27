@@ -545,6 +545,31 @@ class TestUploadToMinio:
             mock_file.seek.assert_called_once_with(0)
             mock_logger.error.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_upload_to_minio_file_size_parameter_passed(self):
+        """Test that file_size parameter is correctly calculated and passed to upload_fileobj"""
+        from backend.services.file_management_service import upload_to_minio
+
+        # Create mock UploadFile with known content size
+        test_content = b"test file content with known size"
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=test_content)
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_fileobj', MagicMock(return_value={
+            "success": True, "file_name": "test.txt", "object_name": "folder/test.txt"
+        })) as mock_upload:
+            results = await upload_to_minio(files=[mock_file], folder="folder")
+
+            assert len(results) == 1
+            assert results[0]["success"] is True
+            mock_upload.assert_called_once()
+            # Verify file_size parameter equals the actual content length
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["file_size"] == len(test_content)
+            assert call_kwargs["file_size"] == 33  # Explicit check for known content size
+
 
 class TestGetFileUrlImpl:
     """Test cases for get_file_url_impl function"""

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig
+from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory
 from nexent.memory.memory_service import search_memory_in_levels
 
 from services.file_management_service import get_llm_model, validate_urls_access
@@ -25,6 +25,7 @@ from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id
 from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
+from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
@@ -358,11 +359,15 @@ async def create_agent_config(
             if "KnowledgeBaseSearchTool" == tool.class_name:
                 index_names = tool.params.get("index_names")
                 if index_names:
+                    # Reuse the index_name -> display_name mapping from tool.metadata
+                    # (already computed in create_tool_config_list to avoid redundant DB query)
+                    index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
                     for index_name in index_names:
                         try:
+                            display_name = index_name_to_display_map.get(index_name, index_name)
                             message = ElasticSearchService().get_summary(index_name=index_name)
                             summary = message.get("summary", "")
-                            knowledge_base_summary += f"**{index_name}**: {summary}\n\n"
+                            knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
                         except Exception as e:
                             logger.warning(
                                 f"Failed to get summary for knowledge base {index_name}: {e}")
@@ -458,10 +463,24 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                     tenant_id=tenant_id, model_name=rerank_model_name
                 )
 
+            # Build display_name to index_name mapping for LLM parameter conversion
+            # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
+            index_names = param_dict.get("index_names", [])
+            display_name_to_index_map = {}
+            index_name_to_display_map = {}
+            if index_names:
+                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                # Reverse the mapping: display_name (knowledge_name) -> index_name
+                for idx_name, kb_name in knowledge_name_map.items():
+                    display_name_to_index_map[kb_name] = idx_name
+                    index_name_to_display_map[idx_name] = kb_name
+
             tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
                 "rerank_model": rerank_model,
+                "display_name_to_index_map": display_name_to_index_map,
+                "index_name_to_display_map": index_name_to_display_map,
             }
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
             rerank = param_dict.get("rerank", False)
@@ -652,6 +671,63 @@ async def join_minio_file_description_to_query(
     return final_query
 
 
+def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files: int = 20) -> str:
+    """Format minio_files into a string for embedding in history content.
+
+    Args:
+        minio_files: List of file info dicts
+        max_files: Maximum number of files to include per message
+
+    Returns:
+        Formatted string describing the files, or empty string if no files
+    """
+    if not minio_files or not isinstance(minio_files, list):
+        return ""
+
+    file_lines = []
+    for i, file in enumerate(minio_files):
+        if i >= max_files:
+            file_lines.append(f"  - ... (and {len(minio_files) - max_files} more files)")
+            break
+        if isinstance(file, dict) and file.get("url") and file.get("name"):
+            s3_url = f"s3:/{file['url']}"
+            presigned_url = file.get("presigned_url", "")
+            if presigned_url:
+                file_lines.append(
+                    f"  - {file['name']}: {s3_url} (download: {presigned_url})"
+                )
+            else:
+                file_lines.append(f"  - {file['name']}: {s3_url}")
+
+    if not file_lines:
+        return ""
+
+    return "\n[Attached files]:\n" + "\n".join(file_lines)
+
+
+def _convert_history_with_minio_files(history: List) -> Optional[List[AgentHistory]]:
+    """Convert HistoryItem list to AgentHistory list, embedding minio_files into content.
+
+    Args:
+        history: List of HistoryItem from API
+
+    Returns:
+        List of AgentHistory with file info embedded in content, or None if history is None
+    """
+    if history is None:
+        return None
+
+    result = []
+    for item in history:
+        content = item.content
+        if item.minio_files:
+            file_info = _format_minio_files_for_content(item.minio_files)
+            if file_info:
+                content = content + file_info if content else file_info
+        result.append(AgentHistory(role=item.role, content=content))
+    return result
+
+
 def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict) -> list:
     """
     Filter mcp servers and tools, only keep the actual used mcp servers
@@ -760,13 +836,16 @@ async def create_agent_run_info(
             # Fallback to string format if record not found
             mcp_host.append(url)
 
+    # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
+    converted_history = _convert_history_with_minio_files(history)
+
     agent_run_info = AgentRunInfo(
         query=final_query,
         model_config_list=model_list,
         observer=MessageObserver(lang=language),
         agent_config=agent_config,
         mcp_host=mcp_host,
-        history=history,
+        history=converted_history,
         stop_event=threading.Event()
     )
     return agent_run_info

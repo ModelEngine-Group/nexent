@@ -18,6 +18,7 @@
   "filePreview.loadingPage": "页面加载中...",
   "filePreview.previewFailed": "文件预览失败",
   "filePreview.emptyFile": "文件内容为空",
+  "filePreview.uploadToPreview": "请上传文件后预览",
   "filePreview.download": "下载",
   "filePreview.zoomIn": "放大",
   "filePreview.zoomOut": "缩小",
@@ -86,6 +87,7 @@
   "extractMsg.unknownTitle": "未知标题",
   "extractMsg.noContentDescription": "无内容描述",
   "extractMsg.cannotParseSearchPlaceholder": "无法解析搜索占位符内容:",
+  "extractMsg.cannotParseMaxStepsData": "无法解析最大步数数据:",
 
   "chatHeader.doubleClickToEdit": "双击修改标题",
 
@@ -251,6 +253,7 @@
   "chatStreamFinalMessage.generatingAudio": "正在生成语音...",
   "chatStreamFinalMessage.stopPlaying": "停止播放",
   "chatStreamFinalMessage.audioGenerationFailed": "语音生成失败",
+  "chatStreamFinalMessage.maxStepsReached": "步数限制",
 
   "chatStreamHandler.codePrefix": "代码：",
   "chatStreamHandler.callingTool": "工具调用中...",
@@ -265,7 +268,11 @@
   "chatStreamHandler.generateTitleFailed": "生成标题失败:",
   "chatStreamHandler.streamResponseError": "处理流式响应时出错:",
   "chatStreamHandler.userInterrupted": "对话主动中止。",
+  "chatStreamHandler.maxStepsReached": "步数限制",
+  "chatStreamHandler.maxStepsNotification": "已达到最大步数限制（{{completedSteps}} 步），下方汇总了当前已完成的工作。如需完整结果，可尝试增加步数限制。",
+  "chatStreamHandler.parseMaxStepsDataFailed": "解析最大步数数据失败:",
 
+  "taskWindow.maxStepsReached": "已达到最大步数限制（{{completedSteps}} 步），正在总结当前工作...",
   "taskWindow.unknownSource": "未知来源",
   "taskWindow.knowledgeFile": "知识库文件",
   "taskWindow.urlParseError": "URL解析错误:",
