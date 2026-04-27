@@ -34,3 +34,8 @@ model-assets/
 *.pytest_cache
 *.coverage
 *coverage.xml
+
+.sisyphus/
+.opencode/
+openspec/
+logs/

@@ -2270,5 +2270,10 @@
 
   "collaborativeAgent.internalAgents": "Internal Agents",
   "collaborativeAgent.externalAgents": "External Agents",
-  "collaborativeAgent.addExternal": "Add External Agent"
+  "collaborativeAgent.addExternal": "Add External Agent",
+  "monitoring.comingSoon.title": "Monitoring coming soon",
+  "monitoring.comingSoon.description": "Stay tuned for real-time monitoring features across your agents.",
+  "monitoring.comingSoon.feature1": "Health checks and uptime monitoring",
+  "monitoring.comingSoon.feature2": "Real-time logs and alerts",
+  "monitoring.comingSoon.feature3": "Performance metrics and dashboards"
 }
