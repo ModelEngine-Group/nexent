@@ -26,6 +26,8 @@ import { chatConfig } from "@/const/chatConfig";
 import { FilePreview } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
+import { TokenUsageIndicator } from "@/components/ui/tokenUsageIndicator";
+import { TokenMetrics } from "@/types/chat";
 
 // Image viewer component
 function ImageViewer({
@@ -305,6 +307,7 @@ interface ChatInputProps {
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
   selectedAgentId?: string | null;
   onAgentSelect?: (agentId: string | null) => void;
+  latestMetrics?: TokenMetrics | null;
 }
 
 export function ChatInput({
@@ -323,6 +326,7 @@ export function ChatInput({
   onAttachmentsChange,
   selectedAgentId = null,
   onAgentSelect,
+  latestMetrics = null,
 }: ChatInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<
@@ -1025,6 +1029,8 @@ export function ChatInput({
         </div>
 
         <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
+          {/* Token usage indicator */}
+          <TokenUsageIndicator latestMetrics={latestMetrics} />
           {/* Voice to text button */}
           <Tooltip
             title={
