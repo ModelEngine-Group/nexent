@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { App, Modal, Input, Button, Form } from "antd";
 import { useTranslation } from "react-i18next";
 import {
-  MCP_HEALTH_STATUS,
-  MCP_SERVICE_STATUS,
-  MCP_TRANSPORT_TYPE,
+  McpHealthStatus,
+  McpServiceStatus,
+  McpTransportType,
 } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import {
@@ -68,7 +68,7 @@ export default function McpServiceDetailModal({
     draft.registryJson
   );
   const isHttpLike =
-    draft.transportType !== MCP_TRANSPORT_TYPE.CONTAINER;
+    draft.transportType !== McpTransportType.CONTAINER;
 
   const handleSave = async () => {
     try {
@@ -261,7 +261,7 @@ export default function McpServiceDetailModal({
                   </Button>
                 </div>
               </div>
-              {draft.transportType === MCP_TRANSPORT_TYPE.CONTAINER ? (
+              {draft.transportType === McpTransportType.CONTAINER ? (
                 <DetailRow
                   label={t("mcpTools.detail.containerStatus")}
                   value={t(getContainerStatusKey(draft.containerStatus))}
@@ -274,7 +274,7 @@ export default function McpServiceDetailModal({
                 {t("mcpTools.detail.tools")}
               </span>
               <div className="flex items-center gap-2">
-                {draft.transportType === MCP_TRANSPORT_TYPE.CONTAINER &&
+                {draft.transportType === McpTransportType.CONTAINER &&
                 draft.containerId ? (
                   <Button
                     size="small"
@@ -348,7 +348,7 @@ export default function McpServiceDetailModal({
               disabled={isToggleLoading(selectedService.mcpId)}
               onClick={() => onToggleEnable(selectedService)}
             >
-              {draft.status === MCP_SERVICE_STATUS.ENABLED
+              {draft.status === McpServiceStatus.ENABLED
                 ? t("mcpTools.detail.disable")
                 : t("mcpTools.detail.enable")}
             </Button>
@@ -402,7 +402,7 @@ export default function McpServiceDetailModal({
         </Modal>
       ) : null}
 
-      {draft.transportType === MCP_TRANSPORT_TYPE.CONTAINER &&
+              {draft.transportType === McpTransportType.CONTAINER &&
       draft.containerId ? (
         <McpContainerLogsModal
           open={logsOpen}
@@ -446,8 +446,8 @@ function StatusLamp({ variant }: { variant: StatusLampVariant }) {
 function healthLampVariant(
   health: McpServiceItem["healthStatus"]
 ): StatusLampVariant {
-  if (health === MCP_HEALTH_STATUS.HEALTHY) return "success";
-  if (health === MCP_HEALTH_STATUS.UNHEALTHY) return "danger";
+  if (health === McpHealthStatus.HEALTHY) return "success";
+  if (health === McpHealthStatus.UNHEALTHY) return "danger";
   return "neutral";
 }
 

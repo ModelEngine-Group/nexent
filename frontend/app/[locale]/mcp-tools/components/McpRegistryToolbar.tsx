@@ -3,7 +3,7 @@ import { DatePicker, Dropdown, Input, Select, Switch } from "antd";
 import type { MenuProps } from "antd";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
-import { McpVersionFilterMode } from "@/types/mcpTools";
+import { McpVersionFilterMode } from "@/const/mcpTools";
 
 interface McpRegistryToolbarProps {
   search: string;

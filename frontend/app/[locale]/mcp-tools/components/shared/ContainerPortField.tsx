@@ -1,7 +1,6 @@
 import { Button, InputNumber } from "antd";
 import { LoadingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { MCP_PORT_RANGE } from "@/const/mcpTools";
 import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortAvailability";
 
 interface ContainerPortFieldProps {
@@ -20,7 +19,6 @@ export default function ContainerPortField({
   const { t } = useTranslation("common");
   const { portCheckLoading, portAvailable, suggesting, suggestPort } =
     useContainerPortAvailability({
-      scope,
       enabled,
       containerPort,
       setContainerPort,
@@ -35,8 +33,6 @@ export default function ContainerPortField({
           onChange={(value) =>
             setContainerPort(value === null ? undefined : value)
           }
-          min={MCP_PORT_RANGE.MIN}
-          max={MCP_PORT_RANGE.MAX}
           controls={false}
           className="w-full"
           placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
@@ -54,7 +50,7 @@ export default function ContainerPortField({
           <LoadingOutlined className="animate-spin" />
           {t("mcpTools.addModal.portChecking")}...
         </p>
-      ) : containerPort ? (
+      ) : containerPort && portAvailable !== null ? (
         <p
           className={`mt-2 text-xs ${portAvailable ? "text-emerald-600" : "text-rose-600"}`}
         >

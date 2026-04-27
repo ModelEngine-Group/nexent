@@ -1,12 +1,23 @@
 import { useState } from "react";
 import { Button, Form, Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
-import { INITIAL_LOCAL_ADD_DRAFT, MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
-import type { LocalAddMcpDraft, McpTransportType } from "@/types/mcpTools";
+import { McpTransportType } from "@/const/mcpTools";
+import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { useMcpAddLocal } from "@/hooks/mcpTools/useMcpAddLocal";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import ContainerPortField from "./shared/ContainerPortField";
 import TagEditor from "./shared/TagEditor";
+
+const createInitialDraft = (): LocalAddMcpDraft => ({
+  name: "",
+  description: "",
+  transportType: McpTransportType.HTTP,
+  serverUrl: "",
+  authorizationToken: "",
+  containerConfigJson: "",
+  containerPort: undefined,
+  tags: [],
+});
 
 interface AddMcpServiceLocalSectionProps {
   active: boolean;
@@ -20,10 +31,10 @@ export default function AddMcpServiceLocalSection({
   const { t } = useTranslation("common");
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
-  const [draft, setDraft] = useState<LocalAddMcpDraft>(INITIAL_LOCAL_ADD_DRAFT);
+  const [draft, setDraft] = useState<LocalAddMcpDraft>(() => createInitialDraft());
   const { submit, submitting } = useMcpAddLocal({
     onSuccess: () => {
-      setDraft(INITIAL_LOCAL_ADD_DRAFT);
+      setDraft(createInitialDraft());
       form.resetFields();
       onAdded();
     },
@@ -71,8 +82,7 @@ export default function AddMcpServiceLocalSection({
   if (!active) return null;
 
   const isHttpLike =
-    draft.transportType === MCP_TRANSPORT_TYPE.HTTP ||
-    draft.transportType === MCP_TRANSPORT_TYPE.SSE;
+    draft.transportType !== McpTransportType.CONTAINER;
 
   return (
     <>
@@ -121,15 +131,15 @@ export default function AddMcpServiceLocalSection({
             options={[
               {
                 label: t("mcpTools.serverType.http"),
-                value: MCP_TRANSPORT_TYPE.HTTP,
+                value: McpTransportType.HTTP,
               },
               {
                 label: t("mcpTools.serverType.sse"),
-                value: MCP_TRANSPORT_TYPE.SSE,
+                value: McpTransportType.SSE,
               },
               {
                 label: t("mcpTools.serverType.container"),
-                value: MCP_TRANSPORT_TYPE.CONTAINER,
+                value: McpTransportType.CONTAINER,
               },
             ]}
           />

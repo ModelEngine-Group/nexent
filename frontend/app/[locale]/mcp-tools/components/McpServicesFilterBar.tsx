@@ -1,12 +1,11 @@
 import { Select } from "antd";
 import { useTranslation } from "react-i18next";
-import { MCP_TAB, MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
+import { FILTER_ALL, McpSource, McpTransportType } from "@/const/mcpTools";
 import type {
   McpSourceFilter,
   McpTagStat,
   McpTransportFilter,
 } from "@/types/mcpTools";
-import { FILTER_ALL } from "@/types/mcpTools";
 
 interface McpServicesFilterBarProps {
   source: McpSourceFilter;
@@ -43,12 +42,12 @@ export default function McpServicesFilterBar({
         className="min-w-[140px] flex-1 lg:flex-none lg:w-36"
         options={[
           { value: FILTER_ALL, label: t("mcpTools.page.sourceFilter.all") },
-          { value: MCP_TAB.LOCAL, label: t("mcpTools.source.local") },
+          { value: McpSource.LOCAL, label: t("mcpTools.source.local") },
           {
-            value: MCP_TAB.MCP_REGISTRY,
+            value: McpSource.REGISTRY,
             label: t("mcpTools.source.registry"),
           },
-          { value: MCP_TAB.COMMUNITY, label: t("mcpTools.source.community") },
+          { value: McpSource.COMMUNITY, label: t("mcpTools.source.community") },
         ]}
       />
       <Select
@@ -59,15 +58,15 @@ export default function McpServicesFilterBar({
         options={[
           { value: FILTER_ALL, label: t("mcpTools.page.transportFilter.all") },
           {
-            value: MCP_TRANSPORT_TYPE.HTTP,
+            value: McpTransportType.HTTP,
             label: t("mcpTools.serverType.http"),
           },
           {
-            value: MCP_TRANSPORT_TYPE.SSE,
+            value: McpTransportType.SSE,
             label: t("mcpTools.serverType.sse"),
           },
           {
-            value: MCP_TRANSPORT_TYPE.CONTAINER,
+            value: McpTransportType.CONTAINER,
             label: t("mcpTools.serverType.container"),
           },
         ]}

@@ -1,48 +1,46 @@
-import {
-  McpContainerStatus,
-  McpHealthStatus,
-  McpTransportType,
-  McpServiceStatus,
-  McpTab,
-  McpServerStatus,
-  FILTER_ALL,
-} from "@/types/mcpTools";
-import type { LocalAddMcpDraft } from "@/types/mcpTools";
+export enum McpSource {
+  LOCAL = "local",
+  REGISTRY = "mcp_registry",
+  COMMUNITY = "community",
+}
 
-export const MCP_TAB = {
-  LOCAL: McpTab.LOCAL,
-  MCP_REGISTRY: McpTab.MCP_REGISTRY,
-  COMMUNITY: McpTab.COMMUNITY,
-} as const;
+export enum McpTransportType {
+  HTTP = "http",
+  SSE = "sse",
+  CONTAINER = "container",
+}
 
-export const MCP_TRANSPORT_TYPE = {
-  HTTP: McpTransportType.HTTP,
-  SSE: McpTransportType.SSE,
-  CONTAINER: McpTransportType.CONTAINER,
-} as const;
+export enum McpServiceStatus {
+  ENABLED = "enabled",
+  DISABLED = "disabled",
+}
 
-export const MCP_SERVICE_STATUS = {
-  ENABLED: McpServiceStatus.ENABLED,
-  DISABLED: McpServiceStatus.DISABLED,
-} as const;
+export enum McpHealthStatus {
+  HEALTHY = "healthy",
+  UNHEALTHY = "unhealthy",
+  UNCHECKED = "unchecked",
+}
 
-export const MCP_HEALTH_STATUS = {
-  HEALTHY: McpHealthStatus.HEALTHY,
-  UNHEALTHY: McpHealthStatus.UNHEALTHY,
-  UNCHECKED: McpHealthStatus.UNCHECKED,
-} as const;
+export enum McpContainerStatus {
+  RUNNING = "running",
+  STOPPED = "stopped",
+  UNKNOWN = "unknown",
+}
 
-export const MCP_CONTAINER_STATUS = {
-  RUNNING: McpContainerStatus.RUNNING,
-  STOPPED: McpContainerStatus.STOPPED,
-  UNKNOWN: McpContainerStatus.UNKNOWN,
-} as const;
+export enum McpVersionFilterMode {
+  ALL = "all",
+  LATEST = "latest",
+  CUSTOM = "custom",
+}
 
-export const MCP_REGISTRY_SERVER_STATUS = {
-  ACTIVE: McpServerStatus.ACTIVE,
-  DEPRECATED: McpServerStatus.DEPRECATED,
-  UNKNOWN: McpServerStatus.UNKNOWN,
-} as const;
+export enum McpServerStatus {
+  ACTIVE = "active",
+  DEPRECATED = "deprecated",
+  UNKNOWN = "unknown",
+}
+
+/** Sentinel value used by toolbar `Select`s to mean "no filter applied". */
+export const FILTER_ALL = "all";
 
 /** Field length limits shared by every MCP form (used by rule builders). */
 export const MCP_FIELD_LIMITS = {
@@ -62,18 +60,6 @@ export const MCP_SEARCH_DEBOUNCE_MS = 350;
 
 export const MCP_GRID_CARD_OUTER =
   "group flex h-56 w-full min-h-56 max-h-56 shrink-0 cursor-pointer flex-col overflow-hidden rounded-md border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md";
-
-/** Default blank state for the local-add form. */
-export const INITIAL_LOCAL_ADD_DRAFT: LocalAddMcpDraft = {
-  name: "",
-  description: "",
-  transportType: McpTransportType.HTTP,
-  serverUrl: "",
-  authorizationToken: "",
-  containerConfigJson: "",
-  containerPort: undefined,
-  tags: [],
-};
 
 /**
  * Shared React Query cache keys for the MCP tools feature. Centralised so every
@@ -99,5 +85,3 @@ export const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 
 /** Short semver used by the "My community MCP" edit form (`x`, `x.y`, `x.y.z`). */
 export const SHORT_VERSION_PATTERN = /^\d+(?:\.\d+){0,2}$/;
-
-export { FILTER_ALL };

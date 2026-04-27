@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Form, Input, Modal, Select } from "antd";
 import { useTranslation } from "react-i18next";
-import { MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
-import type { CommunityMcpCard, McpTransportType } from "@/types/mcpTools";
+import { McpTransportType } from "@/const/mcpTools";
+import type { CommunityMcpCard } from "@/types/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
 import { useMcpCommunityQuickAdd } from "@/hooks/mcpTools/useMcpCommunityQuickAdd";
@@ -190,22 +190,21 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
             options={[
               {
                 label: t("mcpTools.serverType.http"),
-                value: MCP_TRANSPORT_TYPE.HTTP,
+                value: McpTransportType.HTTP,
               },
               {
                 label: t("mcpTools.serverType.sse"),
-                value: MCP_TRANSPORT_TYPE.SSE,
+                value: McpTransportType.SSE,
               },
               {
                 label: t("mcpTools.serverType.container"),
-                value: MCP_TRANSPORT_TYPE.CONTAINER,
+                value: McpTransportType.CONTAINER,
               },
             ]}
           />
         </Form.Item>
 
-        {draft.transportType === MCP_TRANSPORT_TYPE.HTTP ||
-        draft.transportType === MCP_TRANSPORT_TYPE.SSE ? (
+        {draft.transportType !== McpTransportType.CONTAINER ? (
           <div className="space-y-4">
             <Form.Item
               label={t("mcpTools.addModal.serverUrl")}

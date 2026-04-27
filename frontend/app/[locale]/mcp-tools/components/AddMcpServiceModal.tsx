@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Segmented } from "antd";
 import { useTranslation } from "react-i18next";
-import { MCP_TAB } from "@/const/mcpTools";
-import { McpTab } from "@/types/mcpTools";
+import { McpSource } from "@/const/mcpTools";
 import AddMcpServiceLocalSection from "./AddMcpServiceLocalSection";
 import AddMcpServiceRegistrySection from "./AddMcpServiceRegistrySection";
 import AddMcpServiceCommunitySection from "./AddMcpServiceCommunitySection";
@@ -17,10 +16,10 @@ export default function AddMcpServiceModal({
   onClose,
 }: AddMcpServiceModalProps) {
   const { t } = useTranslation("common");
-  const [tab, setTab] = useState<McpTab>(McpTab.LOCAL);
+  const [tab, setTab] = useState<McpSource>(McpSource.LOCAL);
 
   useEffect(() => {
-    if (!open) setTab(McpTab.LOCAL);
+    if (!open) setTab(McpSource.LOCAL);
   }, [open]);
 
   if (!open) return null;
@@ -58,16 +57,16 @@ export default function AddMcpServiceModal({
         <div className="shrink-0 px-6 pt-4">
           <Segmented
             value={tab}
-            onChange={(value) => setTab(value as McpTab)}
+            onChange={(value) => setTab(value as McpSource)}
             options={[
-              { label: t("mcpTools.addModal.tabLocal"), value: MCP_TAB.LOCAL },
+              { label: t("mcpTools.addModal.tabLocal"), value: McpSource.LOCAL },
               {
                 label: t("mcpTools.addModal.tabRegistry"),
-                value: MCP_TAB.MCP_REGISTRY,
+                value: McpSource.REGISTRY,
               },
               {
                 label: t("mcpTools.addModal.tabCommunity"),
-                value: MCP_TAB.COMMUNITY,
+                value: McpSource.COMMUNITY,
               },
             ]}
             className="h-9 rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:leading-[30px] [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
@@ -76,15 +75,15 @@ export default function AddMcpServiceModal({
 
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
           <AddMcpServiceLocalSection
-            active={tab === MCP_TAB.LOCAL}
+            active={tab === McpSource.LOCAL}
             onAdded={onClose}
           />
           <AddMcpServiceRegistrySection
-            active={tab === MCP_TAB.MCP_REGISTRY}
+            active={tab === McpSource.REGISTRY}
             onAdded={onClose}
           />
           <AddMcpServiceCommunitySection
-            active={tab === MCP_TAB.COMMUNITY}
+            active={tab === McpSource.COMMUNITY}
             onAdded={onClose}
           />
         </div>

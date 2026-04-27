@@ -1,113 +1,89 @@
-import { useCallback, useEffect, useState } from "react";
-import { App } from "antd";
-import { useQuery } from "@tanstack/react-query";
+// hooks/useContainerPortAvailability.ts
+
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import log from "@/lib/logger";
-import {
-  checkMcpContainerPortConflictService,
-  suggestMcpContainerPortService,
+import { 
+  checkMcpContainerPortConflictService, 
+  suggestMcpContainerPortService 
 } from "@/services/mcpToolsService";
+import { isValidPort } from "@/lib/mcpTools";
 
-const PORT_CHECK_DEBOUNCE_MS = 350;
-const PORT_CHECK_STALE_TIME_MS = 10_000;
-
-/**
- * Checks whether a container port is available. Returns `false` when the port
- * is undefined or already occupied.
- */
 export async function checkContainerPortAvailable(
   port: number | undefined
 ): Promise<boolean> {
-  if (typeof port !== "number") return false;
+  if (!isValidPort(port)) return false;
   const result = await checkMcpContainerPortConflictService({ port });
   return result.data.available;
 }
 
-type UseContainerPortAvailabilityParams = {
-  /** Unique scope so React Query caches port checks per form context. */
-  scope: string;
-  /** Whether the field is being shown/edited (skips queries when false). */
-  enabled: boolean;
+interface UseContainerPortAvailabilityParams {
+  enabled?: boolean;
   containerPort: number | undefined;
   setContainerPort: (value: number | undefined) => void;
-};
+}
 
-/**
- * Owns the port-availability query and the "suggest next free port" mutation.
- */
 export function useContainerPortAvailability({
-  scope,
-  enabled,
+  enabled = true,
   containerPort,
   setContainerPort,
 }: UseContainerPortAvailabilityParams) {
-  const { message } = App.useApp();
   const { t } = useTranslation("common");
-  const [debouncedPort, setDebouncedPort] = useState<number | undefined>(
-    undefined
-  );
+  const [portCheckLoading, setPortCheckLoading] = useState(false);
+  const [portAvailable, setPortAvailable] = useState<boolean | null>(null);
   const [suggesting, setSuggesting] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
+  // 检查端口
+  const checkPort = useCallback(async (port: number) => {
+    setPortCheckLoading(true);
+    try {
+      const result = await checkMcpContainerPortConflictService({ port });
+      setPortAvailable(result.data.available);
+    } catch (error) {
+      setPortAvailable(false);
+    } finally {
+      setPortCheckLoading(false);
+    }
+  }, []);
+
+  // 防抖自动检查
   useEffect(() => {
-    if (!enabled || typeof containerPort !== "number") {
-      setDebouncedPort(undefined);
+    if (!enabled || !isValidPort(containerPort)) {
+      // 不合法或未启用，清空状态
+      setPortAvailable(null);
+      setPortCheckLoading(false);
       return;
     }
-    const timer = window.setTimeout(
-      () => setDebouncedPort(containerPort),
-      PORT_CHECK_DEBOUNCE_MS
-    );
-    return () => window.clearTimeout(timer);
-  }, [containerPort, enabled]);
 
-  const portCheckQuery = useQuery({
-    queryKey: ["mcp-tools", `${scope}-container-port-check`, debouncedPort],
-    enabled: enabled && typeof debouncedPort === "number",
-    retry: false,
-    staleTime: PORT_CHECK_STALE_TIME_MS,
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    queryFn: async () => {
-      const result = await checkMcpContainerPortConflictService({
-        port: debouncedPort as number,
-      });
-      return result.data;
-    },
-  });
+    // 合法端口，防抖后检查
+    setPortCheckLoading(true);
+    timerRef.current = setTimeout(() => {
+      checkPort(containerPort);
+    }, 500);
 
-  const isPortChecked =
-    typeof containerPort === "number" &&
-    debouncedPort === containerPort &&
-    typeof portCheckQuery.data?.available === "boolean";
+    return () => {
+      clearTimeout(timerRef.current);
+    };
+  }, [containerPort, enabled, checkPort]);
 
-  const portCheckLoading =
-    enabled &&
-    typeof containerPort === "number" &&
-    !isPortChecked &&
-    !portCheckQuery.isError;
-
+  // 建议端口
   const suggestPort = useCallback(async () => {
     setSuggesting(true);
     try {
       const result = await suggestMcpContainerPortService();
-      setContainerPort(result.data.port);
-      message.success(
-        t("mcpTools.addModal.portSuggested", { port: result.data.port })
-      );
+      const port = result.data.port;
+      if (isValidPort(port)) {
+        setContainerPort(port);
+      }
     } catch (error) {
-      log.error(
-        `[useContainerPortAvailability:${scope}] Failed to suggest container port`,
-        { error }
-      );
-      message.error(t("mcpTools.addModal.portSuggestFailed"));
     } finally {
       setSuggesting(false);
     }
-  }, [message, scope, setContainerPort, t]);
+  }, [setContainerPort]);
 
   return {
     portCheckLoading,
-    portAvailable: portCheckQuery.data?.available === true,
+    portAvailable,
     suggesting,
     suggestPort,
   };

@@ -1,6 +1,6 @@
 import { Tag } from "antd";
 import { useTranslation } from "react-i18next";
-import { MCP_GRID_CARD_OUTER, MCP_SERVICE_STATUS } from "@/const/mcpTools";
+import { MCP_GRID_CARD_OUTER, McpServiceStatus } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import { getSourceLabelKey, getTransportLabelKey } from "@/lib/mcpTools";
 import StatusBadge from "./shared/StatusBadge";
@@ -15,7 +15,7 @@ export default function McpServiceCard({
   onSelect,
 }: McpServiceCardProps) {
   const { t } = useTranslation("common");
-  const isEnabled = service.status === MCP_SERVICE_STATUS.ENABLED;
+  const isEnabled = service.status === McpServiceStatus.ENABLED;
 
   return (
     <div onClick={() => onSelect(service)} className={MCP_GRID_CARD_OUTER}>

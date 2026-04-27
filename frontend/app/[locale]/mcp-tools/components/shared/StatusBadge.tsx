@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { McpServerStatus, McpServiceStatus } from "@/types/mcpTools";
+import { McpServerStatus, McpServiceStatus } from "@/const/mcpTools";
 
 interface RegistryStatusBadgeProps {
   status: string | undefined;

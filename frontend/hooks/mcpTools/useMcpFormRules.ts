@@ -8,7 +8,7 @@ import {
   MCP_PORT_RANGE,
   SHORT_VERSION_PATTERN,
 } from "@/const/mcpTools";
-import { isHttpUrl } from "@/lib/mcpTools";
+import { isHttpUrl, isValidPort } from "@/lib/mcpTools";
 
 /**
  * Returns all AntD Form `Rule[]` arrays used across MCP add / edit forms.
@@ -73,9 +73,7 @@ export function useMcpFormRules() {
             }
             const port = Number(value);
             if (
-              !Number.isInteger(port) ||
-              port < MCP_PORT_RANGE.MIN ||
-              port > MCP_PORT_RANGE.MAX
+              !isValidPort(port)
             ) {
               throw new Error(t("mcpTools.add.validate.containerPortRange"));
             }

@@ -1,20 +1,18 @@
 import type { McpServer } from "@/types/agentConfig";
 import type {
-  McpContainerStatus,
-  McpHealthStatus,
   McpServiceItem,
-  McpTransportType,
   RegistryMcpCard,
   RegistryPackageArgumentInput,
   RegistryQuickAddOption,
   RegistryRemoteVariable,
 } from "@/types/mcpTools";
 import {
-  MCP_CONTAINER_STATUS,
-  MCP_HEALTH_STATUS,
-  MCP_SERVICE_STATUS,
-  MCP_TAB,
-  MCP_TRANSPORT_TYPE,
+  MCP_PORT_RANGE,
+  McpContainerStatus,
+  McpHealthStatus,
+  McpServiceStatus,
+  McpSource,
+  McpTransportType,
 } from "@/const/mcpTools";
 
 // ---------------------------------------------------------------------------
@@ -23,8 +21,8 @@ import {
 
 /** i18n key for the label shown next to a service's `source` enum. */
 export const getSourceLabelKey = (source: McpServiceItem["source"]): string => {
-  if (source === MCP_TAB.LOCAL) return "mcpTools.source.local";
-  if (source === MCP_TAB.COMMUNITY) return "mcpTools.source.community";
+  if (source === McpSource.LOCAL) return "mcpTools.source.local";
+  if (source === McpSource.COMMUNITY) return "mcpTools.source.community";
   return "mcpTools.source.registry";
 };
 
@@ -32,17 +30,17 @@ export const getSourceLabelKey = (source: McpServiceItem["source"]): string => {
 export const getTransportLabelKey = (
   transportType: McpTransportType | string
 ): string => {
-  if (transportType === MCP_TRANSPORT_TYPE.HTTP)
+  if (transportType === McpTransportType.HTTP)
     return "mcpTools.serverType.http";
-  if (transportType === MCP_TRANSPORT_TYPE.SSE)
+  if (transportType === McpTransportType.SSE)
     return "mcpTools.serverType.sse";
   return "mcpTools.serverType.container";
 };
 
 /** i18n key for a service's `healthStatus`. */
 export const getHealthStatusKey = (status: McpHealthStatus): string => {
-  if (status === MCP_HEALTH_STATUS.HEALTHY) return "mcpTools.health.healthy";
-  if (status === MCP_HEALTH_STATUS.UNHEALTHY)
+  if (status === McpHealthStatus.HEALTHY) return "mcpTools.health.healthy";
+  if (status === McpHealthStatus.UNHEALTHY)
     return "mcpTools.health.unhealthy";
   return "mcpTools.health.unchecked";
 };
@@ -51,50 +49,11 @@ export const getHealthStatusKey = (status: McpHealthStatus): string => {
 export const getContainerStatusKey = (
   status: McpContainerStatus | undefined
 ): string => {
-  if (status === MCP_CONTAINER_STATUS.RUNNING)
+  if (status === McpContainerStatus.RUNNING)
     return "mcpTools.containerStatus.running";
-  if (status === MCP_CONTAINER_STATUS.STOPPED)
+  if (status === McpContainerStatus.STOPPED)
     return "mcpTools.containerStatus.stopped";
   return "mcpTools.containerStatus.unknown";
-};
-
-// ---------------------------------------------------------------------------
-// Service list helpers
-// ---------------------------------------------------------------------------
-
-export const mapServersToServiceCards = (
-  serverList: McpServer[] | undefined,
-  defaultDescription: string
-): McpServiceItem[] => {
-  return (serverList ?? []).map((server) => {
-    const normalizedUrl =
-      typeof server.mcp_url === "string" ? server.mcp_url : "";
-    const inferredType = normalizedUrl.startsWith("container://")
-      ? MCP_TRANSPORT_TYPE.CONTAINER
-      : MCP_TRANSPORT_TYPE.HTTP;
-
-    return {
-      mcpId: typeof server.mcp_id === "number" ? server.mcp_id : -1,
-      name: typeof server.service_name === "string" ? server.service_name : "",
-      description: defaultDescription,
-      source: MCP_TAB.LOCAL,
-      status: server.status
-        ? MCP_SERVICE_STATUS.ENABLED
-        : MCP_SERVICE_STATUS.DISABLED,
-      updatedAt: "",
-      tags: [],
-      transportType: inferredType,
-      serverUrl: normalizedUrl,
-      tools: [],
-      healthStatus: server.status
-        ? MCP_HEALTH_STATUS.HEALTHY
-        : MCP_HEALTH_STATUS.UNCHECKED,
-      authorizationToken:
-        typeof server.authorization_token === "string"
-          ? server.authorization_token
-          : undefined,
-    };
-  });
 };
 
 export const filterServiceCards = (
@@ -251,7 +210,7 @@ export const parseHealthCheckError = (
 };
 
 // ---------------------------------------------------------------------------
-// Registry quick-add builders (pure helpers extracted from hook)
+// Registry quick-add builders
 // ---------------------------------------------------------------------------
 
 const toStringOrUndefined = (value: unknown): string | undefined => {
@@ -394,13 +353,13 @@ const resolveQuickAddTarget = (
     .trim()
     .toLowerCase();
   if (normalizedType === "sse") {
-    return { transportType: "sse", serverUrl };
+    return { transportType: McpTransportType.SSE, serverUrl };
   }
   if (normalizedType === "streamable-http" || normalizedType === "http") {
-    return { transportType: "http", serverUrl };
+    return { transportType: McpTransportType.HTTP, serverUrl };
   }
   if (/^https?:\/\//i.test(serverUrl)) {
-    return { transportType: "http", serverUrl };
+    return { transportType: McpTransportType.HTTP, serverUrl };
   }
 
   return null;
@@ -509,7 +468,7 @@ export const normalizeServerKey = (raw: string): string => {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
-  return normalized || "market-mcp";
+  return normalized;
 };
 
 /**
@@ -805,3 +764,8 @@ export const collectPackageEnvValues = (
     return acc;
   }, {});
 };
+
+export const isValidPort = (port: number | undefined): port is number => {
+  return typeof port === "number" && Number.isInteger(port) && port >= MCP_PORT_RANGE.MIN && port <= MCP_PORT_RANGE.MAX;
+};
+

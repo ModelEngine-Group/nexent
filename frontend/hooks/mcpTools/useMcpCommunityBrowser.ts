@@ -11,7 +11,7 @@ import type {
   McpTagStat,
   McpTransportFilter,
 } from "@/types/mcpTools";
-import { FILTER_ALL } from "@/types/mcpTools";
+import { FILTER_ALL } from "@/const/mcpTools";
 import { MCP_SEARCH_DEBOUNCE_MS, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
 export type CommunityTransportFilter = McpTransportFilter;

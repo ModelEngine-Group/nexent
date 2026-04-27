@@ -10,7 +10,7 @@ import {
   enableMcpToolService,
 } from "@/services/mcpToolsService";
 import { updateToolList } from "@/services/mcpService";
-import { MCP_SERVICE_STATUS } from "@/const/mcpTools";
+import { McpServiceStatus } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
@@ -36,7 +36,7 @@ export function useMcpServiceToggle() {
       message.warning(t("mcpTools.service.toggle.missingId"));
       return;
     }
-    const nextEnabled = service.status !== MCP_SERVICE_STATUS.ENABLED;
+    const nextEnabled = service.status !== McpServiceStatus.ENABLED;
     setToggle(service.mcpId, true);
     try {
       if (nextEnabled) {

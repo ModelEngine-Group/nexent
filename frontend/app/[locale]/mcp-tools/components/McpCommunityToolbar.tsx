@@ -1,8 +1,7 @@
 import { Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
-import { MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
+import { FILTER_ALL, McpTransportType } from "@/const/mcpTools";
 import type { McpTagStat, McpTransportFilter } from "@/types/mcpTools";
-import { FILTER_ALL } from "@/types/mcpTools";
 
 interface McpCommunityToolbarProps {
   search: string;
@@ -56,15 +55,15 @@ export default function McpCommunityToolbar({
                 label: t("mcpTools.page.transportFilter.all"),
               },
               {
-                value: MCP_TRANSPORT_TYPE.HTTP,
+                value: McpTransportType.HTTP,
                 label: t("mcpTools.serverType.http"),
               },
               {
-                value: MCP_TRANSPORT_TYPE.SSE,
+                value: McpTransportType.SSE,
                 label: t("mcpTools.serverType.sse"),
               },
               {
-                value: MCP_TRANSPORT_TYPE.CONTAINER,
+                value: McpTransportType.CONTAINER,
                 label: t("mcpTools.serverType.container"),
               },
             ]}

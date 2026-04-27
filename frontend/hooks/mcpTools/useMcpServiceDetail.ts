@@ -25,7 +25,7 @@ import {
   isSameStringArray,
   parseHealthCheckError,
 } from "@/lib/mcpTools";
-import { MCP_HEALTH_STATUS, MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
+import { McpHealthStatus, McpTransportType } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import type { McpTool } from "@/types/agentConfig";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
@@ -94,7 +94,7 @@ export function useMcpServiceDetail({
     try {
       const result = await healthcheckMcpToolService({ mcp_id: draft.mcpId });
       const nextStatus =
-        result.data?.health_status ?? MCP_HEALTH_STATUS.UNCHECKED;
+        result.data?.health_status ?? McpHealthStatus.UNCHECKED;
       setDraft((prev) => (prev ? { ...prev, healthStatus: nextStatus } : prev));
       message.success(t("mcpTools.service.healthOk"));
       invalidateServices();
@@ -130,7 +130,7 @@ export function useMcpServiceDetail({
         duration: 10,
       });
       setDraft((prev) =>
-        prev ? { ...prev, healthStatus: MCP_HEALTH_STATUS.UNHEALTHY } : prev
+        prev ? { ...prev, healthStatus: McpHealthStatus.UNHEALTHY } : prev
       );
     } finally {
       setHealthChecking(false);
@@ -194,8 +194,8 @@ export function useMcpServiceDetail({
       return;
     }
     if (
-      (draft.transportType === MCP_TRANSPORT_TYPE.HTTP ||
-        draft.transportType === MCP_TRANSPORT_TYPE.SSE) &&
+      (draft.transportType === McpTransportType.HTTP ||
+        draft.transportType === McpTransportType.SSE) &&
       !isHttpUrl(nextUrl)
     ) {
       message.warning(t("mcpTools.add.validate.httpUrlFormat"));

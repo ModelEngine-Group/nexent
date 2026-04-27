@@ -12,7 +12,7 @@ import {
 } from "@/services/mcpToolsService";
 import { updateToolList } from "@/services/mcpService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
-import { MCP_TAB, MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
+import { McpSource, McpTransportType } from "@/const/mcpTools";
 import type {
   CommunityMcpCard,
   CommunityQuickAddDraft,
@@ -30,7 +30,7 @@ const draftFromSource = (
   description: service.description || "",
   transportType:
     (service.transportType as CommunityQuickAddDraft["transportType"]) ||
-    MCP_TRANSPORT_TYPE.HTTP,
+    McpTransportType.HTTP,
   serverUrl: service.serverUrl || "",
   authorizationToken: "",
   containerConfigJson: service.configJson
@@ -80,7 +80,7 @@ export function useMcpCommunityQuickAdd({
       return;
     }
 
-    const isContainer = draft.transportType === MCP_TRANSPORT_TYPE.CONTAINER;
+    const isContainer = draft.transportType === McpTransportType.CONTAINER;
     if (isContainer) {
       const available = await checkContainerPortAvailable(draft.containerPort);
       if (!available) {
@@ -108,7 +108,7 @@ export function useMcpCommunityQuickAdd({
           name,
           description: draft.description,
           tags: draft.tags,
-          source: "community",
+          source: McpSource.COMMUNITY,
           authorization_token: draft.authorizationToken.trim() || undefined,
           registry_json: draft.registryJson,
           port: draft.containerPort as number,
@@ -118,7 +118,7 @@ export function useMcpCommunityQuickAdd({
         await addMcpToolService({
           name,
           description: draft.description,
-          source: MCP_TAB.COMMUNITY,
+          source: McpSource.COMMUNITY,
           transport_type: draft.transportType,
           server_url: draft.serverUrl.trim(),
           authorization_token: draft.authorizationToken.trim() || undefined,

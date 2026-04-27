@@ -1,6 +1,6 @@
 import log from "@/lib/logger";
 import { fetchWithAuth } from "@/lib/auth";
-import { MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
+import { McpHealthStatus, McpSource, McpTransportType } from "@/const/mcpTools";
 import { API_ENDPOINTS } from "@/services/api";
 import type {
   AddMcpRuntimeFromConfigPayload,
@@ -9,9 +9,7 @@ import type {
   RegistryMcpCard,
   CommunityMcpCard,
   McpTagStat,
-  McpHealthStatus,
   McpServiceItem,
-  McpTransportType,
   ToggleMcpServicePayload,
   UpdateMcpServicePayload,
 } from "@/types/mcpTools";
@@ -38,7 +36,7 @@ type AddContainerMcpToolPayload = {
   name: string;
   description: string;
   tags: string[];
-  source?: "local" | "community" | "market";
+  source?: McpSource;
   authorization_token?: string;
   registry_json?: Record<string, unknown>;
   port: number;
@@ -178,7 +176,7 @@ export const resolveContainerServerInfo = async (params: {
     mcpConfig?: AddMcpRuntimeFromConfigPayload;
   }>
 > => {
-  if (params.transportType !== MCP_TRANSPORT_TYPE.CONTAINER) {
+  if (params.transportType !== McpTransportType.CONTAINER) {
     return {
       success: true,
       data: {

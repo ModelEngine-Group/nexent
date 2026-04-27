@@ -1,54 +1,19 @@
-export enum McpTab {
-  LOCAL = "local",
-  MCP_REGISTRY = "mcp_registry",
-  COMMUNITY = "community",
-}
+import {
+  FILTER_ALL,
+  McpSource,
+  type McpContainerStatus,
+  type McpHealthStatus,
+  type McpServiceStatus,
+  type McpTransportType,
+} from "@/const/mcpTools";
 
-export enum McpTransportType {
-  HTTP = "http",
-  SSE = "sse",
-  CONTAINER = "container",
-}
-
-export enum McpServiceStatus {
-  ENABLED = "enabled",
-  DISABLED = "disabled",
-}
-
-export enum McpHealthStatus {
-  HEALTHY = "healthy",
-  UNHEALTHY = "unhealthy",
-  UNCHECKED = "unchecked",
-}
-
-export enum McpContainerStatus {
-  RUNNING = "running",
-  STOPPED = "stopped",
-  UNKNOWN = "unknown",
-}
-
-/** Sentinel value used by toolbar `Select`s to mean "no filter applied". */
-export const FILTER_ALL = "all";
 export type FilterAll = typeof FILTER_ALL;
 
 /** Source-filter for the main service list (all | local | registry | community). */
-export type McpSourceFilter = McpTab | FilterAll;
+export type McpSourceFilter = McpSource | FilterAll;
 /** Transport-filter for toolbars (all | http | sse | container). */
 export type McpTransportFilter = McpTransportType | FilterAll;
 
-/** Version-selection modes of the registry toolbar. */
-export enum McpVersionFilterMode {
-  ALL = "all",
-  LATEST = "latest",
-  CUSTOM = "custom",
-}
-
-/** Server status reported by the MCP registry / community entries. */
-export enum McpServerStatus {
-  ACTIVE = "active",
-  DEPRECATED = "deprecated",
-  UNKNOWN = "unknown",
-}
 
 export interface RegistryServerPayload {
   name: string;
@@ -180,7 +145,7 @@ export interface McpServiceItem {
   containerPort?: number | null;
   name: string;
   description: string;
-  source: McpTab;
+  source: McpSource;
   status: McpServiceStatus;
   updatedAt: string;
   tags: string[];
@@ -223,7 +188,7 @@ export interface McpTagStat {
 export interface AddMcpServicePayload {
   name: string;
   description: string;
-  source: McpTab;
+  source: McpSource;
   transport_type: McpTransportType;
   server_url: string;
   tags: string[];

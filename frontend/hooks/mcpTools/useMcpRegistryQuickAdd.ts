@@ -11,7 +11,7 @@ import {
 } from "@/services/mcpToolsService";
 import { updateToolList } from "@/services/mcpService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
-import { MCP_TAB } from "@/const/mcpTools";
+import { McpSource, McpTransportType } from "@/const/mcpTools";
 import {
   buildInitialQuickAddValues,
   collectPackageEnvValues,
@@ -25,7 +25,6 @@ import {
   resolveRuntimeArgs,
 } from "@/lib/mcpTools";
 import type { RegistryMcpCard, RegistryQuickAddOption } from "@/types/mcpTools";
-import { McpTransportType } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
 interface UseMcpRegistryQuickAddParams {
@@ -136,11 +135,7 @@ export function useMcpRegistryQuickAdd({
         }
         const runtimeArgs = resolveRuntimeArgs(selectedOption, values);
         const envValues = collectPackageEnvValues(selectedOption, values);
-        const serverKey = normalizeServerKey(
-          candidate.server?.name ||
-            selectedOption.packageIdentifier ||
-            "market-mcp"
-        );
+        const serverKey = normalizeServerKey(candidate.server?.name);
 
         const mcpConfig = {
           mcpServers: {
@@ -154,13 +149,10 @@ export function useMcpRegistryQuickAdd({
         };
 
         await addContainerMcpToolService({
-          name:
-            candidate.server?.name ||
-            selectedOption.packageIdentifier ||
-            "market-mcp",
+          name: candidate.server?.name,
           description: candidate.server?.description || "",
           tags,
-          source: "market",
+          source: McpSource.REGISTRY,
           port: containerPort as number,
           mcp_config: mcpConfig,
         });
@@ -183,9 +175,9 @@ export function useMcpRegistryQuickAdd({
         );
 
         await addMcpToolService({
-          name: candidate.server?.name || "market-mcp",
+          name: candidate.server?.name,
           description: candidate.server?.description || "",
-          source: MCP_TAB.MCP_REGISTRY,
+          source: McpSource.REGISTRY,
           transport_type: selectedOption.transportType as McpTransportType,
           server_url: finalUrl,
           tags,
