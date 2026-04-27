@@ -65,8 +65,10 @@ def _extract_text_from_chat_message(msg: ChatMessage) -> Optional[str]:
     """Extract plain text from a single ChatMessage.
 
     Compatible with content as str or list[{"type": "text", "text": "..."}].
-    Returns None when the content type is unsupported.
+    Returns None when the content type is unsupported or msg is None.
     """
+    if msg is None:
+        return None
     if isinstance(msg.content, str):
         return msg.content
     if isinstance(msg.content, list):
@@ -111,6 +113,8 @@ def msg_token_count(
     Prefers tiktoken-based (or CJK-heuristic) estimation when text can be
     extracted; falls back to ``chars / chars_per_token`` otherwise.
     """
+    if msg is None:
+        return 0
     if isinstance(msg, list):
         text = ""
         fallback_chars = 0
