@@ -19,9 +19,12 @@ import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
  */
 const convertToMarkdownCodeFences = (content: string): string => {
   // Handle complete blocks
-  content = content.replace(/<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g, (_match, language, code) => {
-    return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
-  });
+  content = content.replace(
+    /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
+    (_match, language, code) => {
+      return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+    }
+  );
   content = content.replace(/<code>([\s\S]*?)<\/code>/g, (_match, code) => {
     return `\`\`\`python\n${code.trim()}\n\`\`\``;
   });
@@ -29,7 +32,7 @@ const convertToMarkdownCodeFences = (content: string): string => {
 };
 import { Button } from "antd";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
-import { ChatMessageType } from "@/types/chat";
+import { ChatMessageType, MaxStepsInfo } from "@/types/chat";
 import { chatConfig, Opinion } from "@/const/chatConfig";
 import { conversationService } from "@/services/conversationService";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -37,6 +40,7 @@ import log from "@/lib/logger";
 import { AttachmentItem } from "@/types/chat";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { ChatAttachment } from "../components/chatAttachment";
+import { AlertTriangle } from "lucide-react";
 
 interface FinalMessageProps {
   message: ChatMessageType;
@@ -53,7 +57,8 @@ interface FinalMessageProps {
 }
 
 // TTS playback status
-type TTSStatus = typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus];
+type TTSStatus =
+  (typeof chatConfig.ttsStatus)[keyof typeof chatConfig.ttsStatus];
 
 function ChatStreamFinalMessageInner({
   message,
@@ -78,7 +83,9 @@ function ChatStreamFinalMessageInner({
   const [isVisible, setIsVisible] = useState(false);
 
   // TTS related states
-  const [ttsStatus, setTtsStatus] = useState<TTSStatus>(chatConfig.ttsStatus.IDLE);
+  const [ttsStatus, setTtsStatus] = useState<TTSStatus>(
+    chatConfig.ttsStatus.IDLE
+  );
   const ttsServiceRef = useRef<ReturnType<
     typeof conversationService.tts.createTTSService
   > | null>(null);
@@ -126,7 +133,10 @@ function ChatStreamFinalMessageInner({
 
   // Handle thumbs up
   const handleThumbsUp = async () => {
-    const newOpinion = localOpinion === chatConfig.opinion.POSITIVE ? null : chatConfig.opinion.POSITIVE;
+    const newOpinion =
+      localOpinion === chatConfig.opinion.POSITIVE
+        ? null
+        : chatConfig.opinion.POSITIVE;
     setLocalOpinion(newOpinion);
 
     let messageId = message.message_id;
@@ -155,7 +165,10 @@ function ChatStreamFinalMessageInner({
 
   // Handle thumbs down
   const handleThumbsDown = () => {
-    const newOpinion = localOpinion === chatConfig.opinion.NEGATIVE ? null : chatConfig.opinion.NEGATIVE;
+    const newOpinion =
+      localOpinion === chatConfig.opinion.NEGATIVE
+        ? null
+        : chatConfig.opinion.NEGATIVE;
     setLocalOpinion(newOpinion);
     if (onOpinionChange && message.message_id) {
       onOpinionChange(message.message_id, newOpinion as Opinion);
@@ -234,7 +247,9 @@ function ChatStreamFinalMessageInner({
       {/* Message content part */}
       <div
         className={`${
-          message.role === MESSAGE_ROLES.USER ? "flex items-end flex-col w-full" : "w-full"
+          message.role === MESSAGE_ROLES.USER
+            ? "flex items-end flex-col w-full"
+            : "w-full"
         }`}
       >
         {/* User message part */}
@@ -285,8 +300,36 @@ function ChatStreamFinalMessageInner({
         {message.role === MESSAGE_ROLES.ASSISTANT &&
           (message.finalAnswer || message.content !== undefined) && (
             <div className="bg-white rounded-lg w-full -mt-2">
+              {/* Max steps warning - show when message has maxStepsInfo */}
+              {message.steps &&
+                message.steps.some((step) => step.maxStepsInfo) &&
+                (() => {
+                  const maxStepsStep = message.steps?.find(
+                    (step) => step.maxStepsInfo
+                  );
+                  const maxStepsInfo = maxStepsStep?.maxStepsInfo;
+                  if (!maxStepsInfo) return null;
+                  return (
+                    <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                      <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <div className="font-medium text-amber-800 text-sm mb-1">
+                          {t("chatStreamFinalMessage.maxStepsReached")}
+                        </div>
+                        <div className="text-amber-700 text-sm">
+                          {t("chatStreamHandler.maxStepsNotification", {
+                            completedSteps: maxStepsInfo.completedSteps,
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
               <MarkdownRenderer
-                content={convertToMarkdownCodeFences(message.finalAnswer || message.content || "")}
+                content={convertToMarkdownCodeFences(
+                  message.finalAnswer || message.content || ""
+                )}
                 searchResults={message?.searchResults}
                 onCitationHover={onCitationHover}
                 // For historical messages, content already represents the final answer
@@ -303,7 +346,7 @@ function ChatStreamFinalMessageInner({
                       message.searchResults.length > 0) ||
                       (message?.images && message.images.length > 0)) && (
                       <div className="flex items-center text-xs text-gray-500">
-                          <Button
+                        <Button
                           className={`flex items-center gap-1 p-1 pl-3 hover:bg-gray-100 rounded transition-all duration-200 border border-gray-200 ${
                             isSelected ? "bg-gray-100" : ""
                           }`}
@@ -428,7 +471,10 @@ function ChatStreamFinalMessageInner({
   );
 }
 
-function areEqualFinalMessage(prev: FinalMessageProps, next: FinalMessageProps): boolean {
+function areEqualFinalMessage(
+  prev: FinalMessageProps,
+  next: FinalMessageProps
+): boolean {
   return (
     // Message object reference covers content, finalAnswer, isComplete, opinion_flag, attachments, etc.
     prev.message === next.message &&
@@ -443,4 +489,7 @@ function areEqualFinalMessage(prev: FinalMessageProps, next: FinalMessageProps):
   );
 }
 
-export const ChatStreamFinalMessage = React.memo(ChatStreamFinalMessageInner, areEqualFinalMessage);
+export const ChatStreamFinalMessage = React.memo(
+  ChatStreamFinalMessageInner,
+  areEqualFinalMessage
+);

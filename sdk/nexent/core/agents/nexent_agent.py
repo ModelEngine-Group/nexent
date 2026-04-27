@@ -57,7 +57,8 @@ class NexentAgent:
             temperature=model_config.temperature,
             top_p=model_config.top_p,
             ssl_verify=model_config.ssl_verify if model_config.ssl_verify is not None else True,
-            model_factory=model_config.model_factory
+            model_factory=model_config.model_factory,
+            display_name=model_config.cite_name,
         )
         model.stop_event = self.stop_event
         return model
@@ -75,7 +76,7 @@ class NexentAgent:
                 # These parameters have exclude=True and cannot be passed to __init__
                 # due to smolagents.tools.Tool wrapper restrictions
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model", "display_name_to_index_map"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -87,6 +88,8 @@ class NexentAgent:
                     "embedding_model", None) if tool_config.metadata else None
                 tools_obj.rerank_model = tool_config.metadata.get(
                     "rerank_model", None) if tool_config.metadata else None
+                tools_obj.display_name_to_index_map = tool_config.metadata.get(
+                    "display_name_to_index_map", {}) if tool_config.metadata else {}
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()
@@ -96,15 +99,25 @@ class NexentAgent:
                 tools_obj.rerank_model = tool_config.metadata.get(
                     "rerank_model", None) if tool_config.metadata else None
             elif class_name == "AnalyzeTextFileTool":
+                # Extract validate_url_access from metadata if it's callable
+                validate_url_access = tool_config.metadata.get("validate_url_access") if tool_config.metadata else None
+                if validate_url_access is not None and not callable(validate_url_access):
+                    validate_url_access = None
                 tools_obj = tool_class(observer=self.observer,
                                        llm_model=tool_config.metadata.get("llm_model", []),
                                        storage_client=tool_config.metadata.get("storage_client", []),
                                        data_process_service_url=tool_config.metadata.get("data_process_service_url", []),
+                                       validate_url_access=validate_url_access,
                                        **params)
             elif class_name == "AnalyzeImageTool":
+                # Extract validate_url_access from metadata if it's callable
+                validate_url_access = tool_config.metadata.get("validate_url_access") if tool_config.metadata else None
+                if validate_url_access is not None and not callable(validate_url_access):
+                    validate_url_access = None
                 tools_obj = tool_class(observer=self.observer,
                                        vlm_model=tool_config.metadata.get("vlm_model", []),
                                        storage_client=tool_config.metadata.get("storage_client", []),
+                                       validate_url_access=validate_url_access,
                                        **params)
             else:
                 tools_obj = tool_class(**params)
@@ -227,7 +240,7 @@ class NexentAgent:
             try:
                 # Create internal managed agents recursively
                 managed_agents_list = [
-                    self.create_single_agent(sub_agent_config) 
+                    self.create_single_agent(sub_agent_config)
                     for sub_agent_config in agent_config.managed_agents
                 ]
             except Exception as e:

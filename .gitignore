@@ -37,3 +37,8 @@ model-assets/
 
 # Log files
 *.log
+
+.sisyphus/
+.opencode/
+openspec/
+logs/

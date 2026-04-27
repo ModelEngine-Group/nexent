@@ -6,11 +6,11 @@ from datetime import datetime
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig
+from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory
 from nexent.core.agents.agent_context import ContextManagerConfig
 from nexent.memory.memory_service import search_memory_in_levels
 
-from services.file_management_service import get_llm_model
+from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
@@ -26,6 +26,7 @@ from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id
 from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
+from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
@@ -359,11 +360,15 @@ async def create_agent_config(
             if "KnowledgeBaseSearchTool" == tool.class_name:
                 index_names = tool.params.get("index_names")
                 if index_names:
+                    # Reuse the index_name -> display_name mapping from tool.metadata
+                    # (already computed in create_tool_config_list to avoid redundant DB query)
+                    index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
                     for index_name in index_names:
                         try:
+                            display_name = index_name_to_display_map.get(index_name, index_name)
                             message = ElasticSearchService().get_summary(index_name=index_name)
                             summary = message.get("summary", "")
-                            knowledge_base_summary += f"**{index_name}**: {summary}\n\n"
+                            knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
                         except Exception as e:
                             logger.warning(
                                 f"Failed to get summary for knowledge base {index_name}: {e}")
@@ -467,10 +472,24 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                     tenant_id=tenant_id, model_name=rerank_model_name
                 )
 
+            # Build display_name to index_name mapping for LLM parameter conversion
+            # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
+            index_names = param_dict.get("index_names", [])
+            display_name_to_index_map = {}
+            index_name_to_display_map = {}
+            if index_names:
+                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                # Reverse the mapping: display_name (knowledge_name) -> index_name
+                for idx_name, kb_name in knowledge_name_map.items():
+                    display_name_to_index_map[kb_name] = idx_name
+                    index_name_to_display_map[idx_name] = kb_name
+
             tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
                 "rerank_model": rerank_model,
+                "display_name_to_index_map": display_name_to_index_map,
+                "index_name_to_display_map": index_name_to_display_map,
             }
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
             rerank = param_dict.get("rerank", False)
@@ -488,12 +507,14 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
             tool_config.metadata = {
                 "llm_model": get_llm_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
-                "data_process_service_url": DATA_PROCESS_SERVICE
+                "data_process_service_url": DATA_PROCESS_SERVICE,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
         elif tool_config.class_name == "AnalyzeImageTool":
             tool_config.metadata = {
                 "vlm_model": get_vlm_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
 
         tool_config_list.append(tool_config)
@@ -561,18 +582,159 @@ async def prepare_prompt_templates(
     return prompt_templates
 
 
-async def join_minio_file_description_to_query(minio_files, query):
+async def join_minio_file_description_to_query(
+    minio_files,
+    query,
+    history=None,
+    max_files: int = 50,
+    max_chars: int = 10000,
+):
+    """
+    Join MinIO file descriptions to the user query.
+
+    This function formats uploaded file information into a structured description
+    that includes both S3 URL (for internal tools) and Download URL (for external MCP tools).
+    It processes files from both the current message and historical messages.
+
+    De-duplication is performed using the file URL as the unique key. A maximum
+    file count and total character limit are enforced to prevent prompt bloat.
+
+    Args:
+        minio_files: List of file info dicts from current message upload
+        query: Original user query
+        history: Optional list of historical message dicts, each may contain minio_files
+        max_files: Maximum number of files to include (default 50)
+        max_chars: Maximum total characters for file descriptions (default 10000)
+
+    Returns:
+        Modified query with file descriptions appended
+    """
     final_query = query
+    seen_urls: set[str] = set()
+    all_files: list[dict] = []
+
+    # Collect files from current message first (higher priority)
     if minio_files and isinstance(minio_files, list):
-        file_descriptions = []
         for file in minio_files:
-            if isinstance(file, dict) and "url" in file and file["url"] and "name" in file and file["name"]:
-                file_descriptions.append(f"File name: {file['name']}, S3 URL: s3:/{file['url']}")
+            if isinstance(file, dict) and file.get("url") and file.get("name"):
+                url = file["url"]
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    all_files.append(file)
+
+    # Collect files from historical messages (lower priority, already-deduped)
+    if history and isinstance(history, list):
+        for msg in history:
+            if isinstance(msg, dict) and msg.get("minio_files"):
+                for file in msg["minio_files"]:
+                    if isinstance(file, dict) and file.get("url") and file.get("name"):
+                        url = file["url"]
+                        if url not in seen_urls:
+                            seen_urls.add(url)
+                            all_files.append(file)
+
+    # Enforce file count limit (keep most recent files by truncating from the end)
+    if len(all_files) > max_files:
+        all_files = all_files[:max_files]
+        logger.debug(f"File list truncated from {len(all_files)} to {max_files} files")
+
+    if all_files:
+        file_descriptions: list[str] = []
+        # Calculate fixed overhead that is added only once
+        prefix = "User uploaded files. The file information is as follows:\n"
+        suffix = f"\n\nUser wants to answer questions based on the information in the above files: {query}"
+        fixed_overhead = len(prefix) + len(suffix)
+
+        for i, file in enumerate(all_files):
+            s3_url = f"s3:/{file['url']}"
+            presigned_url = file.get("presigned_url", "")
+
+            # Build description with both URLs
+            if presigned_url:
+                desc = (
+                    f"File name: {file['name']}\n"
+                    f"- S3 URL: {s3_url}  [permanent, for internal tools like analyze_text_file]\n"
+                    f"- Download URL: {presigned_url}  [temporary (expires in 24h), for external MCP tools]"
+                )
+            else:
+                desc = f"File name: {file['name']}, S3 URL: {s3_url}  [permanent]"
+
+            # Calculate total length if we include this description
+            # Each description after the first adds 2 chars for \n\n separator
+            separator_chars = 2 if i > 0 else 0
+            total_len = sum(len(d) for d in file_descriptions) + len(desc) + separator_chars + fixed_overhead
+
+            # Check if adding this description would exceed the character limit
+            if total_len > max_chars:
+                logger.debug(
+                    f"File descriptions truncated at {len(file_descriptions)} files "
+                    f"to stay within {max_chars} character limit"
+                )
+                break
+
+            file_descriptions.append(desc)
+
         if file_descriptions:
-            final_query = "User uploaded files. The file information is as follows:\n"
-            final_query += "\n".join(file_descriptions) + "\n\n"
-            final_query += f"User wants to answer questions based on the information in the above files: {query}"
+            final_query = prefix + "\n\n".join(file_descriptions) + suffix
+
     return final_query
+
+
+def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files: int = 20) -> str:
+    """Format minio_files into a string for embedding in history content.
+
+    Args:
+        minio_files: List of file info dicts
+        max_files: Maximum number of files to include per message
+
+    Returns:
+        Formatted string describing the files, or empty string if no files
+    """
+    if not minio_files or not isinstance(minio_files, list):
+        return ""
+
+    file_lines = []
+    for i, file in enumerate(minio_files):
+        if i >= max_files:
+            file_lines.append(f"  - ... (and {len(minio_files) - max_files} more files)")
+            break
+        if isinstance(file, dict) and file.get("url") and file.get("name"):
+            s3_url = f"s3:/{file['url']}"
+            presigned_url = file.get("presigned_url", "")
+            if presigned_url:
+                file_lines.append(
+                    f"  - {file['name']}: {s3_url} (download: {presigned_url})"
+                )
+            else:
+                file_lines.append(f"  - {file['name']}: {s3_url}")
+
+    if not file_lines:
+        return ""
+
+    return "\n[Attached files]:\n" + "\n".join(file_lines)
+
+
+def _convert_history_with_minio_files(history: List) -> Optional[List[AgentHistory]]:
+    """Convert HistoryItem list to AgentHistory list, embedding minio_files into content.
+
+    Args:
+        history: List of HistoryItem from API
+
+    Returns:
+        List of AgentHistory with file info embedded in content, or None if history is None
+    """
+    if history is None:
+        return None
+
+    result = []
+    for item in history:
+        content = item.content
+        if item.minio_files:
+            file_info = _format_minio_files_for_content(item.minio_files)
+            if file_info:
+                content = content + file_info if content else file_info
+        result.append(AgentHistory(role=item.role, content=content))
+    return result
 
 
 def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict) -> list:
@@ -626,7 +788,11 @@ async def create_agent_run_info(
             version_no = 0
             logger.info(f"Agent {agent_id} has no published version, using draft version 0")
 
-    final_query = await join_minio_file_description_to_query(minio_files=minio_files, query=query)
+    final_query = await join_minio_file_description_to_query(
+        minio_files=minio_files,
+        query=query,
+        history=history
+    )
     model_list = await create_model_config_list(tenant_id)
     create_config_kwargs = {
         "agent_id": agent_id,
@@ -679,13 +845,16 @@ async def create_agent_run_info(
             # Fallback to string format if record not found
             mcp_host.append(url)
 
+    # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
+    converted_history = _convert_history_with_minio_files(history)
+
     agent_run_info = AgentRunInfo(
         query=final_query,
         model_config_list=model_list,
         observer=MessageObserver(lang=language),
         agent_config=agent_config,
         mcp_host=mcp_host,
-        history=history,
+        history=converted_history,
         stop_event=threading.Event()
     )
     return agent_run_info
