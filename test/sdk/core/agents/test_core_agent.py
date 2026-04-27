@@ -40,7 +40,20 @@ def _create_mock_smolagents():
 
     # memory submodule
     memory_mod = ModuleType("smolagents.memory")
-    for _name in ["ActionStep", "ToolCall", "TaskStep", "SystemPromptStep", "PlanningStep", "FinalAnswerStep"]:
+    class _TaskStepBase:
+        def __init__(self, task=None):
+            self.task = task
+    class _ActionStepBase:
+        def __init__(self, step_number=None, timing=None, action_output=None, model_output=None):
+            self.step_number = step_number
+            self.timing = timing
+            self.action_output = action_output
+            self.model_output = model_output
+    setattr(memory_mod, "TaskStep", _TaskStepBase)
+    setattr(memory_mod, "ActionStep", _ActionStepBase)
+    setattr(memory_mod, "AgentMemory", MagicMock)
+    setattr(memory_mod, "MemoryStep", MagicMock)
+    for _name in ["ToolCall", "SystemPromptStep", "PlanningStep", "FinalAnswerStep"]:
         setattr(memory_mod, _name, MagicMock(name=f"smolagents.memory.{_name}"))
     setattr(mock_smolagents, "memory", memory_mod)
 
@@ -68,8 +81,10 @@ def _create_mock_smolagents():
     setattr(mock_smolagents, "utils", utils_mod)
 
     # Top-level exports
-    for _name in ["ActionStep", "TaskStep", "AgentText", "handle_agent_output_types"]:
-        setattr(mock_smolagents, _name, MagicMock(name=f"smolagents.{_name}"))
+    setattr(mock_smolagents, "TaskStep", memory_mod.TaskStep)
+    setattr(mock_smolagents, "ActionStep", memory_mod.ActionStep)
+    setattr(mock_smolagents, "AgentText", MagicMock(name="smolagents.AgentText"))
+    setattr(mock_smolagents, "handle_agent_output_types", MagicMock(name="smolagents.handle_agent_output_types"))
     setattr(mock_smolagents, "Timing", monitoring_mod.Timing)
     setattr(mock_smolagents, "Tool", MagicMock(name="Tool"))
 
@@ -188,10 +203,32 @@ def _load_core_agent_module():
 
     # Create full package hierarchy
     sys.modules["sdk"] = ModuleType("sdk")
+    sys.modules["sdk"].__path__ = []
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
+    sys.modules["sdk.nexent"].__path__ = []
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
-    sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
-    sys.modules["sdk.nexent.core.utils"] = _module_mocks["sdk.nexent.core.utils.observer"]
+    sys.modules["sdk.nexent.core"].__path__ = []
+    agents_pkg = ModuleType("sdk.nexent.core.agents")
+    agents_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "agents")]
+    sys.modules["sdk.nexent.core.agents"] = agents_pkg
+
+    utils_pkg = ModuleType("sdk.nexent.core.utils")
+    utils_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "utils")]
+    sys.modules["sdk.nexent.core.utils"] = utils_pkg
+
+    observer_mod = ModuleType("sdk.nexent.core.utils.observer")
+    observer_mod.MessageObserver = MagicMock()
+    observer_mod.ProcessType = MagicMock()
+    sys.modules["sdk.nexent.core.utils.observer"] = observer_mod
+
+    token_estimation_mod = ModuleType("sdk.nexent.core.utils.token_estimation")
+    token_estimation_mod.msg_token_count = MagicMock(return_value=0)
+    sys.modules["sdk.nexent.core.utils.token_estimation"] = token_estimation_mod
+
+    agent_context_mod = ModuleType("sdk.nexent.core.agents.agent_context")
+    agent_context_mod.ContextManager = MagicMock()
+    agent_context_mod.ContextManagerConfig = MagicMock()
+    sys.modules["sdk.nexent.core.agents.agent_context"] = agent_context_mod
 
     # Load the module
     spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.core_agent", core_agent_path)
@@ -1641,8 +1678,9 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
+        agent.context_manager = None
+        agent.step_metrics = []
 
-        # Bind mocked methods
         agent._step_stream = mock_step_stream
         agent._handle_max_steps_reached = mock_handle_max_steps_reached
         agent._finalize_step = lambda x: None
@@ -1870,6 +1908,8 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
+        agent.context_manager = None
+        agent.step_metrics = []
 
         agent._step_stream = mock_step_stream
         agent._handle_max_steps_reached = MagicMock(return_value="Max steps")

@@ -194,6 +194,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "business_logic_model_name": new_agent.business_logic_model_name,
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
+            "enable_context_manager": new_agent.enable_context_manager,
             "current_version_no": new_agent.current_version_no,
             "version_no": new_agent.version_no,
             "created_by": new_agent.created_by,

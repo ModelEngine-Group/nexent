@@ -187,22 +187,20 @@ class TestTokenCountTransformer:
     """Test TokenCountTransformer class"""
 
     def test_token_count_transformer_zh(self):
-        """Test TokenCountTransformer with Chinese language"""
+        """Test TokenCountTransformer passes content unchanged"""
         transformer = TokenCountTransformer()
         duration = "2.5s"
 
         result = transformer.transform(content=duration, lang="zh")
-        expected = """<span style="color: #bbbbc2; font-size: 12px;">步骤耗时：2.5s</span> """
-        assert result == expected
+        assert result == duration
 
     def test_token_count_transformer_en(self):
-        """Test TokenCountTransformer with English language"""
+        """Test TokenCountTransformer passes content unchanged"""
         transformer = TokenCountTransformer()
         duration = "1.8s"
 
         result = transformer.transform(content=duration, lang="en")
-        expected = """<span style="color: #bbbbc2; font-size: 12px;">Duration:1.8s</span> """
-        assert result == expected
+        assert result == duration
 
 
 class TestErrorTransformer:

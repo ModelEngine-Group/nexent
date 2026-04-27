@@ -30,10 +30,17 @@ mock_chat_message_cls.from_dict = classmethod(lambda cls, d: MagicMock())
 mock_models_module.ChatMessage = mock_chat_message_cls
 mock_smolagents.models = mock_models_module
 
+mock_memory_module = MagicMock()
+mock_memory_module.ActionStep = MagicMock
+mock_memory_module.AgentMemory = MagicMock
+mock_memory_module.MemoryStep = MagicMock
+mock_smolagents.memory = mock_memory_module
+
 # Assemble smolagents.* paths and openai.* placeholders
 module_mocks = {
     "smolagents": mock_smolagents,
     "smolagents.models": mock_models_module,
+    "smolagents.memory": mock_memory_module,
     "openai.types": MagicMock(),
     "openai.types.chat": MagicMock(),
     "openai.types.chat.chat_completion_message": MagicMock(),

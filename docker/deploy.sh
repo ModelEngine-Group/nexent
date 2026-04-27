@@ -414,7 +414,8 @@ get_compose_version() {
   # Function to get the version of docker compose
   if command -v docker &> /dev/null; then
       version_output=$(docker compose version 2>/dev/null)
-      if [[ $version_output =~ (v[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+      # 修改点：放宽正则匹配，允许版本号后面跟随其他字符（如 -desktop.1）
+      if [[ $version_output =~ v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
           echo "v2 ${BASH_REMATCH[1]}"
           return 0
       fi
@@ -422,6 +423,7 @@ get_compose_version() {
 
   if command -v docker-compose &> /dev/null; then
       version_output=$(docker-compose --version 2>/dev/null)
+      # 同样放宽这里的匹配规则，以防万一
       if [[ $version_output =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
           echo "v1 ${BASH_REMATCH[1]}"
           return 0

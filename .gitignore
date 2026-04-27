@@ -35,6 +35,9 @@ model-assets/
 *.coverage
 *coverage.xml
 
+# Log files
+*.log
+
 .sisyphus/
 .opencode/
 openspec/
