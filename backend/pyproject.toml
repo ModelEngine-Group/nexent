@@ -34,6 +34,7 @@ data-process = [
 test = [
     "pytest",
     "pytest-cov",
+    "pytest-xdist",
     "coverage",
     "unittest2",
     "mock",
