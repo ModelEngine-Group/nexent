@@ -2,8 +2,9 @@
 Nexent LLM Performance Monitoring System
 
 A comprehensive monitoring solution specifically designed for LLM applications.
-Provides distributed tracing, token-level performance monitoring, and seamless 
-integration with OpenTelemetry, Jaeger, Prometheus, and Grafana.
+Provides distributed tracing, token-level performance monitoring, and seamless
+integration with OpenTelemetry OTLP protocol for AI observability platforms
+like Arize Phoenix, Langfuse, and others.
 
 This module uses a singleton pattern for consistent monitoring across the SDK.
 When OpenTelemetry dependencies are not available, the module gracefully degrades
@@ -17,24 +18,29 @@ Installation:
 # Optional OpenTelemetry imports - gracefully handle missing dependencies
 try:
     from opentelemetry.trace.status import Status, StatusCode
-    from opentelemetry.exporter.prometheus import PrometheusMetricReader
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as OTLPSpanExporterHTTP
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as OTLPSpanExporterGRPC
+    from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPMetricExporterHTTP
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPMetricExporterGRPC
     from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.instrumentation.requests import RequestsInstrumentor
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry.exporter.jaeger.thrift import JaegerExporter
     from opentelemetry import trace, metrics
     from opentelemetry.sdk.resources import Resource
     OPENTELEMETRY_AVAILABLE = True
 except ImportError:
     OPENTELEMETRY_AVAILABLE = False
+
 import logging
 import time
 import functools
+import json
 from contextlib import contextmanager
 from typing import Any, Dict, Optional, Callable, TypeVar, cast, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +51,20 @@ def is_opentelemetry_available() -> bool:
     """Check if OpenTelemetry dependencies are available."""
     return OPENTELEMETRY_AVAILABLE
 
+
 @dataclass
 class MonitoringConfig:
-    """Configuration for monitoring system."""
+    """
+    Configuration for monitoring system using OTLP protocol.
+    
+    Supports HTTP and gRPC protocols for exporting traces and metrics
+    to any OpenTelemetry-compatible backend (Arize Phoenix, Langfuse, etc).
+    """
     enable_telemetry: bool = False
-    service_name: str = "nexent-sdk"
-    jaeger_endpoint: str = "http://localhost:14268/api/traces"
-    prometheus_port: int = 8000
+    service_name: str = "nexent-backend"
+    otlp_endpoint: str = "http://localhost:4318"
+    otlp_protocol: str = "http"  # "http" or "grpc"
+    otlp_headers: Dict[str, str] = field(default_factory=dict)
     telemetry_sample_rate: float = 1.0
     llm_slow_request_threshold_seconds: float = 5.0
     llm_slow_token_rate_threshold: float = 10.0
@@ -64,6 +77,13 @@ class MonitoringConfig:
                 "Install with: pip install nexent[performance]"
             )
             self.enable_telemetry = False
+        
+        # Validate protocol
+        if self.otlp_protocol not in ("http", "grpc"):
+            logger.warning(
+                f"Invalid OTLP protocol '{self.otlp_protocol}'. Using 'http'."
+            )
+            self.otlp_protocol = "http"
 
 
 class MonitoringManager:
@@ -87,12 +107,18 @@ class MonitoringManager:
         self._tracer: Optional[Any] = None
         self._meter: Optional[Any] = None
 
-        # LLM-specific metrics
+        # LLM-specific metrics (OpenInference semantics)
         self._llm_request_duration: Optional[Any] = None
         self._llm_token_generation_rate: Optional[Any] = None
         self._llm_ttft_duration: Optional[Any] = None
-        self._llm_total_tokens: Optional[Any] = None
+        self._llm_token_count_prompt: Optional[Any] = None
+        self._llm_token_count_completion: Optional[Any] = None
         self._llm_error_count: Optional[Any] = None
+
+        # Agent-specific metrics (OpenInference semantics)
+        self._agent_step_count: Optional[Any] = None
+        self._agent_execution_duration: Optional[Any] = None
+        self._agent_error_count: Optional[Any] = None
 
         self._initialized = True
         logger.info("MonitoringManager singleton created")
@@ -101,13 +127,15 @@ class MonitoringManager:
         """Configure the monitoring system."""
         self._config = config
         logger.info(
-            f"Monitoring configured: enabled={config.enable_telemetry}, service={config.service_name}")
+            f"Monitoring configured: enabled={config.enable_telemetry}, "
+            f"service={config.service_name}, protocol={config.otlp_protocol}"
+        )
 
         if config.enable_telemetry:
-            self._init_telemetry()
+            self._init_telemetry_otlp()
 
-    def _init_telemetry(self) -> None:
-        """Initialize OpenTelemetry tracing and metrics."""
+    def _init_telemetry_otlp(self) -> None:
+        """Initialize OpenTelemetry tracing and metrics with OTLP exporters."""
         if not self._config or not self._config.enable_telemetry:
             logger.info("Telemetry is disabled by configuration")
             return
@@ -120,64 +148,128 @@ class MonitoringManager:
             return
 
         try:
-            # Setup tracing with proper service name resource
+            # Setup resource with service name
             resource = Resource.create({
                 "service.name": self._config.service_name,
                 "service.version": "1.0.0",
                 "service.instance.id": "nexent-instance-1"
             })
+
+            # Initialize TracerProvider with OTLP exporter
             self._tracer_provider = TracerProvider(resource=resource)
             trace.set_tracer_provider(self._tracer_provider)
 
-            # Jaeger exporter
-            jaeger_exporter = JaegerExporter(
-                agent_host_name="localhost",
-                agent_port=14268,
-                collector_endpoint=self._config.jaeger_endpoint,
-            )
+            # Choose exporter based on protocol
+            if self._config.otlp_protocol == "grpc":
+                span_exporter = OTLPSpanExporterGRPC(
+                    endpoint=self._config.otlp_endpoint,
+                    headers=self._config.otlp_headers
+                )
+            else:
+                # HTTP protocol (default)
+                # For HTTP, append /v1/traces to endpoint if not already present
+                trace_endpoint = self._config.otlp_endpoint
+                if not trace_endpoint.endswith("/v1/traces"):
+                    trace_endpoint = trace_endpoint.rstrip("/") + "/v1/traces"
+                span_exporter = OTLPSpanExporterHTTP(
+                    endpoint=trace_endpoint,
+                    headers=self._config.otlp_headers
+                )
 
-            span_processor = BatchSpanProcessor(jaeger_exporter)
+            # BatchSpanProcessor for efficient export
+            span_processor = BatchSpanProcessor(
+                span_exporter,
+                max_queue_size=512,
+                schedule_delay_millis=1000,  # 1 second
+                max_export_batch_size=512
+            )
             self._tracer_provider.add_span_processor(span_processor)
 
-            # Setup metrics with Prometheus exporter
-            prometheus_reader = PrometheusMetricReader()
+            # Initialize MeterProvider with OTLP exporter
+            if self._config.otlp_protocol == "grpc":
+                metric_exporter = OTLPMetricExporterGRPC(
+                    endpoint=self._config.otlp_endpoint,
+                    headers=self._config.otlp_headers
+                )
+            else:
+                # HTTP protocol
+                metric_endpoint = self._config.otlp_endpoint
+                if not metric_endpoint.endswith("/v1/metrics"):
+                    metric_endpoint = metric_endpoint.rstrip("/") + "/v1/metrics"
+                metric_exporter = OTLPMetricExporterHTTP(
+                    endpoint=metric_endpoint,
+                    headers=self._config.otlp_headers
+                )
+
+            # PeriodicExportingMetricReader for batch export
+            metric_reader = PeriodicExportingMetricReader(
+                exporter=metric_exporter,
+                export_interval_millis=60000  # 60 seconds
+            )
+
             self._meter_provider = MeterProvider(
                 resource=resource,
-                metric_readers=[prometheus_reader])
+                metric_readers=[metric_reader]
+            )
             metrics.set_meter_provider(self._meter_provider)
 
             # Get tracer and meter instances
             self._tracer = trace.get_tracer(self._config.service_name)
             self._meter = metrics.get_meter(self._config.service_name)
 
-            # Create LLM-specific metrics
+            # Create LLM-specific metrics (OpenInference semantic conventions)
             self._llm_request_duration = self._meter.create_histogram(
-                name="llm_request_duration_seconds",
+                name="llm.request.duration",
                 description="Duration of LLM requests in seconds",
                 unit="s"
             )
 
             self._llm_token_generation_rate = self._meter.create_histogram(
-                name="llm_token_generation_rate",
+                name="llm.token.generation_rate",
                 description="Token generation rate (tokens per second)",
                 unit="tokens/s"
             )
 
             self._llm_ttft_duration = self._meter.create_histogram(
-                name="llm_time_to_first_token_seconds",
+                name="llm.time_to_first_token",
                 description="Time to first token (TTFT) in seconds",
                 unit="s"
             )
 
-            self._llm_total_tokens = self._meter.create_counter(
-                name="llm_total_tokens",
-                description="Total tokens processed",
+            self._llm_token_count_prompt = self._meter.create_counter(
+                name="llm.token_count.prompt",
+                description="Number of prompt/input tokens",
+                unit="tokens"
+            )
+
+            self._llm_token_count_completion = self._meter.create_counter(
+                name="llm.token_count.completion",
+                description="Number of completion/output tokens",
                 unit="tokens"
             )
 
             self._llm_error_count = self._meter.create_counter(
-                name="llm_error_count",
+                name="llm.error.count",
                 description="Number of LLM errors",
+                unit="errors"
+            )
+
+            # Create Agent-specific metrics (OpenInference semantic conventions)
+            self._agent_step_count = self._meter.create_counter(
+                name="agent.step.count",
+                description="Number of agent execution steps",
+                unit="steps"
+            )
+
+            self._agent_execution_duration = self._meter.create_histogram(
+                name="agent.execution.duration",
+                description="Duration of agent execution in seconds",
+                unit="s"
+            )
+
+            self._agent_error_count = self._meter.create_counter(
+                name="agent.error.count",
+                description="Number of agent execution errors",
                 unit="errors"
             )
 
@@ -185,10 +277,13 @@ class MonitoringManager:
             RequestsInstrumentor().instrument()
 
             logger.info(
-                f"Telemetry initialized successfully for service: {self._config.service_name}")
+                f"OTLP telemetry initialized successfully for service: {self._config.service_name}, "
+                f"endpoint: {self._config.otlp_endpoint}, protocol: {self._config.otlp_protocol}"
+            )
 
         except Exception as e:
-            logger.error(f"Failed to initialize telemetry: {str(e)}")
+            logger.error(f"Failed to initialize OTLP telemetry: {str(e)}")
+            # Do not raise - allow application to continue without monitoring
 
     @property
     def is_enabled(self) -> bool:
@@ -208,7 +303,8 @@ class MonitoringManager:
             if self.is_enabled and app and OPENTELEMETRY_AVAILABLE:
                 FastAPIInstrumentor.instrument_app(app)
                 logger.info(
-                    "FastAPI application monitoring initialized successfully")
+                    "FastAPI application monitoring initialized successfully"
+                )
                 return True
             elif not OPENTELEMETRY_AVAILABLE:
                 logger.warning(
@@ -222,18 +318,25 @@ class MonitoringManager:
 
     @contextmanager
     def trace_llm_request(self, operation_name: str, model_name: str, **attributes: Any) -> Iterator[Optional[Any]]:
-        """Context manager for tracing LLM requests with comprehensive metrics."""
+        """
+        Context manager for tracing LLM requests with comprehensive metrics.
+        Uses OpenInference semantic conventions for attribute naming.
+        """
         if not self.is_enabled or not OPENTELEMETRY_AVAILABLE or not self._tracer:
             yield None
             return
 
+        # OpenInference semantic attributes
+        openinference_attrs = {
+            "llm.model_name": model_name,
+            "llm.operation.name": operation_name,
+        }
+        # Add user-provided attributes
+        openinference_attrs.update(attributes)
+
         with self._tracer.start_as_current_span(
             operation_name,
-            attributes={
-                "llm.model_name": model_name,
-                "llm.operation": operation_name,
-                **attributes
-            }
+            attributes=openinference_attrs
         ) as span:
             start_time = time.time()
             try:
@@ -242,13 +345,143 @@ class MonitoringManager:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 if self._llm_error_count:
                     self._llm_error_count.add(
-                        1, {"model": model_name, "operation": operation_name})
+                        1, {"llm.model_name": model_name, "llm.operation.name": operation_name}
+                    )
                 raise
             finally:
                 duration = time.time() - start_time
                 if self._llm_request_duration:
                     self._llm_request_duration.record(
-                        duration, {"model": model_name, "operation": operation_name})
+                        duration, {"llm.model_name": model_name, "llm.operation.name": operation_name}
+                    )
+
+    @contextmanager
+    def trace_agent_step(self, step_name: str, agent_name: str, step_type: str, **attributes: Any) -> Iterator[Optional[Any]]:
+        """
+        Context manager for tracing Agent execution steps.
+        Uses OpenInference semantic conventions for attribute naming.
+        
+        Args:
+            step_name: Name of the step (e.g., "web_search", "reasoning_step_1")
+            agent_name: Name of the agent
+            step_type: Type of step - "tool_call", "reasoning", or "action_selection"
+            **attributes: Additional attributes to add to the span
+        """
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE or not self._tracer:
+            yield None
+            return
+
+        # OpenInference semantic attributes for agent
+        openinference_attrs = {
+            "agent.name": agent_name,
+            "agent.step.name": step_name,
+            "agent.step.type": step_type,
+        }
+        openinference_attrs.update(attributes)
+
+        span_name = f"agent.{step_name}"
+        
+        with self._tracer.start_as_current_span(
+            span_name,
+            attributes=openinference_attrs
+        ) as span:
+            start_time = time.time()
+            try:
+                yield span
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                if self._agent_error_count:
+                    self._agent_error_count.add(
+                        1, {"agent.name": agent_name, "error.type": type(e).__name__}
+                    )
+                raise
+            finally:
+                duration = time.time() - start_time
+                if self._agent_step_count:
+                    self._agent_step_count.add(
+                        1, {"agent.name": agent_name, "agent.step.type": step_type}
+                    )
+
+    @contextmanager
+    def trace_tool_call(self, tool_name: str, agent_name: str, tool_input: Optional[Dict] = None, **attributes: Any) -> Iterator[Optional[Any]]:
+        """
+        Context manager for tracing Agent tool calls.
+        Uses OpenInference semantic conventions for attribute naming.
+        
+        Args:
+            tool_name: Name of the tool being called
+            agent_name: Name of the agent making the call
+            tool_input: Input parameters for the tool (will be JSON serialized)
+            **attributes: Additional attributes to add to the span
+        """
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE or not self._tracer:
+            yield None
+            return
+
+        # OpenInference semantic attributes for tool call
+        openinference_attrs = {
+            "agent.name": agent_name,
+            "agent.step.name": tool_name,
+            "agent.step.type": "tool_call",
+            "agent.tool.name": tool_name,
+        }
+        
+        # Add tool input as JSON string
+        if tool_input:
+            try:
+                openinference_attrs["agent.tool.input"] = json.dumps(tool_input, ensure_ascii=False)
+            except (TypeError, ValueError):
+                openinference_attrs["agent.tool.input"] = str(tool_input)
+        
+        openinference_attrs.update(attributes)
+
+        span_name = f"agent.tool.{tool_name}"
+        
+        with self._tracer.start_as_current_span(
+            span_name,
+            attributes=openinference_attrs
+        ) as span:
+            start_time = time.time()
+            try:
+                yield span
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.set_attribute("error.type", type(e).__name__)
+                span.set_attribute("error.message", str(e))
+                if self._agent_error_count:
+                    self._agent_error_count.add(
+                        1, {"agent.name": agent_name, "error.type": type(e).__name__, "agent.tool.name": tool_name}
+                    )
+                raise
+            finally:
+                duration = time.time() - start_time
+                duration_ms = duration * 1000
+                span.set_attribute("agent.tool.duration_ms", duration_ms)
+                if self._agent_step_count:
+                    self._agent_step_count.add(
+                        1, {"agent.name": agent_name, "agent.step.type": "tool_call", "agent.tool.name": tool_name}
+                    )
+
+    def set_tool_output(self, output: Any) -> None:
+        """
+        Set the output of a tool call on the current span.
+        Call this within a trace_tool_call context manager.
+        
+        Args:
+            output: Tool output (will be JSON serialized)
+        """
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
+            return
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            try:
+                if isinstance(output, str):
+                    span.set_attribute("agent.tool.output", output)
+                else:
+                    span.set_attribute("agent.tool.output", json.dumps(output, ensure_ascii=False))
+            except (TypeError, ValueError):
+                span.set_attribute("agent.tool.output", str(output))
 
     def get_current_span(self) -> Optional[Any]:
         """Get the current active span."""
@@ -279,16 +512,34 @@ class MonitoringManager:
         return LLMTokenTracker(self, model_name, span)
 
     def record_llm_metrics(self, metric_type: str, value: float, attributes: Dict[str, Any]) -> None:
-        """Record LLM-specific metrics."""
+        """
+        Record LLM-specific metrics using OpenInference semantic conventions.
+        """
         if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
             return
+
+        # Ensure attributes use OpenInference naming
+        if "model" in attributes and "llm.model_name" not in attributes:
+            attributes["llm.model_name"] = attributes["model"]
 
         if metric_type == "ttft" and self._llm_ttft_duration:
             self._llm_ttft_duration.record(value, attributes)
         elif metric_type == "token_rate" and self._llm_token_generation_rate:
             self._llm_token_generation_rate.record(value, attributes)
-        elif metric_type == "tokens" and self._llm_total_tokens:
-            self._llm_total_tokens.add(value, attributes)
+        elif metric_type == "tokens_prompt" and self._llm_token_count_prompt:
+            self._llm_token_count_prompt.add(value, attributes)
+        elif metric_type == "tokens_completion" and self._llm_token_count_completion:
+            self._llm_token_count_completion.add(value, attributes)
+
+    def record_agent_metrics(self, metric_type: str, value: float, attributes: Dict[str, Any]) -> None:
+        """
+        Record Agent-specific metrics using OpenInference semantic conventions.
+        """
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
+            return
+
+        if metric_type == "duration" and self._agent_execution_duration:
+            self._agent_execution_duration.record(value, attributes)
 
     def monitor_endpoint(self, operation_name: Optional[str] = None, include_params: bool = True, exclude_params: Optional[list] = None) -> Callable[[F], F]:
         """
@@ -324,8 +575,8 @@ class MonitoringManager:
                     except Exception as e:
                         duration = time.time() - start_time
                         self.add_span_event(f"{op_name}.error", {
-                            "error_type": type(e).__name__,
-                            "error_message": str(e),
+                            "error.type": type(e).__name__,
+                            "error.message": str(e),
                             "duration": duration
                         })
                         raise
@@ -355,8 +606,8 @@ class MonitoringManager:
                     except Exception as e:
                         duration = time.time() - start_time
                         self.add_span_event(f"{op_name}.error", {
-                            "error_type": type(e).__name__,
-                            "error_message": str(e),
+                            "error.type": type(e).__name__,
+                            "error.message": str(e),
                             "duration": duration
                         })
                         raise
@@ -373,6 +624,7 @@ class MonitoringManager:
         """
         Specialized decorator for LLM calls with token tracking.
         Monitoring is automatically enabled/disabled based on configuration.
+        Uses OpenInference semantic conventions for attribute naming.
         """
         def decorator(func: F) -> F:
             @functools.wraps(func)
@@ -389,8 +641,8 @@ class MonitoringManager:
                         return result
                     except Exception as e:
                         self.add_span_event("llm_call_error", {
-                            "error_type": type(e).__name__,
-                            "error_message": str(e)
+                            "error.type": type(e).__name__,
+                            "error.message": str(e)
                         })
                         raise
 
@@ -409,8 +661,8 @@ class MonitoringManager:
                         return result
                     except Exception as e:
                         self.add_span_event("llm_call_error", {
-                            "error_type": type(e).__name__,
-                            "error_message": str(e)
+                            "error.type": type(e).__name__,
+                            "error.message": str(e)
                         })
                         raise
 
@@ -421,9 +673,72 @@ class MonitoringManager:
 
         return decorator
 
+    def monitor_agent_execution(self, agent_name: str):
+        """
+        Decorator to add monitoring to Agent execution.
+        Tracks overall execution duration and error count.
+        
+        Args:
+            agent_name: Name of the agent being monitored
+        """
+        def decorator(func: F) -> F:
+            @functools.wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                start_time = time.time()
+                status = "success"
+                
+                try:
+                    result = await func(*args, **kwargs)
+                    return result
+                except Exception as e:
+                    status = "error"
+                    if self._agent_error_count:
+                        self._agent_error_count.add(
+                            1, {"agent.name": agent_name, "error.type": type(e).__name__}
+                        )
+                    raise
+                finally:
+                    duration = time.time() - start_time
+                    if self._agent_execution_duration:
+                        self._agent_execution_duration.record(
+                            duration, {"agent.name": agent_name, "agent.status": status}
+                        )
+
+            @functools.wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                start_time = time.time()
+                status = "success"
+                
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                except Exception as e:
+                    status = "error"
+                    if self._agent_error_count:
+                        self._agent_error_count.add(
+                            1, {"agent.name": agent_name, "error.type": type(e).__name__}
+                        )
+                    raise
+                finally:
+                    duration = time.time() - start_time
+                    if self._agent_execution_duration:
+                        self._agent_execution_duration.record(
+                            duration, {"agent.name": agent_name, "agent.status": status}
+                        )
+
+            if hasattr(func, '__code__') and func.__code__.co_flags & 0x80:
+                return cast(F, async_wrapper)
+            else:
+                return cast(F, sync_wrapper)
+
+        return decorator
+
 
 class LLMTokenTracker:
-    """Tracks token generation metrics for streaming LLM responses."""
+    """
+    Tracks token generation metrics for streaming LLM responses.
+    Uses OpenInference semantic conventions for attribute naming.
+    """
 
     def __init__(self, manager: MonitoringManager, model_name: str, span: Optional[Any] = None):
         self.manager = manager
@@ -446,10 +761,10 @@ class LLMTokenTracker:
 
             if self.span:
                 self.span.add_event("first_token_received",
-                                    {"ttft_seconds": ttft})
+                                    {"llm.time_to_first_token": ttft})
 
             self.manager.record_llm_metrics(
-                "ttft", ttft, {"model": self.model_name})
+                "ttft", ttft, {"llm.model_name": self.model_name})
 
     def record_token(self, token: str) -> None:
         """Record a new token generated."""
@@ -468,7 +783,7 @@ class LLMTokenTracker:
             })
 
     def record_completion(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
-        """Record completion metrics."""
+        """Record completion metrics using OpenInference semantic conventions."""
         if not self.manager.is_enabled:
             return
 
@@ -481,23 +796,23 @@ class LLMTokenTracker:
         if total_duration > 0 and self.token_count > 0:
             generation_rate = self.token_count / total_duration
             self.manager.record_llm_metrics("token_rate", generation_rate, {
-                                            "model": self.model_name})
+                "llm.model_name": self.model_name})
 
-        # Record total tokens
-        self.manager.record_llm_metrics("tokens", input_tokens, {
-                                        "model": self.model_name, "type": "input"})
-        self.manager.record_llm_metrics("tokens", output_tokens, {
-                                        "model": self.model_name, "type": "output"})
+        # Record token counts using OpenInference naming
+        self.manager.record_llm_metrics("tokens_prompt", input_tokens, {
+            "llm.model_name": self.model_name})
+        self.manager.record_llm_metrics("tokens_completion", output_tokens, {
+            "llm.model_name": self.model_name})
 
-        # Add span attributes
+        # Add span attributes using OpenInference naming
         if self.span:
             self.span.set_attributes({
-                "llm.input_tokens": input_tokens,
-                "llm.output_tokens": output_tokens,
-                "llm.total_tokens": input_tokens + output_tokens,
+                "llm.token_count.prompt": input_tokens,
+                "llm.token_count.completion": output_tokens,
+                "llm.token_count.total": input_tokens + output_tokens,
                 "llm.generation_rate": generation_rate,
-                "llm.total_duration": total_duration,
-                "llm.ttft": self.first_token_time - self.start_time if self.first_token_time else 0
+                "llm.duration.total": total_duration,
+                "llm.time_to_first_token": self.first_token_time - self.start_time if self.first_token_time else 0
             })
 
 

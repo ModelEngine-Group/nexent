@@ -1,65 +1,4 @@
 services:
-  # Jaeger - Distributed Tracing
-  jaeger:
-    image: jaegertracing/all-in-one:1.52
-    container_name: nexent-jaeger
-    ports:
-      - "16686:16686"  # Jaeger UI
-      - "14268:14268"  # Jaeger collector HTTP
-      - "14250:14250"  # Jaeger collector gRPC
-      - "6831:6831/udp"  # Agent UDP
-      - "6832:6832/udp"  # Agent UDP
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
-    networks:
-      - nexent-network
-    restart: unless-stopped
-    volumes:
-      - jaeger-data:/tmp
-
-  # Prometheus - Metrics Collection
-  prometheus:
-    image: prom/prometheus:v2.48.0
-    container_name: nexent-prometheus
-    ports:
-      - "9090:9090"
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=15d'
-      - '--web.enable-lifecycle'
-      - '--web.enable-admin-api'
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    networks:
-      - nexent-network
-    restart: unless-stopped
-
-  # Grafana - Metrics Visualization
-  grafana:
-    image: grafana/grafana:10.2.0
-    container_name: nexent-grafana
-    ports:
-      - "3005:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
-    networks:
-      - nexent-network
-    restart: unless-stopped
-    depends_on:
-      - prometheus
-
-  # OpenTelemetry Collector (Optional - for advanced setups)
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.89.0
     container_name: nexent-otel-collector
@@ -67,21 +6,11 @@ services:
     volumes:
       - ./monitoring/otel-collector-config.yml:/etc/otel-collector-config.yml
     ports:
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
-      - "8888:8888"   # Prometheus metrics exposed by the collector
-      - "8889:8889"   # Prometheus exporter metrics
-    depends_on:
-      - jaeger
-      - prometheus
+      - "4317:4317"
+      - "4318:4318"
     networks:
       - nexent-network
     restart: unless-stopped
-
-volumes:
-  jaeger-data:
-  prometheus-data:
-  grafana-data:
 
 networks:
   nexent-network:

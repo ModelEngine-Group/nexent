@@ -316,19 +316,34 @@ THINK_START_PATTERN = "<think>"
 THINK_END_PATTERN = "</think>"
 
 
-# Telemetry and Monitoring Configuration
+# Telemetry and Monitoring Configuration (OTLP Protocol)
 ENABLE_TELEMETRY = os.getenv("ENABLE_TELEMETRY", "false").lower() == "true"
-SERVICE_NAME = os.getenv("SERVICE_NAME", "nexent-backend")
-JAEGER_ENDPOINT = os.getenv(
-    "JAEGER_ENDPOINT", "http://localhost:14268/api/traces")
-PROMETHEUS_PORT = int(os.getenv("PROMETHEUS_PORT", "8000"))
+OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "nexent-backend")
+OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+OTEL_EXPORTER_OTLP_PROTOCOL = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http")
+OTEL_EXPORTER_OTLP_HEADERS = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
 TELEMETRY_SAMPLE_RATE = float(os.getenv("TELEMETRY_SAMPLE_RATE", "1.0"))
+
+# Parse OTLP headers into dict format
+def _parse_otlp_headers(headers_str: str) -> dict:
+    """Parse OTLP headers string into dict. Format: 'key1=value1,key2=value2'"""
+    if not headers_str:
+        return {}
+    headers = {}
+    for pair in headers_str.split(","):
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            headers[key.strip()] = value.strip()
+    return headers
+
+OTLP_HEADERS = _parse_otlp_headers(OTEL_EXPORTER_OTLP_HEADERS)
 
 # Performance monitoring thresholds
 LLM_SLOW_REQUEST_THRESHOLD_SECONDS = float(
     os.getenv("LLM_SLOW_REQUEST_THRESHOLD_SECONDS", "5.0"))
 LLM_SLOW_TOKEN_RATE_THRESHOLD = float(
-    os.getenv("LLM_SLOW_TOKEN_RATE_THRESHOLD", "10.0"))  # tokens per second
+    os.getenv("LLM_SLOW_TOKEN_RATE_THRESHOLD", "10.0"))
 
 
 DEFAULT_ZH_TITLE = "新对话"
