@@ -104,6 +104,7 @@ def run_tests():
     sdk_source = os.path.join(project_root, 'sdk')
 
     # Build the pytest command with parallel execution
+    # Use --tb=short for shorter tracebacks and -v for verbose output
     cmd = [
         sys.executable,
         "-m",
@@ -111,13 +112,14 @@ def run_tests():
         backend_test_dir,   # All backend tests
         sdk_test_dir,       # All SDK tests
         "-n", str(workers),  # Parallel execution with N workers
-        "-q",                # Quiet mode for cleaner output
+        "-v",                # Verbose mode to show individual test results
         f"--cov={backend_source}",
         f"--cov={sdk_source}",
         "--cov-report=",
         "--cov-branch",      # Enable branch coverage
         "--cov-config=test/.coveragerc",
-        "--disable-warnings"
+        "--tb=short",        # Shorter traceback format
+        "-p", "no:warnings"  # Disable warning plugin to reduce noise
     ]
 
     # Set environment variables
@@ -130,62 +132,61 @@ def run_tests():
     env["COVERAGE_PROCESS_START"] = config_file
 
     logger.info("Starting parallel test execution...")
+    logger.info("=" * 60)
 
     # Run pytest with all tests at once
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    # Note: We use stdout=None to inherit parent's stdout for real-time output in CI
+    result = subprocess.run(
+        cmd,
+        stdout=None,  # Inherit stdout for real-time output
+        stderr=subprocess.STDOUT,  # Merge stderr into stdout
+        env=env
+    )
 
-    # Print test output
-    if result.stdout:
-        print(result.stdout)
+    # Generate test summary report
+    logger.info("\n" + "=" * 60)
+    logger.info("Test Summary (see above for detailed results)")
+    logger.info("=" * 60)
 
-    if result.stderr:
-        logger.warning("Warnings or errors:")
-        logger.warning(result.stderr)
+    # Get test counts using pytest --collect-only
+    # This is fast and doesn't run the tests
+    collect_cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        backend_test_dir,
+        sdk_test_dir,
+        "--collect-only",
+        "-q"
+    ]
+    collect_result = subprocess.run(
+        collect_cmd,
+        capture_output=True,
+        text=True,
+        env=env
+    )
 
-    # Parse test results
+    # Parse collected test count
     total_tests = 0
     passed_tests = 0
     failed_tests = 0
 
-    # Look for the summary line at the end of the test run
-    for line in result.stdout.split('\n'):
-        # Match patterns like "10 passed in 0.05s" or "17 passed, 13 warnings in 2.49s"
-        if " passed" in line and " in " in line:
-            parts = line.strip().split()
-            try:
-                # Find the position of "passed" word
-                for i, part in enumerate(parts):
-                    if "passed" in part:
-                        passed_tests = int(parts[i-1])
-                        break
-                # Find the position of "failed" word if it exists
-                for i, part in enumerate(parts):
-                    if "failed" in part:
-                        failed_tests = int(parts[i-1])
-                        break
-            except (IndexError, ValueError):
-                pass
-
-    # Also check for collection info
-    for line in result.stdout.split('\n'):
+    for line in collect_result.stdout.split('\n'):
         if line.strip().startswith('collected '):
             try:
                 total_tests = int(line.strip().split('collected ')[1].split()[0])
             except (IndexError, ValueError):
                 pass
 
-    # If we couldn't determine from output, use passed + failed
-    if total_tests == 0:
-        total_tests = passed_tests + failed_tests
+    # Calculate pass rate - if pytest exited with 0, all passed
+    if result.returncode == 0:
+        passed_tests = total_tests
+        failed_tests = 0
+    else:
+        passed_tests = 0
+        failed_tests = total_tests
 
-    # Generate test summary report
-    logger.info("\n" + "=" * 60)
-    logger.info("Test Summary")
-    logger.info("=" * 60)
-
-    # Calculate pass rate
     pass_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0
-    logger.info(f"\nTest Results:")
     logger.info(f"  Total Tests: {total_tests}")
     logger.info(f"  Passed: {passed_tests}")
     logger.info(f"  Failed: {failed_tests}")

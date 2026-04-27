@@ -50,7 +50,7 @@ jobs:
 
       - name: Run all tests and collect coverage
         run: |
-          source backend/.venv/bin/activate && python test/run_all_test.py
+          source backend/.venv/bin/activate && python -u test/run_all_test.py
           TEST_EXIT_CODE=$?
 
           if [ -f "test/coverage.xml" ]; then
