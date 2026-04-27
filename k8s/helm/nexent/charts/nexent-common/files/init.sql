@@ -1392,6 +1392,71 @@ COMMENT ON COLUMN "ag_a2a_artifact_t".meta_data IS 'Artifact metadata';
 COMMENT ON COLUMN "ag_a2a_artifact_t".extensions IS 'Extension URI list';
 COMMENT ON COLUMN "ag_a2a_artifact_t".create_time IS 'Artifact creation timestamp';
 
+-- Create the model_monitoring_record_t table for LLM performance metrics
+CREATE TABLE IF NOT EXISTS nexent.model_monitoring_record_t (
+    monitoring_id       SERIAL          PRIMARY KEY,
+    model_id            INT4,
+    model_name          VARCHAR(100)    NOT NULL,
+    model_type          VARCHAR(20)     DEFAULT 'llm',
+    agent_id            INT4,
+    agent_name          VARCHAR(100),
+    conversation_id     INT4,
+    tenant_id           VARCHAR(100)    NOT NULL,
+    user_id             VARCHAR(100),
+    display_name        VARCHAR(100),
+    request_duration_ms INT4,
+    ttft_ms             INT4,
+    input_tokens        INT4,
+    output_tokens       INT4,
+    total_tokens        INT4,
+    generation_rate     FLOAT,
+    is_streaming        BOOLEAN         DEFAULT FALSE,
+    is_success          BOOLEAN         DEFAULT TRUE,
+    is_error            BOOLEAN         DEFAULT FALSE,
+    error_type          VARCHAR(50),
+    error_message       TEXT,
+    retry_count         INT4            DEFAULT 0,
+    operation           VARCHAR(50),
+    create_time         TIMESTAMP       DEFAULT NOW(),
+    delete_flag         VARCHAR(1)      DEFAULT 'N'
+);
+
+ALTER TABLE nexent.model_monitoring_record_t OWNER TO "root";
+
+COMMENT ON TABLE nexent.model_monitoring_record_t IS 'Per-request LLM performance metrics for model monitoring';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.monitoring_id IS 'Monitoring record ID, unique primary key';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.model_id IS 'Foreign key to model_record_t.model_id';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.model_name IS 'Model identifier (repo/name format)';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.model_type IS 'Model type: llm, vlm, embedding, multi_embedding, rerank';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.agent_id IS 'Agent ID that initiated the request';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.agent_name IS 'Agent display name';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.conversation_id IS 'Conversation ID associated with the request';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.tenant_id IS 'Tenant ID for multi-tenancy isolation';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.user_id IS 'User ID who initiated the request';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.display_name IS 'Human-readable model display name';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.request_duration_ms IS 'Total request duration in milliseconds';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.ttft_ms IS 'Time to first token in milliseconds (streaming only)';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.input_tokens IS 'Number of input prompt tokens';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.output_tokens IS 'Number of output completion tokens';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.total_tokens IS 'Total tokens (input + output)';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.generation_rate IS 'Token generation rate in tokens per second';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.is_streaming IS 'Whether the request used streaming response';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.is_success IS 'Whether the request completed successfully';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.is_error IS 'Whether the request resulted in an error';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.error_type IS 'Error exception class name';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.error_message IS 'Error message text';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.retry_count IS 'Number of retry attempts';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.operation IS 'Operation type: chat_completion, title_generation, connectivity_check, embedding_call, system_prompt_generation';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.create_time IS 'Record creation timestamp';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.delete_flag IS 'Soft delete flag: Y/N';
+
+CREATE INDEX IF NOT EXISTS ix_monitoring_model_id     ON nexent.model_monitoring_record_t (model_id);
+CREATE INDEX IF NOT EXISTS ix_monitoring_tenant_id    ON nexent.model_monitoring_record_t (tenant_id);
+CREATE INDEX IF NOT EXISTS ix_monitoring_agent_id     ON nexent.model_monitoring_record_t (agent_id);
+CREATE INDEX IF NOT EXISTS ix_monitoring_create_time  ON nexent.model_monitoring_record_t (create_time);
+CREATE INDEX IF NOT EXISTS ix_monitoring_is_error     ON nexent.model_monitoring_record_t (is_error);
+CREATE INDEX IF NOT EXISTS ix_monitoring_model_type   ON nexent.model_monitoring_record_t (model_type);
+CREATE INDEX IF NOT EXISTS ix_monitoring_model_time   ON nexent.model_monitoring_record_t (model_id, create_time);
 
 -- Create user OAuth account table for third-party login (GitHub, WeChat, etc.)
 CREATE TABLE IF NOT EXISTS nexent.user_oauth_account_t (

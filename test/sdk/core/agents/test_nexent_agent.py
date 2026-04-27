@@ -462,7 +462,8 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         api_base=mock_model_config.url,
         temperature=mock_model_config.temperature,
         top_p=mock_model_config.top_p,
-        ssl_verify=True
+        ssl_verify=True,
+        display_name=mock_model_config.cite_name,
     )
 
     # Verify stop_event was set
@@ -490,7 +491,8 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         api_base=mock_deep_thinking_model_config.url,
         temperature=mock_deep_thinking_model_config.temperature,
         top_p=mock_deep_thinking_model_config.top_p,
-        ssl_verify=True
+        ssl_verify=True,
+        display_name=mock_deep_thinking_model_config.cite_name,
     )
 
     # Verify stop_event was set

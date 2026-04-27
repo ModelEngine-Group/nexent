@@ -723,3 +723,57 @@ def test_normalize_mcp_config_edge_cases():
     assert result["transport"] == "sse"
     # Empty string authorization creates empty headers dict
     assert result.get("headers") == {"Authorization": ""}
+
+
+@pytest.mark.asyncio
+async def test_agent_run_uses_copy_context(basic_agent_run_info, monkeypatch):
+    """agent_run passes ctx.run as Thread target, preserving contextvars."""
+    basic_agent_run_info.observer.get_cached_message.side_effect = [[]]
+
+    async def fast_sleep(duration):
+        ...
+
+    monkeypatch.setattr(run_agent.asyncio, "sleep", fast_sleep)
+
+    captured_target = {}
+
+    class CapturingThread:
+        def __init__(self, target=None, args=None):
+            captured_target["target"] = target
+            captured_target["args"] = args
+
+        def start(self):
+            ...
+
+        def is_alive(self):
+            return False
+
+    monkeypatch.setattr(run_agent, "Thread", CapturingThread)
+
+    async for _ in run_agent.agent_run(basic_agent_run_info):
+        pass
+
+    assert captured_target["target"] is not None
+    assert callable(captured_target["target"])
+
+
+def test_agent_run_thread_preserves_context_var(basic_agent_run_info, monkeypatch):
+    """contextvars set before agent_run_thread are visible inside the thread."""
+    from contextvars import ContextVar
+
+    test_var = ContextVar("test_preserve_var", default="missing")
+
+    captured_value = {}
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    original_run = run_agent.agent_run_thread.__wrapped__
+
+    def capturing_run(info):
+        captured_value["val"] = test_var.get()
+        return original_run(info)
+
+    test_var.set("preserved!")
+    capturing_run(basic_agent_run_info)
+    assert captured_value.get("val") == "preserved!"

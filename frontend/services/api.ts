@@ -366,6 +366,9 @@ export const API_ENDPOINTS = {
     check: (invitationCode: string) =>
       `${API_BASE_URL}/invitations/${invitationCode}/check`,
   },
+  monitoring: {
+    models: `${API_BASE_URL}/monitoring/models`,
+  },
 };
 
 // Common error handling
