@@ -57,7 +57,20 @@ for _sub in [
     elif _sub == "local_python_executor":
         setattr(sub_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
     elif _sub == "memory":
-        for _name in ["ActionStep", "ToolCall", "TaskStep", "SystemPromptStep", "PlanningStep", "FinalAnswerStep"]:
+        class _TaskStepBase:
+            def __init__(self, task=None):
+                self.task = task
+        class _ActionStepBase:
+            def __init__(self, step_number=None, timing=None, action_output=None, model_output=None):
+                self.step_number = step_number
+                self.timing = timing
+                self.action_output = action_output
+                self.model_output = model_output
+        setattr(sub_mod, "TaskStep", _TaskStepBase)
+        setattr(sub_mod, "ActionStep", _ActionStepBase)
+        setattr(sub_mod, "AgentMemory", MagicMock)
+        setattr(sub_mod, "MemoryStep", MagicMock)
+        for _name in ["ToolCall", "SystemPromptStep", "PlanningStep", "FinalAnswerStep"]:
             setattr(sub_mod, _name, MagicMock(name=f"smolagents.memory.{_name}"))
     elif _sub == "models":
         setattr(sub_mod, "ChatMessage", MagicMock(name="smolagents.models.ChatMessage"))
@@ -89,8 +102,10 @@ for _sub in [
     # Will be added to module_mocks below
 
 # Top-level exports expected directly from `smolagents` by nexent_agent.py
-for _name in ["ActionStep", "TaskStep", "AgentText", "handle_agent_output_types"]:
-    setattr(mock_smolagents, _name, MagicMock(name=f"smolagents.{_name}"))
+setattr(mock_smolagents, "TaskStep", mock_smolagents.memory.TaskStep)
+setattr(mock_smolagents, "ActionStep", mock_smolagents.memory.ActionStep)
+setattr(mock_smolagents, "AgentText", MagicMock(name="smolagents.AgentText"))
+setattr(mock_smolagents, "handle_agent_output_types", MagicMock(name="smolagents.handle_agent_output_types"))
 # Export Timing from monitoring submodule to top-level
 setattr(mock_smolagents, "Timing", mock_smolagents.monitoring.Timing)
 # Also export Tool at top-level so that `from smolagents import Tool` works

@@ -60,8 +60,14 @@ mock_smolagents_tools = MagicMock()
 mock_smolagents_tools.Tool = mock_tool_class
 mock_smolagents.tools = mock_smolagents_tools
 
+mock_smolagents.memory = MagicMock()
+mock_smolagents.memory.ActionStep = _ActionStep
+mock_smolagents.memory.AgentMemory = MagicMock
+mock_smolagents.memory.MemoryStep = MagicMock
+mock_smolagents.memory.TaskStep = _TaskStep
+
 # Create dummy smolagents sub-modules that may be imported indirectly
-for sub_mod in ["agents", "memory", "models", "monitoring", "utils", "local_python_executor"]:
+for sub_mod in ["agents", "models", "monitoring", "utils", "local_python_executor"]:
     mock_module = MagicMock()
     setattr(mock_smolagents, sub_mod, mock_module)
 
@@ -213,7 +219,7 @@ module_mocks = {
     "smolagents": mock_smolagents,
     "smolagents.tools": mock_smolagents_tools,
     "smolagents.agents": MagicMock(),
-    "smolagents.memory": MagicMock(),
+    "smolagents.memory": mock_smolagents.memory,
     "smolagents.models": MagicMock(),
     "smolagents.monitoring": MagicMock(),
     "smolagents.utils": MagicMock(),
