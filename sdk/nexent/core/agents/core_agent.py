@@ -207,6 +207,38 @@ class FinalAnswerError(Exception):
     pass
 
 
+def _build_final_answer_messages(task: str, agent_prompt_templates: Dict[str, Any], memory_messages: List) -> List[ChatMessage]:
+    """Build messages for final answer generation.
+
+    Args:
+        task: The original task prompt
+        agent_prompt_templates: Prompt templates from the agent
+        memory_messages: Messages from agent memory
+
+    Returns:
+        List of ChatMessage for final answer generation
+    """
+    from smolagents.models import MessageRole
+
+    messages = [
+        ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=[{"type": "text", "text": agent_prompt_templates["final_answer"]["pre_messages"]}]
+        )
+    ]
+    messages += memory_messages[1:]
+    messages.append(
+        ChatMessage(
+            role=MessageRole.USER,
+            content=[{"type": "text", "text": Template(
+                agent_prompt_templates["final_answer"]["post_messages"],
+                undefined=StrictUndefined
+            ).render(task=task)}]
+        )
+    )
+    return messages
+
+
 class CoreAgent(CodeAgent):
     def __init__(self, observer: MessageObserver, prompt_templates: Dict[str, Any] | None = None, *args, **kwargs):
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
@@ -570,3 +602,76 @@ You have been provided with these additional arguments, that you can access usin
             # and sets action_step.error, so don't yield again to avoid duplicate error
             final_answer = self._handle_max_steps_reached(task)
         yield FinalAnswerStep(handle_agent_output_types(final_answer))
+
+    def _handle_max_steps_reached(self, task: str) -> Any:
+        """Handle the case when max steps is reached by generating final answer with streaming.
+
+        This method overrides the parent class implementation to use streaming for
+        the final answer generation, allowing the observer to receive thinking tokens
+        in real-time.
+
+        Args:
+            task: The original task prompt
+
+        Returns:
+            The final answer content string
+        """
+        from smolagents.models import MessageRole
+
+        action_step_start_time = time.time()
+
+        # Send STEP_COUNT to start a new step for the final answer thinking process
+        # This ensures the thinking content is displayed in the task details panel
+        self.observer.add_message(
+            self.agent_name, ProcessType.STEP_COUNT, self.step_number)
+
+        # Build messages for final answer generation
+        memory_messages = self.write_memory_to_messages()
+        messages = _build_final_answer_messages(task, self.prompt_templates, memory_messages)
+
+        # Create the final memory step with error
+        final_memory_step = ActionStep(
+            step_number=self.step_number,
+            error=AgentMaxStepsError("Reached max steps.", self.logger),
+            timing=Timing(start_time=action_step_start_time),
+        )
+
+        # Track accumulated content and token usage for streaming
+        accumulated_content = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+        role = None
+
+        try:
+            # Use streaming call (model.__call__) to generate final answer
+            # This will trigger observer.add_model_new_token() and
+            # observer.add_model_reasoning_content() in OpenAIModel
+            chat_message: ChatMessage = self.model(messages)
+
+            # Update role and content from the completed message
+            role = chat_message.role
+            model_output = chat_message.content or ""
+
+            # Accumulate token usage if available
+            if chat_message.token_usage:
+                total_input_tokens = chat_message.token_usage.input_tokens
+                total_output_tokens = chat_message.token_usage.output_tokens
+
+        except Exception as e:
+            # Fallback to error message if streaming fails
+            model_output = f"Error in generating final LLM output: {e}"
+            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.WARNING)
+
+        # Finalize the memory step
+        final_memory_step.timing.end_time = time.time()
+        final_memory_step.token_usage = TokenUsage(
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens
+        )
+        final_memory_step.action_output = model_output
+
+        self._finalize_step(final_memory_step)
+        self.memory.steps.append(final_memory_step)
+
+        return model_output
+
