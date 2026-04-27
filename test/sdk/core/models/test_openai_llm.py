@@ -1296,6 +1296,234 @@ def test_non_streaming_response_with_error_message(openai_model_instance):
         assert result == mock_result_message
 
 
+def test_handle_non_streaming_no_choices_raises_error(openai_model_instance):
+    """
+    Test _handle_non_streaming_response raises ValueError when choices is empty.
+    Covers line 223.
+
+    When a response has id/model (indicating non-streaming) but empty choices,
+    _handle_non_streaming_response is called and should raise ValueError.
+    """
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Create a response with id/model but empty choices list
+    # This makes it pass the non-streaming detection but fail in _handle_non_streaming_response
+    response_no_choices = types.SimpleNamespace()
+    response_no_choices.id = "chatcmpl-test"  # Has id to trigger non-streaming path
+    response_no_choices.model = "gpt-4"  # Has model to trigger non-streaming path
+    response_no_choices.choices = []  # Empty choices
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [response_no_choices]
+
+        with pytest.raises(ValueError, match="Non-streaming response has no choices"):
+            openai_model_instance.__call__(messages)
+
+
+def test_handle_non_streaming_no_choices_attr_raises_error(openai_model_instance):
+    """
+    Test _handle_non_streaming_response raises ValueError when choices attribute is missing.
+    Covers line 223.
+    """
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Create a response without choices attribute at all
+    response_no_choices_attr = types.SimpleNamespace()
+    # No choices attribute
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [response_no_choices_attr]
+
+        with pytest.raises(ValueError, match="LLM API returned invalid response format"):
+            openai_model_instance.__call__(messages)
+
+
+def test_handle_non_streaming_with_delta_fallback(openai_model_instance):
+    """
+    Test _handle_non_streaming_response uses delta as fallback for content.
+    Covers lines 231-232.
+
+    Some non-standard responses might have delta instead of message.
+    """
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Create a non-streaming response that uses delta instead of message
+    response_with_delta = types.SimpleNamespace()
+    response_with_delta.id = "chatcmpl-delta-test"
+    response_with_delta.model = "gpt-4"
+    response_with_delta.choices = [types.SimpleNamespace()]
+    # Use delta instead of message
+    response_with_delta.choices[0].delta = types.SimpleNamespace()
+    response_with_delta.choices[0].delta.content = "Content from delta"
+    response_with_delta.choices[0].delta.role = "assistant"
+    response_with_delta.usage = types.SimpleNamespace()
+    response_with_delta.usage.prompt_tokens = 5
+    response_with_delta.usage.completion_tokens = 3
+
+    mock_result_message = MagicMock()
+    mock_result_message.raw = response_with_delta
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [response_with_delta]
+
+        result = openai_model_instance.__call__(messages)
+
+        # Verify the result
+        assert result == mock_result_message
+        # Observer should have received the content from delta
+        openai_model_instance.observer.add_model_new_token.assert_called_with("Content from delta")
+
+
+def test_handle_non_streaming_delta_role_fallback(openai_model_instance):
+    """
+    Test _handle_non_streaming_response uses delta for role when message is absent.
+    Covers lines 238-239.
+    """
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Create a response with delta that has role (no message)
+    response_delta_role = types.SimpleNamespace()
+    response_delta_role.id = "chatcmpl-delta-role"
+    response_delta_role.model = "gpt-4"
+    response_delta_role.choices = [types.SimpleNamespace()]
+    # Only delta, no message
+    response_delta_role.choices[0].delta = types.SimpleNamespace()
+    response_delta_role.choices[0].delta.content = "Response from delta"
+    response_delta_role.choices[0].delta.role = "assistant"
+    response_delta_role.usage = types.SimpleNamespace()
+    response_delta_role.usage.prompt_tokens = 3
+    response_delta_role.usage.completion_tokens = 2
+
+    mock_result_message = MagicMock()
+    mock_result_message.raw = response_delta_role
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [response_delta_role]
+
+        result = openai_model_instance.__call__(messages)
+
+        assert result == mock_result_message
+        openai_model_instance.observer.add_model_new_token.assert_called_with("Response from delta")
+
+
+def test_call_context_length_exceeded_raises_value_error(openai_model_instance):
+    """
+    Test that context_length_exceeded error is wrapped with ValueError.
+    Covers line 209.
+
+    Note: The exception handling at line 209 can only be reached when the error
+    occurs INSIDE the try block (during streaming). When create() itself throws,
+    it's outside the try block. This test verifies the error wrapping logic works.
+    """
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Create a streaming response that eventually raises context_length error
+    def streaming_with_error(*args, **kwargs):
+        # First yield a valid chunk
+        chunk1 = types.SimpleNamespace()
+        chunk1.choices = [types.SimpleNamespace()]
+        chunk1.choices[0].delta = types.SimpleNamespace()
+        chunk1.choices[0].delta.content = "Partial "
+        chunk1.choices[0].delta.role = "assistant"
+        yield chunk1
+
+        # Then raise the context_length error
+        raise Exception("context_length_exceeded: token limit exceeded")
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = streaming_with_error()
+
+        # Should raise ValueError with "Token limit exceeded" message
+        with pytest.raises(ValueError, match="Token limit exceeded"):
+            openai_model_instance.__call__(messages)
+
+
+def test_call_context_length_exceeded_no_wrapping(openai_model_instance):
+    """
+    Test that non-context_length errors are re-raised as-is (not wrapped).
+    Covers line 210 (raise e without wrapping).
+    """
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        # Mock the client to raise a general error
+        openai_model_instance.client.chat.completions.create.side_effect = Exception(
+            "Some other error")
+
+        # Should re-raise the original Exception
+        with pytest.raises(Exception, match="Some other error"):
+            openai_model_instance.__call__(messages)
+
+
+def test_handle_non_streaming_response_directly_with_delta():
+    """
+    Test _handle_non_streaming_response directly with delta instead of message.
+    Covers lines 232-233 and 239-240 (delta fallback branches).
+    """
+
+    # Create a minimal mock setup for direct method testing
+    observer = MagicMock()
+    model = ImportedOpenAIModel(observer=observer)
+    model.model_id = "test-model"
+    model.temperature = 0.7
+    model.top_p = 0.9
+    model.custom_role_conversions = {}
+
+    # Create response that uses delta instead of message
+    response = types.SimpleNamespace()
+    response.choices = [types.SimpleNamespace()]
+    # Only set delta, not message - triggers fallback branches
+    response.choices[0].delta = types.SimpleNamespace()
+    response.choices[0].delta.content = "Delta content"
+    response.choices[0].delta.role = "assistant"
+    response.usage = types.SimpleNamespace()
+    response.usage.prompt_tokens = 5
+    response.usage.completion_tokens = 2
+
+    result = model._handle_non_streaming_response(response)
+
+    # Verify the result
+    assert result is not None
+    observer.add_model_new_token.assert_called_with("Delta content")
+    observer.flush_remaining_tokens.assert_called_once()
+    assert model.last_input_token_count == 5
+    assert model.last_output_token_count == 2
+
+
+def test_handle_non_streaming_response_directly_delta_only_no_role():
+    """
+    Test _handle_non_streaming_response with delta but no role attribute.
+    Covers fallback branches when delta exists but role is missing.
+    """
+
+    observer = MagicMock()
+    model = ImportedOpenAIModel(observer=observer)
+    model.model_id = "test-model"
+
+    # Create response with delta but no role
+    response = types.SimpleNamespace()
+    response.choices = [types.SimpleNamespace()]
+    response.choices[0].delta = types.SimpleNamespace()
+    response.choices[0].delta.content = "Content without role"
+    # No role attribute on delta
+    response.usage = types.SimpleNamespace()
+    response.usage.prompt_tokens = 1
+    response.usage.completion_tokens = 1
+
+    result = model._handle_non_streaming_response(response)
+
+    # Should default to "assistant" role
+    assert result is not None
+    observer.add_model_new_token.assert_called_with("Content without role")
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
