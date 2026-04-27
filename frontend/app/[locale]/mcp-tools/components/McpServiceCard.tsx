@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MCP_GRID_CARD_OUTER, MCP_SERVICE_STATUS } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import { getSourceLabelKey, getTransportLabelKey } from "@/lib/mcpTools";
+import StatusBadge from "./shared/StatusBadge";
 
 interface McpServiceCardProps {
   service: McpServiceItem;
@@ -25,17 +26,7 @@ export default function McpServiceCard({
         >
           {service.name}
         </h3>
-        <span
-          className={`shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-xs ${
-            isEnabled
-              ? "bg-emerald-50 text-emerald-700"
-              : "bg-slate-100 text-slate-500"
-          }`}
-        >
-          {t(
-            isEnabled ? "mcpTools.status.enabled" : "mcpTools.status.disabled"
-          )}
-        </span>
+        <StatusBadge status={service.status} />
       </div>
 
       <p

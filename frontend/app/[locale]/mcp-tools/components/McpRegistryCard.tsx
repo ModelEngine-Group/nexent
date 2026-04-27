@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MCP_GRID_CARD_OUTER } from "@/const/mcpTools";
 import { formatRegistryDate, formatRegistryVersion } from "@/lib/mcpTools";
 import type { RegistryMcpCard } from "@/types/mcpTools";
-import RegistryStatusBadge from "./shared/RegistryStatusBadge";
+import RegistryStatusBadge from "./shared/StatusBadge";
 
 interface McpRegistryCardProps {
   service: RegistryMcpCard;

@@ -7,7 +7,7 @@ import {
   getTransportLabelKey,
 } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
-import RegistryStatusBadge from "./shared/RegistryStatusBadge";
+import RegistryStatusBadge from "./shared/StatusBadge";
 
 interface McpCommunityCardProps {
   service: CommunityMcpCard;
@@ -33,7 +33,7 @@ export default function McpCommunityCard({
         >
           {service.name}
         </h3>
-        <RegistryStatusBadge status={service.status} variant="community" />
+        <RegistryStatusBadge status={service.status} />
       </div>
 
       <div className="mt-1 flex shrink-0 items-center gap-2 text-xs text-slate-500">

@@ -9,7 +9,6 @@ import type {
   RegistryQuickAddOption,
   RegistryRemoteVariable,
 } from "@/types/mcpTools";
-import { McpRegistryServerStatus } from "@/types/mcpTools";
 import {
   MCP_CONTAINER_STATUS,
   MCP_HEALTH_STATUS,
@@ -57,34 +56,6 @@ export const getContainerStatusKey = (
   if (status === MCP_CONTAINER_STATUS.STOPPED)
     return "mcpTools.containerStatus.stopped";
   return "mcpTools.containerStatus.unknown";
-};
-
-/** Colour + text key used by the registry/community status pill. */
-export const getRegistryStatusBadge = (
-  status: string | undefined,
-  textKeyVariant: "registry" | "community" = "registry"
-): { className: string; textKey: string } => {
-  const normalized = String(status || "").toLowerCase();
-  const base =
-    textKeyVariant === "registry"
-      ? "mcpTools.registry.status"
-      : "mcpTools.community.status";
-  if (normalized === McpRegistryServerStatus.ACTIVE) {
-    return {
-      className: "bg-emerald-100 text-emerald-700",
-      textKey: `${base}.active`,
-    };
-  }
-  if (normalized === McpRegistryServerStatus.DEPRECATED) {
-    return {
-      className: "bg-amber-100 text-amber-700",
-      textKey: `${base}.deprecated`,
-    };
-  }
-  return {
-    className: "bg-slate-100 text-slate-600",
-    textKey: `${base}.unknown`,
-  };
 };
 
 // ---------------------------------------------------------------------------

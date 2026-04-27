@@ -8,7 +8,7 @@ import {
   toPrettyRegistryJson,
 } from "@/lib/mcpTools";
 import type { RegistryMcpCard } from "@/types/mcpTools";
-import RegistryStatusBadge from "./shared/RegistryStatusBadge";
+import RegistryStatusBadge from "./shared/StatusBadge";
 
 interface McpRegistryDetailModalProps {
   service: RegistryMcpCard;

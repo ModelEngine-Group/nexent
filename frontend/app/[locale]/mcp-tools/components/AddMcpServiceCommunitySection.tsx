@@ -9,7 +9,7 @@ import { useMcpCommunityQuickAdd } from "@/hooks/mcpTools/useMcpCommunityQuickAd
 import McpCommunityToolbar from "./McpCommunityToolbar";
 import McpCommunityCardList from "./McpCommunityCardList";
 import McpCommunityDetailModal from "./McpCommunityDetailModal";
-import ContainerPortField from "./ContainerPortField";
+import ContainerPortField from "./shared/ContainerPortField";
 import TagEditor from "./shared/TagEditor";
 
 interface AddMcpServiceCommunitySectionProps {

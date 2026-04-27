@@ -10,7 +10,7 @@ import {
   getTransportLabelKey,
   toPrettyRegistryJson,
 } from "@/lib/mcpTools";
-import RegistryStatusBadge from "./shared/RegistryStatusBadge";
+import RegistryStatusBadge from "./shared/StatusBadge";
 import TagEditor from "./shared/TagEditor";
 
 interface PublishedServiceDetailModalProps {
@@ -194,7 +194,6 @@ export default function PublishedServiceDetailModal({
                 </span>
                 <RegistryStatusBadge
                   status={service.status}
-                  variant="community"
                   className="px-3 py-1 text-xs"
                 />
               </div>

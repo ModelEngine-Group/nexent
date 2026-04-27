@@ -21,6 +21,7 @@ import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import TagEditor from "./shared/TagEditor";
 import PublishConfirmModal from "./PublishConfirmModal";
+import StatusBadge from "./shared/StatusBadge";
 
 interface McpServiceDetailModalProps {
   selectedService: McpServiceItem | null;
@@ -67,8 +68,7 @@ export default function McpServiceDetailModal({
     draft.registryJson
   );
   const isHttpLike =
-    draft.transportType === MCP_TRANSPORT_TYPE.HTTP ||
-    draft.transportType === MCP_TRANSPORT_TYPE.SSE;
+    draft.transportType !== MCP_TRANSPORT_TYPE.CONTAINER;
 
   const handleSave = async () => {
     try {
@@ -236,18 +236,7 @@ export default function McpServiceDetailModal({
                 <span className="shrink-0 text-slate-500">
                   {t("mcpTools.detail.status")}
                 </span>
-                <span className="flex items-center gap-2 font-medium text-slate-800">
-                  <StatusLamp
-                    variant={
-                      draft.status === MCP_SERVICE_STATUS.ENABLED
-                        ? "success"
-                        : "neutral"
-                    }
-                  />
-                  {draft.status === MCP_SERVICE_STATUS.ENABLED
-                    ? t("mcpTools.status.enabled")
-                    : t("mcpTools.status.disabled")}
-                </span>
+                <StatusBadge status={draft.status} />
               </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="shrink-0 text-slate-500">

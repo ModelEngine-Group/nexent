@@ -9,7 +9,7 @@ import {
   toPrettyRegistryJson,
 } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
-import RegistryStatusBadge from "./shared/RegistryStatusBadge";
+import RegistryStatusBadge from "./shared/StatusBadge";
 
 interface McpCommunityDetailModalProps {
   service: CommunityMcpCard;
@@ -123,8 +123,6 @@ export default function McpCommunityDetailModal({
                 </span>
                 <RegistryStatusBadge
                   status={service.status}
-                  variant="community"
-                  className="px-3 py-1 text-xs"
                 />
               </div>
               <div className="flex items-center justify-between">

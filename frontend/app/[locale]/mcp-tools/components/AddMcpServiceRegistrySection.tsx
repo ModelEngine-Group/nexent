@@ -12,7 +12,7 @@ import { useMcpRegistryQuickAdd } from "@/hooks/mcpTools/useMcpRegistryQuickAdd"
 import McpRegistryToolbar from "./McpRegistryToolbar";
 import McpRegistryCardList from "./McpRegistryCardList";
 import McpRegistryDetailModal from "./McpRegistryDetailModal";
-import ContainerPortField from "./ContainerPortField";
+import ContainerPortField from "./shared/ContainerPortField";
 
 interface AddMcpServiceRegistrySectionProps {
   active: boolean;

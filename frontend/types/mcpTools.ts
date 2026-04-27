@@ -44,7 +44,7 @@ export enum McpVersionFilterMode {
 }
 
 /** Server status reported by the MCP registry / community entries. */
-export enum McpRegistryServerStatus {
+export enum McpServerStatus {
   ACTIVE = "active",
   DEPRECATED = "deprecated",
   UNKNOWN = "unknown",

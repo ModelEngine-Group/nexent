@@ -5,7 +5,7 @@ import { INITIAL_LOCAL_ADD_DRAFT, MCP_TRANSPORT_TYPE } from "@/const/mcpTools";
 import type { LocalAddMcpDraft, McpTransportType } from "@/types/mcpTools";
 import { useMcpAddLocal } from "@/hooks/mcpTools/useMcpAddLocal";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
-import ContainerPortField from "./ContainerPortField";
+import ContainerPortField from "./shared/ContainerPortField";
 import TagEditor from "./shared/TagEditor";
 
 interface AddMcpServiceLocalSectionProps {

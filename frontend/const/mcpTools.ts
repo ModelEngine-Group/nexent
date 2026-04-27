@@ -4,7 +4,7 @@ import {
   McpTransportType,
   McpServiceStatus,
   McpTab,
-  McpRegistryServerStatus,
+  McpServerStatus,
   FILTER_ALL,
 } from "@/types/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
@@ -39,9 +39,9 @@ export const MCP_CONTAINER_STATUS = {
 } as const;
 
 export const MCP_REGISTRY_SERVER_STATUS = {
-  ACTIVE: McpRegistryServerStatus.ACTIVE,
-  DEPRECATED: McpRegistryServerStatus.DEPRECATED,
-  UNKNOWN: McpRegistryServerStatus.UNKNOWN,
+  ACTIVE: McpServerStatus.ACTIVE,
+  DEPRECATED: McpServerStatus.DEPRECATED,
+  UNKNOWN: McpServerStatus.UNKNOWN,
 } as const;
 
 /** Field length limits shared by every MCP form (used by rule builders). */
