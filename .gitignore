@@ -34,3 +34,6 @@ model-assets/
 *.pytest_cache
 *.coverage
 *coverage.xml
+
+# Log files
+*.log
