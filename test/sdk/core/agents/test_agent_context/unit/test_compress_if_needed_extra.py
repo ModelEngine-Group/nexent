@@ -343,7 +343,7 @@ class TestM12NoSystemPrompt:
 class TestM13StepLocalLogCleared:
 
     def test_step_local_log_cleared_at_start_of_each_compress_call(self):
-        """Consecutive compress calls, second _step_local_log should not contain first's records."""
+        """Two consecutive compression calls, the second _step_local_log should not contain records from the first."""
         cm = make_cm(enabled=True, threshold=1, keep_recent_pairs=1)
 
         def _make_mem():
@@ -356,9 +356,12 @@ class TestM13StepLocalLogCleared:
         mem1 = _make_mem()
         cm.compress_if_needed(model, mem1, make_original_messages(mem1), current_run_start_idx=4)
         count_after_first = len(cm._step_local_log)
+        assert count_after_first == 1
+        assert cm._step_local_log[0].call_type == "previous_summary"
 
         mem2 = _make_mem()
         cm.compress_if_needed(model, mem2, make_original_messages(mem2), current_run_start_idx=4)
         count_after_second = len(cm._step_local_log)
-        assert count_after_first == 1
-        assert count_after_second == 0
+        # reuse Previous_summary_cache; cache hit is still recorded in _step_local_log
+        assert count_after_second == 1
+        assert cm._step_local_log[0].call_type == "previous_cache_hit"

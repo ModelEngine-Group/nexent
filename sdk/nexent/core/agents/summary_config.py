@@ -22,11 +22,11 @@ class ContextManagerConfig:
     )
 
     summary_json_schema: Dict[str, Any] = field(default_factory=lambda: {
-        "task_overview": "User's core request and success criteria (<=150 chars)",
-        "completed_work": "Work completed, files or results produced (<=200 chars)",
-        "key_decisions": "Important findings, decisions made and reasons (<=200 chars)",
-        "pending_items": "Specific steps pending, blockers (<=150 chars)",
-        "context_to_preserve": "User preferences, domain details, commitments (<=150 chars)",
+        "task_overview": "User's core request and success criteria (<=150 words)",
+        "completed_work": "Work completed, files or results produced (<=200 words)",
+        "key_decisions": "Important findings, decisions made and reasons (<=200 words)",
+        "pending_items": "Specific steps pending, blockers (<=150 words)",
+        "context_to_preserve": "User preferences, domain details, commitments (<=150 words)",
     })
 
     max_summary_input_tokens: int = 0
