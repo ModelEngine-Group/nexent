@@ -303,6 +303,15 @@ class ContextManager:
             compress_prev = prev_tokens > self.config.token_threshold * 0.6
             compress_curr = curr_tokens > self.config.token_threshold * 0.4
 
+            total_effective_tokens = prev_tokens + curr_tokens
+            if compress_prev or compress_curr:
+                logger.info(
+                    f"Context compression triggered: total_tokens={total_effective_tokens}, "
+                    f"threshold={self.config.token_threshold}, "
+                    f"prev_tokens={prev_tokens} (compress={compress_prev}), "
+                    f"curr_tokens={curr_tokens} (compress={compress_curr})"
+                )
+
             # --------------- Previous phase ---------------
             prev_summary_step: Optional[SummaryTaskStep] = None
             prev_tail_steps: List[MemoryStep] = list(prev_steps)

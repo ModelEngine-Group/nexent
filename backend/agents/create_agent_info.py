@@ -396,13 +396,17 @@ async def create_agent_config(
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
+    model_max_tokens = 10000
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
         model_name = model_info["display_name"] if model_info is not None else "main_model"
+        if model_info is not None and model_info.get("max_tokens"):
+            model_max_tokens = model_info["max_tokens"]
     else:
         model_name = "main_model"
     cm_config = ContextManagerConfig(
         enabled=True,
+        token_threshold=model_max_tokens,
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
