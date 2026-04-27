@@ -357,3 +357,13 @@ NORTHBOUND_EXTERNAL_URL = _northbound_url.rstrip("/") if _northbound_url else "h
 
 # APP Version
 APP_VERSION = "v2.0.2"
+
+
+# Skill Creation Streaming Configuration
+STREAMABLE_CONTENT_TYPES = frozenset([
+    "model_output_thinking",
+    "model_output_code",
+    "model_output_deep_thinking",
+    "tool",
+    "execution_logs",
+])

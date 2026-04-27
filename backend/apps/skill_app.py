@@ -1,67 +1,27 @@
 """Skill management HTTP endpoints."""
 
-import asyncio
 import logging
-import os
-import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Header
 from starlette.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from consts.const import APP_VERSION, STREAMABLE_CONTENT_TYPES
 from consts.exceptions import SkillException, UnauthorizedError
-from services.skill_service import SkillService
-from consts.model import SkillInstanceInfoRequest
+from services.skill_service import (
+    SkillService,
+    skill_creation_task_manager,
+    stream_skill_creation,
+)
+from consts.model import SkillInstanceInfoRequest, SkillCreateRequest, SkillCreateInteractiveRequest, SkillUpdateRequest, SkillResponse
 from utils.auth_utils import get_current_user_id, get_current_user_info
-from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
 from nexent.core.agents.agent_model import ModelConfig
-from agents.skill_creation_agent import create_simple_skill_from_request
-from nexent.core.utils.observer import MessageObserver
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
-
-
-class SkillCreateRequest(BaseModel):
-    """Request model for creating a skill."""
-    name: str
-    description: str
-    content: str
-    tool_ids: Optional[List[int]] = []  # Use tool_id list, link to ag_tool_info_t
-    tool_names: Optional[List[str]] = []  # Alternative: use tool name list, will be converted to tool_ids
-    tags: Optional[List[str]] = []
-    source: Optional[str] = "custom"   # official, custom, partner
-    params: Optional[Dict[str, Any]] = None  # Skill config (JSON object)
-
-
-class SkillUpdateRequest(BaseModel):
-    """Request model for updating a skill."""
-    description: Optional[str] = None
-    content: Optional[str] = None
-    tool_ids: Optional[List[int]] = None  # Use tool_id list
-    tool_names: Optional[List[str]] = None  # Alternative: use tool name list, will be converted to tool_ids
-    tags: Optional[List[str]] = None
-    source: Optional[str] = None
-    params: Optional[Dict[str, Any]] = None
-
-
-class SkillResponse(BaseModel):
-    """Response model for skill data."""
-    skill_id: int
-    name: str
-    description: str
-    content: str
-    tool_ids: List[int]
-    tags: List[str]
-    source: str
-    params: Optional[Dict[str, Any]] = None
-    created_by: Optional[str] = None
-    create_time: Optional[str] = None
-    updated_by: Optional[str] = None
-    update_time: Optional[str] = None
 
 
 # List routes first (no path parameters)
@@ -93,7 +53,7 @@ async def create_skill(
         # Convert tool_names to tool_ids if provided
         tool_ids = request.tool_ids or []
         if request.tool_names:
-            tool_ids = service.repository.get_tool_ids_by_names(request.tool_names, tenant_id)
+            raise NotImplementedError("Tool names are not supported for skill creation")
 
         skill_data = {
             "name": request.name,
@@ -103,6 +63,7 @@ async def create_skill(
             "tags": request.tags,
             "source": request.source,
             "params": request.params,
+            "files": request.files if request.files else [],
         }
         skill = service.create_skill(skill_data, user_id=user_id)
         return JSONResponse(content=skill, status_code=201)
@@ -122,6 +83,7 @@ async def create_skill(
 async def create_skill_from_file(
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
     skill_name: Optional[str] = Form(None, description="Optional skill name override"),
+    source: Optional[str] = Form("自定义", description="Skill source"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Create a skill from file upload.
@@ -130,10 +92,9 @@ async def create_skill_from_file(
     - Single SKILL.md file: Extracts metadata and saves directly
     - ZIP archive: Contains SKILL.md plus scripts/assets folders
     """
-    try:
+    try:        
         user_id, tenant_id = get_current_user_id(authorization)
         service = SkillService()
-
         content = await file.read()
 
         file_type = "auto"
@@ -147,19 +108,22 @@ async def create_skill_from_file(
             file_content=content,
             skill_name=skill_name,
             file_type=file_type,
+            source=source,
             user_id=user_id,
             tenant_id=tenant_id
         )
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
+        logger.warning(f"Unauthorized: {e}")
         raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
         error_msg = str(e).lower()
+        logger.warning(f"SkillException: {e}")
         if "already exists" in error_msg:
             raise HTTPException(status_code=409, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error creating skill from file: {e}")
+        logger.error(f"Unexpected error: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -405,21 +369,14 @@ async def update_skill(
             update_data["description"] = request.description
         if request.content is not None:
             update_data["content"] = request.content
-        if request.tool_ids is not None:
-            # Convert tool_names to tool_ids if tool_names provided, else use tool_ids directly
-            if request.tool_names:
-                update_data["tool_ids"] = service.repository.get_tool_ids_by_names(request.tool_names, tenant_id)
-            else:
-                update_data["tool_ids"] = request.tool_ids
-        elif request.tool_names is not None:
-            # Only tool_names provided, convert to tool_ids
-            update_data["tool_ids"] = service.repository.get_tool_ids_by_names(request.tool_names, tenant_id)
         if request.tags is not None:
             update_data["tags"] = request.tags
         if request.source is not None:
             update_data["source"] = request.source
         if request.params is not None:
             update_data["params"] = request.params
+        if request.files is not None:
+            update_data["files"] = [f.model_dump() for f in request.files]
 
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
@@ -459,12 +416,6 @@ async def delete_skill(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-class SkillCreateSimpleRequest(BaseModel):
-    """Request model for interactive skill creation."""
-    user_request: str
-    existing_skill: Optional[Dict[str, Any]] = None
-
-
 def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
     """Build ModelConfig from tenant's quick-config LLM model."""
     from utils.config_utils import tenant_config_manager, get_model_name_from_config
@@ -489,117 +440,66 @@ def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
     )
 
 
-@skill_creator_router.post("/create-simple")
-async def create_simple_skill(
-    request: SkillCreateSimpleRequest,
+@skill_creator_router.post("/create")
+async def create_skill(
+    request: SkillCreateInteractiveRequest,
     authorization: Optional[str] = Header(None)
 ):
-    """Create a simple skill interactively via LLM agent.
+    """Create a skill interactively via LLM agent.
 
-    Loads the skill_creation_simple prompt template, runs an internal agent
-    with WriteSkillFileTool and ReadSkillMdTool, extracts the <SKILL> block
+    Loads the skill creation prompt template (simple or complicated based on complexity),
+    runs an internal agent with WriteSkillFileTool and ReadSkillMdTool, extracts the skill content
     from the final answer, and streams step progress and token content via SSE.
 
     Yields SSE events:
         - step_count: Current agent step number
         - skill_content: Token-level content (thinking, code, deep_thinking, tool output)
-        - final_answer: Complete skill content
+        - final_answer: Complete skill content with <SKILL> and <FILE> delimiters
         - done: Stream completion signal
     """
-    # Message types to stream as skill_content (token-level output)
-    STREAMABLE_CONTENT_TYPES = frozenset([
-        "model_output_thinking",
-        "model_output_code",
-        "model_output_deep_thinking",
-        "tool",
-        "execution_logs",
-    ])
+    try:
+        _, tenant_id, user_language = get_current_user_info(authorization)
+    except Exception as e:
+        logger.error(f"Unauthorized access attempt: {e}")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    async def generate():
-        import json
-        try:
-            _, tenant_id, language = get_current_user_info(authorization)
+    # Build model config from tenant
+    model_config = _build_model_config_from_tenant(tenant_id)
 
-            template = get_skill_creation_simple_prompt_template(
-                language,
-                existing_skill=request.existing_skill
-            )
+    # Get language from request or user preference
+    lang = request.language or user_language or "zh"
 
-            model_config = _build_model_config_from_tenant(tenant_id)
-            observer = MessageObserver(lang=language)
-            stop_event = threading.Event()
+    # Delegate to service layer
+    task_id, generator = stream_skill_creation(
+        user_request=request.user_request,
+        language=lang,
+        model_config=model_config,
+        existing_skill=request.existing_skill,
+        complexity=request.complexity or "simple"
+    )
 
-            # Get local_skills_dir from SkillManager
-            skill_service = SkillService()
-            local_skills_dir = skill_service.skill_manager.local_skills_dir or ""
+    return StreamingResponse(generator(), media_type="text/event-stream", headers={"X-Task-ID": task_id})
 
-            # Start skill creation in background thread
-            def run_task():
-                create_simple_skill_from_request(
-                    system_prompt=template.get("system_prompt", ""),
-                    user_prompt=request.user_request,
-                    model_config_list=[model_config],
-                    observer=observer,
-                    stop_event=stop_event,
-                    local_skills_dir=local_skills_dir
-                )
 
-            thread = threading.Thread(target=run_task)
-            thread.start()
+@skill_creator_router.get("/stop/{task_id}")
+async def stop_skill_creation(
+    task_id: str,
+    authorization: Optional[str] = Header(None)
+):
+    """Stop an active skill creation task.
 
-            # Poll observer for step_count and token content messages
-            while thread.is_alive():
-                cached = observer.get_cached_message()
-                for msg in cached:
-                    if isinstance(msg, str):
-                        try:
-                            data = json.loads(msg)
-                            msg_type = data.get("type", "")
-                            content = data.get("content", "")
+    Args:
+        task_id: The task ID returned from the /create endpoint (passed via X-Task-ID header)
+    """
+    try:
+        _, _ = get_current_user_id(authorization)
+    except Exception as e:
+        logger.error(f"Unauthorized access attempt: {e}")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-                            # Stream step progress
-                            if msg_type == "step_count":
-                                yield f"data: {json.dumps({'type': 'step_count', 'content': content}, ensure_ascii=False)}\n\n"
-                            # Stream token content (thinking, code, deep_thinking, tool output)
-                            elif msg_type in STREAMABLE_CONTENT_TYPES:
-                                yield f"data: {json.dumps({'type': 'skill_content', 'content': content}, ensure_ascii=False)}\n\n"
-                            # Stream final_answer content separately
-                            elif msg_type == "final_answer":
-                                yield f"data: {json.dumps({'type': 'final_answer', 'content': content}, ensure_ascii=False)}\n\n"
-                        except (json.JSONDecodeError, Exception):
-                            pass
-                await asyncio.sleep(0.1)
+    success = skill_creation_task_manager.stop_task(task_id)
 
-            thread.join()
-
-            # Stream any remaining cached messages after thread completes
-            remaining = observer.get_cached_message()
-            for msg in remaining:
-                if isinstance(msg, str):
-                    try:
-                        data = json.loads(msg)
-                        msg_type = data.get("type", "")
-                        content = data.get("content", "")
-
-                        if msg_type == "step_count":
-                            yield f"data: {json.dumps({'type': 'step_count', 'content': content}, ensure_ascii=False)}\n\n"
-                        elif msg_type in STREAMABLE_CONTENT_TYPES:
-                            yield f"data: {json.dumps({'type': 'skill_content', 'content': content}, ensure_ascii=False)}\n\n"
-                        elif msg_type == "final_answer":
-                            yield f"data: {json.dumps({'type': 'final_answer', 'content': content}, ensure_ascii=False)}\n\n"
-                    except (json.JSONDecodeError, Exception):
-                        pass
-
-            # Stream final answer content from observer
-            final_result = observer.get_final_answer()
-            if final_result:
-                yield f"data: {json.dumps({'type': 'final_answer', 'content': final_result}, ensure_ascii=False)}\n\n"
-
-            # Send done signal
-            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
-
-        except Exception as e:
-            logger.error(f"Error in create_simple_skill stream: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    if success:
+        return JSONResponse(content={"status": "success", "message": "Skill creation task stopped"})
+    else:
+        return JSONResponse(content={"status": "not_found", "message": "Task not found or already completed"}, status_code=404)

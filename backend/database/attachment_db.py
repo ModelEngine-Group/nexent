@@ -134,7 +134,8 @@ def upload_fileobj(
         bucket: Optional[str] = None,
         prefix: str = "attachments",
         generate_presigned_url: bool = True,
-        presigned_url_expires: int = 86400
+        presigned_url_expires: int = 86400,
+        file_size: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Upload file object to MinIO
@@ -146,6 +147,7 @@ def upload_fileobj(
         prefix: Object name prefix, default is "attachments"
         generate_presigned_url: Whether to generate presigned URL for external access (default True)
         presigned_url_expires: Expiration time in seconds for presigned URL (default 86400 = 24 hours)
+        file_size: Pre-calculated file size in bytes. If not provided, will be calculated internally.
 
     Returns:
         Dict[str, Any]: Upload result, containing success flag, URL and error message (if any)
@@ -153,22 +155,26 @@ def upload_fileobj(
     # Generate object name
     object_name = generate_object_name(file_name, prefix=prefix)
 
-    # Get current position
-    current_pos = file_obj.tell()
-
-    # Calculate file size
-    file_obj.seek(0, os.SEEK_END)
-    file_size = file_obj.tell()
-
-    # Seek to beginning for upload
-    file_obj.seek(0)
+    # Calculate file size if not provided
+    if file_size is None:
+        try:
+            current_pos = file_obj.tell()
+            file_obj.seek(0, os.SEEK_END)
+            file_size = file_obj.tell()
+            file_obj.seek(0)  # Seek to beginning for upload
+        except (ValueError, IOError):
+            file_size = 0
+            file_obj.seek(0)  # Try to seek to beginning anyway
 
     # Upload file
     success, result = minio_client.upload_fileobj(
         file_obj, object_name, bucket)
 
-    # Restore original position
-    file_obj.seek(current_pos)
+    # Restore original position (if file is still open)
+    try:
+        file_obj.seek(0)
+    except (ValueError, IOError):
+        pass  # File is closed, ignore
 
     # Build response
     response = {"success": success, "object_name": object_name, "file_name": file_name, "file_size": file_size,
@@ -253,11 +259,11 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
 def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
     """
     Check if a file exists in the bucket.
-    
+
     Args:
         object_name: Object name in storage
         bucket: Bucket name, if not specified will use default bucket
-        
+
     Returns:
         bool: True if file exists, False otherwise
     """
@@ -271,12 +277,12 @@ def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
 def copy_file(source_object: str, dest_object: str, bucket: Optional[str] = None) -> Dict[str, Any]:
     """
     Copy a file within the same bucket (atomic operation in MinIO).
-    
+
     Args:
         source_object: Source object name
         dest_object: Destination object name
         bucket: Bucket name, if not specified will use default bucket
-        
+
     Returns:
         Dict[str, Any]: Result containing success flag and error message (if any)
     """

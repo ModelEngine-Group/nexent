@@ -4138,5 +4138,71 @@ class TestRefreshOpenapiServicesInMcp:
         mock_logger.warning.assert_called_once()
 
 
+class TestValidateLocalToolMonitoring:
+    """Verify _validate_local_tool sets monitoring context and operation for VLM and LLM branches."""
+
+    @patch('backend.services.tool_configuration_service.set_monitoring_operation')
+    @patch('backend.services.tool_configuration_service.set_monitoring_context')
+    @patch('backend.services.tool_configuration_service.minio_client')
+    @patch('backend.services.tool_configuration_service.get_vlm_model')
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_analyze_image_sets_monitoring_context(
+            self, mock_signature, mock_get_class, mock_get_vlm_model,
+            mock_minio_client, mock_ctx, mock_op):
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "ok"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+        mock_vlm = Mock(display_name="VLM-Model")
+        mock_get_vlm_model.return_value = mock_vlm
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+        _validate_local_tool(
+            "analyze_image", {"image": "bytes"}, {"prompt": "p"},
+            "tenant1", "user1")
+
+        mock_ctx.assert_called_once_with(tenant_id="tenant1")
+        mock_op.assert_called_once_with(
+            "tool_validation", display_name="VLM-Model")
+
+    @patch('backend.services.tool_configuration_service.set_monitoring_operation')
+    @patch('backend.services.tool_configuration_service.set_monitoring_context')
+    @patch('backend.services.tool_configuration_service.minio_client')
+    @patch('backend.services.tool_configuration_service.DATA_PROCESS_SERVICE', "http://svc")
+    @patch('backend.services.tool_configuration_service.get_llm_model')
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_analyze_text_file_sets_monitoring_context(
+            self, mock_signature, mock_get_class, mock_get_llm_model,
+            mock_minio_client, mock_ctx, mock_op):
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "ok"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+        mock_llm = Mock(display_name="LLM-Model")
+        mock_get_llm_model.return_value = mock_llm
+        mock_sig = Mock()
+        mock_sig.parameters = {
+            'llm_model': Mock(), 'storage_client': Mock(),
+            'data_process_service_url': Mock(),
+        }
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+        _validate_local_tool(
+            "analyze_text_file", {"input": "text"}, {"param": "c"},
+            "tenant1", "user1")
+
+        mock_ctx.assert_called_once_with(tenant_id="tenant1")
+        mock_op.assert_called_once_with(
+            "tool_validation", display_name="LLM-Model")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
