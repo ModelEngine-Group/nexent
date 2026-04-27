@@ -631,6 +631,7 @@
   "document.button.overview": "概览",
   "document.button.detail": "分片详情",
   "document.button.autoSummary": "自动总结",
+  "knowledgeBase.tag.autoSummary.off": "关闭",
   "document.title.createNew": "创建新知识库",
   "document.hint.uploadToCreate": "请选择文件上传以完成知识库创建",
   "document.hint.noDocuments": "该知识库中暂无文档，请上传文档",

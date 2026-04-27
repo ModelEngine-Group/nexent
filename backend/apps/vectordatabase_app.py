@@ -160,6 +160,52 @@ async def update_index(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error updating index: {str(exc)}")
 
 
+@router.patch("/{index_name}/summary_frequency")
+async def update_summary_frequency_endpoint(
+        index_name: str = Path(..., description="Name of the index to update"),
+        request: Dict[str, Any] = Body(..., description="Update payload with summary_frequency"),
+        authorization: Optional[str] = Header(None)
+):
+    """Update the auto-summary frequency for a knowledge base."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        summary_frequency = request.get("summary_frequency")
+
+        valid_frequencies = ["3h", "5h", "1d", "1w", None]
+        if summary_frequency not in valid_frequencies:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=f"Invalid summary_frequency. Must be one of: {valid_frequencies}"
+            )
+
+        from database.knowledge_db import update_summary_frequency
+        success = update_summary_frequency(
+            index_name=index_name,
+            summary_frequency=summary_frequency,
+            tenant_id=tenant_id,
+            user_id=user_id
+        )
+
+        if success:
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={"message": "Summary frequency updated successfully", "status": "success"}
+            )
+        else:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Knowledge base '{index_name}' not found"
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            f"Error updating summary frequency for '{index_name}': {str(exc)}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error updating summary frequency: {str(exc)}"
+        )
+
+
 @router.get("")
 def get_list_indices(
         pattern: str = Query("*", description="Pattern to match index names"),

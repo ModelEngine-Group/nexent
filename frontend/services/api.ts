@@ -193,6 +193,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/summary/${indexName}/summary`,
     getSummary: (indexName: string) =>
       `${API_BASE_URL}/summary/${indexName}/summary`,
+    updateSummaryFrequency: (indexName: string) =>
+      `${API_BASE_URL}/indices/${indexName}/summary_frequency`,
 
     // File upload service
     upload: `${API_BASE_URL}/file/upload`,

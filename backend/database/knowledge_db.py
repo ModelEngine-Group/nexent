@@ -413,3 +413,54 @@ def get_knowledge_name_map_by_index_names(index_names: List[str]) -> Dict[str, s
             return knowledge_name_map
     except SQLAlchemyError as e:
         raise e
+
+
+def update_summary_frequency(index_name: str, summary_frequency: Optional[str],
+                              tenant_id: str, user_id: str) -> bool:
+    """Update the auto-summary frequency for a knowledge base."""
+    valid_frequencies = ["3h", "5h", "1d", "1w", None]
+    if summary_frequency not in valid_frequencies:
+        raise ValueError(f"Invalid summary_frequency: {summary_frequency}")
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if not record:
+                return False
+            record.summary_frequency = summary_frequency
+            record.updated_by = user_id
+            session.commit()
+            return True
+    except SQLAlchemyError as e:
+        raise e
+
+
+def update_last_summary_time(index_name: str):
+    """Update last_summary_time to now after a successful summary generation."""
+    from datetime import datetime
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if record:
+                record.last_summary_time = datetime.now()
+                session.commit()
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_knowledge_bases_for_auto_summary() -> List[Dict[str, Any]]:
+    """Query all knowledge bases with non-null summary_frequency."""
+    try:
+        with get_db_session() as session:
+            records = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.summary_frequency.isnot(None),
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            return [as_dict(record) for record in records]
+    except SQLAlchemyError as e:
+        raise e

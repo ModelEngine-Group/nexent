@@ -787,6 +787,9 @@ class ElasticSearchService:
                         "tenant_id": record.get("tenant_id"),
                         # Update time for sorting and display
                         "update_time": record.get("update_time"),
+                        # Auto-summary settings
+                        "summary_frequency": record.get("summary_frequency"),
+                        "last_summary_time": record.get("last_summary_time"),
                         "stats": index_stats,
                     })
 
@@ -1450,6 +1453,9 @@ class ElasticSearchService:
                 "index_name": index_name
             }
             update_knowledge_record(update_data)
+            # Update last_summary_time for auto-summary tracking
+            from database.knowledge_db import update_last_summary_time
+            update_last_summary_time(index_name)
             return {"status": "success", "message": f"Index {index_name} summary updated successfully",
                     "summary": summary_result}
         except Exception as e:

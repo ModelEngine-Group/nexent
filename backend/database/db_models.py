@@ -357,6 +357,10 @@ class KnowledgeRecord(TableBase):
     group_ids = Column(String, doc="Knowledge base group IDs list")
     ingroup_permission = Column(
         String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    summary_frequency = Column(String(10), nullable=True,
+        doc="Auto-summary frequency: '3h', '5h', '1d', '1w', or NULL (disabled)")
+    last_summary_time = Column(TIMESTAMP(timezone=False), nullable=True,
+        doc="Timestamp of last summary generation")
 
 
 class TenantConfig(TableBase):

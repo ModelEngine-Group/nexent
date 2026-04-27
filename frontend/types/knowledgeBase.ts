@@ -33,6 +33,8 @@ export interface KnowledgeBase {
   tokenNum: number;
   source: string;
   tenant_id?: string;
+  summaryFrequency?: string | null;
+  lastSummaryTime?: string | null;
 }
 
 // Create knowledge base parameter type

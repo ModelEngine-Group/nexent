@@ -630,6 +630,7 @@
   "document.button.overview": "Overview",
   "document.button.detail": "Chunk Details",
   "document.button.autoSummary": "Auto Summary",
+  "knowledgeBase.tag.autoSummary.off": "Off",
   "document.title.createNew": "Create New Knowledge Base",
   "document.hint.uploadToCreate": "Please select files to upload to complete knowledge base creation",
   "document.hint.noDocuments": "No documents in this knowledge base, please upload documents",
