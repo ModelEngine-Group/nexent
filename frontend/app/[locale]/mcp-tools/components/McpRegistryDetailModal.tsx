@@ -9,6 +9,7 @@ import {
 } from "@/lib/mcpTools";
 import type { RegistryMcpCard } from "@/types/mcpTools";
 import RegistryStatusBadge from "./shared/StatusBadge";
+import JsonPreviewModal from "./shared/JsonPreviewModal";
 
 interface McpRegistryDetailModalProps {
   service: RegistryMcpCard;
@@ -629,21 +630,12 @@ export default function McpRegistryDetailModal({
         </div>
       </Modal>
 
-      {showServerJsonModal && hasServerJson ? (
-        <Modal
-          open
-          footer={null}
-          closable
-          centered
-          width={960}
-          onCancel={() => setShowServerJsonModal(false)}
-          title={t("mcpTools.registry.serverJsonTitle", { name: server.name })}
-        >
-          <pre className="max-h-[65vh] overflow-auto rounded-md bg-slate-950 p-4 text-xs text-slate-100">
-            {serverJsonPretty}
-          </pre>
-        </Modal>
-      ) : null}
+      <JsonPreviewModal
+        open={showServerJsonModal && hasServerJson}
+        title={t("mcpTools.registry.serverJsonTitle", { name: server.name })}
+        json={serverJsonPretty}
+        onCancel={() => setShowServerJsonModal(false)}
+      />
     </>
   );
 }

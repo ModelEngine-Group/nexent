@@ -20,6 +20,7 @@ import { useMcpServiceDetail } from "@/hooks/mcpTools/useMcpServiceDetail";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import TagEditor from "./shared/TagEditor";
+import JsonPreviewModal from "./shared/JsonPreviewModal";
 import PublishConfirmModal from "./PublishConfirmModal";
 import StatusBadge from "./shared/StatusBadge";
 
@@ -364,43 +365,19 @@ export default function McpServiceDetailModal({
         serverName={draft.name || String(t("mcpTools.service.defaultName"))}
       />
 
-      {showServerJson && hasRegistryJson ? (
-        <Modal
-          open
-          footer={null}
-          closable
-          centered
-          width={960}
-          onCancel={() => setShowServerJson(false)}
-          title={t("mcpTools.registry.serverJsonTitle", { name: draft.name })}
-          styles={{ body: { paddingTop: 8 } }}
-        >
-          <div className="rounded-md border border-slate-200 bg-slate-50">
-            <pre className="max-h-[65vh] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-800">
-              {toPrettyRegistryJson(draft.registryJson)}
-            </pre>
-          </div>
-        </Modal>
-      ) : null}
+      <JsonPreviewModal
+        open={showServerJson && hasRegistryJson}
+        title={t("mcpTools.registry.serverJsonTitle", { name: draft.name })}
+        json={toPrettyRegistryJson(draft.registryJson)}
+        onCancel={() => setShowServerJson(false)}
+      />
 
-      {showConfigJson && hasConfigJson ? (
-        <Modal
-          open
-          footer={null}
-          closable
-          centered
-          width={960}
-          onCancel={() => setShowConfigJson(false)}
-          title={t("mcpTools.detail.configJsonTitle", { name: draft.name })}
-          styles={{ body: { paddingTop: 8 } }}
-        >
-          <div className="rounded-md border border-slate-200 bg-slate-50">
-            <pre className="max-h-[65vh] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-800">
-              {toPrettyRegistryJson(draft.configJson)}
-            </pre>
-          </div>
-        </Modal>
-      ) : null}
+      <JsonPreviewModal
+        open={showConfigJson && hasConfigJson}
+        title={t("mcpTools.detail.configJsonTitle", { name: draft.name })}
+        json={toPrettyRegistryJson(draft.configJson)}
+        onCancel={() => setShowConfigJson(false)}
+      />
 
               {draft.transportType === McpTransportType.CONTAINER &&
       draft.containerId ? (

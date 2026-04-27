@@ -10,6 +10,7 @@ import {
 } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import RegistryStatusBadge from "./shared/StatusBadge";
+import JsonPreviewModal from "./shared/JsonPreviewModal";
 
 interface McpCommunityDetailModalProps {
   service: CommunityMcpCard;
@@ -234,39 +235,19 @@ export default function McpCommunityDetailModal({
         </div>
       </Modal>
 
-      {showServerJsonModal && hasServerJson ? (
-        <Modal
-          open
-          footer={null}
-          closable
-          centered
-          width={960}
-          onCancel={() => setShowServerJsonModal(false)}
-          title={t("mcpTools.community.serverJsonTitle", {
-            name: service.name,
-          })}
-        >
-          <pre className="max-h-[65vh] overflow-auto rounded-md bg-slate-950 p-4 text-xs text-slate-100">
-            {serverJsonPretty}
-          </pre>
-        </Modal>
-      ) : null}
+      <JsonPreviewModal
+        open={showServerJsonModal && hasServerJson}
+        title={t("mcpTools.community.serverJsonTitle", { name: service.name })}
+        json={serverJsonPretty}
+        onCancel={() => setShowServerJsonModal(false)}
+      />
 
-      {showConfigJsonModal && hasConfigJson ? (
-        <Modal
-          open
-          footer={null}
-          closable
-          centered
-          width={960}
-          onCancel={() => setShowConfigJsonModal(false)}
-          title={t("mcpTools.detail.configJsonTitle", { name: service.name })}
-        >
-          <pre className="max-h-[65vh] overflow-auto rounded-md bg-slate-950 p-4 text-xs text-slate-100">
-            {configJsonPretty}
-          </pre>
-        </Modal>
-      ) : null}
+      <JsonPreviewModal
+        open={showConfigJsonModal && hasConfigJson}
+        title={t("mcpTools.detail.configJsonTitle", { name: service.name })}
+        json={configJsonPretty}
+        onCancel={() => setShowConfigJsonModal(false)}
+      />
     </>
   );
 }

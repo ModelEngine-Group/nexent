@@ -308,7 +308,7 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
           <Alert
             type="warning"
             showIcon
-            message={t("mcpTools.registry.quickAddUnsupported")}
+            title={t("mcpTools.registry.quickAddUnsupported")}
           />
         ) : (
           <>

@@ -11,6 +11,7 @@ import {
   toPrettyRegistryJson,
 } from "@/lib/mcpTools";
 import RegistryStatusBadge from "./shared/StatusBadge";
+import JsonPreviewModal from "./shared/JsonPreviewModal";
 import TagEditor from "./shared/TagEditor";
 
 interface PublishedServiceDetailModalProps {
@@ -320,45 +321,19 @@ export default function PublishedServiceDetailModal({
         </div>
       </Modal>
 
-      {showServerJsonModal && hasServerJson ? (
-        <Modal
-          open
-          footer={null}
-          closable
-          centered
-          width={960}
-          onCancel={() => setShowServerJsonModal(false)}
-          title={t("mcpTools.community.serverJsonTitle", {
-            name: service.name,
-          })}
-          styles={{ body: { paddingTop: 8 } }}
-        >
-          <div className="rounded-md border border-slate-200 bg-slate-50">
-            <pre className="max-h-[65vh] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-800">
-              {serverJsonPretty}
-            </pre>
-          </div>
-        </Modal>
-      ) : null}
+      <JsonPreviewModal
+        open={showServerJsonModal && hasServerJson}
+        title={t("mcpTools.community.serverJsonTitle", { name: service.name })}
+        json={serverJsonPretty}
+        onCancel={() => setShowServerJsonModal(false)}
+      />
 
-      {showConfigJsonModal && hasConfigJson ? (
-        <Modal
-          open
-          footer={null}
-          closable
-          centered
-          width={960}
-          onCancel={() => setShowConfigJsonModal(false)}
-          title={t("mcpTools.detail.configJsonTitle", { name: service.name })}
-          styles={{ body: { paddingTop: 8 } }}
-        >
-          <div className="rounded-md border border-slate-200 bg-slate-50">
-            <pre className="max-h-[65vh] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-800">
-              {configJsonPretty}
-            </pre>
-          </div>
-        </Modal>
-      ) : null}
+      <JsonPreviewModal
+        open={showConfigJsonModal && hasConfigJson}
+        title={t("mcpTools.detail.configJsonTitle", { name: service.name })}
+        json={configJsonPretty}
+        onCancel={() => setShowConfigJsonModal(false)}
+      />
     </>
   );
 }
