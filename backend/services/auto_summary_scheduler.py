@@ -8,11 +8,9 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
-from database.knowledge_db import (
-    get_knowledge_bases_for_auto_summary,
-    update_last_summary_time,
-)
+from database.knowledge_db import get_knowledge_bases_for_auto_summary
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from utils.config_utils import tenant_config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +73,20 @@ def _run_auto_summary_for_kb(index_name: str, tenant_id: str):
             merge_cluster_summaries,
         )
 
+        # Get model_id from tenant config for LLM summarization
+        model_id = None
+        if tenant_id:
+            try:
+                tenant_config = tenant_config_manager.load_config(tenant_id)
+                model_id_str = tenant_config.get("LLM_ID")
+                if model_id_str:
+                    model_id = int(model_id_str)
+                    logger.info(f"Using LLM model ID {model_id} for auto-summary (tenant: {tenant_id})")
+                else:
+                    logger.warning(f"No LLM_ID configured for tenant {tenant_id}, summary will be placeholder only")
+            except (ValueError, TypeError, Exception) as e:
+                logger.warning(f"Failed to get LLM_ID from tenant config: {e}")
+
         sample_count = 40  # Smaller sample for auto-summary
         document_samples, doc_embeddings = process_documents_for_clustering(
             index_name=index_name,
@@ -93,7 +105,7 @@ def _run_auto_summary_for_kb(index_name: str, tenant_id: str):
             language="zh",
             doc_max_words=100,
             cluster_max_words=150,
-            model_id=None,
+            model_id=model_id,
             tenant_id=tenant_id,
         )
         final_summary = merge_cluster_summaries(cluster_summaries)

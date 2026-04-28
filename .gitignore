@@ -42,3 +42,8 @@ model-assets/
 .opencode/
 openspec/
 logs/
+
+.devspace/
+devspace.yaml
+k8s/helm/**/*.tgz
+k8s/helm/nexent/Chart.lock
