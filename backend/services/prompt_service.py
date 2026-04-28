@@ -385,10 +385,14 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
         "assistant_description": assistant_description
     }
 
-    # Add knowledge base display names for few-shot examples if available
+    # Always add knowledge_base_names to context (empty string when not available).
+    # This is necessary because Jinja2 StrictUndefined raises an error for any
+    # undefined variable, even inside an {% if %} block.
     if knowledge_base_display_names:
         kb_names_str = ", ".join(f'"{name}"' for name in knowledge_base_display_names)
-        template_context["knowledge_base_names"] = kb_names_str
+    else:
+        kb_names_str = ""
+    template_context["knowledge_base_names"] = kb_names_str
 
     # Generate content using template
     content = Template(prompt_for_generate["USER_PROMPT"], undefined=StrictUndefined).render(template_context)

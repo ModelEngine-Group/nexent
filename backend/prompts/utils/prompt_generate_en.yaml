@@ -252,8 +252,8 @@ USER_PROMPT: |-
   {% if knowledge_base_names %}
   ### Knowledge Base Configuration Note:
   When generating few-shot examples, if using the knowledge_base_search tool, you MUST use the following actual configured knowledge base names:
-  {{knowledge_base_names}}
-  Please use these names directly in examples, e.g.: knowledge_base_search(query="xxx", index_names=[{{knowledge_base_names}}])
+  {{ knowledge_base_names | default('') }}
+  Please use these names directly in examples, e.g.: knowledge_base_search(query="xxx", index_names=[{{ knowledge_base_names | default('') }}])
   {% endif %}
 
 
