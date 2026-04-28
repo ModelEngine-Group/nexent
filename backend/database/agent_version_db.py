@@ -1,6 +1,6 @@
 import logging
 from typing import List, Optional, Tuple
-from sqlalchemy import select, insert, update, func
+from sqlalchemy import select, insert, update, delete, func
 
 from database.client import get_db_session, as_dict
 from database.db_models import AgentInfo, ToolInstance, AgentRelation, AgentVersion, SkillInstance
@@ -368,6 +368,96 @@ def delete_relation_snapshot(
             .values(**values)
         )
         return result.rowcount
+
+
+# ============== Restore Draft from Version Snapshot ==============
+# Used by rollback: copies a published version's data back into draft (version_no=0)
+
+def restore_agent_draft(
+    agent_id: int,
+    tenant_id: str,
+    target_version_no: int,
+    target_agent_snapshot: dict,
+    target_tool_snapshots: List[dict],
+    target_relation_snapshots: List[dict],
+    target_skill_snapshots: List[dict],
+) -> None:
+    """
+    Atomically restore the agent draft (version_no=0) from a published version snapshot.
+    This replaces all draft data with the target version's data.
+
+    Operations in a single transaction:
+    1. Hard-delete current draft tools, relations, skills (version_no=0) to free up PK slots
+    2. Update agent draft record with target version's agent data
+    3. Bulk-insert tools copied from target version with version_no=0
+    4. Bulk-insert relations copied from target version with version_no=0
+    5. Bulk-insert skills copied from target version with version_no=0
+    6. Update current_version_no to point to target_version_no
+    """
+
+    with get_db_session() as session:
+        # 1. Hard-delete current draft tools to free up (tool_instance_id, version_no=0) keys
+        session.execute(
+            delete(ToolInstance).where(
+                ToolInstance.agent_id == agent_id,
+                ToolInstance.tenant_id == tenant_id,
+                ToolInstance.version_no == 0,
+            )
+        )
+
+        # 2. Hard-delete current draft relations
+        session.execute(
+            delete(AgentRelation).where(
+                AgentRelation.parent_agent_id == agent_id,
+                AgentRelation.tenant_id == tenant_id,
+                AgentRelation.version_no == 0,
+            )
+        )
+
+        # 3. Hard-delete current draft skills
+        session.execute(
+            delete(SkillInstance).where(
+                SkillInstance.agent_id == agent_id,
+                SkillInstance.tenant_id == tenant_id,
+                SkillInstance.version_no == 0,
+            )
+        )
+
+        # 4. Update agent draft record with target version's data
+        draft_values = {k: v for k, v in target_agent_snapshot.items()
+                        if k not in ('version_no', 'current_version_no')}
+        draft_values['current_version_no'] = target_version_no
+        session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag == 'N',
+            )
+            .values(**draft_values)
+        )
+
+        # 5. Bulk-insert tools from target version (with version_no=0)
+        for tool in target_tool_snapshots:
+            tool_copy = {k: v for k, v in tool.items()
+                         if k not in ('version_no',)}
+            tool_copy['version_no'] = 0
+            session.execute(insert(ToolInstance).values(**tool_copy))
+
+        # 6. Bulk-insert relations from target version (with version_no=0)
+        for rel in target_relation_snapshots:
+            rel_copy = {k: v for k, v in rel.items()
+                        if k not in ('version_no',)}
+            rel_copy['version_no'] = 0
+            session.execute(insert(AgentRelation).values(**rel_copy))
+
+        # 7. Bulk-insert skills from target version (with version_no=0)
+        for skill in target_skill_snapshots:
+            skill_copy = {k: v for k, v in skill.items()
+                          if k not in ('version_no',)}
+            skill_copy['version_no'] = 0
+            session.execute(insert(SkillInstance).values(**skill_copy))
 
 
 def delete_skill_snapshot(
