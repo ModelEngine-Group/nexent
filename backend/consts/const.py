@@ -343,8 +343,8 @@ MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
 
-# Northbound API Server URL (used for internal service-to-service communication within containers)
-NORTHBOUND_EXTERNAL_URL = os.getenv("NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api")
+# Northbound API public base URL (used for A2A agent cards and external file proxy links)
+NORTHBOUND_EXTERNAL_URL = os.getenv("NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
 
 
 # APP Version
