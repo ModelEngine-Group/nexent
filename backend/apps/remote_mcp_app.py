@@ -549,31 +549,35 @@ async def get_container_logs(
         )
 
 
-@router.get("/healthcheck")
-async def check_mcp_health_by_url(
-    mcp_url: str,
-    service_name: str,
-    tenant_id: Optional[str] = Query(
-        None, description="Tenant ID for filtering (uses auth if not provided)"),
+@router.post("/healthcheck")
+async def check_mcp_health(
+    payload: HealthcheckMcpServiceRequest,
     authorization: Optional[str] = Header(None),
     http_request: Request = None
 ):
-    """Check MCP service health by URL and service name (legacy)."""
+    """Check MCP service health by ID."""
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
-        effective_tenant_id = tenant_id or auth_tenant_id
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        await check_mcp_health_and_update_db(mcp_url, service_name, effective_tenant_id, user_id)
+        health_status = await check_mcp_service_health(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            mcp_id=payload.mcp_id,
+        )
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"status": "success"}
+            content={"status": "success", "data": {"health_status": health_status}}
         )
+    except McpNotFoundError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except McpValidationError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except MCPConnectionError as e:
         logger.error(f"MCP connection failed: {e}")
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="MCP connection failed"
+            detail=str(e) or "MCP connection failed"
         )
     except Exception as e:
         logger.error(f"Failed to check MCP health: {e}")
