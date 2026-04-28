@@ -365,7 +365,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-type ImageScaleMode = 'fit' | 'actual' | 'custom';
 type ImageBaseMode = 'fit' | 'actual';
 
 type DetectedFileType = 'pdf' | 'image' | 'markdown' | 'csv' | 'text' | 'office' | 'unknown';
@@ -404,7 +403,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const [imageLoadError, setImageLoadError] = useState(false);
   const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
   const [imageViewportSize, setImageViewportSize] = useState({ width: 0, height: 0 });
-  const [imageScaleMode, setImageScaleMode] = useState<ImageScaleMode>('fit');
   const [imageBaseMode, setImageBaseMode] = useState<ImageBaseMode>('fit');
   const imageViewportResizeObserverRef = useRef<ResizeObserver | null>(null);
   const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
@@ -526,6 +524,8 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   );
   const imageBaseScale = imageBaseMode === 'fit' ? imageFitScale : 1;
   const effectiveImageScale = imageScale * imageBaseScale;
+  const imageScaleMin = imageBaseScale > 0 ? 0.25 / imageBaseScale : 0.25;
+  const imageScaleMax = imageBaseScale > 0 ? 6 / imageBaseScale : 6;
 
   const imageDisplaySize = useMemo(() => {
     const { width: naturalWidth, height: naturalHeight } = imageNaturalSize;
@@ -571,10 +571,8 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     const rotatedHeight = isQuarterTurn ? imageNaturalSize.width : imageNaturalSize.height;
     if (rotatedWidth > imageViewportSize.width || rotatedHeight > imageViewportSize.height) {
       setImageBaseMode('fit');
-      setImageScaleMode('fit');
     } else {
       setImageBaseMode('actual');
-      setImageScaleMode('actual');
     }
   }, [open, imageNaturalSize, imageViewportSize, imageRotation]);
 
@@ -617,8 +615,8 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     });
     imagePanRef.current = nextPan;
     setImagePan(nextPan);
+    imageScaleRef.current = nextScale;
     setImageScale(nextScale);
-    setImageScaleMode('custom');
   }, [clampImagePan]);
 
   const handleImageWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
@@ -630,7 +628,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
     const currentScale = imageScaleRef.current;
     const zoomFactor = Math.exp(-event.deltaY * 0.0015);
-    const nextScale = clamp(currentScale * zoomFactor, 0.25, 6);
+    const nextScale = clamp(currentScale * zoomFactor, imageScaleMin, imageScaleMax);
     if (nextScale === currentScale) {
       return;
     }
@@ -639,7 +637,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     const cursorX = event.clientX - rect.left - rect.width / 2;
     const cursorY = event.clientY - rect.top - rect.height / 2;
     applyImageScale(nextScale, cursorX, cursorY);
-  }, [applyImageScale, imageLoadError]);
+  }, [applyImageScale, imageLoadError, imageScaleMin, imageScaleMax]);
 
   const handleImagePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (imageLoadError || event.button !== 0) {
@@ -694,19 +692,16 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
   const handleImageDoubleClick = useCallback(() => {
     setImageBaseMode('fit');
-    setImageScaleMode('fit');
     setImageScale(1);
     imageScaleRef.current = 1;
     handleImagePanReset();
   }, [handleImagePanReset]);
 
-  const toggleImageScaleMode = useCallback(() => {
+  const toggleImageBaseMode = useCallback(() => {
     if (imageBaseMode === 'fit') {
       setImageBaseMode('actual');
-      setImageScaleMode('actual');
     } else {
       setImageBaseMode('fit');
-      setImageScaleMode('fit');
     }
     setImageScale(1);
     imageScaleRef.current = 1;
@@ -930,7 +925,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       setImageRotation(0);
       setImageNaturalSize({ width: 0, height: 0 });
       setImageViewportSize({ width: 0, height: 0 });
-      setImageScaleMode('fit');
       setImageBaseMode('fit');
       handleImagePanReset();
       setTextContent('');
@@ -955,7 +949,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       observerRef.current = null;
       imageViewportResizeObserverRef.current?.disconnect();
       imageViewportResizeObserverRef.current = null;
-      handleImagePanReset();
       if (previousPreviewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(previousPreviewUrl);
       }
@@ -1127,7 +1120,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-full shadow-lg px-3 py-1">
             <button
               onClick={() => {
-                const nextScale = clamp(imageScaleRef.current - 0.25, 0.25, 6);
+                const nextScale = clamp(imageScaleRef.current - 0.25, imageScaleMin, imageScaleMax);
                 applyImageScale(nextScale, 0, 0);
               }}
               disabled={effectiveImageScale <= 0.25}
@@ -1143,7 +1136,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
             <button
               onClick={() => {
-                const nextScale = clamp(imageScaleRef.current + 0.25, 0.25, 6);
+                const nextScale = clamp(imageScaleRef.current + 0.25, imageScaleMin, imageScaleMax);
                 applyImageScale(nextScale, 0, 0);
               }}
               disabled={effectiveImageScale >= 6}
@@ -1156,7 +1149,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             <div className="w-px h-5 bg-gray-200 mx-1" />
 
             <button
-              onClick={toggleImageScaleMode}
+              onClick={toggleImageBaseMode}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
               title={
                 imageBaseMode === 'fit'
