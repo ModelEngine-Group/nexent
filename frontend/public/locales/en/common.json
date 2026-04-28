@@ -23,6 +23,8 @@
   "filePreview.zoomIn": "Zoom in",
   "filePreview.zoomOut": "Zoom out",
   "filePreview.rotate": "Rotate",
+  "filePreview.image.fitPage": "Fit to page",
+  "filePreview.image.actualSize": "Actual size",
   "filePreview.tooLargeToPreview": "File too large to preview. Please download it to view.",
   "filePreview.csv.column": "Col",
   "filePreview.unsupportedSingleLine": "This file type is not supported for preview",

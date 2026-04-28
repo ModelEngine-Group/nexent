@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import dynamic from 'next/dynamic';
 import { Drawer, Spin, Button, Table } from 'antd';
-import { Download, Minus, Plus, RotateCw, X } from 'lucide-react';
+import { Download, Maximize2, Minimize2, Minus, Plus, RotateCw, X } from 'lucide-react';
 import Papa from 'papaparse';
 import { FilePreviewProps } from '@/types/chat';
 import { storageService } from '@/services/storageService';
@@ -342,6 +342,32 @@ function detectCsvDelimiter(sampleText: string): string {
   return bestDelimiter;
 }
 
+function computeRotateFitScale(
+  rotationDeg: number,
+  naturalSize: { width: number; height: number },
+  viewportSize: { width: number; height: number },
+): number {
+  const { width: naturalWidth, height: naturalHeight } = naturalSize;
+  const { width: viewportWidth, height: viewportHeight } = viewportSize;
+  if (naturalWidth <= 0 || naturalHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
+    return 1;
+  }
+
+  const normalizedRotation = ((rotationDeg % 360) + 360) % 360;
+  const isQuarterTurn = normalizedRotation === 90 || normalizedRotation === 270;
+  const rotatedWidth = isQuarterTurn ? naturalHeight : naturalWidth;
+  const rotatedHeight = isQuarterTurn ? naturalWidth : naturalHeight;
+  const fitScale = Math.min(viewportWidth / rotatedWidth, viewportHeight / rotatedHeight);
+  return Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+type ImageScaleMode = 'fit' | 'actual' | 'custom';
+type ImageBaseMode = 'fit' | 'actual';
+
 type DetectedFileType = 'pdf' | 'image' | 'markdown' | 'csv' | 'text' | 'office' | 'unknown';
 
 export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
@@ -376,6 +402,30 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const [imageScale, setImageScale] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
   const [imageLoadError, setImageLoadError] = useState(false);
+  const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
+  const [imageViewportSize, setImageViewportSize] = useState({ width: 0, height: 0 });
+  const [imageScaleMode, setImageScaleMode] = useState<ImageScaleMode>('fit');
+  const [imageBaseMode, setImageBaseMode] = useState<ImageBaseMode>('fit');
+  const imageViewportResizeObserverRef = useRef<ResizeObserver | null>(null);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
+  const [isImageDragging, setIsImageDragging] = useState(false);
+  const imagePanRef = useRef({ x: 0, y: 0 });
+  const imageScaleRef = useRef(1);
+  const dragStateRef = useRef<{
+    isDragging: boolean;
+    pointerId: number | null;
+    startX: number;
+    startY: number;
+    startPanX: number;
+    startPanY: number;
+  }>({
+    isDragging: false,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    startPanX: 0,
+    startPanY: 0,
+  });
 
   const [serverTooLarge, setServerTooLarge] = useState(false);
 
@@ -468,6 +518,206 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   
   const isEmptyFile = fileSize === 0;
   const isTooLargeToPreview = !!(fileSize && fileSize > 100 * 1024 * 1024);
+
+  const normalizedImageRotation = ((imageRotation % 360) + 360) % 360;
+  const imageFitScale = useMemo(
+    () => computeRotateFitScale(normalizedImageRotation, imageNaturalSize, imageViewportSize),
+    [imageNaturalSize, imageViewportSize, normalizedImageRotation],
+  );
+  const imageBaseScale = imageBaseMode === 'fit' ? imageFitScale : 1;
+  const effectiveImageScale = imageScale * imageBaseScale;
+
+  const imageDisplaySize = useMemo(() => {
+    const { width: naturalWidth, height: naturalHeight } = imageNaturalSize;
+    if (naturalWidth <= 0 || naturalHeight <= 0) {
+      return { width: 0, height: 0 };
+    }
+    const isQuarterTurn = normalizedImageRotation === 90 || normalizedImageRotation === 270;
+    const displayWidth = (isQuarterTurn ? naturalHeight : naturalWidth) * effectiveImageScale;
+    const displayHeight = (isQuarterTurn ? naturalWidth : naturalHeight) * effectiveImageScale;
+    return { width: displayWidth, height: displayHeight };
+  }, [imageNaturalSize, normalizedImageRotation, effectiveImageScale]);
+
+  const clampImagePan = useCallback((pan: { x: number; y: number }) => {
+    const { width: viewportWidth, height: viewportHeight } = imageViewportSize;
+    const { width: displayWidth, height: displayHeight } = imageDisplaySize;
+    if (viewportWidth <= 0 || viewportHeight <= 0 || displayWidth <= 0 || displayHeight <= 0) {
+      return { x: 0, y: 0 };
+    }
+
+    const maxPanX = Math.max(0, (displayWidth - viewportWidth) / 2);
+    const maxPanY = Math.max(0, (displayHeight - viewportHeight) / 2);
+    return {
+      x: clamp(pan.x, -maxPanX, maxPanX),
+      y: clamp(pan.y, -maxPanY, maxPanY),
+    };
+  }, [imageDisplaySize, imageViewportSize]);
+
+  useEffect(() => {
+    imagePanRef.current = imagePan;
+  }, [imagePan]);
+
+  useEffect(() => {
+    imageScaleRef.current = imageScale;
+  }, [imageScale]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (imageNaturalSize.width === 0 || imageNaturalSize.height === 0) return;
+    if (imageViewportSize.width === 0 || imageViewportSize.height === 0) return;
+    const normalizedRotation = ((imageRotation % 360) + 360) % 360;
+    const isQuarterTurn = normalizedRotation === 90 || normalizedRotation === 270;
+    const rotatedWidth = isQuarterTurn ? imageNaturalSize.height : imageNaturalSize.width;
+    const rotatedHeight = isQuarterTurn ? imageNaturalSize.width : imageNaturalSize.height;
+    if (rotatedWidth > imageViewportSize.width || rotatedHeight > imageViewportSize.height) {
+      setImageBaseMode('fit');
+      setImageScaleMode('fit');
+    } else {
+      setImageBaseMode('actual');
+      setImageScaleMode('actual');
+    }
+  }, [open, imageNaturalSize, imageViewportSize, imageRotation]);
+
+  const handleImageViewportRef = useCallback((el: HTMLDivElement | null) => {
+    imageViewportResizeObserverRef.current?.disconnect();
+    imageViewportResizeObserverRef.current = null;
+
+    if (!el) {
+      setImageViewportSize({ width: 0, height: 0 });
+      return;
+    }
+
+    const updateViewportSize = () => {
+      setImageViewportSize({ width: el.clientWidth, height: el.clientHeight });
+    };
+
+    const observer = new ResizeObserver(updateViewportSize);
+    observer.observe(el);
+    imageViewportResizeObserverRef.current = observer;
+    updateViewportSize();
+  }, []);
+
+  const handleImagePanReset = useCallback(() => {
+    const nextPan = { x: 0, y: 0 };
+    setImagePan(nextPan);
+    imagePanRef.current = nextPan;
+    setIsImageDragging(false);
+  }, []);
+
+  const applyImageScale = useCallback((nextScale: number, anchorX = 0, anchorY = 0) => {
+    const currentScale = imageScaleRef.current;
+    if (nextScale === currentScale) {
+      return;
+    }
+    const scaleRatio = nextScale / currentScale;
+    const currentPan = imagePanRef.current;
+    const nextPan = clampImagePan({
+      x: anchorX - scaleRatio * (anchorX - currentPan.x),
+      y: anchorY - scaleRatio * (anchorY - currentPan.y),
+    });
+    imagePanRef.current = nextPan;
+    setImagePan(nextPan);
+    setImageScale(nextScale);
+    setImageScaleMode('custom');
+  }, [clampImagePan]);
+
+  const handleImageWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    if (imageLoadError) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const currentScale = imageScaleRef.current;
+    const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+    const nextScale = clamp(currentScale * zoomFactor, 0.25, 6);
+    if (nextScale === currentScale) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const cursorX = event.clientX - rect.left - rect.width / 2;
+    const cursorY = event.clientY - rect.top - rect.height / 2;
+    applyImageScale(nextScale, cursorX, cursorY);
+  }, [applyImageScale, imageLoadError]);
+
+  const handleImagePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (imageLoadError || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsImageDragging(true);
+    dragStateRef.current = {
+      isDragging: true,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startPanX: imagePanRef.current.x,
+      startPanY: imagePanRef.current.y,
+    };
+  }, [imageLoadError]);
+
+  const handleImagePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current;
+    if (!dragState.isDragging || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextPan = {
+      x: dragState.startPanX + (event.clientX - dragState.startX),
+      y: dragState.startPanY + (event.clientY - dragState.startY),
+    };
+    const clamped = clampImagePan(nextPan);
+    imagePanRef.current = clamped;
+    setImagePan(clamped);
+  }, [clampImagePan]);
+
+  const handleImagePointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current;
+    if (dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    dragStateRef.current = {
+      isDragging: false,
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      startPanX: 0,
+      startPanY: 0,
+    };
+    setIsImageDragging(false);
+  }, []);
+
+  const handleImageDoubleClick = useCallback(() => {
+    setImageBaseMode('fit');
+    setImageScaleMode('fit');
+    setImageScale(1);
+    imageScaleRef.current = 1;
+    handleImagePanReset();
+  }, [handleImagePanReset]);
+
+  const toggleImageScaleMode = useCallback(() => {
+    if (imageBaseMode === 'fit') {
+      setImageBaseMode('actual');
+      setImageScaleMode('actual');
+    } else {
+      setImageBaseMode('fit');
+      setImageScaleMode('fit');
+    }
+    setImageScale(1);
+    imageScaleRef.current = 1;
+    handleImagePanReset();
+  }, [handleImagePanReset, imageBaseMode]);
+
+  useEffect(() => {
+    const clamped = clampImagePan(imagePanRef.current);
+    imagePanRef.current = clamped;
+    setImagePan(clamped);
+  }, [clampImagePan, effectiveImageScale, normalizedImageRotation, imageViewportSize]);
 
   const fetchTextChunk = useCallback(async (url: string, isFirst = false, sessionId?: number): Promise<void> => {
     const activeSessionId = sessionId ?? textFetchSessionRef.current;
@@ -678,6 +928,11 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       setServerTooLarge(false);
       setImageScale(1);
       setImageRotation(0);
+      setImageNaturalSize({ width: 0, height: 0 });
+      setImageViewportSize({ width: 0, height: 0 });
+      setImageScaleMode('fit');
+      setImageBaseMode('fit');
+      handleImagePanReset();
       setTextContent('');
       setTxtLines([]);
       setCsvRows([]);
@@ -698,12 +953,22 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       decoderAllowGbFallbackRef.current = false;
       observerRef.current?.disconnect();
       observerRef.current = null;
+      imageViewportResizeObserverRef.current?.disconnect();
+      imageViewportResizeObserverRef.current = null;
+      handleImagePanReset();
       if (previousPreviewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(previousPreviewUrl);
       }
       previewUrlRef.current = '';
     }
   }, [open]);
+
+  useEffect(() => {
+    return () => {
+      imageViewportResizeObserverRef.current?.disconnect();
+      imageViewportResizeObserverRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -812,33 +1077,60 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
   const renderImageViewer = () => (
     <div className="h-full relative bg-gray-100">
-      <div className="h-full overflow-auto flex items-center justify-center p-4 pb-20">
-        {imageLoadError ? (
-          renderCenteredErrorState()
-        ) : (
-          <img
-            src={previewUrl}
-            alt={fileName}
-            style={{
-              transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
-              transition: 'transform 0.2s ease-in-out',
-              maxWidth: '100%',
-              maxHeight: '100%',
-              objectFit: 'contain',
-            }}
-            className="select-none"
-            draggable={false}
-            onError={() => setImageLoadError(true)}
-          />
-        )}
+      <div
+        ref={handleImageViewportRef}
+        className="relative h-full overflow-hidden bg-gray-100 p-4 pb-20 select-none touch-none cursor-grab active:cursor-grabbing"
+        onWheel={handleImageWheel}
+        onPointerDown={handleImagePointerDown}
+        onPointerMove={handleImagePointerMove}
+        onPointerUp={handleImagePointerEnd}
+        onPointerCancel={handleImagePointerEnd}
+        onLostPointerCapture={handleImagePointerEnd}
+        onDoubleClick={handleImageDoubleClick}
+      >
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {imageLoadError ? (
+            renderCenteredErrorState()
+          ) : (
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              style={{
+                perspective: '1000px',
+              }}
+            >
+              <div
+                style={{
+                  transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${effectiveImageScale}) rotate(${imageRotation}deg)`,
+                  willChange: 'transform',
+                  transition: isImageDragging ? 'none' : 'transform 0.2s ease-in-out',
+                }}
+              >
+                <img
+                  src={previewUrl}
+                  alt={fileName}
+                  className="block select-none max-w-none"
+                  draggable={false}
+                  onLoad={(e) => {
+                    const img = e.currentTarget;
+                    setImageNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+                  }}
+                  onError={() => setImageLoadError(true)}
+                />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {!imageLoadError && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10">
           <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-full shadow-lg px-3 py-1">
             <button
-              onClick={() => setImageScale(prev => Math.max(prev - 0.25, 0.5))}
-              disabled={imageScale <= 0.5}
+              onClick={() => {
+                const nextScale = clamp(imageScaleRef.current - 0.25, 0.25, 6);
+                applyImageScale(nextScale, 0, 0);
+              }}
+              disabled={effectiveImageScale <= 0.25}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
               title={t('filePreview.zoomOut')}
             >
@@ -846,12 +1138,15 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             </button>
 
             <span className="px-1 text-sm text-gray-500 select-none min-w-[52px] text-center">
-              {Math.round(imageScale * 100)}%
+              {Math.round(effectiveImageScale * 100)}%
             </span>
 
             <button
-              onClick={() => setImageScale(prev => Math.min(prev + 0.25, 3))}
-              disabled={imageScale >= 3}
+              onClick={() => {
+                const nextScale = clamp(imageScaleRef.current + 0.25, 0.25, 6);
+                applyImageScale(nextScale, 0, 0);
+              }}
+              disabled={effectiveImageScale >= 6}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
               title={t('filePreview.zoomIn')}
             >
@@ -861,7 +1156,22 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             <div className="w-px h-5 bg-gray-200 mx-1" />
 
             <button
-              onClick={() => setImageRotation(prev => (prev + 90) % 360)}
+              onClick={toggleImageScaleMode}
+              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
+              title={
+                imageBaseMode === 'fit'
+                  ? t('filePreview.image.actualSize')
+                  : t('filePreview.image.fitPage')
+              }
+            >
+              {imageBaseMode === 'fit' ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+            </button>
+
+            <button
+              onClick={() => {
+                setImageRotation(prev => prev + 90);
+                handleImagePanReset();
+              }}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
               title={t('filePreview.rotate')}
             >
