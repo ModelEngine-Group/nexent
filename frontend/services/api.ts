@@ -271,7 +271,6 @@ export const API_ENDPOINTS = {
   },
   skills: {
     list: `${API_BASE_URL}/skills`,
-    create: `${API_BASE_URL}/skills`,
     upload: `${API_BASE_URL}/skills/upload`,
     get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
     update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
@@ -283,7 +282,9 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
     instanceList: `${API_BASE_URL}/skills/instance/list`,
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
-    createSimple: `${API_BASE_URL}/skills/create-simple`,
+    create: `${API_BASE_URL}/skills`,
+    createStream: `${API_BASE_URL}/skills/create`,
+    stopCreate: (taskId: string) => `${API_BASE_URL}/skills/stop/${taskId}`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
@@ -365,6 +366,9 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/invitations/${invitationCode}`,
     check: (invitationCode: string) =>
       `${API_BASE_URL}/invitations/${invitationCode}/check`,
+  },
+  monitoring: {
+    models: `${API_BASE_URL}/monitoring/models`,
   },
 };
 

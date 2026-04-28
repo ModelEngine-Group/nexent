@@ -22,9 +22,16 @@ mock_models_module.OpenAIServerModel = MockOpenAIServerModel
 mock_models_module.ChatMessage = MockChatMessage
 mock_smolagents.models = mock_models_module
 
+mock_memory_module = MagicMock()
+mock_memory_module.ActionStep = MagicMock
+mock_memory_module.AgentMemory = MagicMock
+mock_memory_module.MemoryStep = MagicMock
+mock_smolagents.memory = mock_memory_module
+
 with patch.dict("sys.modules", {
     "smolagents": mock_smolagents,
     "smolagents.models": mock_models_module,
+    "smolagents.memory": mock_memory_module,
 }):
     import sdk.nexent.core.models.openai_long_context_model as openai_long_context_model
     from sdk.nexent.core.utils.observer import MessageObserver

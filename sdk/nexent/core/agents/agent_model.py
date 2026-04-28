@@ -12,6 +12,11 @@ from pydantic import BaseModel, Field
 
 from ..utils.observer import MessageObserver
 
+# TYPE_CHECKING to avoid circular import
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .agent_context import ContextManagerConfig
+
 
 class ModelConfig(BaseModel):
     cite_name: str = Field(description="Model alias")
@@ -46,6 +51,7 @@ class AgentConfig(BaseModel):
     max_steps: int = Field(description="Maximum number of steps for current Agent", default=5)
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
+    managed_agents: List[AgentConfig] = Field(description="Managed Agents", default=[])
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
     managed_agents: List["AgentConfig"] = Field(
         description="Internal managed sub-agents created locally",
@@ -54,6 +60,10 @@ class AgentConfig(BaseModel):
     external_a2a_agents: List["ExternalA2AAgentConfig"] = Field(
         description="External A2A agents called via HTTP requests",
         default=[]
+    )
+    context_manager_config: Optional[Any] = Field(
+        description="Context manager configuration for conversation-level memory compression",
+        default=None
     )
 
 
@@ -77,6 +87,11 @@ class AgentRunInfo(BaseModel):
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
+    context_manager: Optional[Any] = Field(
+        description="Conversation-level reusable ContextManager instance. "
+                    "If provided, it will be attached to the CoreAgent instead of creating a new one.",
+        default=None
+    )
 
     class Config:
         arbitrary_types_allowed = True

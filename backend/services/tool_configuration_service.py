@@ -40,6 +40,7 @@ from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model, get_rerank_model, get_vector_db_core
 from database.client import minio_client
 from services.image_service import get_vlm_model
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
@@ -747,6 +748,11 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
+            vlm_display_name = getattr(
+                image_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=vlm_display_name)
             params = {
                 **instantiation_params,
                 'vlm_model': image_to_text_model,
@@ -759,6 +765,11 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
+            llm_display_name = getattr(
+                long_text_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=llm_display_name)
             params = {
                 **instantiation_params,
                 'llm_model': long_text_to_text_model,

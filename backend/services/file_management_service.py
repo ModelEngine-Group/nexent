@@ -36,6 +36,7 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import save_upload_file
 
 from nexent import MessageObserver
+from nexent.multi_modal.utils import parse_s3_url
 from nexent.core.models import OpenAILongContextModel
 
 # Create upload directory
@@ -136,8 +137,6 @@ def validate_urls_access(urls: List[str], user_id: Optional[str]) -> None:
     """
     if not urls:
         return
-
-    from sdk.nexent.multi_modal.utils import parse_s3_url
 
     for url in urls:
         if not url:

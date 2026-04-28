@@ -317,16 +317,25 @@ export default function ToolTestPanel({
         });
       }
 
-      // Override index_names with selectedKbIds if KB selection is enabled
+      // Prepare KB selection parameter based on tool type
+      // These are init-time configuration parameters, not forward() parameters
+      let kbSelectionConfig: Record<string, any> = {};
       if (toolRequiresKbSelection && selectedKbIds.length > 0) {
-        toolParams.index_names = selectedKbIds;
+        // Determine the correct parameter name based on tool type
+        if (tool?.name === "dify_search") {
+          kbSelectionConfig = { dataset_ids: JSON.stringify(selectedKbIds) };
+        } else {
+          // knowledge_base_search, datamate_search, idata_search use index_names
+          kbSelectionConfig = { index_names: selectedKbIds };
+        }
       }
 
       // Prepare configuration parameters from currentParams
-      // Filter out index_names from configs when KB selection is enabled since it's passed via toolParams
+      // Filter out index_names/dataset_ids from configs when KB selection is enabled
+      // since KB IDs are provided via kbSelectionConfig above
       const configs = (configParams || []).reduce(
         (acc: Record<string, any>, param: ToolParam) => {
-          // Skip index_names when KB selection is enabled (it's passed via toolParams)
+          // Skip index_names/dataset_ids when KB selection is enabled (provided via kbSelectionConfig)
           if (toolRequiresKbSelection && (param.name === "index_names" || param.name === "dataset_ids")) {
             return acc;
           }
@@ -340,6 +349,9 @@ export default function ToolTestPanel({
         },
         {} as Record<string, any>
       );
+
+      // Merge KB selection config into configs
+      const finalConfigs = { ...configs, ...kbSelectionConfig };
       // Call validateTool with parameters
       const toolName = tool.origin_name || tool.name || "";
       const toolSource = tool.source || "";
@@ -348,7 +360,7 @@ export default function ToolTestPanel({
         toolSource, // Tool source
         tool.usage || "", // Tool usage
         toolParams, // tool input parameters
-        configs // tool configuration parameters
+        finalConfigs // tool configuration parameters
       );
 
       // Format the JSON string response
