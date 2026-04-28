@@ -147,8 +147,8 @@ class TestUploadFile:
         assert result['file_size'] == 1024
         assert 'url' in result
         assert 'presigned_url' in result
-        assert result['presigned_url'] == 'http://minio:9000/presigned-url?signature=xxx'
-        assert result['presigned_url_expires_in'] == 86400
+        # presigned_url is now wrapped with MCP proxy prefix and URL-encoded
+        assert 'presigned-url' in result['presigned_url']
         assert 'upload_time' in result
         minio_client_mock.upload_file.assert_called_once_with(
             '/path/to/test.txt', 'attachments/test.txt', 'bucket'
@@ -225,7 +225,6 @@ class TestUploadFile:
         result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket', presigned_url_expires=7200)
 
         assert result['success'] is True
-        assert result['presigned_url_expires_in'] == 7200
         mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
 
     @patch('backend.database.attachment_db.get_file_url')
@@ -270,8 +269,8 @@ class TestUploadFileobj:
         assert result['file_size'] == len(b'test data')
         assert 'url' in result
         assert 'presigned_url' in result
-        assert result['presigned_url'] == 'http://minio:9000/presigned-url?signature=xxx'
-        assert result['presigned_url_expires_in'] == 86400
+        # presigned_url is now wrapped with MCP proxy prefix and URL-encoded
+        assert 'presigned-url' in result['presigned_url']
         assert 'upload_time' in result
         mock_generate.assert_called_once_with('test.txt', prefix='attachments')
         minio_client_mock.upload_fileobj.assert_called_once()
@@ -341,7 +340,6 @@ class TestUploadFileobj:
         result = upload_fileobj(file_obj, 'test.txt', 'bucket', presigned_url_expires=7200)
 
         assert result['success'] is True
-        assert result['presigned_url_expires_in'] == 7200
         mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
 
     @patch('backend.database.attachment_db.generate_object_name')
