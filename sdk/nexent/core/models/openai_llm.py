@@ -5,6 +5,7 @@ from ...monitor.monitoring import (
     _monitoring_display_name,
     _detect_model_type,
 )
+from ..utils.token_estimation import estimate_tokens_text
 import logging
 import threading
 import asyncio
@@ -122,6 +123,8 @@ class OpenAIModel(OpenAIServerModel):
             temperature=self.temperature, top_p=self.top_p, **kwargs,
         )
 
+        completion_kwargs["stream_options"] = {"include_usage": True}
+
         current_request = self.client.chat.completions.create(
             stream=True, **completion_kwargs)
         chunk_list = []
@@ -158,6 +161,10 @@ class OpenAIModel(OpenAIServerModel):
                         raise ValueError(
                             f"LLM API returned invalid response format: {chunk_str[:200]}"
                         )
+
+                if not chunk.choices:
+                    chunk_list.append(chunk)
+                    continue
 
                 new_token = chunk.choices[0].delta.content
                 reasoning_content = getattr(
@@ -208,8 +215,24 @@ class OpenAIModel(OpenAIServerModel):
                 self.last_input_token_count = input_tokens
                 self.last_output_token_count = output_tokens
             else:
-                self.last_input_token_count = 0
-                self.last_output_token_count = 0
+                input_text = ""
+                for msg in messages_for_completion:
+                    if hasattr(msg, 'content'):
+                        content = msg.content
+                        if isinstance(content, str):
+                            input_text += content
+                        elif isinstance(content, list):
+                            for part in content:
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    input_text += part.get("text", "")
+                input_tokens = estimate_tokens_text(input_text)
+                output_tokens = estimate_tokens_text(model_output)
+                self.last_input_token_count = input_tokens
+                self.last_output_token_count = output_tokens
+                logger.debug(
+                    f"Token usage not returned by API, using estimation: "
+                    f"input_tokens={input_tokens}, output_tokens={output_tokens}"
+                )
 
             # Record completion metrics
             if token_tracker:
@@ -228,6 +251,13 @@ class OpenAIModel(OpenAIServerModel):
                 ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
                                       content=model_output).model_dump(include={"role", "content", "tool_calls"}))
 
+            from smolagents.monitoring import TokenUsage
+
+            if input_tokens > 0 or output_tokens > 0:
+                message.token_usage = TokenUsage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens
+                )
             message.raw = current_request
             message.role = MessageRole.ASSISTANT
             return message
