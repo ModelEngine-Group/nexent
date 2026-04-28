@@ -98,6 +98,12 @@ class NexentAgent:
                 tools_obj.observer = self.observer
                 tools_obj.rerank_model = tool_config.metadata.get(
                     "rerank_model", None) if tool_config.metadata else None
+            elif class_name == "HaotianSearchTool":
+                # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "rerank_model", "rerank"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
             elif class_name == "AnalyzeTextFileTool":
                 # Extract validate_url_access from metadata if it's callable
                 validate_url_access = tool_config.metadata.get("validate_url_access") if tool_config.metadata else None
