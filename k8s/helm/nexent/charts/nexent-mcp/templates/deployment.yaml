@@ -24,6 +24,8 @@ spec:
           ports:
             - containerPort: 5011
               name: http
+            - containerPort: 5015
+              name: http-alt
           command:
             - /bin/bash
             - -c
