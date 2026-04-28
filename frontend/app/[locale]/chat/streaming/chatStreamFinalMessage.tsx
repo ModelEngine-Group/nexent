@@ -300,8 +300,9 @@ function ChatStreamFinalMessageInner({
         {message.role === MESSAGE_ROLES.ASSISTANT &&
           (message.finalAnswer || message.content !== undefined) && (
             <div className="bg-white rounded-lg w-full -mt-2">
-              {/* Max steps warning - show when message has maxStepsInfo */}
-              {message.steps &&
+              {/* Max steps warning - show when message is complete and has maxStepsInfo */}
+              {message.isComplete &&
+                message.steps &&
                 message.steps.some((step) => step.maxStepsInfo) &&
                 (() => {
                   const maxStepsStep = message.steps?.find(
