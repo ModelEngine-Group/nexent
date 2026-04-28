@@ -101,6 +101,7 @@ Nexent 采用微服务架构，包含以下核心服务：
 | Web 界面 | 3000 | 3000 | 主应用程序访问 |
 | 后端 API | 5010 | 5010 | 后端服务 |
 | 数据处理 | 5012 | 5012 | 数据处理 API |
+| 北向 API | 5013 | 5013 | 北向接口服务 (A2A/MCP 集成) |
 | PostgreSQL | 5432 | 5434 | 数据库连接 |
 | Elasticsearch | 9200 | 9210 | 搜索引擎 API |
 | MinIO API | 9000 | 9010 | 对象存储 API |
@@ -109,6 +110,32 @@ Nexent 采用微服务架构，包含以下核心服务：
 | SSH 服务器 | 22 | 2222 | 终端工具访问 |
 
 有关完整的端口映射详细信息，请参阅我们的 [开发容器指南](../deployment/devcontainer.md#port-mapping)。
+
+## 🔧 高级配置
+
+### 北向接口配置 (NORTHBOUND_EXTERNAL_URL)
+
+如果您需要使用以下功能，需要配置 `NORTHBOUND_EXTERNAL_URL` 环境变量：
+
+1. **A2A 协议集成** - 第三方系统通过 A2A 协议调用 Nexent 智能体
+2. **MCP 工具访问** - 使用第三方 MCP 工具访问 Nexent 文档文件等资源
+
+**配置方法：**
+
+在 `.env` 文件中设置公网可访问的 URL：
+
+```bash
+# 格式：协议://主机:端口/api
+# 本地开发（默认）:
+NORTHBOUND_EXTERNAL_URL=http://localhost:5013/api
+
+# 生产环境 - 使用您的公网 IP 或域名:
+NORTHBOUND_EXTERNAL_URL=http://your-public-ip:5013/api
+# 或
+NORTHBOUND_EXTERNAL_URL=https://api.yourdomain.com/api
+```
+
+> **重要**: URL 必须包含 `/api` 后缀，因为 Northbound 服务使用 FastAPI 的 `root_path="/api"` 配置。
 
 ## 💡 需要帮助
 

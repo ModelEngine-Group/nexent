@@ -100,6 +100,7 @@ Nexent uses a microservices architecture with the following core services:
 | Web Interface | 3000 | 3000 | Main application access |
 | Backend API | 5010 | 5010 | Backend service |
 | Data Processing | 5012 | 5012 | Data processing API |
+| Northbound API | 5013 | 5013 | Northbound interface service (A2A/MCP integration) |
 | PostgreSQL | 5432 | 5434 | Database connection |
 | Elasticsearch | 9200 | 9210 | Search engine API |
 | MinIO API | 9000 | 9010 | Object storage API |
@@ -108,6 +109,32 @@ Nexent uses a microservices architecture with the following core services:
 | SSH Server | 22 | 2222 | Terminal tool access |
 
 For complete port mapping details, see our [Dev Container Guide](../deployment/devcontainer.md#port-mapping).
+
+## 🔧 Advanced Configuration
+
+### Northbound Interface Configuration (NORTHBOUND_EXTERNAL_URL)
+
+If you need to use any of the following features, configure the `NORTHBOUND_EXTERNAL_URL` environment variable:
+
+1. **A2A Protocol Integration** - Third-party systems calling Nexent agents via A2A protocol
+2. **MCP Tool Access** - Using MCP protocol to access Nexent resources like documents
+
+**Configuration:**
+
+Set the publicly accessible URL in your `.env` file:
+
+```bash
+# Format: protocol://host:port/api
+# Local development (default):
+NORTHBOUND_EXTERNAL_URL=http://localhost:5013/api
+
+# Production - use your public IP or domain:
+NORTHBOUND_EXTERNAL_URL=http://your-public-ip:5013/api
+# or
+NORTHBOUND_EXTERNAL_URL=https://api.yourdomain.com/api
+```
+
+> **Important**: The URL must include the `/api` suffix because the Northbound service uses FastAPI's `root_path="/api"` configuration.
 
 ## 💡 Need Help
 
