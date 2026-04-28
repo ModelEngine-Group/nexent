@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, BinaryIO, Dict, List, Optional
 
 from .client import minio_client
-from consts.const import MINIO_BUCKET, NORTHBOUND_EXTERNAL_URL
+from consts.const import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote
 
 
