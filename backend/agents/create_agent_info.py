@@ -595,7 +595,7 @@ async def join_minio_file_description_to_query(
     Join MinIO file descriptions to the user query.
 
     This function formats uploaded file information into a structured description
-    that includes both S3 URL (for internal tools) and Download URL (for external MCP tools).
+    that includes both S3 URL (for internal tools) and presigned_url (for external MCP tools).
     It processes files from both the current message and historical messages.
 
     De-duplication is performed using the file URL as the unique key. A maximum

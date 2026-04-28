@@ -290,6 +290,8 @@ async def fetch_file_from_presigned_url(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail="Invalid URL scheme. Must be http or https"
             )
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Invalid presigned_url format: {str(e)}")
         raise HTTPException(
