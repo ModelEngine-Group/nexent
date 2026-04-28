@@ -743,6 +743,14 @@ def _validate_local_tool(
                 'rerank_model': rerank_model,
             }
             tool_instance = tool_class(**params)
+        elif tool_name == "haotian_search":
+            # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
+            # Must explicitly pass observer=None: if omitted, Python applies the FieldInfo default
+            # (not None), causing 'FieldInfo has no attr lang' errors in forward()
+            filtered_params = {k: v for k, v in instantiation_params.items()
+                              if k not in ["observer", "rerank_model", "rerank"]}
+            filtered_params["observer"] = None
+            tool_instance = tool_class(**filtered_params)
         elif tool_name == "analyze_image":
             if not tenant_id or not user_id:
                 raise ToolExecutionException(

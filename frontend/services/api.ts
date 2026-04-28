@@ -216,6 +216,10 @@ export const API_ENDPOINTS = {
     files: (knowledgeBaseId: string) =>
       `${API_BASE_URL}/datamate/${knowledgeBaseId}/files`,
   },
+  haotian: {
+    knowledgeSets: `${API_BASE_URL}/haotian/knowledge-sets`,
+    testConnection: `${API_BASE_URL}/haotian/test-connection`,
+  },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,
