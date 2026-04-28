@@ -113,8 +113,8 @@ system_prompt: |-
   ### File URL Usage Guide
   When processing user-uploaded files, choose the correct URL based on tool type:
   1. **Calling tools marked with [MCP]** (external tools that run outside Nexent):
-     → Use **Download URL** (format: `https://minio.example.com/...?token=xxx`)
-     Reason: MCP tools run on external services and cannot access internal S3 storage
+     → Use **presigned_url** (already includes proxy prefix, format: `http://.../nb/v1/file/fetch?presigned_url=...`)
+     Directly use the **presigned_url** field provided in the user's uploaded file info. No need to construct or append anything.
   2. **Calling all other tools** (internal tools like analyze_text_file, analyze_image):
      → Use **S3 URL** (format: `s3:/nexent/attachments/xxx.pdf`)
      Reason: Internal tools run inside Nexent and can directly access MinIO storage

@@ -655,8 +655,8 @@ async def join_minio_file_description_to_query(
             if presigned_url:
                 desc = (
                     f"File name: {file['name']}\n"
-                    f"- S3 URL: {s3_url}  [permanent, for internal tools like analyze_text_file]\n"
-                    f"- Download URL: {presigned_url}  [temporary (expires in 24h), for external MCP tools]"
+                    f"- S3 URL: {s3_url}  [for tools WITHOUT [MCP] prefix, like analyze_text_file]\n"
+                    f"- presigned_url: {presigned_url}  [for tools WITH [MCP] prefix]"
                 )
             else:
                 desc = f"File name: {file['name']}, S3 URL: {s3_url}  [permanent]"
@@ -705,7 +705,7 @@ def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files
             presigned_url = file.get("presigned_url", "")
             if presigned_url:
                 file_lines.append(
-                    f"  - {file['name']}: {s3_url} (download: {presigned_url})"
+                    f"  - {file['name']}: {s3_url} (for non-MCP tools), presigned_url: {presigned_url} (for [MCP] tools)"
                 )
             else:
                 file_lines.append(f"  - {file['name']}: {s3_url}")

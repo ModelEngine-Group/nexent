@@ -5,6 +5,25 @@ from datetime import datetime
 from typing import Any, BinaryIO, Dict, List, Optional
 
 from .client import minio_client
+from consts.const import MINIO_BUCKET, NORTHBOUND_EXTERNAL_URL
+from urllib.parse import quote
+
+
+def _build_mcp_presigned_url(presigned_url: str) -> str:
+    """
+    Build northbound API proxy URL for MCP tools.
+
+    Args:
+        presigned_url: Original MinIO presigned URL
+
+    Returns:
+        str: URL wrapped with northbound API proxy, with presigned_url URL-encoded
+    """
+    if not presigned_url:
+        return ""
+    # URL-encode the presigned_url before embedding it as a query parameter
+    encoded_presigned_url = quote(presigned_url, safe='')
+    return f"{NORTHBOUND_EXTERNAL_URL}/nb/v1/file/fetch?presigned_url={encoded_presigned_url}"
 
 
 def generate_object_name(file_name: str, prefix: str = "attachments") -> str:
@@ -67,8 +86,8 @@ def upload_file(
         if generate_presigned_url:
             presigned_result = get_file_url(object_name, bucket, presigned_url_expires)
             if presigned_result.get("success"):
-                response["presigned_url"] = presigned_result["url"]
-                response["presigned_url_expires_in"] = presigned_url_expires
+                # Only expose MCP URL (with proxy prefix), not raw MinIO URL
+                response["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
     else:
         response["error"] = result
 
@@ -133,8 +152,8 @@ def upload_fileobj(
         if generate_presigned_url:
             presigned_result = get_file_url(object_name, bucket, presigned_url_expires)
             if presigned_result.get("success"):
-                response["presigned_url"] = presigned_result["url"]
-                response["presigned_url_expires_in"] = presigned_url_expires
+                # Only expose MCP URL (with proxy prefix), not raw MinIO URL
+                response["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
     else:
         response["error"] = result
 
