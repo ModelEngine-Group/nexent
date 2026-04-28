@@ -382,7 +382,10 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
     template_context = {
         "task_description": task_description,
         "tool_description": tool_description,
-        "assistant_description": assistant_description
+        "assistant_description": assistant_description,
+        # Always include knowledge_base_names to avoid StrictUndefined errors in template.
+        # An empty string is falsy, so the {% if knowledge_base_names %} block will be skipped.
+        "knowledge_base_names": ""
     }
 
     # Add knowledge base display names for few-shot examples if available
