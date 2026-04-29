@@ -595,7 +595,7 @@ async def join_minio_file_description_to_query(
     Join MinIO file descriptions to the user query.
 
     This function formats uploaded file information into a structured description
-    that includes both S3 URL (for internal tools) and Download URL (for external MCP tools).
+    that includes both S3 URL (for internal tools) and presigned_url (for external MCP tools).
     It processes files from both the current message and historical messages.
 
     De-duplication is performed using the file URL as the unique key. A maximum
@@ -655,8 +655,8 @@ async def join_minio_file_description_to_query(
             if presigned_url:
                 desc = (
                     f"File name: {file['name']}\n"
-                    f"- S3 URL: {s3_url}  [permanent, for internal tools like analyze_text_file]\n"
-                    f"- Download URL: {presigned_url}  [temporary (expires in 24h), for external MCP tools]"
+                    f"- S3 URL: {s3_url}  [for tools WITHOUT [MCP] prefix, like analyze_text_file]\n"
+                    f"- presigned_url: {presigned_url}  [for tools WITH [MCP] prefix]"
                 )
             else:
                 desc = f"File name: {file['name']}, S3 URL: {s3_url}  [permanent]"
@@ -705,7 +705,7 @@ def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files
             presigned_url = file.get("presigned_url", "")
             if presigned_url:
                 file_lines.append(
-                    f"  - {file['name']}: {s3_url} (download: {presigned_url})"
+                    f"  - {file['name']}: {s3_url} (for non-MCP tools), presigned_url: {presigned_url} (for [MCP] tools)"
                 )
             else:
                 file_lines.append(f"  - {file['name']}: {s3_url}")
