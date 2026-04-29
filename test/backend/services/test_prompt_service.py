@@ -1245,7 +1245,7 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         template_vars = mock_template_instance.render.call_args[0][0]
-        # knowledge_base_names should always be in template vars (empty string when not provided)
+        # knowledge_base_names is always present but empty when not provided
         self.assertIn("knowledge_base_names", template_vars)
         self.assertEqual(template_vars["knowledge_base_names"], "")
 
