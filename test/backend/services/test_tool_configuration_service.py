@@ -300,6 +300,10 @@ memory_service_module.clear_memory = MagicMock()
 sys.modules['nexent.memory'] = _create_package_mock('nexent.memory')
 sys.modules['nexent.memory.memory_service'] = memory_service_module
 
+sys.modules['nexent.multi_modal'] = MagicMock()
+sys.modules['nexent.multi_modal.utils'] = MagicMock()
+sys.modules['nexent.multi_modal.utils'].parse_s3_url = MagicMock(return_value=("bucket", "key"))
+
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
