@@ -14,9 +14,10 @@ from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
-    get_embedding_model,
+    get_embedding_model_by_index_name,
     get_rerank_model,
 )
+from consts.exceptions import ValidationError
 from services.remote_mcp_service import get_remote_mcp_server_list
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
@@ -488,11 +489,23 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
 
             tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
-                "embedding_model": get_embedding_model(tenant_id=tenant_id),
+                "embedding_model": None,
                 "rerank_model": rerank_model,
                 "display_name_to_index_map": display_name_to_index_map,
                 "index_name_to_display_map": index_name_to_display_map,
             }
+
+            # Must have embedding model for knowledge base search
+            if not index_names:
+                raise ValidationError(
+                    "Embedding model is required for knowledge_base_search but index_names is empty")
+
+            embedding_model, model_id = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            if not embedding_model:
+                raise ValidationError(
+                    f"No embedding model found for index '{index_names[0]}'. "
+                    f"Please configure an embedding model for this knowledge base.")
+            tool_config.metadata["embedding_model"] = embedding_model
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
             rerank = param_dict.get("rerank", False)
             rerank_model_name = param_dict.get("rerank_model_name", "")

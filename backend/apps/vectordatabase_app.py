@@ -11,7 +11,7 @@ from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchReq
 from nexent.vector_database.base import VectorDatabaseCore
 from services.vectordatabase_service import (
     ElasticSearchService,
-    get_embedding_model,
+    get_embedding_model_by_id,
     get_vector_db_core,
     check_knowledge_base_exist_impl,
 )
@@ -201,12 +201,12 @@ def create_index_documents(
         
         # Get the knowledge base record to retrieve the saved embedding model
         knowledge_record = get_knowledge_record({'index_name': index_name})
-        saved_embedding_model_name = None
+        saved_embedding_model_id = None
         if knowledge_record:
-            saved_embedding_model_name = knowledge_record.get('embedding_model_name')
+            saved_embedding_model_id = knowledge_record.get('embedding_model_id')
         
-        # Use the saved model from knowledge base, fallback to tenant default if not set
-        embedding_model = get_embedding_model(tenant_id, saved_embedding_model_name)
+        # Use the saved model from knowledge base by model_id
+        embedding_model, _ = get_embedding_model_by_id(tenant_id, saved_embedding_model_id) if saved_embedding_model_id else (None, None)
         
         return ElasticSearchService.index_documents(
             embedding_model=embedding_model,
@@ -214,6 +214,7 @@ def create_index_documents(
             data=data,
             vdb_core=vdb_core,
             task_id=task_id,
+            model_id=saved_embedding_model_id,
         )
     except Exception as e:
         error_msg = str(e)

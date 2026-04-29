@@ -37,11 +37,11 @@ from database.tool_db import (
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
-from services.vectordatabase_service import get_embedding_model, get_rerank_model, get_vector_db_core
+from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model, get_vector_db_core
 from database.client import minio_client
 from services.image_service import get_vlm_model
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from services.vectordatabase_service import get_embedding_model, get_vector_db_core
+from services.vectordatabase_service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
@@ -704,7 +704,19 @@ def _validate_local_tool(
                     instantiation_params[param_name] = param.default
 
         if tool_name == "knowledge_base_search":
-            embedding_model = get_embedding_model(tenant_id=tenant_id)
+            index_names = instantiation_params.get("index_names", [])
+
+            # Must have embedding model for knowledge base search
+            if not index_names or not tenant_id:
+                raise ToolExecutionException(
+                    "Embedding model is required for knowledge_base_search but index_names or tenant_id is missing")
+
+            embedding_model, model_id = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            if not embedding_model:
+                raise ToolExecutionException(
+                    f"No embedding model found for index '{index_names[0]}'. "
+                    f"Please configure an embedding model for this knowledge base.")
+
             vdb_core = get_vector_db_core()
 
             # Get rerank configuration
@@ -715,7 +727,6 @@ def _validate_local_tool(
                 rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
 
             # Build display_name to index_name mapping for LLM parameter conversion
-            index_names = instantiation_params.get("index_names", [])
             display_name_to_index_map = {}
             if index_names:
                 knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)

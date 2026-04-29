@@ -37,3 +37,8 @@ Total:  main_i=1479 main_o=61 | comp_i=0 comp_o=0 | all_i=1479 all_o=61 | mem_es
 Step 1: main_i=1551 main_o=467 | comp_i=0 comp_o=0 | mem_est_input=1970 |mem_est_output=607
 Total:  main_i=1551 main_o=467 | comp_i=0 comp_o=0 | all_i=1551 all_o=467 | mem_est_input=1970 |mem_est_output=607
 -----
+Step 1:  real_i=2111  real_o=208 | comp_i=0  comp_o=0 | est_i=2417  est_o=225 | est_raw_i=2417  save=0.0% | hit=False
+Step 2:  real_i=3985  real_o=416 | comp_i=0  comp_o=0 | est_i=4113  est_o=454 | est_raw_i=4113  save=0.0% | hit=False
+Total:   real_i=6096  real_o=624 | comp_i=0  comp_o=0 | est_i=6530  est_o=679 | est_raw_i=6530  save=0.0% | hit=  0/2
+Context Manager Global: {'total_calls': 0, 'total_input_tokens': 0, 'total_output_tokens': 0, 'total_cache_hits': 0}
+-----

@@ -49,6 +49,7 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "knowledge_sources": query.get("knowledge_sources", "elasticsearch"),
                 "tenant_id": query.get("tenant_id"),
                 "embedding_model_name": query.get("embedding_model_name"),
+                "embedding_model_id": query.get("embedding_model_id"),
                 "knowledge_name": knowledge_name,
                 "group_ids": convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids,
                 "ingroup_permission": query.get("ingroup_permission"),
@@ -116,6 +117,7 @@ def upsert_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 existing_record.knowledge_describe = query.get('knowledge_describe', '')
                 existing_record.knowledge_sources = query.get('knowledge_sources', 'elasticsearch')
                 existing_record.embedding_model_name = query.get('embedding_model_name')
+                existing_record.embedding_model_id = query.get('embedding_model_id')
                 existing_record.updated_by = query.get('user_id')
                 existing_record.update_time = func.current_timestamp()
 
