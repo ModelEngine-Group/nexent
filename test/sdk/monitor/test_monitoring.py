@@ -22,6 +22,9 @@ from sdk.nexent.monitor.monitoring import (
 import pytest
 import asyncio
 from unittest.mock import Mock, MagicMock, patch
+import json
+import sys
+import types
 
 
 class TestMonitoringConfig:
@@ -33,9 +36,14 @@ class TestMonitoringConfig:
 
         assert config.enable_telemetry is False
         assert config.service_name == "nexent-backend"
+        assert config.provider == "otlp"
         assert config.otlp_endpoint == "http://localhost:4318"
+        assert config.get_trace_endpoint() == "http://localhost:4318/v1/traces"
+        assert config.get_metric_endpoint() == "http://localhost:4318/v1/metrics"
         assert config.otlp_protocol == "http"
         assert config.otlp_headers == {}
+        assert config.export_traces is True
+        assert config.export_metrics is True
         assert config.telemetry_sample_rate == 1.0
         assert config.llm_slow_request_threshold_seconds == 5.0
         assert config.llm_slow_token_rate_threshold == 10.0
@@ -45,9 +53,13 @@ class TestMonitoringConfig:
         config = MonitoringConfig(
             enable_telemetry=True,
             service_name="test-service",
-            otlp_endpoint="https://phoenix.arize.com/v1",
+            provider="phoenix",
+            otlp_endpoint="https://app.phoenix.arize.com",
             otlp_protocol="grpc",
-            otlp_headers={"x-api-key": "test-key"},
+            otlp_headers={"Authorization": "Bearer test-key"},
+            export_metrics=False,
+            use_platform_sdk=True,
+            project_name="nexent-test",
             telemetry_sample_rate=0.5,
             llm_slow_request_threshold_seconds=10.0,
             llm_slow_token_rate_threshold=20.0
@@ -55,9 +67,13 @@ class TestMonitoringConfig:
 
         assert config.enable_telemetry is True
         assert config.service_name == "test-service"
-        assert config.otlp_endpoint == "https://phoenix.arize.com/v1"
-        assert config.otlp_protocol == "grpc"
-        assert config.otlp_headers == {"x-api-key": "test-key"}
+        assert config.provider == "phoenix"
+        assert config.otlp_endpoint == "https://app.phoenix.arize.com"
+        assert config.otlp_protocol == "http"
+        assert config.otlp_headers == {"Authorization": "Bearer test-key"}
+        assert config.export_metrics is False
+        assert config.use_platform_sdk is True
+        assert config.project_name == "nexent-test"
         assert config.telemetry_sample_rate == 0.5
         assert config.llm_slow_request_threshold_seconds == 10.0
         assert config.llm_slow_token_rate_threshold == 20.0
@@ -70,6 +86,57 @@ class TestMonitoringConfig:
                 otlp_protocol="invalid"
             )
             assert config.otlp_protocol == "http"
+
+    def test_signal_endpoint_derivation_from_base_endpoint(self):
+        """Test HTTP endpoints are derived from a base OTLP endpoint."""
+        config = MonitoringConfig(
+            otlp_endpoint="https://cloud.langfuse.com/api/public/otel"
+        )
+
+        assert config.get_trace_endpoint() == "https://cloud.langfuse.com/api/public/otel/v1/traces"
+        assert config.get_metric_endpoint() == "https://cloud.langfuse.com/api/public/otel/v1/metrics"
+
+    def test_signal_endpoint_derivation_from_existing_signal_endpoint(self):
+        """Test signal endpoints are not duplicated when already provided."""
+        config = MonitoringConfig(
+            otlp_endpoint="https://collector.example.com/v1/traces"
+        )
+
+        assert config.get_trace_endpoint() == "https://collector.example.com/v1/traces"
+        assert config.get_metric_endpoint() == "https://collector.example.com/v1/metrics"
+
+    def test_from_json_file_with_overrides(self, tmp_path):
+        """Test monitoring config can be loaded from a config file and env overrides."""
+        config_file = tmp_path / "monitoring.json"
+        config_file.write_text(json.dumps({
+            "monitoring": {
+                "enable_telemetry": True,
+                "service_name": "file-service",
+                "exporter": {
+                    "provider": "langfuse",
+                    "endpoint": "https://cloud.langfuse.com/api/public/otel",
+                    "headers": {"Authorization": "Basic file-token"},
+                    "export_metrics": False
+                }
+            }
+        }), encoding="utf-8")
+
+        config = MonitoringConfig.from_file(
+            str(config_file),
+            overrides={
+                "service_name": "env-service",
+                "otlp_headers": {"x-langfuse-ingestion-version": "4"},
+            }
+        )
+
+        assert config.service_name == "env-service"
+        assert config.provider == "langfuse"
+        assert config.get_trace_endpoint() == "https://cloud.langfuse.com/api/public/otel/v1/traces"
+        assert config.otlp_headers == {
+            "Authorization": "Basic file-token",
+            "x-langfuse-ingestion-version": "4",
+        }
+        assert config.export_metrics is False
 
 
 class TestMonitoringManager:
@@ -195,6 +262,63 @@ class TestMonitoringManager:
 
             with patch('sdk.nexent.monitor.monitoring.Resource.create', side_effect=Exception("Test error")):
                 manager.configure(config)
+
+    @patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True)
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    @patch('sdk.nexent.monitor.monitoring.metrics')
+    @patch('sdk.nexent.monitor.monitoring.TracerProvider')
+    @patch('sdk.nexent.monitor.monitoring.MeterProvider')
+    @patch('sdk.nexent.monitor.monitoring.OTLPSpanExporterHTTP')
+    @patch('sdk.nexent.monitor.monitoring.Resource')
+    @patch('sdk.nexent.monitor.monitoring.RequestsInstrumentor')
+    def test_phoenix_platform_sdk_reuses_registered_tracer_provider(
+        self,
+        mock_requests_instr,
+        mock_resource,
+        mock_span_exporter_http,
+        mock_meter_provider,
+        mock_tracer_provider,
+        mock_metrics,
+        mock_trace
+    ):
+        """Test Phoenix SDK provider is reused instead of double-registering traces."""
+        manager = MonitoringManager()
+        sdk_tracer_provider = MagicMock()
+        phoenix_module = types.ModuleType("phoenix")
+        phoenix_otel_module = types.ModuleType("phoenix.otel")
+        phoenix_otel_module.register = MagicMock(return_value=sdk_tracer_provider)
+
+        mock_resource.create.return_value = MagicMock()
+        mock_metrics.get_meter.return_value = MagicMock()
+        mock_trace.get_tracer.return_value = MagicMock()
+
+        with patch.dict(sys.modules, {
+            "phoenix": phoenix_module,
+            "phoenix.otel": phoenix_otel_module,
+        }):
+            config = MonitoringConfig(
+                enable_telemetry=True,
+                provider="phoenix",
+                otlp_endpoint="https://app.phoenix.arize.com/s/test-space",
+                otlp_headers={"Authorization": "Bearer test-key"},
+                export_metrics=False,
+                use_platform_sdk=True,
+                project_name="nexent-test"
+            )
+            manager.configure(config)
+
+        phoenix_otel_module.register.assert_called_once_with(
+            project_name="nexent-test",
+            endpoint="https://app.phoenix.arize.com/s/test-space",
+            protocol="http/protobuf",
+            headers={"Authorization": "Bearer test-key"},
+            auto_instrument=False
+        )
+        assert manager._tracer_provider is sdk_tracer_provider
+        mock_tracer_provider.assert_not_called()
+        mock_trace.set_tracer_provider.assert_not_called()
+        mock_span_exporter_http.assert_not_called()
+        mock_requests_instr().instrument.assert_called_once()
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_trace_llm_request_openinference_attrs(self, mock_trace):
@@ -445,6 +569,44 @@ class TestDecorators:
 
         result = asyncio.run(test_function("value1", param2="value2"))
         assert result == {"result": "success"}
+
+    def test_monitor_endpoint_decorator_async_generator(self):
+        """Test monitor_endpoint keeps context while async generators are consumed."""
+        manager = MonitoringManager()
+        config = MonitoringConfig(enable_telemetry=False)
+        manager.configure(config)
+        events = []
+        original_add_span_event = manager.add_span_event
+
+        def capture_event(name, attributes=None):
+            events.append((name, attributes or {}))
+            original_add_span_event(name, attributes)
+
+        manager.add_span_event = capture_event
+
+        @manager.monitor_endpoint("stream_operation")
+        async def stream_function():
+            manager.add_span_event("stream_operation.inside")
+            yield "chunk-1"
+            manager.add_span_event("stream_operation.after_yield")
+            yield "chunk-2"
+
+        async def consume_stream():
+            return [item async for item in stream_function()]
+
+        try:
+            result = asyncio.run(consume_stream())
+        finally:
+            manager.add_span_event = original_add_span_event
+
+        assert result == ["chunk-1", "chunk-2"]
+        event_names = [name for name, _ in events]
+        assert event_names == [
+            "stream_operation.started",
+            "stream_operation.inside",
+            "stream_operation.after_yield",
+            "stream_operation.completed",
+        ]
 
     def test_monitor_llm_call_decorator(self):
         """Test monitor_llm_call decorator."""

@@ -385,6 +385,7 @@ export default defineConfig({
                 ],
               },
               { text: "性能监控", link: "/zh/sdk/monitoring" },
+              { text: "OpenTelemetry 设计", link: "/zh/sdk/opentelemetry-design" },
               { text: "向量数据库", link: "/zh/sdk/vector-database" },
               { text: "数据处理", link: "/zh/sdk/data-process" },
             ],

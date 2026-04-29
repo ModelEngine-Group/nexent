@@ -20,6 +20,7 @@ cp .env.example .env
 
 vim .env
 ENABLE_TELEMETRY=true
+MONITORING_PROVIDER=otlp
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
 
@@ -35,9 +36,18 @@ Arize Phoenix 提供针对 AI 的专业可观测性，原生支持 OpenInference
 **配置：**
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=https://phoenix.arize.com/v1
-OTEL_EXPORTER_OTLP_HEADERS=x-api-key=YOUR_PHOENIX_API_KEY
+MONITORING_PROVIDER=phoenix
+OTEL_EXPORTER_OTLP_ENDPOINT=https://app.phoenix.arize.com/s/YOUR_SPACE
+OTEL_EXPORTER_OTLP_AUTHORIZATION="Bearer YOUR_PHOENIX_API_KEY"
 OTEL_EXPORTER_OTLP_PROTOCOL=http
+OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+```
+
+如果希望使用 Phoenix 官方 SDK 负责部分 OpenTelemetry 初始化，可额外启用。启用后 SDK 返回的 tracer provider 会被复用，避免重复注册 OpenTelemetry 全局 provider：
+
+```bash
+MONITORING_USE_PLATFORM_SDK=true
+MONITORING_PROJECT_NAME=nexent-production
 ```
 
 **功能特性：**
@@ -53,12 +63,14 @@ Langfuse 提供 Prompt 管理和 LLM 可观测性，支持 OTLP 协议。
 **配置：**
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel/v1
+MONITORING_PROVIDER=langfuse
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
 
 LANGFUSE_PUBLIC_KEY=pk-xxx
 LANGFUSE_SECRET_KEY=sk-xxx
 
-OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic BASE64_ENCODED_KEY
+OTEL_EXPORTER_OTLP_AUTHORIZATION=Basic BASE64_ENCODED_KEY
+OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION=4
 ```
 
 生成认证 Key：
@@ -101,10 +113,39 @@ jaeger:
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
+| `MONITORING_CONFIG_FILE` | （空） | JSON/YAML 监控配置文件路径 |
+| `MONITORING_PROVIDER` | `otlp` | 平台配置：`otlp`、`phoenix`、`langfuse`、`jaeger`、`custom` |
+| `MONITORING_USE_PLATFORM_SDK` | `false` | 是否额外初始化平台 SDK |
+| `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | 服务标识 |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP 接收端点 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint，SDK 会派生 `/v1/traces` 和 `/v1/metrics` |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | （空） | 可选 trace 专用 endpoint |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | （空） | 可选 metric 专用 endpoint |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http` | 协议：`http` 或 `grpc` |
-| `OTEL_EXPORTER_OTLP_HEADERS` | （空） | 认证头（逗号分隔） |
+| `OTEL_EXPORTER_OTLP_HEADERS` | （空） | 通用认证头（逗号分隔） |
+| `OTEL_EXPORTER_OTLP_AUTHORIZATION` | （空） | `Authorization` header，常用于 Phoenix bearer auth 和 Langfuse |
+| `OTEL_EXPORTER_OTLP_X_API_KEY` | （空） | `x-api-key` header，用于兼容需要该 header 的平台 |
+| `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION` | （空） | Langfuse 实时摄取版本，例如 `4` |
+| `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | `true` | 是否导出 OTLP metrics |
+
+## 配置文件
+
+除环境变量外，也可以通过 `MONITORING_CONFIG_FILE` 指定 JSON/YAML 文件。环境变量中显式设置的非默认值会覆盖文件配置。
+
+```yaml
+monitoring:
+  enable_telemetry: true
+  service_name: nexent-backend
+  project_name: nexent-production
+  exporter:
+    provider: langfuse
+    protocol: http
+    endpoint: https://cloud.langfuse.com/api/public/otel
+    headers:
+      Authorization: Basic BASE64_ENCODED_KEY
+      x-langfuse-ingestion-version: "4"
+    export_metrics: false
+```
 
 ## 代码集成
 
@@ -183,14 +224,20 @@ with monitoring_manager.trace_tool_call("web_search", "agent_name", {"query": "t
 
 ## Collector 配置
 
-OpenTelemetry Collector 将数据路由到选定的后端：
+OpenTelemetry Collector 默认只通过 logging exporter 打印数据，避免没有外部后端时把数据转发回自身。需要通过 Collector 转发到平台时，增加对应 exporter：
 
 ```yaml
 exporters:
-  otlp:
-    endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+  otlphttp/langfuse:
+    endpoint: https://cloud.langfuse.com/api/public/otel
     headers:
-      authorization: ${OTEL_EXPORTER_OTLP_HEADERS}
+      Authorization: Basic BASE64_ENCODED_KEY
+      x-langfuse-ingestion-version: "4"
+
+service:
+  pipelines:
+    traces:
+      exporters: [otlphttp/langfuse, logging]
 ```
 
 完整配置见 `docker/monitoring/otel-collector-config.yml`。

@@ -10,7 +10,7 @@ processors:
   batch:
     timeout: 1s
     send_batch_size: 512
-  
+
   memory_limiter:
     limit_mib: 256
     check_interval: 1s
@@ -25,11 +25,6 @@ processors:
         action: insert
 
 exporters:
-  otlp:
-    endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4318}
-    headers:
-      authorization: ${OTEL_EXPORTER_OTLP_HEADERS:-}
-  
   logging:
     verbosity: normal
 
@@ -38,13 +33,13 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [otlp, logging]
-    
+      exporters: [logging]
+
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [otlp, logging]
-  
+      exporters: [logging]
+
   telemetry:
     logs:
       level: "info"
@@ -53,27 +48,32 @@ service:
 #
 # === Arize Phoenix ===
 # Set environment variables:
-#   OTEL_EXPORTER_OTLP_ENDPOINT=https://phoenix.arize.com/v1
-#   OTEL_EXPORTER_OTLP_HEADERS=x-api-key=YOUR_PHOENIX_API_KEY
+#   OTEL_EXPORTER_OTLP_ENDPOINT=https://app.phoenix.arize.com/s/YOUR_SPACE
+#   OTEL_EXPORTER_OTLP_AUTHORIZATION=Bearer YOUR_PHOENIX_API_KEY
+#   OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 #
 # Or configure directly in exporters section:
-#   otlp/arize:
-#     endpoint: https://phoenix.arize.com/v1
+#   otlphttp/arize:
+#     endpoint: https://app.phoenix.arize.com/s/YOUR_SPACE
 #     headers:
-#       x-api-key: YOUR_PHOENIX_API_KEY
+#       Authorization: Bearer YOUR_PHOENIX_API_KEY
+# Then add otlphttp/arize to the traces pipeline exporters.
 #
 # === Langfuse ===
 # Set environment variables:
 #   OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
-#   OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic BASE64_ENCODED_KEY
+#   OTEL_EXPORTER_OTLP_AUTHORIZATION=Basic BASE64_ENCODED_KEY
+#   OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION=4
 #
 # Where BASE64_ENCODED_KEY = base64(public_key:secret_key)
 #
 # Or configure directly:
-#   otlp/langfuse:
-#     endpoint: https://cloud.langfuse.com/api/public/otel/v1
+#   otlphttp/langfuse:
+#     endpoint: https://cloud.langfuse.com/api/public/otel
 #     headers:
 #       Authorization: Basic BASE64_ENCODED_KEY
+#       x-langfuse-ingestion-version: "4"
+# Then add otlphttp/langfuse to the traces pipeline exporters.
 #
 # === Local Jaeger (OTLP) ===
 # For gradual migration, you can still use Jaeger via OTLP:
@@ -85,4 +85,4 @@ service:
 # === Multiple Exporters ===
 # To export to multiple backends simultaneously, create multiple exporters
 # and add them to the pipelines:
-#   exporters: [otlp/arize, otlp/langfuse, logging]
+#   exporters: [otlphttp/arize, otlphttp/langfuse, logging]

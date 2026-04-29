@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Nexent LLM Performance Monitoring Setup Script
-# This script sets up OpenTelemetry + Jaeger + Prometheus + Grafana for monitoring
+# This script starts the OpenTelemetry Collector used by Nexent monitoring.
 
 set -e
 
@@ -47,7 +47,7 @@ check_service() {
     local name=$1
     local url=$2
     local port=$3
-    
+
     if curl -s --max-time 5 --connect-timeout 3 "$url" > /dev/null 2>&1; then
         echo "✅ $name is running at http://localhost:$port"
         return 0
@@ -57,22 +57,16 @@ check_service() {
     fi
 }
 
-# Check Jaeger
-check_service "Jaeger" "http://localhost:16686/api/services" "16686" || true
-
-# Check Prometheus
-check_service "Prometheus" "http://localhost:9090/-/healthy" "9090" || true
-
-# Check Grafana
-check_service "Grafana" "http://localhost:3005/api/health" "3005" || true
+# Check OpenTelemetry Collector HTTP receiver
+check_service "OpenTelemetry Collector HTTP receiver" "http://localhost:4318" "4318" || true
 
 echo ""
 echo "🎉 Monitoring setup complete!"
 echo ""
 echo "📊 Access your monitoring tools:"
-echo "   • Jaeger UI:    http://localhost:16686"
-echo "   • Prometheus:   http://localhost:9090"
-echo "   • Grafana:      http://localhost:3005 (admin/admin)"
+echo "   • OTLP HTTP receiver: http://localhost:4318"
+echo "   • OTLP gRPC receiver: localhost:4317"
+echo "   • Configure Phoenix, Langfuse, Jaeger, or another OTLP backend in monitoring.env"
 echo ""
 echo "🔧 To enable monitoring in your Nexent backend:"
 echo "   1. Set ENABLE_TELEMETRY=true in your .env file"

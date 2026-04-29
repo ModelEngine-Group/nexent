@@ -20,6 +20,7 @@ cp .env.example .env
 
 vim .env
 ENABLE_TELEMETRY=true
+MONITORING_PROVIDER=otlp
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
 
@@ -35,9 +36,18 @@ Arize Phoenix provides AI-specific observability with OpenInference semantic sup
 **Configuration:**
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=https://phoenix.arize.com/v1
-OTEL_EXPORTER_OTLP_HEADERS=x-api-key=YOUR_PHOENIX_API_KEY
+MONITORING_PROVIDER=phoenix
+OTEL_EXPORTER_OTLP_ENDPOINT=https://app.phoenix.arize.com/s/YOUR_SPACE
+OTEL_EXPORTER_OTLP_AUTHORIZATION="Bearer YOUR_PHOENIX_API_KEY"
 OTEL_EXPORTER_OTLP_PROTOCOL=http
+OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+```
+
+To let the Phoenix SDK handle part of the OpenTelemetry setup, also enable this. When the SDK returns a tracer provider, Nexent reuses it to avoid registering a second global OpenTelemetry provider:
+
+```bash
+MONITORING_USE_PLATFORM_SDK=true
+MONITORING_PROJECT_NAME=nexent-production
 ```
 
 **Features:**
@@ -53,12 +63,14 @@ Langfuse offers prompt management and LLM observability with OTLP support.
 **Configuration:**
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel/v1
+MONITORING_PROVIDER=langfuse
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
 
 LANGFUSE_PUBLIC_KEY=pk-xxx
 LANGFUSE_SECRET_KEY=sk-xxx
 
-OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic BASE64_ENCODED_KEY
+OTEL_EXPORTER_OTLP_AUTHORIZATION=Basic BASE64_ENCODED_KEY
+OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION=4
 ```
 
 Generate the encoded key:
@@ -101,10 +113,39 @@ jaeger:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
+| `MONITORING_CONFIG_FILE` | (empty) | JSON/YAML monitoring config file path |
+| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `jaeger`, `custom` |
+| `MONITORING_USE_PLATFORM_SDK` | `false` | Whether to also initialize a provider SDK |
+| `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP receiver endpoint |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint; SDK derives `/v1/traces` and `/v1/metrics` |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | (empty) | Optional trace-specific endpoint |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | (empty) | Optional metric-specific endpoint |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http` | Protocol: `http` or `grpc` |
-| `OTEL_EXPORTER_OTLP_HEADERS` | (empty) | Auth headers (comma-separated) |
+| `OTEL_EXPORTER_OTLP_HEADERS` | (empty) | Generic auth headers (comma-separated) |
+| `OTEL_EXPORTER_OTLP_AUTHORIZATION` | (empty) | `Authorization` header, commonly used by Phoenix bearer auth and Langfuse |
+| `OTEL_EXPORTER_OTLP_X_API_KEY` | (empty) | `x-api-key` header for platforms that require it |
+| `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION` | (empty) | Langfuse ingestion version, for example `4` |
+| `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | `true` | Whether to export OTLP metrics |
+
+## Configuration File
+
+You can also set `MONITORING_CONFIG_FILE` to a JSON/YAML file. Explicit non-default environment variables override file values.
+
+```yaml
+monitoring:
+  enable_telemetry: true
+  service_name: nexent-backend
+  project_name: nexent-production
+  exporter:
+    provider: langfuse
+    protocol: http
+    endpoint: https://cloud.langfuse.com/api/public/otel
+    headers:
+      Authorization: Basic BASE64_ENCODED_KEY
+      x-langfuse-ingestion-version: "4"
+    export_metrics: false
+```
 
 ## Code Integration
 
@@ -183,14 +224,20 @@ The system uses OpenInference semantic conventions for AI-specific observability
 
 ## Collector Configuration
 
-The OpenTelemetry Collector routes data to your chosen backend:
+By default, the OpenTelemetry Collector only logs data through the logging exporter. This avoids forwarding data back into itself when no external backend is configured. To forward through the Collector, add a platform exporter:
 
 ```yaml
 exporters:
-  otlp:
-    endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+  otlphttp/langfuse:
+    endpoint: https://cloud.langfuse.com/api/public/otel
     headers:
-      authorization: ${OTEL_EXPORTER_OTLP_HEADERS}
+      Authorization: Basic BASE64_ENCODED_KEY
+      x-langfuse-ingestion-version: "4"
+
+service:
+  pipelines:
+    traces:
+      exporters: [otlphttp/langfuse, logging]
 ```
 
 See `docker/monitoring/otel-collector-config.yml` for full configuration with platform examples.
