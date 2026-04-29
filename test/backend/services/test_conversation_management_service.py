@@ -42,11 +42,27 @@ class Template:
 jinja2_mod.StrictUndefined = StrictUndefined
 jinja2_mod.Template = Template
 sys.modules["jinja2"] = jinja2_mod
-# Stub nexent.core.agents.agent_model to satisfy imports in consts.model
+# Stub nexent.core.agents.agent_model to satisfy imports in consts.model and agent_run_manager
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 agent_model_mod.ToolConfig = object
+agent_model_mod.AgentRunInfo = object
 sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
 sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+
+# Stub nexent.core.agents.agent_context for agent_run_manager import
+agent_context_mod = types.ModuleType("nexent.core.agents.agent_context")
+agent_context_mod.ContextManager = object
+agent_context_mod.ContextManagerConfig = object
+sys.modules["nexent.core.agents.agent_context"] = agent_context_mod
+
+# Stub backend.agents.agent_run_manager to avoid importing the real module
+agent_run_manager_mod = types.ModuleType("backend.agents.agent_run_manager")
+mock_agent_run_manager = MagicMock()
+mock_agent_run_manager.clear_conversation_context_manager = MagicMock()
+agent_run_manager_mod.agent_run_manager = mock_agent_run_manager
+agent_run_manager_mod.AgentRunManager = object
+sys.modules["backend.agents"] = types.ModuleType("backend.agents")
+sys.modules["backend.agents.agent_run_manager"] = agent_run_manager_mod
 # Stub nexent.core.utils.observer ProcessType and MessageObserver used by conversation service
 observer_mod = types.ModuleType("nexent.core.utils.observer")
 observer_mod.MessageObserver = lambda *a, **k: types.SimpleNamespace(add_model_new_token=lambda t: None, add_model_reasoning_content=lambda r: None, flush_remaining_tokens=lambda: None)

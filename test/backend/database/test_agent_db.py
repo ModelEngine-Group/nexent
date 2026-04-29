@@ -121,6 +121,7 @@ class MockAgent:
         self.business_description = None
         self.group_ids = None
         self.is_new = True
+        self.enable_context_manager = False
         self.current_version_no = None
         self.version_no = 0
         self.created_by = None

@@ -364,6 +364,63 @@ class KnowledgeBaseService {
     }
   }
 
+  /**
+   * Fetch Haotian knowledge sets via backend proxy.
+   */
+  async getHaotianKnowledgeSets(listUrl: string, externalAuthorization: string): Promise<{
+    knowledge_sets: Array<{
+      name: string;
+      knowledge_bases: Array<{ dify_dataset_id: string; name: string }>;
+    }>;
+  }> {
+    const response = await fetch(API_ENDPOINTS.haotian.knowledgeSets, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        list_url: listUrl,
+        authorization: externalAuthorization,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Failed to fetch Haotian knowledge sets");
+    }
+    return data;
+  }
+
+  /**
+   * Test Haotian connection via backend proxy.
+   */
+  async testHaotianConnection(listUrl: string, externalAuthorization: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(API_ENDPOINTS.haotian.testConnection, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          list_url: listUrl,
+          authorization: externalAuthorization,
+        }),
+      });
+      if (response.ok) return { success: true };
+      const errorData = await response.json();
+      return { success: false, error: errorData.detail || "Connection failed" };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Connection test failed",
+      };
+    }
+  }
+
   // Sync Dify knowledge bases
   async syncDifyDatasets(
     difyApiBase: string,

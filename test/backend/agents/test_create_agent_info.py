@@ -3,7 +3,7 @@ import sys
 import types
 import importlib.util
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 
 from test.common.test_mocks import bootstrap_test_env
 
@@ -114,6 +114,11 @@ sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     ExternalA2AAgentConfig=MagicMock(),
     AgentRunInfo=MagicMock(),
     MessageObserver=MagicMock(),
+)
+sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
+    "nexent.core.agents.agent_context",
+    ContextManager=MagicMock(),
+    ContextManagerConfig=MagicMock(),
 )
 sys.modules['smolagents.agents'] = MagicMock()
 sys.modules['smolagents.utils'] = MagicMock()
@@ -1399,7 +1404,8 @@ class TestCreateAgentConfig:
                 model_name="test_model",
                 provide_run_summary=True,
                 managed_agents=[],
-                external_a2a_agents=[]
+                external_a2a_agents=[],
+                context_manager_config=ANY
             )
 
     @pytest.mark.asyncio
@@ -1466,7 +1472,8 @@ class TestCreateAgentConfig:
                     model_name="test_model",
                     provide_run_summary=True,
                     managed_agents=[mock_sub_agent_config],
-                    external_a2a_agents=[]
+                    external_a2a_agents=[],
+                    context_manager_config=ANY
                 )
 
     @pytest.mark.asyncio
@@ -1664,7 +1671,8 @@ class TestCreateAgentConfig:
                 model_name="main_model",  # Should fallback to "main_model"
                 provide_run_summary=True,
                 managed_agents=[],
-                external_a2a_agents=[]
+                external_a2a_agents=[],
+                context_manager_config=ANY
             )
 
     @pytest.mark.asyncio

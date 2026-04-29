@@ -13,7 +13,7 @@ import {
   Select,
   Skeleton,
 } from "antd";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { CloseOutlined } from "@ant-design/icons";
 
@@ -23,9 +23,15 @@ import { KnowledgeBase } from "@/types/knowledgeBase";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
+import HaotianKnowledgeSelectorModal, {
+  HaotianKnowledgeSet,
+} from "@/components/tool-config/HaotianKnowledgeSelectorModal";
 import { useConfig } from "@/hooks/useConfig";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
-import { useKnowledgeBaseConfigChangeHandler } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
+import {
+  useKnowledgeBaseConfigChangeHandler,
+  ToolKbType,
+} from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { API_ENDPOINTS } from "@/services/api";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
@@ -52,6 +58,7 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "dify_search",
   "datamate_search",
   "idata_search",
+  "haotian_search",
 ];
 
 const TOOLS_SUPPORTING_RERANK = [
@@ -183,14 +190,72 @@ export default function ToolConfigModal({
     | "dify_search"
     | "datamate_search"
     | "idata_search"
+    | "haotian_search"
     | null => {
     if (!toolRequiresKbSelection) return null;
     const name = tool?.name;
     if (name === "dify_search") return "dify_search";
     if (name === "datamate_search") return "datamate_search";
     if (name === "idata_search") return "idata_search";
+    if (name === "haotian_search") return "haotian_search";
     return "knowledge_base_search";
   }, [tool?.name, toolRequiresKbSelection]);
+
+  // Haotian configuration state
+  const [haotianConfig, setHaotianConfig] = useState<{
+    listUrl: string;
+    retrieveUrl: string;
+    authorization: string;
+  }>({
+    listUrl: "",
+    retrieveUrl: "",
+    authorization: "",
+  });
+  const [haotianKnowledgeSets, setHaotianKnowledgeSets] = useState<
+    HaotianKnowledgeSet[]
+  >([]);
+
+  // Initialize Haotian config from params
+  useEffect(() => {
+    if (toolKbType !== "haotian_search") return;
+    const listUrl = String(
+      currentParams.find((p) => p.name === "list_url")?.value || ""
+    );
+    const retrieveUrl = String(
+      currentParams.find((p) => p.name === "retrieve_url")?.value || ""
+    );
+    const extAuth = String(
+      currentParams.find((p) => p.name === "authorization")?.value || ""
+    );
+    setHaotianConfig({ listUrl, retrieveUrl, authorization: extAuth });
+  }, [toolKbType, currentParams]);
+
+  const {
+    data: haotianSetsResult,
+    isFetching: haotianSetsLoading,
+    refetch: refetchHaotianSets,
+  } = useQuery({
+    queryKey: ["knowledgeSets", "list", "haotian_search", haotianConfig.listUrl],
+    queryFn: async () => {
+      if (!haotianConfig.listUrl || !haotianConfig.authorization) {
+        return { knowledge_sets: [] as HaotianKnowledgeSet[] };
+      }
+      return await knowledgeBaseService.getHaotianKnowledgeSets(
+        haotianConfig.listUrl,
+        haotianConfig.authorization
+      );
+    },
+    enabled: !!haotianConfig.listUrl,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    retry: 0,
+  });
+
+  useEffect(() => {
+    if (toolKbType !== "haotian_search") return;
+    const sets = (haotianSetsResult?.knowledge_sets || []) as HaotianKnowledgeSet[];
+    setHaotianKnowledgeSets(sets);
+  }, [toolKbType, haotianSetsResult]);
 
   // Get Dify configuration from initial params
   const difyServerUrlParam = useMemo(() => {
@@ -944,6 +1009,10 @@ export default function ToolConfigModal({
         if (difyConfig.serverUrl && difyConfig.apiKey) {
           refetchKnowledgeBases();
         }
+      } else if (toolKbType === "haotian_search") {
+        if (haotianConfig.listUrl && haotianConfig.authorization) {
+          refetchHaotianSets();
+        }
       } else {
         refetchKnowledgeBases();
       }
@@ -952,8 +1021,10 @@ export default function ToolConfigModal({
     toolRequiresKbSelection,
     isOpen,
     refetchKnowledgeBases,
+    refetchHaotianSets,
     toolKbType,
     difyConfig,
+    haotianConfig,
   ]);
 
   // Show sync message when knowledge base selector modal opens
@@ -965,7 +1036,10 @@ export default function ToolConfigModal({
       hasShownSyncMessageRef.current = true;
 
       // Trigger sync and show message based on result
-      refetchKnowledgeBases()
+      const syncPromise =
+        toolKbType === "haotian_search" ? refetchHaotianSets() : refetchKnowledgeBases();
+
+      syncPromise
         .then((result) => {
           if (result.isError || result.error) {
             log.error("Failed to sync knowledge bases:", result.error);
@@ -984,7 +1058,15 @@ export default function ToolConfigModal({
           message.error(t("knowledgeBase.message.syncError"));
         });
     }
-  }, [kbSelectorVisible, toolRequiresKbSelection, refetchKnowledgeBases, clearKnowledgeBases, t]);
+  }, [
+    kbSelectorVisible,
+    toolRequiresKbSelection,
+    refetchKnowledgeBases,
+    refetchHaotianSets,
+    toolKbType,
+    clearKnowledgeBases,
+    t,
+  ]);
 
   // Reset sync message flag when KB selector closes
   useEffect(() => {
@@ -1001,6 +1083,14 @@ export default function ToolConfigModal({
       Object.entries(formValues).forEach(([fieldName, value]) => {
         const index = parseInt(fieldName.replace("param_", ""));
         if (!isNaN(index) && newParams[index]) {
+          const paramName = newParams[index].name;
+          // Skip knowledge base selector field (controlled by handleHaotianKbConfirm)
+          if (
+            paramName === "index_names" ||
+            paramName === "dataset_ids"
+          ) {
+            return;
+          }
           newParams[index] = { ...newParams[index], value };
         }
       });
@@ -1156,6 +1246,36 @@ export default function ToolConfigModal({
     setCurrentKbParamIndex(null);
   };
 
+  const handleHaotianKbConfirm = (payload: {
+    datasetIds: string[];
+    displayNames: string[];
+  }) => {
+    const ids = payload.datasetIds || [];
+    const displayNames = payload.displayNames || [];
+
+    setSelectedKbIds(ids);
+    setSelectedKbDisplayNames(displayNames);
+    setHasSubmitted(false);
+
+    if (currentKbParamIndex !== null) {
+      const param = currentParams[currentKbParamIndex];
+      if (param) {
+        const formFieldName = `param_${currentKbParamIndex}`;
+        form.setFieldValue(formFieldName, ids);
+
+        const updatedParams = [...currentParams];
+        updatedParams[currentKbParamIndex] = {
+          ...updatedParams[currentKbParamIndex],
+          value: ids,
+        };
+        setCurrentParams(updatedParams);
+      }
+    }
+
+    setKbSelectorVisible(false);
+    setCurrentKbParamIndex(null);
+  };
+
   // Remove a single knowledge base from selection
   const removeKbFromSelection = (indexToRemove: number, paramIndex: number) => {
     const newIds = selectedKbIds.filter((_, i) => i !== indexToRemove);
@@ -1182,11 +1302,7 @@ export default function ToolConfigModal({
   };
 
   // Get tool type for knowledge base selector
-  const getToolType = ():
-    | "knowledge_base_search"
-    | "dify_search"
-    | "datamate_search"
-    | "idata_search" => {
+  const getToolType = (): ToolKbType => {
     return toolKbType || "knowledge_base_search";
   };
 
@@ -1215,12 +1331,26 @@ export default function ToolConfigModal({
         }
 
         // Map IDs to display names
-        if (ids.length > 0 && knowledgeBases.length > 0) {
-          displayNames = ids.map((id) => {
-            const cleanId = id.trim();
-            const kb = knowledgeBases.find((k) => k.id === cleanId);
-            return kb?.display_name || kb?.name || cleanId;
-          });
+        if (ids.length > 0) {
+          if (toolKbType === "haotian_search" && haotianKnowledgeSets.length > 0) {
+            // Search through nested haotian knowledge sets
+            displayNames = ids.map((id) => {
+              const cleanId = id.trim();
+              for (const ks of haotianKnowledgeSets) {
+                const kb = (ks.knowledge_bases || []).find(
+                  (b) => String(b.dify_dataset_id) === cleanId
+                );
+                if (kb) return kb.name;
+              }
+              return cleanId;
+            });
+          } else if (knowledgeBases.length > 0) {
+            displayNames = ids.map((id) => {
+              const cleanId = id.trim();
+              const kb = knowledgeBases.find((k) => k.id === cleanId);
+              return kb?.display_name || kb?.name || cleanId;
+            });
+          }
         }
       }
 
@@ -1770,6 +1900,8 @@ export default function ToolConfigModal({
                     removeKbFromSelection(index, paramIndex);
                   }
                 }}
+                toolKbType={toolKbType}
+                haotianKnowledgeSets={haotianKnowledgeSets}
               />
             )}
           </div>
@@ -1777,57 +1909,63 @@ export default function ToolConfigModal({
       </Modal>
 
       {/* Knowledge Base Selector Modal */}
-      <KnowledgeBaseSelectorModal
-        isOpen={kbSelectorVisible}
-        onClose={() => setKbSelectorVisible(false)}
-        onConfirm={handleKbConfirm}
-        selectedIds={selectedKbIds}
-        toolType={getToolType()}
-        knowledgeBases={knowledgeBases}
-        isLoading={kbLoading}
-        showCheckbox={true}
-        onSync={async (toolType) => {
-          try {
-            const result = await refetchKnowledgeBases();
-            // Check if refetch has an error - React Query sets isError when queryFn throws
-            // Note: if queryFn catches error internally and returns data, isError will be false
-            // So we need to check both error and isError
-            if (result.isError || result.error) {
-              log.error("Failed to sync knowledge bases:", result.error);
-              // Clear knowledge base list on sync failure
+      {toolKbType === "haotian_search" ? (
+        <HaotianKnowledgeSelectorModal
+          isOpen={kbSelectorVisible}
+          onClose={() => setKbSelectorVisible(false)}
+          onConfirm={handleHaotianKbConfirm}
+          selectedDatasetIds={selectedKbIds}
+          knowledgeSets={haotianKnowledgeSets}
+          isLoading={haotianSetsLoading}
+          title="Haotian knowledge sets"
+        />
+      ) : (
+        <KnowledgeBaseSelectorModal
+          isOpen={kbSelectorVisible}
+          onClose={() => setKbSelectorVisible(false)}
+          onConfirm={handleKbConfirm}
+          selectedIds={selectedKbIds}
+          toolType={getToolType()}
+          knowledgeBases={knowledgeBases}
+          isLoading={kbLoading}
+          showCheckbox={true}
+          onSync={async () => {
+            try {
+              const result = await refetchKnowledgeBases();
+              if (result.isError || result.error) {
+                log.error("Failed to sync knowledge bases:", result.error);
+                clearKnowledgeBases();
+                message.error(t("knowledgeBase.message.syncError"));
+                return;
+              }
+              message.success(t("knowledgeBase.message.syncSuccess"));
+            } catch (error) {
+              log.error("Failed to sync knowledge bases:", error);
               clearKnowledgeBases();
               message.error(t("knowledgeBase.message.syncError"));
-              return;
             }
-            // Show success message after sync completes
-            message.success(t("knowledgeBase.message.syncSuccess"));
-          } catch (error) {
-            log.error("Failed to sync knowledge bases:", error);
-            // Clear knowledge base list on sync failure
-            clearKnowledgeBases();
-            message.error(t("knowledgeBase.message.syncError"));
+          }}
+          syncLoading={kbLoading}
+          isSelectable={canSelectKnowledgeBase}
+          currentEmbeddingModel={currentEmbeddingModel}
+          currentMultiEmbeddingModel={currentMultiEmbeddingModel}
+          toolMultimodal={toolMultimodal}
+          difyConfig={
+            toolKbType === "dify_search"
+              ? difyConfig
+              : toolKbType === "datamate_search"
+                ? { serverUrl: datamateServerUrl }
+                : toolKbType === "idata_search"
+                  ? {
+                      serverUrl: idataConfig.serverUrl,
+                      apiKey: idataConfig.apiKey,
+                      userId: idataConfig.userId,
+                      knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+                    }
+                  : undefined
           }
-        }}
-        syncLoading={kbLoading}
-        isSelectable={canSelectKnowledgeBase}
-        currentEmbeddingModel={currentEmbeddingModel}
-        currentMultiEmbeddingModel={currentMultiEmbeddingModel}
-        toolMultimodal={toolMultimodal}
-        difyConfig={
-          toolKbType === "dify_search"
-            ? difyConfig
-            : toolKbType === "datamate_search"
-              ? { serverUrl: datamateServerUrl }
-              : toolKbType === "idata_search"
-                ? {
-                    serverUrl: idataConfig.serverUrl,
-                    apiKey: idataConfig.apiKey,
-                    userId: idataConfig.userId,
-                    knowledgeSpaceId: idataConfig.knowledgeSpaceId,
-                  }
-                : undefined
-        }
-      />
+        />
+      )}
     </>
   );
 }

@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import PIL.Image
 
+from .agent_context import ContextManager
+from ..utils.token_estimation import msg_token_count
 
 def parse_code_blobs(text: str) -> str:
     """Extract code blocs from the LLM's output for execution.
@@ -207,11 +209,47 @@ class FinalAnswerError(Exception):
     pass
 
 
+def _build_final_answer_messages(task: str, agent_prompt_templates: Dict[str, Any], memory_messages: List) -> List[ChatMessage]:
+    """Build messages for final answer generation.
+
+    Args:
+        task: The original task prompt
+        agent_prompt_templates: Prompt templates from the agent
+        memory_messages: Messages from agent memory
+
+    Returns:
+        List of ChatMessage for final answer generation
+    """
+    from smolagents.models import MessageRole
+
+    messages = [
+        ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=[{"type": "text", "text": agent_prompt_templates["final_answer"]["pre_messages"]}]
+        )
+    ]
+    messages += memory_messages[1:]
+    messages.append(
+        ChatMessage(
+            role=MessageRole.USER,
+            content=[{"type": "text", "text": Template(
+                agent_prompt_templates["final_answer"]["post_messages"],
+                undefined=StrictUndefined
+            ).render(task=task)}]
+        )
+    )
+    return messages
+
+
 class CoreAgent(CodeAgent):
     def __init__(self, observer: MessageObserver, prompt_templates: Dict[str, Any] | None = None, *args, **kwargs):
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
         self.observer = observer
         self.stop_event = threading.Event()
+        self._history_step_count = 0  # For ContextManager, record boundary for compression
+        self.context_manager: ContextManager = None
+        self.step_metrics: List[dict] = []  # Quantitative metrics per step
+        self._last_uncompressed_est = 0
 
     def _log_model_call_parameters(self, input_messages: List[ChatMessage], stop_sequences: List[str], additional_args: Dict[str, Any]) -> None:
         """
@@ -235,6 +273,7 @@ class CoreAgent(CodeAgent):
             # Format as JSON with truncation for readability
             messages_json = json.dumps(messages_data, indent=2, ensure_ascii=False, default=str)
             truncated_messages = truncate_content(messages_json, max_length=1000)
+            truncated_messages = messages_json
 
             # Format stop sequences
             stop_seq_str = ", ".join(f'"{seq}"' for seq in stop_sequences) if stop_sequences else "None"
@@ -265,7 +304,7 @@ Additional Args:
 
         except Exception as e:
             # Don't let logging errors break the model call
-            self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.WARNING)
+            self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.INFO)
 
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
@@ -277,8 +316,22 @@ Additional Args:
 
         memory_messages = self.write_memory_to_messages()
 
-        input_messages = memory_messages.copy()
+        chars_per_token = (
+            self.context_manager.config.chars_per_token
+            if self.context_manager
+            else 1.5
+        )
+        self._last_uncompressed_est = msg_token_count(
+            memory_messages, chars_per_token
+        )
 
+        input_messages = memory_messages.copy()
+        # import pdb; pdb.set_trace()
+        # Trigger context compression if needed before building messages
+        if self.context_manager and self.context_manager.config.enabled:
+            input_messages = self.context_manager.compress_if_needed(
+                self.model, self.memory, input_messages, self._history_step_count
+            )
         # Add new step in logs
         memory_step.model_input_messages = input_messages
         stop_sequences = ["Observation:", "Calling tools:"]
@@ -551,6 +604,8 @@ You have been provided with these additional arguments, that you can access usin
 
             finally:
                 self._finalize_step(action_step)
+                # add quantitative collection
+                self._collect_step_metrics(action_step)
                 self.memory.steps.append(action_step)
                 yield action_step
                 self.step_number += 1
@@ -570,3 +625,151 @@ You have been provided with these additional arguments, that you can access usin
             # and sets action_step.error, so don't yield again to avoid duplicate error
             final_answer = self._handle_max_steps_reached(task)
         yield FinalAnswerStep(handle_agent_output_types(final_answer))
+
+
+    def _collect_step_metrics(self, action_step: ActionStep):
+        """Extract single-step data into structured metrics"""
+        metric = {
+            "step_number": action_step.step_number,
+            "timestamp": time.time(),
+            "main_llm": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+            },
+            "compression": {
+                "calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_hits": 0,
+                "cache_types": [],
+            },
+            "memory_state": {
+                "estimated_input_tokens": 0,
+                "estimated_output_tokens": 0,
+            },
+            "uncompressed_mem_est_input": 0,
+            "cache_hit": False,
+            "cache_types": [],
+        }
+
+        # 1. Main model tokens
+        if action_step.token_usage:
+            metric["main_llm"]["input_tokens"] = action_step.token_usage.input_tokens
+            metric["main_llm"]["output_tokens"] = action_step.token_usage.output_tokens
+
+        # 2. Compression overhead (from ContextManager)
+        if self.context_manager and self.context_manager.config.enabled:
+            comp_stats = self.context_manager.get_step_compression_stats()
+            metric["compression"].update(comp_stats)
+            metric["cache_hit"] = comp_stats.get("cache_hits", 0) > 0
+            metric["cache_types"] = comp_stats.get("cache_types", [])
+        else:
+            metric["compression"] = {
+                "calls": 0, "input_tokens": 0, "output_tokens": 0,
+                "cache_hits": 0, "cache_types": [],
+            }
+            metric["cache_hit"] = False
+            metric["cache_types"] = []
+
+        # 3. Current memory estimated length
+        chars_per_token = (
+            self.context_manager.config.chars_per_token
+            if self.context_manager
+            else 1.5
+        )
+        metric["memory_state"]["estimated_input_tokens"] = msg_token_count(
+            action_step.model_input_messages, chars_per_token
+        )
+        metric["memory_state"]["estimated_output_tokens"] = msg_token_count(
+            action_step.model_output_message, chars_per_token
+        )
+
+        # 4. Uncompressed memory estimation
+        metric["uncompressed_mem_est_input"] = getattr(
+            self, "_last_uncompressed_est", 0
+        )
+        self._last_uncompressed_est = 0
+
+        # 5. Compression ratio
+        uncompressed = metric["uncompressed_mem_est_input"]
+        compressed = metric["memory_state"]["estimated_input_tokens"]
+        if uncompressed > 0:
+            metric["compression_ratio"] = round(
+                (1 - compressed / uncompressed) * 100, 1
+            )
+        else:
+            metric["compression_ratio"] = 0.0
+
+        self.step_metrics.append(metric)
+    def _handle_max_steps_reached(self, task: str) -> Any:
+        """Handle the case when max steps is reached by generating final answer with streaming.
+
+        This method overrides the parent class implementation to use streaming for
+        the final answer generation, allowing the observer to receive thinking tokens
+        in real-time.
+
+        Args:
+            task: The original task prompt
+
+        Returns:
+            The final answer content string
+        """
+        from smolagents.models import MessageRole
+
+        action_step_start_time = time.time()
+
+        # Send STEP_COUNT to start a new step for the final answer thinking process
+        # This ensures the thinking content is displayed in the task details panel
+        self.observer.add_message(
+            self.agent_name, ProcessType.STEP_COUNT, self.step_number)
+
+        # Build messages for final answer generation
+        memory_messages = self.write_memory_to_messages()
+        messages = _build_final_answer_messages(task, self.prompt_templates, memory_messages)
+
+        # Create the final memory step with error
+        final_memory_step = ActionStep(
+            step_number=self.step_number,
+            error=AgentMaxStepsError("Reached max steps.", self.logger),
+            timing=Timing(start_time=action_step_start_time),
+        )
+
+        # Track accumulated content and token usage for streaming
+        accumulated_content = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+        role = None
+
+        try:
+            # Use streaming call (model.__call__) to generate final answer
+            # This will trigger observer.add_model_new_token() and
+            # observer.add_model_reasoning_content() in OpenAIModel
+            chat_message: ChatMessage = self.model(messages)
+
+            # Update role and content from the completed message
+            role = chat_message.role
+            model_output = chat_message.content or ""
+
+            # Accumulate token usage if available
+            if chat_message.token_usage:
+                total_input_tokens = chat_message.token_usage.input_tokens
+                total_output_tokens = chat_message.token_usage.output_tokens
+
+        except Exception as e:
+            # Fallback to error message if streaming fails
+            model_output = f"Error in generating final LLM output: {e}"
+            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.WARNING)
+
+        # Finalize the memory step
+        final_memory_step.timing.end_time = time.time()
+        final_memory_step.token_usage = TokenUsage(
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens
+        )
+        final_memory_step.action_output = model_output
+
+        self._finalize_step(final_memory_step)
+        self.memory.steps.append(final_memory_step)
+
+        return model_output
+

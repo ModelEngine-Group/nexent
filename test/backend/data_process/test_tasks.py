@@ -135,7 +135,7 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         sys.modules["database.attachment_db"] = types.SimpleNamespace(
             get_file_stream=lambda source: io.BytesIO(b"stub-bytes"),
             get_file_size_from_minio=lambda object_name, bucket=None: 0,
-            build_s3_url=lambda bucket_name, object_name: f"http://mock-s3/{bucket_name}/{object_name}",
+            build_s3_url=lambda bucket_name, object_name: f"http://mock-s3/{bucket_name}/{object_name}",  # NOSONAR
             upload_fileobj=lambda file_obj, bucket_name, object_name: "mock-etag",
         )
     # Stub model_management_db module required by ray_actors
