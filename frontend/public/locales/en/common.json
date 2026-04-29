@@ -1957,6 +1957,7 @@
   "mcpTools.community.descriptionMarkdownHint": "Tip: This description is shown to community users and supports Markdown formatting.",
   "mcpTools.community.descriptionPreview": "Markdown Preview",
   "mcpTools.tools.loadFailed": "Failed to load tools",
+  "mcpTools.tools.refreshing": "Refreshing tools…",
   "mcpTools.detail.title": "MCP Service Details",
   "mcpTools.detail.name": "Name",
   "mcpTools.detail.description": "Description",

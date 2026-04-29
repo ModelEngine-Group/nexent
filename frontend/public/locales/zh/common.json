@@ -2104,6 +2104,7 @@
   "mcpTools.community.descriptionMarkdownHint": "提示：该描述会展示给社区用户，支持 Markdown 格式化。",
   "mcpTools.community.descriptionPreview": "Markdown 预览",
   "mcpTools.tools.loadFailed": "获取工具列表失败",
+  "mcpTools.tools.refreshing": "正在刷新工具列表…",
   "mcpTools.detail.title": "MCP 服务详情",
   "mcpTools.detail.name": "名称",
   "mcpTools.detail.description": "描述",

@@ -10,11 +10,11 @@ import {
   addMcpToolService,
   resolveContainerServerInfo,
 } from "@/services/mcpToolsService";
-import { updateToolList } from "@/services/mcpService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import { refreshToolListWithToast } from "./refreshToolListWithToast";
 
 interface UseMcpAddLocalParams {
   onSuccess: () => void;
@@ -89,11 +89,11 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.tagStats,
       });
-      try {
-        await updateToolList();
-      } catch (error) {
-        log.error("[useMcpAddLocal] Failed to refresh tool list", { error });
-      }
+      await refreshToolListWithToast({
+        message,
+        t,
+        toastKey: "mcp-tools-refresh-tools-add-local",
+      });
       onSuccess();
       return true;
     } catch (error) {

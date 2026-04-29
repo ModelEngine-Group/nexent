@@ -506,7 +506,7 @@ export const resolveQuickAddOptions = (
       key: `remote-${index}`,
       sourceType: "remote",
       sourceLabel: `${remote.type || "remote"} - ${remote.url}`,
-      transportType: remoteTarget.transportType,
+      transportType: remoteTarget.transportType as McpTransportType,
       serverUrl: remoteTarget.serverUrl,
       remoteVariables,
       remoteHeaders: pickSupportedAuthorizationHeaders(allRemoteHeaders),
@@ -575,7 +575,7 @@ export const resolveQuickAddOptions = (
         ...basePackageOption,
         key: `package-${index}`,
         sourceLabel: `${packageIdentifier} - ${transportType} - ${transportUrl}`,
-        transportType: packageTarget.transportType,
+        transportType: packageTarget.transportType as McpTransportType,
         serverUrl: packageTarget.serverUrl,
       });
       return;
@@ -586,7 +586,7 @@ export const resolveQuickAddOptions = (
         ...basePackageOption,
         key: `package-${index}`,
         sourceLabel: `${packageIdentifier} - stdio`,
-        transportType: "container",
+        transportType: McpTransportType.CONTAINER,
         packageEnvTemplate: extractPackageEnvTemplate(
           service,
           packageIdentifier

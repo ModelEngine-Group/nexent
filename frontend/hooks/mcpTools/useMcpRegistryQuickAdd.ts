@@ -9,9 +9,9 @@ import {
   addContainerMcpToolService,
   addMcpToolService,
 } from "@/services/mcpToolsService";
-import { updateToolList } from "@/services/mcpService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
+import { refreshToolListWithToast } from "./refreshToolListWithToast";
 import {
   buildInitialQuickAddValues,
   collectPackageEnvValues,
@@ -117,7 +117,7 @@ export function useMcpRegistryQuickAdd({
 
     setSubmitting(true);
     try {
-      if (selectedOption.transportType === "container") {
+      if (selectedOption.transportType === McpTransportType.CONTAINER) {
         const available = await checkContainerPortAvailable(containerPort);
         if (!available) {
           message.error(
@@ -193,13 +193,11 @@ export function useMcpRegistryQuickAdd({
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.tagStats,
       });
-      try {
-        await updateToolList();
-      } catch (error) {
-        log.error("[useMcpRegistryQuickAdd] Failed to refresh tool list", {
-          error,
-        });
-      }
+      await refreshToolListWithToast({
+        message,
+        t,
+        toastKey: "mcp-tools-refresh-tools-add-registry",
+      });
       onSuccess();
       close();
     } catch (error) {

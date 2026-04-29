@@ -19,7 +19,7 @@ import {
   updateCommunityMcpTool,
   updateMcpToolService,
 } from "@/services/mcpToolsService";
-import { updateToolList } from "@/services/mcpService";
+import { refreshToolListWithToast } from "./refreshToolListWithToast";
 import {
   isHttpUrl,
   isSameStringArray,
@@ -214,13 +214,11 @@ export function useMcpServiceDetail({
       });
       message.success(t("mcpTools.service.saveSuccess"));
       invalidateServices();
-      try {
-        await updateToolList();
-      } catch (error) {
-        log.error("[useMcpServiceDetail] Failed to refresh tool list", {
-          error,
-        });
-      }
+      await refreshToolListWithToast({
+        message,
+        t,
+        toastKey: "mcp-tools-refresh-tools-save",
+      });
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to save service", { error });
       message.error(t("mcpTools.service.saveFailed"));
@@ -236,14 +234,11 @@ export function useMcpServiceDetail({
       await deleteMcpToolService(selectedService.mcpId);
       message.success(t("mcpTools.service.deleted"));
       invalidateServices();
-      try {
-        await updateToolList();
-      } catch (error) {
-        log.error(
-          "[useMcpServiceDetail] Failed to refresh tool list after delete",
-          { error }
-        );
-      }
+      await refreshToolListWithToast({
+        message,
+        t,
+        toastKey: "mcp-tools-refresh-tools-delete",
+      });
       onClose();
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to delete service", { error });

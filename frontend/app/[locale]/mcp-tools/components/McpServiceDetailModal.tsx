@@ -29,6 +29,7 @@ interface McpServiceDetailModalProps {
   onClose: () => void;
   onToggleEnable: (service: McpServiceItem) => void;
   isToggleLoading: (mcpId?: number) => boolean;
+  isToolsRefreshing: (mcpId?: number) => boolean;
 }
 
 export default function McpServiceDetailModal({
@@ -36,6 +37,7 @@ export default function McpServiceDetailModal({
   onClose,
   onToggleEnable,
   isToggleLoading,
+  isToolsRefreshing,
 }: McpServiceDetailModalProps) {
   const { modal } = App.useApp();
   const { t } = useTranslation("common");
@@ -62,6 +64,9 @@ export default function McpServiceDetailModal({
   if (!selectedService || !draft) {
     return null;
   }
+
+  const toolsRefreshing = isToolsRefreshing(selectedService.mcpId);
+  const toggleBusy = isToggleLoading(selectedService.mcpId) || toolsRefreshing;
 
   const hasRegistryJson = Boolean(draft.registryJson);
   const hasConfigJson = Boolean(draft.configJson);
@@ -346,7 +351,7 @@ export default function McpServiceDetailModal({
               type="primary"
               autoInsertSpace={false}
               loading={isToggleLoading(selectedService.mcpId)}
-              disabled={isToggleLoading(selectedService.mcpId)}
+              disabled={toggleBusy}
               onClick={() => onToggleEnable(selectedService)}
             >
               {draft.enabled === McpServiceStatus.ENABLED

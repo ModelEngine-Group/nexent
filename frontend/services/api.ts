@@ -256,7 +256,6 @@ export const API_ENDPOINTS = {
     tagsStats: `${API_BASE_URL}/mcp/tags/stats`,
     portCheck: `${API_BASE_URL}/mcp/port/check`,
     portSuggest: `${API_BASE_URL}/mcp/port/suggest`,
-    addContainer: `${API_BASE_URL}/mcp/container/add`,
     enable: `${API_BASE_URL}/mcp/enable`,
     disable: `${API_BASE_URL}/mcp/disable`,
   },

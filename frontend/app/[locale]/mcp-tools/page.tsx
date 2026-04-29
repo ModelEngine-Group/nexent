@@ -35,14 +35,19 @@ export default function McpToolsPage() {
   const toggle = useMcpServiceToggle();
   const myPublished = useMyCommunityMcp(tab === "published");
 
-  const handleToggle = (service: McpServiceItem) => {
-    toggle.toggle(service).catch((error) => {
+  const handleToggle = async (service: McpServiceItem) => {
+    try {
+      const nextStatus = await toggle.toggle(service);
+      setSelectedImported((prev) =>
+        prev && prev.mcpId === service.mcpId ? { ...prev, enabled: nextStatus } : prev
+      );
+    } catch (error) {
       log.error("[McpToolsPage] Failed to toggle service status", {
         error,
         serviceName: service.name,
         serverUrl: service.serverUrl,
       });
-    });
+    }
   };
 
   const handleSelectPublished = (item: CommunityMcpCard) => {
@@ -127,6 +132,7 @@ export default function McpToolsPage() {
                 onClose={() => setSelectedImported(null)}
                 onToggleEnable={handleToggle}
                 isToggleLoading={toggle.isToggling}
+                isToolsRefreshing={toggle.isRefreshing}
               />
             ) : null}
 

@@ -652,6 +652,17 @@ async def delete_mcp_service(
     Raises:
         McpNotFoundError: If MCP record is not found
     """
+    current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not current_record:
+        raise McpNotFoundError("MCP record not found")
+    container_id = current_record.get("container_id")
+    if container_id:
+        try:
+            manager = MCPContainerManager()
+            await manager.stop_mcp_container(container_id=container_id)
+        except Exception as exc:
+            logger.warning(f"Failed to stop container: {exc}, but continue to delete MCP record")
+
     delete_mcp_record_by_id(
         mcp_id=mcp_id,
         tenant_id=tenant_id,
@@ -719,14 +730,8 @@ async def get_remote_mcp_server_list(
         else:
             permission = PERMISSION_EDIT if can_edit_all or str(created_by) == str(user_id) else PERMISSION_READ
 
-        source = record.get("source")
-        enabled = bool(record.get("enabled"))
-        status = record.get("status")
-        registry_json = record.get("registry_json")
         config_json = record.get("config_json")
-
         container_id = record.get("container_id")
-        container_port = record.get("container_port")
 
         is_container = container_id is not None or config_json is not None
 
@@ -740,18 +745,18 @@ async def get_remote_mcp_server_list(
         record_dict = {
             "remote_mcp_server_name": record["mcp_name"],
             "remote_mcp_server": record["mcp_server"],
-            "status": status,
+            "status": record.get("status"),
             "permission": permission,
             "mcp_id": record.get("mcp_id"),
             "container_id": container_id,
             "description": record.get("description"),
-            "enabled": enabled,
-            "source": source,
+            "enabled": record.get("enabled"),
+            "source": record.get("source"),
             "update_time": record.get("update_time"),
             "tags": record.get("tags") or [],
-            "container_port": container_port,
-            "registry_json": registry_json,
-            "config_json": config_json,
+            "container_port": record.get("container_port"),
+            "registry_json": record.get("registry_json"),
+            "config_json": record.get("config_json"),
             "container_status": container_status,
         }
         if is_need_auth:

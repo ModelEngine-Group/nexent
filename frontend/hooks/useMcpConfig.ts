@@ -181,7 +181,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     const key = `${server.service_name}__${server.mcp_url}`;
     setHealthCheckLoading(prev => ({ ...prev, [key]: true }));
     try {
-      const result = await checkMcpServerHealth(server.mcp_id, options.tenantId);
+      const result = await checkMcpServerHealth(server.mcp_id);
       invalidateMcpServers();
       invalidateMcpContainers();
       await refreshToolsAndAgents();

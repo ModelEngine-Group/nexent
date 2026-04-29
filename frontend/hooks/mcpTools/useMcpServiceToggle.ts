@@ -9,7 +9,7 @@ import {
   disableMcpToolService,
   enableMcpToolService,
 } from "@/services/mcpToolsService";
-import { updateToolList } from "@/services/mcpService";
+import { refreshToolListWithToast } from "./refreshToolListWithToast";
 import { McpServiceStatus } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
@@ -24,6 +24,9 @@ export function useMcpServiceToggle() {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const [toggling, setToggling] = useState<Record<number, boolean>>({});
+  const [refreshingTools, setRefreshingTools] = useState<Record<number, boolean>>(
+    {}
+  );
 
   const isToggling = (mcpId?: number) =>
     typeof mcpId === "number" ? Boolean(toggling[mcpId]) : false;
@@ -31,10 +34,13 @@ export function useMcpServiceToggle() {
   const setToggle = (mcpId: number, value: boolean) =>
     setToggling((prev) => ({ ...prev, [mcpId]: value }));
 
-  const toggle = async (service: McpServiceItem) => {
+  const isRefreshing = (mcpId?: number) =>
+    typeof mcpId === "number" ? Boolean(refreshingTools[mcpId]) : false;
+
+  const toggle = async (service: McpServiceItem): Promise<McpServiceStatus> => {
     if (typeof service.mcpId !== "number" || service.mcpId < 0) {
       message.warning(t("mcpTools.service.toggle.missingId"));
-      return;
+      throw new Error("Missing MCP id");
     }
     const nextEnabled = service.enabled !== McpServiceStatus.ENABLED;
     setToggle(service.mcpId, true);
@@ -49,18 +55,28 @@ export function useMcpServiceToggle() {
           ? t("mcpTools.service.enabled")
           : t("mcpTools.service.disabled")
       );
-      try {
-        await updateToolList();
-      } catch (error) {
-        log.error("[useMcpServiceToggle] Failed to refresh tool list", {
-          error,
-        });
-      }
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
-      queryClient.invalidateQueries({ queryKey: ["tools"] });
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      const nextStatus = nextEnabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED;
+
+      // Fire-and-forget tool scan / refresh. UI should update immediately after
+      // enable/disable succeeds, without waiting for scan_tools.
+      setRefreshingTools((prev) => ({ ...prev, [service.mcpId]: true }));
+      void refreshToolListWithToast({
+        message,
+        t,
+        toastKey: `mcp-tools-refresh-${service.mcpId}`,
+      })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["tools"] });
+          queryClient.invalidateQueries({ queryKey: ["agents"] });
+        })
+        .finally(() => {
+          setRefreshingTools((prev) => ({ ...prev, [service.mcpId]: false }));
+        });
+
+      return nextStatus;
     } catch (error) {
       log.error("[useMcpServiceToggle] Failed to toggle service", {
         error,
@@ -74,5 +90,5 @@ export function useMcpServiceToggle() {
     }
   };
 
-  return { toggle, isToggling };
+  return { toggle, isToggling, isRefreshing };
 }

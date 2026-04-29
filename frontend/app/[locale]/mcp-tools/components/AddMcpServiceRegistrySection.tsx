@@ -13,6 +13,7 @@ import McpRegistryToolbar from "./McpRegistryToolbar";
 import McpRegistryCardList from "./McpRegistryCardList";
 import McpRegistryDetailModal from "./McpRegistryDetailModal";
 import ContainerPortField from "./shared/ContainerPortField";
+import { McpTransportType } from "@/const/mcpTools";
 
 interface AddMcpServiceRegistrySectionProps {
   active: boolean;
@@ -312,7 +313,7 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
           />
         ) : (
           <>
-            {selectedOption?.transportType === "container" ? (
+            {selectedOption?.transportType === McpTransportType.CONTAINER ? (
               <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
                 <Form.Item
                   name="containerPort"

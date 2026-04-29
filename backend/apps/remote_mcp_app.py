@@ -373,7 +373,7 @@ async def get_mcp_list(
         remote_mcp_list = await get_remote_mcp_server_list(
             tenant_id=effective_tenant_id,
             user_id=user_id,
-            is_need_auth=False
+            is_need_auth=True
         )
 
         return JSONResponse(

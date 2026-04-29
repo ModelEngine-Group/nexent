@@ -10,7 +10,6 @@ import {
   addMcpToolService,
   resolveContainerServerInfo,
 } from "@/services/mcpToolsService";
-import { updateToolList } from "@/services/mcpService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
 import type {
@@ -18,6 +17,7 @@ import type {
   CommunityQuickAddDraft,
 } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import { refreshToolListWithToast } from "./refreshToolListWithToast";
 
 interface UseMcpCommunityQuickAddParams {
   onSuccess: () => void;
@@ -134,13 +134,11 @@ export function useMcpCommunityQuickAdd({
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.tagStats,
       });
-      try {
-        await updateToolList();
-      } catch (error) {
-        log.error("[useMcpCommunityQuickAdd] Failed to refresh tool list", {
-          error,
-        });
-      }
+      await refreshToolListWithToast({
+        message,
+        t,
+        toastKey: "mcp-tools-refresh-tools-add-community",
+      });
       onSuccess();
       close();
     } catch (error) {
