@@ -119,7 +119,6 @@ export function useMcpCommunityQuickAdd({
           name,
           description: draft.description,
           source: McpSource.COMMUNITY,
-          transport_type: draft.transportType,
           server_url: draft.serverUrl.trim(),
           authorization_token: draft.authorizationToken.trim() || undefined,
           tags: draft.tags,

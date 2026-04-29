@@ -687,7 +687,7 @@ async def get_remote_mcp_server_list(
     Returns:
         List of MCP server records with all fields including container_id, description,
         enabled, source, update_time, tags, container_port, registry_json, config_json,
-        health_status, container_status, and authorization_token
+        container_status, and authorization_token
     """
     mcp_records = get_mcp_records_by_tenant(tenant_id=tenant_id)
     mcp_records_list = []
@@ -744,15 +744,14 @@ async def get_remote_mcp_server_list(
             "permission": permission,
             "mcp_id": record.get("mcp_id"),
             "container_id": container_id,
-            "description": record.get("description") or record.get("category") or "",
+            "description": record.get("description"),
             "enabled": enabled,
-            "source": source or "local",
+            "source": source,
             "update_time": record.get("update_time"),
             "tags": record.get("tags") or [],
             "container_port": container_port,
             "registry_json": registry_json,
             "config_json": config_json,
-            "health_status": "healthy" if status is True else "unhealthy" if status is False else "unchecked",
             "container_status": container_status,
         }
         if is_need_auth:

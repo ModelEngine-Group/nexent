@@ -364,7 +364,7 @@ async def get_mcp_list(
     Get list of MCP services.
     Returns remote MCP list with full details including container_id, description,
     enabled, source, update_time, tags, container_port, registry_json, config_json,
-    health_status, container_status, and authorization_token.
+    container_status, and authorization_token.
     """
     try:
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)

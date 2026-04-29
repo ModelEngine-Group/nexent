@@ -370,7 +370,7 @@ export interface McpServer {
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;
-  mcp_id?: number;
+  mcp_id: number;
   /**
    * Per-item permission returned by /mcp/list.
    * EDIT: editable, READ_ONLY: read-only.

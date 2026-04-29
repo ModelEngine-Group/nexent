@@ -39,10 +39,9 @@ export function useMcpServicesList() {
   const [filters, setFilters] = useState<McpServicesFilters>(INITIAL_FILTERS);
 
   const servicesQuery = useQuery({
-    queryKey: [...MCP_TOOLS_QUERY_KEYS.services, filters.tag],
+    queryKey: [...MCP_TOOLS_QUERY_KEYS.services],
     queryFn: async () => {
-      const tag = filters.tag === FILTER_ALL ? undefined : filters.tag;
-      const result = await listMcpTools(tag ? { tag } : undefined);
+      const result = await listMcpTools();
       return result.data;
     },
     staleTime: 30_000,
@@ -76,9 +75,14 @@ export function useMcpServicesList() {
         item.transportType !== filters.transport
       )
         return false;
+      if (
+        filters.tag !== FILTER_ALL &&
+        !item.tags.some((tag) => tag === filters.tag)
+      )
+        return false;
       return true;
     });
-  }, [services, filters.search, filters.source, filters.transport]);
+  }, [services, filters.search, filters.source, filters.transport, filters.tag]);
 
   const updateFilter = <K extends keyof McpServicesFilters>(
     key: K,

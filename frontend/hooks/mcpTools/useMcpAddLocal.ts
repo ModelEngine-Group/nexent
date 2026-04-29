@@ -76,7 +76,6 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           name: trimmedName,
           description: draft.description,
           source: McpSource.LOCAL,
-          transport_type: draft.transportType,
           server_url: draft.serverUrl.trim(),
           authorization_token: draft.authorizationToken.trim() || undefined,
           tags: draft.tags,

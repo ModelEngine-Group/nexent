@@ -33,7 +33,7 @@ export function useContainerPortAvailability({
   const [suggesting, setSuggesting] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // 检查端口
+  // Check port
   const checkPort = useCallback(async (port: number) => {
     setPortCheckLoading(true);
     try {
@@ -46,16 +46,17 @@ export function useContainerPortAvailability({
     }
   }, []);
 
-  // 防抖自动检查
+  // Anti-shake Auto Check
   useEffect(() => {
     if (!enabled || !isValidPort(containerPort)) {
-      // 不合法或未启用，清空状态
+      // Illegal or not enabled, clear status
       setPortAvailable(null);
       setPortCheckLoading(false);
       return;
     }
 
-    // 合法端口，防抖后检查
+    // Legal port, check after debounce
+
     setPortCheckLoading(true);
     timerRef.current = setTimeout(() => {
       checkPort(containerPort);
@@ -66,7 +67,7 @@ export function useContainerPortAvailability({
     };
   }, [containerPort, enabled, checkPort]);
 
-  // 建议端口
+  // Suggest port
   const suggestPort = useCallback(async () => {
     setSuggesting(true);
     try {

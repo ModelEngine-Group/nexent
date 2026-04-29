@@ -237,7 +237,7 @@ export default function McpServiceDetailModal({
                 <span className="shrink-0 text-slate-500">
                   {t("mcpTools.detail.status")}
                 </span>
-                <StatusBadge status={draft.status} />
+                <StatusBadge status={draft.enabled} />
               </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="shrink-0 text-slate-500">
@@ -349,7 +349,7 @@ export default function McpServiceDetailModal({
               disabled={isToggleLoading(selectedService.mcpId)}
               onClick={() => onToggleEnable(selectedService)}
             >
-              {draft.status === McpServiceStatus.ENABLED
+              {draft.enabled === McpServiceStatus.ENABLED
                 ? t("mcpTools.detail.disable")
                 : t("mcpTools.detail.enable")}
             </Button>

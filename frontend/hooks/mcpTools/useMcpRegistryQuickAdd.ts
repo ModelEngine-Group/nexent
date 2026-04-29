@@ -178,7 +178,6 @@ export function useMcpRegistryQuickAdd({
           name: candidate.server?.name,
           description: candidate.server?.description || "",
           source: McpSource.REGISTRY,
-          transport_type: selectedOption.transportType as McpTransportType,
           server_url: finalUrl,
           tags,
           authorization_token: authorization,

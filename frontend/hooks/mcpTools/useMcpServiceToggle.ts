@@ -36,7 +36,7 @@ export function useMcpServiceToggle() {
       message.warning(t("mcpTools.service.toggle.missingId"));
       return;
     }
-    const nextEnabled = service.status !== McpServiceStatus.ENABLED;
+    const nextEnabled = service.enabled !== McpServiceStatus.ENABLED;
     setToggle(service.mcpId, true);
     try {
       if (nextEnabled) {

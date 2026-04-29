@@ -49,7 +49,6 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           container_port: server.container_port,
           registry_json: server.registry_json,
           config_json: server.config_json,
-          health_status: server.health_status,
           container_status: server.container_status,
           authorization_token: server.authorization_token,
         };

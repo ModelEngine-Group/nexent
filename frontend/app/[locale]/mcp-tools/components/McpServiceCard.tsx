@@ -15,7 +15,7 @@ export default function McpServiceCard({
   onSelect,
 }: McpServiceCardProps) {
   const { t } = useTranslation("common");
-  const isEnabled = service.status === McpServiceStatus.ENABLED;
+  const isEnabled = service.enabled === McpServiceStatus.ENABLED;
 
   return (
     <div onClick={() => onSelect(service)} className={MCP_GRID_CARD_OUTER}>
@@ -26,7 +26,7 @@ export default function McpServiceCard({
         >
           {service.name}
         </h3>
-        <StatusBadge status={service.status} />
+        <StatusBadge status={service.enabled} />
       </div>
 
       <p

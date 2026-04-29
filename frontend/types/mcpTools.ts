@@ -105,7 +105,7 @@ export interface RegistryQuickAddOption {
   key: string;
   sourceType: "remote" | "package";
   sourceLabel: string;
-  transportType: "http" | "sse" | "container";
+  transportType: McpTransportType;
   serverUrl?: string;
   remoteVariables?: RegistryRemoteVariable[];
   remoteHeaders?: RegistryRemoteVariable[];
@@ -131,8 +131,8 @@ export interface CommunityMcpCard {
   updatedAt?: string;
   remotes: Array<{ type: string; url: string }>;
   packages: Array<Record<string, unknown>>;
-  source?: "community";
-  transportType: "http" | "sse" | "container";
+  source?: McpSource.COMMUNITY;
+  transportType: McpTransportType;
   serverUrl: string;
   configJson?: Record<string, unknown> | null;
   registryJson?: Record<string, unknown> | null;
@@ -146,7 +146,7 @@ export interface McpServiceItem {
   name: string;
   description: string;
   source: McpSource;
-  status: McpServiceStatus;
+  enabled: McpServiceStatus;
   updatedAt: string;
   tags: string[];
   transportType: McpTransportType;
@@ -160,26 +160,6 @@ export interface McpServiceItem {
   authorizationToken?: string;
 }
 
-export interface McpServerListItem {
-  service_name: string;
-  mcp_url: string;
-  status: boolean;
-  permission: string;
-  mcp_id: number;
-  container_id?: string | null;
-  description?: string;
-  enabled?: boolean;
-  source?: string;
-  update_time?: string;
-  tags?: string[];
-  container_port?: number | null;
-  registry_json?: Record<string, unknown> | null;
-  config_json?: Record<string, unknown> | null;
-  health_status?: McpHealthStatus;
-  container_status?: McpContainerStatus;
-  authorization_token?: string;
-}
-
 export interface McpTagStat {
   tag: string;
   count: number;
@@ -189,7 +169,7 @@ export interface AddMcpServicePayload {
   name: string;
   description: string;
   source: McpSource;
-  transport_type: McpTransportType;
+  //transport_type: McpTransportType;
   server_url: string;
   tags: string[];
   authorization_token?: string;
@@ -226,7 +206,7 @@ export interface AddMcpRuntimeFromConfigPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Feature-local draft interfaces (kept here so components/hooks share shape)
+// Feature-local draft interfaces
 // ---------------------------------------------------------------------------
 
 /**

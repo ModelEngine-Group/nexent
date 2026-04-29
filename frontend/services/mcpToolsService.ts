@@ -1,6 +1,12 @@
 import log from "@/lib/logger";
 import { fetchWithAuth } from "@/lib/auth";
-import { McpHealthStatus, McpSource, McpTransportType } from "@/const/mcpTools";
+import {
+  McpContainerStatus,
+  McpHealthStatus,
+  McpServiceStatus,
+  McpSource,
+  McpTransportType,
+} from "@/const/mcpTools";
 import { API_ENDPOINTS } from "@/services/api";
 import type {
   AddMcpRuntimeFromConfigPayload,
@@ -238,11 +244,32 @@ export const addContainerMcpToolService = async (payload: AddContainerMcpToolPay
 };
 
 export const listMcpTools = async (params?: { tag?: string }) => {
-  // This function now returns data from getMcpServerList in mcpService.ts
-  // The frontend should use getMcpServerList from mcpService.ts instead
-  // This export is kept for backward compatibility
-  const { getMcpServerList } = await import('./mcpService');
-  return getMcpServerList();
+  const { getMcpServerList } = await import("./mcpService");
+  const res = await getMcpServerList();
+
+  const items = (res.data || []).map((s: any) => {
+    return {
+      mcpId: s.mcp_id,
+      containerId: s.container_id,
+      containerPort: s.container_port,
+      name: s.service_name,
+      description: s.description,
+      source: (s.source as McpSource),
+      enabled: s.enabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED,
+      updatedAt: s.update_time,
+      tags: s.tags || [],
+      transportType: (s.container_id !== undefined && s.container_id !== null) ? McpTransportType.CONTAINER : McpTransportType.HTTP,
+      serverUrl: s.mcp_url,
+      version: null,
+      registryJson: s.registry_json,
+      configJson: s.config_json,
+      tools: [],
+      healthStatus: s.status ? McpHealthStatus.HEALTHY : McpHealthStatus.UNCHECKED,
+      containerStatus: s.container_status as McpContainerStatus,
+      authorizationToken: s.authorization_token,
+    } as McpServiceItem;
+  });
+  return { success: true, data: items } as McpToolsApiResult<McpServiceItem[]>;
 };
 
 export const fetchMcpTagStats = async () => {
@@ -465,7 +492,7 @@ export const healthcheckMcpToolService = async (payload: HealthcheckMcpServicePa
 
 export const deleteMcpToolService = async (mcpId: number) => {
   try {
-    const response = await fetchWithAuth(`${API_ENDPOINTS.mcp.delete}?mcp_id=${encodeURIComponent(String(mcpId))}`, {
+    const response = await fetchWithAuth(`${API_ENDPOINTS.mcp.delete}/${mcpId}`, {
       method: "DELETE",
     });
     const data = await parseJson<ApiEnvelope>(response);
