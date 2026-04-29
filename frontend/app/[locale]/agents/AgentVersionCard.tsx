@@ -259,6 +259,7 @@ export function VersionCardItem({
               ...agentResult.data,
               permission: permissionFromList,
             });
+            store.triggerForceRefresh();
           }
         }
       } else {

@@ -67,6 +67,7 @@ export default function AgentGenerateDetail({
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
+  const forceRefreshKey = useAgentConfigStore((state) => state.forceRefreshKey);
   const updateBusinessInfo = useAgentConfigStore((state) => state.updateBusinessInfo);
   const updateProfileInfo = useAgentConfigStore((state) => state.updateProfileInfo);
 
@@ -309,7 +310,7 @@ export default function AgentGenerateDetail({
       });
     }
 
-  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode, editedAgent]);
+  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode, forceRefreshKey]);
 
   // Default to selecting all groups when creating a new agent.
   // Only applies when groups are loaded and no group is selected yet.
