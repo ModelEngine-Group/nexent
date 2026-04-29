@@ -117,7 +117,7 @@ config:
     gdeClientSecret: ""
     sslVerify: "true"
     caBundle: ""
-    callbackBaseUrl: "http://localhost:3000"
+    callbackBaseUrl: "http://localhost:30000"
 
 # Secrets used by common templates
 secrets:
