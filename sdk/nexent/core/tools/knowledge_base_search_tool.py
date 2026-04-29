@@ -205,19 +205,6 @@ class KnowledgeBaseSearchTool(Tool):
         if len(search_index_names) == 0:
             return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
-        if search_mode == "hybrid":
-            kb_search_data = self.search_hybrid(
-                query=query, index_names=search_index_names, top_k=effective_top_k)
-        elif search_mode == "accurate":
-            kb_search_data = self.search_accurate(
-                query=query, index_names=search_index_names, top_k=effective_top_k)
-        elif search_mode == "semantic":
-            kb_search_data = self.search_semantic(
-                query=query, index_names=search_index_names, top_k=effective_top_k)
-        else:
-            raise Exception(
-                f"Invalid search mode: {search_mode}, only support: hybrid, accurate, semantic")
-
         kb_search_data = self._run_search(
             query=query,
             index_names=search_index_names,
@@ -229,11 +216,11 @@ class KnowledgeBaseSearchTool(Tool):
         if not kb_search_results:
             raise Exception("No results found! Try a less restrictive/shorter query.")
 
-        if rerank_enabled and self.rerank_model and kb_search_results:
+        if self.rerank and self.rerank_model and kb_search_results:
             kb_search_results = self._apply_rerank(
                 query=query,
                 kb_search_results=kb_search_results,
-                top_k=top_k,
+                top_k=self.top_k,
             )
 
         (

@@ -1,3 +1,5 @@
+import types
+
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import sys
@@ -11,7 +13,12 @@ sys.path.insert(0, os.path.join(current_dir, "../../../backend"))
 
 boto3_mock = MagicMock()
 minio_client_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+import importlib.machinery
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient

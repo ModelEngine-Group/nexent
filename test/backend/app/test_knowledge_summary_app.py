@@ -2,6 +2,7 @@ import pytest
 import sys
 import os
 import types
+import importlib.machinery
 from unittest.mock import patch, MagicMock, AsyncMock
 
 # Add path for correct imports
@@ -15,7 +16,11 @@ for path in (PROJECT_ROOT, BACKEND_DIR):
 # Environment variables are now configured in conftest.py
 
 # Mock external dependencies
-sys.modules['boto3'] = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 sys.modules['botocore'] = MagicMock()
 sys.modules['botocore.client'] = MagicMock()
 sys.modules['botocore.exceptions'] = MagicMock()

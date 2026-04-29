@@ -53,6 +53,12 @@ vector_db_pkg.elasticsearch_core = vector_db_es_module
 vector_db_es_module.ElasticSearchCore = MagicMock()
 vector_db_es_module.Elasticsearch = MagicMock()
 
+monitor_module = types.ModuleType("nexent.monitor")
+monitor_module.set_monitoring_context = MagicMock()
+monitor_module.set_monitoring_operation = MagicMock()
+sys.modules['nexent.monitor'] = monitor_module
+nexent_module.monitor = monitor_module
+
 # Stub nexent.core.utils.observer MessageObserver used by llm_utils
 observer_mod = types.ModuleType("nexent.core.utils.observer")
 

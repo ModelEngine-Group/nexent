@@ -32,7 +32,7 @@ class DataProcessCore:
     CHUNKING_STRATEGIES = {"basic", "by_title", "none"}
     
     EXTRACT_IMAGE_EXTENSIONS = {".pdf", ".doc",
-                                ".docx", ".xls", ".xlsx", "ppt", "pptx"}
+                                ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
 
     # Supported processors
     PROCESSORS = {"Unstructured", "OpenPyxl", "UniversalImageExtractor"}

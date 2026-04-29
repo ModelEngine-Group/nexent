@@ -99,7 +99,6 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     "index_name": process_params.index_name,
                     "original_filename": file_details.get("filename"),
                     "embedding_model_id": embedding_model_id,
-                    "is_multimodal": is_multimodal,
                     "tenant_id": tenant_id
                 }
                 sources.append(source)

@@ -1,11 +1,16 @@
 import json
+import importlib.machinery
+import types
 import unittest
 from unittest.mock import patch, MagicMock
 
 # Mock boto3 and minio client before importing the module under test
 import sys
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 
 # Mock ElasticSearch before importing other modules
 elasticsearch_mock = MagicMock()

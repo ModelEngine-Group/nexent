@@ -1,3 +1,5 @@
+import importlib.machinery
+import types
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 import sys
@@ -9,7 +11,11 @@ import aiohttp
 
 # Align with the standard pattern used in test_conversation_management_service.py
 # Mock external SDKs and patch MinioClient before importing the SUT
-sys.modules['boto3'] = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 sys.modules['supabase'] = MagicMock()
 sys.modules['psycopg2'] = MagicMock()
 

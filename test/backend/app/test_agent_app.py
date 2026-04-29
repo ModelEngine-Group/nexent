@@ -1,5 +1,6 @@
 import atexit
 from unittest.mock import patch, Mock, MagicMock, ANY
+import importlib.machinery
 import os
 import sys
 import types
@@ -20,8 +21,11 @@ backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
 # Mock boto3 before importing backend modules
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import

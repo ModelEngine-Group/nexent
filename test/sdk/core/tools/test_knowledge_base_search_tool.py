@@ -643,7 +643,7 @@ class TestConvertToIndexNames:
         mock_vdb_core.hybrid_search.return_value = mock_results
 
         tool = KnowledgeBaseSearchTool(
-            index_names=[],
+            index_names=["Knowledge A"],
             search_mode="hybrid",
             vdb_core=mock_vdb_core,
             embedding_model=mock_embedding_model,
@@ -653,7 +653,7 @@ class TestConvertToIndexNames:
             },
         )
 
-        tool.forward("test query", index_names=["Knowledge A"])
+        tool.forward("test query")
 
         mock_vdb_core.hybrid_search.assert_called_once_with(
             index_names=["es_index_knowledge_a"],
@@ -733,7 +733,7 @@ class TestSourceTypeConversion:
         mock_vdb_core.hybrid_search.return_value = mock_results
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
-        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+        knowledge_base_search_tool.forward("test query")
 
         # Check the SEARCH_CONTENT message which contains full results via to_dict()
         search_content_call = [
@@ -763,7 +763,7 @@ class TestSourceTypeConversion:
         mock_vdb_core.hybrid_search.return_value = mock_results
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
-        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+        knowledge_base_search_tool.forward("test query")
 
         # Check the SEARCH_CONTENT message
         search_content_call = [
@@ -793,7 +793,7 @@ class TestSourceTypeConversion:
         mock_vdb_core.hybrid_search.return_value = mock_results
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
-        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+        knowledge_base_search_tool.forward("test query")
 
         # Check the SEARCH_CONTENT message
         search_content_call = [
@@ -815,7 +815,7 @@ class TestRecordOps:
 
         initial_ops = knowledge_base_search_tool.record_ops
 
-        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+        knowledge_base_search_tool.forward("test query")
 
         assert knowledge_base_search_tool.record_ops == initial_ops + 2
 
@@ -825,10 +825,10 @@ class TestRecordOps:
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
         knowledge_base_search_tool.record_ops = 0
-        knowledge_base_search_tool.forward("query1", index_names=["kb1"])
+        knowledge_base_search_tool.forward("query1")
         first_call_ops = knowledge_base_search_tool.record_ops
 
-        knowledge_base_search_tool.forward("query2", index_names=["kb1"])
+        knowledge_base_search_tool.forward("query2")
         second_call_ops = knowledge_base_search_tool.record_ops
 
         # Each call with 1 result adds 1 to record_ops
@@ -841,7 +841,7 @@ class TestRecordOps:
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
         # record_ops starts at 1, so cite_index should be 1+0+1=1, 1+1+1=2
-        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+        knowledge_base_search_tool.forward("test query")
 
         # Check the SEARCH_CONTENT message for cite_index values
         search_content_call = [
@@ -862,7 +862,7 @@ class TestSearchContentObserver:
         mock_results = create_mock_search_result(1)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+        knowledge_base_search_tool.forward("test query")
 
         search_content_calls = [
             call for call in knowledge_base_search_tool.observer.add_message.call_args_list
@@ -918,9 +918,7 @@ class TestToolMetadata:
     def test_inputs_contain_required_fields(self):
         """Test that inputs dict contains required fields."""
         assert "query" in KnowledgeBaseSearchTool.inputs
-        assert "index_names" in KnowledgeBaseSearchTool.inputs
         assert KnowledgeBaseSearchTool.inputs["query"]["type"] == "string"
-        assert KnowledgeBaseSearchTool.inputs["index_names"]["type"] == "array"
 
     def test_running_prompts(self, knowledge_base_search_tool):
         """Test running prompts for both languages."""
@@ -951,7 +949,7 @@ class TestEdgeCases:
         mock_vdb_core.hybrid_search.return_value = mock_results
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
-        knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+        knowledge_base_search_tool.forward("test query")
 
         # Check the SEARCH_CONTENT message which contains full results via to_dict()
         search_content_call = [
@@ -982,7 +980,7 @@ class TestEdgeCases:
         mock_vdb_core.hybrid_search.return_value = mock_results
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
-        result = knowledge_base_search_tool.forward("test query", index_names=["kb1"])
+        result = knowledge_base_search_tool.forward("test query")
         search_results = json.loads(result)
 
         assert search_results[0]["text"] == ""
@@ -1018,7 +1016,7 @@ class TestEdgeCases:
         mock_vdb_core.hybrid_search.return_value = mock_results
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
-        result = knowledge_base_search_tool.forward("test query", index_names=["index1", "index2"])
+        result = knowledge_base_search_tool.forward("test query")
         search_results = json.loads(result)
 
         assert len(search_results) == 2

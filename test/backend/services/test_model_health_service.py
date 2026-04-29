@@ -41,6 +41,11 @@ sys.modules['nexent.core.agents.agent_model'] = MockModule()
 sys.modules['nexent.core.models'] = MockModule()
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
 
+monitor_module = MockModule()
+monitor_module.set_monitoring_context = mock.MagicMock()
+monitor_module.set_monitoring_operation = mock.MagicMock()
+sys.modules['nexent.monitor'] = monitor_module
+
 # Mock rerank_model module with proper class exports
 
 

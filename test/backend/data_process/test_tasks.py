@@ -116,6 +116,8 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
         const_mod.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
         const_mod.ROOT_DIR = "/mock/root"
+        const_mod.TABLE_TRANSFORMER_MODEL_PATH = "/mock/table_transformer_model"
+        const_mod.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/mock/unstructured_params.json"
         sys.modules["consts.const"] = const_mod
     # Minimal stub for consts.model used by utils.file_management_utils
     if "consts.model" not in sys.modules:
@@ -133,6 +135,8 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         sys.modules["database.attachment_db"] = types.SimpleNamespace(
             get_file_stream=lambda source: io.BytesIO(b"stub-bytes"),
             get_file_size_from_minio=lambda object_name, bucket=None: 0,
+            build_s3_url=lambda bucket_name, object_name: f"http://mock-s3/{bucket_name}/{object_name}",
+            upload_fileobj=lambda file_obj, bucket_name, object_name: "mock-etag",
         )
     # Stub model_management_db module required by ray_actors
     if "database.model_management_db" not in sys.modules:

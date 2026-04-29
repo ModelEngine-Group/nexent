@@ -26,8 +26,11 @@ boto3_module = types.ModuleType("boto3")
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 boto3_module.client = MagicMock()
 minio_client_mock = MagicMock()
-sys.modules["boto3"] = boto3_module
-
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
 storage_client_mock = MagicMock()
@@ -707,8 +710,12 @@ async def test_create_index_documents_uses_multimodal_embedding(vdb_core_mock, a
         )
 
         assert response.status_code == 200
-        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], True)
-
+        mock_get_embedding.assert_called_once_with(
+                    tenant_id=auth_data["tenant_id"], 
+                    is_multimodal=True,
+                    model_name=None,
+                    strict_model_name=False
+                )
 
 @pytest.mark.asyncio
 async def test_create_index_documents_exception(vdb_core_mock, auth_data):
@@ -2336,10 +2343,15 @@ async def test_create_index_documents_gets_saved_embedding_model_from_knowledge_
         assert response.status_code == 200
         
         # Verify get_knowledge_record was called with correct index_name
-        mock_get_knowledge_record.assert_called_once_with({'index_name': index_name})
+        mock_get_knowledge_record.assert_called_once_with({'index_name': index_name, 'tenant_id': auth_data["tenant_id"]})
         
         # Verify get_embedding_model was called with the saved model name
-        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], saved_model_name)
+        mock_get_embedding.assert_called_once_with(
+            tenant_id=auth_data["tenant_id"],
+            model_name=saved_model_name,
+            is_multimodal=False,
+            strict_model_name=True
+        )
         
         # Verify index_documents was called with the embedding model
         mock_index.assert_called_once()
@@ -2391,7 +2403,12 @@ async def test_create_index_documents_fallback_to_default_when_no_saved_model(vd
         assert response.status_code == 200
         
         # Verify get_embedding_model was called with None as model_name (fallback to default)
-        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], None)
+        mock_get_embedding.assert_called_once_with(
+            tenant_id=auth_data["tenant_id"],
+            model_name=None,
+            is_multimodal=False,
+            strict_model_name=False
+        )
 
 
 @pytest.mark.asyncio
@@ -2434,7 +2451,12 @@ async def test_create_index_documents_fallback_when_knowledge_record_not_found(v
         assert response.status_code == 200
         
         # Verify get_embedding_model was called with None as model_name (fallback to default)
-        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], None)
+        mock_get_embedding.assert_called_once_with(
+            tenant_id=auth_data["tenant_id"],
+            model_name=None,
+            is_multimodal=False,
+            strict_model_name=False
+        )
 
 
 @pytest.mark.asyncio
@@ -2483,7 +2505,12 @@ async def test_create_index_documents_with_empty_string_model_name(vdb_core_mock
         # Verify get_embedding_model was called with empty string (will be treated as falsy in the function)
         # The code checks `if knowledge_record:` and `saved_embedding_model_name = knowledge_record.get('embedding_model_name')`
         # So empty string will be passed, but the service layer will handle it appropriately
-        mock_get_embedding.assert_called_once()
-        args = mock_get_embedding.call_args[0]
-        assert args[0] == auth_data["tenant_id"]
-        assert args[1] == ""  # Empty string is passed
+        mock_get_embedding.assert_called_once_with(
+            tenant_id=auth_data["tenant_id"],
+            model_name="",
+            is_multimodal=False,
+            strict_model_name=False
+        )
+        kwargs = mock_get_embedding.call_args[1]
+        assert kwargs["tenant_id"] == auth_data["tenant_id"]
+        assert kwargs["model_name"] == ""  # Empty string is passed

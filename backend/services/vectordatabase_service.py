@@ -291,22 +291,6 @@ def get_embedding_model(
     )
     return _build_embedding_from_config(model_config)
 
-
-def _resolve_embedding_model(
-    tenant_id: str,
-    is_multimodal: bool,
-    embedding_model_name: Optional[str],
-) -> Optional[BaseEmbedding]:
-    if embedding_model_name:
-        return get_embedding_model(
-            tenant_id,
-            is_multimodal=is_multimodal,
-            model_name=embedding_model_name,
-            strict_model_name=True,
-        )
-    return get_embedding_model(tenant_id, is_multimodal=is_multimodal)
-
-
 def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
     """
     Get the rerank model for the tenant, optionally using a specific model name.

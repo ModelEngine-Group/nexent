@@ -816,7 +816,7 @@ class TestCreateToolConfigList:
 
             # Verify correct functions were called with correct parameters
             mock_get_vector_db_core.assert_called_once()
-            mock_embedding.assert_called_once_with(tenant_id="tenant_1")
+            mock_embedding.assert_called_once_with(tenant_id="tenant_1", is_multimodal=True)
 
             # Verify metadata contains vdb_core, embedding_model, rerank_model and display_name_to_index_map
             assert "vdb_core" in mock_tool_instance.metadata
