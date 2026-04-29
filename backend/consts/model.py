@@ -304,6 +304,8 @@ class GeneratePromptRequest(BaseModel):
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
+    knowledge_base_display_names: Optional[List[str]] = Field(
+        None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
 
 
 class GenerateTitleRequest(BaseModel):
@@ -334,6 +336,7 @@ class AgentInfoRequest(BaseModel):
     related_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
+    enable_context_manager: Optional[bool] = None
     version_no: int = 0
 
 
@@ -824,6 +827,7 @@ class VersionListItemResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number if rollback")
     source_type: Optional[str] = Field(None, description="Source type: NORMAL / ROLLBACK")
     status: str = Field(..., description="Version status: RELEASED / DISABLED / ARCHIVED")
+    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
 
@@ -843,6 +847,7 @@ class VersionDetailResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number")
     source_type: Optional[str] = Field(None, description="Source type")
     status: str = Field(..., description="Version status")
+    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
     agent_info: Optional[dict] = Field(None, description="Agent info snapshot")
@@ -883,3 +888,69 @@ class CurrentVersionResponse(BaseModel):
     release_note: Optional[str] = Field(None, description="Release notes")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
+
+
+# Skill Management Data Models
+# ---------------------------------------------------------------------------
+class SkillCreateRequest(BaseModel):
+    """Request model for creating a skill via JSON."""
+    name: str
+    description: str
+    content: str
+    tool_ids: Optional[List[int]] = []
+    tool_names: Optional[List[str]] = []
+    tags: Optional[List[str]] = []
+    source: Optional[str] = "custom"
+    params: Optional[Dict[str, Any]] = None
+    files: Optional[List[Dict[str, str]]] = Field(
+        default_factory=list,
+        description="Additional skill files beyond SKILL.md. "
+        "Each entry has 'path' (relative path) and 'content'. "
+        "SKILL.md may also be sent here; the 'content' field is the primary SKILL.md source."
+    )
+
+
+class SkillFileData(BaseModel):
+    """A single file within a skill."""
+    path: str = Field(description="Relative file path within the skill (e.g. 'SKILL.md', 'scripts/run.py')")
+    content: str = Field(description="Full file content")
+
+
+class SkillUpdateRequest(BaseModel):
+    """Request model for updating a skill."""
+    description: Optional[str] = None
+    content: Optional[str] = None
+    tool_ids: Optional[List[int]] = None
+    tool_names: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    source: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+    files: Optional[List[SkillFileData]] = Field(
+        default_factory=list,
+        description="Updated skill files. Each entry has file_path and content. "
+        "Pass 'SKILL.md' here to update the main skill file; other files are written as-is."
+    )
+
+
+class SkillResponse(BaseModel):
+    """Response model for skill data."""
+    skill_id: int
+    name: str
+    description: str
+    content: str
+    tool_ids: List[int]
+    tags: List[str]
+    source: str
+    params: Optional[Dict[str, Any]] = None
+    created_by: Optional[str] = None
+    create_time: Optional[str] = None
+    updated_by: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class SkillCreateInteractiveRequest(BaseModel):
+    """Request model for interactive skill creation via LLM agent."""
+    user_request: str
+    existing_skill: Optional[Dict[str, Any]] = None
+    complexity: Optional[str] = "simple"
+    language: Optional[str] = "zh"

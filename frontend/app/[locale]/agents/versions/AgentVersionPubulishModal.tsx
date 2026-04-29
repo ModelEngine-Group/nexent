@@ -21,6 +21,7 @@ export interface AgentVersionPubulishModalProps {
   initialValues?: {
     version_name?: string;
     release_note?: string;
+    is_a2a?: boolean;
   };
   onPublished?: () => void;
   onUpdated?: () => void;
@@ -72,10 +73,11 @@ export default function AgentVersionPubulishModal({
     if (open) {
       if (isEdit && initialValues) {
         publishForm.setFieldsValue(initialValues);
+        setIsA2AAgent(initialValues.is_a2a ?? false);
       } else if (!isEdit) {
         publishForm.resetFields();
+        setIsA2AAgent(false);
       }
-      setIsA2AAgent(false);
     }
   }, [open, isEdit, initialValues, publishForm]);
 
@@ -232,7 +234,6 @@ export default function AgentVersionPubulishModal({
 
           <Form.Item
             label={t("agent.version.publishAsA2AAgent")}
-            name="publish_as_a2a"
             valuePropName="checked"
           >
             <Switch

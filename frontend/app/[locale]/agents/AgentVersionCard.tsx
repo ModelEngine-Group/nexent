@@ -579,6 +579,7 @@ export function VersionCardItem({
         initialValues={{
           version_name: version.version_name,
           release_note: version.release_note,
+          is_a2a: version.is_a2a,
         }}
         onUpdated={() => {
           // Refresh version list using the proper invalidate function

@@ -42,11 +42,27 @@ class Template:
 jinja2_mod.StrictUndefined = StrictUndefined
 jinja2_mod.Template = Template
 sys.modules["jinja2"] = jinja2_mod
-# Stub nexent.core.agents.agent_model to satisfy imports in consts.model
+# Stub nexent.core.agents.agent_model to satisfy imports in consts.model and agent_run_manager
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 agent_model_mod.ToolConfig = object
+agent_model_mod.AgentRunInfo = object
 sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
 sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+
+# Stub nexent.core.agents.agent_context for agent_run_manager import
+agent_context_mod = types.ModuleType("nexent.core.agents.agent_context")
+agent_context_mod.ContextManager = object
+agent_context_mod.ContextManagerConfig = object
+sys.modules["nexent.core.agents.agent_context"] = agent_context_mod
+
+# Stub backend.agents.agent_run_manager to avoid importing the real module
+agent_run_manager_mod = types.ModuleType("backend.agents.agent_run_manager")
+mock_agent_run_manager = MagicMock()
+mock_agent_run_manager.clear_conversation_context_manager = MagicMock()
+agent_run_manager_mod.agent_run_manager = mock_agent_run_manager
+agent_run_manager_mod.AgentRunManager = object
+sys.modules["backend.agents"] = types.ModuleType("backend.agents")
+sys.modules["backend.agents.agent_run_manager"] = agent_run_manager_mod
 # Stub nexent.core.utils.observer ProcessType and MessageObserver used by conversation service
 observer_mod = types.ModuleType("nexent.core.utils.observer")
 observer_mod.MessageObserver = lambda *a, **k: types.SimpleNamespace(add_model_new_token=lambda t: None, add_model_reasoning_content=lambda r: None, flush_remaining_tokens=lambda: None)
@@ -678,6 +694,49 @@ class TestConversationManagementService(unittest.TestCase):
             "How to use Python effectively?", self.tenant_id, "en")
         mock_update_title.assert_called_once_with(
             123, "Python Tips", self.user_id)
+
+
+class TestCallLlmForTitleMonitoring(unittest.TestCase):
+    """Verify call_llm_for_title sets monitoring context and operation."""
+
+    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.tenant_config_manager')
+    @patch('backend.services.conversation_management_service.set_monitoring_operation')
+    @patch('backend.services.conversation_management_service.set_monitoring_context')
+    def test_sets_monitoring_context_with_tenant_id(
+            self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
+        mock_config_mgr.get_model_config.return_value = {
+            "model_repo": "openai", "model_name": "gpt-4",
+            "base_url": "http://x", "api_key": "k",
+            "display_name": "GPT-4",
+        }
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_model_cls.return_value = mock_llm
+
+        call_llm_for_title("hello?", "tenant-123", "en")
+
+        mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id=None)
+
+    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.tenant_config_manager')
+    @patch('backend.services.conversation_management_service.set_monitoring_operation')
+    @patch('backend.services.conversation_management_service.set_monitoring_context')
+    def test_sets_monitoring_operation_with_display_name(
+            self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
+        mock_config_mgr.get_model_config.return_value = {
+            "model_repo": "openai", "model_name": "gpt-4",
+            "base_url": "http://x", "api_key": "k",
+            "display_name": "GPT-4",
+        }
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_model_cls.return_value = mock_llm
+
+        call_llm_for_title("hello?", "tenant-123", "zh")
+
+        mock_op.assert_called_once_with(
+            "title_generation", display_name="GPT-4")
 
 
 if __name__ == '__main__':

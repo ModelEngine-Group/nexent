@@ -1825,9 +1825,7 @@ class TestDiscoverSingleFromNacosDetailed:
         }
 
         mock_instance = {
-            "ip": "192.168.1.100",
-            "port": 8080,
-            "metadata": {}  # No a2a_card_url, and no host/port
+            "metadata": {}  # No a2a_card_url, no ip, no port
         }
 
         mock_client = AsyncMock()

@@ -249,6 +249,13 @@ USER_PROMPT: |-
   You have no available assistants
   {% endif %}
 
+  {% if knowledge_base_names %}
+  ### Knowledge Base Configuration Note:
+  When generating few-shot examples, if using the knowledge_base_search tool, you MUST use the following actual configured knowledge base names:
+  {{knowledge_base_names}}
+  Please use these names directly in examples, e.g.: knowledge_base_search(query="xxx", index_names=[{{knowledge_base_names}}])
+  {% endif %}
+
 
 AGENT_NAME_REGENERATE_SYSTEM_PROMPT: |-
   ### You are an [Agent Variable Name Refinement Expert]
