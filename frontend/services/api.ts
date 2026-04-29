@@ -242,7 +242,7 @@ export const API_ENDPOINTS = {
     tools: `${API_BASE_URL}/mcp/tools`,
     add: `${API_BASE_URL}/mcp/add`,
     update: `${API_BASE_URL}/mcp/update`,
-    delete: `${API_BASE_URL}/mcp`,
+    delete: (mcpId: number) => `${API_BASE_URL}/mcp/${mcpId}`,
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
     addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,

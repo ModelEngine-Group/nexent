@@ -224,8 +224,8 @@ export const updateMcpServer = async (
 export const deleteMcpServer = async (mcpId: number, tenantId?: string | null) => {
   try {
     const url = tenantId
-      ? `${API_ENDPOINTS.mcp.delete}/${mcpId}?tenant_id=${encodeURIComponent(tenantId)}`
-      : `${API_ENDPOINTS.mcp.delete}/${mcpId}`;
+      ? `${API_ENDPOINTS.mcp.delete(mcpId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.delete(mcpId);
     const response = await fetch(url, {
       method: 'DELETE',
       headers: getAuthHeaders(),
@@ -274,10 +274,12 @@ export const deleteMcpServer = async (mcpId: number, tenantId?: string | null) =
  */
 export const getMcpTools = async (mcpId: number) => {
   try {
+    const query = new URLSearchParams();
+    query.set('mcp_id', mcpId.toString());
     const response = await fetch(
-      `${API_ENDPOINTS.mcp.tools}?mcp_id=${mcpId}`,
+      `${API_ENDPOINTS.mcp.tools}?${query.toString()}`,
       {
-        method: 'POST',
+        method: 'GET',
         headers: getAuthHeaders(),
       }
     );
@@ -324,7 +326,7 @@ export const getMcpTools = async (mcpId: number) => {
 };
 
 /**
- * 更新工具列表及状态
+ * Update tool list and status
  */
 export const updateToolList = async () => {
   try {
@@ -374,15 +376,13 @@ export const updateToolList = async () => {
 /**
  * checkMcpServerHealth
  */
-export const checkMcpServerHealth = async (mcpId: number, tenantId?: string | null) => {
+export const checkMcpServerHealth = async (mcpId: number) => {
   try {
-    const url = tenantId
-      ? `${API_ENDPOINTS.mcp.healthcheck}?tenant_id=${encodeURIComponent(tenantId)}`
-      : API_ENDPOINTS.mcp.healthcheck;
-    const response = await fetch(url, {
-      method: 'POST',
+    const query = new URLSearchParams();
+    query.set('mcp_id', mcpId.toString());
+    const response = await fetch(`${API_ENDPOINTS.mcp.healthcheck}?${query.toString()}`, {
+      method: 'GET',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ mcp_id: mcpId }),
     });
 
     const data = await response.json();

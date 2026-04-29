@@ -138,10 +138,9 @@ export const checkMcpContainerPortConflictService = async (payload: {
   port: number;
 }) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcp.portCheck, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const query = new URLSearchParams();
+    query.set('port', payload.port.toString());
+    const response = await fetchWithAuth(`${API_ENDPOINTS.mcp.portCheck}?${query.toString()}`);
     const data = await parseJson<ApiEnvelope<PortConflictResult>>(response);
     if (data.status !== "success") {
       throw new Error("Failed to check MCP port conflict");
@@ -155,9 +154,7 @@ export const checkMcpContainerPortConflictService = async (payload: {
 
 export const suggestMcpContainerPortService = async () => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcp.portSuggest, {
-      method: "POST",
-    });
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.portSuggest);
     const data = await parseJson<ApiEnvelope<{ port: number }>>(response);
     if (data.status !== "success") {
       throw new Error("Failed to suggest MCP port");
@@ -228,9 +225,9 @@ export const resolveContainerServerInfo = async (params: {
 
 export const addContainerMcpToolService = async (payload: AddContainerMcpToolPayload) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcp.addContainer, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.addFromConfig, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload)
     });
     const data = await parseJson<ApiEnvelope>(response);
     if (data.status !== "success") {
@@ -314,10 +311,18 @@ export const listCommunityMcpTools = async (payload: {
   limit?: number;
 }) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.communityList, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const query = new URLSearchParams();
+    if (payload.search) query.set("search", payload.search);
+    if (payload.tag) query.set("tag", payload.tag);
+    if (payload.cursor) query.set("cursor", payload.cursor);
+    if (typeof payload.limit === "number") query.set("limit", String(payload.limit));
+
+    const queryString = query.toString();
+    const url = queryString
+      ? `${API_ENDPOINTS.mcpTools.communityList}?${queryString}`
+      : API_ENDPOINTS.mcpTools.communityList;
+
+    const response = await fetchWithAuth(url);
     const data = await parseJson<ApiEnvelope<{ items: CommunityMcpCard[]; nextCursor: string | null }>>(response);
     if (data.status !== "success") {
       throw new Error("Failed to load community mcp list");
@@ -473,9 +478,10 @@ export const disableMcpToolService = async (payload: ToggleMcpServicePayload) =>
 
 export const healthcheckMcpToolService = async (payload: HealthcheckMcpServicePayload) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcp.healthcheck, {
-      method: "POST",
-      body: JSON.stringify(payload),
+    const query = new URLSearchParams();
+    query.set('mcp_id', payload.mcp_id.toString());
+    const response = await fetchWithAuth(`${API_ENDPOINTS.mcp.healthcheck}?${query.toString()}`, {
+      method: "GET",
     });
     const data = await parseJson<ApiEnvelope<HealthcheckPayload>>(
       response
@@ -492,7 +498,7 @@ export const healthcheckMcpToolService = async (payload: HealthcheckMcpServicePa
 
 export const deleteMcpToolService = async (mcpId: number) => {
   try {
-    const response = await fetchWithAuth(`${API_ENDPOINTS.mcp.delete}/${mcpId}`, {
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.delete(mcpId), {
       method: "DELETE",
     });
     const data = await parseJson<ApiEnvelope>(response);
@@ -508,13 +514,9 @@ export const deleteMcpToolService = async (mcpId: number) => {
 
 export const listMcpRuntimeTools = async (mcpId: number) => {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcp.tools, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ mcp_id: mcpId }),
-    });
+    const query = new URLSearchParams();
+    query.set('mcp_id', mcpId.toString());
+    const response = await fetchWithAuth(`${API_ENDPOINTS.mcp.tools}?${query.toString()}`);
     const data = await parseJson<ApiEnvelope>(response);
     if (data.status !== "success") {
       throw new Error("Failed to load MCP tools");

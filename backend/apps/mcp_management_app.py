@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -79,9 +79,9 @@ async def list_registry_mcp_services_api(
 # Community Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/community/list")
+@router.get("/community/list")
 async def list_community_mcp_services_api(
-    payload: CommunityListRequest,
+    query: CommunityListRequest = Depends(),
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
@@ -91,10 +91,10 @@ async def list_community_mcp_services_api(
     try:
         get_current_user_info(authorization, http_request)
         data = await list_community_mcp_services(
-            search=payload.search,
-            tag=payload.tag,
-            cursor=payload.cursor,
-            limit=payload.limit,
+            search=query.search,
+            tag=query.tag,
+            cursor=query.cursor,
+            limit=query.limit,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,

@@ -57,7 +57,7 @@ logger = logging.getLogger("remote_mcp_app")
 # Tools Endpoint
 # ---------------------------------------------------------------------------
 
-@router.post("/tools")
+@router.get("/tools")
 async def get_tools_from_mcp(
     mcp_id: int = Query(..., description="MCP service ID"),
     authorization: Optional[str] = Header(None),
@@ -549,9 +549,9 @@ async def get_container_logs(
         )
 
 
-@router.post("/healthcheck")
+@router.get("/healthcheck")
 async def check_mcp_health(
-    payload: HealthcheckMcpServiceRequest,
+    mcp_id: int = Query(..., description="MCP service ID"),
     authorization: Optional[str] = Header(None),
     http_request: Request = None
 ):
@@ -562,7 +562,7 @@ async def check_mcp_health(
         health_status = await check_mcp_service_health(
             tenant_id=tenant_id,
             user_id=user_id,
-            mcp_id=payload.mcp_id,
+            mcp_id=mcp_id,
         )
 
         return JSONResponse(
@@ -591,7 +591,7 @@ async def check_mcp_health(
 # Port Management Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/port/check")
+@router.get("/port/check")
 async def check_mcp_port(
     port: int = Query(..., ge=1, le=65535),
     authorization: Optional[str] = Header(None),
@@ -601,9 +601,15 @@ async def check_mcp_port(
     try:
         get_current_user_info(authorization, http_request)
         available = check_container_port_conflict(port=port)
+        no_cache_headers = {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        }
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"status": "success", "data": {"available": available}}
+            content={"status": "success", "data": {"available": available}},
+            headers=no_cache_headers
         )
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -615,7 +621,7 @@ async def check_mcp_port(
         )
 
 
-@router.post("/port/suggest")
+@router.get("/port/suggest")
 async def suggest_mcp_port(
     authorization: Optional[str] = Header(None),
     http_request: Request = None
