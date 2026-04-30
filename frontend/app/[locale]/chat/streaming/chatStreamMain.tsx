@@ -12,6 +12,7 @@ import { ChatInput } from "../components/chatInput";
 import { ChatStreamFinalMessage } from "./chatStreamFinalMessage";
 import { TaskWindow } from "./taskWindow";
 import { transformMessagesToTaskMessages } from "./messageTransformer";
+import { TokenMetrics } from "@/types/chat";
 
 export function ChatStreamMain({
   messages,
@@ -98,6 +99,19 @@ export function ChatStreamMain({
       taskMessages: taskMsgs,
       conversationGroups: conversationGroups,
     };
+  }, [messages]);
+
+  // Extract latest token metrics from the most recent assistant step
+  const latestMetrics = useMemo<TokenMetrics | null>(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === MESSAGE_ROLES.ASSISTANT && msg.steps?.length) {
+        for (let j = msg.steps.length - 1; j >= 0; j--) {
+          if (msg.steps[j].metrics) return msg.steps[j].metrics;
+        }
+      }
+    }
+    return null;
   }, [messages]);
 
   // Monitor ChatInput height changes
@@ -342,6 +356,7 @@ export function ChatStreamMain({
                         onImageUpload={onImageUpload}
                         selectedAgentId={selectedAgentId}
                         onAgentSelect={onAgentSelect}
+                        latestMetrics={latestMetrics}
                       />
                     </motion.div>
                   </AnimatePresence>
@@ -439,6 +454,7 @@ export function ChatStreamMain({
               onImageUpload={onImageUpload}
               selectedAgentId={selectedAgentId}
               onAgentSelect={onAgentSelect}
+              latestMetrics={latestMetrics}
             />
           </motion.div>
         </AnimatePresence>

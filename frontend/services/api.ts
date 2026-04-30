@@ -20,6 +20,13 @@ export const API_ENDPOINTS = {
     tokens: `${API_BASE_URL}/user/tokens`,
     deleteToken: (tokenId: number) => `${API_BASE_URL}/user/tokens/${tokenId}`,
   },
+  oauth: {
+    providers: `${API_BASE_URL}/user/oauth/providers`,
+    authorize: `${API_BASE_URL}/user/oauth/authorize`,
+    link: `${API_BASE_URL}/user/oauth/link`,
+    accounts: `${API_BASE_URL}/user/oauth/accounts`,
+    unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
+  },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
     create: `${API_BASE_URL}/conversation/create`,
@@ -70,10 +77,11 @@ export const API_ENDPOINTS = {
     validate: `${API_BASE_URL}/tool/validate`,
     loadConfig: (toolId: number) =>
       `${API_BASE_URL}/tool/load_config/${toolId}`,
-    importOpenapi: `${API_BASE_URL}/tool/import_openapi`,
-    outerApiTools: `${API_BASE_URL}/tool/outer_api_tools`,
-    deleteOuterApiTool: (toolId: number) =>
-      `${API_BASE_URL}/tool/outer_api_tools/${toolId}`,
+    // OpenAPI Service APIs
+    openapiService: `${API_BASE_URL}/tool/openapi_service`,
+    openapiServices: `${API_BASE_URL}/tool/openapi_services`,
+    deleteOpenapiService: (serviceName: string) =>
+      `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
@@ -208,6 +216,10 @@ export const API_ENDPOINTS = {
     files: (knowledgeBaseId: string) =>
       `${API_BASE_URL}/datamate/${knowledgeBaseId}/files`,
   },
+  haotian: {
+    knowledgeSets: `${API_BASE_URL}/haotian/knowledge-sets`,
+    testConnection: `${API_BASE_URL}/haotian/test-connection`,
+  },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,
@@ -259,10 +271,10 @@ export const API_ENDPOINTS = {
     serverAgentEnable: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/enable`,
     serverAgentDisable: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/disable`,
     serverAgentSettings: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/settings`,
+    agentChat: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}/chat`,
   },
   skills: {
     list: `${API_BASE_URL}/skills`,
-    create: `${API_BASE_URL}/skills`,
     upload: `${API_BASE_URL}/skills/upload`,
     get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
     update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
@@ -274,7 +286,9 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
     instanceList: `${API_BASE_URL}/skills/instance/list`,
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
-    createSimple: `${API_BASE_URL}/skills/create-simple`,
+    create: `${API_BASE_URL}/skills`,
+    createStream: `${API_BASE_URL}/skills/create`,
+    stopCreate: (taskId: string) => `${API_BASE_URL}/skills/stop/${taskId}`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
@@ -356,6 +370,9 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/invitations/${invitationCode}`,
     check: (invitationCode: string) =>
       `${API_BASE_URL}/invitations/${invitationCode}/check`,
+  },
+  monitoring: {
+    models: `${API_BASE_URL}/monitoring/models`,
   },
 };
 

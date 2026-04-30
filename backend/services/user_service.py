@@ -11,6 +11,7 @@ from database.user_tenant_db import (
 from database.group_db import remove_user_from_all_groups
 from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
+from database.oauth_account_db import soft_delete_all_oauth_accounts_by_user_id
 from utils.auth_utils import get_supabase_admin_client
 from utils.memory_utils import build_memory_config
 
@@ -174,7 +175,14 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
         except Exception as e:
             logger.error(f"Failed clearing memory for user {user_id}: {e}")
 
-        # 5) Delete from Supabase
+        # 5) Soft-delete OAuth account bindings
+        try:
+            deleted_oauth = soft_delete_all_oauth_accounts_by_user_id(user_id, user_id)
+            logger.debug(f"\t{deleted_oauth} OAuth account bindings deleted.")
+        except Exception as e:
+            logger.error(f"Failed deleting OAuth accounts for user {user_id}: {e}")
+
+        # 6) Delete from Supabase
         try:
             admin_client = get_supabase_admin_client()
             if admin_client and hasattr(admin_client.auth, "admin"):

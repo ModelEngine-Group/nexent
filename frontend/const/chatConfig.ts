@@ -103,6 +103,7 @@ messageTypes: {
   ERROR: "error" as const,
   STEP_COUNT: "step_count" as const,
   TOKEN_COUNT: "token_count" as const,
+  MAX_STEPS_REACHED: "max_steps_reached" as const,
   SEARCH_CONTENT_PLACEHOLDER: "search_content_placeholder" as const,
   VIRTUAL: "virtual" as const,
   PREPROCESS: "preprocess" as const,

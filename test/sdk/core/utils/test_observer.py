@@ -187,22 +187,20 @@ class TestTokenCountTransformer:
     """Test TokenCountTransformer class"""
 
     def test_token_count_transformer_zh(self):
-        """Test TokenCountTransformer with Chinese language"""
+        """Test TokenCountTransformer passes content unchanged"""
         transformer = TokenCountTransformer()
         duration = "2.5s"
 
         result = transformer.transform(content=duration, lang="zh")
-        expected = """<span style="color: #bbbbc2; font-size: 12px;">步骤耗时：2.5s</span> """
-        assert result == expected
+        assert result == duration
 
     def test_token_count_transformer_en(self):
-        """Test TokenCountTransformer with English language"""
+        """Test TokenCountTransformer passes content unchanged"""
         transformer = TokenCountTransformer()
         duration = "1.8s"
 
         result = transformer.transform(content=duration, lang="en")
-        expected = """<span style="color: #bbbbc2; font-size: 12px;">Duration:1.8s</span> """
-        assert result == expected
+        assert result == duration
 
 
 class TestErrorTransformer:
@@ -528,6 +526,187 @@ class TestMessageObserverEdgeCases:
 
         # Should still be in code mode
         assert observer.current_mode == ProcessType.MODEL_OUTPUT_CODE
+
+
+class TestMaxStepsReached:
+    """Test MAX_STEPS_REACHED ProcessType and MessageObserver handling."""
+
+    def test_process_type_max_steps_reached_exists(self):
+        """Test that ProcessType.MAX_STEPS_REACHED exists and has correct value."""
+        assert hasattr(ProcessType, 'MAX_STEPS_REACHED')
+        assert ProcessType.MAX_STEPS_REACHED.value == "max_steps_reached"
+
+    def test_max_steps_reached_message_format(self):
+        """Test that MAX_STEPS_REACHED messages are handled by DefaultTransformer."""
+        observer = MessageObserver()
+
+        max_steps_data = json.dumps({
+            "completedSteps": 3,
+            "maxSteps": 3,
+            "message": ""
+        })
+
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        cached_messages = observer.get_cached_message()
+        assert len(cached_messages) == 1
+
+        message_data = json.loads(cached_messages[0])
+        assert message_data["type"] == ProcessType.MAX_STEPS_REACHED.value
+
+        # Parse the content to verify the data structure
+        content_data = json.loads(message_data["content"])
+        assert content_data["completedSteps"] == 3
+        assert content_data["maxSteps"] == 3
+        assert content_data["message"] == ""
+
+    def test_max_steps_reached_with_different_completed_steps(self):
+        """Test MAX_STEPS_REACHED message with different completed step counts."""
+        observer = MessageObserver()
+
+        # Test with 1 completed step (reached max at step 1)
+        max_steps_data = json.dumps({
+            "completedSteps": 1,
+            "maxSteps": 3,
+            "message": ""
+        })
+
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        cached_messages = observer.get_cached_message()
+        message_data = json.loads(cached_messages[0])
+        content_data = json.loads(message_data["content"])
+
+        assert content_data["completedSteps"] == 1
+        assert content_data["maxSteps"] == 3
+
+    def test_max_steps_reached_multiple_messages(self):
+        """Test that MAX_STEPS_REACHED can be added alongside other messages."""
+        observer = MessageObserver()
+
+        # Add some regular messages first
+        observer.add_message("test_agent", ProcessType.STEP_COUNT, "1")
+        observer.add_message("test_agent", ProcessType.STEP_COUNT, "2")
+
+        # Add max steps reached message
+        max_steps_data = json.dumps({
+            "completedSteps": 2,
+            "maxSteps": 3,
+            "message": ""
+        })
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        cached_messages = observer.get_cached_message()
+        assert len(cached_messages) == 3
+
+        # Verify the last message is MAX_STEPS_REACHED
+        last_message = json.loads(cached_messages[2])
+        assert last_message["type"] == ProcessType.MAX_STEPS_REACHED.value
+
+    def test_max_steps_data_structure_matches_run_stream(self):
+        """Test the data structure matches what _run_stream creates."""
+        observer = MessageObserver()
+
+        # Simulate the data structure created in _run_stream
+        step_number = 4  # This is max_steps + 1 when max is 3
+        max_steps = 3
+        completed_steps = step_number - 1  # This equals max_steps
+
+        max_steps_data = json.dumps({
+            "completedSteps": completed_steps,
+            "maxSteps": max_steps,
+            "message": ""
+        })
+
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        cached_messages = observer.get_cached_message()
+        message_data = json.loads(cached_messages[0])
+        content_data = json.loads(message_data["content"])
+
+        # Verify the data structure matches what _run_stream creates
+        assert "completedSteps" in content_data
+        assert "maxSteps" in content_data
+        assert "message" in content_data
+        assert content_data["completedSteps"] == completed_steps
+        assert content_data["maxSteps"] == max_steps
+        assert content_data["message"] == ""
+
+    def test_max_steps_reached_edge_case_single_step(self):
+        """Test max steps data when agent completes only 1 step."""
+        observer = MessageObserver()
+
+        max_steps_data = json.dumps({
+            "completedSteps": 1,
+            "maxSteps": 1,
+            "message": ""
+        })
+
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        cached_messages = observer.get_cached_message()
+        message_data = json.loads(cached_messages[0])
+        content_data = json.loads(message_data["content"])
+
+        assert content_data["completedSteps"] == 1
+        assert content_data["maxSteps"] == 1
+
+    def test_max_steps_reached_edge_case_large_step_count(self):
+        """Test max steps data with large step counts."""
+        observer = MessageObserver()
+
+        max_steps_data = json.dumps({
+            "completedSteps": 100,
+            "maxSteps": 100,
+            "message": ""
+        })
+
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        cached_messages = observer.get_cached_message()
+        message_data = json.loads(cached_messages[0])
+        content_data = json.loads(message_data["content"])
+
+        assert content_data["completedSteps"] == 100
+        assert content_data["maxSteps"] == 100
+
+    def test_max_steps_reached_uses_default_transformer(self):
+        """Test that MAX_STEPS_REACHED uses DefaultTransformer (returns content as-is)."""
+        observer = MessageObserver()
+
+        original_content = "已达到最大步数限制（3 步），下方汇总了当前已完成的工作。"
+        max_steps_data = json.dumps({
+            "completedSteps": 3,
+            "maxSteps": 3,
+            "message": original_content
+        })
+
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        cached_messages = observer.get_cached_message()
+        message_data = json.loads(cached_messages[0])
+
+        # Content should be returned as-is by DefaultTransformer
+        assert message_data["content"] == max_steps_data
+
+    def test_max_steps_reached_chinese_content(self):
+        """Test MAX_STEPS_REACHED message with Chinese content."""
+        observer = MessageObserver(lang="zh")
+
+        max_steps_data = json.dumps({
+            "completedSteps": 5,
+            "maxSteps": 5,
+            "message": "已达到最大步数限制"
+        })
+
+        observer.add_message("test_agent", ProcessType.MAX_STEPS_REACHED, max_steps_data)
+
+        cached_messages = observer.get_cached_message()
+        message_data = json.loads(cached_messages[0])
+        content_data = json.loads(message_data["content"])
+
+        assert content_data["completedSteps"] == 5
+        assert "已达到最大步数限制" in str(content_data)
 
 
 if __name__ == "__main__":

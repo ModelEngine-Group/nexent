@@ -3,6 +3,17 @@ import { MESSAGE_ROLES } from "@/const/chatConfig";
 
 export type MessageRole = typeof MESSAGE_ROLES[keyof typeof MESSAGE_ROLES];
 
+// Token metrics emitted per agent step via TOKEN_COUNT SSE event
+export interface TokenMetrics {
+  step_number: number
+  duration: number
+  step_input_tokens: number | null
+  step_output_tokens: number | null
+  total_output_tokens: number
+  estimated_context_tokens: number | null
+  token_threshold: number | null
+}
+
 // Step related types
 export interface StepSection {
   content: string
@@ -24,7 +35,8 @@ export interface StepContent {
         typeof chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER |
         typeof chatConfig.messageTypes.VIRTUAL |
         typeof chatConfig.messageTypes.MEMORY_SEARCH |
-        typeof chatConfig.messageTypes.PREPROCESS
+        typeof chatConfig.messageTypes.PREPROCESS |
+        typeof chatConfig.messageTypes.MAX_STEPS_REACHED
   content: string
   expanded: boolean
   timestamp: number
@@ -37,19 +49,25 @@ export interface StepContent {
   }
 }
 
+export interface MaxStepsInfo {
+  completedSteps: number
+  maxSteps: number
+  message: string
+}
+
 export interface AgentStep {
   id: string
   title: string
   content: string
   expanded: boolean
-  metrics: string
+metrics: TokenMetrics | null
   // Support for both formats
   thinking: StepSection
   code: StepSection
   output: StepSection
-  // New format content array
   contents: StepContent[]
   parsingContent?: string
+  maxStepsInfo?: MaxStepsInfo
 }
 
 // Agent related types - imported from agentConfig
@@ -83,6 +101,7 @@ export interface FileAttachment {
   size: number
   url?: string
   object_name?: string
+  presigned_url?: string  // Temporary URL for external tools (e.g., MCP); expires after a configurable period (24 hours by default)
   description?: string
 }
 
@@ -103,15 +122,24 @@ export interface ChatAttachmentProps {
   className?: string;
 }
 
-// File preview drawer props
-export interface FilePreviewProps {
-  open: boolean;
+type RemoteFilePreviewSource = {
+  source?: "remote";
   objectName: string;
   fileName: string;
   fileType?: string;
   fileSize?: number;
+};
+
+type LocalFilePreviewSource = {
+  source: "local";
+  file: File;
+};
+
+// File preview drawer props
+export type FilePreviewProps = {
+  open: boolean;
   onClose: () => void;
-}
+} & (RemoteFilePreviewSource | LocalFilePreviewSource);
 
 // Main chat message type
 export interface ChatMessageType {
@@ -227,7 +255,15 @@ export interface MinioFileItem {
   size: number
   object_name?: string
   url?: string
+  presigned_url?: string  // Temporary URL for external tools (e.g., MCP), default 24h validity
   description?: string
+}
+
+// History item for API request payload
+export interface HistoryItem {
+  role: string;
+  content: string;
+  minio_files?: MinioFileItem[];
 }
 
 export interface ApiMessage {
@@ -323,6 +359,7 @@ export interface StorageUploadResult {
     content_type: string;
     upload_time: string;
     url: string;
+    presigned_url?: string;
     error?: string;
   }[];
 }

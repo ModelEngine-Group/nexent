@@ -6,6 +6,13 @@ import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
 import yaml from "js-yaml";
 
+/** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
+function normalizeTags(tags: unknown): string[] {
+  if (Array.isArray(tags)) return tags;
+  if (typeof tags === "string" && tags.trim() !== "") return [tags.trim()];
+  return [];
+}
+
 /**
  * Parse tool inputs string to extract parameter information
  * @param inputsString The inputs string from tool data
@@ -389,6 +396,7 @@ export interface UpdateAgentInfoPayload {
   model_id?: number;
   max_steps?: number;
   provide_run_summary?: boolean;
+  enable_context_manager?: boolean;
   enabled?: boolean;
   business_description?: string;
   business_logic_model_name?: string;
@@ -1068,7 +1076,7 @@ export const saveSkillInstance = async (
 
 /**
  * Create a new skill
- * @param skillData skill data including name, description, source, tags, content
+ * @param skillData skill data including name, description, source, tags, content, files
  * @returns created skill
  */
 export const createSkill = async (skillData: {
@@ -1077,15 +1085,19 @@ export const createSkill = async (skillData: {
   source?: string;
   tags?: string[];
   content?: string;
+  files?: Array<{ path: string; content: string }>;
 }) => {
   try {
-    const requestBody = {
+    const requestBody: Record<string, unknown> = {
       name: skillData.name,
       description: skillData.description || "",
       source: skillData.source || "custom",
-      tags: skillData.tags || [],
+      tags: normalizeTags(skillData.tags),
       content: skillData.content || "",
     };
+    if (skillData.files && skillData.files.length > 0) {
+      requestBody.files = skillData.files;
+    }
 
     const response = await fetch(API_ENDPOINTS.skills.create, {
       method: "POST",
@@ -1132,15 +1144,17 @@ export const updateSkill = async (
     tags?: string[];
     content?: string;
     params?: Record<string, unknown>;
+    files?: Array<{ path: string; content: string }>;
   }
 ) => {
   try {
     const requestBody: Record<string, any> = {};
     if (skillData.description !== undefined) requestBody.description = skillData.description;
     if (skillData.source !== undefined) requestBody.source = skillData.source;
-    if (skillData.tags !== undefined) requestBody.tags = skillData.tags;
+    if (skillData.tags !== undefined) requestBody.tags = normalizeTags(skillData.tags);
     if (skillData.content !== undefined) requestBody.content = skillData.content;
     if (skillData.params !== undefined) requestBody.params = skillData.params;
+    if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const response = await fetch(API_ENDPOINTS.skills.update(skillName), {
       method: "PUT",
@@ -1281,7 +1295,15 @@ export const fetchSkillFiles = async (skillName: string): Promise<SkillFileNode[
       throw new Error(`Request failed: ${response.status}`);
     }
     const data = await response.json();
-    return data.files || data || [];
+    // SDK returns a single root object { name, type, children };
+    // normalize to array so callers can always iterate over an array.
+    if (Array.isArray(data)) {
+      return data;
+    }
+    if (data && typeof data === "object" && "children" in data) {
+      return [data];
+    }
+    return [];
   } catch (error) {
     log.error("Error fetching skill files:", error);
     return [];

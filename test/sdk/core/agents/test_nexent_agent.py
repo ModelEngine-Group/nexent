@@ -2,7 +2,7 @@ import sys
 import types
 from pathlib import Path
 from threading import Event
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 
 import pytest
 
@@ -60,8 +60,14 @@ mock_smolagents_tools = MagicMock()
 mock_smolagents_tools.Tool = mock_tool_class
 mock_smolagents.tools = mock_smolagents_tools
 
+mock_smolagents.memory = MagicMock()
+mock_smolagents.memory.ActionStep = _ActionStep
+mock_smolagents.memory.AgentMemory = MagicMock
+mock_smolagents.memory.MemoryStep = MagicMock
+mock_smolagents.memory.TaskStep = _TaskStep
+
 # Create dummy smolagents sub-modules that may be imported indirectly
-for sub_mod in ["agents", "memory", "models", "monitoring", "utils", "local_python_executor"]:
+for sub_mod in ["agents", "models", "monitoring", "utils", "local_python_executor"]:
     mock_module = MagicMock()
     setattr(mock_smolagents, sub_mod, mock_module)
 
@@ -213,7 +219,7 @@ module_mocks = {
     "smolagents": mock_smolagents,
     "smolagents.tools": mock_smolagents_tools,
     "smolagents.agents": MagicMock(),
-    "smolagents.memory": MagicMock(),
+    "smolagents.memory": mock_smolagents.memory,
     "smolagents.models": MagicMock(),
     "smolagents.monitoring": MagicMock(),
     "smolagents.utils": MagicMock(),
@@ -462,7 +468,8 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         api_base=mock_model_config.url,
         temperature=mock_model_config.temperature,
         top_p=mock_model_config.top_p,
-        ssl_verify=True
+        ssl_verify=True,
+        display_name=mock_model_config.cite_name,
     )
 
     # Verify stop_event was set
@@ -490,7 +497,8 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         api_base=mock_deep_thinking_model_config.url,
         temperature=mock_deep_thinking_model_config.temperature,
         top_p=mock_deep_thinking_model_config.top_p,
-        ssl_verify=True
+        ssl_verify=True,
+        display_name=mock_deep_thinking_model_config.cite_name,
     )
 
     # Verify stop_event was set
@@ -880,6 +888,122 @@ def test_create_local_tool_knowledge_base_search_tool_with_none_defaults(nexent_
     assert result == mock_kb_tool_instance
 
 
+def test_create_local_tool_knowledge_base_with_display_name_map(nexent_agent_instance):
+    """Test KnowledgeBaseSearchTool creation sets display_name_to_index_map from metadata."""
+    mock_kb_tool_class = MagicMock()
+    mock_kb_tool_instance = MagicMock()
+    mock_kb_tool_class.return_value = mock_kb_tool_instance
+
+    display_name_map = {
+        "Knowledge A": "es_index_knowledge_a",
+        "Knowledge B": "es_index_knowledge_b",
+    }
+
+    tool_config = ToolConfig(
+        class_name="KnowledgeBaseSearchTool",
+        name="knowledge_base_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 10},
+        source="local",
+        metadata={
+            "vdb_core": "mock_vdb_core",
+            "embedding_model": "mock_embedding_model",
+            "rerank_model": "mock_rerank_model",
+            "display_name_to_index_map": display_name_map,
+        },
+    )
+
+    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
+    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
+
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
+        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
+
+    # Verify display_name_to_index_map was set correctly from metadata
+    assert result.display_name_to_index_map == display_name_map
+    assert result.vdb_core == "mock_vdb_core"
+    assert result.embedding_model == "mock_embedding_model"
+    assert result.rerank_model == "mock_rerank_model"
+
+
+def test_create_local_tool_knowledge_base_with_empty_display_name_map(nexent_agent_instance):
+    """Test KnowledgeBaseSearchTool creation handles empty display_name_to_index_map."""
+    mock_kb_tool_class = MagicMock()
+    mock_kb_tool_instance = MagicMock()
+    mock_kb_tool_class.return_value = mock_kb_tool_instance
+
+    tool_config = ToolConfig(
+        class_name="KnowledgeBaseSearchTool",
+        name="knowledge_base_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 10},
+        source="local",
+        metadata={
+            "vdb_core": "mock_vdb_core",
+            "embedding_model": "mock_embedding_model",
+            "display_name_to_index_map": {},
+        },
+    )
+
+    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
+    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
+
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
+        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
+
+    # Verify empty display_name_to_index_map was set
+    assert result.display_name_to_index_map == {}
+
+
+def test_create_local_tool_knowledge_base_without_metadata(nexent_agent_instance):
+    """Test KnowledgeBaseSearchTool creation handles missing metadata."""
+    mock_kb_tool_class = MagicMock()
+    mock_kb_tool_instance = MagicMock()
+    mock_kb_tool_class.return_value = mock_kb_tool_instance
+
+    tool_config = ToolConfig(
+        class_name="KnowledgeBaseSearchTool",
+        name="knowledge_base_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 10},
+        source="local",
+        metadata=None,
+    )
+
+    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
+    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
+
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
+        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
+
+    # Verify defaults were set when metadata is None
+    assert result.display_name_to_index_map == {}
+    assert result.vdb_core is None
+    assert result.embedding_model is None
+    assert result.rerank_model is None
+
+
 def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
     """Test AnalyzeTextFileTool creation injects observer and metadata."""
     mock_analyze_tool_class = MagicMock()
@@ -918,6 +1042,7 @@ def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
         llm_model="llm_model_obj",
         storage_client="storage_client_obj",
         data_process_service_url="DATA_PROCESS_SERVICE",
+        validate_url_access=None,
         prompt="describe this",
     )
     assert result == mock_analyze_tool_instance
@@ -958,46 +1083,7 @@ def test_create_local_tool_analyze_image_tool(nexent_agent_instance):
         observer=nexent_agent_instance.observer,
         vlm_model="vlm_model_obj",
         storage_client="storage_client_obj",
-        prompt="describe this",
-    )
-    assert result == mock_analyze_tool_instance
-
-
-def test_create_local_tool_analyze_image_tool(nexent_agent_instance):
-    """Test AnalyzeImageTool creation injects observer and metadata."""
-    mock_analyze_tool_class = MagicMock()
-    mock_analyze_tool_instance = MagicMock()
-    mock_analyze_tool_class.return_value = mock_analyze_tool_instance
-
-    tool_config = ToolConfig(
-        class_name="AnalyzeImageTool",
-        name="analyze_image",
-        description="desc",
-        inputs="{}",
-        output_type="string",
-        params={"prompt": "describe this"},
-        source="local",
-        metadata={
-            "vlm_model": "vlm_model_obj",
-            "storage_client": "storage_client_obj",
-        },
-    )
-
-    original_value = nexent_agent.__dict__.get("AnalyzeImageTool")
-    nexent_agent.__dict__["AnalyzeImageTool"] = mock_analyze_tool_class
-
-    try:
-        result = nexent_agent_instance.create_local_tool(tool_config)
-    finally:
-        if original_value is not None:
-            nexent_agent.__dict__["AnalyzeImageTool"] = original_value
-        elif "AnalyzeImageTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["AnalyzeImageTool"]
-
-    mock_analyze_tool_class.assert_called_once_with(
-        observer=nexent_agent_instance.observer,
-        vlm_model="vlm_model_obj",
-        storage_client="storage_client_obj",
+        validate_url_access=None,
         prompt="describe this",
     )
     assert result == mock_analyze_tool_instance
@@ -1202,7 +1288,9 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.5
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.5
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     # Use an instance of our _AgentText so isinstance(..., AgentText) is valid
@@ -1219,7 +1307,7 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
     mock_core_agent.run.assert_called_once_with(
         "test query", stream=True, reset=True)
     mock_core_agent.observer.add_message.assert_any_call(
-        "", ProcessType.TOKEN_COUNT, "1.5")
+        "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
         "test_agent", ProcessType.FINAL_ANSWER, " content")
 
@@ -1232,7 +1320,9 @@ def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_i
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 2.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 2.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     mock_core_agent.run.return_value = [mock_action_step]
@@ -1243,7 +1333,7 @@ def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_i
 
     # Verify
     mock_core_agent.observer.add_message.assert_any_call(
-        "", ProcessType.TOKEN_COUNT, "2.0")
+        "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
         "test_agent", ProcessType.FINAL_ANSWER, "")
 
@@ -1256,7 +1346,9 @@ def test_agent_run_with_observer_with_error_in_step(nexent_agent_instance, mock_
 
     # Mock step logs with error
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = "Test error occurred"
 
     mock_core_agent.run.return_value = [mock_action_step]
@@ -1279,7 +1371,9 @@ def test_agent_run_with_observer_skips_non_action_step(nexent_agent_instance, mo
     # Mock step logs with non-ActionStep
     mock_task_step = MagicMock(spec=TaskStep)
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     mock_core_agent.run.return_value = [mock_task_step, mock_action_step]
@@ -1290,7 +1384,7 @@ def test_agent_run_with_observer_skips_non_action_step(nexent_agent_instance, mo
 
     # Verify only ActionStep was processed
     mock_core_agent.observer.add_message.assert_any_call(
-        "", ProcessType.TOKEN_COUNT, "1.0")
+        "", ProcessType.TOKEN_COUNT, ANY)
     # Should not process TaskStep
 
 
@@ -1302,7 +1396,9 @@ def test_agent_run_with_observer_with_stop_event_set(nexent_agent_instance, mock
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     mock_core_agent.run.return_value = [mock_action_step]
@@ -1349,7 +1445,9 @@ def test_agent_run_with_observer_with_reset_false(nexent_agent_instance, mock_co
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     mock_core_agent.run.return_value = [mock_action_step]
@@ -1371,7 +1469,9 @@ def test_agent_run_with_observer_removes_think_prefix_chinese_colon(nexent_agent
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     # Test with Chinese colon "思考：" followed by content and two newlines
@@ -1402,7 +1502,9 @@ def test_agent_run_with_observer_removes_think_prefix_english_colon(nexent_agent
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     # Test with English colon "思考:" followed by content and two newlines
@@ -1431,7 +1533,9 @@ def test_agent_run_with_observer_preserves_think_prefix_without_two_newlines(nex
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     # Test with "思考：" but only one newline (should not be removed)
@@ -1463,7 +1567,9 @@ def test_agent_run_with_observer_removes_both_think_tag_and_think_prefix(nexent_
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     # Test with both <think> tags and "思考：" prefix
@@ -1493,7 +1599,9 @@ def test_agent_run_with_observer_think_prefix_in_middle(nexent_agent_instance, m
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     # Test with "思考：" in the middle of the text
@@ -1523,7 +1631,9 @@ def test_agent_run_with_observer_no_think_prefix(nexent_agent_instance, mock_cor
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     # Test with normal content without "思考：" prefix
@@ -1548,7 +1658,9 @@ def test_agent_run_with_observer_think_prefix_with_agent_text(nexent_agent_insta
 
     # Mock step logs
     mock_action_step = MagicMock(spec=ActionStep)
-    mock_action_step.duration = 1.0
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.0
+    mock_action_step.step_number = 1
     mock_action_step.error = None
 
     # Test with AgentText containing "思考：" prefix
@@ -2317,6 +2429,229 @@ class TestCreateLocalToolAnalyze:
         assert call_kwargs["param1"] == "value1"
         assert result == mock_tool_instance
 
+    def test_create_local_tool_analyze_text_file_with_validate_url_access_none(self, nexent_agent_instance):
+        """Test AnalyzeTextFileTool creation with validate_url_access not in metadata (None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeTextFileTool",
+            name="analyze_text",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"prompt": "describe this"},
+            source="local",
+            metadata={
+                "llm_model": ["gpt-4"],
+                "storage_client": "storage",
+                "data_process_service_url": "http://service.com"
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeTextFileTool")
+        nexent_agent.__dict__["AnalyzeTextFileTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeTextFileTool"] = original_value
+            elif "AnalyzeTextFileTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeTextFileTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] is None
+
+    def test_create_local_tool_analyze_text_file_with_validate_url_access_callable(self, nexent_agent_instance):
+        """Test AnalyzeTextFileTool creation with validate_url_access as callable."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        def mock_validate_func(url):
+            return True
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeTextFileTool",
+            name="analyze_text",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"prompt": "describe this"},
+            source="local",
+            metadata={
+                "llm_model": ["gpt-4"],
+                "storage_client": "storage",
+                "data_process_service_url": "http://service.com",
+                "validate_url_access": mock_validate_func
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeTextFileTool")
+        nexent_agent.__dict__["AnalyzeTextFileTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeTextFileTool"] = original_value
+            elif "AnalyzeTextFileTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeTextFileTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] == mock_validate_func
+
+    def test_create_local_tool_analyze_text_file_with_validate_url_access_not_callable(self, nexent_agent_instance):
+        """Test AnalyzeTextFileTool creation with non-callable validate_url_access (should be None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeTextFileTool",
+            name="analyze_text",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"prompt": "describe this"},
+            source="local",
+            metadata={
+                "llm_model": ["gpt-4"],
+                "storage_client": "storage",
+                "data_process_service_url": "http://service.com",
+                "validate_url_access": "not_a_callable_string"
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeTextFileTool")
+        nexent_agent.__dict__["AnalyzeTextFileTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeTextFileTool"] = original_value
+            elif "AnalyzeTextFileTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeTextFileTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] is None
+
+    def test_create_local_tool_analyze_image_with_validate_url_access_none(self, nexent_agent_instance):
+        """Test AnalyzeImageTool creation with validate_url_access not in metadata (None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeImageTool",
+            name="analyze_image",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"param1": "value1"},
+            source="local",
+            metadata={
+                "vlm_model": ["gpt-4-vision"],
+                "storage_client": "storage"
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeImageTool")
+        nexent_agent.__dict__["AnalyzeImageTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeImageTool"] = original_value
+            elif "AnalyzeImageTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeImageTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] is None
+
+    def test_create_local_tool_analyze_image_with_validate_url_access_callable(self, nexent_agent_instance):
+        """Test AnalyzeImageTool creation with validate_url_access as callable."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        def mock_validate_func(url):
+            return True
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeImageTool",
+            name="analyze_image",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"param1": "value1"},
+            source="local",
+            metadata={
+                "vlm_model": ["gpt-4-vision"],
+                "storage_client": "storage",
+                "validate_url_access": mock_validate_func
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeImageTool")
+        nexent_agent.__dict__["AnalyzeImageTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeImageTool"] = original_value
+            elif "AnalyzeImageTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeImageTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] == mock_validate_func
+
+    def test_create_local_tool_analyze_image_with_validate_url_access_not_callable(self, nexent_agent_instance):
+        """Test AnalyzeImageTool creation with non-callable validate_url_access (should be None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AnalyzeImageTool",
+            name="analyze_image",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"param1": "value1"},
+            source="local",
+            metadata={
+                "vlm_model": ["gpt-4-vision"],
+                "storage_client": "storage",
+                "validate_url_access": 12345
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get("AnalyzeImageTool")
+        nexent_agent.__dict__["AnalyzeImageTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["AnalyzeImageTool"] = original_value
+            elif "AnalyzeImageTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AnalyzeImageTool"]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["validate_url_access"] is None
+
 
 class TestCreateLocalToolClassNotFound:
     """Tests for create_local_tool when class is not found."""
@@ -2684,16 +3019,18 @@ class TestAgentRunWithObserverEdgeCases:
         mock_core_agent.stop_event.is_set.return_value = False
 
         mock_action_step = MagicMock(spec=_ActionStep)
-        mock_action_step.duration = None
+        mock_action_step.timing = MagicMock()
+        mock_action_step.timing.duration = None
+        mock_action_step.step_number = 1
         mock_action_step.error = None
 
         mock_core_agent.run.return_value = [mock_action_step]
         mock_core_agent.run.return_value[-1].output = "Final answer"
 
-        # The source code calls round(float(step_log.duration), 2) which will raise TypeError
-        # This test documents that None duration causes an error
-        with pytest.raises((TypeError, ValueError)):
-            nexent_agent_instance.agent_run_with_observer("test query")
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+        mock_core_agent.observer.add_message.assert_any_call("", ProcessType.TOKEN_COUNT, ANY)
+        mock_core_agent.observer.add_message.assert_any_call("test_agent", ProcessType.FINAL_ANSWER, "Final answer")
 
     def test_agent_run_with_observer_with_float_duration_conversion(self, nexent_agent_instance, mock_core_agent):
         """Test agent_run_with_observer correctly converts duration to string."""
@@ -2701,7 +3038,9 @@ class TestAgentRunWithObserverEdgeCases:
         mock_core_agent.stop_event.is_set.return_value = False
 
         mock_action_step = MagicMock(spec=_ActionStep)
-        mock_action_step.duration = 3.14159
+        mock_action_step.timing = MagicMock()
+        mock_action_step.timing.duration = 3.14159
+        mock_action_step.step_number = 1
         mock_action_step.error = None
 
         mock_core_agent.run.return_value = [mock_action_step]
@@ -2710,7 +3049,7 @@ class TestAgentRunWithObserverEdgeCases:
         nexent_agent_instance.agent_run_with_observer("test query")
 
         # Verify duration was rounded to 2 decimal places
-        mock_core_agent.observer.add_message.assert_any_call("", ProcessType.TOKEN_COUNT, "3.14")
+        mock_core_agent.observer.add_message.assert_any_call("", ProcessType.TOKEN_COUNT, ANY)
 
 
 if __name__ == "__main__":

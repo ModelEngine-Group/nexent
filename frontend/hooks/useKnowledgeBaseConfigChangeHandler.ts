@@ -9,7 +9,8 @@ export type ToolKbType =
   | "knowledge_base_search"
   | "dify_search"
   | "datamate_search"
-  | "idata_search";
+  | "idata_search"
+  | "haotian_search";
 
 /**
  * Configuration for Dify tool

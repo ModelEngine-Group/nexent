@@ -12,9 +12,11 @@ class ToolSign(Enum):
     DATAMATE_SEARCH = "e"  # DataMate search tool identifier
     DIFY_SEARCH = "g"  # Dify search tool identifier
     IDATA_SEARCH = "h"  # iData search tool identifier
+    HAOTIAN_SEARCH = "i"  # Haotian search tool identifier
     FILE_OPERATION = "f"      # File operation tool identifier
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
     MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
+    DATABASE_OPERATION = "z"  # Database operation tool identifier
 
 
 # Tool sign mapping for backward compatibility
@@ -26,9 +28,11 @@ TOOL_SIGN_MAPPING = {
     "datamate_search": ToolSign.DATAMATE_SEARCH.value,
     "dify_search": ToolSign.DIFY_SEARCH.value,
     "idata_search": ToolSign.IDATA_SEARCH.value,
+    "haotian_search": ToolSign.HAOTIAN_SEARCH.value,
     "file_operation": ToolSign.FILE_OPERATION.value,
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,
+    "database_operation": ToolSign.DATABASE_OPERATION.value,
 }
 
 # Reverse mapping for lookup
@@ -42,6 +46,7 @@ class ToolCategory(Enum):
     EMAIL = "email"
     TERMINAL = "terminal"
     MULTIMODAL = "multimodal"
+    DATABASE = "database"
 
 
 @dataclass

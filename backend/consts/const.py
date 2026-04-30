@@ -69,6 +69,12 @@ SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
 
 
+# OAuth Configuration
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
+OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
+
+
 # ===== To be migrated to frontend configuration =====
 # Email Configuration
 IMAP_SERVER = os.getenv('IMAP_SERVER')
@@ -337,12 +343,19 @@ MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
 
-# Northbound API External URL (used for A2A Agent Card URLs)
-# When accessed through reverse proxy, set this to the public-facing URL
-# Falls back to http://localhost:5013 for local development
-_northbound_url = os.getenv("NORTHBOUND_EXTERNAL_URL", "")
-NORTHBOUND_EXTERNAL_URL = _northbound_url.rstrip("/") if _northbound_url else "http://localhost:5013"
+# Northbound API public base URL (used for A2A agent cards and external file proxy links)
+NORTHBOUND_EXTERNAL_URL = os.getenv("NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
 
 
 # APP Version
-APP_VERSION = "v2.0.2"
+APP_VERSION = "v2.1.0"
+
+
+# Skill Creation Streaming Configuration
+STREAMABLE_CONTENT_TYPES = frozenset([
+    "model_output_thinking",
+    "model_output_code",
+    "model_output_deep_thinking",
+    "tool",
+    "execution_logs",
+])

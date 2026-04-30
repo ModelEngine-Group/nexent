@@ -1,28 +1,9 @@
 import pytest
 import requests
-import importlib.util
 import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
-# Dynamically load the module directly by file path to avoid importing sdk/nexent/__init__
-MODULE_NAME = "embedding_model_under_test"
-MODULE_PATH = (
-    Path(__file__).resolve().parents[4]
-    / "sdk"
-    / "nexent"
-    / "core"
-    / "models"
-    / "embedding_model.py"
-)
-spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
-embedding_model_module = importlib.util.module_from_spec(spec)
-sys.modules[MODULE_NAME] = embedding_model_module
-assert spec and spec.loader
-spec.loader.exec_module(embedding_model_module)
-
-OpenAICompatibleEmbedding = embedding_model_module.OpenAICompatibleEmbedding
-JinaEmbedding = embedding_model_module.JinaEmbedding
+from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding
 
 class DummyResponse:
     def __init__(self, status_code=200, json_data=None):
@@ -73,7 +54,7 @@ async def test_dimension_check_success(openai_embedding_instance):
     expected_embeddings = [[0.1, 0.2, 0.3]]
 
     with patch(
-        "embedding_model_under_test.asyncio.to_thread",
+        "nexent.core.models.embedding_model.asyncio.to_thread",
         new_callable=AsyncMock,
         return_value=expected_embeddings,
     ) as mock_to_thread:
@@ -88,7 +69,7 @@ async def test_dimension_check_failure(openai_embedding_instance):
     """dimension_check should return an empty list when an exception is raised inside to_thread."""
 
     with patch(
-        "embedding_model_under_test.asyncio.to_thread",
+        "nexent.core.models.embedding_model.asyncio.to_thread",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ) as mock_to_thread:
@@ -110,7 +91,7 @@ async def test_jina_dimension_check_success(jina_embedding_instance):
     expected_embeddings = [[0.5, 0.4, 0.3]]
 
     with patch(
-        "embedding_model_under_test.asyncio.to_thread",
+        "nexent.core.models.embedding_model.asyncio.to_thread",
         new_callable=AsyncMock,
         return_value=expected_embeddings,
     ) as mock_to_thread:
@@ -125,7 +106,7 @@ async def test_jina_dimension_check_failure(jina_embedding_instance):
     """dimension_check should return an empty list when an exception is raised inside to_thread."""
 
     with patch(
-        "embedding_model_under_test.asyncio.to_thread",
+        "nexent.core.models.embedding_model.asyncio.to_thread",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ) as mock_to_thread:
@@ -146,7 +127,7 @@ def test_openai_get_embeddings_success_returns_list(openai_embedding_instance):
     fake_response = {"data": [{"embedding": [0.9, 0.8]}]}
 
     with patch(
-        "embedding_model_under_test.OpenAICompatibleEmbedding._make_request",
+        "nexent.core.models.embedding_model.OpenAICompatibleEmbedding._make_request",
         return_value=fake_response,
     ) as mock_make_request:
         result = openai_embedding_instance.get_embeddings(
@@ -164,7 +145,7 @@ def test_openai_get_embeddings_with_metadata(openai_embedding_instance):
         "data": [{"embedding": [1, 2, 3]}], "meta": {"foo": "bar"}}
 
     with patch(
-        "embedding_model_under_test.OpenAICompatibleEmbedding._make_request",
+        "nexent.core.models.embedding_model.OpenAICompatibleEmbedding._make_request",
         return_value=fake_response,
     ) as mock_make_request:
         result = openai_embedding_instance.get_embeddings(
@@ -191,7 +172,7 @@ def test_openai_get_embeddings_timeout_retry_succeeds(openai_embedding_instance)
     side_effect.calls = 0
 
     with patch(
-        "embedding_model_under_test.OpenAICompatibleEmbedding._make_request",
+        "nexent.core.models.embedding_model.OpenAICompatibleEmbedding._make_request",
         side_effect=side_effect,
     ) as mock_make_request:
         result = openai_embedding_instance.get_embeddings(
@@ -211,7 +192,7 @@ def test_openai_get_embeddings_timeout_exhausts_raises(openai_embedding_instance
     """Should raise Timeout after exhausting retries."""
 
     with patch(
-        "embedding_model_under_test.OpenAICompatibleEmbedding._make_request",
+        "nexent.core.models.embedding_model.OpenAICompatibleEmbedding._make_request",
         side_effect=requests.exceptions.Timeout(),
     ) as mock_make_request:
         with pytest.raises(requests.exceptions.Timeout):
@@ -245,7 +226,7 @@ def test_jina_get_embeddings_converts_text_and_delegates(jina_embedding_instance
         return [[0.3, 0.4]]
 
     with patch(
-        "embedding_model_under_test.JinaEmbedding.get_multimodal_embeddings",
+        "nexent.core.models.embedding_model.JinaEmbedding.get_multimodal_embeddings",
         side_effect=side_effect,
     ) as mock_delegate:
         result = jina_embedding_instance.get_embeddings(
@@ -270,7 +251,7 @@ def test_jina_get_embeddings_timeout_retry_succeeds(jina_embedding_instance):
     side_effect.calls = 0
 
     with patch(
-        "embedding_model_under_test.JinaEmbedding.get_multimodal_embeddings",
+        "nexent.core.models.embedding_model.JinaEmbedding.get_multimodal_embeddings",
         side_effect=side_effect,
     ) as mock_delegate:
         result = jina_embedding_instance.get_embeddings(
@@ -292,7 +273,7 @@ def test_jina_get_embeddings_timeout_exhausts_raises(jina_embedding_instance):
     """Should raise Timeout after exhausting retries."""
 
     with patch(
-        "embedding_model_under_test.JinaEmbedding.get_multimodal_embeddings",
+        "nexent.core.models.embedding_model.JinaEmbedding.get_multimodal_embeddings",
         side_effect=requests.exceptions.Timeout(),
     ) as mock_delegate:
         with pytest.raises(requests.exceptions.Timeout):
@@ -325,7 +306,7 @@ def test_jina_get_multimodal_embeddings_parses_embeddings(jina_embedding_instanc
     mock_resp.json = Mock(return_value=fake_response)
 
     with patch(
-        "embedding_model_under_test.requests.post", return_value=mock_resp
+        "nexent.core.models.embedding_model.requests.post", return_value=mock_resp
     ) as mock_post:
         inputs = [{"text": "t1"}, {"image": "http://x/y.jpg"}]
         result = jina_embedding_instance.get_multimodal_embeddings(
@@ -353,7 +334,7 @@ def test_jina_get_multimodal_embeddings_with_metadata(jina_embedding_instance):
     mock_resp.raise_for_status = Mock()
     mock_resp.json = Mock(return_value=fake_response)
 
-    with patch("embedding_model_under_test.requests.post", return_value=mock_resp) as mock_post:
+    with patch("nexent.core.models.embedding_model.requests.post", return_value=mock_resp) as mock_post:
         inputs = [{"text": "t"}]
         result = jina_embedding_instance.get_multimodal_embeddings(
             inputs, with_metadata=True, timeout=4
@@ -389,7 +370,7 @@ def test_jina_get_multimodal_embeddings_timeout_retry_succeeds(jina_embedding_in
     side_effect.calls = 0
 
     with patch(
-        "embedding_model_under_test.requests.post", side_effect=side_effect
+        "nexent.core.models.embedding_model.requests.post", side_effect=side_effect
     ) as mock_post:
         inputs = [{"text": "t"}]
         result = jina_embedding_instance.get_multimodal_embeddings(
@@ -410,7 +391,7 @@ def test_jina_get_multimodal_embeddings_timeout_exhausts_raises(
     """Should raise Timeout after exhausting retries."""
 
     with patch(
-        "embedding_model_under_test.requests.post",
+        "nexent.core.models.embedding_model.requests.post",
         side_effect=requests.exceptions.Timeout(),
     ) as mock_post:
         with pytest.raises(requests.exceptions.Timeout):
@@ -457,7 +438,7 @@ async def test_jina_dimension_check_connection_error_returns_empty(jina_embeddin
     """dimension_check should return [] on ConnectionError."""
 
     with patch(
-        "embedding_model_under_test.asyncio.to_thread",
+        "nexent.core.models.embedding_model.asyncio.to_thread",
         new_callable=AsyncMock,
         side_effect=requests.exceptions.ConnectionError(),
     ):
@@ -476,7 +457,7 @@ def test_openai_get_embeddings_string_prepares_input_list(openai_embedding_insta
         return {"data": [{"embedding": [0.21, 0.22]}]}
 
     with patch(
-        "embedding_model_under_test.OpenAICompatibleEmbedding._make_request",
+        "nexent.core.models.embedding_model.OpenAICompatibleEmbedding._make_request",
         side_effect=side_effect,
     ) as mock_make_request:
         result = openai_embedding_instance.get_embeddings(
@@ -497,7 +478,7 @@ def test_openai_make_request_invokes_requests_post(openai_embedding_instance):
     mock_resp.raise_for_status = Mock()
     mock_resp.json = Mock(return_value=fake_response)
 
-    with patch("embedding_model_under_test.requests.post", return_value=mock_resp) as mock_post:
+    with patch("nexent.core.models.embedding_model.requests.post", return_value=mock_resp) as mock_post:
         result = openai_embedding_instance.get_embeddings(
             ["hi"], with_metadata=False, timeout=2
         )
@@ -521,7 +502,7 @@ async def test_openai_dimension_check_connection_error_returns_empty(openai_embe
     """dimension_check should return [] on ConnectionError."""
 
     with patch(
-        "embedding_model_under_test.asyncio.to_thread",
+        "nexent.core.models.embedding_model.asyncio.to_thread",
         new_callable=AsyncMock,
         side_effect=requests.exceptions.ConnectionError(),
     ):
@@ -647,3 +628,58 @@ def test_jina_get_multimodal_embeddings_missing_data_key(monkeypatch):
     emb = JinaEmbedding(api_key="k")
     with pytest.raises(KeyError):
         emb.get_multimodal_embeddings([{"text": "t"}], with_metadata=False, timeout=1)
+
+
+# ---------------------------------------------------------------------------
+# Tests for record_model_call monitoring wrapper
+# ---------------------------------------------------------------------------
+
+
+def test_openai_get_embeddings_calls_record_model_call(mocker):
+    """OpenAICompatibleEmbedding.get_embeddings calls record_model_call with correct args."""
+    mock_ctx = mocker.MagicMock()
+    mock_ctx.__enter__ = mocker.MagicMock(return_value=None)
+    mock_ctx.__exit__ = mocker.MagicMock(return_value=False)
+    mock_record = mocker.patch(
+        "nexent.core.models.embedding_model.record_model_call",
+        return_value=mock_ctx,
+    )
+    mock_resp = Mock()
+    mock_resp.raise_for_status = Mock()
+    mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2]}]}
+    mocker.patch("requests.post", return_value=mock_resp)
+
+    emb = OpenAICompatibleEmbedding(
+        model_name="text-emb-3",
+        base_url="https://api.example.com",
+        api_key="k",
+        embedding_dim=2,
+        ssl_verify=True,
+    )
+    emb.get_embeddings(["hello"], with_metadata=False, timeout=5)
+
+    mock_record.assert_called_once_with(
+        "embedding", "text-emb-3", display_name="text-emb-3"
+    )
+
+
+def test_jina_get_embeddings_calls_record_model_call(mocker):
+    """JinaEmbedding.get_multimodal_embeddings calls record_model_call with correct args."""
+    mock_ctx = mocker.MagicMock()
+    mock_ctx.__enter__ = mocker.MagicMock(return_value=None)
+    mock_ctx.__exit__ = mocker.MagicMock(return_value=False)
+    mock_record = mocker.patch(
+        "nexent.core.models.embedding_model.record_model_call",
+        return_value=mock_ctx,
+    )
+    mock_resp = Mock()
+    mock_resp.raise_for_status = Mock()
+    mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2]}]}
+    mocker.patch("requests.post", return_value=mock_resp)
+
+    emb = JinaEmbedding(api_key="k", ssl_verify=True)
+    emb.get_multimodal_embeddings([{"text": "hi"}], with_metadata=False, timeout=5)
+
+    mock_record.assert_called_once_with(
+        "multi_embedding", emb.model, display_name=emb.model
+    )

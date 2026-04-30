@@ -1,10 +1,12 @@
 import logging
 from http import HTTPStatus
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
 import uuid
 
+import httpx
 from fastapi import APIRouter, Body, Header, Request, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from consts.exceptions import LimitExceededError, UnauthorizedError
 from services.northbound_service import (
@@ -258,3 +260,89 @@ async def update_convs_title(
         logging.error(f"Failed to update conversation title: {str(e)}", exc_info=e)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.get("/file/fetch")
+async def fetch_file_from_presigned_url(
+    presigned_url: str = Query(..., description="Presigned URL from MinIO storage"),
+):
+    """
+    Fetch file content from a MinIO presigned URL.
+
+    This endpoint acts as a proxy - it downloads the file from MinIO
+    (which is only accessible from within the container network) and
+    returns the file content to external callers (e.g., MCP tools).
+
+    The presigned_url parameter should be URL-encoded by the caller.
+
+    NOTE: No authentication required for this endpoint.
+    """
+    if not presigned_url:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="presigned_url is required"
+        )
+
+    try:
+        parsed = urlparse(presigned_url)
+        if parsed.scheme not in ("http", "https"):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Invalid URL scheme. Must be http or https"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Invalid presigned_url format: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Invalid presigned_url format"
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(presigned_url)
+
+        if response.status_code != 200:
+            logging.error(f"Failed to fetch file from presigned_url, status: {response.status_code}")
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"Failed to fetch file from storage, status: {response.status_code}"
+            )
+
+        content_type = response.headers.get("Content-Type", "application/octet-stream")
+        content_disposition = response.headers.get("Content-Disposition", "")
+
+        headers = {
+            "Content-Type": content_type,
+        }
+        if content_disposition:
+            headers["Content-Disposition"] = content_disposition
+
+        return StreamingResponse(
+            content=response.aiter_bytes(),
+            status_code=HTTPStatus.OK,
+            headers=headers,
+            media_type=content_type
+        )
+
+    except httpx.TimeoutException:
+        logging.error(f"Timeout fetching file from presigned_url")
+        raise HTTPException(
+            status_code=HTTPStatus.GATEWAY_TIMEOUT,
+            detail="Timeout fetching file from storage"
+        )
+    except httpx.RequestError as e:
+        logging.error(f"Request error fetching file from presigned_url: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=f"Failed to fetch file from storage: {str(e)}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Unexpected error fetching file: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )

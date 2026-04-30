@@ -1,9 +1,11 @@
+from .sql_tools import MySqlTool, PostgreSqlTool, MsSqlTool
 from .exa_search_tool import ExaSearchTool
 from .get_email_tool import GetEmailTool
 from .knowledge_base_search_tool import KnowledgeBaseSearchTool
 from .dify_search_tool import DifySearchTool
 from .datamate_search_tool import DataMateSearchTool
 from .idata_search_tool import IdataSearchTool
+from .haotian_search_tool import HaotianSearchTool
 from .send_email_tool import SendEmailTool
 from .tavily_search_tool import TavilySearchTool
 from .linkup_search_tool import LinkupSearchTool
@@ -22,11 +24,15 @@ from .read_skill_md_tool import read_skill_md
 from .read_skill_config_tool import read_skill_config
 
 __all__ = [
+    "MySqlTool",
+    "PostgreSqlTool",
+    "MsSqlTool",
     "ExaSearchTool",
     "KnowledgeBaseSearchTool",
     "DifySearchTool",
     "DataMateSearchTool",
     "IdataSearchTool",
+    "HaotianSearchTool",
     "SendEmailTool",
     "GetEmailTool",
     "TavilySearchTool",

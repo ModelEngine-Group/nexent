@@ -4,13 +4,13 @@ import re
 from threading import Thread
 from typing import Any, Callable, Dict, List, Optional
 
-import requests
+import httpx
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
-from database.outer_api_tool_db import query_available_outer_api_tools
+from database.outer_api_tool_db import query_available_openapi_services
 from mcp.types import Tool as MCPTool
 from tool_collection.mcp.local_mcp_service import local_mcp_service
 from utils.logging_utils import configure_logging
@@ -72,7 +72,7 @@ class CustomFunctionTool:
 nexent_mcp = FastMCP(name="nexent_mcp")
 nexent_mcp.mount(local_mcp_service.name, local_mcp_service)
 
-_registered_outer_api_tools: Dict[str, Callable] = {}
+_openapi_mcp_services: Dict[str, FastMCP] = {}
 
 
 # FastAPI app for management endpoints (runs alongside the MCP server)
@@ -97,7 +97,7 @@ def get_mcp_management_app():
             to notify the MCP server to reload outer API tools.
             """
             try:
-                result = refresh_outer_api_tools(tenant_id)
+                result = refresh_openapi_services_by_tenant(tenant_id)
                 return {
                     "status": "success",
                     "data": result
@@ -106,48 +106,68 @@ def get_mcp_management_app():
                 logger.error(f"Failed to refresh outer API tools: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
+        @_mcp_management_app.post("/tools/openapi_service/refresh")
+        async def refresh_openapi_services_endpoint(
+            tenant_id: str = Query(..., description="Tenant ID"),
+            authorization: Optional[str] = Header(None)
+        ):
+            """
+            Refresh OpenAPI services (using from_openapi approach) for a tenant.
+
+            This endpoint uses FastMCP.from_openapi() to batch-load all tools
+            from each OpenAPI service, replacing individual tool registration.
+            """
+            try:
+                result = refresh_openapi_services_by_tenant(tenant_id)
+                return {
+                    "status": "success",
+                    "data": result
+                }
+            except Exception as e:
+                logger.error(f"Failed to refresh OpenAPI services: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @_mcp_management_app.get("/tools/openapi_service")
+        async def list_openapi_services_endpoint(
+            tenant_id: str = Query(..., description="Tenant ID"),
+            authorization: Optional[str] = Header(None)
+        ):
+            """List all registered OpenAPI service names and their tool counts."""
+            return {
+                "status": "success",
+                "data": get_registered_openapi_services()
+            }
+
+        @_mcp_management_app.post("/tools/openapi_service/{service_name}/refresh")
+        async def refresh_single_openapi_service_endpoint(
+            service_name: str,
+            tenant_id: str = Query(..., description="Tenant ID"),
+            authorization: Optional[str] = Header(None)
+        ):
+            """
+            Refresh a single OpenAPI service after tool deletion/update.
+
+            This allows dynamic updates without reloading all services.
+            """
+            try:
+                result = refresh_single_openapi_service(service_name, tenant_id)
+                return {
+                    "status": "success",
+                    "data": result
+                }
+            except Exception as e:
+                logger.error(f"Failed to refresh OpenAPI service '{service_name}': {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
         @_mcp_management_app.get("/tools/outer_api")
         async def list_outer_api_tools_endpoint(
             authorization: Optional[str] = Header(None)
         ):
-            """List all registered outer API tool names."""
+            """List all registered outer API tool names (legacy endpoint, now returns OpenAPI services)."""
             return {
                 "status": "success",
-                "data": get_registered_outer_api_tools()
+                "data": get_registered_openapi_services()
             }
-
-        @_mcp_management_app.delete("/tools/outer_api/{tool_name}")
-        async def remove_outer_api_tool_endpoint(
-            tool_name: str,
-            authorization: Optional[str] = Header(None)
-        ):
-            """
-            Remove a specific outer API tool from the MCP server.
-
-            Args:
-                tool_name: Name of the tool to remove
-
-            Returns:
-                Success status
-            """
-            try:
-                sanitized_name = _sanitize_function_name(tool_name)
-                result = remove_outer_api_tool(sanitized_name)
-                if result:
-                    return {
-                        "status": "success",
-                        "message": f"Tool '{sanitized_name}' removed"
-                    }
-                else:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Tool '{sanitized_name}' not found"
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"Failed to remove outer API tool '{tool_name}': {e}")
-                raise HTTPException(status_code=500, detail=str(e))
 
     return _mcp_management_app
 
@@ -161,288 +181,234 @@ def _sanitize_function_name(name: str) -> str:
     return sanitized
 
 
-def _build_headers(headers_template: Dict[str, Any], kwargs: Dict[str, Any]) -> Dict[str, str]:
-    """Build request headers from template."""
-    headers = {}
-    for key, value in headers_template.items():
-        if isinstance(value, str) and "{" in value:
-            try:
-                headers[key] = value.format(**kwargs)
-            except KeyError:
-                headers[key] = value
-        else:
-            headers[key] = value
-    return headers
+# --------------------------------------------------
+# OpenAPI Service Registration (using from_openapi)
+# --------------------------------------------------
 
-
-def _build_url(url_template: str, kwargs: Dict[str, Any]) -> str:
-    """Build URL from template, replacing path parameters."""
-    path_params = re.findall(r'\{(\w+)\}', url_template)
-    for param in path_params:
-        if param in kwargs:
-            url_template = url_template.replace(f'{{{param}}}', str(kwargs[param]))
-    return url_template
-
-
-def _build_query_params(query_template: Dict[str, Any], kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    """Build query parameters from template."""
-    params = {}
-    for key, value in query_template.items():
-        if key in kwargs:
-            params[key] = kwargs[key]
-        elif isinstance(value, dict) and "default" in value:
-            params[key] = value["default"]
-        else:
-            params[key] = value
-    return params
-
-
-def _build_request_body(body_template: Dict[str, Any], kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Build request body from template and kwargs."""
-    body = {}
-    for key, value in body_template.items():
-        if key in kwargs:
-            body[key] = kwargs[key]
-        elif value is not None:
-            body[key] = value
-    for key, value in kwargs.items():
-        if key not in body and key not in _get_non_body_keys():
-            body[key] = value
-    return body if body else None
-
-
-def _get_non_body_keys() -> set:
-    """Get keys that should not be included in body."""
-    return {"url", "method", "headers", "params", "json", "data"}
-
-
-def _register_single_outer_api_tool(api_def: Dict[str, Any]) -> bool:
+def register_openapi_service(
+    service_name: str,
+    openapi_json: Dict[str, Any],
+    server_url: str
+) -> bool:
     """
-    Register a single outer API tool to the MCP server.
+    Register an OpenAPI service using FastMCP.from_openapi().
+
+    This approach batch-loads all tools from the OpenAPI spec at once,
+    instead of registering each tool individually.
 
     Args:
-        api_def: Tool definition from database
+        service_name: MCP service name for grouping
+        openapi_json: Complete OpenAPI JSON specification
+        server_url: Base URL of the REST API server
 
     Returns:
         True if registered successfully, False otherwise
     """
+    global _openapi_mcp_services
+
+    # Validate inputs
+    if not service_name:
+        logger.error("Cannot register OpenAPI service: service_name is None or empty")
+        return False
+
+    if service_name in _openapi_mcp_services:
+        logger.warning(f"OpenAPI service '{service_name}' already registered, skipping")
+        return False
+
     try:
-        tool_name = _sanitize_function_name(api_def.get("name", "unnamed_tool"))
+        # Override server URL in openapi spec
+        openapi_spec = openapi_json.copy()
+        if server_url:
+            openapi_spec["servers"] = [{"url": server_url}]
 
-        if tool_name in _registered_outer_api_tools:
-            logger.warning(f"Tool '{tool_name}' already registered, skipping")
-            return False
+        # Create HTTP client for the underlying REST API
+        client = httpx.AsyncClient(base_url=server_url, timeout=30.0)
 
-        method = api_def.get("method", "GET").upper()
-        url_template = api_def.get("url", "")
-        headers_template = api_def.get("headers_template") or {}
-        query_template = api_def.get("query_template") or {}
-        body_template = api_def.get("body_template") or {}
-        input_schema = api_def.get("input_schema") or {}
-
-        _registered_outer_api_tools[tool_name] = {
-            "api_def": api_def
-        }
-
-        flat_input_schema = _build_flat_input_schema(input_schema)
-
-        async def tool_func(**kwargs: Any) -> str:
-            """Execute the outer API call."""
-            try:
-                url = _build_url(url_template, kwargs)
-                headers = _build_headers(headers_template, kwargs)
-                query_params = _build_query_params(query_template, kwargs)
-                body = _build_request_body(body_template, kwargs) if method in ["POST", "PUT", "PATCH"] else None
-
-                response = requests.request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    params=query_params,
-                    json=body
-                )
-
-                response.raise_for_status()
-                return response.text
-
-            except requests.RequestException as e:
-                logger.error(f"Outer API tool '{tool_name}' failed: {e}")
-                return f"Error: {str(e)}"
-            except Exception as e:
-                logger.error(f"Outer API tool '{tool_name}' unexpected error: {e}")
-                return f"Error: {str(e)}"
-
-        logger.info(f"Flat input schema for '{tool_name}': {flat_input_schema}")
-
-        tool = CustomFunctionTool(
-            name=tool_name,
-            fn=tool_func,
-            description=api_def.get("description", f"Outer API tool: {tool_name}"),
-            parameters=flat_input_schema,
+        # Create FastMCP instance from OpenAPI spec
+        mcp_server = FastMCP.from_openapi(
+            openapi_spec=openapi_spec,
+            client=client,
+            name=service_name,
         )
 
-        nexent_mcp.add_tool(tool)
+        # Validate that mcp_server was created successfully
+        if mcp_server is None:
+            logger.error(f"FastMCP.from_openapi() returned None for service '{service_name}'")
+            return False
 
-        logger.info(f"Registered outer API tool: {tool_name}")
+        _openapi_mcp_services[service_name] = mcp_server
+
+        # Mount to the main MCP server
+        nexent_mcp.mount(service_name, mcp_server)
+
+        logger.info(f"Registered OpenAPI service: {service_name}")
         return True
 
     except Exception as e:
-        logger.error(f"Failed to register outer API tool '{api_def.get('name')}': {e}", exc_info=True)
+        logger.error(f"Failed to register OpenAPI service '{service_name}': {e}", exc_info=True)
         return False
 
 
-def _build_flat_input_schema(input_schema: Dict[str, Any]) -> Dict[str, Any]:
+def unregister_openapi_service(service_name: str) -> bool:
     """
-    Build a flat input schema from the OpenAPI input schema.
+    Unregister an OpenAPI service.
 
-    If the input schema has a nested structure (with a single property containing
-    an object schema), extract the inner properties to create a flat schema.
+    Note: FastMCP does not support dynamic unmount, so this just removes
+    the service from the registry. A full restart or architecture change
+    would be needed to actually remove it from the running server.
 
     Args:
-        input_schema: Input schema from OpenAPI
-
-    Returns:
-        Flattened JSON schema for MCP tool parameters
-    """
-    if not input_schema:
-        return {"type": "object", "properties": {}}
-
-    logger.debug(f"Original input_schema: {input_schema}")
-
-    properties = input_schema.get("properties", {})
-    required = input_schema.get("required", []) or []
-
-    if len(properties) == 1:
-        single_key = list(properties.keys())[0]
-        single_prop = properties[single_key]
-
-        if single_prop.get("type") == "object" and "properties" in single_prop:
-            logger.debug(f"Flattening nested schema with key '{single_key}'")
-            return {
-                "type": "object",
-                "properties": single_prop.get("properties", {}),
-                "required": single_prop.get("required", []) or []
-            }
-
-    result = {
-        "type": "object",
-        "properties": properties,
-        "required": required if required else None
-    }
-    logger.debug(f"Processed input_schema: {result}")
-    return result
-
-
-def register_outer_api_tools(tenant_id: str) -> Dict[str, int]:
-    """
-    Register all outer API tools from database to the MCP server.
-
-    Args:
-        tenant_id: Tenant ID to load tools for
-
-    Returns:
-        Dictionary with counts of registered tools
-    """
-    tools = query_available_outer_api_tools(tenant_id)
-
-    registered_count = 0
-    skipped_count = 0
-
-    for tool in tools:
-        if _register_single_outer_api_tool(tool):
-            registered_count += 1
-        else:
-            skipped_count += 1
-
-    logger.info(f"Outer API tools registration complete: {registered_count} registered, {skipped_count} skipped")
-    return {
-        "registered": registered_count,
-        "skipped": skipped_count,
-        "total": len(tools)
-    }
-
-
-def refresh_outer_api_tools(tenant_id: str) -> Dict[str, int]:
-    """
-    Refresh all outer API tools: unregister all, then re-register from database.
-
-    Args:
-        tenant_id: Tenant ID to load tools for
-
-    Returns:
-        Dictionary with counts of refreshed tools
-    """
-    unregister_all_outer_api_tools()
-    return register_outer_api_tools(tenant_id)
-
-
-def unregister_all_outer_api_tools() -> int:
-    """
-    Unregister all outer API tools from the MCP server.
-
-    Returns:
-        Number of tools unregistered
-    """
-    global _registered_outer_api_tools
-    count = len(_registered_outer_api_tools)
-    _registered_outer_api_tools.clear()
-    logger.info(f"Unregistered {count} outer API tools")
-    return count
-
-
-def unregister_outer_api_tool(tool_name: str) -> bool:
-    """
-    Unregister a specific outer API tool from the registry.
-
-    Args:
-        tool_name: Name of the tool to unregister
+        service_name: Name of the service to unregister
 
     Returns:
         True if unregistered, False if not found
     """
-    sanitized_name = _sanitize_function_name(tool_name)
-    if sanitized_name in _registered_outer_api_tools:
-        del _registered_outer_api_tools[sanitized_name]
-        logger.info(f"Unregistered outer API tool from registry: {sanitized_name}")
+    global _openapi_mcp_services
+    if service_name in _openapi_mcp_services:
+        del _openapi_mcp_services[service_name]
+        logger.info(f"Unregistered OpenAPI service from registry: {service_name}")
         return True
     return False
 
 
-def remove_outer_api_tool(tool_name: str) -> bool:
+def get_registered_openapi_services() -> List[Dict[str, Any]]:
     """
-    Remove a specific outer API tool from both the registry and MCP server.
+    Get information about registered OpenAPI services.
+
+    Returns:
+        List of service info dictionaries
+    """
+    return [
+        {
+            "service_name": name,
+            "status": "registered"
+        }
+        for name in _openapi_mcp_services.keys()
+    ]
+
+
+def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
+    """
+    Refresh all OpenAPI services for a tenant using from_openapi approach.
 
     Args:
-        tool_name: Name of the tool to remove
+        tenant_id: Tenant ID to load services for
 
     Returns:
-        True if removed, False if not found
+        Dictionary with refresh result counts
     """
-    sanitized_name = _sanitize_function_name(tool_name)
+    global _openapi_mcp_services
 
-    # Remove from registry
-    if sanitized_name in _registered_outer_api_tools:
-        del _registered_outer_api_tools[sanitized_name]
+    # Clear all mounted servers from both lists
+    # NOTE: Both nexent_mcp._mounted_servers and _tool_manager._mounted_servers
+    # must be cleared, otherwise tools remain visible via MCP protocol
+    _openapi_mcp_services.clear()
+    nexent_mcp._mounted_servers.clear()
+    if hasattr(nexent_mcp._tool_manager, '_mounted_servers'):
+        nexent_mcp._tool_manager._mounted_servers.clear()
 
-    # Remove from MCP server
-    try:
-        nexent_mcp.remove_tool(sanitized_name)
-        logger.info(f"Removed outer API tool from MCP server: {sanitized_name}")
-        return True
-    except Exception as e:
-        logger.warning(f"Tool '{sanitized_name}' not found in MCP server or already removed: {e}")
-        # Return True if it was in registry (db cleanup happened)
-        return sanitized_name not in _registered_outer_api_tools
+    # Re-mount local_mcp_service after clearing
+    nexent_mcp.mount(local_mcp_service, local_mcp_service.name)
+
+    # Query all available OpenAPI services from database
+    services = query_available_openapi_services(tenant_id)
+
+    registered_count = 0
+    skipped_count = 0
+
+    for service in services:
+        service_name = service.get("mcp_service_name")
+        openapi_json = service.get("openapi_json")
+        server_url = service.get("server_url")
+
+        if not openapi_json:
+            logger.warning(f"Service '{service_name}' has no OpenAPI JSON, skipping")
+            skipped_count += 1
+            continue
+
+        if register_openapi_service(service_name, openapi_json, server_url):
+            registered_count += 1
+        else:
+            skipped_count += 1
+
+    logger.info(
+        f"OpenAPI services refresh complete for tenant {tenant_id}: "
+        f"{registered_count} registered, {skipped_count} skipped"
+    )
+    return {
+        "registered": registered_count,
+        "skipped": skipped_count,
+        "total": len(services)
+    }
 
 
-def get_registered_outer_api_tools() -> List[str]:
+def refresh_single_openapi_service(service_name: str, tenant_id: str) -> Dict[str, Any]:
     """
-    Get list of registered outer API tool names.
+    Refresh a single OpenAPI service after tool deletion/update.
+
+    This allows dynamic updates by:
+    1. Removing the old service instance from memory
+    2. Reloading from database with fresh data
+    3. Re-registering the service
+
+    Args:
+        service_name: Name of the service to refresh
+        tenant_id: Tenant ID
 
     Returns:
-        List of tool names
+        Dictionary with refresh result
     """
-    return list(_registered_outer_api_tools.keys())
+    global _openapi_mcp_services
+
+    # Remove old service instance from memory
+    if service_name in _openapi_mcp_services:
+        del _openapi_mcp_services[service_name]
+        logger.info(f"Removed old instance of service '{service_name}'")
+
+    # Query fresh data from database
+    services = query_available_openapi_services(tenant_id)
+    service_data = None
+    for svc in services:
+        if svc.get("mcp_service_name") == service_name:
+            service_data = svc
+            break
+
+    if not service_data:
+        # Service was deleted - remove from both mounted servers lists only
+        # Do NOT clear local_mcp_service
+        if hasattr(nexent_mcp, '_mounted_servers'):
+            for mounted in list(nexent_mcp._mounted_servers):
+                if mounted.prefix == service_name:
+                    nexent_mcp._mounted_servers.remove(mounted)
+        # Also clear from tool manager's mounted servers
+        if hasattr(nexent_mcp._tool_manager, '_mounted_servers'):
+            for mounted in list(nexent_mcp._tool_manager._mounted_servers):
+                if mounted.prefix == service_name:
+                    nexent_mcp._tool_manager._mounted_servers.remove(mounted)
+        logger.info(f"Service '{service_name}' deleted, removed from MCP registry")
+        return {
+            "status": "deleted",
+            "service_name": service_name
+        }
+
+    # Re-register with fresh data
+    openapi_json = service_data.get("openapi_json")
+    server_url = service_data.get("server_url")
+
+    if not openapi_json:
+        logger.warning(f"Service '{service_name}' has no OpenAPI JSON")
+        return {
+            "status": "error",
+            "service_name": service_name,
+            "error": "No OpenAPI JSON found"
+        }
+
+    success = register_openapi_service(service_name, openapi_json, server_url)
+    return {
+        "status": "refreshed" if success else "error",
+        "service_name": service_name,
+        "server_url": server_url
+    }
 
 
 def run_mcp_server_with_management():

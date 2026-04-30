@@ -33,6 +33,7 @@ system_prompt: |-
   ## Output Format
 
   **Important**: All content that needs to be written to SKILL.md must be wrapped with `<SKILL>` and `</SKILL>` XML delimiters.
+  Summary content must be wrapped with `<SUMMARY>` and `</SUMMARY>` XML delimiters.
 
   ### Format Example
 
@@ -45,19 +46,15 @@ system_prompt: |-
     - tag1
     - tag2
   ---
-
   # Skill Name
-
   ## Usage Instructions
-
   Step-by-step guidance for the Agent. Keep it concise—assume the Agent already has relevant knowledge.
-
   ## Examples (Optional)
-
   Specific usage examples.
   </SKILL>
-
-  [Your friendly message to the user, such as skill created, feature highlights, etc.]
+  <SUMMARY>
+  Your friendly message to the user, such as skill created, feature highlights, etc.
+  </SUMMARY>
   ```
 
   ## Writing Descriptions (Key Point)

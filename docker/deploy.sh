@@ -17,6 +17,7 @@ DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
 MODE_CHOICE_SAVED=""
 VERSION_CHOICE_SAVED=""
 IS_MAINLAND_SAVED=""
+ENABLE_SKILLS_SAVED="Y"
 ENABLE_TERMINAL_SAVED="N"
 TERMINAL_MOUNT_DIR_SAVED="${TERMINAL_MOUNT_DIR:-}"
 APP_VERSION=""
@@ -30,6 +31,7 @@ source .env
 MODE_CHOICE=""
 IS_MAINLAND=""
 ENABLE_TERMINAL=""
+ENABLE_SKILLS=""
 VERSION_CHOICE=""
 ROOT_DIR_PARAM=""
 
@@ -48,6 +50,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --enable-terminal)
       ENABLE_TERMINAL="$2"
+      shift 2
+      ;;
+    --enable-skills)
+      ENABLE_SKILLS="$2"
       shift 2
       ;;
     --version)
@@ -266,6 +272,7 @@ persist_deploy_options() {
     echo "MODE_CHOICE=\"${MODE_CHOICE_SAVED}\""
     echo "VERSION_CHOICE=\"${VERSION_CHOICE_SAVED}\""
     echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
+    echo "ENABLE_SKILLS=\"${ENABLE_SKILLS_SAVED}\""
     echo "ENABLE_TERMINAL=\"${ENABLE_TERMINAL_SAVED}\""
     echo "TERMINAL_MOUNT_DIR=\"${TERMINAL_MOUNT_DIR_SAVED}\""
   } > "$DEPLOY_OPTIONS_FILE"
@@ -407,7 +414,8 @@ get_compose_version() {
   # Function to get the version of docker compose
   if command -v docker &> /dev/null; then
       version_output=$(docker compose version 2>/dev/null)
-      if [[ $version_output =~ (v[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+      # 修改点：放宽正则匹配，允许版本号后面跟随其他字符（如 -desktop.1）
+      if [[ $version_output =~ v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
           echo "v2 ${BASH_REMATCH[1]}"
           return 0
       fi
@@ -415,6 +423,7 @@ get_compose_version() {
 
   if command -v docker-compose &> /dev/null; then
       version_output=$(docker-compose --version 2>/dev/null)
+      # 同样放宽这里的匹配规则，以防万一
       if [[ $version_output =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
           echo "v1 ${BASH_REMATCH[1]}"
           return 0
@@ -867,7 +876,7 @@ select_terminal_tool() {
 
 check_super_admin_user_exists() {
   # Check if super admin user exists in Supabase
-  local email="suadmin@nexent.com"
+  local email="${1:-suadmin@nexent.com}"
   local curl_container="nexent-config"
 
   # Determine which container to use for curl command
@@ -903,6 +912,210 @@ check_super_admin_user_exists() {
   else
     return 1  # User likely does not exist
   fi
+}
+
+get_access_token_by_credentials() {
+  # Get access token by signing in with email and password
+  local email="$1"
+  local password="$2"
+
+  # Suppress echo messages when capturing output
+  set +x 2>/dev/null
+
+  local response
+  response=$(docker exec nexent-config bash -c "curl -s -X POST http://kong:8000/auth/v1/token?grant_type=password -H \"apikey: ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"${password}\"}'" 2>/dev/null)
+
+  if echo "$response" | grep -q '"access_token"'; then
+    local access_token
+    access_token=$(echo "$response" | grep -o '"access_token":"[^"]*"' | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+    # Only output the token, no other text
+    echo "$access_token"
+    return 0
+  else
+    # Output error to stderr, not stdout
+    echo "   ❌ Failed to get access token: $response" >&2
+    return 1
+  fi
+}
+
+prompt_skill_credentials() {
+  # Prompt user for email and password for skill installation with retry loop
+  local default_email="suadmin@nexent.com"
+  local max_attempts=5
+  local attempts=0
+
+  echo ""
+  echo "🔐 Skills Installation - Authentication Required"
+  echo "   Please provide credentials for an existing admin account."
+  echo ""
+
+  while [ $attempts -lt $max_attempts ]; do
+    attempts=$((attempts + 1))
+
+    # Prompt for email
+    read -p "   📧 Enter email [${default_email}]: " user_email
+    user_email=$(sanitize_input "$user_email")
+    if [ -z "$user_email" ]; then
+      user_email="$default_email"
+    fi
+
+    # Prompt for password
+    echo -n "   🔐 Enter password: "
+    read -s user_password
+    echo ""
+
+    if [ -z "$user_password" ]; then
+      echo "   ❌ Error: Password cannot be empty. Please try again."
+      echo ""
+      continue
+    fi
+
+    # Return credentials via global variables
+    SKILL_AUTH_EMAIL="$user_email"
+    SKILL_AUTH_PASSWORD="$user_password"
+    return 0
+  done
+
+  echo "   ❌ Too many failed attempts. Aborting skills installation."
+  return 1
+}
+
+install_builtin_skills() {
+  # Install built-in skills if enabled
+  if [ "$ENABLE_SKILLS_SAVED" != "Y" ]; then
+    return 0
+  fi
+
+  echo ""
+  echo "--------------------------------"
+  echo "📦 Installing built-in skills..."
+  echo ""
+
+  local install_script="$SCRIPT_DIR/install-skills.sh"
+  chmod +x "$install_script"
+
+  # Export necessary environment variables
+  export SUPABASE_KEY
+  export DEPLOYMENT_VERSION
+  export DEPLOYMENT_MODE
+  export SUPABASE_POSTGRES_DB
+
+  # Get access token for skill installation
+  local access_token=""
+  local email="suadmin@nexent.com"
+  local max_attempts=3
+  local attempts=0
+
+  # Check if super admin user exists first
+  local check_result
+  check_super_admin_user_exists "$email"
+  check_result=$?
+
+  if [ $check_result -eq 0 ]; then
+    # User exists, prompt for credentials with retry loop
+    echo "   🔐 Please provide credentials to install skills."
+    echo ""
+
+    while [ $attempts -lt $max_attempts ]; do
+      attempts=$((attempts + 1))
+
+      prompt_skill_credentials || {
+        echo "   ❌ Failed to get credentials"
+        return 1
+      }
+
+      echo -n "   🔐 Signing in... "
+      access_token=$(get_access_token_by_credentials "$SKILL_AUTH_EMAIL" "$SKILL_AUTH_PASSWORD")
+
+      if [ -n "$access_token" ]; then
+        echo "✅"
+        echo "   ✅ Credentials verified."
+        break
+      else
+        echo "❌"
+        echo "   ❌ Invalid email or password."
+        echo ""
+        # Clear sensitive data
+        unset SKILL_AUTH_PASSWORD access_token
+      fi
+    done
+
+    if [ -z "$access_token" ]; then
+      echo "   ❌ Too many failed attempts. Aborting skills installation."
+      unset SKILL_AUTH_PASSWORD
+      return 1
+    fi
+
+  elif [ $check_result -eq 1 ]; then
+    # User does not exist - this is a fresh deployment
+    echo "   ℹ️  Super admin user will be created during deployment."
+    echo "   💡 Skills will be installed after user creation."
+    unset SKILL_AUTH_PASSWORD
+    return 0
+  else
+    echo "   ⚠️  Warning: Could not determine if user exists"
+    unset SKILL_AUTH_PASSWORD
+    return 1
+  fi
+
+  # Clear password from memory as soon as possible
+  unset SKILL_AUTH_PASSWORD
+
+  # Install skills using the access token
+  if bash "$install_script" "$access_token"; then
+    echo "   ✅ Built-in skills installed successfully"
+  else
+    echo "   ⚠️  Built-in skills installation failed"
+    return 1
+  fi
+
+  # Clean up access token
+  unset access_token
+
+  echo ""
+  echo "--------------------------------"
+  echo ""
+}
+
+install_skills_after_user_creation() {
+  # Install skills after user creation - called with access_token as first argument
+  if [ "$ENABLE_SKILLS_SAVED" != "Y" ]; then
+    return 0
+  fi
+
+  if [ "$DEPLOYMENT_VERSION" != "full" ]; then
+    return 0
+  fi
+
+  local access_token="$1"
+
+  if [ -z "$access_token" ]; then
+    echo "   ⚠️  Warning: No access token provided for skill installation"
+    return 1
+  fi
+
+  local install_script="$SCRIPT_DIR/install-skills.sh"
+  if [ ! -f "$install_script" ]; then
+    echo "   ❌ Error: install-skills.sh not found"
+    return 1
+  fi
+
+  export SUPABASE_KEY
+  export DEPLOYMENT_VERSION
+  export DEPLOYMENT_MODE
+  export SUPABASE_POSTGRES_DB
+
+  echo ""
+  echo "📦 Installing built-in skills..."
+  if bash "$install_script" "$access_token"; then
+    echo "   ✅ Built-in skills installed successfully"
+  else
+    echo "   ⚠️  Built-in skills installation failed"
+    return 1
+  fi
+
+  # Clean up access token from memory
+  unset access_token
 }
 
 prompt_super_admin_password() {
@@ -1034,6 +1247,36 @@ choose_image_env() {
   echo ""
 }
 
+select_skills_installation() {
+  # Ask user whether to install built-in skills
+  if [ -n "$ENABLE_SKILLS" ]; then
+    enable_skills="$ENABLE_SKILLS"
+    echo "👉 Using enable_skills from argument: $enable_skills"
+  else
+    read -p "👉 Do you want to install built-in skills? [Y/N] (default Y): " enable_skills
+  fi
+
+  # Sanitize potential Windows CR in input
+  enable_skills=$(sanitize_input "$enable_skills")
+
+  # Default to Y if no input
+  if [ -z "$enable_skills" ]; then
+    enable_skills="Y"
+  fi
+
+  if [[ "$enable_skills" =~ ^[Yy]$ ]]; then
+    ENABLE_SKILLS_SAVED="Y"
+    echo "✅ Built-in skills will be installed later on."
+  else
+    ENABLE_SKILLS_SAVED="N"
+    echo "🚫 Built-in skills installation skipped."
+  fi
+
+  echo ""
+  echo "--------------------------------"
+  echo ""
+}
+
 main_deploy() {
   # Main deployment function
   echo  "🚀 Nexent Deployment Script 🚀"
@@ -1056,6 +1299,7 @@ main_deploy() {
   select_deployment_mode || { echo "❌ Deployment mode selection failed"; exit 1; }
   select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 1; }
   choose_image_env || { echo "❌ Image environment setup failed"; exit 1; }
+  select_skills_installation || { echo "❌ Skills installation selection failed"; exit 1; }
 
   # Set NEXENT_MCP_DOCKER_IMAGE in .env file
   if [ -n "${NEXENT_MCP_DOCKER_IMAGE:-}" ]; then
@@ -1090,6 +1334,32 @@ main_deploy() {
     # Create default super admin user (only for full version)
     if [ "$DEPLOYMENT_VERSION" = "full" ]; then
       create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
+
+      # Install skills after user creation (if enabled)
+      if [ "$ENABLE_SKILLS_SAVED" = "Y" ]; then
+        echo ""
+        echo "--------------------------------"
+        echo "📦 Checking if skills installation is needed..."
+
+        # Read access token from file (saved by create-su.sh)
+        local token_file="$SCRIPT_DIR/.access_token"
+        if [ -f "$token_file" ]; then
+          local access_token
+          access_token=$(cat "$token_file" | tr -d '[:space:]')
+          rm -f "$token_file"  # Clean up after reading
+
+          if [ -n "$access_token" ]; then
+            echo "   💡 Found access token, proceeding with skills installation..."
+            install_skills_after_user_creation "$access_token" || {
+              echo "   ⚠️  Warning: Skills installation encountered issues"
+            }
+          fi
+        else
+          echo "   ℹ️  No access token file found. Infrastructure mode may need manual skill installation."
+        fi
+        echo ""
+        echo "--------------------------------"
+      fi
     fi
 
     echo "🎉 Infrastructure deployment completed successfully!"
@@ -1115,6 +1385,53 @@ main_deploy() {
   # Create default super admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
     create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
+
+    # Install skills after user creation (if enabled)
+    if [ "$ENABLE_SKILLS_SAVED" = "Y" ]; then
+      echo ""
+      echo "--------------------------------"
+      echo "📦 Checking if skills installation is needed..."
+
+      # Read access token from file (saved by create-su.sh)
+      local token_file="$SCRIPT_DIR/.access_token"
+      if [ -f "$token_file" ]; then
+        local access_token
+        access_token=$(cat "$token_file" | tr -d '[:space:]')
+        rm -f "$token_file"  # Clean up after reading
+
+        if [ -n "$access_token" ]; then
+          echo "   💡 Found access token, proceeding with skills installation..."
+          install_skills_after_user_creation "$access_token" || {
+            echo "   ⚠️  Warning: Skills installation encountered issues"
+          }
+        fi
+      else
+        echo "   ℹ️  No access token file found. Checking if skills installation is needed..."
+        # Check if super admin user already exists (was created previously)
+        check_super_admin_user_exists "suadmin@nexent.com"
+        local check_result=$?
+        if [ $check_result -eq 0 ]; then
+          # User exists, prompt for credentials
+          echo "   ℹ️  Super admin user exists from previous deployment."
+          echo "   💡 Please provide credentials to install skills."
+          if prompt_skill_credentials; then
+            local access_token
+            access_token=$(get_access_token_by_credentials "$SKILL_AUTH_EMAIL" "$SKILL_AUTH_PASSWORD") || {
+              echo "   ⚠️  Warning: Could not get access token, skipping skills installation"
+            }
+            if [ -n "$access_token" ]; then
+              install_skills_after_user_creation "$access_token" || {
+                echo "   ⚠️  Warning: Skills installation encountered issues"
+              }
+            fi
+          fi
+        else
+          echo "   ⚠️  Warning: Could not determine user status, skipping skills installation"
+        fi
+      fi
+      echo ""
+      echo "--------------------------------"
+    fi
   fi
 
   persist_deploy_options

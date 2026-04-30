@@ -111,6 +111,15 @@ export const TOOL_PARAM_OPTIONS = {
   datamate_search: {
     // No enum parameters currently defined
   },
+  // Haotian search tool
+  haotian_search: {
+    search_method: [
+      "keyword_search",
+      "semantic_search",
+      "full_text_search",
+      "hybrid_search",
+    ],
+  },
 } as const;
 
 // Get options for a specific tool and parameter

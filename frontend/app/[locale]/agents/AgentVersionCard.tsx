@@ -39,9 +39,10 @@ import type { Agent, Tool } from "@/types/agentConfig";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { rollbackVersion, compareVersions, deleteVersion } from "@/services/agentVersionService";
+import { searchAgentInfo } from "@/services/agentConfigService";
+import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
 import { message } from "antd";
@@ -139,7 +140,6 @@ export function VersionCardItem({
 
   // Get invalidate functions for refreshing data
   const { agentVersionList, invalidate: invalidateAgentVersionList } = useAgentVersionList(agentId);
-  const { invalidate: invalidateAgentInfo } = useAgentInfo(agentId);
 
   // Fetch version detail when expanded
   const { agentVersionDetail } = useAgentVersionDetail(
@@ -246,8 +246,22 @@ export function VersionCardItem({
         message.success(t("agent.version.rollbackSuccess"));
         setCompareModalOpen(false);
         invalidateAgentVersionList?.();
-        invalidateAgentInfo?.();
+        queryClient.invalidateQueries({ queryKey: ["agentInfo", agentId] });
         queryClient.invalidateQueries({ queryKey: ["agents"] });
+
+        // Refresh agent detail and sync to Zustand store
+        const store = useAgentConfigStore.getState();
+        if (store.currentAgentId === agentId) {
+          const agentResult = await searchAgentInfo(agentId);
+          if (agentResult.success && agentResult.data) {
+            const permissionFromList = currentAgent?.permission ?? undefined;
+            store.setCurrentAgent({
+              ...agentResult.data,
+              permission: permissionFromList,
+            });
+            store.triggerForceRefresh();
+          }
+        }
       } else {
         message.error(result.message || t("agent.version.rollbackError"));
       }
@@ -282,7 +296,7 @@ export function VersionCardItem({
         message.success(t("agent.version.deleteSuccess"));
         setDeleteModalOpen(false);
         invalidateAgentVersionList?.();
-        invalidateAgentInfo?.();
+        queryClient.invalidateQueries({ queryKey: ["agentInfo", agentId] });
         queryClient.invalidateQueries({ queryKey: ["agents"] });
       } else {
         message.error(result.message || t("agent.version.deleteError"));
@@ -522,6 +536,7 @@ export function VersionCardItem({
         currentVersionNo={currentVersionNo}
         compareData={compareData}
         onCancel={() => setCompareModalOpen(false)}
+        agentId={agentId}
         showRollback
         rollbackLoading={rollbackLoading}
         onRollbackConfirm={handleRollbackConfirm}
@@ -578,6 +593,7 @@ export function VersionCardItem({
         initialValues={{
           version_name: version.version_name,
           release_note: version.release_note,
+          is_a2a: version.is_a2a,
         }}
         onUpdated={() => {
           // Refresh version list using the proper invalidate function
