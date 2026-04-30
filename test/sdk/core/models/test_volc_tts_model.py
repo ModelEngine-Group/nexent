@@ -332,6 +332,121 @@ class TestVolcTTSModelGenerators:
         assert isinstance(result, (types.AsyncGeneratorType, types.CoroutineType))
 
 
+class TestVolcTTSModelEdgeCases:
+    """Test edge cases for VolcTTSModel."""
+
+    @pytest.fixture
+    def volc_model(self):
+        config = VolcTTSConfig(appid="test_app", token="test_token", speed_ratio=1.0)
+        return VolcTTSModel(config)
+
+    def test_config_cluster_property(self):
+        """Test VolcTTSConfig cluster default value."""
+        config = VolcTTSConfig(appid="app", token="tok", speed_ratio=1.0)
+        assert config.cluster == "volcano_tts"
+
+    def test_config_resource_id_property(self):
+        """Test VolcTTSConfig resource_id default value."""
+        config = VolcTTSConfig(appid="app", token="tok", speed_ratio=1.0)
+        assert config.resource_id == "seed-tts-2.0"
+
+    def test_parse_response_protocol_logging(self, volc_model, caplog):
+        """Test _parse_response logs protocol version and header."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        response = bytearray()
+        response.append(0x11)
+        response.append((0x0B << 4) | 0x00)
+        response.append(0x10)
+        response.append(0x00)
+
+        done, chunk = volc_model._parse_response(bytes(response), None)
+        assert done is False
+        assert chunk is None
+
+    def test_parse_response_gzip_compressed_payload(self, volc_model):
+        """Test _parse_response with GZIP compressed audio payload."""
+        audio_data = b"compressed_audio_data"
+        response = bytearray()
+        response.append(0x11)
+        response.append((0x0B << 4) | 0x01)
+        response.append(0x11)
+        response.append(0x00)
+        response.extend((1).to_bytes(4, 'big', signed=True))
+        response.extend(b'\x00' * 8)
+        compressed = gzip.compress(audio_data)
+        response.extend(compressed)
+
+        buffer = io.BytesIO()
+        done, chunk = volc_model._parse_response(bytes(response), buffer)
+        assert done is False
+        assert chunk is not None
+
+    def test_request_template_copy(self, volc_model):
+        """Test that _prepare_request creates a copy of template."""
+        text1 = "First text"
+        text2 = "Second text"
+        
+        req1 = volc_model._prepare_request(text1)
+        req2 = volc_model._prepare_request(text2)
+        
+        payload1 = gzip.decompress(req1[8:])
+        payload2 = gzip.decompress(req2[8:])
+        
+        parsed1 = json.loads(payload1)
+        parsed2 = json.loads(payload2)
+        
+        assert parsed1["request"]["text"] == text1
+        assert parsed2["request"]["text"] == text2
+
+    def test_request_template_does_not_mutate(self, volc_model):
+        """Test that _prepare_request does not mutate original template."""
+        original_text = volc_model._request_template["request"]["text"]
+        volc_model._prepare_request("New text")
+        assert volc_model._request_template["request"]["text"] == original_text
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_with_empty_audio(self, volc_model):
+        """Test check_connectivity when audio is empty bytes."""
+        with patch.object(volc_model, 'generate_speech', return_value=b""):
+            result = await volc_model.check_connectivity()
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_with_error_result(self, volc_model):
+        """Test check_connectivity when result is error dict."""
+        with patch.object(volc_model, 'generate_speech', return_value={"error": "Service error"}):
+            result = await volc_model.check_connectivity()
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_with_audio_result(self, volc_model):
+        """Test check_connectivity when audio is generated successfully."""
+        with patch.object(volc_model, 'generate_speech', return_value=b"fake_audio"):
+            result = await volc_model.check_connectivity()
+            assert result is True
+
+
+class TestVolcTTSConfigEdgeCases:
+    """Test VolcTTSConfig edge cases."""
+
+    def test_config_speed_ratio_bounds(self):
+        """Test VolcTTSConfig with different speed ratios."""
+        config = VolcTTSConfig(appid="app", token="tok", speed_ratio=2.0)
+        assert config.speed_ratio == 2.0
+
+    def test_config_volume_ratio_bounds(self):
+        """Test VolcTTSConfig with different volume ratios."""
+        config = VolcTTSConfig(appid="app", token="tok", speed_ratio=1.0, volume_ratio=0.5)
+        assert config.volume_ratio == 0.5
+
+    def test_config_pitch_ratio_bounds(self):
+        """Test VolcTTSConfig with different pitch ratios."""
+        config = VolcTTSConfig(appid="app", token="tok", speed_ratio=1.0, pitch_ratio=1.5)
+        assert config.pitch_ratio == 1.5
+
+
 class TestVolcTTSConnectivity:
     """Test VolcTTSModel connectivity check."""
 

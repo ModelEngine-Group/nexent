@@ -50,6 +50,32 @@ class TestVoiceApp:
 
             mock_service.start_stt_streaming_session.assert_called_once()
 
+    def test_stt_websocket_bytes_config(self):
+        """Test STT WebSocket with bytes message containing config."""
+        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+            mock_service = MockVoiceService()
+            mock_get_service.return_value = mock_service
+
+            with self.client.websocket_connect("/voice/stt/ws") as websocket:
+                import json
+                config_bytes = json.dumps({"model": "qwen3-asr-flash-realtime"}).encode('utf-8')
+                websocket.send_bytes(config_bytes)
+                assert websocket is not None
+
+            mock_service.start_stt_streaming_session.assert_called_once()
+
+    def test_stt_websocket_bytes_config_parse_error(self):
+        """Test STT WebSocket with invalid bytes config."""
+        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+            mock_service = MockVoiceService()
+            mock_get_service.return_value = mock_service
+
+            with self.client.websocket_connect("/voice/stt/ws") as websocket:
+                websocket.send_bytes(b"invalid json")
+                assert websocket is not None
+
+            mock_service.start_stt_streaming_session.assert_called_once()
+
     def test_stt_websocket_stt_connection_error(self):
         """Test STT WebSocket with STT connection error."""
         with patch('apps.voice_app.get_voice_service') as mock_get_service:
@@ -84,6 +110,65 @@ class TestVoiceApp:
 
             with self.client.websocket_connect("/voice/tts/ws") as websocket:
                 websocket.send_json({"text": "Hello, world!"})
+
+            mock_service.stream_tts_to_websocket.assert_called_once()
+
+    def test_tts_websocket_bytes_config(self):
+        """Test TTS WebSocket with bytes message containing config."""
+        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+            mock_service = MockVoiceService()
+            mock_get_service.return_value = mock_service
+
+            with self.client.websocket_connect("/voice/tts/ws") as websocket:
+                import json
+                config_bytes = json.dumps({"text": "Hello from bytes"}).encode('utf-8')
+                websocket.send_bytes(config_bytes)
+
+            mock_service.stream_tts_to_websocket.assert_called_once()
+
+    def test_tts_websocket_bytes_config_parse_error(self):
+        """Test TTS WebSocket with invalid bytes config - should return error."""
+        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+            mock_service = MockVoiceService()
+            mock_get_service.return_value = mock_service
+
+            with self.client.websocket_connect("/voice/tts/ws") as websocket:
+                websocket.send_bytes(b"invalid json")
+                data = websocket.receive_json()
+                assert "error" in data
+                assert "No text provided" in data["error"]
+
+            mock_service.stream_tts_to_websocket.assert_not_called()
+
+    def test_tts_websocket_missing_text(self):
+        """Test TTS WebSocket with missing text field."""
+        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+            mock_service = MockVoiceService()
+            mock_get_service.return_value = mock_service
+
+            with self.client.websocket_connect("/voice/tts/ws") as websocket:
+                websocket.send_json({})
+                data = websocket.receive_json()
+                assert "error" in data
+                assert "No text provided" in data["error"]
+
+    def test_tts_websocket_with_all_config_fields(self):
+        """Test TTS WebSocket with complete config fields."""
+        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+            mock_service = MockVoiceService()
+            mock_get_service.return_value = mock_service
+
+            with self.client.websocket_connect("/voice/tts/ws") as websocket:
+                websocket.send_json({
+                    "text": "Hello",
+                    "tenant_id": "tenant_123",
+                    "model_factory": "volc",
+                    "model_name": "tts_model",
+                    "api_key": "key123",
+                    "model_appid": "app_456",
+                    "access_token": "token789",
+                    "base_url": "https://api.example.com"
+                })
 
             mock_service.stream_tts_to_websocket.assert_called_once()
 

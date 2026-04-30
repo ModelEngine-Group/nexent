@@ -1291,3 +1291,553 @@ class TestAliSTTModelAdditionalCoverage:
         result = ali_model.parse_response(response)
         assert result["event"] == "unknown.event"
         assert "extra_field" not in result
+
+
+class TestAliSTTModelEdgeCases:
+    """Edge case tests for complete coverage."""
+
+    @pytest.fixture
+    def ali_config(self):
+        """Create a test Ali STT configuration."""
+        return AliSTTConfig(api_key="test_key", language="zh")
+
+    @pytest.fixture
+    def ali_model(self, ali_config):
+        """Create a test Ali STT model instance."""
+        return AliSTTModel(ali_config, "/path/to/test/audio.pcm")
+
+    def test_config_all_parameters(self, ali_config):
+        """Test AliSTTConfig with all parameters."""
+        config = AliSTTConfig(
+            api_key="key123",
+            model="qwen3-asr",
+            language="en",
+            ws_url="wss://test.com/ws",
+            format="wav",
+            rate=48000,
+            channel=2,
+            seg_duration=150,
+            timeout=120,
+            enable_vad=False,
+            vad_threshold=0.8,
+            vad_silence_duration_ms=3000,
+        )
+        assert config.api_key == "key123"
+        assert config.model == "qwen3-asr"
+        assert config.language == "en"
+        assert config.ws_url == "wss://test.com/ws"
+        assert config.format == "wav"
+        assert config.rate == 48000
+        assert config.channel == 2
+        assert config.seg_duration == 150
+        assert config.timeout == 120
+        assert config.enable_vad is False
+        assert config.vad_threshold == 0.8
+        assert config.vad_silence_duration_ms == 3000
+
+    def test_get_websocket_url_with_custom_ws_url_and_model(self, ali_model):
+        """Test get_websocket_url with custom ws_url and model."""
+        ali_model.config.ws_url = "wss://custom.example.com/stt"
+        ali_model.config.model = "custom-model"
+        url = ali_model.get_websocket_url()
+        assert "custom.example.com" in url
+        assert "custom-model" in url
+
+    def test_construct_session_update_with_custom_vad_settings(self, ali_model):
+        """Test construct_session_update with custom VAD settings."""
+        ali_model.config.enable_vad = True
+        ali_model.config.vad_threshold = 0.3
+        ali_model.config.vad_silence_duration_ms = 5000
+        session = ali_model.construct_session_update()
+        assert session["session"]["turn_detection"]["threshold"] == 0.3
+        assert session["session"]["turn_detection"]["silence_duration_ms"] == 5000
+
+    def test_construct_session_update_with_custom_format_and_rate(self, ali_model):
+        """Test construct_session_update with custom format and rate."""
+        ali_model.config.format = "wav"
+        ali_model.config.rate = 44100
+        ali_model.config.model = "custom-model"
+        ali_model.config.language = "en"
+        session = ali_model.construct_session_update()
+        assert session["session"]["input_audio_format"] == "wav"
+        assert session["session"]["sample_rate"] == 44100
+        assert session["session"]["input_audio_transcription"]["model"] == "custom-model"
+        assert session["session"]["input_audio_transcription"]["language"] == "en"
+
+    def test_construct_audio_append_event_with_empty_data(self, ali_model):
+        """Test construct_audio_append_event with empty data."""
+        event = ali_model.construct_audio_append_event(b"")
+        assert event["type"] == "input_audio_buffer.append"
+        assert event["audio"] == ""
+
+    def test_generate_event_id_uniqueness(self, ali_model):
+        """Test generate_event_id generates unique IDs."""
+        ids = [ali_model.generate_event_id() for _ in range(100)]
+        assert len(set(ids)) == 100
+
+    def test_parse_response_with_empty_text(self, ali_model):
+        """Test parse_response with empty text field."""
+        response = {
+            "type": "conversation.item.input_audio_transcription.text",
+            "text": ""
+        }
+        result = ali_model.parse_response(response)
+        assert result["event"] == "conversation.item.input_audio_transcription.text"
+        assert result["text"] == ""
+
+    def test_parse_response_conversation_item_created(self, ali_model):
+        """Test parse_response with conversation.item.created event."""
+        response = {"type": "conversation.item.created"}
+        result = ali_model.parse_response(response)
+        assert result["event"] == "conversation.item.created"
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_multiple_intermediate_results(self, ali_model):
+        """Test process_audio_data with multiple intermediate transcription results."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "First"})
+        response3 = json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Second"})
+        response4 = json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "Final"})
+        response5 = json.dumps({"type": "session.finished", "transcript": "Final"})
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2, response3, response4, response5])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
+
+        assert "text" in result
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_with_error_after_initial(self, ali_model):
+        """Test process_audio_data where error comes after session created."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "error", "message": "Service error occurred"})
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
+
+        assert "error" in result
+        assert "Service error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_multiple_audio_chunks(self, ali_model):
+        """Test start_streaming_session with multiple audio chunks."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data_1",
+            b"audio_data_2",
+            b"audio_data_3",
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+            json.dumps({"type": "input_audio_buffer.speech_started"}),
+            json.dumps({"type": "input_audio_buffer.speech_stopped"}),
+            json.dumps({"type": "input_audio_buffer.speech_started"}),
+            json.dumps({"type": "input_audio_buffer.committed"}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_send_json_exception(self, ali_model):
+        """Test start_streaming_session when send_json raises exception."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.send_json = AsyncMock(side_effect=Exception("Send failed"))
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            asyncio.TimeoutError(),
+        ])
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_start_streaming_session_completed_with_empty_transcription(self, ali_model):
+        """Test start_streaming_session transcription completed with empty text."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[
+            b"audio_data",
+            asyncio.TimeoutError(),
+        ])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "session.created", "session": {"id": "sess_123"}}),
+            json.dumps({"type": "session.updated"}),
+            json.dumps({"type": "input_audio_buffer.speech_started"}),
+            json.dumps({"type": "conversation.item.input_audio_transcription.completed", "text": ""}),
+        ])
+        mock_ws_server.send = AsyncMock()
+
+        mock_connect = MagicMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("websockets.connect", return_value=mock_connect):
+            await ali_model.start_streaming_session(mock_ws_client)
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_session_finished_with_combined_text(self, ali_model):
+        """Test _handle_stt_event session finished uses combined transcription."""
+        mock_ws = AsyncMock()
+        transcription_texts = ["First part", "Second part"]
+        result = await ali_model._handle_stt_event(
+            {"event": "session.finished", "transcript": ""},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is True
+        mock_ws.send_json.assert_called_once()
+        call_args = mock_ws.send_json.call_args[0][0]
+        assert "First part Second part" in call_args["text"]
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_success_with_text_result(self, ali_model):
+        """Test check_connectivity with text result."""
+        with patch.object(ali_model, 'process_audio_file', return_value={"text": "Transcribed text"}):
+            result = await ali_model.check_connectivity()
+            assert result is True
+
+    def test_is_stt_result_successful_with_only_text(self, ali_model):
+        """Test _is_stt_result_successful with only text key."""
+        assert ali_model._is_stt_result_successful({"text": "Hello"}) is True
+
+    def test_is_stt_result_successful_with_empty_text(self, ali_model):
+        """Test _is_stt_result_successful with empty text."""
+        assert ali_model._is_stt_result_successful({"text": ""}) is True
+
+    @pytest.mark.asyncio
+    async def test_process_audio_file_pcm_with_wav_header(self, ali_model):
+        """Test process_audio_file with PCM file that has WAV header."""
+        buffer = BytesIO()
+        with wave.open(buffer, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes(b"\x00\x01" * 16000)
+        wav_data = buffer.getvalue()
+
+        mock_file = AsyncMock()
+        mock_file.read = AsyncMock(return_value=wav_data)
+        mock_file.__aenter__ = AsyncMock(return_value=mock_file)
+        mock_file.__aexit__ = AsyncMock(return_value=None)
+
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "session.finished", "transcript": "Transcribed"})
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_aiofiles, "open", return_value=mock_file):
+            with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+                ali_model.config.format = "pcm"
+                result = await ali_model.process_audio_file("/test/file.pcm")
+                assert "text" in result
+
+    @pytest.mark.asyncio
+    async def test_process_audio_file_pcm_raw(self, ali_model):
+        """Test process_audio_file with raw PCM file (no WAV header)."""
+        pcm_data = b"\x00\x01" * 16000
+
+        mock_file = AsyncMock()
+        mock_file.read = AsyncMock(return_value=pcm_data)
+        mock_file.__aenter__ = AsyncMock(return_value=mock_file)
+        mock_file.__aexit__ = AsyncMock(return_value=None)
+
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "session.finished", "transcript": "Transcribed"})
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_aiofiles, "open", return_value=mock_file):
+            with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+                ali_model.config.format = "pcm"
+                result = await ali_model.process_audio_file("/test/file.pcm")
+                assert "text" in result
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_timeout_during_receive(self, ali_model):
+        """Test process_audio_data with timeout during receive loop."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "session.finished", "transcript": "Final"})
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2, asyncio.TimeoutError()])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await ali_model.process_audio_data(b"audio_data" * 100, 1000)
+            assert "text" in result
+
+    @pytest.mark.asyncio
+    async def test_process_audio_data_with_intermediate_callback(self, ali_model):
+        """Test process_audio_data with intermediate transcription callback."""
+        response1 = json.dumps({"type": "session.created", "session": {"id": "sess_123"}})
+        response2 = json.dumps({"type": "conversation.item.input_audio_transcription.text", "text": "Partial"})
+        response3 = json.dumps({"type": "session.finished", "transcript": "Final"})
+
+        callback_results = []
+        async def on_result(text):
+            callback_results.append(text)
+
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response1, response2, response3])
+        mock_ws.send = AsyncMock()
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            result = await ali_model.process_audio_data(b"audio_data" * 100, 1000, on_result=on_result)
+            assert "text" in result
+            assert len(callback_results) > 0
+
+    def test_parse_response_with_item_content_transcript(self, ali_model):
+        """Test parse_response with item.content structure - falls back to empty text."""
+        response = {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "",
+            "item": {
+                "content": [
+                    {"transcript": "Transcribed from item content"}
+                ]
+            }
+        }
+        result = ali_model.parse_response(response)
+        assert result["event"] == "conversation.item.input_audio_transcription.completed"
+        assert result["text"] == ""
+
+    def test_parse_response_with_stash_field(self, ali_model):
+        """Test parse_response with stash field - falls back to empty text."""
+        response = {
+            "type": "conversation.item.input_audio_transcription.text",
+            "text": "",
+            "stash": "Stashed text content"
+        }
+        result = ali_model.parse_response(response)
+        assert result["event"] == "conversation.item.input_audio_transcription.text"
+        assert result["text"] == ""
+
+    def test_parse_response_session_created_with_full_session(self, ali_model):
+        """Test parse_response with session.created including full session info."""
+        response = {
+            "type": "session.created",
+            "session": {
+                "id": "sess_abc123",
+                "status": "incomplete",
+                " modalities": ["text", "audio"]
+            }
+        }
+        result = ali_model.parse_response(response)
+        assert result["event"] == "session.created"
+        assert result["session_id"] == "sess_abc123"
+
+    def test_parse_response_session_updated(self, ali_model):
+        """Test parse_response with session.updated."""
+        response = {
+            "type": "session.updated",
+            "session": {
+                "id": "sess_xyz789",
+                "status": "completed"
+            }
+        }
+        result = ali_model.parse_response(response)
+        assert result["event"] == "session.updated"
+        assert result["session_id"] == "sess_xyz789"
+
+    def test_parse_response_input_audio_buffer_speech_started(self, ali_model):
+        """Test parse_response with input_audio_buffer.speech_started."""
+        response = {"type": "input_audio_buffer.speech_started"}
+        result = ali_model.parse_response(response)
+        assert result["event"] == "input_audio_buffer.speech_started"
+        assert result["vad"] == "started"
+
+    def test_parse_response_input_audio_buffer_speech_stopped(self, ali_model):
+        """Test parse_response with input_audio_buffer.speech_stopped."""
+        response = {"type": "input_audio_buffer.speech_stopped"}
+        result = ali_model.parse_response(response)
+        assert result["event"] == "input_audio_buffer.speech_stopped"
+        assert result["vad"] == "stopped"
+
+    def test_parse_response_session_finished(self, ali_model):
+        """Test parse_response with session.finished."""
+        response = {
+            "type": "session.finished",
+            "transcript": "Final transcription text"
+        }
+        result = ali_model.parse_response(response)
+        assert result["event"] == "session.finished"
+        assert result["finished"] is True
+        assert result["transcript"] == "Final transcription text"
+
+    def test_parse_response_error(self, ali_model):
+        """Test parse_response with error event."""
+        response = {
+            "type": "error",
+            "message": "Invalid audio format"
+        }
+        result = ali_model.parse_response(response)
+        assert result["event"] == "error"
+        assert result["error"] == "Invalid audio format"
+
+    def test_parse_response_unknown_event(self, ali_model):
+        """Test parse_response with unknown event type."""
+        response = {"type": "unknown.custom.event", "data": "test"}
+        result = ali_model.parse_response(response)
+        assert result["event"] == "unknown.custom.event"
+        assert "raw" not in result
+
+    def test_parse_response_non_dict_input(self, ali_model):
+        """Test parse_response with non-dict input."""
+        result = ali_model.parse_response(12345)
+        assert result["event"] == "unknown"
+
+    def test_parse_response_invalid_json_string(self, ali_model):
+        """Test parse_response with invalid JSON string."""
+        result = ali_model.parse_response("not valid json {")
+        assert result["event"] == "unknown"
+        assert "raw" in result
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_error_send_exception(self, ali_model):
+        """Test _handle_stt_event error event when send fails."""
+        mock_ws = AsyncMock()
+        mock_ws.send_json = AsyncMock(side_effect=Exception("Connection lost"))
+
+        result = await ali_model._handle_stt_event(
+            {"event": "error", "error": "Test error"},
+            mock_ws,
+            []
+        )
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_speech_started_send_exception(self, ali_model):
+        """Test _handle_stt_event speech_started when send fails."""
+        mock_ws = AsyncMock()
+        mock_ws.send_json = AsyncMock(side_effect=Exception("Connection lost"))
+
+        result = await ali_model._handle_stt_event(
+            {"event": "input_audio_buffer.speech_started"},
+            mock_ws,
+            []
+        )
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_speech_stopped_send_exception(self, ali_model):
+        """Test _handle_stt_event speech_stopped when send fails."""
+        mock_ws = AsyncMock()
+        mock_ws.send_json = AsyncMock(side_effect=Exception("Connection lost"))
+
+        result = await ali_model._handle_stt_event(
+            {"event": "input_audio_buffer.speech_stopped"},
+            mock_ws,
+            []
+        )
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_transcription_text_empty(self, ali_model):
+        """Test _handle_stt_event with empty transcription text - sends empty result."""
+        mock_ws = AsyncMock()
+        mock_ws.send_json = AsyncMock()
+
+        result = await ali_model._handle_stt_event(
+            {"event": "conversation.item.input_audio_transcription.text", "text": ""},
+            mock_ws,
+            []
+        )
+        assert result is False
+        mock_ws.send_json.assert_called_once()
+        call_args = mock_ws.send_json.call_args[0][0]
+        assert call_args["text"] == ""
+        assert call_args["is_final"] is False
+
+    @pytest.mark.asyncio
+    async def test_handle_stt_event_session_finished_empty_transcript(self, ali_model):
+        """Test _handle_stt_event session.finished with empty transcript."""
+        mock_ws = AsyncMock()
+        mock_ws.send_json = AsyncMock()
+
+        transcription_texts = ["First", "Second"]
+        result = await ali_model._handle_stt_event(
+            {"event": "session.finished", "transcript": ""},
+            mock_ws,
+            transcription_texts
+        )
+        assert result is True
+        mock_ws.send_json.assert_called_once()
+        assert "First Second" in mock_ws.send_json.call_args[0][0]["text"]
+
+    def test_slice_data_with_exact_division(self, ali_model):
+        """Test slice_data with data that divides evenly."""
+        data = b"1234567890"
+        chunks = list(ali_model.slice_data(data, 5))
+        assert len(chunks) == 2
+        assert chunks[0] == (b"12345", False)
+        assert chunks[1] == (b"67890", True)
+
+    def test_slice_data_single_chunk(self, ali_model):
+        """Test slice_data with data smaller than chunk size."""
+        data = b"abc"
+        chunks = list(ali_model.slice_data(data, 10))
+        assert len(chunks) == 1
+        assert chunks[0] == (b"abc", True)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

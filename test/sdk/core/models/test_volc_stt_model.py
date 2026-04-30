@@ -70,6 +70,7 @@ with patch.dict(_sys.modules, _module_mocks):
         POS_SEQUENCE,
         NEG_SEQUENCE,
         NEG_WITH_SEQUENCE,
+        NEG_SEQUENCE_1,
         JSON,
         GZIP,
         NO_COMPRESSION,
@@ -172,6 +173,11 @@ class TestVolcSTTModelProtocolConstants:
         assert GZIP == 0b0001
         assert NO_COMPRESSION == 0b0000
 
+    def test_neg_sequence_1_constant(self):
+        """Test NEG_SEQUENCE_1 is same as NEG_WITH_SEQUENCE."""
+        assert NEG_SEQUENCE_1 == 0b0011
+        assert NEG_SEQUENCE_1 == NEG_WITH_SEQUENCE
+
 
 class TestVolcSTTModelHeaderGeneration:
     """Tests for header generation methods."""
@@ -216,6 +222,40 @@ class TestVolcSTTModelHeaderGeneration:
         header = model.generate_header(message_type_specific_flags=POS_SEQUENCE)
         flags = header[1] & 0x0f
         assert flags == POS_SEQUENCE
+
+    def test_generate_header_reserved_data(self):
+        """Test header generation with custom reserved data."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+        header = model.generate_header(reserved_data=0xFF)
+        assert header[3] == 0xFF
+
+    def test_generate_header_all_combinations(self):
+        """Test header generation with various combinations."""
+        config = VolcSTTConfig(appid="test", access_token="test", compression=True)
+        model = VolcSTTModel(config)
+        
+        # Test CLIENT_FULL_REQUEST with POS_SEQUENCE
+        header = model.generate_header(
+            message_type=CLIENT_FULL_REQUEST,
+            message_type_specific_flags=POS_SEQUENCE,
+            serial_method=JSON,
+            compression_type=GZIP
+        )
+        assert len(header) == 4
+        assert header[0] == 0x11
+        assert header[1] == 0x11
+        assert header[2] == 0x11
+        
+        # Test CLIENT_AUDIO_ONLY_REQUEST with NEG_SEQUENCE
+        header = model.generate_header(
+            message_type=CLIENT_AUDIO_ONLY_REQUEST,
+            message_type_specific_flags=NEG_SEQUENCE,
+            serial_method=JSON,
+            compression_type=NO_COMPRESSION
+        )
+        # 0x2 << 4 | 0x2 = 0x20 | 0x2 = 0x22
+        assert header[1] == 0x22
 
 
 class TestVolcSTTModelBeforePayload:
@@ -287,6 +327,32 @@ class TestVolcSTTModelResponseParsing:
         result = model.parse_response(response)
         assert result["is_last_package"] is False
 
+    def test_parse_response_server_full_response_no_sequence(self):
+        """Test parsing SERVER_FULL_RESPONSE without sequence flag."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+        header = bytearray([0x11, 0x90, 0x10, 0x00])
+        payload_data = b'{"result":{"text":"test"}}'
+        payload_size_bytes = len(payload_data).to_bytes(4, "big", signed=False)
+        response = bytes(header) + payload_size_bytes + payload_data
+        result = model.parse_response(response)
+        assert "payload_msg" in result
+        assert "is_last_package" in result
+
+    def test_parse_response_server_ack_with_full_payload(self):
+        """Test parsing SERVER_ACK with full payload."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+        header = bytearray([0x11, 0xB0, 0x10, 0x00])
+        seq_bytes = (5).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (20).to_bytes(4, "big", signed=False)
+        payload_data = b'{"result":"data"}'
+        response = bytes(header) + seq_bytes + payload_size_bytes + payload_data
+        result = model.parse_response(response)
+        assert result["seq"] == 5
+        assert result["payload_size"] == 20
+        assert "payload_msg" in result
+
 
 class TestVolcSTTModelWavProcessing:
     """Tests for WAV file processing."""
@@ -336,6 +402,28 @@ class TestVolcSTTModelConstructRequest:
         assert "request" in req
         assert req["request"]["model_name"] == "bigmodel"
 
+    def test_construct_request_with_all_config(self):
+        """Test constructing request with all configuration options."""
+        config = VolcSTTConfig(
+            appid="test_appid",
+            access_token="test_token",
+            uid="custom_user",
+            format="wav",
+            rate=44100,
+            bits=16,
+            channel=2,
+            codec="raw"
+        )
+        model = VolcSTTModel(config)
+        req = model.construct_request("req123")
+        assert req["user"]["uid"] == "custom_user"
+        assert req["audio"]["format"] == "wav"
+        assert req["audio"]["sample_rate"] == 44100
+        assert req["audio"]["bits"] == 16
+        assert req["audio"]["channel"] == 2
+        assert req["audio"]["codec"] == "raw"
+        assert req["request"]["enable_punc"] is True
+
 
 class TestVolcSTTModelAuthHeaders:
     """Tests for authentication headers."""
@@ -360,11 +448,26 @@ class TestVolcSTTModelAuthHeaders:
         headers = model.get_auth_headers()
         assert "X-Api-Access-Key" not in headers
 
+    def test_get_auth_headers_without_appid(self):
+        """Test getting auth headers without appid."""
+        config = VolcSTTConfig(appid="", access_token="test_token")
+        model = VolcSTTModel(config)
+        headers = model.get_auth_headers()
+        assert "X-Api-App-Key" not in headers
+
     def test_get_websocket_url(self):
         """Test getting WebSocket URL."""
         config = VolcSTTConfig(appid="test", access_token="test", ws_url="wss://custom.url")
         model = VolcSTTModel(config)
         assert model.get_websocket_url() == "wss://custom.url"
+
+    def test_get_auth_headers_unique_connect_id(self):
+        """Test that each call generates unique Connect-Id."""
+        config = VolcSTTConfig(appid="test", access_token="test")
+        model = VolcSTTModel(config)
+        headers1 = model.get_auth_headers()
+        headers2 = model.get_auth_headers()
+        assert headers1["X-Api-Connect-Id"] != headers2["X-Api-Connect-Id"]
 
 
 class TestVolcSTTModelIntegration:
@@ -1201,6 +1304,234 @@ class TestVolcSTTModelExceptionHandling:
         assert "X-Api-Access-Key" in headers
         assert "X-Api-App-Key" in headers
         assert headers["X-Api-Resource-Id"] == volc_model.config.resourceid
+
+
+class TestVolcSTTModelBaseClassCoverage:
+    """Tests for base class methods in VolcSTTModel."""
+
+    @pytest.fixture
+    def volc_config(self):
+        config = VolcSTTConfig(appid="test_appid", access_token="test_token")
+        return config
+
+    @pytest.fixture
+    def volc_model(self, volc_config):
+        return VolcSTTModel(volc_config, "/path/to/test/audio.pcm")
+
+    def test_is_stt_result_successful_valid(self, volc_model):
+        """Test _is_stt_result_successful with valid result."""
+        result = {"text": "success", "code": 1000}
+        assert volc_model._is_stt_result_successful(result) is True
+
+    def test_is_stt_result_successful_with_error(self, volc_model):
+        """Test _is_stt_result_successful with error key."""
+        result = {"error": "Some error occurred"}
+        assert volc_model._is_stt_result_successful(result) is False
+
+    def test_is_stt_result_successful_with_error_code(self, volc_model):
+        """Test _is_stt_result_successful with error code."""
+        result = {"code": 2000, "text": "failed"}
+        assert volc_model._is_stt_result_successful(result) is False
+
+    def test_is_stt_result_successful_with_payload_error(self, volc_model):
+        """Test _is_stt_result_successful with payload error."""
+        result = {"code": 1000, "payload_msg": {"error": "Service error"}}
+        assert volc_model._is_stt_result_successful(result) is False
+
+    def test_is_stt_result_successful_empty_dict(self, volc_model):
+        """Test _is_stt_result_successful with empty dict."""
+        assert volc_model._is_stt_result_successful({}) is False
+
+    def test_is_stt_result_successful_non_dict(self, volc_model):
+        """Test _is_stt_result_successful with non-dict."""
+        assert volc_model._is_stt_result_successful("string") is False
+        assert volc_model._is_stt_result_successful(None) is False
+        assert volc_model._is_stt_result_successful(123) is False
+
+    def test_extract_stt_error_message_direct_error(self, volc_model):
+        """Test _extract_stt_error_message with direct error."""
+        result = {"error": "Direct error message"}
+        msg = volc_model._extract_stt_error_message(result)
+        assert msg == "Direct error message"
+
+    def test_extract_stt_error_message_with_code(self, volc_model):
+        """Test _extract_stt_error_message with error code."""
+        result = {"code": 2000}
+        msg = volc_model._extract_stt_error_message(result)
+        assert "STT service error code: 2000" in msg
+
+    def test_extract_stt_error_message_with_code_and_payload(self, volc_model):
+        """Test _extract_stt_error_message with code and payload error."""
+        result = {"code": 2000, "payload_msg": {"error": "Payload error"}}
+        msg = volc_model._extract_stt_error_message(result)
+        assert "STT service error code: 2000" in msg
+        assert "Payload error" in msg
+
+    def test_extract_stt_error_message_with_payload_only(self, volc_model):
+        """Test _extract_stt_error_message with payload error only."""
+        result = {"payload_msg": {"error": "Payload only error"}}
+        msg = volc_model._extract_stt_error_message(result)
+        assert msg == "Payload only error"
+
+    def test_extract_stt_error_message_invalid_type(self, volc_model):
+        """Test _extract_stt_error_message with invalid type."""
+        msg = volc_model._extract_stt_error_message("not a dict")
+        assert "Invalid result type" in msg
+
+    def test_extract_stt_error_message_unknown_error(self, volc_model):
+        """Test _extract_stt_error_message with unknown error."""
+        result = {"text": "some text", "code": 1000}
+        msg = volc_model._extract_stt_error_message(result)
+        assert "Unknown error" in msg
+
+
+class TestVolcSTTModelStreamingCoverage:
+    """Additional streaming session tests for branch coverage."""
+
+    @pytest.fixture
+    def volc_config(self):
+        config = VolcSTTConfig(appid="test_appid", access_token="test_token")
+        return config
+
+    @pytest.fixture
+    def volc_model(self, volc_config):
+        return VolcSTTModel(volc_config, "/path/to/test/audio.pcm")
+
+    @pytest.mark.asyncio
+    async def test_process_streaming_audio_malformed_result(self, volc_model):
+        """Test process_streaming_audio with malformed result."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[b"audio_data", _MockConnectionClosedError(1000, "Client closed")])
+        mock_ws_client.send_json = AsyncMock()
+
+        header = bytearray([0x11, 0x90, 0x10, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (50).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"malformed_data"
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.send = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[response_data, _MockConnectionClosedError(1000, "Server closed")])
+        mock_ws_server.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.process_streaming_audio(mock_ws_client, 1000)
+
+    @pytest.mark.asyncio
+    async def test_process_streaming_audio_result_text_empty(self, volc_model):
+        """Test process_streaming_audio with empty text in result."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[b"audio_data", _MockConnectionClosedError(1000, "Client closed")])
+        mock_ws_client.send_json = AsyncMock()
+
+        header = bytearray([0x11, 0x90, 0x10, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (100).to_bytes(4, "big", signed=False)
+        payload = json.dumps({"result": {"text": ""}}).encode()
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + payload
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.send = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[response_data, _MockConnectionClosedError(1000, "Server closed")])
+        mock_ws_server.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.process_streaming_audio(mock_ws_client, 1000)
+
+    @pytest.mark.asyncio
+    async def test_process_streaming_audio_connection_closed_with_last_chunk(self, volc_model):
+        """Test process_streaming_audio when connection closes after last chunk."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.receive_bytes = AsyncMock(side_effect=[b"", _MockConnectionClosedError(1000, "Client closed")])
+        mock_ws_client.send_json = AsyncMock()
+
+        mock_ws_server = AsyncMock()
+        mock_ws_server.send = AsyncMock()
+        mock_ws_server.recv = AsyncMock(side_effect=[
+            websockets.exceptions.ConnectionClosed(1000, "Server closed")
+        ])
+        mock_ws_server.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws_server)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.process_streaming_audio(mock_ws_client, 1000)
+
+    @pytest.mark.asyncio
+    async def test_process_streaming_audio_ws_exception(self, volc_model):
+        """Test process_streaming_audio with WebSocket exception."""
+        mock_ws_client = AsyncMock()
+        mock_ws_client.send_json = AsyncMock()
+
+        class MockWebSocketException(Exception):
+            pass
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=MockWebSocketException("Connection failed"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+            await volc_model.process_streaming_audio(mock_ws_client, 1000)
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_with_exception(self, volc_model):
+        """Test check_connectivity with exception."""
+        volc_model.audio_file_path = "/test/audio.pcm"
+        volc_model.config.format = "pcm"
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(side_effect=Exception("Connection failed"))
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        mock_file = AsyncMock()
+        mock_file.read = AsyncMock(return_value=b"test_pcm_data")
+        mock_file.__aenter__ = AsyncMock(return_value=mock_file)
+        mock_file.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_aiofiles, "open", return_value=mock_file):
+            with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+                result = await volc_model.check_connectivity()
+                assert result is False
+
+    @pytest.mark.asyncio
+    async def test_check_connectivity_success(self, volc_model):
+        """Test check_connectivity with successful result."""
+        volc_model.audio_file_path = "/test/audio.pcm"
+        volc_model.config.format = "pcm"
+
+        header = bytearray([0x11, 0xB0, 0x00, 0x00])
+        seq_bytes = (1).to_bytes(4, "big", signed=True)
+        payload_size_bytes = (8).to_bytes(4, "big", signed=False)
+        response_data = bytes(header) + seq_bytes + payload_size_bytes + b"\x00" * 8
+
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[response_data, response_data])
+        mock_ws.response_headers = {}
+
+        mock_connect = AsyncMock()
+        mock_connect.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_connect.__aexit__ = AsyncMock(return_value=None)
+
+        mock_file = AsyncMock()
+        mock_file.read = AsyncMock(return_value=b"test_pcm_data")
+        mock_file.__aenter__ = AsyncMock(return_value=mock_file)
+        mock_file.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(_mock_aiofiles, "open", return_value=mock_file):
+            with patch.object(_mock_websockets, "connect", return_value=mock_connect):
+                result = await volc_model.check_connectivity()
+                assert result is True
 
 
 if __name__ == "__main__":
