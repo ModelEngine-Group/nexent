@@ -54,7 +54,6 @@ class VoiceService:
         
         if use_volc:
             # Use Volcano Engine STT
-            logger.info(f"Using Volcano Engine STT with appid={model_appid}, access_token={'***' if access_token else None}")
             volc_config = VolcSTTConfig(
                 appid=model_appid or "",
                 access_token=access_token or "",
@@ -65,7 +64,6 @@ class VoiceService:
             return VolcSTTModel(volc_config, TEST_PCM_PATH)
         else:
             # Use Ali Cloud STT (default)
-            logger.info(f"Using Ali Cloud STT with api_key={'***' if api_key else None}")
             ali_config = AliSTTConfig(
                 api_key=api_key or "",
                 model=model_name or "qwen3-asr-flash-realtime",
@@ -174,7 +172,6 @@ class VoiceService:
             logger.info("Auto-detected Volcano Engine TTS from base_url")
 
         if use_volc:
-            logger.info(f"Using Volcano Engine TTS with appid={model_appid}, access_token={'***' if access_token else None}")
             volc_config = VolcTTSConfig(
                 appid=model_appid or "",
                 token=access_token or "",
@@ -187,7 +184,6 @@ class VoiceService:
             is_qwen_realtime = model and ("qwen" in model.lower() or "/realtime" in (base_url or "").lower())
             effective_voice = "Cherry" if is_qwen_realtime else "longxiaochun_v2"
 
-            logger.info(f"Using Ali Cloud TTS with api_key={'***' if api_key else None}")
             ali_config = AliTTSConfig(
                 api_key=api_key or "",
                 model=model or ("qwen3-tts-instruct-flash-realtime" if is_qwen_realtime else "cosyvoice-v2"),
@@ -280,16 +276,13 @@ class VoiceService:
             STTConnectionException: If STT streaming fails
         """
         try:
-            # Extract config from stt_config dict if provided
-            logger.info(f"Received stt_config: {stt_config}")
-            
             model_factory = None
             model_name = None
             api_key = None
             model_appid = None
             access_token = None
             base_url = None
-            
+
             if stt_config:
                 model_factory = stt_config.get("model_factory")
                 model_name = stt_config.get("model") or stt_config.get("model_name")
@@ -298,8 +291,6 @@ class VoiceService:
                 access_token = stt_config.get("access_token")
                 base_url = stt_config.get("base_url") or stt_config.get("baseUrl")
                 language = stt_config.get("language", language)
-                logger.info(f"Extracted config - model_factory: {model_factory}, api_key: {'***' if api_key else None}, "
-                           f"model_appid: {'***' if model_appid else None}, access_token: {'***' if access_token else None}")
             else:
                 logger.warning("No stt_config provided, will use tenant model config if available")
 
@@ -374,9 +365,6 @@ class VoiceService:
                 speed_ratio = float(tts_config.get("speed_ratio", 1.0))
                 base_url = tts_config.get("base_url") or tts_config.get("baseUrl")
                 model_name = tts_config.get("model") or tts_config.get("model_name")
-                logger.info(f"Extracted TTS config - model_factory: {model_factory}, api_key: {'***' if api_key else None}, "
-                           f"model_appid: {'***' if model_appid else None}, access_token: {'***' if access_token else None}, "
-                           f"base_url: {base_url}, model: {model_name}")
 
             # If model_name is provided directly, use it
             effective_model = model_name_override or model_name

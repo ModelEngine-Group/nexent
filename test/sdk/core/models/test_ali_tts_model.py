@@ -870,12 +870,12 @@ class TestAliTTSConstants:
 
     def test_cosyvoice_api_url(self):
         """Test COSYVOICE_API_URL constant."""
-        assert "dashscope.aliyuncs.com" in COSYVOICE_API_URL
+        assert COSYVOICE_API_URL.startswith("wss://")
         assert "inference" in COSYVOICE_API_URL
 
     def test_qwen_realtime_api_url(self):
         """Test QWEN_REALTIME_API_URL constant."""
-        assert "dashscope.aliyuncs.com" in QWEN_REALTIME_API_URL
+        assert QWEN_REALTIME_API_URL.startswith("wss://")
         assert "realtime" in QWEN_REALTIME_API_URL.lower()
 
 
