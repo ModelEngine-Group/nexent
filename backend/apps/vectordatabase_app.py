@@ -162,9 +162,9 @@ async def update_index(
 
 @router.patch("/{index_name}/summary_frequency")
 async def update_summary_frequency_endpoint(
-        index_name: str = Path(..., description="Name of the index to update"),
-        request: Dict[str, Any] = Body(..., description="Update payload with summary_frequency"),
-        authorization: Optional[str] = Header(None)
+        index_name: Annotated[str, Path(..., description="Name of the index to update")],
+        request: Annotated[Dict[str, Any], Body(..., description="Update payload with summary_frequency")],
+        authorization: Annotated[Optional[str], Header(None)],
 ):
     """Update the auto-summary frequency for a knowledge base."""
     try:
@@ -244,16 +244,16 @@ def create_index_documents(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        
+
         # Get the knowledge base record to retrieve the saved embedding model
         knowledge_record = get_knowledge_record({'index_name': index_name})
         saved_embedding_model_name = None
         if knowledge_record:
             saved_embedding_model_name = knowledge_record.get('embedding_model_name')
-        
+
         # Use the saved model from knowledge base, fallback to tenant default if not set
         embedding_model = get_embedding_model(tenant_id, saved_embedding_model_name)
-        
+
         return ElasticSearchService.index_documents(
             embedding_model=embedding_model,
             index_name=index_name,
