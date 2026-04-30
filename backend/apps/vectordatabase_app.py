@@ -1,7 +1,7 @@
 import logging
 import json
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
@@ -164,7 +164,7 @@ async def update_index(
 async def update_summary_frequency_endpoint(
         index_name: Annotated[str, Path(..., description="Name of the index to update")],
         request: Annotated[Dict[str, Any], Body(..., description="Update payload with summary_frequency")],
-        authorization: Annotated[Optional[str], Header(None)],
+        authorization: Annotated[Optional[str], Header()] = None,
 ):
     """Update the auto-summary frequency for a knowledge base."""
     try:
