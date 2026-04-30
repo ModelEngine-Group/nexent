@@ -285,7 +285,14 @@ async def test_perform_connectivity_check_tts():
         # Assert
         assert result is True
         mock_service_instance.check_voice_connectivity.assert_called_once_with(
-            "tts")
+            model_type="tts",
+            stt_config={
+                "model_factory": None,
+                "api_key": "test-key",
+                "voice_type": "longxia",
+                "model": "tts-1"
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -310,7 +317,13 @@ async def test_perform_connectivity_check_stt():
         # Assert
         assert result is True
         mock_service_instance.check_voice_connectivity.assert_called_once_with(
-            "stt")
+            model_type="stt",
+            stt_config={
+                "api_key": "test-key",
+                "base_url": "https://api.openai.com",
+                "model": "whisper-1"
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -457,6 +470,7 @@ async def test_check_model_connectivity_success():
             "model123", {"connect_status": "available"})
         mock_connectivity_check.assert_called_once_with(
             "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True,
+            None, None, None,
             display_name="GPT-4"
         )
 
@@ -582,7 +596,8 @@ async def test_verify_model_config_connectivity_success():
         assert "error" not in response
 
         mock_connectivity_check.assert_called_once_with(
-            "gpt-4", "llm", "https://api.openai.com", "test-key", True
+            "gpt-4", "llm", "https://api.openai.com", "test-key", True,
+            None, None, None
         )
 
 

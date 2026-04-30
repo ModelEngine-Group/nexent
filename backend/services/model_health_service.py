@@ -70,6 +70,7 @@ async def _perform_connectivity_check(
     model_factory: Optional[str] = None,
     model_appid: Optional[str] = None,
     access_token: Optional[str] = None,
+    display_name: Optional[str] = None,
 ) -> bool:
     """
     Perform specific model connectivity check
