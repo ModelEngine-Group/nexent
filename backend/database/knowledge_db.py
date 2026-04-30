@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 
+import logging
 import uuid
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
@@ -419,7 +420,7 @@ def get_knowledge_name_map_by_index_names(index_names: List[str]) -> Dict[str, s
 
 
 def update_summary_frequency(index_name: str, summary_frequency: Optional[str],
-                              _tenant_id: str, user_id: str) -> bool:
+                             _tenant_id: str, user_id: str) -> bool:
     """Update the auto-summary frequency for a knowledge base."""
     valid_frequencies = ["3h", "5h", "1d", "1w", None]
     if summary_frequency not in valid_frequencies:
