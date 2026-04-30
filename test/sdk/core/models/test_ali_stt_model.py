@@ -88,7 +88,7 @@ class TestAliSTTConfig:
             api_key="custom_key",
             model="custom-model",
             language="en",
-            ws_url="wss://custom.test.com",
+            ws_url="wss://host/ws",
             format="wav",
             rate=48000,
             enable_vad=False,
@@ -97,7 +97,7 @@ class TestAliSTTConfig:
         assert config.api_key == "custom_key"
         assert config.model == "custom-model"
         assert config.language == "en"
-        assert config.ws_url == "wss://custom.test.com"
+        assert config.ws_url == "wss://host/ws"
         assert config.format == "wav"
         assert config.rate == 48000
         assert config.enable_vad is False
@@ -163,9 +163,9 @@ class TestAliSTTModel:
 
     def test_get_websocket_url_custom(self, ali_model):
         """Test get_websocket_url with custom ws_url."""
-        ali_model.config.ws_url = "wss://custom.test.com"
+        ali_model.config.ws_url = "wss://host"
         url = ali_model.get_websocket_url()
-        assert url.startswith("wss://custom.test.com")
+        assert url.startswith("wss://host")
         assert "model=" in url
 
     def test_get_auth_headers_basic(self, ali_model):
@@ -1313,7 +1313,7 @@ class TestAliSTTModelEdgeCases:
             api_key="key123",
             model="qwen3-asr",
             language="en",
-            ws_url="wss://custom.test.com/ws",
+            ws_url="wss://host/ws",
             format="wav",
             rate=48000,
             channel=2,
@@ -1326,7 +1326,7 @@ class TestAliSTTModelEdgeCases:
         assert config.api_key == "key123"
         assert config.model == "qwen3-asr"
         assert config.language == "en"
-        assert config.ws_url == "wss://custom.test.com/ws"
+        assert config.ws_url == "wss://host/ws"
         assert config.format == "wav"
         assert config.rate == 48000
         assert config.channel == 2
@@ -1338,10 +1338,10 @@ class TestAliSTTModelEdgeCases:
 
     def test_get_websocket_url_with_custom_ws_url_and_model(self, ali_model):
         """Test get_websocket_url with custom ws_url and model."""
-        ali_model.config.ws_url = "wss://custom.test.com/stt"
+        ali_model.config.ws_url = "wss://host/stt"
         ali_model.config.model = "custom-model"
         url = ali_model.get_websocket_url()
-        assert url.startswith("wss://custom.test.com")
+        assert url.startswith("wss://host")
         assert "custom-model" in url
 
     def test_construct_session_update_with_custom_vad_settings(self, ali_model):

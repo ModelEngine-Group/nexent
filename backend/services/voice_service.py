@@ -167,9 +167,6 @@ class VoiceService:
             TTS model instance based on configuration
         """
         use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
-        if not use_volc and base_url and "openspeech.bytedance.com" in base_url:
-            use_volc = True
-            logger.info("Auto-detected Volcano Engine TTS from base_url")
 
         if use_volc:
             volc_config = VolcTTSConfig(
