@@ -77,7 +77,9 @@ export const handleStreamResponse = async (
   const decoder = new TextDecoder();
   let buffer = "";
 
-  // Used to accumulate different types of content
+  // Guard flag to prevent duplicate title generation
+  // null = not applicable (existing conversation), true = not started, false = already scheduled
+  let titleGenerationGuard: boolean | null = isNewConversation ? true : null;
 
   // Create an empty step object
   let currentStep: AgentStep = {
@@ -86,48 +88,52 @@ export const handleStreamResponse = async (
     content: "",
     expanded: true,
     contents: [],
-    metrics: "",
+    metrics: null,
     thinking: { content: "", expanded: true },
     code: { content: "", expanded: true },
     output: { content: "", expanded: true },
   };
 
+  // Store pending metrics that need to be applied to steps that already exist in messages
+  // This handles the case where TOKEN_COUNT arrives after a new STEP_COUNT has been received
+  const pendingMetrics: Map<string, any> = new Map();
+
   // Generate conversation title immediately when stream starts (for new conversations)
   // This runs in parallel with the streaming response
-  if (isNewConversation) {
-    // Use setTimeout to ensure the user message has been added to state
+  if (titleGenerationGuard === true) {
+    // Mark as scheduled immediately to prevent duplicate calls
+    titleGenerationGuard = false;
+
+    // Capture user message at this point to avoid setMessages callback issues
+    let capturedUserMessage: string | null = null;
+    setMessages((prevMessages) => {
+      const firstUserMessage = prevMessages.find(
+        (msg) => msg.role === MESSAGE_ROLES.USER
+      );
+      if (firstUserMessage?.content) {
+        capturedUserMessage = firstUserMessage.content;
+      }
+      return prevMessages;
+    });
+
     setTimeout(async () => {
-      try {
-        // Get the current messages to find the user's question
-        setMessages((prevMessages) => {
-          const firstUserMessage = prevMessages.find(
-            (msg) => msg.role === MESSAGE_ROLES.USER
-          );
-          if (firstUserMessage?.content) {
-            // Call the generate title from question interface
-            conversationService
-              .generateTitle({
-                conversation_id: currentConversationId,
-                question: firstUserMessage.content,
-              })
-              .then((title: string) => {
-                if (title) {
-                  setConversationTitle(title);
-                }
-                // Update the conversation list
-                fetchConversationList();
-              })
-              .catch((error: Error) => {
-                log.error(
-                  t("chatStreamHandler.generateTitleFailed"),
-                  error
-                );
-              });
-          }
-          return prevMessages;
-        });
-      } catch (error) {
-        log.error(t("chatStreamHandler.generateTitleFailed"), error);
+      // Use captured message directly instead of setMessages callback
+      if (capturedUserMessage) {
+        conversationService
+          .generateTitle({
+            conversation_id: currentConversationId,
+            question: capturedUserMessage,
+          })
+          .then((title: string) => {
+            if (title) {
+              setConversationTitle(title);
+            }
+            // Update the conversation list
+            fetchConversationList();
+          })
+          .catch((error: Error) => {
+            log.error(t("chatStreamHandler.generateTitleFailed"), error);
+          });
       }
     }, 0);
   }
@@ -157,7 +163,10 @@ export const handleStreamResponse = async (
         readResult = await reader.read();
       } catch (readError: any) {
         // If read is aborted, break the loop gracefully
-        if (readError?.name === "AbortError" || readError?.name === "AbortSignal") {
+        if (
+          readError?.name === "AbortError" ||
+          readError?.name === "AbortSignal"
+        ) {
           break;
         }
         throw readError;
@@ -186,21 +195,23 @@ export const handleStreamResponse = async (
               // Process different types of messages
               switch (messageType) {
                 case chatConfig.messageTypes.STEP_COUNT:
-                  // Increment the counter for each new step
+                  // Increment the counter for each new step (for unique ID generation)
                   stepIdCounter.current += 1;
 
-                  // Create a new step - use the counter and UUID combination to generate a unique ID
+                  // Extract the raw numeric step number from formatted content like "\n**Step 1** \n"
+                  // TOKEN_COUNT sends step_number as an integer, so IDs must use only the digit
+                  const stepTitle = messageContent.trim();
+                  const stepNumMatch = stepTitle.match(/\d+/);
+                  const stepNumber = stepNumMatch ? stepNumMatch[0] : String(stepIdCounter.current);
+
+                  // Create a new step - use step number as part of ID for reliable matching
                   currentStep = {
-                    id: `step-${
-                      stepIdCounter.current
-                    }-${Date.now()}-${Math.random()
-                      .toString(36)
-                      .substring(2, 9)}`,
-                    title: messageContent.trim(),
+                    id: `step-${stepNumber}`,
+                    title: stepTitle,
                     content: "",
                     expanded: true,
                     contents: [], // Use an array to store all content in order
-                    metrics: "",
+                    metrics: null,
                     thinking: { content: "", expanded: true },
                     code: { content: "", expanded: true },
                     output: { content: "", expanded: true },
@@ -214,8 +225,20 @@ export const handleStreamResponse = async (
                   break;
 
                 case chatConfig.messageTypes.TOKEN_COUNT:
-                  // Process token counting logic
-                  currentStep.metrics = messageContent;
+                  try {
+                    const metricsData = JSON.parse(messageContent);
+                    const metricsStepId = `step-${metricsData.step_number}`;
+
+                    // If currentStep matches the metrics step number, set directly
+                    if (currentStep && currentStep.id === metricsStepId) {
+                      currentStep.metrics = metricsData;
+                    } else {
+                      // currentStep was already reset to a new step, store metrics for later application
+                      pendingMetrics.set(metricsStepId, metricsData);
+                    }
+                  } catch {
+                    // Failed to parse metrics
+                  }
                   break;
 
                 case chatConfig.messageTypes.MODEL_OUTPUT:
@@ -231,7 +254,7 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
@@ -275,7 +298,7 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
@@ -287,7 +310,7 @@ export const handleStreamResponse = async (
                     lastModelOutputIndex >= 0 &&
                     currentStep.contents[lastModelOutputIndex] &&
                     currentStep.contents[lastModelOutputIndex].subType ===
-                      "thinking";
+                    "thinking";
 
                   if (shouldAppendThinking) {
                     // Append to existing thinking content
@@ -322,7 +345,7 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
@@ -334,7 +357,7 @@ export const handleStreamResponse = async (
                     lastModelOutputIndex >= 0 &&
                     currentStep.contents[lastModelOutputIndex] &&
                     currentStep.contents[lastModelOutputIndex].subType ===
-                      "deep_thinking";
+                    "deep_thinking";
 
                   if (shouldAppendDeep) {
                     // Append to existing deep_thinking content
@@ -370,7 +393,7 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
@@ -384,11 +407,12 @@ export const handleStreamResponse = async (
                     // Check if we should append to existing code content
                     // Only append if the last content type was MODEL_OUTPUT_CODE and we have a valid index
                     const shouldAppendCode =
-                      lastContentType === chatConfig.contentTypes.MODEL_OUTPUT_CODE &&
+                      lastContentType ===
+                      chatConfig.contentTypes.MODEL_OUTPUT_CODE &&
                       lastCodeOutputIndex >= 0 &&
                       currentStep.contents[lastCodeOutputIndex] &&
                       currentStep.contents[lastCodeOutputIndex].type ===
-                        chatConfig.messageTypes.MODEL_OUTPUT_CODE;
+                      chatConfig.messageTypes.MODEL_OUTPUT_CODE;
 
                     if (shouldAppendCode) {
                       const codeOutput =
@@ -402,7 +426,10 @@ export const handleStreamResponse = async (
                       ) {
                         // Clean existing content
                         codeOutput.content = codeOutput.content.replace(
-                          new RegExp(`^(${codePrefix}|代码|Code)[：:]\\s*`, "i"),
+                          new RegExp(
+                            `^(${codePrefix}|代码|Code)[：:]\\s*`,
+                            "i"
+                          ),
                           ""
                         );
                       }
@@ -424,13 +451,16 @@ export const handleStreamResponse = async (
                         );
                       }
                       // Also handle Chinese and English variants directly
-                      processedContent = processedContent.replace(/^(代码|Code)[：:]\s*/i, "");
-                      
+                      processedContent = processedContent.replace(
+                        /^(代码|Code)[：:]\s*/i,
+                        ""
+                      );
+
                       // Remove incomplete "<end" suffix if present
                       if (processedContent.endsWith("<end")) {
                         processedContent = processedContent.slice(0, -4);
                       }
-                      
+
                       currentStep.contents.push({
                         id: `model-code-${Date.now()}-${Math.random()
                           .toString(36)
@@ -449,7 +479,10 @@ export const handleStreamResponse = async (
                   } else {
                     // In non-debug mode, use the original logic - add a stable loading prompt
                     // Check if there is a code generation prompt
-                    if (lastContentType === chatConfig.contentTypes.GENERATING_CODE) {
+                    if (
+                      lastContentType ===
+                      chatConfig.contentTypes.GENERATING_CODE
+                    ) {
                       break;
                     }
 
@@ -481,7 +514,7 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
@@ -549,7 +582,7 @@ export const handleStreamResponse = async (
                           content: "",
                           expanded: true,
                           contents: [],
-                          metrics: "",
+                          metrics: null,
                           thinking: { content: "", expanded: true },
                           code: { content: "", expanded: true },
                           output: { content: "", expanded: true },
@@ -669,7 +702,7 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
@@ -710,7 +743,7 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
@@ -743,7 +776,7 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
@@ -773,7 +806,7 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
                       output: { content: "", expanded: true },
@@ -782,7 +815,8 @@ export const handleStreamResponse = async (
 
                   // Check if there's already a memory_search message to update
                   const existingMemoryIndex = currentStep.contents.findIndex(
-                    (item) => item.type === chatConfig.messageTypes.MEMORY_SEARCH
+                    (item) =>
+                      item.type === chatConfig.messageTypes.MEMORY_SEARCH
                   );
 
                   if (existingMemoryIndex >= 0) {
@@ -806,7 +840,7 @@ export const handleStreamResponse = async (
                           try {
                             const evt = new Event("nexent:new-memory");
                             window.dispatchEvent(evt);
-                          } catch (_) {}
+                          } catch (_) { }
                           break;
                         case "<MEM_FAILED>":
                           m.message = t("chatStreamHandler.memoryFailed");
@@ -842,10 +876,10 @@ export const handleStreamResponse = async (
                       content: "",
                       expanded: true,
                       contents: [],
-                      metrics: "",
+                      metrics: null,
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
-                      output: { content: "", expanded: true }
+                      output: { content: "", expanded: true },
                     };
                   }
 
@@ -854,13 +888,59 @@ export const handleStreamResponse = async (
                     type: chatConfig.contentTypes.PREPROCESS,
                     content: messageContent,
                     expanded: true,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
                   };
 
                   currentStep.contents.push(normalizedPreprocessData);
 
                   // Update the last processed content type
                   lastContentType = chatConfig.contentTypes.PREPROCESS;
+                  break;
+
+                case chatConfig.messageTypes.MAX_STEPS_REACHED:
+                  // Parse the max steps reached event data
+                  try {
+                    const maxStepsData = JSON.parse(messageContent);
+                    const completedSteps = maxStepsData.completedSteps || 0;
+
+                    // If there's no currentStep, create one
+                    if (!currentStep) {
+                      currentStep = {
+                        id: `step-max-steps-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                        title: t("chatStreamHandler.maxStepsReached"),
+                        content: "",
+                        expanded: true,
+                        contents: [],
+                        metrics: null,
+                        thinking: { content: "", expanded: true },
+                        code: { content: "", expanded: true },
+                        output: { content: "", expanded: true },
+                      };
+                    }
+
+                    // Store the max steps info in the step
+                    currentStep.maxStepsInfo = {
+                      completedSteps: completedSteps,
+                      maxSteps: maxStepsData.maxSteps || 0,
+                      message: t("chatStreamHandler.maxStepsNotification", {
+                        completedSteps,
+                      }),
+                    };
+
+                    // Add the max steps content to current step's contents
+                    currentStep.contents.push({
+                      id: `max-steps-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                      type: chatConfig.messageTypes.MAX_STEPS_REACHED,
+                      content: messageContent,
+                      expanded: true,
+                      timestamp: Date.now(),
+                    });
+                  } catch (e) {
+                    log.error(
+                      t("chatStreamHandler.parseMaxStepsDataFailed"),
+                      e
+                    );
+                  }
                   break;
 
                 default:
@@ -896,6 +976,16 @@ export const handleStreamResponse = async (
                         steps.push(currentStep);
                       }
                     }
+
+                    // Apply any pending metrics to existing steps
+                    pendingMetrics.forEach((metrics, stepId) => {
+                      const pendingStepIndex = steps.findIndex((s) => s.id === stepId);
+                      if (pendingStepIndex >= 0) {
+                        steps[pendingStepIndex] = { ...steps[pendingStepIndex], metrics };
+                        pendingMetrics.delete(stepId);
+                      }
+                    });
+
                     updatedMsg.steps = steps;
                   }
 
@@ -908,7 +998,7 @@ export const handleStreamResponse = async (
                 return newMessages;
               });
             }
-          } catch (parseError) {}
+          } catch (parseError) { }
         }
       }
     }

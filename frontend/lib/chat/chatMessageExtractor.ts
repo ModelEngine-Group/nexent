@@ -76,7 +76,7 @@ export function extractAssistantMsgFromResponse(
             content: "",
             expanded: false,
             contents: [],
-            metrics: "",
+            metrics: null,
             thinking: { content: "", expanded: false },
             code: { content: "", expanded: false },
             output: { content: "", expanded: false },
@@ -173,7 +173,11 @@ export function extractAssistantMsgFromResponse(
         case chatConfig.messageTypes.TOKEN_COUNT: {
           const currentStep = steps[steps.length - 1];
           if (currentStep) {
-            currentStep.metrics = msg.content;
+            try {
+              currentStep.metrics = JSON.parse(msg.content);
+            } catch {
+              currentStep.metrics = null;
+            }
           }
           break;
         }

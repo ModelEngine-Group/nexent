@@ -86,7 +86,7 @@ def run_skill_creation_agent(
     agent_run_thread(agent_run_info)
 
 
-def create_simple_skill_from_request(
+def create_skill_from_request(
     system_prompt: str,
     user_prompt: str,
     model_config_list: List[ModelConfig],

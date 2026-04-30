@@ -34,11 +34,13 @@ from database.tool_db import (
     search_last_tool_instance_by_tool_id,
     update_tool_table_from_scan_tool_list,
 )
+from database.knowledge_db import get_knowledge_name_map_by_index_names
 from mcpadapt.smolagents_adapter import _sanitize_function_name
-from services.file_management_service import get_llm_model
+from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model, get_rerank_model, get_vector_db_core
 from database.client import minio_client
 from services.image_service import get_vlm_model
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
@@ -712,11 +714,20 @@ def _validate_local_tool(
             if rerank and rerank_model_name:
                 rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
 
+            # Build display_name to index_name mapping for LLM parameter conversion
+            index_names = instantiation_params.get("index_names", [])
+            display_name_to_index_map = {}
+            if index_names:
+                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                for idx_name, kb_name in knowledge_name_map.items():
+                    display_name_to_index_map[kb_name] = idx_name
+
             params = {
                 **instantiation_params,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
                 'rerank_model': rerank_model,
+                'display_name_to_index_map': display_name_to_index_map,
             }
             tool_instance = tool_class(**params)
         elif tool_name in ["dify_search", "datamate_search"]:
@@ -732,15 +743,29 @@ def _validate_local_tool(
                 'rerank_model': rerank_model,
             }
             tool_instance = tool_class(**params)
+        elif tool_name == "haotian_search":
+            # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
+            # Must explicitly pass observer=None: if omitted, Python applies the FieldInfo default
+            # (not None), causing 'FieldInfo has no attr lang' errors in forward()
+            filtered_params = {k: v for k, v in instantiation_params.items()
+                              if k not in ["observer", "rerank_model", "rerank"]}
+            filtered_params["observer"] = None
+            tool_instance = tool_class(**filtered_params)
         elif tool_name == "analyze_image":
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
+            vlm_display_name = getattr(
+                image_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=vlm_display_name)
             params = {
                 **instantiation_params,
                 'vlm_model': image_to_text_model,
-                'storage_client': minio_client
+                'storage_client': minio_client,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_text_file":
@@ -748,11 +773,17 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
+            llm_display_name = getattr(
+                long_text_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=llm_display_name)
             params = {
                 **instantiation_params,
                 'llm_model': long_text_to_text_model,
                 'storage_client': minio_client,
-                "data_process_service_url": DATA_PROCESS_SERVICE
+                "data_process_service_url": DATA_PROCESS_SERVICE,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }
             tool_instance = tool_class(**params)
         else:

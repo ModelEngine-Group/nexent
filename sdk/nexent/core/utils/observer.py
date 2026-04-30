@@ -26,6 +26,7 @@ class ProcessType(Enum):
     CARD = "card"  # content that needs to be rendered by the front end using cards
     TOOL = "tool"  # tool name
     MEMORY_SEARCH = "memory_search"  # memory search status
+    MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
 
 
 # message transformer base class
@@ -92,15 +93,9 @@ class FinalAnswerTransformer(MessageTransformer):
 
 
 class TokenCountTransformer(MessageTransformer):
-    TEMPLATES = {"zh": "步骤耗时：{0}", "en": "Duration:{0}"}
-
     def transform(self, **kwargs: Any) -> str:
-        """convert the message of token count"""
-        content = kwargs.get("content", "")
-        lang = kwargs.get("lang", "en")
-
-        template = self.TEMPLATES.get(lang, self.TEMPLATES["en"])
-        return f"""<span style="color: #bbbbc2; font-size: 12px;">{template.format(content)}</span> """
+        """Pass through token stats JSON content unchanged for frontend consumption."""
+        return kwargs.get("content", "")
 
 
 class ErrorTransformer(MessageTransformer):
@@ -163,7 +158,8 @@ class MessageObserver:
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
             ProcessType.TOOL: default_transformer,
-            ProcessType.MEMORY_SEARCH: default_transformer
+            ProcessType.MEMORY_SEARCH: default_transformer,
+            ProcessType.MAX_STEPS_REACHED: default_transformer
         }
 
     def add_model_new_token(self, new_token):

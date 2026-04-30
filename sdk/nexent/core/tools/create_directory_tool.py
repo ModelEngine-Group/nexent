@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-from typing import Optional
 from pydantic import Field
 from smolagents.tools import Tool
 
@@ -48,30 +47,35 @@ class CreateDirectoryTool(Tool):
 
     tool_sign = ToolSign.FILE_OPERATION.value  # File operation tool identifier
 
-    def __init__(self, 
+    def __init__(self,
                  init_path: str = Field(description="Initial workspace path", default="/mnt/nexent"),
                  observer: MessageObserver = Field(description="Message observer", default=None, exclude=True)):
         """Initialize the CreateDirectoryTool.
-        
+
         Args:
             init_path (str): Initial workspace path for directory operations. Defaults to "/mnt/nexent".
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
+
+        Raises:
+            ValueError: If init_path is provided but empty.
         """
         super().__init__()
-        self.init_path = os.path.abspath(init_path)
+        if init_path is not None and init_path.strip() == "":
+            raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
+        self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
         self.running_prompt_zh = "正在创建文件夹..."
         self.running_prompt_en = "Creating directory..."
 
     def _validate_path(self, directory_path: str) -> str:
         """Validate and resolve directory path within the workspace.
-        
+
         Args:
             directory_path (str): Input directory path
-            
+
         Returns:
             str: Validated absolute path
-            
+
         Raises:
             Exception: If path is outside workspace or invalid
         """
@@ -81,16 +85,16 @@ class CreateDirectoryTool(Tool):
         else:
             # Treat as relative path from init_path
             abs_path = os.path.abspath(os.path.join(self.init_path, directory_path))
-        
+
         # Normalize path to resolve any '..' or '.' components
         abs_path = os.path.normpath(abs_path)
-        
+
         # Check if the path is within the allowed workspace
         if not abs_path.startswith(self.init_path):
             raise Exception(f"Permission denied: Directory operations are restricted to the workspace directory '{self.init_path}'. "
                           f"Attempted path '{abs_path}' is outside the allowed area. "
                           f"Please use relative paths within the workspace.")
-        
+
         return abs_path
 
     def forward(self, directory_path: str, permissions: str = "755") -> str:
@@ -132,7 +136,7 @@ class CreateDirectoryTool(Tool):
             os.chmod(abs_path, octal_permissions)
 
             logger.info(f"Successfully created/verified directory: {abs_path} with permissions: {permissions}")
-            
+
             # Prepare success message
             # Show relative path in response for better UX
             relative_path = os.path.relpath(abs_path, self.init_path)
@@ -151,13 +155,13 @@ class CreateDirectoryTool(Tool):
             logger.error(f"Permission denied when creating directory: {directory_path}, error: {e}")
             error_msg = f"Permission denied: Cannot create directory at {directory_path}. Check directory permissions."
             raise Exception(error_msg)
-        
+
         except OSError as e:
             logger.error(f"OS error when creating directory: {directory_path}, error: {e}")
             error_msg = f"OS error: Cannot create directory at {directory_path}. {str(e)}"
             raise Exception(error_msg)
-        
+
         except Exception as e:
             logger.error(f"Unexpected error when creating directory: {directory_path}, error: {e}")
             error_msg = f"Failed to create directory: {str(e)}"
-            raise Exception(error_msg) 
+            raise Exception(error_msg)

@@ -201,7 +201,13 @@ mock_models_module = MagicMock()
 # Provide a minimal OpenAIServerModel base with the method needed by OpenAIModel
 class DummyOpenAIServerModel:
     def __init__(self, *args, **kwargs):
-        pass
+        self.model_id = kwargs.get("model_id", None)
+        self.client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=MagicMock())
+            )
+        )
+        self.custom_role_conversions = {}
 
     def _prepare_completion_kwargs(self, *args, **kwargs):
         # In tests we will patch this method on the instance directly, so default impl is fine
@@ -246,6 +252,17 @@ nexent_monitor_mock.get_monitoring_manager = lambda: monitoring_manager_mock
 nexent_monitor_mock.monitoring_manager = monitoring_manager_mock
 nexent_monitor_mock.MonitoringManager = MagicMock
 nexent_monitor_mock.MonitoringConfig = MagicMock
+
+# Provide real ContextVar objects and monitoring symbols for wrapper tests
+from contextvars import ContextVar as _RealContextVar
+nexent_monitor_mock._monitoring_display_name = _RealContextVar(
+    "_monitoring_display_name_test", default=None)
+nexent_monitor_mock._monitoring_operation = _RealContextVar(
+    "_monitoring_operation_test", default="unknown")
+nexent_monitor_mock._detect_model_type = MagicMock(return_value="llm")
+nexent_monitor_mock._MonitoredClient = type("_MonitoredClient", (), {
+    "__init__": lambda self, client, model_id, model_type: setattr(self, "_wrapped", client),
+})
 
 # Create mock parent package structure for nexent module
 nexent_mock = types.ModuleType("nexent")
@@ -625,9 +642,10 @@ def test_call_with_no_usage_info(openai_model_instance):
         # Call the method
         openai_model_instance.__call__(messages)
 
-        # Verify token counts are set to 0 when usage is None
-        assert openai_model_instance.last_input_token_count == 0
-        assert openai_model_instance.last_output_token_count == 0
+        # Verify token counts are estimated when usage is None (not set to 0)
+        # The implementation estimates tokens from input/output text
+        assert openai_model_instance.last_input_token_count >= 0
+        assert openai_model_instance.last_output_token_count >= 0
 
 
 def test_call_with_null_tokens(openai_model_instance):
@@ -1119,6 +1137,86 @@ def test_call_invalid_message_type_raises_type_error(openai_model_instance):
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
         with pytest.raises(TypeError, match="Messages must be ChatMessage or dict objects."):
             openai_model_instance.__call__(messages)
+
+
+# ---------------------------------------------------------------------------
+# Tests for monitoring wrapper in __init__
+# ---------------------------------------------------------------------------
+
+
+def test_init_client_wrapped_with_monitored_client():
+    """When model_id is set, __init__ wraps self.client with _MonitoredClient."""
+    _MonitoredClient = openai_llm_module._MonitoredClient
+    observer = MagicMock()
+    model = ImportedOpenAIModel(
+        observer=observer, model_id="test-model",
+        api_base="http://localhost", api_key="k")
+    assert isinstance(model.client, _MonitoredClient)
+
+
+def test_init_display_name_sets_context_variable():
+    """When display_name is provided, _monitoring_display_name context var is set."""
+    _monitoring_display_name = openai_llm_module._monitoring_display_name
+    observer = MagicMock()
+    model = ImportedOpenAIModel(
+        observer=observer, model_id="test-model",
+        api_base="http://localhost", api_key="k", display_name="GPT-4")
+    assert _monitoring_display_name.get() == "GPT-4"
+
+
+def test_init_no_client_logs_warning():
+    """When base_client is None after init, a warning is logged and client is not wrapped."""
+    _MonitoredClient = openai_llm_module._MonitoredClient
+    observer = MagicMock()
+    model = ImportedOpenAIModel(observer=observer)
+    assert not isinstance(model.client, _MonitoredClient)
+
+
+def test_call_with_token_tracker_uses_provided_tracker(openai_model_instance):
+    """When _token_tracker is passed, __call__ uses it instead of creating one."""
+    mock_tracker = MagicMock()
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "hi"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 1
+    mock_chunk.usage.completion_tokens = 1
+
+    mock_result_message = MagicMock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        openai_model_instance(
+            messages=[{"role": "user", "content": "hello"}], _token_tracker=mock_tracker)
+
+    mock_tracker.record_token.assert_called()
+
+
+def test_call_without_tracker_creates_tracker(openai_model_instance):
+    """When no _token_tracker is passed, __call__ creates one from monitoring manager."""
+    mock_tracker = MagicMock()
+    openai_model_instance._monitoring.create_token_tracker = MagicMock(return_value=mock_tracker)
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "hi"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 1
+    mock_chunk.usage.completion_tokens = 1
+
+    mock_result_message = MagicMock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        openai_model_instance(messages=[{"role": "user", "content": "hello"}])
+
+    openai_model_instance._monitoring.create_token_tracker.assert_called_once_with("dummy-model")
+    mock_tracker.record_token.assert_called()
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

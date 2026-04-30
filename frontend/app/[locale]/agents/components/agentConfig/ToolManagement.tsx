@@ -26,6 +26,7 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "dify_search",
   "datamate_search",
   "idata_search",
+  "haotian_search",
 ];
 
 // Tool types that require Embedding model
@@ -40,11 +41,12 @@ const TOOLS_REQUIRING_VLM = [
 
 function getToolKbType(
   toolName: string
-): "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | null {
+): "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | null {
   if (!TOOLS_REQUIRING_KB_SELECTION.includes(toolName)) return null;
   if (toolName === "dify_search") return "dify_search";
   if (toolName === "datamate_search") return "datamate_search";
   if (toolName === "idata_search") return "idata_search";
+  if (toolName === "haotian_search") return "haotian_search";
   return "knowledge_base_search";
 }
 
@@ -293,26 +295,24 @@ export default function ToolManagement({
 
   // Generate Tabs configuration
   const tabItems = toolGroups.map((group) => {
-    // Limit tab display to maximum 7 characters
-    const displayLabel =
-      t(group.label).length > 7
-        ? `${t(group.label).substring(0, 7)}...`
-        : t(group.label);
+    const label = t(group.label);
 
     return {
       key: group.key,
       label: (
-        <span
-          style={{
-            display: "block",
-            maxWidth: "70px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {displayLabel}
-        </span>
+        <Tooltip title={label} placement="right">
+          <span
+            style={{
+              display: "block",
+              maxWidth: "70px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {label}
+          </span>
+        </Tooltip>
       ),
       children: (
         <div

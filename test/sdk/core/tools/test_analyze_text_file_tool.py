@@ -171,3 +171,112 @@ class TestAnalyzeTextFileTool:
         assert result == ("analysis", 0)
         mock_get_template.assert_called_once_with(
             template_type="analyze_file", language="en")
+
+
+class TestAnalyzeTextFileToolValidateUrlAccess:
+    """Test cases for validate_url_access parameter in AnalyzeTextFileTool."""
+
+    def test_load_save_object_manager_created_with_validate_url_access_none(
+        self, observer_en, llm_model
+    ):
+        """Test that LoadSaveObjectManager is called with validate_url_access=None by default."""
+        with patch.object(module, 'LoadSaveObjectManager') as mock_manager_class:
+            mock_manager_instance = MagicMock()
+            mock_manager_class.return_value = mock_manager_instance
+            mock_manager_instance.load_object.return_value = lambda x: x
+
+            tool = AnalyzeTextFileTool(
+                storage_client=MagicMock(),
+                observer=observer_en,
+                data_process_service_url="http://data-process",
+                llm_model=llm_model,
+            )
+
+            mock_manager_class.assert_called_once_with(
+                storage_client=tool.storage_client,
+                validate_url_access=None
+            )
+
+    def test_load_save_object_manager_with_validate_url_access_callable(
+        self, observer_en, llm_model
+    ):
+        """Test that callable validate_url_access is passed to LoadSaveObjectManager."""
+        with patch.object(module, 'LoadSaveObjectManager') as mock_manager_class:
+            mock_manager_instance = MagicMock()
+            mock_manager_class.return_value = mock_manager_instance
+            mock_manager_instance.load_object.return_value = lambda x: x
+
+            validate_callback = MagicMock()
+
+            tool = AnalyzeTextFileTool(
+                storage_client=MagicMock(),
+                observer=observer_en,
+                data_process_service_url="http://data-process",
+                llm_model=llm_model,
+                validate_url_access=validate_callback,
+            )
+
+            mock_manager_class.assert_called_once_with(
+                storage_client=tool.storage_client,
+                validate_url_access=validate_callback
+            )
+
+    def test_load_save_object_manager_validate_url_access_not_callable(
+        self, observer_en, llm_model
+    ):
+        """Test that non-callable validate_url_access is converted to None."""
+        with patch.object(module, 'LoadSaveObjectManager') as mock_manager_class:
+            mock_manager_instance = MagicMock()
+            mock_manager_class.return_value = mock_manager_instance
+            mock_manager_instance.load_object.return_value = lambda x: x
+
+            tool = AnalyzeTextFileTool(
+                storage_client=MagicMock(),
+                observer=observer_en,
+                data_process_service_url="http://data-process",
+                llm_model=llm_model,
+                validate_url_access="not_a_callable",
+            )
+
+            mock_manager_class.assert_called_once_with(
+                storage_client=tool.storage_client,
+                validate_url_access=None
+            )
+
+    def test_load_save_object_manager_validate_url_access_lambda(
+        self, observer_en, llm_model
+    ):
+        """Test that lambda validate_url_access is passed to LoadSaveObjectManager."""
+        with patch.object(module, 'LoadSaveObjectManager') as mock_manager_class:
+            mock_manager_instance = MagicMock()
+            mock_manager_class.return_value = mock_manager_instance
+            mock_manager_instance.load_object.return_value = lambda x: x
+
+            validate_callback = lambda url: True
+
+            tool = AnalyzeTextFileTool(
+                storage_client=MagicMock(),
+                observer=observer_en,
+                data_process_service_url="http://data-process",
+                llm_model=llm_model,
+                validate_url_access=validate_callback,
+            )
+
+            mock_manager_class.assert_called_once_with(
+                storage_client=tool.storage_client,
+                validate_url_access=validate_callback
+            )
+
+    def test_init_param_descriptions_has_validate_url_access(
+        self, observer_en, llm_model
+    ):
+        """Test that init_param_descriptions includes validate_url_access."""
+        tool = AnalyzeTextFileTool(
+            storage_client=MagicMock(),
+            observer=observer_en,
+            data_process_service_url="http://data-process",
+            llm_model=llm_model,
+        )
+
+        assert "validate_url_access" in tool.init_param_descriptions
+        assert "Callback function to validate URL access permissions (passed to LoadSaveObjectManager)" in tool.init_param_descriptions["validate_url_access"]["description"]

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Button,
@@ -22,6 +22,13 @@ import { Sparkles, Maximize2, Zap, Settings2 } from "lucide-react";
 import log from "@/lib/logger";
 import { AgentProfileInfo, AgentBusinessInfo } from "@/types/agentConfig";
 import type { PromptTemplateItem } from "@/types/agentConfig";
+import {
+  getAgentGenerationCache,
+  setAgentGenerationStatus,
+  saveGeneratedField,
+  clearAgentGenerationCache,
+  clearExpiredGenerationCaches
+} from "@/lib/agentGenerationCache";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
   GENERATE_PROMPT_STREAM_TYPES,
@@ -115,6 +122,32 @@ export default function AgentGenerateDetail({
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplateItem[]>([]);
   const [selectedPromptTemplateId, setSelectedPromptTemplateId] = useState<number | undefined>(undefined);
   const [promptTemplateModalOpen, setPromptTemplateModalOpen] = useState(false);
+
+  // Use ref to track generation initiator - this doesn't trigger re-renders
+  // but is accessible in closures
+  const generationInitiatorRef = useRef<number | null>(null);
+
+  // Cleanup invalid cache on mount to prevent stuck "generating" state
+  useEffect(() => {
+    // Clean up expired caches on startup to prevent stuck states
+    // Only removes entries that have exceeded their expiry time
+    // Does not interfere with legitimate in-progress caches
+    clearExpiredGenerationCaches();
+  }, []);
+
+  // Sync businessInfo local state with store when editedAgent changes
+  // This handles navigation scenarios where component remounts but store persists
+  useEffect(() => {
+    if (editedAgent.business_description !== businessInfo.businessDescription ||
+        editedAgent.business_logic_model_name !== businessInfo.businessLogicModelName ||
+        editedAgent.business_logic_model_id !== businessInfo.businessLogicModelId) {
+      setBusinessInfo({
+        businessDescription: editedAgent.business_description || "",
+        businessLogicModelName: editedAgent.business_logic_model_name || "",
+        businessLogicModelId: editedAgent.business_logic_model_id || 0,
+      });
+    }
+  }, [editedAgent.business_description, editedAgent.business_logic_model_name, editedAgent.business_logic_model_id]);
 
   // Only show "no edit permission" tooltip when the panel is active and agent is read-only.
   // Note: when no agent is selected, AgentInfoComp shows an overlay and we should not show
@@ -230,6 +263,23 @@ export default function AgentGenerateDetail({
 
   // Initialize form values when component mounts or currentAgentId changes
   useEffect(() => {
+    const effectiveAgentId = currentAgentId ?? 0;
+
+    // Skip form initialization if we're currently generating for this agent
+    // Use generationInitiatorRef to avoid stale closure issues
+    if (generationInitiatorRef.current === effectiveAgentId) {
+      return;
+    }
+
+    // Check if this agent has cached generation content in progress
+    const cached = getAgentGenerationCache(effectiveAgentId);
+    const hasCachedGeneration = cached?.isGenerating === true;
+
+    // Skip form initialization if we're resuming a cached generation
+    // This prevents overwriting the generated content
+    if (hasCachedGeneration) {
+      return;
+    }
 
     const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
@@ -669,11 +719,32 @@ export default function AgentGenerateDetail({
     }
 
     setIsGenerating(true);
+    generationInitiatorRef.current = effectiveAgentId;
     setActiveTab("few-shots");
+
+    // Mark generation as in progress in cache
+    setAgentGenerationStatus(effectiveAgentId, true, {
+      businessDescription: businessInfo.businessDescription,
+      businessLogicModelId: businessInfo.businessLogicModelId,
+      businessLogicModelName: businessInfo.businessLogicModelName,
+    });
+
+
+    // Extract knowledge base display names from selected tools
+    // This allows the backend to use frontend-configured display names without database lookup
+    const knowledgeBaseDisplayNames: string[] = [];
+    if (Array.isArray(editedAgent.tools)) {
+      for (const tool of editedAgent.tools) {
+        if (typeof tool === "object" && tool.display_names && Array.isArray(tool.display_names)) {
+          knowledgeBaseDisplayNames.push(...tool.display_names);
+        }
+      }
+    }
+
     try {
       await generatePromptStream(
         {
-          agent_id: currentAgentId || 0,
+          agent_id: effectiveAgentId,
           task_description: businessInfo.businessDescription,
           model_id: businessInfo.businessLogicModelId.toString(),
           template_id: selectedPromptTemplateId,
@@ -685,80 +756,142 @@ export default function AgentGenerateDetail({
                 : tool
             )
             : [],
+          // Pass knowledge base display names from frontend-configured tools
+          knowledge_base_display_names: knowledgeBaseDisplayNames.length > 0 ? knowledgeBaseDisplayNames : undefined,
         },
         (data) => {
-          // Process streaming response data
+          // Track the agent this generation was for
+          const generationAgentId = effectiveAgentId;
+          const currentVisibleAgentId = useAgentConfigStore.getState().currentAgentId ?? 0;
+          const isSameAgent = generationInitiatorRef.current === currentVisibleAgentId;
 
           switch (data.type) {
             case GENERATE_PROMPT_STREAM_TYPES.DUTY:
-              form.setFieldsValue({ dutyPrompt: data.content });
-              setGeneratedContent((prev) => ({
-                ...prev,
-                dutyPrompt: data.content,
-              }));
+              // Only update UI if we're on the same agent
+              if (isSameAgent) {
+                form.setFieldsValue({ dutyPrompt: data.content });
+                setGeneratedContent((prev) => ({
+                  ...prev,
+                  dutyPrompt: data.content,
+                }));
+              }
+              // Always save to cache for the generation agent
+              saveGeneratedField(generationAgentId, 'dutyPrompt', data.content);
               break;
             case GENERATE_PROMPT_STREAM_TYPES.CONSTRAINT:
-              form.setFieldsValue({ constraintPrompt: data.content });
-              setGeneratedContent((prev) => ({
-                ...prev,
-                constraintPrompt: data.content,
-              }));
+              if (isSameAgent) {
+                form.setFieldsValue({ constraintPrompt: data.content });
+                setGeneratedContent((prev) => ({
+                  ...prev,
+                  constraintPrompt: data.content,
+                }));
+              }
+              saveGeneratedField(generationAgentId, 'constraintPrompt', data.content);
               break;
             case GENERATE_PROMPT_STREAM_TYPES.FEW_SHOTS:
-              form.setFieldsValue({ fewShotsPrompt: data.content });
-              setGeneratedContent((prev) => ({
-                ...prev,
-                fewShotsPrompt: data.content,
-              }));
+              if (isSameAgent) {
+                form.setFieldsValue({ fewShotsPrompt: data.content });
+                setGeneratedContent((prev) => ({
+                  ...prev,
+                  fewShotsPrompt: data.content,
+                }));
+              }
+              saveGeneratedField(generationAgentId, 'fewShotsPrompt', data.content);
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_VAR_NAME:
-              if (!form.getFieldValue("agentName")?.trim()) {
-                form.setFieldsValue({ agentName: data.content });
+              if (isSameAgent) {
+                if (!form.getFieldValue("agentName")?.trim()) {
+                  form.setFieldsValue({ agentName: data.content });
+                }
+                setGeneratedContent((prev) => ({
+                  ...prev,
+                  agentName: data.content,
+                }));
               }
-              setGeneratedContent((prev) => ({
-                ...prev,
-                agentName: data.content,
-              }));
+              saveGeneratedField(generationAgentId, 'agentName', data.content);
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DESCRIPTION:
-              form.setFieldsValue({ agentDescription: data.content });
-              setGeneratedContent((prev) => ({
-                ...prev,
-                agentDescription: data.content,
-              }));
+              if (isSameAgent) {
+                form.setFieldsValue({ agentDescription: data.content });
+                setGeneratedContent((prev) => ({
+                  ...prev,
+                  agentDescription: data.content,
+                }));
+              }
+              saveGeneratedField(generationAgentId, 'agentDescription', data.content);
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DISPLAY_NAME:
-              // Only update if current agent display name is empty
-              if (!form.getFieldValue("agentDisplayName")?.trim()) {
-                form.setFieldsValue({ agentDisplayName: data.content });
+              if (isSameAgent) {
+                // Only update if current agent display name is empty
+                if (!form.getFieldValue("agentDisplayName")?.trim()) {
+                  form.setFieldsValue({ agentDisplayName: data.content });
+                }
+                setGeneratedContent((prev) => ({
+                  ...prev,
+                  agentDisplayName: data.content,
+                }));
               }
-              setGeneratedContent((prev) => ({
-                ...prev,
-                agentDisplayName: data.content,
-              }));
+              saveGeneratedField(generationAgentId, 'agentDisplayName', data.content);
               break;
           }
         },
         (error) => {
           log.error("Generate prompt stream error:", error);
-          // Try to get i18n translated message using error code, fallback to backend message or default
-          let errorMessage = t("businessLogic.config.message.generateError");
-          if (error?.code) {
-            const i18nKey = `errorCode.${error.code}`;
-            const translated = t(i18nKey);
-            // Check if translation exists (i18next returns the key if not found)
-            if (translated !== i18nKey) {
-              errorMessage = translated;
+
+          // Track the agent this generation was for
+          const generationAgentId = effectiveAgentId;
+
+          // Always clear generating state regardless of current agent
+          // This prevents stuck "generating" state when user switches agents
+          setIsGenerating(false);
+          generationInitiatorRef.current = null;
+
+          // If we're on the same agent, show error message
+          const currentEffectiveAgentId = useAgentConfigStore.getState().currentAgentId ?? 0;
+          if (generationAgentId === currentEffectiveAgentId) {
+            // Try to get i18n translated message using error code, fallback to backend message or default
+            let errorMessage = t("businessLogic.config.message.generateError");
+            if (error?.code) {
+              const i18nKey = `errorCode.${error.code}`;
+              const translated = t(i18nKey);
+              // Check if translation exists (i18next returns the key if not found)
+              if (translated !== i18nKey) {
+                errorMessage = translated;
+              } else if (error?.message) {
+                errorMessage = error.message;
+              }
             } else if (error?.message) {
               errorMessage = error.message;
             }
-          } else if (error?.message) {
-            errorMessage = error.message;
+            message.error(errorMessage);
           }
-          message.error(errorMessage);
-          setIsGenerating(false);
+
+          // Clear cache for this agent
+          setAgentGenerationStatus(generationAgentId, false);
         },
         () => {
+          // Track the agent this generation was for
+          const generationAgentId = effectiveAgentId;
+
+          // Check if we're still on the same agent
+          const currentEffectiveAgentId = useAgentConfigStore.getState().currentAgentId ?? 0;
+          const isSameAgent = generationInitiatorRef.current === currentEffectiveAgentId;
+
+          // Clear generating state immediately for ALL cases
+          // This prevents the "stuck in generating" state when user switches agents
+          setIsGenerating(false);
+          generationInitiatorRef.current = null;
+
+          // If not on same agent, keep the cache so user can restore when switching back
+          // Do NOT clear cache here - the cache contains the completed generation result
+          // Always mark cache as finished (isGenerating=false) so switch-back effect can restore it
+          if (!isSameAgent) {
+            setAgentGenerationStatus(generationAgentId, false);
+            return;
+          }
+
+          // On same agent: proceed with updating form values and store
+
           // After generation completes, get all form values and update parent component state
           // Use generatedContent state as fallback to ensure we get the streamed data
           const formValues = form.getFieldsValue();
@@ -789,14 +922,20 @@ export default function AgentGenerateDetail({
             agentDisplayName: "",
           });
 
+          // Clear the cache since generation completed successfully on this agent
+          clearAgentGenerationCache(generationAgentId);
+
           message.success(t("businessLogic.config.message.generateSuccess"));
-          setIsGenerating(false);
         }
       );
     } catch (error) {
       log.error("Generate agent error:", error);
       message.error(t("businessLogic.config.message.generateError"));
+
+      // Clear generating state but keep cache for potential resume
       setIsGenerating(false);
+      generationInitiatorRef.current = null;
+      setAgentGenerationStatus(effectiveAgentId, false);
     }
   };
 

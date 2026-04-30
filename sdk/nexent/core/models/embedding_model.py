@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import requests
 
+from ...monitor.monitoring import record_model_call
+
 
 class BaseEmbedding(ABC):
     """
@@ -267,34 +269,35 @@ class JinaEmbedding(MultimodalEmbedding):
             ... ]
             >>> embeddings = jina.get_multimodal_embeddings(inputs)
         """
-        data = self._prepare_multimodal_input(inputs)
+        with record_model_call("multi_embedding", self.model, display_name=self.model):
+            data = self._prepare_multimodal_input(inputs)
 
-        base_timeout = timeout if timeout is not None else retry_timeout_step
-        attempts = retries + 1
-        last_timeout: Optional[requests.exceptions.Timeout] = None
-        for attempt_index in range(attempts):
-            current_timeout = base_timeout + attempt_index * retry_timeout_step
-            try:
-                response = self._make_request(data, timeout=current_timeout)
+            base_timeout = timeout if timeout is not None else retry_timeout_step
+            attempts = retries + 1
+            last_timeout: Optional[requests.exceptions.Timeout] = None
+            for attempt_index in range(attempts):
+                current_timeout = base_timeout + attempt_index * retry_timeout_step
+                try:
+                    response = self._make_request(data, timeout=current_timeout)
 
-                if with_metadata:
-                    return response
+                    if with_metadata:
+                        return response
 
-                embeddings = [item["embedding"] for item in response["data"]]
-                return embeddings
-            except requests.exceptions.Timeout as e:
-                logging.warning(
-                    f"JinaEmbedding API connection test timed out in {current_timeout}s ({attempt_index + 1}/{attempts})"
-                )
-                last_timeout = e
-                if attempt_index == attempts - 1:
-                    logging.error("JinaEmbedding API connection test timed out.")
-                    raise
-                continue
+                    embeddings = [item["embedding"] for item in response["data"]]
+                    return embeddings
+                except requests.exceptions.Timeout as e:
+                    logging.warning(
+                        f"JinaEmbedding API connection test timed out in {current_timeout}s ({attempt_index + 1}/{attempts})"
+                    )
+                    last_timeout = e
+                    if attempt_index == attempts - 1:
+                        logging.error("JinaEmbedding API connection test timed out.")
+                        raise
+                    continue
 
-        if last_timeout:
-            raise last_timeout
-        return []
+            if last_timeout:
+                raise last_timeout
+            return []
 
     async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
         try:
@@ -371,34 +374,35 @@ class OpenAICompatibleEmbedding(TextEmbedding):
         Returns:
             List of embedding vectors, or a dictionary with metadata if with_metadata is True.
         """
-        data = self._prepare_input(inputs)
+        with record_model_call("embedding", self.model, display_name=self.model):
+            data = self._prepare_input(inputs)
 
-        base_timeout = timeout if timeout is not None else retry_timeout_step
-        attempts = retries + 1
-        last_timeout: Optional[requests.exceptions.Timeout] = None
-        for attempt_index in range(attempts):
-            current_timeout = base_timeout + attempt_index * retry_timeout_step
-            try:
-                response = self._make_request(data, timeout=current_timeout)
+            base_timeout = timeout if timeout is not None else retry_timeout_step
+            attempts = retries + 1
+            last_timeout: Optional[requests.exceptions.Timeout] = None
+            for attempt_index in range(attempts):
+                current_timeout = base_timeout + attempt_index * retry_timeout_step
+                try:
+                    response = self._make_request(data, timeout=current_timeout)
 
-                if with_metadata:
-                    return response
+                    if with_metadata:
+                        return response
 
-                embeddings = [item["embedding"] for item in response["data"]]
-                return embeddings
-            except requests.exceptions.Timeout as e:
-                logging.warning(
-                    f"OpenAI API connection test timed out in {current_timeout}s ({attempt_index + 1}/{attempts})"
-                )
-                last_timeout = e
-                if attempt_index == attempts - 1:
-                    logging.error("OpenAI API connection test timed out.")
-                    raise
-                continue
+                    embeddings = [item["embedding"] for item in response["data"]]
+                    return embeddings
+                except requests.exceptions.Timeout as e:
+                    logging.warning(
+                        f"OpenAI API connection test timed out in {current_timeout}s ({attempt_index + 1}/{attempts})"
+                    )
+                    last_timeout = e
+                    if attempt_index == attempts - 1:
+                        logging.error("OpenAI API connection test timed out.")
+                        raise
+                    continue
 
-        if last_timeout:
-            raise last_timeout
-        return []
+            if last_timeout:
+                raise last_timeout
+            return []
 
     async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
         try:

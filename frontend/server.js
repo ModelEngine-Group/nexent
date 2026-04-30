@@ -57,7 +57,7 @@ function setAuthCookies(res, session) {
   const cookies = [];
 
   const expiresInSeconds = session.expires_in_seconds || 3600;
-  
+
   const refreshTokenMaxAge = expiresInSeconds * 10;
 
   if (session.access_token) {
@@ -118,6 +118,8 @@ const AUTH_INTERCEPT_ENDPOINTS = new Set([
   "/api/user/refresh_token",
   "/api/user/logout",
   "/api/user/revoke",
+  "/api/user/oauth/callback",
+  "/api/user/oauth/link",
 ]);
 
 function collectRequestBody(req) {
@@ -192,11 +194,16 @@ function forwardAuthRequest(req, res, targetUrl) {
             if (isLogout || isRevoke) {
               clearAuthCookies(res);
             } else if (data.data && data.data.session) {
-              // Extract tokens, set cookies, strip tokens from response
               const session = data.data.session;
               setAuthCookies(res, session);
 
-              // Remove sensitive tokens from the response body sent to browser
+              const isOAuthCallback = req.parsedPathname === "/api/user/oauth/callback";
+              if (isOAuthCallback) {
+                res.writeHead(302, { Location: "/" });
+                res.end();
+                return;
+              }
+
               const sanitized = { ...data };
               sanitized.data = { ...data.data };
               sanitized.data.session = {
@@ -204,6 +211,14 @@ function forwardAuthRequest(req, res, targetUrl) {
                 expires_in_seconds: session.expires_in_seconds,
               };
               finalBody = Buffer.from(JSON.stringify(sanitized));
+            } else if (req.parsedPathname === "/api/user/oauth/callback" && data.data && data.data.oauth_error) {
+              const errorParams = new URLSearchParams({
+                oauth_error: data.data.oauth_error,
+                oauth_error_description: data.data.oauth_error_description || "",
+              });
+              res.writeHead(302, { Location: `/?${errorParams.toString()}` });
+              res.end();
+              return;
             }
           }
         } catch {
@@ -290,7 +305,7 @@ app.prepare().then(() => {
           pathname.startsWith("/api/memory/") ||
           pathname.startsWith("/api/file/storage") ||
           pathname.startsWith("/api/file/preprocess") ||
-          pathname.startsWith("/api/skills/create-simple");
+          pathname.startsWith("/api/skills/create");
         const target = isRuntime ? RUNTIME_HTTP_BACKEND : HTTP_BACKEND;
         proxy.web(req, res, { target, changeOrigin: true });
       }

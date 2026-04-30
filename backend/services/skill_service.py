@@ -1,19 +1,26 @@
 """Skill management service."""
 
+import asyncio
+import uuid
 import io
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Union
+import threading
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
+from nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.agent_model import ModelConfig
 from consts.const import CONTAINER_SKILLS_PATH, ROOT_DIR
 from consts.exceptions import SkillException
 from database import skill_db
-from database.db_models import SkillInfo
+from agents.skill_creation_agent import create_skill_from_request
+from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
+from utils.content_classifier_utils import ContentClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -566,6 +573,7 @@ class SkillService:
         file_content: Union[bytes, str, io.BytesIO],
         skill_name: Optional[str] = None,
         file_type: str = "auto",
+        source: str = "自定义",
         tenant_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -579,6 +587,7 @@ class SkillService:
             file_content: File content as bytes, string, or BytesIO
             skill_name: Optional skill name (extracted from ZIP if not provided)
             file_type: File type hint - "md", "zip", or "auto" (detect)
+            source: Source identifier for the skill (e.g., "自定义", "官方", "导入")
             tenant_id: Tenant ID (reserved for future multi-tenant support)
             user_id: User ID of the creator
 
@@ -600,14 +609,15 @@ class SkillService:
                 file_type = "md"
 
         if file_type == "zip":
-            return self._create_skill_from_zip(content_bytes, skill_name, user_id, tenant_id)
+            return self._create_skill_from_zip(content_bytes, skill_name, source, user_id, tenant_id)
         else:
-            return self._create_skill_from_md(content_bytes, skill_name, user_id, tenant_id)
+            return self._create_skill_from_md(content_bytes, skill_name, source, user_id, tenant_id)
 
     def _create_skill_from_md(
         self,
         content_bytes: bytes,
         skill_name: Optional[str] = None,
+        source: str = "自定义",
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -639,7 +649,7 @@ class SkillService:
             "description": skill_data.get("description", ""),
             "content": skill_data.get("content", ""),
             "tags": skill_data.get("tags", []),
-            "source": "custom",
+            "source": source,
             "tool_ids": tool_ids,
             "allowed-tools": allowed_tools,  # Preserve for local file sync
         }
@@ -660,6 +670,7 @@ class SkillService:
         self,
         zip_bytes: bytes,
         skill_name: Optional[str] = None,
+        source: str = "自定义",
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -746,7 +757,7 @@ class SkillService:
             "description": skill_data.get("description", ""),
             "content": skill_data.get("content", ""),
             "tags": skill_data.get("tags", []),
-            "source": "custom",
+            "source": source,
             "tool_ids": tool_ids,
             "allowed-tools": allowed_tools,  # Preserve for local file sync
         }
@@ -783,14 +794,14 @@ class SkillService:
 
         local_dir = os.path.join(self.skill_manager.local_skills_dir, skill_name)
         logger.info("Starting deletion of local files for skill '%s' from '%s'", skill_name, local_dir)
-        
+
         if not os.path.isdir(local_dir):
             logger.info("Local skill directory does not exist, nothing to delete: %s", local_dir)
             return
         try:
             items = os.listdir(local_dir)
             logger.info("Found %d items to delete in '%s'", len(items), local_dir)
-            
+
             for item in items:
                 item_path = os.path.join(local_dir, item)
                 if item_path.endswith("/"):
@@ -861,7 +872,8 @@ class SkillService:
                     file_data = zf.read(file_path)
 
                     local_dir = os.path.join(self.skill_manager.local_skills_dir, skill_name)
-                    local_path = os.path.join(local_dir, relative_path)
+                    normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
+                    local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
                     with open(local_path, "wb") as f:
                         f.write(file_data)
@@ -1106,6 +1118,7 @@ class SkillService:
                     "content": skill_data.get("content", existing.get("content", "")),
                     "tags": skill_data.get("tags", existing.get("tags", [])),
                     "allowed-tools": allowed_tools,
+                    "files": skill_data.get("files", []),
                 }
                 self.skill_manager.save_skill(local_skill_dict)
             except Exception as exc:
@@ -1355,7 +1368,8 @@ class SkillService:
         """
         try:
             local_dir = os.path.join(self.skill_manager.local_skills_dir, skill_name)
-            full_path = os.path.join(local_dir, file_path)
+            normalized_file_path = file_path.replace("/", os.sep).replace("\\", os.sep)
+            full_path = os.path.normpath(os.path.join(local_dir, normalized_file_path))
 
             if not os.path.exists(full_path):
                 logger.warning(f"File not found: {full_path}")
@@ -1443,3 +1457,286 @@ class SkillService:
             tenant_id=tenant_id,
             version_no=version_no
         )
+
+
+def classify_streaming_content(
+    content: str,
+    classifier: Any
+) -> List[Dict[str, Any]]:
+    """Classify streaming content using the ContentClassifier.
+
+    Args:
+        content: Raw streaming content to classify
+        classifier: ContentClassifier instance
+
+    Returns:
+        List of classified event dictionaries
+    """
+    return classifier.classify(content)
+
+
+class SkillCreationStreamService:
+    """Service for handling skill creation streaming operations."""
+
+    def __init__(self, skill_service: Optional["SkillService"] = None):
+        """Initialize the stream service.
+
+        Args:
+            skill_service: Optional SkillService instance for accessing skill manager
+        """
+        self.skill_service = skill_service or SkillService()
+
+    def get_skill_manager_local_dir(self) -> str:
+        """Get local_skills_dir from SkillManager.
+
+        Returns:
+            Local skills directory path
+        """
+        return self.skill_service.skill_manager.local_skills_dir or ""
+
+    def create_classifier(self) -> "ContentClassifier":
+        """Create a new ContentClassifier instance.
+
+        Returns:
+            New ContentClassifier instance
+        """
+        from utils.content_classifier_utils import ContentClassifier
+        return ContentClassifier()
+
+    def classify_content(
+        self,
+        content: str,
+        classifier: "ContentClassifier"
+    ) -> List[Dict[str, Any]]:
+        """Classify streaming content using the provided classifier.
+
+        Args:
+            content: Raw streaming content to classify
+            classifier: ContentClassifier instance
+
+        Returns:
+            List of classified event dictionaries
+        """
+        return classifier.classify(content)
+
+
+def create_skill_creation_stream_generator(
+    observer: Any,
+    classifier: "ContentClassifier",
+) -> Any:
+    """Create a generator that processes observer messages and yields SSE events.
+
+    Args:
+        observer: MessageObserver instance with cached messages
+        classifier: ContentClassifier instance for content classification
+
+    Yields:
+        SSE-formatted event strings
+    """
+    import json
+    from consts.const import STREAMABLE_CONTENT_TYPES
+
+    cached = observer.get_cached_message()
+    for msg in cached:
+        if isinstance(msg, str):
+            try:
+                data = json.loads(msg)
+                msg_type = data.get("type", "")
+                content = data.get("content", "")
+
+                if msg_type == "step_count":
+                    yield f"data: {json.dumps({'type': 'step_count', 'content': content}, ensure_ascii=False)}\n\n"
+                elif msg_type in STREAMABLE_CONTENT_TYPES:
+                    for event in classifier.classify(content):
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            except (json.JSONDecodeError, Exception):
+                pass
+
+
+def format_final_answer_sse(classifier: "ContentClassifier", final_result: str) -> List[str]:
+    """Format final answer content into SSE event strings.
+
+    Args:
+        classifier: ContentClassifier instance for content classification
+        final_result: Final answer content to format
+
+    Returns:
+        List of SSE-formatted event strings
+    """
+    import json
+
+    events = []
+    for event in classifier.classify(final_result):
+        events.append(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
+    return events
+
+
+# ========== Skill Creation Task Manager ==========
+
+
+class SkillCreationTaskManager:
+    """Singleton manager to track active skill creation threads and their stop events."""
+
+    _instance: Optional["SkillCreationTaskManager"] = None
+    _lock = threading.Lock()
+
+    def __new__(cls) -> "SkillCreationTaskManager":
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._tasks: Dict[str, Tuple[threading.Thread, threading.Event]] = {}
+                    cls._instance._tasks_lock = threading.Lock()
+        return cls._instance
+
+    def register_task(self, task_id: str, thread: threading.Thread, stop_event: threading.Event) -> None:
+        """Register a new skill creation task.
+
+        Args:
+            task_id: Unique identifier for the task
+            thread: The thread running the skill creation
+            stop_event: Event to signal stop request
+        """
+        with self._tasks_lock:
+            self._tasks[task_id] = (thread, stop_event)
+            logger.info(f"Registered skill creation task: {task_id}")
+
+    def unregister_task(self, task_id: str) -> None:
+        """Unregister a completed skill creation task.
+
+        Args:
+            task_id: Unique identifier for the task
+        """
+        with self._tasks_lock:
+            if task_id in self._tasks:
+                del self._tasks[task_id]
+                logger.info(f"Unregistered skill creation task: {task_id}")
+
+    def stop_task(self, task_id: str) -> bool:
+        """Signal a skill creation task to stop.
+
+        Args:
+            task_id: Unique identifier for the task
+
+        Returns:
+            True if the task was found and stop was signaled, False otherwise
+        """
+        with self._tasks_lock:
+            if task_id in self._tasks:
+                _, stop_event = self._tasks[task_id]
+                stop_event.set()
+                logger.info(f"Stop signal sent for skill creation task: {task_id}")
+                return True
+        return False
+
+    def is_task_running(self, task_id: str) -> bool:
+        """Check if a task is still running.
+
+        Args:
+            task_id: Unique identifier for the task
+
+        Returns:
+            True if the task exists and is still alive
+        """
+        with self._tasks_lock:
+            if task_id in self._tasks:
+                thread, _ = self._tasks[task_id]
+                return thread.is_alive()
+        return False
+
+
+# Singleton instance
+skill_creation_task_manager = SkillCreationTaskManager()
+
+
+# ========== Skill Creation Stream Service ==========
+
+
+def stream_skill_creation(
+    user_request: str,
+    language: str,
+    model_config: "ModelConfig",
+    existing_skill: Optional[Dict[str, Any]] = None,
+    complexity: str = "simple",
+) -> tuple[str, Any]:
+    """Stream skill creation process as an async generator.
+
+    This function handles all the business logic for skill creation:
+    - Loads prompt template
+    - Creates observer, stop_event, and classifier
+    - Registers the task with the task manager
+    - Starts the agent thread
+    - Yields SSE events until completion
+
+    Args:
+        user_request: User's skill description request
+        language: Language code (e.g., "zh", "en")
+        model_config: Model configuration
+        existing_skill: Optional existing skill for modification
+        complexity: Skill complexity level ("simple" or "complicated")
+
+    Returns:
+        Tuple of (task_id, generator_function)
+        The task_id should be passed to the caller for stop functionality
+    """
+    task_id = str(uuid.uuid4())
+
+    async def generate():
+        is_task_registered = False
+        observer = None
+        classifier = None
+
+        try:
+            # Load prompt template
+            template = get_skill_creation_simple_prompt_template(
+                language=language,
+                existing_skill=existing_skill,
+                complexity=complexity
+            )
+
+            # Create observer and classifier
+            observer = MessageObserver(lang=language)
+            stop_event = threading.Event()
+            classifier = ContentClassifier()
+
+            # Get local skills directory
+            local_skills_dir = SkillService().skill_manager.local_skills_dir or ""
+
+            def run_task():
+                create_skill_from_request(
+                    system_prompt=template.get("system_prompt", ""),
+                    user_prompt=user_request,
+                    model_config_list=[model_config],
+                    observer=observer,
+                    stop_event=stop_event,
+                    local_skills_dir=local_skills_dir
+                )
+
+            thread = threading.Thread(target=run_task)
+
+            # Register task before starting
+            skill_creation_task_manager.register_task(task_id, thread, stop_event)
+            is_task_registered = True
+
+            thread.start()
+
+            while thread.is_alive():
+                for event in create_skill_creation_stream_generator(observer, classifier):
+                    yield event
+                await asyncio.sleep(0.1)
+
+            thread.join()
+
+            for event in create_skill_creation_stream_generator(observer, classifier):
+                yield event
+
+            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Error in stream_skill_creation: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            if is_task_registered:
+                skill_creation_task_manager.unregister_task(task_id)
+
+    return task_id, generate
