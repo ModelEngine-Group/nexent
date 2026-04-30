@@ -84,7 +84,7 @@ def _run_auto_summary_for_kb(index_name: str, tenant_id: str):
                     logger.info(f"Using LLM model ID {model_id} for auto-summary (tenant: {tenant_id})")
                 else:
                     logger.warning(f"No LLM_ID configured for tenant {tenant_id}, summary will be placeholder only")
-            except (ValueError, TypeError, Exception) as e:
+            except Exception as e:
                 logger.warning(f"Failed to get LLM_ID from tenant config: {e}")
 
         sample_count = 40  # Smaller sample for auto-summary

@@ -199,8 +199,7 @@ async def update_summary_frequency_endpoint(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(
-            f"Error updating summary frequency for '{index_name}': {str(exc)}", exc_info=True)
+        logger.exception("Error updating summary frequency")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error updating summary frequency: {str(exc)}"
         )

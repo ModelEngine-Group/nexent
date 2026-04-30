@@ -42,7 +42,7 @@ async def auto_summary(
                     logger.info(f"Using LLM_ID {model_id} from tenant config for auto-summary")
                 else:
                     logger.warning(f"No LLM_ID configured for tenant {tenant_id}, summary may be placeholder")
-            except (ValueError, TypeError, Exception) as e:
+            except Exception as e:
                 logger.warning(f"Failed to get LLM_ID from tenant config: {e}")
 
         return await service.summary_index_name(

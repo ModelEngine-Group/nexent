@@ -8,6 +8,8 @@ from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
 from utils.str_utils import convert_list_to_string
 
+logger = logging.getLogger("knowledge_db")
+
 
 def _generate_index_name(knowledge_id: int) -> str:
     """
@@ -411,12 +413,13 @@ def get_knowledge_name_map_by_index_names(index_names: List[str]) -> Dict[str, s
                     knowledge_name_map[index_name] = index_name
 
             return knowledge_name_map
-    except SQLAlchemyError as e:
-        raise e
+    except SQLAlchemyError:
+        logger.exception("Query knowledge name map error")
+        raise
 
 
 def update_summary_frequency(index_name: str, summary_frequency: Optional[str],
-                              tenant_id: str, user_id: str) -> bool:
+                              _tenant_id: str, user_id: str) -> bool:
     """Update the auto-summary frequency for a knowledge base."""
     valid_frequencies = ["3h", "5h", "1d", "1w", None]
     if summary_frequency not in valid_frequencies:
@@ -433,8 +436,9 @@ def update_summary_frequency(index_name: str, summary_frequency: Optional[str],
             record.updated_by = user_id
             session.commit()
             return True
-    except SQLAlchemyError as e:
-        raise e
+    except SQLAlchemyError:
+        logger.exception("Update summary frequency error")
+        raise
 
 
 def update_last_summary_time(index_name: str):
@@ -449,8 +453,9 @@ def update_last_summary_time(index_name: str):
             if record:
                 record.last_summary_time = datetime.now()
                 session.commit()
-    except SQLAlchemyError as e:
-        raise e
+    except SQLAlchemyError:
+        logger.exception("Update last summary time error")
+        raise
 
 
 def get_knowledge_bases_for_auto_summary() -> List[Dict[str, Any]]:
@@ -462,5 +467,6 @@ def get_knowledge_bases_for_auto_summary() -> List[Dict[str, Any]]:
                 KnowledgeRecord.delete_flag != 'Y'
             ).all()
             return [as_dict(record) for record in records]
-    except SQLAlchemyError as e:
-        raise e
+    except SQLAlchemyError:
+        logger.exception("Get knowledge bases error")
+        raise
