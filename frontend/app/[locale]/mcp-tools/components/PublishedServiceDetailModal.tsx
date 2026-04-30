@@ -124,13 +124,12 @@ export default function PublishedServiceDetailModal({
         destroyOnHidden
         styles={{ mask: { background: "rgba(15,23,42,0.4)" } }}
       >
-        <div className="max-h-[min(85vh,900px)] overflow-y-auto pr-0.5">
-          <Form
-            form={form}
-            layout="vertical"
-            requiredMark={false}
-            className="space-y-3"
-          >
+        <Form
+          form={form}
+          layout="vertical"
+          requiredMark={false}
+          className="space-y-3"
+        >
             <Form.Item
               label={t("mcpTools.detail.name")}
               name="name"
@@ -294,21 +293,20 @@ export default function PublishedServiceDetailModal({
               onRemoveTag={removeDraftTag}
               removeAriaKey="mcpTools.detail.removeTagAria"
             />
-          </Form>
+        </Form>
 
-          <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
-            <Button
-              danger
-              loading={deleting}
-              disabled={!service.communityId}
-              onClick={handleDelete}
-            >
-              {t("common.delete")}
-            </Button>
-            <Button type="primary" loading={saving} onClick={handleSave}>
-              {t("common.save")}
-            </Button>
-          </div>
+        <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
+          <Button
+            danger
+            loading={deleting}
+            disabled={!service.communityId}
+            onClick={handleDelete}
+          >
+            {t("common.delete")}
+          </Button>
+          <Button type="primary" loading={saving} onClick={handleSave}>
+            {t("common.save")}
+          </Button>
         </div>
       </Modal>
 
