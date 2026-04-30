@@ -17,6 +17,7 @@ import {
 } from "@/lib/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useMcpServiceDetail } from "@/hooks/mcpTools/useMcpServiceDetail";
+import { useMcpServiceToggle } from "@/hooks/mcpTools/useMcpServiceToggle";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import TagEditor from "./shared/TagEditor";
@@ -27,17 +28,13 @@ import StatusBadge from "./shared/StatusBadge";
 interface McpServiceDetailModalProps {
   selectedService: McpServiceItem | null;
   onClose: () => void;
-  onToggleEnable: (service: McpServiceItem) => void;
-  isToggleLoading: (mcpId?: number) => boolean;
-  isToolsRefreshing: (mcpId?: number) => boolean;
+  onStatusChanged?: (mcpId: number, next: McpServiceStatus) => void;
 }
 
 export default function McpServiceDetailModal({
   selectedService,
   onClose,
-  onToggleEnable,
-  isToggleLoading,
-  isToolsRefreshing,
+  onStatusChanged,
 }: McpServiceDetailModalProps) {
   const { modal } = App.useApp();
   const { t } = useTranslation("common");
@@ -50,6 +47,7 @@ export default function McpServiceDetailModal({
 
   const detail = useMcpServiceDetail({ selectedService, onClose });
   const { draft } = detail;
+  const toggle = useMcpServiceToggle();
 
   useEffect(() => {
     if (!draft) return;
@@ -65,8 +63,9 @@ export default function McpServiceDetailModal({
     return null;
   }
 
-  const toolsRefreshing = isToolsRefreshing(selectedService.mcpId);
-  const toggleBusy = isToggleLoading(selectedService.mcpId) || toolsRefreshing;
+  const toolsRefreshing = toggle.isRefreshing(selectedService.mcpId);
+  const toggleLoading = toggle.isToggling(selectedService.mcpId);
+  const toggleBusy = toggleLoading || toolsRefreshing;
 
   const hasRegistryJson = Boolean(draft.registryJson);
   const hasConfigJson = Boolean(draft.configJson);
@@ -350,9 +349,12 @@ export default function McpServiceDetailModal({
             <Button
               type="primary"
               autoInsertSpace={false}
-              loading={isToggleLoading(selectedService.mcpId)}
+              loading={toggleLoading}
               disabled={toggleBusy}
-              onClick={() => onToggleEnable(selectedService)}
+              onClick={async () => {
+                const next = await toggle.toggle(selectedService);
+                onStatusChanged?.(selectedService.mcpId as number, next);
+              }}
             >
               {draft.enabled === McpServiceStatus.ENABLED
                 ? t("mcpTools.detail.disable")

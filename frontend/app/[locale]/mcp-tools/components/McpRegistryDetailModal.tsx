@@ -304,7 +304,6 @@ export default function McpRegistryDetailModal({
               </div>
               <RegistryStatusBadge
                 status={officialMeta.status as string | undefined}
-                className="px-3 py-1 text-xs"
               />
             </div>
           </div>

@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { App, Button, Form, Input, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import type { CommunityMcpCard } from "@/types/mcpTools";
-import type { MyCommunityEditDraft } from "@/hooks/mcpTools/useMyCommunityMcp";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
+import { usePublishedServiceDetailEdit } from "@/hooks/mcpTools/usePublishedServiceDetailEdit";
 import {
   extractRegistryLinks,
   formatRegistryDate,
@@ -17,15 +17,7 @@ import TagEditor from "./shared/TagEditor";
 interface PublishedServiceDetailModalProps {
   open: boolean;
   service: CommunityMcpCard | null;
-  draft: MyCommunityEditDraft | null;
-  saving: boolean;
-  deleting: boolean;
-  onCancel: () => void;
-  onChange: (patch: Partial<MyCommunityEditDraft>) => void;
-  onAddTag: (tag: string) => void;
-  onRemoveTag: (index: number) => void;
-  onSave: () => Promise<boolean | void> | void;
-  onDelete: () => Promise<void> | void;
+  onClose: () => void;
 }
 
 /**
@@ -37,20 +29,15 @@ interface PublishedServiceDetailModalProps {
 export default function PublishedServiceDetailModal({
   open,
   service,
-  draft,
-  saving,
-  deleting,
-  onCancel,
-  onChange,
-  onAddTag,
-  onRemoveTag,
-  onSave,
-  onDelete,
+  onClose,
 }: PublishedServiceDetailModalProps) {
   const { t } = useTranslation("common");
   const { modal } = App.useApp();
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
+  const edit = usePublishedServiceDetailEdit(service, open);
+  const { draft, saving, deleting, updateDraft, addDraftTag, removeDraftTag } =
+    edit;
   const [showServerJsonModal, setShowServerJsonModal] = useState(false);
   const [showConfigJsonModal, setShowConfigJsonModal] = useState(false);
 
@@ -96,7 +83,8 @@ export default function PublishedServiceDetailModal({
     } catch {
       return;
     }
-    await onSave();
+    const ok = await edit.save();
+    if (ok) onClose();
   };
 
   const handleDelete = () => {
@@ -114,7 +102,11 @@ export default function PublishedServiceDetailModal({
       okText: t("mcpTools.delete.confirmOk"),
       cancelText: t("mcpTools.delete.confirmCancel"),
       okButtonProps: { danger: true },
-      onOk: () => onDelete(),
+      onOk: async () => {
+        if (typeof service.communityId !== "number") return;
+        const ok = await edit.remove(service.communityId);
+        if (ok) onClose();
+      },
     });
   };
 
@@ -124,7 +116,7 @@ export default function PublishedServiceDetailModal({
     <>
       <Modal
         open={open}
-        onCancel={onCancel}
+        onCancel={onClose}
         footer={null}
         width={900}
         centered
@@ -147,7 +139,7 @@ export default function PublishedServiceDetailModal({
               <Input
                 value={draft?.name ?? ""}
                 onChange={(event) => {
-                  onChange({ name: event.target.value });
+                  updateDraft({ name: event.target.value });
                   form.setFieldValue("name", event.target.value);
                 }}
                 className="rounded-md"
@@ -162,7 +154,7 @@ export default function PublishedServiceDetailModal({
               <Input.TextArea
                 value={draft?.description ?? ""}
                 onChange={(event) => {
-                  onChange({ description: event.target.value });
+                  updateDraft({ description: event.target.value });
                   form.setFieldValue("description", event.target.value);
                 }}
                 autoSize={{ minRows: 2, maxRows: 16 }}
@@ -195,7 +187,6 @@ export default function PublishedServiceDetailModal({
                 </span>
                 <RegistryStatusBadge
                   status={service.status}
-                  className="px-3 py-1 text-xs"
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -288,7 +279,7 @@ export default function PublishedServiceDetailModal({
               <Input
                 value={draft?.version ?? ""}
                 onChange={(event) => {
-                  onChange({ version: event.target.value });
+                  updateDraft({ version: event.target.value });
                   form.setFieldValue("version", event.target.value);
                 }}
                 placeholder="1.0.0"
@@ -299,8 +290,8 @@ export default function PublishedServiceDetailModal({
             <TagEditor
               title={t("mcpTools.detail.tags")}
               tags={draft?.tags ?? []}
-              onAddTag={(tag) => onAddTag((tag || "").trim())}
-              onRemoveTag={onRemoveTag}
+              onAddTag={(tag) => addDraftTag((tag || "").trim())}
+              onRemoveTag={removeDraftTag}
               removeAriaKey="mcpTools.detail.removeTagAria"
             />
           </Form>

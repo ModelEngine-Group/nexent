@@ -4,13 +4,12 @@ import { useState } from "react";
 import { Button, Empty, Input, Spin, Tabs } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import log from "@/lib/logger";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { Puzzle } from "lucide-react";
 import { useMcpServicesList } from "@/hooks/mcpTools/useMcpServicesList";
-import { useMcpServiceToggle } from "@/hooks/mcpTools/useMcpServiceToggle";
 import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
+import type { McpServiceStatus } from "@/const/mcpTools";
 import AddMcpServiceModal from "./components/AddMcpServiceModal";
 import McpServiceCard from "./components/McpServiceCard";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
@@ -32,32 +31,20 @@ export default function McpToolsPage() {
     useState<CommunityMcpCard | null>(null);
 
   const list = useMcpServicesList();
-  const toggle = useMcpServiceToggle();
   const myPublished = useMyCommunityMcp(tab === "published");
 
-  const handleToggle = async (service: McpServiceItem) => {
-    try {
-      const nextStatus = await toggle.toggle(service);
-      setSelectedImported((prev) =>
-        prev && prev.mcpId === service.mcpId ? { ...prev, enabled: nextStatus } : prev
-      );
-    } catch (error) {
-      log.error("[McpToolsPage] Failed to toggle service status", {
-        error,
-        serviceName: service.name,
-        serverUrl: service.serverUrl,
-      });
-    }
+  const handleStatusChanged = (mcpId: number, nextEnabled: McpServiceStatus) => {
+    setSelectedImported((prev) =>
+      prev && prev.mcpId === mcpId ? { ...prev, enabled: nextEnabled } : prev
+    );
   };
 
   const handleSelectPublished = (item: CommunityMcpCard) => {
     setSelectedPublished(item);
-    myPublished.startEditing(item);
   };
 
   const closePublished = () => {
     setSelectedPublished(null);
-    myPublished.cancelEditing();
   };
 
   return (
@@ -130,34 +117,14 @@ export default function McpToolsPage() {
               <McpServiceDetailModal
                 selectedService={selectedImported}
                 onClose={() => setSelectedImported(null)}
-                onToggleEnable={handleToggle}
-                isToggleLoading={toggle.isToggling}
-                isToolsRefreshing={toggle.isRefreshing}
+                onStatusChanged={handleStatusChanged}
               />
             ) : null}
 
             <PublishedServiceDetailModal
               open={Boolean(selectedPublished)}
               service={selectedPublished}
-              draft={myPublished.editDraft}
-              saving={myPublished.saving}
-              deleting={
-                myPublished.deletingId === selectedPublished?.communityId
-              }
-              onCancel={closePublished}
-              onChange={myPublished.updateDraft}
-              onAddTag={myPublished.addDraftTag}
-              onRemoveTag={myPublished.removeDraftTag}
-              onSave={async () => {
-                const ok = await myPublished.saveEdit();
-                if (ok) closePublished();
-                return ok;
-              }}
-              onDelete={async () => {
-                if (!selectedPublished?.communityId) return;
-                await myPublished.remove(selectedPublished.communityId);
-                closePublished();
-              }}
+              onClose={closePublished}
             />
 
             <AddMcpServiceModal
