@@ -289,6 +289,7 @@ export const ModelEditDialog = ({
             value={form.apiKey}
             onChange={(e) => handleFormChange("apiKey", e.target.value)}
             autoComplete="new-password"
+            visibilityToggle={false}
           />
         </div>
 
@@ -461,7 +462,7 @@ export const ProviderConfigEditDialog = ({
           <label className="block mb-1 text-sm font-medium text-gray-700">
             {t('model.dialog.label.apiKey')}
           </label>
-          <Input.Password value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          <Input.Password value={apiKey} onChange={(e) => setApiKey(e.target.value)} visibilityToggle={false} />
         </div>
         {!isEmbeddingModel && (
           <div>

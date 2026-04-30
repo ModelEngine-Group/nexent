@@ -29,6 +29,7 @@ from database.conversation_db import (
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
+from agents.agent_run_manager import agent_run_manager
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
@@ -369,7 +370,6 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
 
         # Defensive cleanup: release the ContextManager associated with this conversation
         # to avoid memory leaks in edge cases
-        from backend.agents.agent_run_manager import agent_run_manager
         agent_run_manager.clear_conversation_context_manager(conversation_id)
 
         return True

@@ -428,3 +428,194 @@ def test_run_chat_service_error_maps_500(monkeypatch):
     )
 
     assert resp.status_code == 500
+
+
+# --- Tests for /file/fetch endpoint ---
+
+def test_fetch_file_missing_presigned_url():
+    """Missing presigned_url parameter returns 422 (FastAPI validation)."""
+    resp = client.get("/nb/v1/file/fetch")
+    assert resp.status_code == 422
+
+
+def test_fetch_file_invalid_url_scheme(monkeypatch):
+    """URL scheme other than http/https returns 400."""
+    monkeypatch.setattr("apps.northbound_app.validate_bearer_token", lambda auth: (True, {"token_id": "t1"}))
+    monkeypatch.setattr("apps.northbound_app.get_user_and_tenant_by_access_key", lambda access_key: {
+        "user_id": "u1", "tenant_id": "t1", "token_id": "t1"
+    })
+
+    resp = client.get(
+        "/nb/v1/file/fetch",
+        params={"presigned_url": "ftp://example.com/file"},
+        headers=_build_headers(),
+    )
+    assert resp.status_code == 400
+    assert "Invalid URL scheme" in resp.json()["detail"]
+
+
+def test_fetch_file_success(monkeypatch):
+    """Valid presigned_url: proxies file content as StreamingResponse."""
+    monkeypatch.setattr("apps.northbound_app.validate_bearer_token", lambda auth: (True, {"token_id": "t1"}))
+    monkeypatch.setattr("apps.northbound_app.get_user_and_tenant_by_access_key", lambda access_key: {
+        "user_id": "u1", "tenant_id": "t1", "token_id": "t1"
+    })
+
+    import httpx
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.headers = {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="report.pdf"',
+    }
+    mock_response.aiter_bytes = MagicMock(return_value=iter([b"PDF content here"]))
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    resp = client.get(
+        "/nb/v1/file/fetch",
+        params={"presigned_url": "http://minio:9000/bucket/file.pdf"},
+        headers=_build_headers(),
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert "report.pdf" in resp.headers["content-disposition"]
+
+
+def test_fetch_file_non_200_returns_502(monkeypatch):
+    """MinIO returns non-200: maps to 502 Bad Gateway."""
+    monkeypatch.setattr("apps.northbound_app.validate_bearer_token", lambda auth: (True, {"token_id": "t1"}))
+    monkeypatch.setattr("apps.northbound_app.get_user_and_tenant_by_access_key", lambda access_key: {
+        "user_id": "u1", "tenant_id": "t1", "token_id": "t1"
+    })
+
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.headers = {}
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    resp = client.get(
+        "/nb/v1/file/fetch",
+        params={"presigned_url": "http://minio:9000/bucket/file.pdf"},
+        headers=_build_headers(),
+    )
+
+    assert resp.status_code == 502
+    assert "Failed to fetch file from storage" in resp.json()["detail"]
+
+
+def test_fetch_file_timeout_returns_504(monkeypatch):
+    """httpx.TimeoutException: maps to 504 Gateway Timeout."""
+    monkeypatch.setattr("apps.northbound_app.validate_bearer_token", lambda auth: (True, {"token_id": "t1"}))
+    monkeypatch.setattr("apps.northbound_app.get_user_and_tenant_by_access_key", lambda access_key: {
+        "user_id": "u1", "tenant_id": "t1", "token_id": "t1"
+    })
+
+    import httpx
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(side_effect=httpx.TimeoutException("Connection timed out"))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    resp = client.get(
+        "/nb/v1/file/fetch",
+        params={"presigned_url": "http://minio:9000/bucket/file.pdf"},
+        headers=_build_headers(),
+    )
+
+    assert resp.status_code == 504
+    assert "Timeout" in resp.json()["detail"]
+
+
+def test_fetch_file_request_error_returns_502(monkeypatch):
+    """httpx.RequestError: maps to 502 Bad Gateway."""
+    monkeypatch.setattr("apps.northbound_app.validate_bearer_token", lambda auth: (True, {"token_id": "t1"}))
+    monkeypatch.setattr("apps.northbound_app.get_user_and_tenant_by_access_key", lambda access_key: {
+        "user_id": "u1", "tenant_id": "t1", "token_id": "t1"
+    })
+
+    import httpx
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(side_effect=httpx.RequestError("Connection refused", request=MagicMock()))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    resp = client.get(
+        "/nb/v1/file/fetch",
+        params={"presigned_url": "http://minio:9000/bucket/file.pdf"},
+        headers=_build_headers(),
+    )
+
+    assert resp.status_code == 502
+    assert "Failed to fetch file from storage" in resp.json()["detail"]
+
+
+def test_fetch_file_unexpected_error_returns_500(monkeypatch):
+    """Unexpected exception: maps to 500 Internal Server Error."""
+    monkeypatch.setattr("apps.northbound_app.validate_bearer_token", lambda auth: (True, {"token_id": "t1"}))
+    monkeypatch.setattr("apps.northbound_app.get_user_and_tenant_by_access_key", lambda access_key: {
+        "user_id": "u1", "tenant_id": "t1", "token_id": "t1"
+    })
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(side_effect=RuntimeError("unexpected failure"))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    resp = client.get(
+        "/nb/v1/file/fetch",
+        params={"presigned_url": "http://minio:9000/bucket/file.pdf"},
+        headers=_build_headers(),
+    )
+
+    assert resp.status_code == 500
+    assert "Internal server error" in resp.json()["detail"]
+
+
+def test_fetch_file_no_auth_required(monkeypatch):
+    """Endpoint requires no authentication (NOTE: No authentication required)."""
+    auth_called = []
+
+    def _track_auth(auth):
+        auth_called.append(auth)
+        return (True, {"token_id": "t1"})
+
+    monkeypatch.setattr("apps.northbound_app.validate_bearer_token", _track_auth)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.headers = {"Content-Type": "text/plain"}
+    mock_response.aiter_bytes = MagicMock(return_value=iter([b"hello"]))
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    # No headers at all - should still work because auth is not checked
+    resp = client.get(
+        "/nb/v1/file/fetch",
+        params={"presigned_url": "http://minio:9000/bucket/file.pdf"},
+    )
+
+    assert resp.status_code == 200

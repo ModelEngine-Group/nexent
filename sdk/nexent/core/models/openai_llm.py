@@ -127,6 +127,15 @@ class OpenAIModel(OpenAIServerModel):
 
         current_request = self.client.chat.completions.create(
             stream=True, **completion_kwargs)
+
+        # Validate response type: ensure we got a proper iterator, not error strings or dicts
+        # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
+        if isinstance(current_request, str):
+            raise ValueError(f"LLM API returned error string: {current_request}")
+        if isinstance(current_request, dict):
+            error_msg = current_request.get("error") or current_request.get("message") or str(current_request)
+            raise ValueError(f"LLM API returned error: {error_msg}")
+
         chunk_list = []
         token_join = []
         role = None
@@ -140,6 +149,16 @@ class OpenAIModel(OpenAIServerModel):
 
         try:
             for chunk in current_request:
+                # Safety check: skip non-standard chunks that lack expected attributes
+                # This handles edge cases where API returns error responses as chunks
+                if not hasattr(chunk, 'choices'):
+                    # Log warning and continue processing
+                    if hasattr(chunk, '__str__'):
+                        chunk_str = str(chunk)
+                        logger.warning(f"Received non-standard chunk (no 'choices'): {chunk_str[:200]}")
+                    chunk_list.append(chunk)
+                    continue
+
                 if not chunk.choices:
                     chunk_list.append(chunk)
                     continue

@@ -4418,7 +4418,7 @@ class TestFormatMinioFilesForContent:
             {"url": "bucket/file.txt", "name": "file.txt", "presigned_url": "http://presigned.url"}
         ]
         result = _format_minio_files_for_content(minio_files)
-        assert result == "\n[Attached files]:\n  - file.txt: s3:/bucket/file.txt (download: http://presigned.url)"
+        assert result == "\n[Attached files]:\n  - file.txt: s3:/bucket/file.txt (for non-MCP tools), presigned_url: http://presigned.url (for [MCP] tools)"
 
     def test_format_minio_files_for_content_single_file_without_presigned_url(self):
         """Test case for single file without presigned_url"""
@@ -4437,7 +4437,7 @@ class TestFormatMinioFilesForContent:
         ]
         result = _format_minio_files_for_content(minio_files)
         assert "  - file1.txt: s3:/bucket/file1.txt" in result
-        assert "  - file2.txt: s3:/bucket/file2.txt (download: http://presigned2.url)" in result
+        assert "  - file2.txt: s3:/bucket/file2.txt (for non-MCP tools), presigned_url: http://presigned2.url (for [MCP] tools)" in result
         assert "  - file3.txt: s3:/bucket/file3.txt" in result
         assert result.startswith("\n[Attached files]:\n")
 
@@ -4460,7 +4460,7 @@ class TestFormatMinioFilesForContent:
         result = _format_minio_files_for_content(minio_files, max_files=5)
         assert "... (and 5 more files)" in result
         assert "  - file0.txt" in result
-        assert "download: http://url0" in result
+        assert "presigned_url: http://url0" in result
 
     def test_format_minio_files_for_content_file_missing_url(self):
         """Test case for file with missing url is skipped"""
@@ -4573,7 +4573,7 @@ class TestConvertHistoryWithMinioFiles:
         assert "Hello" in result[0].content
         assert "[Attached files]" in result[0].content
         assert "file.txt: s3:/bucket/file.txt" in result[0].content
-        assert "download: http://presigned.url" in result[0].content
+        assert "presigned_url: http://presigned.url" in result[0].content
 
     def test_convert_history_with_minio_files_multiple_items_mixed(self):
         """Test case for multiple history items with/without minio_files"""
