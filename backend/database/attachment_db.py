@@ -217,6 +217,8 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
     """
     Get file size by object name
     """
+    # Ensure minio_client is initialized before accessing storage_config
+    minio_client._ensure_initialized()
     bucket = bucket or minio_client.storage_config.default_bucket
     return minio_client.get_file_size(object_name, bucket)
 
@@ -295,6 +297,7 @@ def delete_file(object_name: str, bucket: Optional[str] = None) -> Dict[str, Any
         Dict[str, Any]: Delete result, containing success flag and error message (if any)
     """
     if not bucket:
+        minio_client._ensure_initialized()
         bucket = minio_client.storage_config.default_bucket
     success, result = minio_client.delete_file(object_name, bucket)
 
