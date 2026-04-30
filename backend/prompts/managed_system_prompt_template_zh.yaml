@@ -178,8 +178,8 @@ system_prompt: |-
   ### 文件链接使用指南
   当处理用户上传的文件时，请根据工具类型选择正确的 URL：
   1. **调用标记为 [MCP] 的工具**（外部工具，运行在 Nexent 之外）：
-     → 使用 **Download URL**（格式：`https://minio.example.com/...?token=xxx`）
-     原因：MCP 工具运行在外部服务，无法访问内部 S3 存储
+     → 使用 **presigned_url**（已包含代理前缀，格式：`http://.../api/nb/v1/file/fetch?presigned_url=...`）
+     直接使用用户上传文件信息中提供的 **presigned_url** 字段，无需拼接。
   2. **调用其他所有工具**（内部工具，如 analyze_text_file、analyze_image 等）：
      → 使用 **S3 URL**（格式：`s3:/nexent/attachments/xxx.pdf`）
      原因：内部工具运行在 Nexent 内部，可以直接访问 MinIO 存储

@@ -22,6 +22,7 @@ from database.agent_version_db import (
     delete_tool_snapshot,
     delete_relation_snapshot,
     delete_skill_snapshot,
+    restore_agent_draft,
     get_next_version_no,
     delete_version,
     SOURCE_TYPE_NORMAL,
@@ -361,9 +362,11 @@ def rollback_version_impl(
     target_version_no: int,
 ) -> dict:
     """
-    Rollback to a specific version by updating current_version_no only.
-    This does NOT create a new version - it simply points the draft to an existing version.
-    The actual version creation happens when user clicks "publish".
+    Rollback to a specific version by restoring draft (version_no=0) with the target version's data.
+    This copies all snapshot data (agent, tools, relations, skills) from the target version into the draft,
+    then updates current_version_no to point to the target version.
+
+    The user can then continue editing or re-publish from the restored state.
 
     Args:
         agent_id: Agent ID
@@ -378,15 +381,30 @@ def rollback_version_impl(
     if not version:
         raise ValueError(f"Version {target_version_no} not found")
 
-    # Update current_version_no in draft to point to target version
-    rows_affected = update_agent_current_version(
+    # Get target version's snapshot data
+    (target_agent, target_tools,
+     target_relations) = query_agent_snapshot(agent_id, tenant_id, target_version_no)
+    if not target_agent:
+        raise ValueError(f"Agent snapshot for version {target_version_no} not found")
+
+    # Get skill snapshots for target version
+    from database import skill_db as skill_db_module
+    target_skills = skill_db_module.query_skill_instances_by_agent_id(
         agent_id=agent_id,
         tenant_id=tenant_id,
-        current_version_no=target_version_no,
+        version_no=target_version_no,
     )
 
-    if rows_affected == 0:
-        raise ValueError("Agent draft not found")
+    # Atomically restore draft from target version snapshot
+    restore_agent_draft(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        target_version_no=target_version_no,
+        target_agent_snapshot=target_agent,
+        target_tool_snapshots=target_tools,
+        target_relation_snapshots=target_relations,
+        target_skill_snapshots=target_skills,
+    )
 
     return {
         "message": f"Successfully rolled back to version {target_version_no}",
