@@ -365,7 +365,7 @@ class VoiceService:
 
             # If model_name is provided directly, use it
             effective_model = model_name_override or model_name
-            logger.info(f"TTS generation using model: {effective_model}")
+           
 
             if api_key or effective_model:
                 tts_model = self._get_tts_model_from_config(
@@ -482,7 +482,7 @@ class VoiceService:
                 language=language
             )
             
-            logger.info(f"Checking STT connectivity for model factory: {model_factory}")
+           
             connected = await stt_model.check_connectivity()
 
             if not connected:
@@ -534,7 +534,7 @@ class VoiceService:
                 model=model
             )
 
-            logger.info(f"Checking TTS connectivity for model factory: {model_factory}")
+            
             connected = await tts_model.check_connectivity()
             if not connected:
                 logger.error("TTS service connection failed")
