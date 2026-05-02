@@ -308,6 +308,22 @@ class GeneratePromptRequest(BaseModel):
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
 
 
+class OptimizePromptSectionRequest(BaseModel):
+    task_description: str
+    agent_id: int
+    model_id: int
+    section_type: str
+    section_title: str
+    current_content: str
+    feedback: str
+    tool_ids: Optional[List[int]] = Field(
+        None, description="Optional: tool IDs from frontend (takes precedence over database query)")
+    sub_agent_ids: Optional[List[int]] = Field(
+        None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
+    knowledge_base_display_names: Optional[List[str]] = Field(
+        None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+
+
 class GenerateTitleRequest(BaseModel):
     conversation_id: int
     question: str

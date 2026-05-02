@@ -24,10 +24,26 @@ from services.agent_service import (
     _generate_unique_display_name_with_suffix
 )
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import get_prompt_generate_prompt_template
+from utils.prompt_template_utils import (
+    get_prompt_generate_prompt_template,
+    get_prompt_optimize_prompt_template,
+)
 
 # Configure logging
 logger = logging.getLogger("prompt_service")
+
+PROMPT_SECTION_TYPE_TITLES = {
+    LANGUAGE["ZH"]: {
+        "duty": "智能体角色",
+        "constraint": "使用要求",
+        "few_shots": "示例",
+    },
+    LANGUAGE["EN"]: {
+        "duty": "Agent Role",
+        "constraint": "Usage Requirements",
+        "few_shots": "Few Shots",
+    },
+}
 
 
 def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None):
@@ -238,6 +254,88 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         raise Exception("Failed to generate prompt content.")
 
 
+def optimize_prompt_section_impl(
+    agent_id: int,
+    model_id: int,
+    task_description: str,
+    tenant_id: str,
+    language: str,
+    section_type: str,
+    section_title: str,
+    current_content: str,
+    feedback: str,
+    tool_ids: Optional[List[int]] = None,
+    sub_agent_ids: Optional[List[int]] = None,
+    knowledge_base_display_names: Optional[List[str]] = None,
+) -> dict:
+    normalized_section_type = (section_type or "").strip()
+    if normalized_section_type not in {"duty", "constraint", "few_shots"}:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "Unsupported prompt section type."
+        )
+
+    if not (current_content or "").strip():
+        raise AppException(
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+            "Current section content is required."
+        )
+
+    if not (feedback or "").strip():
+        raise AppException(
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+            "Optimization feedback is required."
+        )
+
+    tool_info_list = _resolve_prompt_generation_tools(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        tool_ids=tool_ids,
+    )
+    knowledge_base_display_names = _resolve_knowledge_base_display_names(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        tool_info_list=tool_info_list,
+        knowledge_base_display_names=knowledge_base_display_names,
+    )
+    sub_agent_info_list = _resolve_prompt_generation_sub_agents(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        sub_agent_ids=sub_agent_ids,
+    )
+
+    prompt_template = get_prompt_optimize_prompt_template(language)
+    prompt_context = join_info_for_optimize_prompt_section(
+        prompt_for_optimize=prompt_template,
+        section_type=normalized_section_type,
+        section_title=section_title or _default_prompt_section_title(normalized_section_type, language),
+        task_description=task_description,
+        current_content=current_content,
+        feedback=feedback,
+        tool_info_list=tool_info_list,
+        sub_agent_info_list=sub_agent_info_list,
+        language=language,
+        knowledge_base_display_names=knowledge_base_display_names,
+    )
+
+    optimized_content = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=prompt_context,
+        system_prompt=prompt_template["OPTIMIZE_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    if not optimized_content:
+        raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+
+    return {
+        "section_type": normalized_section_type,
+        "section_title": section_title or _default_prompt_section_title(normalized_section_type, language),
+        "original_content": current_content,
+        "optimized_content": optimized_content,
+    }
+
+
 def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, model_id: int, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None):
     """Main function for generating system prompts"""
     prompt_for_generate = get_prompt_generate_prompt_template(language)
@@ -265,6 +363,67 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
 
     # Stream results
     yield from _stream_results(produce_queue, latest, stop_flags, threads, error_holder)
+
+
+def _resolve_prompt_generation_tools(
+    agent_id: int,
+    tenant_id: str,
+    tool_ids: Optional[List[int]] = None,
+) -> List[dict]:
+    if tool_ids and len(tool_ids) > 0:
+        logger.debug(f"Using frontend-provided tool IDs: {tool_ids}")
+        return query_tools_by_ids(tool_ids)
+
+    logger.debug("No tools selected (empty tool_ids list)")
+    return get_enabled_tool_description_for_generate_prompt(
+        tenant_id=tenant_id, agent_id=agent_id
+    )
+
+
+def _resolve_knowledge_base_display_names(
+    agent_id: int,
+    tenant_id: str,
+    tool_info_list: List[dict],
+    knowledge_base_display_names: Optional[List[str]] = None,
+) -> Optional[List[str]]:
+    if knowledge_base_display_names:
+        logger.debug(
+            f"Using frontend-provided knowledge base display names: {knowledge_base_display_names}"
+        )
+        return knowledge_base_display_names
+
+    resolved_names = get_knowledge_base_display_names(
+        tool_info_list=tool_info_list,
+        agent_id=agent_id,
+        tenant_id=tenant_id
+    )
+    logger.debug(f"Using database query for knowledge base display names: {resolved_names}")
+    return resolved_names
+
+
+def _resolve_prompt_generation_sub_agents(
+    agent_id: int,
+    tenant_id: str,
+    sub_agent_ids: Optional[List[int]] = None,
+) -> List[dict]:
+    if sub_agent_ids and len(sub_agent_ids) > 0:
+        sub_agent_info_list = []
+        for sub_agent_id in sub_agent_ids:
+            try:
+                sub_agent_info = search_agent_info_by_agent_id(
+                    agent_id=sub_agent_id, tenant_id=tenant_id)
+                sub_agent_info_list.append(sub_agent_info)
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to get sub-agent info for agent_id {sub_agent_id}: {str(exc)}"
+                )
+        logger.debug(f"Using frontend-provided sub-agent IDs: {sub_agent_ids}")
+        return sub_agent_info_list
+
+    logger.debug("No sub-agents selected (empty sub_agent_ids list)")
+    return get_enabled_sub_agent_description_for_generate_prompt(
+        tenant_id=tenant_id, agent_id=agent_id
+    )
 
 
 def _start_generation_threads(content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id):
@@ -400,6 +559,59 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
     # Generate content using template
     content = Template(prompt_for_generate["USER_PROMPT"], undefined=StrictUndefined).render(template_context)
     return content
+
+
+def join_info_for_optimize_prompt_section(
+    prompt_for_optimize,
+    section_type: str,
+    section_title: str,
+    task_description: str,
+    current_content: str,
+    feedback: str,
+    tool_info_list,
+    sub_agent_info_list,
+    language: str = LANGUAGE["ZH"],
+    knowledge_base_display_names: Optional[List[str]] = None,
+):
+    input_label = "Inputs" if language == LANGUAGE["EN"] else "接受输入"
+    output_label = "Output type" if language == LANGUAGE["EN"] else "返回输出类型"
+
+    tool_description = "\n".join(
+        [f"- {tool['name']}: {tool['description']} \n {input_label}: {tool['inputs']}\n {output_label}: {tool['output_type']}"
+         for tool in tool_info_list]
+    )
+    assistant_description = "\n".join(
+        [f"- {sub_agent_info['name']}: {sub_agent_info['description']}" for sub_agent_info in sub_agent_info_list]
+    )
+
+    if knowledge_base_display_names:
+        kb_names_str = ", ".join(f'"{name}"' for name in knowledge_base_display_names)
+    else:
+        kb_names_str = ""
+
+    template_context = {
+        "section_type": section_type,
+        "section_title": section_title,
+        "task_description": task_description,
+        "current_content": current_content,
+        "feedback": feedback,
+        "tool_description": tool_description,
+        "assistant_description": assistant_description,
+        "knowledge_base_names": kb_names_str,
+    }
+
+    return Template(
+        prompt_for_optimize["OPTIMIZE_USER_PROMPT"],
+        undefined=StrictUndefined
+    ).render(template_context)
+
+
+def _default_prompt_section_title(section_type: str, language: str) -> str:
+    localized_titles = PROMPT_SECTION_TYPE_TITLES.get(
+        language,
+        PROMPT_SECTION_TYPE_TITLES[LANGUAGE["ZH"]]
+    )
+    return localized_titles.get(section_type, section_type)
 
 
 def get_enabled_tool_description_for_generate_prompt(agent_id: int, tenant_id: str):

@@ -17,7 +17,7 @@ import {
   App,
 } from "antd";
 import type { TabsProps } from "antd";
-import { Zap, Maximize2 } from "lucide-react";
+import { Sparkles, Zap, Maximize2 } from "lucide-react";
 
 import log from "@/lib/logger";
 import { AgentProfileInfo, AgentBusinessInfo } from "@/types/agentConfig";
@@ -43,6 +43,7 @@ import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
+import PromptOptimizeModal from "./PromptOptimizeModal";
 
 const { TextArea } = Input;
 
@@ -115,6 +116,8 @@ export default function AgentGenerateDetail({
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
+  const [optimizeModalOpen, setOptimizeModalOpen] = useState(false);
+  const [optimizeModalType, setOptimizeModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
 
   // Use ref to track generation initiator - this doesn't trigger re-renders
   // but is accessible in closures
@@ -183,7 +186,7 @@ export default function AgentGenerateDetail({
     content: {
       backgroundColor: "#fff",
       borderWidth: 1,
-      padding: "8px ",
+      padding: "4px 8px 8px",
       borderRadius: "0 0 8px 8px",
       height: "100%",
     },
@@ -428,15 +431,52 @@ export default function AgentGenerateDetail({
     setExpandModalOpen(true);
   };
 
+  const handleOpenOptimizeModal = (type: 'duty' | 'constraint' | 'few-shots') => {
+    if (!editable || isGenerating || !businessInfo.businessLogicModelId) {
+      return;
+    }
+    setOptimizeModalType(type);
+    setOptimizeModalOpen(true);
+  };
+
   const renderExpandButton = (type: "duty" | "constraint" | "few-shots") => {
     return wrapNoEditTooltipInline(
       <Button
         onClick={() => handleOpenExpandModal(type)}
         title={t("systemPrompt.button.expand")}
-        icon={<Maximize2 size={12} />}
+        icon={<Maximize2 size={11} />}
         size="small"
         type="text"
+        className="prompt-toolbar-button"
+        style={{
+          color: "#475569",
+          width: 24,
+          minWidth: 24,
+          height: 24,
+          borderRadius: 9999,
+        }}
         disabled={!editable || isGenerating}
+      />
+    );
+  };
+
+  const renderOptimizeButton = (type: "duty" | "constraint" | "few-shots") => {
+    return wrapNoEditTooltipInline(
+      <Button
+        onClick={() => handleOpenOptimizeModal(type)}
+        title={t("systemPrompt.button.optimize")}
+        icon={<Sparkles size={11} />}
+        size="small"
+        type="text"
+        className="prompt-toolbar-button"
+        style={{
+          color: "#475569",
+          width: 24,
+          minWidth: 24,
+          height: 24,
+          borderRadius: 9999,
+        }}
+        disabled={!editable || isGenerating || !businessInfo.businessLogicModelId}
       />
     );
   };
@@ -451,6 +491,72 @@ export default function AgentGenerateDetail({
     display: "block",
     flex: 1,
     minHeight: 0,
+    padding: "12px",
+  };
+
+  const promptToolbarStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "2px 10px 4px",
+    borderBottom: "1px solid #eef2f7",
+    backgroundColor: "#fbfdff",
+    flexShrink: 0,
+  };
+
+  const promptToolbarTitleStyle: React.CSSProperties = {
+    fontSize: "12px",
+    fontWeight: 500,
+    color: "#64748b",
+    lineHeight: "18px",
+    letterSpacing: "0.01em",
+  };
+
+  const promptActionGroupStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: "2px",
+    padding: "1px",
+    borderRadius: 9999,
+    border: "1px solid #e2e8f0",
+    backgroundColor: "#ffffff",
+    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+  };
+
+  const renderPromptToolbar = (
+    type: "duty" | "constraint" | "few-shots",
+    title: string
+  ) => {
+    return (
+      <div style={promptToolbarStyle}>
+        <span style={promptToolbarTitleStyle}>{title}</span>
+        <div style={promptActionGroupStyle}>
+          {renderOptimizeButton(type)}
+          {renderExpandButton(type)}
+        </div>
+      </div>
+    );
+  };
+
+  const renderPromptSection = (
+    type: "duty" | "constraint" | "few-shots",
+    fieldName: "dutyPrompt" | "constraintPrompt" | "fewShotsPrompt",
+    title: string,
+    onBlurUpdate: (value: string) => void
+  ) => {
+    return (
+      <div className="overflow-y-auto overflow-x-hidden h-full flex flex-col">
+        {renderPromptToolbar(type, title)}
+        <Form
+          form={form}
+          layout="vertical"
+          className="h-full flex-1 min-h-0 agent-config-form"
+          disabled={isGenerating}
+        >
+          {renderPromptEditor(fieldName, title, onBlurUpdate)}
+        </Form>
+      </div>
+    );
   };
 
   const renderPromptEditor = (
@@ -481,6 +587,11 @@ export default function AgentGenerateDetail({
   const handleCloseExpandModal = () => {
     setExpandModalOpen(false);
     setExpandModalType(null);
+  };
+
+  const handleCloseOptimizeModal = () => {
+    setOptimizeModalOpen(false);
+    setOptimizeModalType(null);
   };
 
   const handleSaveExpandModal = (content: string) => {
@@ -525,6 +636,41 @@ export default function AgentGenerateDetail({
       default:
         return "";
     }
+  };
+
+  const getPromptFieldKey = (type: 'duty' | 'constraint' | 'few-shots') => {
+    switch (type) {
+      case "duty":
+        return "dutyPrompt";
+      case "constraint":
+        return "constraintPrompt";
+      case "few-shots":
+        return "fewShotsPrompt";
+    }
+  };
+
+  const getStoreFieldKey = (type: 'duty' | 'constraint' | 'few-shots') => {
+    switch (type) {
+      case "duty":
+        return "duty_prompt";
+      case "constraint":
+        return "constraint_prompt";
+      case "few-shots":
+        return "few_shots_prompt";
+    }
+  };
+
+  const handleReplaceOptimizedContent = (content: string) => {
+    if (!optimizeModalType) {
+      return;
+    }
+
+    const formFieldKey = getPromptFieldKey(optimizeModalType);
+    const storeFieldKey = getStoreFieldKey(optimizeModalType);
+
+    form.setFieldsValue({ [formFieldKey]: content });
+    updateProfileInfo({ [storeFieldKey]: content } as AgentProfileInfo);
+    handleCloseOptimizeModal();
   };
 
   // Generic validator for agent field uniqueness - use local agent list instead of API call
@@ -1050,70 +1196,31 @@ export default function AgentGenerateDetail({
     {
       key: "duty",
       label: t("systemPrompt.card.duty.title"),
-      children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full relative">
-          <div className="absolute top-2 right-2 z-10">
-            {renderExpandButton("duty")}
-          </div>
-          <Form
-            form={form}
-            layout="vertical"
-            className="h-full agent-config-form"
-            disabled={isGenerating}
-          >
-            {renderPromptEditor(
-              "dutyPrompt",
-              t("systemPrompt.card.duty.title"),
-              (value) => updateProfileInfo({ duty_prompt: value })
-            )}
-          </Form>
-        </div>
+      children: renderPromptSection(
+        "duty",
+        "dutyPrompt",
+        t("systemPrompt.card.duty.title"),
+        (value) => updateProfileInfo({ duty_prompt: value })
       ),
     },
     {
       key: "constraint",
       label: t("systemPrompt.card.constraint.title"),
-      children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full relative">
-          <div className="absolute top-2 right-2 z-10">
-            {renderExpandButton("constraint")}
-          </div>
-          <Form
-            form={form}
-            layout="vertical"
-            className="h-full agent-config-form"
-            disabled={isGenerating}
-          >
-            {renderPromptEditor(
-              "constraintPrompt",
-              t("systemPrompt.card.constraint.title"),
-              (value) => updateProfileInfo({ constraint_prompt: value })
-            )}
-          </Form>
-        </div>
+      children: renderPromptSection(
+        "constraint",
+        "constraintPrompt",
+        t("systemPrompt.card.constraint.title"),
+        (value) => updateProfileInfo({ constraint_prompt: value })
       ),
     },
     {
       key: "few-shots",
       label: t("systemPrompt.card.fewShots.title"),
-      children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full relative">
-          <div className="absolute top-2 right-2 z-10">
-            {renderExpandButton("few-shots")}
-          </div>
-          <Form
-            form={form}
-            layout="vertical"
-            className="h-full agent-config-form"
-            disabled={isGenerating}
-          >
-            {renderPromptEditor(
-              "fewShotsPrompt",
-              t("systemPrompt.card.fewShots.title"),
-              (value) => updateProfileInfo({ few_shots_prompt: value })
-            )}
-          </Form>
-        </div>
+      children: renderPromptSection(
+        "few-shots",
+        "fewShotsPrompt",
+        t("systemPrompt.card.fewShots.title"),
+        (value) => updateProfileInfo({ few_shots_prompt: value })
       ),
     },
   ];
@@ -1282,6 +1389,31 @@ export default function AgentGenerateDetail({
           height: 100% !important;
         }
 
+        .agent-config-tabs .prompt-toolbar-button.ant-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          transition:
+            background-color 0.2s ease,
+            color 0.2s ease,
+            transform 0.2s ease;
+        }
+
+        .agent-config-tabs .prompt-toolbar-button.ant-btn:not(:disabled):hover {
+          background-color: #eff6ff !important;
+          color: #2563eb !important;
+        }
+
+        .agent-config-tabs .prompt-toolbar-button.ant-btn:not(:disabled):active {
+          background-color: #dbeafe !important;
+          color: #1d4ed8 !important;
+          transform: scale(0.98);
+        }
+
+        .agent-config-tabs .prompt-toolbar-button.ant-btn:disabled {
+          color: #cbd5e1 !important;
+        }
+
         /* Ensure the form and its nested Ant components use a flex layout so textarea can grow */
         .agent-config-form,
         .agent-config-form .ant-form-item,
@@ -1311,6 +1443,47 @@ export default function AgentGenerateDetail({
         onClose={handleCloseExpandModal}
         onSave={handleSaveExpandModal}
       />
+
+      {optimizeModalType ? (
+        <PromptOptimizeModal
+          open={optimizeModalOpen}
+          title={
+            optimizeModalType === "duty"
+              ? t("systemPrompt.card.duty.title")
+              : optimizeModalType === "constraint"
+                ? t("systemPrompt.card.constraint.title")
+                : t("systemPrompt.card.fewShots.title")
+          }
+          sectionType={
+            optimizeModalType === "few-shots" ? "few_shots" : optimizeModalType
+          }
+          taskDescription={businessInfo.businessDescription}
+          currentContent={
+            form.getFieldValue(getPromptFieldKey(optimizeModalType)) || ""
+          }
+          modelId={businessInfo.businessLogicModelId}
+          agentId={currentAgentId ?? 0}
+          toolIds={
+            Array.isArray(editedAgent.tools)
+              ? editedAgent.tools.map((tool: any) =>
+                Number(typeof tool === "object" ? tool.id : tool)
+              ).filter((id: number) => Number.isFinite(id))
+              : []
+          }
+          subAgentIds={editedAgent.sub_agent_id_list || []}
+          knowledgeBaseDisplayNames={
+            Array.isArray(editedAgent.tools)
+              ? editedAgent.tools.flatMap((tool: any) =>
+                typeof tool === "object" && Array.isArray(tool.display_names)
+                  ? tool.display_names
+                  : []
+              )
+              : []
+          }
+          onClose={handleCloseOptimizeModal}
+          onReplace={handleReplaceOptimizedContent}
+        />
+      ) : null}
     </Flex>
   );
 }

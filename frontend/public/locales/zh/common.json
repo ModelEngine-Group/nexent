@@ -2346,4 +2346,15 @@
   "collaborativeAgent.internalAgents": "内部 Agent",
   "collaborativeAgent.externalAgents": "外部 Agent",
   "collaborativeAgent.addExternal": "添加外部 Agent"
+  ,
+  "systemPrompt.button.optimize": "优化",
+  "systemPrompt.optimize.feedbackLabel": "评价反馈",
+  "systemPrompt.optimize.feedbackPlaceholder": "请输入你希望这一部分如何优化",
+  "systemPrompt.optimize.feedbackRequired": "请先输入评价反馈",
+  "systemPrompt.optimize.submit": "开始优化",
+  "systemPrompt.optimize.original": "优化前",
+  "systemPrompt.optimize.optimized": "优化后",
+  "systemPrompt.optimize.empty": "暂未生成优化内容",
+  "systemPrompt.optimize.replace": "一键替换",
+  "systemPrompt.optimize.error": "该部分优化失败"
 }
