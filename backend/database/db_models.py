@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, ForeignKey, ForeignKeyConstraint, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float
+from sqlalchemy import BigInteger, Boolean, Column, ForeignKey, ForeignKeyConstraint, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
@@ -309,11 +309,48 @@ class AgentInfo(TableBase):
         Text, doc="Manually entered by the user to describe the entire business process")
     business_logic_model_name = Column(String(100), doc="Model name used for business logic prompt generation")
     business_logic_model_id = Column(Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
+    prompt_template_id = Column(Integer, doc="Prompt template ID used for business logic prompt generation")
+    prompt_template_name = Column(String(100), doc="Prompt template name used for business logic prompt generation")
     group_ids = Column(String, doc="Agent group IDs list")
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
     ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
     enable_context_manager = Column(Boolean, default=False, doc="Whether to enable context management (compression) for this agent")
+
+
+class PromptTemplate(TableBase):
+    """
+    Prompt template table for user-defined prompt generation templates.
+    """
+    __tablename__ = "ag_prompt_template_t"
+    __table_args__ = (
+        Index(
+            "uq_prompt_template_user_name_active",
+            "tenant_id",
+            "user_id",
+            "template_name",
+            unique=True,
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        Index(
+            "idx_ag_prompt_template_t_user",
+            "tenant_id",
+            "user_id",
+            "template_type",
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    template_id = Column(Integer, Sequence(
+        "ag_prompt_template_t_template_id_seq", schema=SCHEMA), primary_key=True, nullable=False, autoincrement=True, doc="Prompt template ID")
+    template_name = Column(String(100), nullable=False, doc="Prompt template name")
+    description = Column(String(500), doc="Prompt template description")
+    template_type = Column(String(50), nullable=False, default="agent_generate", doc="Prompt template type")
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    user_id = Column(String(100), nullable=False, doc="User ID")
+    template_content_zh = Column(JSONB, nullable=False, doc="Chinese prompt template content")
+    template_content_en = Column(JSONB, doc="English prompt template content")
 
 
 class ToolInstance(TableBase):

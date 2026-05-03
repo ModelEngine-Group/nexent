@@ -300,12 +300,35 @@ class GeneratePromptRequest(BaseModel):
     task_description: str
     agent_id: int
     model_id: int
+    prompt_template_id: Optional[int] = None
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
     knowledge_base_display_names: Optional[List[str]] = Field(
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+
+
+class PromptTemplateContentRequest(BaseModel):
+    DUTY_SYSTEM_PROMPT: str
+    CONSTRAINT_SYSTEM_PROMPT: str
+    FEW_SHOTS_SYSTEM_PROMPT: str
+    AGENT_VARIABLE_NAME_SYSTEM_PROMPT: str
+    AGENT_DISPLAY_NAME_SYSTEM_PROMPT: str
+    AGENT_DESCRIPTION_SYSTEM_PROMPT: str
+    USER_PROMPT: str
+    AGENT_NAME_REGENERATE_SYSTEM_PROMPT: str
+    AGENT_NAME_REGENERATE_USER_PROMPT: str
+    AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT: str
+    AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT: str
+
+
+class PromptTemplateRequest(BaseModel):
+    template_name: str
+    description: Optional[str] = None
+    template_type: str = "agent_generate"
+    template_content_zh: PromptTemplateContentRequest
+    template_content_en: Optional[PromptTemplateContentRequest] = None
 
 
 class GenerateTitleRequest(BaseModel):
@@ -331,6 +354,8 @@ class AgentInfoRequest(BaseModel):
     enabled: Optional[bool] = None
     business_logic_model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
+    prompt_template_id: Optional[int] = None
+    prompt_template_name: Optional[str] = None
     enabled_tool_ids: Optional[List[int]] = None
     enabled_skill_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
@@ -419,6 +444,8 @@ class ExportAndImportAgentInfo(BaseModel):
     model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
     business_logic_model_name: Optional[str] = None
+    prompt_template_id: Optional[int] = None
+    prompt_template_name: Optional[str] = None
 
     class Config:
         arbitrary_types_allowed = True

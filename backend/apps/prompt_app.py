@@ -25,6 +25,7 @@ async def generate_and_save_system_prompt_api(
             agent_id=prompt_request.agent_id,
             model_id=prompt_request.model_id,
             task_description=prompt_request.task_description,
+            prompt_template_id=prompt_request.prompt_template_id,
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,

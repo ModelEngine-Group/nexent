@@ -9,6 +9,58 @@ from consts.const import LANGUAGE
 logger = logging.getLogger("prompt_template_utils")
 
 
+PROMPT_GENERATE_TEMPLATE_KEYS = (
+    "DUTY_SYSTEM_PROMPT",
+    "CONSTRAINT_SYSTEM_PROMPT",
+    "FEW_SHOTS_SYSTEM_PROMPT",
+    "AGENT_VARIABLE_NAME_SYSTEM_PROMPT",
+    "AGENT_DISPLAY_NAME_SYSTEM_PROMPT",
+    "AGENT_DESCRIPTION_SYSTEM_PROMPT",
+    "USER_PROMPT",
+    "AGENT_NAME_REGENERATE_SYSTEM_PROMPT",
+    "AGENT_NAME_REGENERATE_USER_PROMPT",
+    "AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT",
+    "AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT",
+)
+
+
+def get_prompt_generate_template_keys() -> list[str]:
+    """Return the supported prompt generation template keys."""
+    return list(PROMPT_GENERATE_TEMPLATE_KEYS)
+
+
+def normalize_prompt_generate_template_content(
+    template_content: Optional[Dict[str, Any]]
+) -> Dict[str, str]:
+    """Normalize prompt generation template content and keep non-empty fields only."""
+    normalized: Dict[str, str] = {}
+    if not isinstance(template_content, dict):
+        return normalized
+
+    for key in PROMPT_GENERATE_TEMPLATE_KEYS:
+        value = template_content.get(key)
+        if isinstance(value, str) and value.strip():
+            normalized[key] = value
+
+    return normalized
+
+
+def merge_prompt_generate_templates(
+    *template_contents: Optional[Dict[str, Any]]
+) -> Dict[str, str]:
+    """Merge multiple prompt generation templates with first-non-empty priority."""
+    merged: Dict[str, str] = {}
+
+    for template_content in template_contents:
+        normalized = normalize_prompt_generate_template_content(template_content)
+        for key in PROMPT_GENERATE_TEMPLATE_KEYS:
+            value = normalized.get(key)
+            if value and key not in merged:
+                merged[key] = value
+
+    return merged
+
+
 def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kwargs) -> Dict[str, Any]:
     """
     Get prompt template

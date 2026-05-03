@@ -23,14 +23,14 @@ from services.agent_service import (
     _generate_unique_agent_name_with_suffix,
     _generate_unique_display_name_with_suffix
 )
+from services.prompt_template_service import resolve_prompt_generate_template
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import get_prompt_generate_prompt_template
 
 # Configure logging
 logger = logging.getLogger("prompt_service")
 
 
-def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None):
+def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, prompt_template_id: Optional[int] = None, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None):
     try:
         for system_prompt in generate_and_save_system_prompt_impl(
             agent_id=agent_id,
@@ -39,6 +39,7 @@ def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description:
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,
+            prompt_template_id=prompt_template_id,
             tool_ids=tool_ids,
             sub_agent_ids=sub_agent_ids,
             knowledge_base_display_names=knowledge_base_display_names
@@ -64,6 +65,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                          user_id: str,
                                          tenant_id: str,
                                          language: str,
+                                         prompt_template_id: Optional[int] = None,
                                          tool_ids: Optional[List[int]] = None,
                                          sub_agent_ids: Optional[List[int]] = None,
                                          knowledge_base_display_names: Optional[List[str]] = None):
@@ -128,8 +130,17 @@ def generate_and_save_system_prompt_impl(agent_id: int,
     ]
 
     # Collect results and yield non-name fields immediately, but hold name fields for duplicate checking
-    for result_data in generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id,
-                                              model_id, language, knowledge_base_display_names):
+    for result_data in generate_system_prompt(
+        sub_agent_info_list,
+        task_description,
+        tool_info_list,
+        tenant_id,
+        user_id,
+        model_id,
+        language,
+        prompt_template_id,
+        knowledge_base_display_names,
+    ):
         result_type = result_data["type"]
         final_results[result_type] = result_data["content"]
 
@@ -158,7 +169,9 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                 tenant_id=tenant_id,
                                 language=language,
                                 agents_cache=all_agents,
-                                exclude_agent_id=agent_id
+                                exclude_agent_id=agent_id,
+                                prompt_template_id=prompt_template_id,
+                                user_id=user_id,
                             )
                             logger.info(f"Regenerated agent name: '{agent_name}'")
                             final_results["agent_var_name"] = agent_name
@@ -199,7 +212,9 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                 tenant_id=tenant_id,
                                 language=language,
                                 agents_cache=all_agents,
-                                exclude_agent_id=agent_id
+                                exclude_agent_id=agent_id,
+                                prompt_template_id=prompt_template_id,
+                                user_id=user_id,
                             )
                             logger.info(f"Regenerated agent display_name: '{agent_display_name}'")
                             final_results["agent_display_name"] = agent_display_name
@@ -238,9 +253,14 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         raise Exception("Failed to generate prompt content.")
 
 
-def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, model_id: int, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None):
+def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], prompt_template_id: Optional[int] = None, knowledge_base_display_names: Optional[List[str]] = None):
     """Main function for generating system prompts"""
-    prompt_for_generate = get_prompt_generate_prompt_template(language)
+    prompt_for_generate = resolve_prompt_generate_template(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        language=language,
+        prompt_template_id=prompt_template_id,
+    )
 
     # Prepare content for generating system prompts
     content = join_info_for_generate_system_prompt(
