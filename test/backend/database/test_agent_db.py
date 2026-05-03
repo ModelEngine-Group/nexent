@@ -119,6 +119,8 @@ class MockAgent:
         self.parent_agent_id = None
         self.provide_run_summary = None
         self.business_description = None
+        self.prompt_template_id = None
+        self.prompt_template_name = None
         self.group_ids = None
         self.is_new = True
         self.enable_context_manager = False

@@ -172,9 +172,11 @@ class TestPromptService(unittest.TestCase):
             "Test task",
             enabled_tools,  # tool_info_list from helper
             "tenant456",
+            "user123",
             self.test_model_id,
             "zh",
-            None  # knowledge_base_display_names
+            None,
+            None,
         )
 
     @patch('backend.services.prompt_service._regenerate_agent_display_name_with_llm')
@@ -567,6 +569,7 @@ class TestPromptService(unittest.TestCase):
             user_id="user123",
             tenant_id="tenant456",
             language="zh",
+            prompt_template_id=None,
             tool_ids=None,
             sub_agent_ids=None,
             knowledge_base_display_names=None,
