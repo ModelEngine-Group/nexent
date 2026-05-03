@@ -583,8 +583,8 @@ class TestPromptService(unittest.TestCase):
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
-    def test_generate_system_prompt(self, mock_get_prompt_template, mock_join_info, mock_call_llm):
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    def test_generate_system_prompt(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
         mock_prompt_config = {
             "USER_PROMPT": "Test user prompt template",
@@ -595,7 +595,7 @@ class TestPromptService(unittest.TestCase):
             "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
             "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
 
         mock_join_info.return_value = "Joined template content"
 
@@ -647,6 +647,7 @@ class TestPromptService(unittest.TestCase):
             mock_task_description,
             mock_tools,
             mock_tenant_id,
+            "test_user",
             self.test_model_id,
             mock_language
         ):
@@ -654,7 +655,12 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         # Verify template loading
-        mock_get_prompt_template.assert_called_once_with(mock_language)
+        mock_resolve_prompt_template.assert_called_once_with(
+            tenant_id=mock_tenant_id,
+            user_id="test_user",
+            language=mock_language,
+            prompt_template_id=None,
+        )
 
         # Verify template joining - now includes knowledge_base_display_names parameter
         mock_join_info.assert_called_once_with(
@@ -700,8 +706,8 @@ class TestPromptService(unittest.TestCase):
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
-    def test_generate_system_prompt_with_exception(self, mock_get_prompt_template, mock_join_info, mock_call_llm):
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    def test_generate_system_prompt_with_exception(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
         mock_prompt_config = {
             "USER_PROMPT": "Test user prompt template",
@@ -712,7 +718,7 @@ class TestPromptService(unittest.TestCase):
             "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
             "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
 
         # Mock call_llm_for_system_prompt to raise exception for one prompt type
@@ -744,6 +750,7 @@ class TestPromptService(unittest.TestCase):
                 mock_task_description,
                 mock_tools,
                 mock_tenant_id,
+                "test_user",
                 self.test_model_id,
                 mock_language
             ):
@@ -997,10 +1004,10 @@ class TestPromptService(unittest.TestCase):
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
     def test_generate_system_prompt_error_before_streaming(
         self,
-        mock_get_prompt_template,
+        mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
     ):
@@ -1015,7 +1022,7 @@ class TestPromptService(unittest.TestCase):
             "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
             "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
 
         # Mock call_llm_for_system_prompt to raise exception immediately
@@ -1037,6 +1044,7 @@ class TestPromptService(unittest.TestCase):
                 "Test task",
                 [{"name": "tool1"}],
                 "tenant123",
+                "test_user",
                 self.test_model_id,
                 "zh"
             ):
@@ -1046,10 +1054,10 @@ class TestPromptService(unittest.TestCase):
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
     def test_generate_system_prompt_error_during_streaming(
         self,
-        mock_get_prompt_template,
+        mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
     ):
@@ -1064,7 +1072,7 @@ class TestPromptService(unittest.TestCase):
             "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
             "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
 
         # Track which call we're on
@@ -1095,6 +1103,7 @@ class TestPromptService(unittest.TestCase):
                 "Test task",
                 [{"name": "tool1"}],
                 "tenant123",
+                "test_user",
                 self.test_model_id,
                 "zh"
             ):
