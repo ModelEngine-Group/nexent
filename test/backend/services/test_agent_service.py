@@ -1,6 +1,7 @@
 import sys
 import asyncio
 import json
+import types
 from contextlib import contextmanager
 from unittest.mock import patch, MagicMock, mock_open, call, Mock, AsyncMock
 import os
@@ -62,10 +63,23 @@ sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.a2a_agent_db'] = MagicMock()
 
 # Mock services submodules
-sys.modules['services'] = MagicMock()
-sys.modules['services.conversation_management_service'] = MagicMock()
-sys.modules['services.memory_config_service'] = MagicMock()
-sys.modules['services.agent_version_service'] = MagicMock()
+services_module = types.ModuleType("services")
+services_module.__path__ = []
+sys.modules['services'] = services_module
+
+conversation_management_service_mock = MagicMock()
+memory_config_service_mock = MagicMock()
+agent_version_service_mock = MagicMock()
+prompt_template_service_mock = MagicMock()
+prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_ID = 0
+prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_NAME = "system-default"
+prompt_template_service_mock.get_prompt_template_summary = MagicMock(return_value=None)
+prompt_template_service_mock.resolve_prompt_generate_template = MagicMock(return_value={})
+
+sys.modules['services.conversation_management_service'] = conversation_management_service_mock
+sys.modules['services.memory_config_service'] = memory_config_service_mock
+sys.modules['services.agent_version_service'] = agent_version_service_mock
+sys.modules['services.prompt_template_service'] = prompt_template_service_mock
 
 # Mock agents submodules
 sys.modules['agents'] = MagicMock()

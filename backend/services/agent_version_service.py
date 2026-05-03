@@ -387,6 +387,11 @@ def rollback_version_impl(
     if not target_agent:
         raise ValueError(f"Agent snapshot for version {target_version_no} not found")
 
+    # Ensure the draft still exists before attempting an in-place restore.
+    draft_agent, _, _ = query_agent_draft(agent_id, tenant_id)
+    if not draft_agent:
+        raise ValueError("Agent draft not found")
+
     # Get skill snapshots for target version
     from database import skill_db as skill_db_module
     target_skills = skill_db_module.query_skill_instances_by_agent_id(
