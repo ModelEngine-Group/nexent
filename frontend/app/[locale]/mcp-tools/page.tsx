@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Empty, Input, Spin, Tabs } from "antd";
+import { Button, ConfigProvider, Empty, Input, Spin, Tabs } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
@@ -18,6 +18,23 @@ import PublishedServiceCard from "./components/PublishedServiceCard";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
 
 type ServicesTab = "imported" | "published";
+
+/** Scoped Ant Design theme so MCP modals, tabs, and primary buttons match this page. */
+const mcpToolsTheme = {
+  token: { colorPrimary: "#059669", colorInfo: "#0d9488" },
+  components: {
+    Tabs: {
+      inkBarColor: "#059669",
+      itemActiveColor: "#0d9488",
+      itemSelectedColor: "#047857",
+    },
+    Segmented: {
+      itemSelectedBg: "#d1fae5",
+      itemSelectedColor: "#047857",
+      trackBg: "#f1f5f9",
+    },
+  },
+};
 
 export default function McpToolsPage() {
   const { t } = useTranslation("common");
@@ -48,6 +65,7 @@ export default function McpToolsPage() {
   };
 
   return (
+    <ConfigProvider theme={mcpToolsTheme}>
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
       {/*
         Own scroll + scrollbar-gutter on this page only: avoids layout shift when
@@ -70,12 +88,12 @@ export default function McpToolsPage() {
               transition={{ duration: 0.5 }}
               className="flex items-center gap-3 mb-6"
             >
-              <div className="flex h-12 w-12 items-center justify-center rounded-md bg-gradient-to-br from-orange-400 to-amber-500">
+              <div className="flex h-12 w-12 items-center justify-center rounded-md bg-gradient-to-br from-emerald-500 to-teal-600 shadow-sm shadow-emerald-900/10">
                 {/* Puzzle icon from lucide-react */}
                 <Puzzle className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-orange-600 dark:text-orange-400">
+                <h1 className="text-3xl font-bold text-emerald-700 dark:text-emerald-400">
                   {t("mcpTools.page.title")}
                 </h1>
                 <p className="text-slate-600 dark:text-slate-300 mt-1">
@@ -98,7 +116,7 @@ export default function McpToolsPage() {
                 type="primary"
                 size="large"
                 onClick={() => setShowAddModal(true)}
-                className="rounded-md bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 px-5 font-semibold shadow-md shadow-emerald-200/50 transition hover:translate-y-[-1px] hover:shadow-emerald-300/70"
+                className="rounded-md px-5 font-semibold shadow-sm transition hover:translate-y-[-1px] hover:shadow-md"
               >
                 {t("mcpTools.page.addService")}
               </Button>
@@ -135,6 +153,7 @@ export default function McpToolsPage() {
         </motion.div>
       </div>
     </div>
+    </ConfigProvider>
   );
 }
 
