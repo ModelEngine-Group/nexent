@@ -64,7 +64,9 @@ export default function AddMcpServiceCommunitySection({
         />
       ) : null}
 
-      <CommunityQuickAddModal controller={quickAdd} />
+      {quickAdd.visible ? (
+        <CommunityQuickAddModal controller={quickAdd} />
+      ) : null}
     </>
   );
 }
