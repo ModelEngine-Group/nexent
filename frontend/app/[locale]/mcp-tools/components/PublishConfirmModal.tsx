@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Form, Input, Modal } from "antd";
 import { useTranslation } from "react-i18next";
+import { McpTransportType } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import TagEditor from "./shared/TagEditor";
@@ -10,6 +11,10 @@ export interface PublishOverride {
   description: string;
   version: string;
   tags: string[];
+  /** Remote server URL; only used when publishing a URL-type MCP. */
+  serverUrl: string;
+  /** Container config JSON text; only used when publishing a container MCP. */
+  containerConfigJson?: string;
 }
 
 interface PublishConfirmModalProps {
@@ -39,15 +44,23 @@ export default function PublishConfirmModal({
     description: "",
     version: "",
     tags: [],
+    serverUrl: "",
+    containerConfigJson: "",
   });
 
   useEffect(() => {
     if (!open || !source) return;
+    const containerConfigJson =
+      source.transportType === McpTransportType.CONTAINER
+        ? JSON.stringify(source.configJson ?? {}, null, 2)
+        : "";
     const next: PublishOverride = {
       name: source.name,
       description: source.description,
       version: source.version || "",
       tags: source.tags || [],
+      serverUrl: source.serverUrl || "",
+      containerConfigJson,
     };
     setDraft(next);
     form.setFieldsValue(next);
@@ -58,6 +71,7 @@ export default function PublishConfirmModal({
   };
 
   const handleOk = async () => {
+    if (!source) return;
     try {
       await form.validateFields();
     } catch {
@@ -68,6 +82,14 @@ export default function PublishConfirmModal({
       description: draft.description,
       version: draft.version.trim(),
       tags: draft.tags,
+      serverUrl:
+        source?.transportType !== McpTransportType.CONTAINER
+          ? draft.serverUrl.trim()
+          : "",
+      containerConfigJson:
+        source?.transportType === McpTransportType.CONTAINER
+          ? draft.containerConfigJson?.trim() ?? ""
+          : undefined,
     });
   };
 
@@ -139,6 +161,43 @@ export default function PublishConfirmModal({
             className="rounded-md"
           />
         </Form.Item>
+
+        {source?.transportType !== McpTransportType.CONTAINER ? (
+          <Form.Item
+            label={t("mcpTools.detail.serverUrl")}
+            name="serverUrl"
+            rules={rules.httpUrl}
+          >
+            <Input
+              value={draft.serverUrl}
+              onChange={(event) => {
+                patch({ serverUrl: event.target.value });
+                form.setFieldValue("serverUrl", event.target.value);
+              }}
+              className="rounded-md"
+            />
+          </Form.Item>
+        ) : null}
+
+        {source?.transportType === McpTransportType.CONTAINER ? (
+          <Form.Item
+            label={t("mcpTools.addModal.containerConfig")}
+            name="containerConfigJson"
+            rules={rules.containerConfig}
+            className="mb-0 text-sm text-slate-500"
+          >
+            <Input.TextArea
+              value={draft.containerConfigJson ?? ""}
+              onChange={(event) => {
+                patch({ containerConfigJson: event.target.value });
+                form.setFieldValue("containerConfigJson", event.target.value);
+              }}
+              rows={6}
+              className="mt-2 rounded-md font-mono text-sm"
+              placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
+            />
+          </Form.Item>
+        ) : null}
 
         <TagEditor
           title={t("mcpTools.detail.tags")}

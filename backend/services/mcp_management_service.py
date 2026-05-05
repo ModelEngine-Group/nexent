@@ -100,13 +100,30 @@ async def publish_community_mcp_service(
     tenant_id: str,
     user_id: str,
     mcp_id: int,
+    name: str | None = None,
+    description: str | None = None,
+    version: str | None = None,
+    tags: List[str] | None = None,
+    mcp_server: str | None = None,
+    config_json: Dict[str, Any] | None = None,
 ) -> int:
     """Publish a local MCP service to the community.
+
+    Optional ``name`` / ``description`` / ``version`` / ``tags`` / ``mcp_server`` /
+    ``config_json`` override the values copied from the local MCP row when creating
+    the community record. Omit an optional field (``None``) to keep the local MCP
+    value for that field.
 
     Args:
         tenant_id: Tenant ID
         user_id: User ID
         mcp_id: MCP record ID to publish
+        name: Optional community display name override
+        description: Optional description override
+        version: Optional version override
+        tags: Optional tags override
+        mcp_server: Optional remote MCP URL override
+        config_json: Optional container config override
 
     Returns:
         Community record ID
@@ -120,19 +137,31 @@ async def publish_community_mcp_service(
 
     source_registry_json = source_record.get("registry_json") if isinstance(source_record.get("registry_json"), dict) else None
     source_config_json = source_record.get("config_json") if isinstance(source_record.get("config_json"), dict) else None
+
+    final_name = name if name is not None else source_record.get("mcp_name")
+    final_description = description if description is not None else source_record.get("description")
+    final_version = version if version is not None else source_record.get("version")
+    final_tags = tags if tags is not None else source_record.get("tags")
+    final_mcp_server = (
+        mcp_server if mcp_server is not None else source_record.get("mcp_server")
+    )
+    final_config_json = (
+        config_json if isinstance(config_json, dict) else source_config_json
+    )
+
     # Remote MCP table may omit transport_type; community list still needs it for filters.
-    community_transport_type = "container" if source_config_json is not None else "url"
+    community_transport_type = "container" if final_config_json is not None else "url"
 
     community_id = create_mcp_community_record(
         mcp_data={
-            "mcp_name": source_record.get("mcp_name"),
-            "mcp_server": source_record.get("mcp_server"),
-            "version": source_record.get("version"),
+            "mcp_name": final_name,
+            "mcp_server": final_mcp_server,
+            "version": final_version,
             "registry_json": source_registry_json,
             "transport_type": source_record.get("transport_type") or community_transport_type,
-            "config_json": source_config_json,
-            "tags": source_record.get("tags"),
-            "description": source_record.get("description"),
+            "config_json": final_config_json,
+            "tags": final_tags,
+            "description": final_description,
         },
         tenant_id=tenant_id,
         user_id=user_id,

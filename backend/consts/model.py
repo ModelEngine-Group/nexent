@@ -1119,8 +1119,23 @@ class CommunityListRequest(BaseModel):
 
 
 class CommunityPublishRequest(BaseModel):
-    """Request model for publishing MCP to community"""
+    """Publish a local MCP to the community; optional fields override the snapshot."""
+
     mcp_id: int = Field(..., gt=0, description="MCP record ID to publish")
+    name: Optional[str] = Field(None, description="Community display name override")
+    description: Optional[str] = Field(None, description="Description override")
+    version: Optional[str] = Field(None, description="Version override")
+    tags: Optional[List[str]] = Field(None, description="Tags override")
+    mcp_server: Optional[str] = Field(None, max_length=500, description="Remote MCP server URL override (URL / HTTP / SSE transports)")
+    config_json: Optional[Dict[str, Any]] = Field(None, description="Container MCP configuration JSON override")
+
+    @field_validator("name", "description", "version", "mcp_server", mode="before")
+    @classmethod
+    def _strip_publish_optional_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
 
 class CommunityUpdateRequest(BaseModel):
@@ -1131,6 +1146,10 @@ class CommunityUpdateRequest(BaseModel):
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     version: Optional[str] = Field(None, description="MCP version")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    config_json: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Container MCP configuration JSON (omit to leave unchanged)",
+    )
 
     @field_validator("name", "description", "version", mode="before")
     @classmethod

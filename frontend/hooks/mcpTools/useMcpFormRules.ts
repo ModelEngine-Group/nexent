@@ -3,11 +3,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { Rule } from "antd/es/form";
-import {
-  MCP_FIELD_LIMITS,
-  MCP_PORT_RANGE,
-  SHORT_VERSION_PATTERN,
-} from "@/const/mcpTools";
+import { MCP_FIELD_LIMITS, MCP_PORT_RANGE } from "@/const/mcpTools";
 import { isHttpUrl, isValidPort } from "@/lib/mcpTools";
 import { parseContainerMcpConfigJson } from "@/services/mcpToolsService";
 
@@ -122,16 +118,15 @@ export function useMcpFormRules() {
         },
       ],
 
-      /** Short semver version field (used by MyCommunityMcpModal). */
+      /** Optional version string (publish / my-community forms); empty is allowed. */
       version: [
         {
           validator: async (_rule: Rule, value: unknown) => {
             const text = String(value || "").trim();
             if (!text) return;
-            if (text.length > MCP_FIELD_LIMITS.VERSION)
+            if (text.length > MCP_FIELD_LIMITS.VERSION) {
               throw new Error(t("mcpTools.community.mine.versionMaxLength"));
-            if (!SHORT_VERSION_PATTERN.test(text))
-              throw new Error(t("mcpTools.community.mine.versionFormat"));
+            }
           },
         },
       ] as Rule[],

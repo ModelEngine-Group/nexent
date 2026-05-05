@@ -347,11 +347,24 @@ export const listCommunityMcpTools = async (payload: {
   }
 };
 
-export const publishCommunityMcpTool = async (mcpId: number) => {
+/** Body for POST /mcp-tools/community/publish (optional fields override the local MCP snapshot). */
+export type PublishCommunityMcpToolPayload = {
+  mcp_id: number;
+  name?: string;
+  description?: string;
+  version?: string;
+  tags?: string[];
+  mcp_server?: string;
+  config_json?: McpContainerConfigPayload;
+};
+
+export const publishCommunityMcpTool = async (
+  payload: PublishCommunityMcpToolPayload
+) => {
   try {
     const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.communityPublish, {
       method: "POST",
-      body: JSON.stringify({ mcp_id: mcpId }),
+      body: JSON.stringify(payload),
     });
     const data = await parseJson<ApiEnvelope<{ community_id: number }>>(response);
     if (data.status !== "success") {
@@ -385,6 +398,7 @@ export const updateCommunityMcpTool = async (payload: {
   tags?: string[];
   version?: string;
   registry_json?: Record<string, unknown>;
+  config_json?: McpContainerConfigPayload;
 }) => {
   try {
     const response = await fetchWithAuth(API_ENDPOINTS.mcpTools.communityUpdate, {

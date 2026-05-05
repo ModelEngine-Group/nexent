@@ -80,9 +80,3 @@ export const MCP_TOOLS_INVALIDATION_KEYS = [
   MCP_TOOLS_QUERY_KEYS.services,
   MCP_TOOLS_QUERY_KEYS.tagStats,
 ] as const;
-
-/** Semver `x.y.z` required by the registry toolbar custom-version input. */
-export const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
-
-/** Short semver used by the "My community MCP" edit form (`x`, `x.y`, `x.y.z`). */
-export const SHORT_VERSION_PATTERN = /^\d+(?:\.\d+){0,2}$/;

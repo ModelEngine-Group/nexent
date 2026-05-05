@@ -161,6 +161,12 @@ async def publish_community_mcp_service_api(
             tenant_id=tenant_id,
             user_id=user_id,
             mcp_id=payload.mcp_id,
+            name=payload.name,
+            description=payload.description,
+            version=payload.version,
+            tags=payload.tags,
+            mcp_server=payload.mcp_server,
+            config_json=payload.config_json,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
