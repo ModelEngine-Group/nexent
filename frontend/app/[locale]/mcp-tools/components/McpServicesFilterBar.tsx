@@ -58,12 +58,8 @@ export default function McpServicesFilterBar({
         options={[
           { value: FILTER_ALL, label: t("mcpTools.page.transportFilter.all") },
           {
-            value: McpTransportType.HTTP,
-            label: t("mcpTools.serverType.http"),
-          },
-          {
-            value: McpTransportType.SSE,
-            label: t("mcpTools.serverType.sse"),
+            value: McpTransportType.URL,
+            label: t("mcpTools.serverType.url"),
           },
           {
             value: McpTransportType.CONTAINER,

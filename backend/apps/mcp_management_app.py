@@ -93,6 +93,7 @@ async def list_community_mcp_services_api(
         data = await list_community_mcp_services(
             search=query.search,
             tag=query.tag,
+            transport_type=query.transport_type,
             cursor=query.cursor,
             limit=query.limit,
         )
@@ -124,8 +125,8 @@ async def list_community_mcp_tag_stats_api(
     Get community MCP tag statistics.
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
-        stats = list_community_mcp_tag_stats(tenant_id=tenant_id)
+        get_current_user_info(authorization, http_request)
+        stats = list_community_mcp_tag_stats()
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": stats},

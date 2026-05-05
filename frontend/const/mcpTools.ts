@@ -7,6 +7,7 @@ export enum McpSource {
 export enum McpTransportType {
   HTTP = "http",
   SSE = "sse",
+  URL = "url",
   CONTAINER = "container",
 }
 

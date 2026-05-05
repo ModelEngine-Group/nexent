@@ -8,14 +8,11 @@ import log from "@/lib/logger";
 import {
   addContainerMcpToolService,
   addMcpToolService,
-  resolveContainerServerInfo,
+  parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
-import type {
-  CommunityMcpCard,
-  CommunityQuickAddDraft,
-} from "@/types/mcpTools";
+import type { CommunityMcpCard, CommunityQuickAddDraft } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 import { refreshToolListWithToast } from "./refreshToolListWithToast";
 
@@ -29,18 +26,14 @@ const draftFromSource = (
   name: service.name || "",
   description: service.description || "",
   transportType:
-    (service.transportType as CommunityQuickAddDraft["transportType"]) ||
-    McpTransportType.HTTP,
+    service.transportType === McpTransportType.CONTAINER ? McpTransportType.CONTAINER : McpTransportType.URL,
   serverUrl: service.serverUrl || "",
   authorizationToken: "",
-  containerConfigJson: service.configJson
-    ? JSON.stringify(service.configJson, null, 2)
-    : "",
+  containerConfigJson: service.configJson ? JSON.stringify(service.configJson, null, 2) : "",
   containerPort: undefined,
   tags: service.tags || [],
   version: service.version || undefined,
-  registryJson:
-    (service.registryJson as Record<string, unknown> | null) || undefined,
+  registryJson: service.registryJson,
 });
 
 /**
@@ -94,33 +87,30 @@ export function useMcpCommunityQuickAdd({
     setSubmitting(true);
     try {
       if (isContainer) {
-        const resolved = await resolveContainerServerInfo({
-          transportType: draft.transportType,
-          serviceUrl: draft.serverUrl,
-          containerPort: draft.containerPort,
-          containerConfigJson: draft.containerConfigJson,
-        });
-        if (!resolved.data.mcpConfig) {
+        const mcpConfig = parseContainerMcpConfigJson(
+          draft.containerConfigJson ?? ""
+        );
+        if (!mcpConfig) {
           message.error(t("mcpTools.add.error.containerJsonInvalid"));
           return;
         }
         await addContainerMcpToolService({
           name,
-          description: draft.description,
+          description: draft.description ?? "",
           tags: draft.tags,
           source: McpSource.COMMUNITY,
-          authorization_token: draft.authorizationToken.trim() || undefined,
+          authorization_token: draft.authorizationToken?.trim() || undefined,
           registry_json: draft.registryJson,
           port: draft.containerPort as number,
-          mcp_config: resolved.data.mcpConfig,
+          mcp_config: mcpConfig,
         });
       } else {
         await addMcpToolService({
           name,
-          description: draft.description,
+          description: draft.description ?? "",
           source: McpSource.COMMUNITY,
           server_url: draft.serverUrl.trim(),
-          authorization_token: draft.authorizationToken.trim() || undefined,
+          authorization_token: draft.authorizationToken?.trim() || undefined,
           tags: draft.tags,
           version: draft.version,
           registry_json: draft.registryJson,

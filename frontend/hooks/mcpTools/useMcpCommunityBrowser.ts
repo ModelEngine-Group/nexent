@@ -67,8 +67,7 @@ export function useMcpCommunityBrowser(enabled: boolean) {
     queryFn: async () => {
       const result = await fetchCommunityMcpCards({
         search: debouncedSearch || undefined,
-        transportType:
-          filters.transport === FILTER_ALL ? undefined : filters.transport,
+        transportType: filters.transport === FILTER_ALL ? undefined : filters.transport,
         tag: filters.tag === FILTER_ALL ? undefined : filters.tag,
         cursor: cursorHistory[pageIndex],
       });

@@ -10,7 +10,6 @@ import {
   MCP_PORT_RANGE,
   McpContainerStatus,
   McpHealthStatus,
-  McpServiceStatus,
   McpSource,
   McpTransportType,
 } from "@/const/mcpTools";
@@ -34,7 +33,9 @@ export const getTransportLabelKey = (
     return "mcpTools.serverType.http";
   if (transportType === McpTransportType.SSE)
     return "mcpTools.serverType.sse";
-  return "mcpTools.serverType.container";
+  if (transportType === McpTransportType.CONTAINER)
+    return "mcpTools.serverType.container";
+  return "mcpTools.serverType.url";
 };
 
 /** i18n key for a service's `healthStatus`. */
@@ -92,7 +93,7 @@ export const formatRegistryVersion = (value: string): string => {
 };
 
 export const extractRegistryLinks = (
-  registryJson?: Record<string, unknown> | null
+  registryJson?: Record<string, unknown>
 ) => {
   if (!registryJson || typeof registryJson !== "object") {
     return { websiteUrl: "", repositoryUrl: "" };
@@ -113,7 +114,7 @@ export const extractRegistryLinks = (
 };
 
 export const toPrettyRegistryJson = (
-  registryJson?: Record<string, unknown> | null
+  registryJson?: Record<string, unknown>
 ) => {
   return JSON.stringify(registryJson || {}, null, 2);
 };

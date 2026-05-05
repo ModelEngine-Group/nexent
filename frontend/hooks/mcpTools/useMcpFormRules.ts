@@ -9,6 +9,7 @@ import {
   SHORT_VERSION_PATTERN,
 } from "@/const/mcpTools";
 import { isHttpUrl, isValidPort } from "@/lib/mcpTools";
+import { parseContainerMcpConfigJson } from "@/services/mcpToolsService";
 
 /**
  * Returns all AntD Form `Rule[]` arrays used across MCP add / edit forms.
@@ -89,9 +90,7 @@ export function useMcpFormRules() {
               throw new Error(
                 t("mcpTools.add.validate.containerConfigRequired")
               );
-            try {
-              JSON.parse(text);
-            } catch {
+            if (!parseContainerMcpConfigJson(text)) {
               throw new Error(t("mcpTools.add.error.containerJsonInvalid"));
             }
           },

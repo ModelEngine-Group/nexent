@@ -134,15 +134,15 @@ export interface CommunityMcpCard {
   source?: McpSource.COMMUNITY;
   transportType: McpTransportType;
   serverUrl: string;
-  configJson?: Record<string, unknown> | null;
-  registryJson?: Record<string, unknown> | null;
+  configJson?: Record<string, unknown>;
+  registryJson?: Record<string, unknown>;
   tags?: string[];
 }
 
 export interface McpServiceItem {
   mcpId: number;
   containerId?: string;
-  containerPort?: number | null;
+  containerPort?: number;
   name: string;
   description: string;
   source: McpSource;
@@ -151,9 +151,9 @@ export interface McpServiceItem {
   tags: string[];
   transportType: McpTransportType;
   serverUrl: string;
-  version?: string | null;
-  registryJson?: Record<string, unknown> | null;
-  configJson?: Record<string, unknown> | null;
+  version?: string;
+  registryJson?: Record<string, unknown>;
+  configJson?: Record<string, unknown>;
   tools: string[];
   healthStatus: McpHealthStatus;
   containerStatus?: McpContainerStatus;
@@ -196,13 +196,16 @@ export interface HealthcheckMcpServicePayload {
   mcp_id: number;
 }
 
-export interface AddMcpRuntimeServerPayload {
-  port?: number;
-  [key: string]: unknown;
+/** One MCP server entry under `mcpServers` for container-based add-from-config. */
+export interface McpContainerServerEntry {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
 }
 
-export interface AddMcpRuntimeFromConfigPayload {
-  mcpServers: Record<string, AddMcpRuntimeServerPayload>;
+/** Root JSON shape for container add-from-config (`parseContainerMcpConfigJson`). */
+export interface McpContainerConfigPayload {
+  mcpServers: Record<string, McpContainerServerEntry>;
 }
 
 // ---------------------------------------------------------------------------
@@ -215,12 +218,12 @@ export interface AddMcpRuntimeFromConfigPayload {
  */
 export interface LocalAddMcpDraft {
   name: string;
-  description: string;
+  description?: string;
   transportType: McpTransportType;
   serverUrl: string;
-  authorizationToken: string;
+  authorizationToken?: string;
   containerConfigJson: string;
-  containerPort: number | undefined;
+  containerPort?: number;
   tags: string[];
 }
 
@@ -229,12 +232,12 @@ export interface LocalAddMcpDraft {
  */
 export interface CommunityQuickAddDraft {
   name: string;
-  description: string;
+  description?: string;
   transportType: McpTransportType;
   serverUrl: string;
-  authorizationToken: string;
-  containerConfigJson: string;
-  containerPort: number | undefined;
+  authorizationToken?: string;
+  containerConfigJson?: string;
+  containerPort?: number;
   tags: string[];
   version?: string;
   registryJson?: Record<string, unknown>;

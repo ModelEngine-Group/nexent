@@ -8,7 +8,7 @@ import log from "@/lib/logger";
 import {
   addContainerMcpToolService,
   addMcpToolService,
-  resolveContainerServerInfo,
+  parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
@@ -51,33 +51,28 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
     setSubmitting(true);
     try {
       if (isContainer) {
-        const resolved = await resolveContainerServerInfo({
-          transportType: draft.transportType,
-          serviceUrl: draft.serverUrl,
-          containerPort: draft.containerPort,
-          containerConfigJson: draft.containerConfigJson,
-        });
-        if (!resolved.data.mcpConfig) {
+        const mcpConfig = parseContainerMcpConfigJson(draft.containerConfigJson);
+        if (!mcpConfig) {
           message.error(t("mcpTools.add.error.containerJsonInvalid"));
           return false;
         }
 
         await addContainerMcpToolService({
           name: trimmedName,
-          description: draft.description,
+          description: draft.description ?? "",
           tags: draft.tags,
           source: McpSource.LOCAL,
-          authorization_token: draft.authorizationToken.trim() || undefined,
+          authorization_token: draft.authorizationToken?.trim() || undefined,
           port: draft.containerPort as number,
-          mcp_config: resolved.data.mcpConfig,
+          mcp_config: mcpConfig,
         });
       } else {
         await addMcpToolService({
           name: trimmedName,
-          description: draft.description,
+          description: draft.description ?? "",
           source: McpSource.LOCAL,
           server_url: draft.serverUrl.trim(),
-          authorization_token: draft.authorizationToken.trim() || undefined,
+          authorization_token: draft.authorizationToken?.trim() || undefined,
           tags: draft.tags,
         });
       }

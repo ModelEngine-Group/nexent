@@ -67,19 +67,10 @@ export function useMcpServicesList() {
 
   const filteredServices = useMemo(() => {
     const keywordFiltered = filterServiceCards(services, filters.search);
-    return keywordFiltered.filter((item) => {
-      if (filters.source !== FILTER_ALL && item.source !== filters.source)
-        return false;
-      if (
-        filters.transport !== FILTER_ALL &&
-        item.transportType !== filters.transport
-      )
-        return false;
-      if (
-        filters.tag !== FILTER_ALL &&
-        !item.tags.some((tag) => tag === filters.tag)
-      )
-        return false;
+    return keywordFiltered.filter((item) => { 
+      if (filters.source !== FILTER_ALL && item.source !== filters.source) return false;
+      if (filters.transport !== FILTER_ALL && item.transportType !== filters.transport) return false;
+      if (filters.tag !== FILTER_ALL && !item.tags.includes(filters.tag)) return false;
       return true;
     });
   }, [services, filters.search, filters.source, filters.transport, filters.tag]);

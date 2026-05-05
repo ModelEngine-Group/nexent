@@ -279,8 +279,7 @@ export default function McpServiceDetailModal({
                 {t("mcpTools.detail.tools")}
               </span>
               <div className="flex items-center gap-2">
-                {draft.transportType === McpTransportType.CONTAINER &&
-                draft.containerId ? (
+                {draft.containerId ? (
                   <Button
                     size="small"
                     autoInsertSpace={false}

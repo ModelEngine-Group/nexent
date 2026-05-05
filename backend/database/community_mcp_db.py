@@ -68,7 +68,7 @@ def get_mcp_community_records(
         }
 
 
-def get_mcp_community_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+def get_mcp_community_tag_stats() -> List[Dict[str, Any]]:
     with get_db_session() as session:
         rows = (
             session.query(
@@ -76,7 +76,6 @@ def get_mcp_community_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]
                 func.count(McpCommunityRecord.community_id).label("count"),
             )
             .filter(
-                McpCommunityRecord.tenant_id == tenant_id,
                 McpCommunityRecord.delete_flag != "Y",
             )
             .group_by("tag")
@@ -163,3 +162,20 @@ def list_mcp_community_records_by_tenant(tenant_id: str) -> List[Dict[str, Any]]
             McpCommunityRecord.delete_flag != "Y",
         ).order_by(McpCommunityRecord.community_id.desc()).all()
         return [as_dict(row) for row in rows]
+
+def get_mcp_community_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                func.unnest(McpCommunityRecord.tags).label("tag"),
+                func.count(McpCommunityRecord.community_id).label("count"),
+            )
+            .filter(
+                McpCommunityRecord.tenant_id == tenant_id,
+                McpCommunityRecord.delete_flag != "Y",
+            )
+            .group_by("tag")
+            .order_by(func.count(McpCommunityRecord.community_id).desc(), "tag")
+            .all()
+        )
+        return [{"tag": str(row.tag), "count": int(row.count)} for row in rows if row.tag]

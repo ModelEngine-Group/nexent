@@ -24,7 +24,11 @@ import {
   resolveQuickAddOptions,
   resolveRuntimeArgs,
 } from "@/lib/mcpTools";
-import type { RegistryMcpCard, RegistryQuickAddOption } from "@/types/mcpTools";
+import type {
+  McpContainerConfigPayload,
+  RegistryMcpCard,
+  RegistryQuickAddOption,
+} from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
 interface UseMcpRegistryQuickAddParams {
@@ -137,20 +141,19 @@ export function useMcpRegistryQuickAdd({
         const envValues = collectPackageEnvValues(selectedOption, values);
         const serverKey = normalizeServerKey(candidate.server?.name);
 
-        const mcpConfig = {
+        const mcpConfig: McpContainerConfigPayload = {
           mcpServers: {
             [serverKey]: {
               command: runtimeCommand,
               args: runtimeArgs,
               env: envValues,
-              port: containerPort as number,
             },
           },
         };
 
         await addContainerMcpToolService({
           name: candidate.server?.name,
-          description: candidate.server?.description || "",
+          description: candidate.server?.description,
           tags,
           source: McpSource.REGISTRY,
           port: containerPort as number,

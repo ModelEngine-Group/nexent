@@ -11,7 +11,7 @@ import TagEditor from "./shared/TagEditor";
 const createInitialDraft = (): LocalAddMcpDraft => ({
   name: "",
   description: "",
-  transportType: McpTransportType.HTTP,
+  transportType: McpTransportType.URL,
   serverUrl: "",
   authorizationToken: "",
   containerConfigJson: "",
@@ -81,8 +81,7 @@ export default function AddMcpServiceLocalSection({
 
   if (!active) return null;
 
-  const isHttpLike =
-    draft.transportType !== McpTransportType.CONTAINER;
+  const isHttpLike = draft.transportType !== McpTransportType.CONTAINER;
 
   return (
     <>
@@ -130,12 +129,8 @@ export default function AddMcpServiceLocalSection({
             className="mt-2 w-full"
             options={[
               {
-                label: t("mcpTools.serverType.http"),
-                value: McpTransportType.HTTP,
-              },
-              {
-                label: t("mcpTools.serverType.sse"),
-                value: McpTransportType.SSE,
+                label: t("mcpTools.serverType.url"),
+                value: McpTransportType.URL,
               },
               {
                 label: t("mcpTools.serverType.container"),

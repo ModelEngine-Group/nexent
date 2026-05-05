@@ -15,7 +15,7 @@ from database.community_mcp_db import (
     delete_mcp_community_record_by_id,
     get_mcp_community_record_by_id_and_tenant,
     get_mcp_community_records,
-    get_mcp_community_tag_stats_by_tenant,
+    get_mcp_community_tag_stats,
     list_mcp_community_records_by_tenant,
     update_mcp_community_record_by_id,
 )
@@ -34,6 +34,7 @@ async def list_community_mcp_services(
     *,
     search: str | None = None,
     tag: str | None = None,
+    transport_type: str | None = None,
     cursor: str | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
@@ -42,6 +43,7 @@ async def list_community_mcp_services(
     Args:
         search: Search keyword
         tag: Filter by tag
+        transport_type: Filter by transport (url or container)
         cursor: Pagination cursor
         limit: Items per page
 
@@ -51,6 +53,7 @@ async def list_community_mcp_services(
     db_result = get_mcp_community_records(
         search=search,
         tag=tag,
+        transport_type=transport_type,
         cursor=cursor,
         limit=limit,
     )
@@ -80,7 +83,7 @@ async def list_community_mcp_services(
     }
 
 
-def list_community_mcp_tag_stats(tenant_id: str) -> List[Dict[str, Any]]:
+def list_community_mcp_tag_stats() -> List[Dict[str, Any]]:
     """Get community MCP tag statistics.
 
     Args:
@@ -89,7 +92,7 @@ def list_community_mcp_tag_stats(tenant_id: str) -> List[Dict[str, Any]]:
     Returns:
         List of tag statistics
     """
-    return get_mcp_community_tag_stats_by_tenant(tenant_id=tenant_id)
+    return get_mcp_community_tag_stats()
 
 
 async def publish_community_mcp_service(
@@ -117,6 +120,8 @@ async def publish_community_mcp_service(
 
     source_registry_json = source_record.get("registry_json") if isinstance(source_record.get("registry_json"), dict) else None
     source_config_json = source_record.get("config_json") if isinstance(source_record.get("config_json"), dict) else None
+    # Remote MCP table may omit transport_type; community list still needs it for filters.
+    community_transport_type = "container" if source_config_json is not None else "url"
 
     community_id = create_mcp_community_record(
         mcp_data={
@@ -124,7 +129,7 @@ async def publish_community_mcp_service(
             "mcp_server": source_record.get("mcp_server"),
             "version": source_record.get("version"),
             "registry_json": source_registry_json,
-            "transport_type": source_record.get("transport_type"),
+            "transport_type": source_record.get("transport_type") or community_transport_type,
             "config_json": source_config_json,
             "tags": source_record.get("tags"),
             "description": source_record.get("description"),

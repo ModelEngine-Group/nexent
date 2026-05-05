@@ -145,7 +145,7 @@ export function useMcpServiceDetail({
       setToolsState({ visible: true, tools: result.data || [] });
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to load tools", { error });
-      message.error(t("mcpTools.service.loadToolsFailed"));
+      message.error(t("mcpTools.tools.loadFailed"));
     } finally {
       setLoadingTools(false);
     }
@@ -159,7 +159,7 @@ export function useMcpServiceDetail({
       setToolsState((prev) => ({ ...prev, tools: result.data || [] }));
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to refresh tools", { error });
-      message.error(t("mcpTools.service.loadToolsFailed"));
+      message.error(t("mcpTools.tools.loadFailed"));
     } finally {
       setLoadingTools(false);
     }
@@ -193,10 +193,7 @@ export function useMcpServiceDetail({
       message.warning(t("mcpTools.add.validate.nameRequired"));
       return;
     }
-    if (
-      (draft.transportType === McpTransportType.HTTP ||
-        draft.transportType === McpTransportType.SSE) &&
-      !isHttpUrl(nextUrl)
+    if (draft.transportType === McpTransportType.URL && !isHttpUrl(nextUrl)
     ) {
       message.warning(t("mcpTools.add.validate.httpUrlFormat"));
       return;

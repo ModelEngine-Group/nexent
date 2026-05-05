@@ -1105,10 +1105,11 @@ class CommunityListRequest(BaseModel):
     """Request model for listing community MCP services"""
     search: Optional[str] = Field(None, description="Search keyword")
     tag: Optional[str] = Field(None, description="Filter by tag")
+    transport_type: Optional[str] = Field(None,description="Filter by transport: url or container")
     cursor: Optional[str] = Field(None, description="Pagination cursor")
     limit: int = Field(default=30, ge=1, le=100, description="Items per page")
 
-    @field_validator("search", "tag", "cursor", mode="before")
+    @field_validator("search", "tag", "cursor", "transport_type", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):

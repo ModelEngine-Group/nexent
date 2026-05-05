@@ -9,9 +9,10 @@ import {
 } from "@/const/mcpTools";
 import { API_ENDPOINTS } from "@/services/api";
 import type {
-  AddMcpRuntimeFromConfigPayload,
   AddMcpServicePayload,
   HealthcheckMcpServicePayload,
+  McpContainerConfigPayload,
+  McpContainerServerEntry,
   RegistryMcpCard,
   CommunityMcpCard,
   McpTagStat,
@@ -40,13 +41,13 @@ type ApiEnvelope<T = unknown> = {
 
 type AddContainerMcpToolPayload = {
   name: string;
-  description: string;
+  description?: string;
   tags: string[];
-  source?: McpSource;
+  source: McpSource;
   authorization_token?: string;
   registry_json?: Record<string, unknown>;
   port: number;
-  mcp_config: AddMcpRuntimeFromConfigPayload;
+  mcp_config: McpContainerConfigPayload;
 };
 
 type PortConflictResult = {
@@ -99,7 +100,7 @@ export const fetchRegistryMcpCards = async (params: {
 export const fetchCommunityMcpCards = async (params: {
   search?: string;
   cursor?: string | null;
-  transportType?: "http" | "sse" | "container";
+  transportType?: McpTransportType;
   tag?: string;
   limit?: number;
 }) => {
@@ -166,62 +167,72 @@ export const suggestMcpContainerPortService = async () => {
   }
 };
 
-export const resolveContainerServerInfo = async (params: {
-  transportType: McpTransportType;
-  serviceUrl: string;
-  containerPort: number | undefined;
-  containerConfigJson: string;
-}): Promise<
-  McpToolsApiResult<{
-    finalServerUrl: string;
-    containerConfig?: Record<string, unknown>;
-    runtimeService?: { name?: string; url?: string };
-    mcpConfig?: AddMcpRuntimeFromConfigPayload;
-  }>
-> => {
-  if (params.transportType !== McpTransportType.CONTAINER) {
-    return {
-      success: true,
-      data: {
-        finalServerUrl: params.serviceUrl.trim(),
-        containerConfig: undefined,
-        runtimeService: undefined,
-        mcpConfig: undefined,
-      },
-    };
+/**
+ * Parses and validates container config JSON for add-from-config. Returns a
+ * typed payload or null (single `JSON.parse`; no network I/O). Each server
+ * entry requires `command` and `args`; `env` is optional when valid.
+ */
+export function parseContainerMcpConfigJson(
+  raw: string
+): McpContainerConfigPayload | null {
+  const text = raw.trim();
+  if (!text) return null;
+
+  let root: unknown;
+  try {
+    root = JSON.parse(text);
+  } catch {
+    return null;
   }
 
-  let finalServerUrl = `container://mcp-container:${params.containerPort}`;
-  const containerConfigPayload: Record<string, unknown> = {
-    config_json: params.containerConfigJson.trim() || undefined,
-    port: params.containerPort,
+  if (!root || typeof root !== "object" || Array.isArray(root)) return null;
+  const rk = Object.keys(root);
+  if (rk.length !== 1 || rk[0] !== "mcpServers") return null;
+
+  const ms = (root as { mcpServers: unknown }).mcpServers;
+  if (!ms || typeof ms !== "object" || Array.isArray(ms)) return null;
+
+  const names = Object.keys(ms);
+  if (names.length !== 1) return null;
+
+  const entry = (ms as Record<string, unknown>)[names[0]!];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+
+  const entryObj = entry as Record<string, unknown>;
+  const keys = Object.keys(entryObj);
+  const allow = new Set(["command", "args", "env"]);
+  if (!keys.every((k) => allow.has(k))) return null;
+  if (!keys.includes("command") || !keys.includes("args")) return null;
+
+  const command = entryObj.command;
+  const args = entryObj.args;
+  if (typeof command !== "string" || !command.trim()) return null;
+  if (!Array.isArray(args) || !args.every((a) => typeof a === "string"))
+    return null;
+
+  const server: McpContainerServerEntry = {
+    command: command.trim(),
+    args: args as string[],
   };
 
-  let parsedConfig: unknown;
-  try {
-    parsedConfig = JSON.parse(params.containerConfigJson);
-  } catch {
-    throw new Error("Invalid container config JSON");
+  if ("env" in entryObj) {
+    const envRaw = entryObj.env;
+    if (envRaw === null) return null;
+    if (typeof envRaw !== "object" || Array.isArray(envRaw)) return null;
+    const envOut: Record<string, string> = {};
+    for (const [k, v] of Object.entries(envRaw as Record<string, unknown>)) {
+      if (typeof k !== "string" || typeof v !== "string") return null;
+      envOut[k] = v;
+    }
+    server.env = envOut;
   }
-
-  const parsedMcpServers = (parsedConfig as { mcpServers?: Record<string, { port?: number }> }).mcpServers;
-  if (!parsedMcpServers || typeof parsedMcpServers !== "object") {
-    throw new Error("Missing mcpServers in container config");
-  }
-
-  const mcpConfigPayload = parsedConfig as AddMcpRuntimeFromConfigPayload;
-  containerConfigPayload.mcp_config = mcpConfigPayload;
 
   return {
-    success: true,
-    data: {
-      finalServerUrl,
-      containerConfig: containerConfigPayload,
-      runtimeService: undefined,
-      mcpConfig: mcpConfigPayload,
+    mcpServers: {
+      [names[0]]: server,
     },
   };
-};
+}
 
 export const addContainerMcpToolService = async (payload: AddContainerMcpToolPayload) => {
   try {
@@ -248,18 +259,18 @@ export const listMcpTools = async (params?: { tag?: string }) => {
     return {
       mcpId: s.mcp_id,
       containerId: s.container_id,
-      containerPort: s.container_port,
+      containerPort: s.container_port ?? undefined,
       name: s.service_name,
       description: s.description,
       source: (s.source as McpSource),
       enabled: s.enabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED,
       updatedAt: s.update_time,
       tags: s.tags || [],
-      transportType: (s.container_id !== undefined && s.container_id !== null) ? McpTransportType.CONTAINER : McpTransportType.HTTP,
+      transportType: (s.container_id !== undefined && s.container_id !== null) ? McpTransportType.CONTAINER : McpTransportType.URL,
       serverUrl: s.mcp_url,
-      version: null,
-      registryJson: s.registry_json,
-      configJson: s.config_json,
+      version: s.version ?? undefined,
+      registryJson: s.registry_json ?? undefined,
+      configJson: s.config_json ?? undefined,
       tools: [],
       healthStatus: s.status ? McpHealthStatus.HEALTHY : McpHealthStatus.UNCHECKED,
       containerStatus: s.container_status as McpContainerStatus,
@@ -306,7 +317,7 @@ export const listRegistryMcpTools = async (query: URLSearchParams) => {
 export const listCommunityMcpTools = async (payload: {
   search?: string;
   tag?: string;
-  transport_type?: "http" | "sse" | "container";
+  transport_type?: McpTransportType;
   cursor?: string;
   limit?: number;
 }) => {
@@ -314,6 +325,8 @@ export const listCommunityMcpTools = async (payload: {
     const query = new URLSearchParams();
     if (payload.search) query.set("search", payload.search);
     if (payload.tag) query.set("tag", payload.tag);
+    if (payload.transport_type) query.set("transport_type", payload.transport_type.toString());
+    
     if (payload.cursor) query.set("cursor", payload.cursor);
     if (typeof payload.limit === "number") query.set("limit", String(payload.limit));
 
