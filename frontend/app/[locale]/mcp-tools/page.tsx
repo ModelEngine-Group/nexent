@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Button, ConfigProvider, Empty, Input, Spin, Tabs } from "antd";
+import { InboxOutlined, CloudUploadOutlined } from "@ant-design/icons";
+import { Button, ConfigProvider, Empty, Input, Segmented, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
@@ -9,7 +10,10 @@ import { Puzzle } from "lucide-react";
 import { useMcpServicesList } from "@/hooks/mcpTools/useMcpServicesList";
 import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
-import type { McpServiceStatus } from "@/const/mcpTools";
+import {
+  McpServiceStatus,
+  McpToolsServicesTab,
+} from "@/const/mcpTools";
 import AddMcpServiceModal from "./components/AddMcpServiceModal";
 import McpServiceCard from "./components/McpServiceCard";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
@@ -17,30 +21,16 @@ import McpServicesFilterBar from "./components/McpServicesFilterBar";
 import PublishedServiceCard from "./components/PublishedServiceCard";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
 
-type ServicesTab = "imported" | "published";
-
-/** Scoped Ant Design theme so MCP modals, tabs, and primary buttons match this page. */
+/** Scoped Ant Design theme for MCP tools (primary buttons, etc.). Segmented uses default styling. */
 const mcpToolsTheme = {
   token: { colorPrimary: "#059669", colorInfo: "#0d9488" },
-  components: {
-    Tabs: {
-      inkBarColor: "#059669",
-      itemActiveColor: "#0d9488",
-      itemSelectedColor: "#047857",
-    },
-    Segmented: {
-      itemSelectedBg: "#d1fae5",
-      itemSelectedColor: "#047857",
-      trackBg: "#f1f5f9",
-    },
-  },
 };
 
 export default function McpToolsPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
 
-  const [tab, setTab] = useState<ServicesTab>("imported");
+  const [tab, setTab] = useState<McpToolsServicesTab>(McpToolsServicesTab.IMPORTED);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedImported, setSelectedImported] =
     useState<McpServiceItem | null>(null);
@@ -48,7 +38,7 @@ export default function McpToolsPage() {
     useState<CommunityMcpCard | null>(null);
 
   const list = useMcpServicesList();
-  const myPublished = useMyCommunityMcp(tab === "published");
+  const myPublished = useMyCommunityMcp(tab === McpToolsServicesTab.PUBLISHED);
 
   const handleStatusChanged = (mcpId: number, nextEnabled: McpServiceStatus) => {
     setSelectedImported((prev) =>
@@ -63,6 +53,11 @@ export default function McpToolsPage() {
   const closePublished = () => {
     setSelectedPublished(null);
   };
+
+  const resultCount =
+    tab === McpToolsServicesTab.IMPORTED
+      ? list.filteredServices.length
+      : myPublished.filteredItems.length;
 
   return (
     <ConfigProvider theme={mcpToolsTheme}>
@@ -81,48 +76,69 @@ export default function McpToolsPage() {
           className="mx-auto w-full max-w-7xl px-6 py-10"
         >
           <div className="flex flex-col gap-6">
-            {/* Page header */}
+            {/* Title + add service (same row on sm+) */}
             <motion.div
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5 }}
-              className="flex items-center gap-3 mb-6"
+              className="mb-1 flex flex-col gap-3 sm:mb-0 sm:flex-row sm:items-end sm:justify-between"
             >
-              <div className="flex h-12 w-12 items-center justify-center rounded-md bg-gradient-to-br from-emerald-500 to-teal-600 shadow-sm shadow-emerald-900/10">
-                {/* Puzzle icon from lucide-react */}
-                <Puzzle className="h-6 w-6 text-white" />
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-sm shadow-emerald-900/10">
+                  <Puzzle className="h-6 w-6 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-3xl font-bold text-emerald-700 dark:text-emerald-400">
+                    {t("mcpTools.page.title")}
+                  </h1>
+                  <p className="mt-1 text-slate-600 dark:text-slate-300">
+                    {t("mcpTools.page.subtitle")}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-3xl font-bold text-emerald-700 dark:text-emerald-400">
-                  {t("mcpTools.page.title")}
-                </h1>
-                <p className="text-slate-600 dark:text-slate-300 mt-1">
-                  {t("mcpTools.page.subtitle")}
-                </p>
-              </div>
-            </motion.div>
-
-            <div className="flex items-center justify-between gap-3">
-              <Tabs
-                activeKey={tab}
-                onChange={(key) => setTab(key as ServicesTab)}
-                className="m-0"
-                items={[
-                  { key: "imported", label: t("mcpTools.page.tab.imported") },
-                  { key: "published", label: t("mcpTools.page.tab.published") },
-                ]}
-              />
               <Button
                 type="primary"
-                size="large"
+                size="middle"
                 onClick={() => setShowAddModal(true)}
-                className="rounded-md px-5 font-semibold shadow-sm transition hover:translate-y-[-1px] hover:shadow-md"
+                className="w-full shrink-0 rounded-md px-4 font-semibold shadow-sm transition hover:translate-y-[-1px] hover:shadow-md sm:ml-auto sm:w-auto"
               >
                 {t("mcpTools.page.addService")}
               </Button>
+            </motion.div>
+
+            {/* Tab switch + result count (same row) */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <Segmented
+                value={tab}
+                onChange={(value) => setTab(value as McpToolsServicesTab)}
+                options={[
+                  {
+                    value: McpToolsServicesTab.IMPORTED,
+                    label: (
+                      <span className="inline-flex items-center gap-1.5 px-0.5 py-px text-sm">
+                        <InboxOutlined className="text-sm" aria-hidden />
+                        <span>{t("mcpTools.page.tab.imported")}</span>
+                      </span>
+                    ),
+                  },
+                  {
+                    value: McpToolsServicesTab.PUBLISHED,
+                    label: (
+                      <span className="inline-flex items-center gap-1.5 px-0.5 py-px text-sm">
+                        <CloudUploadOutlined className="text-sm" aria-hidden />
+                        <span>{t("mcpTools.page.tab.published")}</span>
+                      </span>
+                    ),
+                  },
+                ]}
+                className="h-9 w-full max-w-xs rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm shadow-sm sm:w-auto [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:px-3 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-item-label]:leading-[28px] [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
+              />
+              <span className="pb-0.5 text-xs text-slate-400 sm:shrink-0 sm:text-right">
+                {t("mcpTools.page.resultCount", { count: resultCount })}
+              </span>
             </div>
 
-            {tab === "imported" ? (
+            {tab === McpToolsServicesTab.IMPORTED ? (
               <ImportedView list={list} onSelect={setSelectedImported} />
             ) : (
               <PublishedView
@@ -173,7 +189,6 @@ function ImportedView({
       <SearchAndFilterRow
         searchValue={list.filters.search}
         onSearchChange={(value) => list.updateFilter("search", value)}
-        resultCount={list.filteredServices.length}
         searchPlaceholder={String(t("mcpTools.page.searchPlaceholder"))}
         filters={
           <McpServicesFilterBar
@@ -221,7 +236,6 @@ function PublishedView({
       <SearchAndFilterRow
         searchValue={myPublished.search}
         onSearchChange={myPublished.setSearch}
-        resultCount={myPublished.filteredItems.length}
         searchPlaceholder={String(t("mcpTools.community.searchPlaceholder"))}
         filters={null}
       />
@@ -252,35 +266,27 @@ function PublishedView({
 function SearchAndFilterRow({
   searchValue,
   onSearchChange,
-  resultCount,
   searchPlaceholder,
   filters,
 }: {
   searchValue: string;
   onSearchChange: (value: string) => void;
-  resultCount: number;
   searchPlaceholder: string;
   filters: React.ReactNode;
 }) {
-  const { t } = useTranslation("common");
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <Input
-          value={searchValue}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={searchPlaceholder}
-          size="large"
-          allowClear
-          className="w-full rounded-md lg:flex-1"
-        />
-        {filters ? (
-          <div className="w-full lg:w-auto lg:shrink-0">{filters}</div>
-        ) : null}
-      </div>
-      <span className="text-xs text-slate-400">
-        {t("mcpTools.page.resultCount", { count: resultCount })}
-      </span>
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+      <Input
+        value={searchValue}
+        onChange={(event) => onSearchChange(event.target.value)}
+        placeholder={searchPlaceholder}
+        size="large"
+        allowClear
+        className="w-full rounded-md lg:flex-1"
+      />
+      {filters ? (
+        <div className="w-full lg:w-auto lg:shrink-0">{filters}</div>
+      ) : null}
     </div>
   );
 }

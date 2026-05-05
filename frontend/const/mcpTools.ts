@@ -40,6 +40,12 @@ export enum McpServerStatus {
   UNKNOWN = "unknown",
 }
 
+/** Main MCP tools page: imported workspace services vs. published community list. */
+export enum McpToolsServicesTab {
+  IMPORTED = "imported",
+  PUBLISHED = "published",
+}
+
 /** Sentinel value used by toolbar `Select`s to mean "no filter applied". */
 export const FILTER_ALL = "all";
 
