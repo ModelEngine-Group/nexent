@@ -65,8 +65,14 @@ export const MCP_PORT_RANGE = { MIN: 1, MAX: 65535 } as const;
 /** Debounce for all text-filter inputs on MCP browsers. */
 export const MCP_SEARCH_DEBOUNCE_MS = 350;
 
+/** Inline height for MCP grid cards (avoids Tailwind scanning `frontend/const/`). */
+export const MCP_GRID_CARD_OUTER_STYLE = {
+  height: "12rem",
+};
+
+/** Layout and chrome for MCP grid cards; pair with `MCP_GRID_CARD_OUTER_STYLE` for height. */
 export const MCP_GRID_CARD_OUTER =
-  "group flex h-56 w-full min-h-56 max-h-56 shrink-0 cursor-pointer flex-col overflow-hidden rounded-md border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md";
+  "group flex w-full shrink-0 cursor-pointer flex-col overflow-hidden rounded-md border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md";
 
 /**
  * Shared React Query cache keys for the MCP tools feature. Centralised so every

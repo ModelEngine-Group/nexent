@@ -1,6 +1,9 @@
 import { Button, Tag } from "antd";
 import { useTranslation } from "react-i18next";
-import { MCP_GRID_CARD_OUTER } from "@/const/mcpTools";
+import {
+  MCP_GRID_CARD_OUTER,
+  MCP_GRID_CARD_OUTER_STYLE,
+} from "@/const/mcpTools";
 import {
   formatRegistryDate,
   formatRegistryVersion,
@@ -25,7 +28,11 @@ export default function McpCommunityCard({
   const tags = service.tags || [];
 
   return (
-    <div onClick={() => onSelect(service)} className={MCP_GRID_CARD_OUTER}>
+    <div
+      onClick={() => onSelect(service)}
+      className={MCP_GRID_CARD_OUTER}
+      style={MCP_GRID_CARD_OUTER_STYLE}
+    >
       <div className="flex shrink-0 items-start justify-between gap-2">
         <h3
           className="min-w-0 truncate text-base font-semibold text-slate-900"
@@ -45,9 +52,14 @@ export default function McpCommunityCard({
         </span>
       </div>
 
-      <p className="mt-1 min-h-0 flex-1 overflow-hidden break-all text-sm text-slate-600 line-clamp-3">
-        {service.description}
-      </p>
+      <div className="mt-1 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <p
+          className="line-clamp-2 min-w-0 break-all text-sm leading-relaxed text-slate-600"
+          title={service.description}
+        >
+          {service.description || "-"}
+        </p>
+      </div>
 
       <div className="mt-1 flex min-h-0 max-h-16 shrink-0 flex-wrap content-start gap-1 overflow-hidden">
         <Tag className="m-0">{transportLabel}</Tag>

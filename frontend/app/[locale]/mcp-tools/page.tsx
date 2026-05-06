@@ -294,7 +294,7 @@ function SearchAndFilterRow({
 function ResponsiveCardGrid({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="grid h-56 gap-4"
+      className="grid gap-4"
       style={{
         gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
       }}
