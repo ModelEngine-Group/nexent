@@ -385,15 +385,12 @@ MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
 
-# Northbound API External URL (used for A2A Agent Card URLs)
-# When accessed through reverse proxy, set this to the public-facing URL
-# Falls back to http://localhost:5013 for local development
-_northbound_url = os.getenv("NORTHBOUND_EXTERNAL_URL", "")
-NORTHBOUND_EXTERNAL_URL = _northbound_url.rstrip("/") if _northbound_url else "http://localhost:5013"
+# Northbound API public base URL (used for A2A agent cards and external file proxy links)
+NORTHBOUND_EXTERNAL_URL = os.getenv("NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
 
 
 # APP Version
-APP_VERSION = "v2.0.2"
+APP_VERSION = "v2.1.0"
 
 
 # Skill Creation Streaming Configuration

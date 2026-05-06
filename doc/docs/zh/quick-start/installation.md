@@ -1,13 +1,16 @@
-# 安装部署
+# 基于 Docker 安装部署
 
 ## 🎯 系统要求
 
-| 资源 | 最低要求 |
-|----------|---------|
-| **CPU**  | 2 核 |
-| **内存**  | 6 GiB   |
-| **架构** | x86_64 / ARM64 |
-| **软件** | 已安装 Docker 和 Docker Compose |
+| 资源 | 最低要求 | 推荐配置 |
+|----------|---------|-------------|
+| **CPU**  | 4 核 | 8 核 |
+| **内存**  | 8 GiB | 16 GiB |
+| **磁盘** | 40 GiB | 100 GiB |
+| **架构** | x86_64 / ARM64 | |
+| **软件** | 已安装 Docker 和 Docker Compose | Docker 24+, Docker Compose v2+ |
+
+> **💡 注意**：推荐的 **8 核 16 GiB 内存** 配置可确保生产环境下的良好性能。
 
 ## 🚀 快速开始
 
@@ -45,7 +48,8 @@ bash deploy.sh
 - **区域优化**: 中国大陆用户可使用优化的镜像源
 
 
-### ⚠️ 重要提示
+#### ⚠️ 重要提示
+
 1️⃣ **首次部署 v1.8.0 及以上版本时**，需特别留意 Docker 日志中输出的 `suadmin` 超级管理员账号信息。该账号为系统最高权限账户，密码仅在首次生成时显示，后续无法再次查看，请务必妥善保存。
 > 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/user-management)
 
@@ -55,16 +59,16 @@ bash deploy.sh
 docker exec -it supabase-db-mini bash
 psql -U postgres
 select id, email from auth.users;
-#获取到suadmin@nexent.com账号的user_id
-delete from auth.users where id = '你的user_id';
-delete from auth.identities where user_id = '你的user_id';
+# 获取 suadmin@nexent.com 账号的 user_id
+delete from auth.users where id = 'your_user_id';
+delete from auth.identities where user_id = 'your_user_id';
 
-#Step2：在nexent的数据库中删除su账号记录
+# Step 2: 在 nexent 数据库中删除 su 账号记录
 docker exec -it nexent-postgresql bash
 psql -U root -d nexent
-delete from nexent.user_tenant_t where user_id = '你的user_id';
+delete from nexent.user_tenant_t where user_id = 'your_user_id';
 
-#Step3：重新部署并记录su账号密码
+# Step 3: 重新部署并记录 su 账号密码
 ```
 ### 3. 访问您的安装
 
@@ -73,26 +77,54 @@ delete from nexent.user_tenant_t where user_id = '你的user_id';
 2. 登录超级管理员账号
 3. 访问租户资源 → 创建租户及租户管理员
 4. 登录租户管理员账号
-2. 参考 [用户指南](../user-guide/home-page) 进行智能体的开发
+5. 参考 [用户指南](../user-guide/home-page) 进行智能体的开发
 
 
 ## 📦 服务架构
 
-Nexent 采用微服务架构，包含以下核心服务：
+Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 
-**核心服务:**
-- `nexent`: 后端服务 (端口 5010)
-- `nexent-web`: 前端界面 (端口 3000)
-- `nexent-data-process`: 数据处理服务 (端口 5012)
+**应用服务:**
+| 服务 | 描述 | 默认端口 |
+|---------|-------------|--------------|
+| nexent | 后端服务 | 5010 |
+| nexent-web | Web 前端 | 3000 |
+| nexent-data-process | 数据处理服务 | 5012 |
+| nexent-northbound | 北向 API 服务 | 5013 |
 
 **基础设施服务:**
-- `nexent-postgresql`: 数据库 (端口 5434)
-- `nexent-elasticsearch`: 搜索引擎 (端口 9210)
-- `nexent-minio`: 对象存储 (端口 9010，控制台 9011)
-- `redis`: 缓存服务 (端口 6379)
+| 服务 | 描述 |
+|---------|-------------|
+| nexent-postgresql | 关系型数据库 |
+| nexent-elasticsearch | 搜索引擎和索引服务 |
+| nexent-minio | S3 兼容对象存储 |
+| redis | 缓存层 |
+
+**Supabase 服务（完整版独有）:**
+| 服务 | 描述 |
+|---------|-------------|
+| supabase-kong | API 网关 |
+| supabase-auth | 认证服务 |
+| supabase-db-mini | 数据库服务 |
 
 **可选服务:**
-- `nexent-openssh-server`: 终端工具的 SSH 服务器 (端口 2222)
+| 服务 | 描述 |
+|---------|-------------|
+| nexent-openssh-server | AI 智能体 SSH 终端 |
+
+## 💾 数据持久化
+
+Nexent 使用 Docker volumes 进行数据持久化：
+
+| 数据类型 | Volume 名称 | 默认宿主机路径 |
+|-----------|------------------|-------------------|
+| PostgreSQL | nexent-postgresql-data | `{dataDir}/postgresql` |
+| Elasticsearch | nexent-elasticsearch-data | `{dataDir}/elasticsearch` |
+| Redis | nexent-redis-data | `{dataDir}/redis` |
+| MinIO | nexent-minio-data | `{dataDir}/minio` |
+| Supabase DB（完整版）| nexent-supabase-db-data | `{dataDir}/supabase-db` |
+
+默认 `dataDir` 为 `./volumes`（可在 `.env` 中配置 `ROOT_DIR`）。
 
 ## 🔌 端口映射
 
@@ -101,6 +133,7 @@ Nexent 采用微服务架构，包含以下核心服务：
 | Web 界面 | 3000 | 3000 | 主应用程序访问 |
 | 后端 API | 5010 | 5010 | 后端服务 |
 | 数据处理 | 5012 | 5012 | 数据处理 API |
+| 北向 API | 5013 | 5013 | 北向接口服务 (A2A/MCP 集成) |
 | PostgreSQL | 5432 | 5434 | 数据库连接 |
 | Elasticsearch | 9200 | 9210 | 搜索引擎 API |
 | MinIO API | 9000 | 9010 | 对象存储 API |
@@ -109,6 +142,32 @@ Nexent 采用微服务架构，包含以下核心服务：
 | SSH 服务器 | 22 | 2222 | 终端工具访问 |
 
 有关完整的端口映射详细信息，请参阅我们的 [开发容器指南](../deployment/devcontainer.md#port-mapping)。
+
+## 🔧 高级配置
+
+### 北向接口配置 (NORTHBOUND_EXTERNAL_URL)
+
+如果您需要使用以下功能，需要配置 `NORTHBOUND_EXTERNAL_URL` 环境变量：
+
+1. **A2A 协议集成** - 第三方系统通过 A2A 协议调用 Nexent 智能体
+2. **MCP 工具访问** - 使用第三方 MCP 工具访问 Nexent 文档文件等资源
+
+**配置方法：**
+
+在 `.env` 文件中设置公网可访问的 URL：
+
+```bash
+# 格式：协议://主机:端口/api
+# 本地开发（默认）:
+NORTHBOUND_EXTERNAL_URL=http://localhost:5013/api
+
+# 生产环境 - 使用您的公网 IP 或域名:
+NORTHBOUND_EXTERNAL_URL=http://your-public-ip:5013/api
+# 或
+NORTHBOUND_EXTERNAL_URL=https://api.yourdomain.com/api
+```
+
+> **重要**: URL 必须包含 `/api` 后缀，因为 Northbound 服务使用 FastAPI 的 `root_path="/api"` 配置。
 
 ## 💡 需要帮助
 

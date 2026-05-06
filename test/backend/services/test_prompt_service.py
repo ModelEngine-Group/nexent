@@ -1245,8 +1245,9 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         template_vars = mock_template_instance.render.call_args[0][0]
-        # knowledge_base_names should not be in template vars when not provided
-        self.assertNotIn("knowledge_base_names", template_vars)
+        # knowledge_base_names is always present but empty when not provided
+        self.assertIn("knowledge_base_names", template_vars)
+        self.assertEqual(template_vars["knowledge_base_names"], "")
 
     @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.prompt_service.query_tool_instances_by_id')

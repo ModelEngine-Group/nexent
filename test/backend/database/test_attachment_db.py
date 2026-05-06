@@ -147,8 +147,8 @@ class TestUploadFile:
         assert result['file_size'] == 1024
         assert 'url' in result
         assert 'presigned_url' in result
-        assert result['presigned_url'] == 'http://minio:9000/presigned-url?signature=xxx'
-        assert result['presigned_url_expires_in'] == 86400
+        # presigned_url is now wrapped with MCP proxy prefix and URL-encoded
+        assert 'presigned-url' in result['presigned_url']
         assert 'upload_time' in result
         minio_client_mock.upload_file.assert_called_once_with(
             '/path/to/test.txt', 'attachments/test.txt', 'bucket'
@@ -225,7 +225,6 @@ class TestUploadFile:
         result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket', presigned_url_expires=7200)
 
         assert result['success'] is True
-        assert result['presigned_url_expires_in'] == 7200
         mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
 
     @patch('backend.database.attachment_db.get_file_url')
@@ -270,8 +269,8 @@ class TestUploadFileobj:
         assert result['file_size'] == len(b'test data')
         assert 'url' in result
         assert 'presigned_url' in result
-        assert result['presigned_url'] == 'http://minio:9000/presigned-url?signature=xxx'
-        assert result['presigned_url_expires_in'] == 86400
+        # presigned_url is now wrapped with MCP proxy prefix and URL-encoded
+        assert 'presigned-url' in result['presigned_url']
         assert 'upload_time' in result
         mock_generate.assert_called_once_with('test.txt', prefix='attachments')
         minio_client_mock.upload_fileobj.assert_called_once()
@@ -341,7 +340,6 @@ class TestUploadFileobj:
         result = upload_fileobj(file_obj, 'test.txt', 'bucket', presigned_url_expires=7200)
 
         assert result['success'] is True
-        assert result['presigned_url_expires_in'] == 7200
         mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
 
     @patch('backend.database.attachment_db.generate_object_name')
@@ -497,6 +495,38 @@ class TestGetFileSizeFromMinio:
             'attachments/test.txt', 'test-bucket'
         )
 
+    @patch('backend.database.attachment_db.minio_client')
+    def test_get_file_size_from_minio_calls_ensure_initialized(self, mock_client):
+        """Test get_file_size_from_minio calls _ensure_initialized before accessing storage_config.
+
+        Regression test: prior to the fix, accessing storage_config without calling
+        _ensure_initialized() first would raise AttributeError when the MinioClient
+        singleton was not yet initialized (lazy init).
+        """
+        # Simulate uninitialized client: _storage_client is None, so _ensure_initialize
+        # must be called before storage_config can be accessed.
+        mock_client._storage_client = None
+        mock_client._ensure_initialized = MagicMock(return_value=False)
+        mock_client.storage_config.default_bucket = 'default-bucket'
+        mock_client.get_file_size.return_value = 4096
+
+        size = get_file_size_from_minio('attachments/test.txt')
+
+        mock_client._ensure_initialized.assert_called_once()
+        assert size == 4096
+        mock_client.get_file_size.assert_called_once_with('attachments/test.txt', 'default-bucket')
+
+    @patch('backend.database.attachment_db.minio_client')
+    def test_get_file_size_from_minio_with_explicit_bucket(self, mock_client):
+        """Test get_file_size_from_minio uses explicit bucket when provided."""
+        mock_client._ensure_initialized = MagicMock()
+        mock_client.get_file_size.return_value = 2048
+
+        size = get_file_size_from_minio('attachments/test.txt', bucket='explicit-bucket')
+
+        mock_client._ensure_initialized.assert_called_once()
+        mock_client.get_file_size.assert_called_once_with('attachments/test.txt', 'explicit-bucket')
+
 
 class TestListFiles:
     """Test cases for list_files function"""
@@ -588,6 +618,36 @@ class TestDeleteFile:
 
         assert result['success'] is False
         assert result['error'] == 'Delete failed'
+
+    @patch('backend.database.attachment_db.minio_client')
+    def test_delete_file_calls_ensure_initialized_when_using_default_bucket(self, mock_client):
+        """Test delete_file calls _ensure_initialized before accessing storage_config when no bucket provided.
+
+        Regression test: prior to the fix, accessing storage_config without calling
+        _ensure_initialized() first would raise AttributeError when the MinioClient
+        singleton was not yet initialized (lazy init).
+        """
+        mock_client._storage_client = None
+        mock_client._ensure_initialized = MagicMock(return_value=False)
+        mock_client.storage_config.default_bucket = 'default-bucket'
+        mock_client.delete_file.return_value = (True, 'Deleted')
+
+        result = delete_file('attachments/test.txt')
+
+        mock_client._ensure_initialized.assert_called_once()
+        mock_client.delete_file.assert_called_once_with('attachments/test.txt', 'default-bucket')
+        assert result['success'] is True
+
+    @patch('backend.database.attachment_db.minio_client')
+    def test_delete_file_skips_init_when_bucket_provided(self, mock_client):
+        """Test delete_file does not call _ensure_initialized when bucket is provided."""
+        mock_client._ensure_initialized = MagicMock()
+        mock_client.delete_file.return_value = (True, 'Deleted')
+
+        result = delete_file('attachments/test.txt', bucket='explicit-bucket')
+
+        mock_client._ensure_initialized.assert_not_called()
+        mock_client.delete_file.assert_called_once_with('attachments/test.txt', 'explicit-bucket')
 
 
 class TestGetFileStream:
