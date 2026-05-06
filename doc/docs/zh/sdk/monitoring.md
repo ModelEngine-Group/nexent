@@ -16,16 +16,75 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 
 ```bash
 cd docker
-cp .env.example .env
+cp monitoring/monitoring.env.example monitoring/monitoring.env
 
-vim .env
+vim monitoring/monitoring.env
 ENABLE_TELEMETRY=true
 MONITORING_PROVIDER=otlp
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
 
-docker-compose -f docker-compose-monitoring.yml up -d
+./start-monitoring.sh --stack collector
 ```
+
+## 本地化部署形态
+
+`docker/start-monitoring.sh` 支持三种形态，均以 OpenTelemetry Collector 作为统一入口。业务服务只需要把 OTLP 发到 Collector，不需要感知后端平台差异。
+
+| 形态 | 命令 | 包含服务 | 适用场景 |
+|------|------|----------|----------|
+| `collector` | `./start-monitoring.sh --stack collector` | OpenTelemetry Collector | 只验证埋点、或转发到外部云端平台 |
+| `phoenix` | `./start-monitoring.sh --stack phoenix` | Collector + Phoenix | 本地 trace 调试、OpenInference 属性查看、实验分析 |
+| `langfuse` | `./start-monitoring.sh --stack langfuse` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | 本地完整 LLMOps 体验、会话/用户/反馈/成本分析 |
+
+也可以在 `docker/monitoring/monitoring.env` 中设置默认形态：
+
+```bash
+MONITORING_STACK=phoenix
+```
+
+### 本地 Phoenix
+
+Phoenix 本地部署使用 `arizephoenix/phoenix` 镜像，默认 UI 端口为 `6006`，gRPC OTLP 端口映射为 `4319`，数据持久化到 Docker volume `phoenix-data`。
+
+```bash
+cd docker
+./start-monitoring.sh --stack phoenix
+```
+
+访问地址：
+
+- Phoenix UI：`http://localhost:6006`
+- Collector OTLP HTTP：`http://localhost:4318`
+- Collector OTLP gRPC：`localhost:4317`
+
+Nexent 后端在 Docker 网络内运行时：
+
+```bash
+ENABLE_TELEMETRY=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http
+OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+```
+
+后端直接在宿主机运行时，把 endpoint 改为 `http://localhost:4318`。
+
+### 本地 Langfuse
+
+Langfuse 本地部署使用 v3 架构：Web、Worker、Postgres、ClickHouse、MinIO、Redis。默认 UI 端口为 `3001`，初始化项目和 API Key 来自 `monitoring.env`。
+
+```bash
+cd docker
+./start-monitoring.sh --stack langfuse
+```
+
+访问地址：
+
+- Langfuse UI：`http://localhost:3001`
+- 默认管理员：`admin@nexent.local` / `nexent-langfuse-admin`
+- 默认项目 Key：`pk-lf-nexent-local` / `sk-lf-nexent-local`
+
+启动脚本会在 `LANGFUSE_OTLP_AUTH_HEADER` 为空时自动生成 `Basic base64(public_key:secret_key)`，并让 Collector 将 trace 转发到 `http://langfuse-web:3000/api/public/otel`。本地默认密钥只适合开发验证，生产部署必须替换 `LANGFUSE_NEXTAUTH_SECRET`、`LANGFUSE_SALT`、`LANGFUSE_ENCRYPTION_KEY`、数据库密码和对象存储密钥。
 
 ## AI 可观测性平台对接
 
@@ -240,7 +299,12 @@ service:
       exporters: [otlphttp/langfuse, logging]
 ```
 
-完整配置见 `docker/monitoring/otel-collector-config.yml`。
+本地 Phoenix 和 Langfuse 分别使用独立 Collector 配置：
+
+- `docker/monitoring/otel-collector-phoenix-config.yml`
+- `docker/monitoring/otel-collector-langfuse-config.yml`
+
+基础 logging 配置见 `docker/monitoring/otel-collector-config.yml`。
 
 ## 优雅降级
 

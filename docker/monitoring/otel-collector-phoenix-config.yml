@@ -1,0 +1,48 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 512
+
+  memory_limiter:
+    limit_mib: 256
+    check_interval: 1s
+
+  resource:
+    attributes:
+      - key: service.name
+        value: nexent-backend
+        action: upsert
+      - key: service.version
+        from_attribute: version
+        action: insert
+
+exporters:
+  logging:
+    verbosity: normal
+
+  otlphttp/phoenix:
+    endpoint: http://phoenix:6006
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/phoenix, logging]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [logging]
+
+  telemetry:
+    logs:
+      level: "info"

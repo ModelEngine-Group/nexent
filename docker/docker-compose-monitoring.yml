@@ -4,14 +4,209 @@ services:
     container_name: nexent-otel-collector
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
-      - ./monitoring/otel-collector-config.yml:/etc/otel-collector-config.yml
+      - ${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-config.yml}:/etc/otel-collector-config.yml
     ports:
-      - "4317:4317"
-      - "4318:4318"
+      - "${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"
+      - "${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"
     networks:
       - nexent-network
     restart: unless-stopped
 
+  phoenix:
+    image: arizephoenix/phoenix:${PHOENIX_VERSION:-latest}
+    container_name: nexent-phoenix
+    profiles: ["phoenix"]
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenix-data:/mnt/data
+    ports:
+      - "${PHOENIX_PORT:-6006}:6006"
+      - "${PHOENIX_GRPC_HOST_PORT:-4319}:4317"
+    networks:
+      - nexent-network
+    restart: unless-stopped
+
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:${LANGFUSE_VERSION:-3}
+    container_name: nexent-langfuse-worker
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    depends_on: &langfuse-depends-on
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+    environment: &langfuse-env
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3001}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-nexent-langfuse-secret}
+      DATABASE_URL: postgresql://${LANGFUSE_POSTGRES_USER:-postgres}:${LANGFUSE_POSTGRES_PASSWORD:-postgres}@langfuse-postgres:5432/${LANGFUSE_POSTGRES_DB:-postgres}
+      SALT: ${LANGFUSE_SALT:-nexent-langfuse-salt}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-myredissecret}
+      REDIS_TLS_ENABLED: "false"
+      LANGFUSE_USE_AZURE_BLOB: "false"
+      LANGFUSE_USE_OCI_NATIVE_OBJECT_STORAGE: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_ROOT_PASSWORD:-miniosecret}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET:-langfuse}
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_ROOT_PASSWORD:-miniosecret}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:${LANGFUSE_MINIO_API_PORT:-9092}
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      LANGFUSE_S3_BATCH_EXPORT_BUCKET: ${LANGFUSE_S3_BUCKET:-langfuse}
+      LANGFUSE_S3_BATCH_EXPORT_REGION: auto
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: http://localhost:${LANGFUSE_MINIO_API_PORT:-9092}
+      LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${LANGFUSE_MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_ROOT_PASSWORD:-miniosecret}
+      LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
+    networks:
+      - nexent-network
+
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:${LANGFUSE_VERSION:-3}
+    container_name: nexent-langfuse-web
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    depends_on: *langfuse-depends-on
+    environment:
+      <<: *langfuse-env
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-nexent}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-Nexent}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-nexent-local}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-Nexent Local}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-pk-lf-nexent-local}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-sk-lf-nexent-local}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@nexent.local}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-Nexent Admin}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-nexent-langfuse-admin}
+    ports:
+      - "${LANGFUSE_PORT:-3001}:3000"
+    networks:
+      - nexent-network
+
+  langfuse-clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:${LANGFUSE_CLICKHOUSE_VERSION:-latest}
+    container_name: nexent-langfuse-clickhouse
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+    volumes:
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+      - langfuse-clickhouse-logs:/var/log/clickhouse-server
+    ports:
+      - "127.0.0.1:${LANGFUSE_CLICKHOUSE_HTTP_PORT:-8124}:8123"
+      - "127.0.0.1:${LANGFUSE_CLICKHOUSE_NATIVE_PORT:-9002}:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+    networks:
+      - nexent-network
+
+  langfuse-minio:
+    image: docker.io/minio/minio:${LANGFUSE_MINIO_VERSION:-latest}
+    container_name: nexent-langfuse-minio
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/${LANGFUSE_S3_BUCKET:-langfuse} && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${LANGFUSE_MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_ROOT_PASSWORD:-miniosecret}
+    ports:
+      - "${LANGFUSE_MINIO_API_PORT:-9092}:9000"
+      - "127.0.0.1:${LANGFUSE_MINIO_CONSOLE_PORT:-9093}:9001"
+    volumes:
+      - langfuse-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    networks:
+      - nexent-network
+
+  langfuse-redis:
+    image: docker.io/redis:7
+    container_name: nexent-langfuse-redis
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    command: >
+      --requirepass ${LANGFUSE_REDIS_AUTH:-myredissecret}
+      --maxmemory-policy noeviction
+    ports:
+      - "127.0.0.1:${LANGFUSE_REDIS_PORT:-6380}:6379"
+    volumes:
+      - langfuse-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${LANGFUSE_REDIS_AUTH:-myredissecret} ping | grep PONG"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    networks:
+      - nexent-network
+
+  langfuse-postgres:
+    image: docker.io/postgres:${LANGFUSE_POSTGRES_VERSION:-17}
+    container_name: nexent-langfuse-postgres
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${LANGFUSE_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${LANGFUSE_POSTGRES_DB:-postgres}
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "127.0.0.1:${LANGFUSE_POSTGRES_PORT:-5440}:5432"
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LANGFUSE_POSTGRES_USER:-postgres}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - nexent-network
+
 networks:
   nexent-network:
     external: true
+
+volumes:
+  phoenix-data:
+  langfuse-postgres-data:
+  langfuse-clickhouse-data:
+  langfuse-clickhouse-logs:
+  langfuse-minio-data:
+  langfuse-redis-data:

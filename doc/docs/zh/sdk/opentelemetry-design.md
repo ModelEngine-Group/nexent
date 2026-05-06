@@ -26,7 +26,7 @@ Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成
 | 自动埋点 | FastAPI instrumentation、requests instrumentation |
 | AI 语义 | OpenInference 风格属性：`llm.*`、`agent.*`、`agent.tool.*` |
 | 配置 | 环境变量、`MONITORING_CONFIG_FILE` JSON/YAML |
-| Collector | `otel/opentelemetry-collector-contrib`，使用 `otlphttp` 转发 HTTP 平台 |
+| Collector | `otel/opentelemetry-collector-contrib`，使用 `otlphttp` 转发 HTTP 平台；本地可选择 logging、Phoenix、Langfuse 三类部署形态 |
 | 可选 SDK | `phoenix.otel.register`、`langfuse.get_client`，默认不启用；Phoenix SDK 成功注册时复用其 tracer provider |
 
 ## 配置模型
@@ -38,6 +38,7 @@ Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成
 | `ENABLE_TELEMETRY` | 总开关 |
 | `MONITORING_CONFIG_FILE` | JSON/YAML 配置文件路径 |
 | `MONITORING_PROVIDER` | `otlp`、`phoenix`、`langfuse`、`jaeger`、`custom` |
+| `MONITORING_STACK` | 本地部署形态：`collector`、`phoenix`、`langfuse` |
 | `MONITORING_USE_PLATFORM_SDK` | 是否额外初始化平台 SDK |
 | `MONITORING_PROJECT_NAME` | 平台项目名 |
 | `OTEL_SERVICE_NAME` | OpenTelemetry service name |
@@ -126,6 +127,67 @@ OTEL_EXPORTER_OTLP_AUTHORIZATION="Basic BASE64_PUBLIC_SECRET"
 OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION=4
 OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 ```
+
+## 本地化部署设计
+
+本地化部署通过 `docker/start-monitoring.sh` 选择形态。所有形态都保留 OpenTelemetry Collector 作为入口，Nexent 后端统一上报到 `http://otel-collector:4318` 或宿主机的 `http://localhost:4318`，平台差异只体现在 Collector exporter 和本地服务组合上。
+
+| 形态 | Collector 配置 | 本地服务 | 数据去向 | 说明 |
+|------|----------------|----------|----------|------|
+| `collector` | `otel-collector-config.yml` | Collector | logging exporter | 最小形态，用于验证 span/metric 是否产生，或手动改配置转发到云端平台 |
+| `phoenix` | `otel-collector-phoenix-config.yml` | Collector + Phoenix | `http://phoenix:6006/v1/traces` | Phoenix 容器同时提供 UI 和 OTLP HTTP/gRPC trace collector，适合本地 trace debug |
+| `langfuse` | `otel-collector-langfuse-config.yml` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | `http://langfuse-web:3000/api/public/otel/v1/traces` | Langfuse v3 依赖多组件，适合完整 LLMOps 能力验证 |
+
+启动命令：
+
+```bash
+cd docker
+./start-monitoring.sh --stack collector
+./start-monitoring.sh --stack phoenix
+./start-monitoring.sh --stack langfuse
+```
+
+部署脚本职责：
+
+- 创建或复用 `nexent-network`。
+- 首次启动时从 `monitoring.env.example` 生成 `monitoring.env`。
+- 根据 `MONITORING_STACK` 或 `--stack` 选择 Docker Compose profile。
+- 根据部署形态设置 `OTEL_COLLECTOR_CONFIG_FILE`。
+- Langfuse 本地形态下，如果 `LANGFUSE_OTLP_AUTH_HEADER` 未显式配置，则使用初始化项目的 public/secret key 生成 Basic Auth header。
+
+### Phoenix 本地形态
+
+Phoenix 使用 `arizephoenix/phoenix` 镜像，默认暴露：
+
+| 端口 | 用途 |
+|------|------|
+| `6006` | Phoenix UI 和 OTLP HTTP `/v1/traces` |
+| `4319` | 映射到容器内 gRPC OTLP `4317`，避免与 Collector gRPC 端口冲突 |
+
+Compose 中设置 `PHOENIX_WORKING_DIR=/mnt/data` 并挂载 `phoenix-data` volume，确保本地重启后 trace 数据不丢失。Collector 使用 `otlphttp/phoenix` exporter 的 base endpoint `http://phoenix:6006`，由 Collector 按 OTLP HTTP 规则追加 `/v1/traces`。
+
+### Langfuse 本地形态
+
+Langfuse v3 本地形态按官方自托管架构拆分为应用容器和存储组件：
+
+| 组件 | 用途 |
+|------|------|
+| `langfuse-web` | UI、API、OTLP HTTP ingestion |
+| `langfuse-worker` | 异步消费和处理 trace 事件 |
+| `langfuse-postgres` | 事务型元数据 |
+| `langfuse-clickhouse` | trace/observation/score 分析数据 |
+| `langfuse-minio` | S3 兼容对象存储，保存事件和大对象 |
+| `langfuse-redis` | 队列和缓存 |
+
+初始化参数通过 `LANGFUSE_INIT_*` 配置，默认创建 `nexent-local` 项目和本地 API Key。Collector 使用 `otlphttp/langfuse` exporter，endpoint 为 `http://langfuse-web:3000/api/public/otel`，并携带：
+
+```yaml
+headers:
+  Authorization: ${env:LANGFUSE_OTLP_AUTH_HEADER}
+  x-langfuse-ingestion-version: "4"
+```
+
+默认密钥仅用于本地验证。生产或共享环境必须替换认证密钥、数据库密码、对象存储密钥和 `LANGFUSE_ENCRYPTION_KEY`，并补充备份、高可用和升级策略。
 
 ## 埋点信息
 
@@ -251,5 +313,9 @@ flowchart TB
 - Phoenix Setup Tracing: https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing
 - Phoenix Setup OTEL: https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-using-phoenix-otel
 - Phoenix Authentication: https://arize.com/docs/phoenix/deployment/authentication
+- Phoenix Self-Hosting: https://arize.com/docs/phoenix/self-hosting
+- Phoenix Docker Deployment: https://arize.com/docs/phoenix/self-hosting/deployment-options/docker
 - Langfuse OpenTelemetry: https://langfuse.com/integrations/native/opentelemetry
+- Langfuse Self-Hosting: https://langfuse.com/self-hosting
+- Langfuse Docker Compose: https://langfuse.com/self-hosting/local
 - Langfuse Overview: https://langfuse.com/docs
