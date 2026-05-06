@@ -166,5 +166,14 @@ planning:
 
 final_answer:
   pre_messages: |-
+    You have reached the maximum step limit. Please provide a comprehensive summary of:
+    1. What has been accomplished so far
+    2. Key findings or results
+    3. Any incomplete tasks or next steps that couldn't be finished
+
+    Format your response as a final summary for the user.
 
   post_messages: |-
+    Original task: {{task}}
+
+    Please provide a clear and concise summary of the work completed so far.
