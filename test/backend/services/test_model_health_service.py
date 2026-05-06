@@ -264,38 +264,6 @@ async def test_perform_connectivity_check_vlm():
 
 
 @pytest.mark.asyncio
-async def test_perform_connectivity_check_tts():
-    # Setup
-    with mock.patch("backend.services.model_health_service.get_voice_service") as mock_get_voice_service:
-        mock_service_instance = mock.MagicMock()
-        # Fix: make check_voice_connectivity return an awaitable coroutine instead of a bool
-        async_mock = mock.AsyncMock()
-        async_mock.return_value = True
-        mock_service_instance.check_voice_connectivity = async_mock
-        mock_get_voice_service.return_value = mock_service_instance
-
-        # Execute
-        result = await _perform_connectivity_check(
-            "tts-1",
-            "tts",
-            "https://api.openai.com",
-            "test-key",
-        )
-
-        # Assert
-        assert result is True
-        mock_service_instance.check_voice_connectivity.assert_called_once_with(
-            model_type="tts",
-            stt_config={
-                "model_factory": None,
-                "api_key": "test-key",
-                "voice_type": "longxia",
-                "model": "tts-1"
-            }
-        )
-
-
-@pytest.mark.asyncio
 async def test_perform_connectivity_check_stt():
     # Setup
     with mock.patch("backend.services.model_health_service.get_voice_service") as mock_get_voice_service:

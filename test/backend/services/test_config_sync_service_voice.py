@@ -1,6 +1,6 @@
 """
-Unit tests for config_sync_service STT/TTS model config saving.
-These tests cover the STT and TTS specific fields in save_config_impl.
+Unit tests for config_sync_service STT model config saving.
+These tests cover the STT specific fields in save_config_impl.
 """
 import sys
 from unittest.mock import patch, MagicMock
@@ -145,149 +145,8 @@ class TestSaveConfigSTTModel:
         # accessToken should not be saved
 
 
-class TestSaveConfigTTSModel:
-    """Tests for save_config_impl with TTS model configuration."""
-
-    @pytest.mark.asyncio
-    async def test_save_config_impl_with_tts_model(self, service_mocks):
-        """Test saving configuration with TTS model."""
-        config = MagicMock()
-        config_dict = {
-            "app": {
-                "name": "Test App"
-            },
-            "models": {
-                "tts": {
-                    "displayName": "TTS Model",
-                    "modelFactory": "dashscope",
-                    "modelAppid": "tts_appid_123",
-                    "accessToken": "tts_token_456"
-                }
-            }
-        }
-        config.model_dump.return_value = config_dict
-
-        tenant_id = "test_tenant_id"
-        user_id = "test_user_id"
-
-        service_mocks['tenant_config_manager'].load_config.return_value = {}
-        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
-        service_mocks['safe_value'].side_effect = lambda value: str(value) if value is not None else ""
-        service_mocks['get_model_id'].return_value = "tts-model-id"
-
-        result = await save_config_impl(config, tenant_id, user_id)
-
-        assert result is None
-        # Verify TTS specific fields are saved
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "TTS_MODEL_FACTORY", "dashscope"
-        )
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "TTS_MODEL_APPID", "tts_appid_123"
-        )
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "TTS_ACCESS_TOKEN", "tts_token_456"
-        )
-
-    @pytest.mark.asyncio
-    async def test_save_config_impl_tts_partial_fields(self, service_mocks):
-        """Test saving configuration with TTS model and partial fields."""
-        config = MagicMock()
-        config_dict = {
-            "app": {
-                "name": "Test App"
-            },
-            "models": {
-                "tts": {
-                    "displayName": "TTS Model",
-                    "accessToken": "tts_token_456"
-                    # modelFactory and modelAppid are missing
-                }
-            }
-        }
-        config.model_dump.return_value = config_dict
-
-        tenant_id = "test_tenant_id"
-        user_id = "test_user_id"
-
-        service_mocks['tenant_config_manager'].load_config.return_value = {}
-        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
-        service_mocks['safe_value'].side_effect = lambda value: str(value) if value is not None else ""
-        service_mocks['get_model_id'].return_value = "tts-model-id"
-
-        result = await save_config_impl(config, tenant_id, user_id)
-
-        assert result is None
-        # Verify only provided TTS fields are saved
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "TTS_ACCESS_TOKEN", "tts_token_456"
-        )
-        # modelFactory and modelAppid should not be saved
-
-
-class TestSaveConfigBothSTTAndTTS:
-    """Tests for save_config_impl with both STT and TTS models."""
-
-    @pytest.mark.asyncio
-    async def test_save_config_impl_with_stt_and_tts(self, service_mocks):
-        """Test saving configuration with both STT and TTS models."""
-        config = MagicMock()
-        config_dict = {
-            "app": {
-                "name": "Test App"
-            },
-            "models": {
-                "stt": {
-                    "displayName": "STT Model",
-                    "modelFactory": "volc",
-                    "modelAppid": "stt_appid_123",
-                    "accessToken": "stt_token_456"
-                },
-                "tts": {
-                    "displayName": "TTS Model",
-                    "modelFactory": "dashscope",
-                    "modelAppid": "tts_appid_789",
-                    "accessToken": "tts_token_789"
-                }
-            }
-        }
-        config.model_dump.return_value = config_dict
-
-        tenant_id = "test_tenant_id"
-        user_id = "test_user_id"
-
-        service_mocks['tenant_config_manager'].load_config.return_value = {}
-        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
-        service_mocks['safe_value'].side_effect = lambda value: str(value) if value is not None else ""
-        service_mocks['get_model_id'].return_value = "model-id"
-
-        result = await save_config_impl(config, tenant_id, user_id)
-
-        assert result is None
-        # Verify STT fields are saved
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "STT_MODEL_FACTORY", "volc"
-        )
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "STT_MODEL_APPID", "stt_appid_123"
-        )
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "STT_ACCESS_TOKEN", "stt_token_456"
-        )
-        # Verify TTS fields are saved
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "TTS_MODEL_FACTORY", "dashscope"
-        )
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "TTS_MODEL_APPID", "tts_appid_789"
-        )
-        service_mocks['tenant_config_manager'].set_single_config.assert_any_call(
-            user_id, tenant_id, "TTS_ACCESS_TOKEN", "tts_token_789"
-        )
-
-
-class TestBuildModelConfigSTTAndTTS:
-    """Tests for build_model_config with STT and TTS model types."""
+class TestBuildModelConfigSTT:
+    """Tests for build_model_config with STT model types."""
 
     def test_build_model_config_stt(self, service_mocks):
         """Test build_model_config with STT model."""
@@ -309,26 +168,6 @@ class TestBuildModelConfigSTTAndTTS:
         assert result["modelAppid"] == "stt_appid"
         assert result["accessToken"] == "stt_token"
 
-    def test_build_model_config_tts(self, service_mocks):
-        """Test build_model_config with TTS model."""
-        model_config = {
-            "display_name": "TTS Model",
-            "api_key": "test-key",
-            "base_url": "https://tts.example.com",
-            "model_type": "tts",
-            "model_factory": "dashscope",
-            "model_appid": "tts_appid",
-            "access_token": "tts_token"
-        }
-
-        service_mocks['get_model_name'].return_value = "tts-model"
-
-        result = build_model_config(model_config)
-
-        assert result["modelFactory"] == "dashscope"
-        assert result["modelAppid"] == "tts_appid"
-        assert result["accessToken"] == "tts_token"
-
     def test_build_model_config_stt_empty_fields(self, service_mocks):
         """Test build_model_config with STT model and empty voice fields."""
         model_config = {
@@ -337,21 +176,6 @@ class TestBuildModelConfigSTTAndTTS:
         }
 
         service_mocks['get_model_name'].return_value = "stt-model"
-
-        result = build_model_config(model_config)
-
-        assert result["modelFactory"] == ""
-        assert result["modelAppid"] == ""
-        assert result["accessToken"] == ""
-
-    def test_build_model_config_tts_empty_fields(self, service_mocks):
-        """Test build_model_config with TTS model and empty voice fields."""
-        model_config = {
-            "display_name": "TTS Model",
-            "model_type": "tts"
-        }
-
-        service_mocks['get_model_name'].return_value = "tts-model"
 
         result = build_model_config(model_config)
 

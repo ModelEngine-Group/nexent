@@ -127,21 +127,6 @@ async def save_config_impl(config, tenant_id, user_id):
                 stt_token_key = "STT_ACCESS_TOKEN"
                 tenant_config_manager.set_single_config(
                     user_id, tenant_id, stt_token_key, model_config.get("accessToken"))
-
-        # Save TTS specific fields for speech synthesis models
-        if model_type == "tts":
-            if model_config.get("modelFactory"):
-                tts_factory_key = "TTS_MODEL_FACTORY"
-                tenant_config_manager.set_single_config(
-                    user_id, tenant_id, tts_factory_key, model_config.get("modelFactory"))
-            if model_config.get("modelAppid"):
-                tts_appid_key = "TTS_MODEL_APPID"
-                tenant_config_manager.set_single_config(
-                    user_id, tenant_id, tts_appid_key, model_config.get("modelAppid"))
-            if model_config.get("accessToken"):
-                tts_token_key = "TTS_ACCESS_TOKEN"
-                tenant_config_manager.set_single_config(
-                    user_id, tenant_id, tts_token_key, model_config.get("accessToken"))
     logger.info("Configuration saved successfully")
 
 
@@ -217,13 +202,9 @@ def build_model_config(model_config: dict) -> dict:
     if "embedding" in model_config.get("model_type", ""):
         config["dimension"] = model_config.get("max_tokens", 0)
 
-    # Add voice model specific fields (STT and TTS)
+    # Add STT model specific fields
     model_type = model_config.get("model_type", "")
     if model_type == "stt":
-        config["modelFactory"] = model_config.get("model_factory", "")
-        config["modelAppid"] = model_config.get("model_appid", "")
-        config["accessToken"] = model_config.get("access_token", "")
-    elif model_type == "tts":
         config["modelFactory"] = model_config.get("model_factory", "")
         config["modelAppid"] = model_config.get("model_appid", "")
         config["accessToken"] = model_config.get("access_token", "")

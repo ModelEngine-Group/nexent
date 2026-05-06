@@ -164,39 +164,6 @@ async def _perform_connectivity_check(
                     "model": model_name
                 }
             )
-    elif model_type == "tts":
-        # Determine TTS provider based on model_factory
-        use_volc = model_factory and model_factory.lower() in ["volcengine", "volcano", "volcengine", "火山引擎"]
-        voice_service = get_voice_service()
-        if use_volc:
-            # Use Volcano TTS with appid and access_token
-            # voice_type uses SDK default (BV700_V2_streaming)
-            connectivity = await voice_service.check_voice_connectivity(
-                model_type="tts",
-                stt_config={
-                    "model_factory": model_factory,
-                    "model_appid": model_appid,
-                    "access_token": access_token,
-                    "base_url": model_base_url,
-                }
-            )
-        else:
-            # Use Ali TTS with api_key and optional custom base_url
-            is_qwen_realtime = "qwen" in (model_name or "").lower() or "/realtime" in (model_base_url or "").lower()
-            tts_voice_type = "Cherry" if is_qwen_realtime else "longxia"
-            # Use custom base_url if provided (for international or custom endpoints)
-            tts_config = {
-                "model_factory": model_factory,
-                "api_key": model_api_key,
-                "voice_type": tts_voice_type,
-                "model": model_name  # Pass the actual model name (e.g., cosyvoice-v3.5-plus)
-            }
-            if model_base_url and model_base_url.startswith("wss://"):
-                tts_config["base_url"] = model_base_url
-            connectivity = await voice_service.check_voice_connectivity(
-                model_type="tts",
-                stt_config=tts_config
-            )
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
@@ -274,7 +241,6 @@ async def verify_model_config_connectivity(model_config: dict):
         model_base_url = model_config.get("base_url", "")
         model_api_key = model_config["api_key"]
         # Default to True if not present
-        ssl_verify = model_config.get("ssl_verify", True)
         ssl_verify = model_config.get("ssl_verify", True)
         model_factory = model_config.get("model_factory")
         model_appid = model_config.get("model_appid")

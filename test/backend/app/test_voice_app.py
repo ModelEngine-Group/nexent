@@ -11,8 +11,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 from consts.exceptions import (
     VoiceServiceException,
     STTConnectionException,
-    TTSConnectionException,
-    VoiceConfigException
 )
 
 
@@ -21,7 +19,6 @@ class MockVoiceService:
 
     def __init__(self):
         self.start_stt_streaming_session = AsyncMock()
-        self.stream_tts_to_websocket = AsyncMock(return_value=None)
         self.check_voice_connectivity = AsyncMock(return_value=True)
 
 
@@ -102,114 +99,6 @@ class TestVoiceApp:
                 assert "error" in data
                 assert "General error" in data["error"]
 
-    def test_tts_websocket_success(self):
-        """Test successful TTS WebSocket connection."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_get_service.return_value = mock_service
-
-            with self.client.websocket_connect("/voice/tts/ws") as websocket:
-                websocket.send_json({"text": "Hello, world!"})
-
-            mock_service.stream_tts_to_websocket.assert_called_once()
-
-    def test_tts_websocket_bytes_config(self):
-        """Test TTS WebSocket with bytes message containing config."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_get_service.return_value = mock_service
-
-            with self.client.websocket_connect("/voice/tts/ws") as websocket:
-                import json
-                config_bytes = json.dumps({"text": "Hello from bytes"}).encode('utf-8')
-                websocket.send_bytes(config_bytes)
-
-            mock_service.stream_tts_to_websocket.assert_called_once()
-
-    def test_tts_websocket_bytes_config_parse_error(self):
-        """Test TTS WebSocket with invalid bytes config - should return error."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_get_service.return_value = mock_service
-
-            with self.client.websocket_connect("/voice/tts/ws") as websocket:
-                websocket.send_bytes(b"invalid json")
-                data = websocket.receive_json()
-                assert "error" in data
-                assert "No text provided" in data["error"]
-
-            mock_service.stream_tts_to_websocket.assert_not_called()
-
-    def test_tts_websocket_missing_text(self):
-        """Test TTS WebSocket with missing text field."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_get_service.return_value = mock_service
-
-            with self.client.websocket_connect("/voice/tts/ws") as websocket:
-                websocket.send_json({})
-                data = websocket.receive_json()
-                assert "error" in data
-                assert "No text provided" in data["error"]
-
-    def test_tts_websocket_with_all_config_fields(self):
-        """Test TTS WebSocket with complete config fields."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_get_service.return_value = mock_service
-
-            with self.client.websocket_connect("/voice/tts/ws") as websocket:
-                websocket.send_json({
-                    "text": "Hello",
-                    "tenant_id": "tenant_123",
-                    "model_factory": "volc",
-                    "model_name": "tts_model",
-                    "api_key": "key123",
-                    "model_appid": "app_456",
-                    "access_token": "token789",
-                    "base_url": "https://api.example.com"
-                })
-
-            mock_service.stream_tts_to_websocket.assert_called_once()
-
-    def test_tts_websocket_no_text(self):
-        """Test TTS WebSocket with no text provided."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_get_service.return_value = mock_service
-
-            with self.client.websocket_connect("/voice/tts/ws") as websocket:
-                websocket.send_json({"text": ""})
-                data = websocket.receive_json()
-                assert "error" in data
-                assert "No text provided" in data["error"]
-
-    def test_tts_websocket_tts_connection_error(self):
-        """Test TTS WebSocket with TTS connection error."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_service.stream_tts_to_websocket.side_effect = TTSConnectionException("TTS connection failed")
-            mock_get_service.return_value = mock_service
-
-            with self.client.websocket_connect("/voice/tts/ws") as websocket:
-                websocket.send_json({"text": "Hello, world!"})
-                data = websocket.receive_json()
-                assert "error" in data
-                assert "TTS connection failed" in data["error"]
-
-    def test_tts_websocket_general_error(self):
-        """Test TTS WebSocket with general error."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_service.stream_tts_to_websocket.side_effect = Exception("General error")
-            mock_get_service.return_value = mock_service
-
-            with self.client.websocket_connect("/voice/tts/ws") as websocket:
-                websocket.send_json({"text": "Hello, world!"})
-                data = websocket.receive_json()
-                assert "error" in data
-                assert "General error" in data["error"]
-
     def test_check_voice_connectivity_success(self):
         """Test successful voice connectivity check."""
         with patch('apps.voice_app.get_voice_service') as mock_get_service:
@@ -237,13 +126,13 @@ class TestVoiceApp:
 
             response = self.client.post(
                 "/voice/connectivity",
-                json={"model_type": "tts"}
+                json={"model_type": "stt"}
             )
 
             assert response.status_code == 200
             data = response.json()
             assert data["connected"] is False
-            assert data["model_type"] == "tts"
+            assert data["model_type"] == "stt"
             assert "Service connection failed" in data["message"]
 
     def test_check_voice_connectivity_voice_service_error(self):
@@ -277,38 +166,6 @@ class TestVoiceApp:
             assert response.status_code == 503
             data = response.json()
             assert "STT service unavailable" in data["detail"]
-
-    def test_check_voice_connectivity_tts_connection_error(self):
-        """Test voice connectivity check with TTSConnectionException."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_service.check_voice_connectivity.side_effect = TTSConnectionException("TTS service unavailable")
-            mock_get_service.return_value = mock_service
-
-            response = self.client.post(
-                "/voice/connectivity",
-                json={"model_type": "tts"}
-            )
-
-            assert response.status_code == 503
-            data = response.json()
-            assert "TTS service unavailable" in data["detail"]
-
-    def test_check_voice_connectivity_voice_config_error(self):
-        """Test voice connectivity check with VoiceConfigException."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = MockVoiceService()
-            mock_service.check_voice_connectivity.side_effect = VoiceConfigException("Configuration error")
-            mock_get_service.return_value = mock_service
-
-            response = self.client.post(
-                "/voice/connectivity",
-                json={"model_type": "stt"}
-            )
-
-            assert response.status_code == 500
-            data = response.json()
-            assert "Configuration error" in data["detail"]
 
     def test_check_voice_connectivity_unexpected_error(self):
         """Test voice connectivity check with unexpected error."""
@@ -374,25 +231,6 @@ class TestVoiceAppIntegration:
 
             mock_service.check_voice_connectivity.assert_called_once_with("stt")
 
-    def test_voice_connectivity_real_logic_tts(self):
-        """Test voice connectivity with real service logic for TTS."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = Mock()
-            mock_service.check_voice_connectivity = AsyncMock(return_value=False)
-            mock_get_service.return_value = mock_service
-
-            response = self.client.post(
-                "/voice/connectivity",
-                json={"model_type": "tts"}
-            )
-
-            assert response.status_code == 200
-            data = response.json()
-            assert data["connected"] is False
-            assert data["model_type"] == "tts"
-
-            mock_service.check_voice_connectivity.assert_called_once_with("tts")
-
     def test_stt_websocket_real_logic(self):
         """Test STT WebSocket with real service logic."""
         with patch('apps.voice_app.get_voice_service') as mock_get_service:
@@ -405,21 +243,6 @@ class TestVoiceAppIntegration:
                 assert websocket is not None
 
             mock_service.start_stt_streaming_session.assert_called_once()
-
-    def test_tts_websocket_real_logic(self):
-        """Test TTS WebSocket with real service logic."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
-            mock_service = Mock()
-            mock_service.stream_tts_to_websocket = AsyncMock(return_value=None)
-            mock_get_service.return_value = mock_service
-
-            with self.client.websocket_connect("/voice/tts/ws") as websocket:
-                websocket.send_json({"text": "Hello, world!"})
-
-            mock_service.stream_tts_to_websocket.assert_called_once()
-
-            call_args = mock_service.stream_tts_to_websocket.call_args
-            assert call_args[0][1] == "Hello, world!"
 
 
 if __name__ == "__main__":
