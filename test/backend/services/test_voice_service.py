@@ -171,7 +171,7 @@ class TestCheckVoiceConnectivity:
             p.start()
         try:
             service = VoiceService()
-            with pytest.raises(VoiceServiceException, match="Unknown model type"):
+            with pytest.raises(VoiceServiceException, match=r"Unsupported model type"):
                 await service.check_voice_connectivity("invalid")
         finally:
             for p in reversed(patches):
