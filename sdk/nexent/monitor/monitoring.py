@@ -119,6 +119,36 @@ F = TypeVar('F', bound=Callable[..., Any])
 DEFAULT_OTLP_ENDPOINT = "http://localhost:4318"
 TRACE_PATH = "/v1/traces"
 METRIC_PATH = "/v1/metrics"
+
+OPENINFERENCE_SPAN_KIND = "openinference.span.kind"
+OPENINFERENCE_SPAN_KIND_AGENT = "AGENT"
+OPENINFERENCE_SPAN_KIND_CHAIN = "CHAIN"
+OPENINFERENCE_SPAN_KIND_LLM = "LLM"
+OPENINFERENCE_SPAN_KIND_TOOL = "TOOL"
+OPENINFERENCE_SPAN_KIND_RETRIEVER = "RETRIEVER"
+OPENINFERENCE_INPUT_VALUE = "input.value"
+OPENINFERENCE_OUTPUT_VALUE = "output.value"
+OPENINFERENCE_METADATA = "metadata"
+OPENINFERENCE_SESSION_ID = "session.id"
+OPENINFERENCE_USER_ID = "user.id"
+OPENINFERENCE_TAG_TAGS = "tag.tags"
+
+LANGFUSE_OBSERVATION_TYPE = "langfuse.observation.type"
+LANGFUSE_OBSERVATION_INPUT = "langfuse.observation.input"
+LANGFUSE_OBSERVATION_OUTPUT = "langfuse.observation.output"
+LANGFUSE_OBSERVATION_MODEL_NAME = "langfuse.observation.model.name"
+LANGFUSE_OBSERVATION_MODEL_PARAMETERS = "langfuse.observation.model.parameters"
+LANGFUSE_OBSERVATION_USAGE_DETAILS = "langfuse.observation.usage_details"
+LANGFUSE_TRACE_NAME = "langfuse.trace.name"
+LANGFUSE_TRACE_INPUT = "langfuse.trace.input"
+LANGFUSE_TRACE_OUTPUT = "langfuse.trace.output"
+LANGFUSE_TRACE_TAGS = "langfuse.trace.tags"
+LANGFUSE_SESSION_ID = "langfuse.session.id"
+LANGFUSE_USER_ID = "langfuse.user.id"
+
+AGENT_OPERATION_NAMES = {
+    "agent.run",
+}
 SUPPORTED_PROVIDERS = {"otlp", "phoenix", "langfuse", "jaeger", "custom"}
 
 
@@ -256,6 +286,10 @@ class MonitoringConfig:
     otlp_headers: Dict[str, str] = field(default_factory=dict)
     export_traces: bool = True
     export_metrics: bool = True
+    instrument_fastapi: bool = True
+    instrument_requests: bool = False
+    fastapi_excluded_urls: str = ""
+    fastapi_exclude_spans: List[str] = field(default_factory=lambda: ["receive", "send"])
     use_platform_sdk: bool = False
     project_name: Optional[str] = None
     telemetry_sample_rate: float = 1.0
@@ -304,6 +338,10 @@ class MonitoringConfig:
             "otlp_headers": headers,
             "export_traces": exporter.get("export_traces", data.get("export_traces")),
             "export_metrics": exporter.get("export_metrics", data.get("export_metrics")),
+            "instrument_fastapi": data.get("instrument_fastapi"),
+            "instrument_requests": data.get("instrument_requests"),
+            "fastapi_excluded_urls": data.get("fastapi_excluded_urls"),
+            "fastapi_exclude_spans": data.get("fastapi_exclude_spans"),
             "use_platform_sdk": exporter.get("use_platform_sdk", data.get("use_platform_sdk")),
             "project_name": exporter.get("project_name", data.get("project_name")),
             "telemetry_sample_rate": data.get("telemetry_sample_rate"),
@@ -331,6 +369,20 @@ class MonitoringConfig:
         self.enable_telemetry = _as_bool(self.enable_telemetry)
         self.export_traces = _as_bool(self.export_traces, True)
         self.export_metrics = _as_bool(self.export_metrics, True)
+        self.instrument_fastapi = _as_bool(self.instrument_fastapi, True)
+        self.instrument_requests = _as_bool(self.instrument_requests, False)
+        if isinstance(self.fastapi_exclude_spans, str):
+            self.fastapi_exclude_spans = [
+                item.strip()
+                for item in self.fastapi_exclude_spans.split(",")
+                if item.strip()
+            ]
+        else:
+            self.fastapi_exclude_spans = [
+                str(item).strip()
+                for item in self.fastapi_exclude_spans
+                if str(item).strip()
+            ]
         self.use_platform_sdk = _as_bool(self.use_platform_sdk)
         self.telemetry_sample_rate = _as_float(self.telemetry_sample_rate, 1.0)
         self.llm_slow_request_threshold_seconds = _as_float(
@@ -571,8 +623,10 @@ class MonitoringManager:
                 unit="errors"
             )
 
-            # Auto-instrument other libraries
-            RequestsInstrumentor().instrument()
+            # Auto-instrument outbound HTTP calls only when explicitly enabled.
+            # AI observability UIs otherwise get noisy generic HTTP spans.
+            if self._config.instrument_requests:
+                RequestsInstrumentor().instrument()
 
             logger.info(
                 f"OTLP telemetry initialized successfully for service: {self._config.service_name}, "
@@ -632,8 +686,20 @@ class MonitoringManager:
     def setup_fastapi_app(self, app) -> bool:
         """Setup monitoring for a FastAPI application."""
         try:
-            if self.is_enabled and app and OPENTELEMETRY_AVAILABLE:
-                FastAPIInstrumentor.instrument_app(app)
+            if self.is_enabled and app and OPENTELEMETRY_AVAILABLE and self._config:
+                if not self._config.instrument_fastapi:
+                    logger.info("FastAPI auto instrumentation is disabled")
+                    return False
+
+                instrument_kwargs: Dict[str, Any] = {}
+                if self._config.fastapi_excluded_urls:
+                    instrument_kwargs["excluded_urls"] = self._config.fastapi_excluded_urls
+
+                signature = inspect.signature(FastAPIInstrumentor.instrument_app)
+                if "exclude_spans" in signature.parameters:
+                    instrument_kwargs["exclude_spans"] = self._config.fastapi_exclude_spans
+
+                FastAPIInstrumentor.instrument_app(app, **instrument_kwargs)
                 logger.info(
                     "FastAPI application monitoring initialized successfully"
                 )
@@ -648,6 +714,419 @@ class MonitoringManager:
             logger.error(f"Failed to initialize FastAPI monitoring: {e}")
             return False
 
+    @staticmethod
+    def _infer_openinference_span_kind(operation_name: str) -> str:
+        """Infer OpenInference span kind for Nexent service operations."""
+        if operation_name in AGENT_OPERATION_NAMES:
+            return OPENINFERENCE_SPAN_KIND_AGENT
+        return OPENINFERENCE_SPAN_KIND_CHAIN
+
+    @staticmethod
+    def _to_openinference_json_value(value: Any) -> str:
+        """Convert a value to the JSON-string form expected by OpenInference."""
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(value)
+
+    @staticmethod
+    def _to_langfuse_attribute_value(value: Any) -> Any:
+        """Convert metadata values to Langfuse filterable attribute values."""
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(value)
+
+    @staticmethod
+    def _to_langfuse_observation_type(span_kind: str) -> str:
+        """Map OpenInference span kind to Langfuse observation type."""
+        return {
+            OPENINFERENCE_SPAN_KIND_AGENT: "agent",
+            OPENINFERENCE_SPAN_KIND_CHAIN: "chain",
+            OPENINFERENCE_SPAN_KIND_LLM: "generation",
+            OPENINFERENCE_SPAN_KIND_TOOL: "tool",
+            OPENINFERENCE_SPAN_KIND_RETRIEVER: "retriever",
+        }.get(span_kind, "span")
+
+    def build_langfuse_attributes(
+        self,
+        span_kind: str,
+        input_value: Any = None,
+        output_value: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        session_id: Optional[Any] = None,
+        user_id: Optional[Any] = None,
+        trace_name: Optional[str] = None,
+        trace_level: bool = False,
+    ) -> Dict[str, Any]:
+        """Build Langfuse OTel attributes for trace and observation mapping."""
+        attrs: Dict[str, Any] = {
+            LANGFUSE_OBSERVATION_TYPE: self._to_langfuse_observation_type(
+                span_kind),
+        }
+        if input_value is not None:
+            input_json = self._to_openinference_json_value(input_value)
+            attrs[LANGFUSE_OBSERVATION_INPUT] = input_json
+            if trace_level:
+                attrs[LANGFUSE_TRACE_INPUT] = input_json
+        if output_value is not None:
+            output_json = self._to_openinference_json_value(output_value)
+            attrs[LANGFUSE_OBSERVATION_OUTPUT] = output_json
+            if trace_level:
+                attrs[LANGFUSE_TRACE_OUTPUT] = output_json
+        if metadata:
+            for key, value in metadata.items():
+                if value is not None:
+                    attrs[f"langfuse.observation.metadata.{key}"] = (
+                        self._to_langfuse_attribute_value(value)
+                    )
+                    if trace_level:
+                        attrs[f"langfuse.trace.metadata.{key}"] = (
+                            self._to_langfuse_attribute_value(value)
+                        )
+        if tags is not None:
+            attrs[LANGFUSE_TRACE_TAGS] = tags
+        if session_id is not None:
+            attrs[LANGFUSE_SESSION_ID] = str(session_id)
+        if user_id is not None:
+            attrs[LANGFUSE_USER_ID] = str(user_id)
+        if trace_name:
+            attrs[LANGFUSE_TRACE_NAME] = trace_name
+        return attrs
+
+    def build_openinference_attributes(
+        self,
+        span_kind: str,
+        input_value: Any = None,
+        output_value: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        session_id: Optional[Any] = None,
+        user_id: Optional[Any] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build Phoenix/OpenInference attributes for a custom span."""
+        attrs: Dict[str, Any] = {
+            OPENINFERENCE_SPAN_KIND: span_kind,
+        }
+        if input_value is not None:
+            attrs[OPENINFERENCE_INPUT_VALUE] = self._to_openinference_json_value(
+                input_value)
+        if output_value is not None:
+            attrs[OPENINFERENCE_OUTPUT_VALUE] = self._to_openinference_json_value(
+                output_value)
+        if metadata is not None:
+            attrs[OPENINFERENCE_METADATA] = self._to_openinference_json_value(
+                metadata)
+        if tags is not None:
+            attrs[OPENINFERENCE_TAG_TAGS] = self._to_openinference_json_value(
+                tags)
+        if session_id is not None:
+            attrs[OPENINFERENCE_SESSION_ID] = str(session_id)
+        if user_id is not None:
+            attrs[OPENINFERENCE_USER_ID] = str(user_id)
+        attrs.update(self.build_langfuse_attributes(
+            span_kind=span_kind,
+            input_value=input_value,
+            output_value=output_value,
+            metadata=metadata,
+            tags=tags,
+            session_id=session_id,
+            user_id=user_id,
+            trace_name=attributes.get(LANGFUSE_TRACE_NAME) if attributes else None,
+            trace_level=span_kind == OPENINFERENCE_SPAN_KIND_AGENT,
+        ))
+        if attributes:
+            attrs.update(attributes)
+        return attrs
+
+    @contextmanager
+    def trace_operation(
+        self,
+        operation_name: str,
+        span_kind: str = OPENINFERENCE_SPAN_KIND_CHAIN,
+        **attributes: Any
+    ) -> Iterator[Optional[Any]]:
+        """Trace a non-LLM operation using OpenInference span kind semantics."""
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE or not self._tracer:
+            yield None
+            return
+
+        span_attrs = {
+            OPENINFERENCE_SPAN_KIND: span_kind,
+            LANGFUSE_OBSERVATION_TYPE: self._to_langfuse_observation_type(
+                span_kind),
+        }
+        span_attrs.update(attributes)
+
+        with self._tracer.start_as_current_span(
+            operation_name,
+            attributes=span_attrs
+        ) as span:
+            try:
+                yield span
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.set_attribute("error.type", type(e).__name__)
+                span.set_attribute("error.message", str(e))
+                raise
+
+    @contextmanager
+    def trace_openinference_span(
+        self,
+        operation_name: str,
+        span_kind: str,
+        input_value: Any = None,
+        output_value: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        session_id: Optional[Any] = None,
+        user_id: Optional[Any] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Optional[Any]]:
+        """Trace a custom Phoenix/OpenInference span."""
+        span_attrs = self.build_openinference_attributes(
+            span_kind=span_kind,
+            input_value=input_value,
+            output_value=output_value,
+            metadata=metadata,
+            tags=tags,
+            session_id=session_id,
+            user_id=user_id,
+            attributes=attributes,
+        )
+        with self.trace_operation(operation_name, span_kind, **span_attrs) as span:
+            yield span
+
+    def trace_agent(
+        self,
+        operation_name: str,
+        input_value: Any = None,
+        output_value: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        session_id: Optional[Any] = None,
+        user_id: Optional[Any] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Optional[Any]]:
+        """Trace a custom agent span."""
+        return self.trace_openinference_span(
+            operation_name=operation_name,
+            span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
+            input_value=input_value,
+            output_value=output_value,
+            metadata=metadata,
+            tags=tags,
+            session_id=session_id,
+            user_id=user_id,
+            attributes=attributes,
+        )
+
+    def trace_chain(
+        self,
+        operation_name: str,
+        input_value: Any = None,
+        output_value: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        session_id: Optional[Any] = None,
+        user_id: Optional[Any] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Optional[Any]]:
+        """Trace a custom chain span."""
+        return self.trace_openinference_span(
+            operation_name=operation_name,
+            span_kind=OPENINFERENCE_SPAN_KIND_CHAIN,
+            input_value=input_value,
+            output_value=output_value,
+            metadata=metadata,
+            tags=tags,
+            session_id=session_id,
+            user_id=user_id,
+            attributes=attributes,
+        )
+
+    def trace_retriever(
+        self,
+        operation_name: str,
+        input_value: Any = None,
+        output_value: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        session_id: Optional[Any] = None,
+        user_id: Optional[Any] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Optional[Any]]:
+        """Trace a custom retriever span."""
+        return self.trace_openinference_span(
+            operation_name=operation_name,
+            span_kind=OPENINFERENCE_SPAN_KIND_RETRIEVER,
+            input_value=input_value,
+            output_value=output_value,
+            metadata=metadata,
+            tags=tags,
+            session_id=session_id,
+            user_id=user_id,
+            attributes=attributes,
+        )
+
+    def set_openinference_output(
+        self,
+        output_value: Any,
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+    ) -> None:
+        """Attach OpenInference output fields to the current span."""
+        attrs = self.build_openinference_attributes(
+            span_kind="",
+            output_value=output_value,
+            metadata=metadata,
+            tags=tags,
+        )
+        attrs.pop(OPENINFERENCE_SPAN_KIND, None)
+        attrs.pop(LANGFUSE_OBSERVATION_TYPE, None)
+        self.set_span_attributes(**attrs)
+
+    def set_openinference_agent_context(
+        self,
+        agent_id: Optional[int] = None,
+        conversation_id: Optional[int] = None,
+        user_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        query: Optional[str] = None,
+        is_debug: Optional[bool] = None,
+        memory_enabled: Optional[bool] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        span_kind: Optional[str] = OPENINFERENCE_SPAN_KIND_AGENT,
+    ) -> None:
+        """Attach Phoenix/OpenInference agent dimensions to the current span."""
+        metadata = {
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "tenant_id": tenant_id,
+            "conversation_id": conversation_id,
+            "is_debug": is_debug,
+            "memory_enabled": memory_enabled,
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+
+        tags = ["nexent", "agent"]
+        if agent_id is not None:
+            tags.append(f"agent_id:{agent_id}")
+        if tenant_id:
+            tags.append(f"tenant_id:{tenant_id}")
+        if is_debug is True:
+            tags.append("debug")
+        if memory_enabled is True:
+            tags.append("memory_enabled")
+        elif memory_enabled is False:
+            tags.append("memory_disabled")
+
+        effective_span_kind = span_kind or ""
+        attrs: Dict[str, Any] = {
+            OPENINFERENCE_METADATA: json.dumps(metadata, ensure_ascii=False),
+            OPENINFERENCE_TAG_TAGS: json.dumps(tags, ensure_ascii=False),
+            LANGFUSE_TRACE_TAGS: tags,
+        }
+        if span_kind:
+            attrs[OPENINFERENCE_SPAN_KIND] = span_kind
+            attrs[LANGFUSE_OBSERVATION_TYPE] = self._to_langfuse_observation_type(
+                effective_span_kind)
+        if query is not None:
+            attrs[OPENINFERENCE_INPUT_VALUE] = query
+            attrs[LANGFUSE_OBSERVATION_INPUT] = query
+            attrs[LANGFUSE_TRACE_INPUT] = query
+        if conversation_id is not None:
+            attrs[OPENINFERENCE_SESSION_ID] = str(conversation_id)
+            attrs[LANGFUSE_SESSION_ID] = str(conversation_id)
+            attrs["conversation.id"] = conversation_id
+        if user_id:
+            attrs[OPENINFERENCE_USER_ID] = str(user_id)
+            attrs[LANGFUSE_USER_ID] = str(user_id)
+        if tenant_id:
+            attrs["tenant.id"] = str(tenant_id)
+        if agent_id is not None:
+            attrs["agent.id"] = agent_id
+        if agent_name:
+            attrs["agent.name"] = agent_name
+            attrs[LANGFUSE_TRACE_NAME] = agent_name
+
+        for key, value in metadata.items():
+            attrs[f"langfuse.trace.metadata.{key}"] = (
+                self._to_langfuse_attribute_value(value)
+            )
+            attrs[f"langfuse.observation.metadata.{key}"] = (
+                self._to_langfuse_attribute_value(value)
+            )
+
+        self.set_span_attributes(**attrs)
+
+    def apply_openinference_context_attributes(
+        self,
+        span_kind: Optional[str] = None,
+    ) -> None:
+        """Attach request-scoped OpenInference context to the current span."""
+        context = get_monitoring_context()
+        agent_id = context.get("agent_id")
+        conversation_id = context.get("conversation_id")
+        user_id = context.get("user_id")
+        tenant_id = context.get("tenant_id")
+        if not any([agent_id is not None, conversation_id is not None, user_id, tenant_id]):
+            return
+
+        metadata = {
+            "agent_id": agent_id,
+            "tenant_id": tenant_id,
+            "conversation_id": conversation_id,
+        }
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+
+        tags = ["nexent"]
+        if span_kind == OPENINFERENCE_SPAN_KIND_AGENT:
+            tags.append("agent")
+        if agent_id is not None:
+            tags.append(f"agent_id:{agent_id}")
+        if tenant_id:
+            tags.append(f"tenant_id:{tenant_id}")
+
+        attrs: Dict[str, Any] = {
+            OPENINFERENCE_METADATA: json.dumps(metadata, ensure_ascii=False),
+            OPENINFERENCE_TAG_TAGS: json.dumps(tags, ensure_ascii=False),
+            LANGFUSE_TRACE_TAGS: tags,
+        }
+        if span_kind:
+            attrs[OPENINFERENCE_SPAN_KIND] = span_kind
+            attrs[LANGFUSE_OBSERVATION_TYPE] = self._to_langfuse_observation_type(
+                span_kind)
+        if conversation_id is not None:
+            attrs[OPENINFERENCE_SESSION_ID] = str(conversation_id)
+            attrs[LANGFUSE_SESSION_ID] = str(conversation_id)
+            attrs["conversation.id"] = conversation_id
+        if user_id:
+            attrs[OPENINFERENCE_USER_ID] = str(user_id)
+            attrs[LANGFUSE_USER_ID] = str(user_id)
+        if tenant_id:
+            attrs["tenant.id"] = str(tenant_id)
+        if agent_id is not None:
+            attrs["agent.id"] = agent_id
+        for key, value in metadata.items():
+            attrs[f"langfuse.trace.metadata.{key}"] = (
+                self._to_langfuse_attribute_value(value)
+            )
+            attrs[f"langfuse.observation.metadata.{key}"] = (
+                self._to_langfuse_attribute_value(value)
+            )
+
+        self.set_span_attributes(**attrs)
+
     @contextmanager
     def trace_llm_request(self, operation_name: str, model_name: str, **attributes: Any) -> Iterator[Optional[Any]]:
         """
@@ -660,11 +1139,39 @@ class MonitoringManager:
 
         # OpenInference semantic attributes
         openinference_attrs = {
+            OPENINFERENCE_SPAN_KIND: attributes.pop(
+                OPENINFERENCE_SPAN_KIND,
+                OPENINFERENCE_SPAN_KIND_LLM,
+            ),
+            LANGFUSE_OBSERVATION_TYPE: "generation",
+            LANGFUSE_OBSERVATION_MODEL_NAME: model_name,
             "llm.model_name": model_name,
             "llm.operation.name": operation_name,
+            "gen_ai.request.model": model_name,
         }
         # Add user-provided attributes
         openinference_attrs.update(attributes)
+        if (
+            OPENINFERENCE_INPUT_VALUE in openinference_attrs
+            and LANGFUSE_OBSERVATION_INPUT not in openinference_attrs
+        ):
+            openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = (
+                openinference_attrs[OPENINFERENCE_INPUT_VALUE]
+            )
+        if (
+            OPENINFERENCE_OUTPUT_VALUE in openinference_attrs
+            and LANGFUSE_OBSERVATION_OUTPUT not in openinference_attrs
+        ):
+            openinference_attrs[LANGFUSE_OBSERVATION_OUTPUT] = (
+                openinference_attrs[OPENINFERENCE_OUTPUT_VALUE]
+            )
+        if (
+            "llm.invocation_parameters" in openinference_attrs
+            and LANGFUSE_OBSERVATION_MODEL_PARAMETERS not in openinference_attrs
+        ):
+            openinference_attrs[LANGFUSE_OBSERVATION_MODEL_PARAMETERS] = (
+                openinference_attrs["llm.invocation_parameters"]
+            )
 
         with self._tracer.start_as_current_span(
             operation_name,
@@ -711,10 +1218,18 @@ class MonitoringManager:
 
         # OpenInference semantic attributes for agent
         openinference_attrs = {
+            OPENINFERENCE_SPAN_KIND: attributes.pop(
+                OPENINFERENCE_SPAN_KIND,
+                OPENINFERENCE_SPAN_KIND_CHAIN,
+            ),
             "agent.name": agent_name,
             "agent.step.name": step_name,
             "agent.step.type": step_type,
         }
+        openinference_attrs[LANGFUSE_OBSERVATION_TYPE] = (
+            self._to_langfuse_observation_type(
+                openinference_attrs[OPENINFERENCE_SPAN_KIND])
+        )
         openinference_attrs.update(attributes)
 
         span_name = f"agent.{step_name}"
@@ -764,18 +1279,31 @@ class MonitoringManager:
 
         # OpenInference semantic attributes for tool call
         openinference_attrs = {
+            OPENINFERENCE_SPAN_KIND: attributes.pop(
+                OPENINFERENCE_SPAN_KIND,
+                OPENINFERENCE_SPAN_KIND_TOOL,
+            ),
+            LANGFUSE_OBSERVATION_TYPE: "tool",
             "agent.name": agent_name,
             "agent.step.name": tool_name,
             "agent.step.type": "tool_call",
             "agent.tool.name": tool_name,
+            "tool.name": tool_name,
         }
 
         # Add tool input as JSON string
         if tool_input:
             try:
-                openinference_attrs["agent.tool.input"] = json.dumps(tool_input, ensure_ascii=False)
+                tool_input_json = json.dumps(tool_input, ensure_ascii=False)
+                openinference_attrs["agent.tool.input"] = tool_input_json
+                openinference_attrs["tool.parameters"] = tool_input_json
+                openinference_attrs[OPENINFERENCE_INPUT_VALUE] = tool_input_json
+                openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = tool_input_json
             except (TypeError, ValueError):
                 openinference_attrs["agent.tool.input"] = str(tool_input)
+                openinference_attrs["tool.parameters"] = str(tool_input)
+                openinference_attrs[OPENINFERENCE_INPUT_VALUE] = str(tool_input)
+                openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = str(tool_input)
 
         openinference_attrs.update(attributes)
 
@@ -822,10 +1350,17 @@ class MonitoringManager:
             try:
                 if isinstance(output, str):
                     span.set_attribute("agent.tool.output", output)
+                    span.set_attribute(OPENINFERENCE_OUTPUT_VALUE, output)
+                    span.set_attribute(LANGFUSE_OBSERVATION_OUTPUT, output)
                 else:
-                    span.set_attribute("agent.tool.output", json.dumps(output, ensure_ascii=False))
+                    output_json = json.dumps(output, ensure_ascii=False)
+                    span.set_attribute("agent.tool.output", output_json)
+                    span.set_attribute(OPENINFERENCE_OUTPUT_VALUE, output_json)
+                    span.set_attribute(LANGFUSE_OBSERVATION_OUTPUT, output_json)
             except (TypeError, ValueError):
                 span.set_attribute("agent.tool.output", str(output))
+                span.set_attribute(OPENINFERENCE_OUTPUT_VALUE, str(output))
+                span.set_attribute(LANGFUSE_OBSERVATION_OUTPUT, str(output))
 
     def get_current_span(self) -> Optional[Any]:
         """Get the current active span."""
@@ -899,7 +1434,7 @@ class MonitoringManager:
             op_name = operation_name or f"{func.__module__}.{func.__name__}"
             exclude_set = set(exclude_params or [])
 
-            def prepare_span(span, kwargs: Dict[str, Any]) -> None:
+            def prepare_span(span, kwargs: Dict[str, Any], span_kind: str) -> None:
                 if span and include_params:
                     safe_params = {
                         k: v for k, v in kwargs.items()
@@ -907,6 +1442,7 @@ class MonitoringManager:
                     }
                     if safe_params:
                         self.set_span_attributes(**{f"param.{k}": v for k, v in safe_params.items()})
+                self.apply_openinference_context_attributes(span_kind)
                 self.add_span_event(f"{op_name}.started")
 
             def complete_span(start_time: float) -> None:
@@ -924,8 +1460,9 @@ class MonitoringManager:
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
                 # Always execute monitoring logic - internal methods handle enabled state
-                with self.trace_llm_request(op_name, "nexent-service") as span:
-                    prepare_span(span, kwargs)
+                span_kind = self._infer_openinference_span_kind(op_name)
+                with self.trace_operation(op_name, span_kind) as span:
+                    prepare_span(span, kwargs, span_kind)
                     start_time = time.time()
 
                     try:
@@ -939,8 +1476,9 @@ class MonitoringManager:
             @functools.wraps(func)
             async def async_generator_wrapper(*args, **kwargs):
                 # Keep the span open while the streaming response is consumed.
-                with self.trace_llm_request(op_name, "nexent-service") as span:
-                    prepare_span(span, kwargs)
+                span_kind = self._infer_openinference_span_kind(op_name)
+                with self.trace_operation(op_name, span_kind) as span:
+                    prepare_span(span, kwargs, span_kind)
                     start_time = time.time()
 
                     try:
@@ -954,8 +1492,9 @@ class MonitoringManager:
             @functools.wraps(func)
             def sync_wrapper(*args, **kwargs):
                 # Always execute monitoring logic - internal methods handle enabled state
-                with self.trace_llm_request(op_name, "nexent-service") as span:
-                    prepare_span(span, kwargs)
+                span_kind = self._infer_openinference_span_kind(op_name)
+                with self.trace_operation(op_name, span_kind) as span:
+                    prepare_span(span, kwargs, span_kind)
                     start_time = time.time()
 
                     try:
@@ -968,8 +1507,9 @@ class MonitoringManager:
 
             @functools.wraps(func)
             def generator_wrapper(*args, **kwargs):
-                with self.trace_llm_request(op_name, "nexent-service") as span:
-                    prepare_span(span, kwargs)
+                span_kind = self._infer_openinference_span_kind(op_name)
+                with self.trace_operation(op_name, span_kind) as span:
+                    prepare_span(span, kwargs, span_kind)
                     start_time = time.time()
 
                     try:
@@ -1203,10 +1743,17 @@ class LLMTokenTracker:
 
         # Add span attributes using OpenInference naming
         if self.span:
+            usage_details = {
+                "input": input_tokens,
+                "output": output_tokens,
+                "total": input_tokens + output_tokens,
+            }
             self.span.set_attributes({
                 "llm.token_count.prompt": input_tokens,
                 "llm.token_count.completion": output_tokens,
                 "llm.token_count.total": input_tokens + output_tokens,
+                LANGFUSE_OBSERVATION_USAGE_DETAILS: json.dumps(
+                    usage_details, ensure_ascii=False),
                 "llm.generation_rate": generation_rate,
                 "llm.duration.total": total_duration,
                 "llm.time_to_first_token": self.first_token_time - self.start_time if self.first_token_time else 0
@@ -1862,6 +2409,30 @@ __all__ = [
     'get_monitoring_context',
     'set_monitoring_operation',
     'record_model_call',
+    'OPENINFERENCE_SPAN_KIND',
+    'OPENINFERENCE_SPAN_KIND_AGENT',
+    'OPENINFERENCE_SPAN_KIND_CHAIN',
+    'OPENINFERENCE_SPAN_KIND_LLM',
+    'OPENINFERENCE_SPAN_KIND_TOOL',
+    'OPENINFERENCE_SPAN_KIND_RETRIEVER',
+    'OPENINFERENCE_INPUT_VALUE',
+    'OPENINFERENCE_OUTPUT_VALUE',
+    'OPENINFERENCE_METADATA',
+    'OPENINFERENCE_SESSION_ID',
+    'OPENINFERENCE_USER_ID',
+    'OPENINFERENCE_TAG_TAGS',
+    'LANGFUSE_OBSERVATION_TYPE',
+    'LANGFUSE_OBSERVATION_INPUT',
+    'LANGFUSE_OBSERVATION_OUTPUT',
+    'LANGFUSE_OBSERVATION_MODEL_NAME',
+    'LANGFUSE_OBSERVATION_MODEL_PARAMETERS',
+    'LANGFUSE_OBSERVATION_USAGE_DETAILS',
+    'LANGFUSE_TRACE_NAME',
+    'LANGFUSE_TRACE_INPUT',
+    'LANGFUSE_TRACE_OUTPUT',
+    'LANGFUSE_TRACE_TAGS',
+    'LANGFUSE_SESSION_ID',
+    'LANGFUSE_USER_ID',
     '_detect_model_type',
     '_MonitoredClient',
     '_MonitoredChatCompletions',

@@ -1,11 +1,15 @@
 import json
+import functools
+import inspect
 import re
 import time
 from threading import Event
-from typing import List
+from typing import Any, Callable, Dict, List
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
+
+from nexent.monitor import get_monitoring_manager
 
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
@@ -14,6 +18,88 @@ from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
 from .agent_context import ContextManager
+
+
+def _tool_name(tool_obj: Any) -> str:
+    """Return the most useful tool name for monitoring."""
+    return (
+        getattr(tool_obj, "name", None)
+        or getattr(tool_obj, "__name__", None)
+        or type(tool_obj).__name__
+    )
+
+
+def _build_tool_input(callable_obj: Callable, args: tuple, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort conversion of tool call arguments into span input attributes."""
+    try:
+        signature = inspect.signature(callable_obj)
+        bound = signature.bind_partial(*args, **kwargs)
+        return dict(bound.arguments)
+    except (TypeError, ValueError):
+        tool_input: Dict[str, Any] = {}
+        if args:
+            tool_input["args"] = list(args)
+        if kwargs:
+            tool_input.update(kwargs)
+        return tool_input
+
+
+def _wrap_tool_with_monitoring(tool_obj: Any, agent_name: str) -> Any:
+    """Wrap smolagents tools and callables with a tool span."""
+    if getattr(tool_obj, "_nexent_monitoring_wrapped", False):
+        return tool_obj
+
+    monitoring_manager = get_monitoring_manager()
+    tool_name = _tool_name(tool_obj)
+
+    if hasattr(tool_obj, "forward") and callable(tool_obj.forward):
+        original_forward = tool_obj.forward
+
+        if inspect.iscoroutinefunction(original_forward):
+            @functools.wraps(original_forward)
+            async def monitored_forward(*args, **kwargs):
+                tool_input = _build_tool_input(original_forward, args, kwargs)
+                with monitoring_manager.trace_tool_call(tool_name, agent_name, tool_input):
+                    result = await original_forward(*args, **kwargs)
+                    monitoring_manager.set_tool_output(result)
+                    return result
+        else:
+            @functools.wraps(original_forward)
+            def monitored_forward(*args, **kwargs):
+                tool_input = _build_tool_input(original_forward, args, kwargs)
+                with monitoring_manager.trace_tool_call(tool_name, agent_name, tool_input):
+                    result = original_forward(*args, **kwargs)
+                    monitoring_manager.set_tool_output(result)
+                    return result
+
+        tool_obj.forward = monitored_forward
+        setattr(tool_obj, "_nexent_monitoring_wrapped", True)
+        return tool_obj
+
+    if callable(tool_obj):
+        original_callable = tool_obj
+
+        if inspect.iscoroutinefunction(original_callable):
+            @functools.wraps(original_callable)
+            async def monitored_callable(*args, **kwargs):
+                tool_input = _build_tool_input(original_callable, args, kwargs)
+                with monitoring_manager.trace_tool_call(tool_name, agent_name, tool_input):
+                    result = await original_callable(*args, **kwargs)
+                    monitoring_manager.set_tool_output(result)
+                    return result
+        else:
+            @functools.wraps(original_callable)
+            def monitored_callable(*args, **kwargs):
+                tool_input = _build_tool_input(original_callable, args, kwargs)
+                with monitoring_manager.trace_tool_call(tool_name, agent_name, tool_input):
+                    result = original_callable(*args, **kwargs)
+                    monitoring_manager.set_tool_output(result)
+                    return result
+
+        setattr(monitored_callable, "_nexent_monitoring_wrapped", True)
+        return monitored_callable
+
+    return tool_obj
 
 
 class NexentAgent:
@@ -239,7 +325,13 @@ class NexentAgent:
             prompt_templates = agent_config.prompt_templates
 
             try:
-                tool_list = [self.create_tool(tool_config) for tool_config in agent_config.tools]
+                tool_list = [
+                    _wrap_tool_with_monitoring(
+                        self.create_tool(tool_config),
+                        agent_config.name,
+                    )
+                    for tool_config in agent_config.tools
+                ]
             except Exception as e:
                 raise ValueError(f"Error in creating tool: {e}")
 

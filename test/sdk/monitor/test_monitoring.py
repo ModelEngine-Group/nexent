@@ -34,6 +34,26 @@ from sdk.nexent.monitor.monitoring import (
     _monitoring_display_name,
     set_monitoring_operation,
     _enqueue_client_monitoring_record,
+    OPENINFERENCE_SPAN_KIND,
+    OPENINFERENCE_SPAN_KIND_AGENT,
+    OPENINFERENCE_SPAN_KIND_CHAIN,
+    OPENINFERENCE_SPAN_KIND_LLM,
+    OPENINFERENCE_SPAN_KIND_TOOL,
+    OPENINFERENCE_SPAN_KIND_RETRIEVER,
+    OPENINFERENCE_SESSION_ID,
+    OPENINFERENCE_USER_ID,
+    OPENINFERENCE_METADATA,
+    OPENINFERENCE_TAG_TAGS,
+    OPENINFERENCE_INPUT_VALUE,
+    OPENINFERENCE_OUTPUT_VALUE,
+    LANGFUSE_OBSERVATION_TYPE,
+    LANGFUSE_OBSERVATION_INPUT,
+    LANGFUSE_OBSERVATION_OUTPUT,
+    LANGFUSE_OBSERVATION_MODEL_NAME,
+    LANGFUSE_TRACE_INPUT,
+    LANGFUSE_TRACE_TAGS,
+    LANGFUSE_SESSION_ID,
+    LANGFUSE_USER_ID,
 )
 import pytest
 import asyncio
@@ -62,6 +82,10 @@ class TestMonitoringConfig:
         assert config.otlp_headers == {}
         assert config.export_traces is True
         assert config.export_metrics is True
+        assert config.instrument_fastapi is True
+        assert config.instrument_requests is False
+        assert config.fastapi_excluded_urls == ""
+        assert config.fastapi_exclude_spans == ["receive", "send"]
         assert config.telemetry_sample_rate == 1.0
         assert config.llm_slow_request_threshold_seconds == 5.0
         assert config.llm_slow_token_rate_threshold == 10.0
@@ -76,6 +100,10 @@ class TestMonitoringConfig:
             otlp_protocol="grpc",
             otlp_headers={"Authorization": "Bearer test-key"},
             export_metrics=False,
+            instrument_fastapi=False,
+            instrument_requests=True,
+            fastapi_excluded_urls="/agent/run",
+            fastapi_exclude_spans="send",
             use_platform_sdk=True,
             project_name="nexent-test",
             telemetry_sample_rate=0.5,
@@ -90,6 +118,10 @@ class TestMonitoringConfig:
         assert config.otlp_protocol == "http"
         assert config.otlp_headers == {"Authorization": "Bearer test-key"}
         assert config.export_metrics is False
+        assert config.instrument_fastapi is False
+        assert config.instrument_requests is True
+        assert config.fastapi_excluded_urls == "/agent/run"
+        assert config.fastapi_exclude_spans == ["send"]
         assert config.use_platform_sdk is True
         assert config.project_name == "nexent-test"
         assert config.telemetry_sample_rate == 0.5
@@ -130,6 +162,8 @@ class TestMonitoringConfig:
             "monitoring": {
                 "enable_telemetry": True,
                 "service_name": "file-service",
+                "instrument_requests": True,
+                "fastapi_exclude_spans": ["receive"],
                 "exporter": {
                     "provider": "langfuse",
                     "endpoint": "https://cloud.langfuse.com/api/public/otel",
@@ -155,6 +189,8 @@ class TestMonitoringConfig:
             "x-langfuse-ingestion-version": "4",
         }
         assert config.export_metrics is False
+        assert config.instrument_requests is True
+        assert config.fastapi_exclude_spans == ["receive"]
 
 
 class TestMonitoringManager:
@@ -235,6 +271,44 @@ class TestMonitoringManager:
             mock_tracer_provider.assert_called_once()
             mock_span_exporter_http.assert_called_once()
             mock_batch_processor.assert_called_once()
+            mock_requests_instr().instrument.assert_not_called()
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    @patch('sdk.nexent.monitor.monitoring.metrics')
+    @patch('sdk.nexent.monitor.monitoring.TracerProvider')
+    @patch('sdk.nexent.monitor.monitoring.MeterProvider')
+    @patch('sdk.nexent.monitor.monitoring.OTLPSpanExporterHTTP')
+    @patch('sdk.nexent.monitor.monitoring.BatchSpanProcessor')
+    @patch('sdk.nexent.monitor.monitoring.Resource')
+    @patch('sdk.nexent.monitor.monitoring.RequestsInstrumentor')
+    def test_init_telemetry_requests_instrumentation_opt_in(
+        self,
+        mock_requests_instr,
+        mock_resource,
+        mock_batch_processor,
+        mock_span_exporter_http,
+        mock_meter_provider,
+        mock_tracer_provider,
+        mock_metrics,
+        mock_trace,
+    ):
+        """Test requests auto instrumentation is opt-in."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = MonitoringManager()
+            config = MonitoringConfig(
+                enable_telemetry=True,
+                instrument_requests=True,
+                export_metrics=False,
+            )
+
+            mock_resource.create.return_value = MagicMock()
+            mock_tracer_provider.return_value = MagicMock()
+            mock_meter_provider.return_value = MagicMock()
+            mock_trace.get_tracer.return_value = MagicMock()
+            mock_metrics.get_meter.return_value = MagicMock()
+
+            manager.configure(config)
+
             mock_requests_instr().instrument.assert_called_once()
 
     @patch('sdk.nexent.monitor.monitoring.trace')
@@ -280,6 +354,34 @@ class TestMonitoringManager:
 
             with patch('sdk.nexent.monitor.monitoring.Resource.create', side_effect=Exception("Test error")):
                 manager.configure(config)
+
+    def test_setup_fastapi_app_excludes_streaming_internal_spans(self):
+        """Test FastAPI instrumentation suppresses noisy ASGI send/receive spans."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = MonitoringManager()
+            manager.configure(MonitoringConfig(
+                enable_telemetry=True,
+                fastapi_excluded_urls="/health",
+                fastapi_exclude_spans=["receive", "send"],
+            ))
+            app = MagicMock()
+            calls = {}
+
+            def fake_instrument_app(app_arg, excluded_urls=None, exclude_spans=None):
+                calls["app"] = app_arg
+                calls["excluded_urls"] = excluded_urls
+                calls["exclude_spans"] = exclude_spans
+
+            with patch(
+                'sdk.nexent.monitor.monitoring.FastAPIInstrumentor.instrument_app',
+                new=fake_instrument_app,
+            ):
+                result = manager.setup_fastapi_app(app)
+
+            assert result is True
+            assert calls["app"] is app
+            assert calls["excluded_urls"] == "/health"
+            assert calls["exclude_spans"] == ["receive", "send"]
 
     @patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True)
     @patch('sdk.nexent.monitor.monitoring.trace')
@@ -361,6 +463,114 @@ class TestMonitoringManager:
             assert attributes["llm.model_name"] == "gpt-4"
             assert "llm.operation.name" in attributes
             assert attributes["llm.operation.name"] == "test_op"
+            assert attributes[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_LLM
+            assert attributes[LANGFUSE_OBSERVATION_TYPE] == "generation"
+            assert attributes[LANGFUSE_OBSERVATION_MODEL_NAME] == "gpt-4"
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_set_openinference_agent_context_attrs(self, mock_trace):
+        """Test Phoenix/OpenInference agent context attributes are added to current span."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = MonitoringManager()
+            config = MonitoringConfig(enable_telemetry=True)
+            manager.configure(config)
+
+            mock_span = MagicMock()
+            mock_trace.get_current_span.return_value = mock_span
+
+            manager.set_openinference_agent_context(
+                agent_id=1,
+                conversation_id=2,
+                user_id="user-1",
+                tenant_id="tenant-1",
+                query="hello",
+                is_debug=False,
+                memory_enabled=True,
+            )
+
+            attrs = mock_span.set_attributes.call_args.args[0]
+            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_AGENT
+            assert attrs[OPENINFERENCE_SESSION_ID] == "2"
+            assert attrs[OPENINFERENCE_USER_ID] == "user-1"
+            assert attrs[OPENINFERENCE_INPUT_VALUE] == "hello"
+            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "agent"
+            assert attrs[LANGFUSE_SESSION_ID] == "2"
+            assert attrs[LANGFUSE_USER_ID] == "user-1"
+            assert attrs[LANGFUSE_OBSERVATION_INPUT] == "hello"
+            assert attrs[LANGFUSE_TRACE_INPUT] == "hello"
+            assert "agent_id:1" in attrs[LANGFUSE_TRACE_TAGS]
+            assert attrs["langfuse.trace.metadata.agent_id"] == 1
+            assert "agent_id:1" in json.loads(attrs[OPENINFERENCE_TAG_TAGS])
+            metadata = json.loads(attrs[OPENINFERENCE_METADATA])
+            assert metadata["agent_id"] == 1
+            assert metadata["tenant_id"] == "tenant-1"
+
+            manager.set_openinference_agent_context(
+                agent_id=1,
+                conversation_id=2,
+                user_id="user-1",
+                tenant_id="tenant-1",
+                span_kind=OPENINFERENCE_SPAN_KIND_CHAIN,
+            )
+            attrs = mock_span.set_attributes.call_args.args[0]
+            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_CHAIN
+            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "chain"
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_trace_openinference_convenience_spans(self, mock_trace):
+        """Test custom OpenInference span helpers build Phoenix-friendly attributes."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = MonitoringManager()
+            config = MonitoringConfig(enable_telemetry=True)
+            manager.configure(config)
+            manager._tracer = MagicMock()
+
+            mock_span = MagicMock()
+            manager._tracer.start_as_current_span.return_value.__enter__ = Mock(return_value=mock_span)
+            manager._tracer.start_as_current_span.return_value.__exit__ = Mock(return_value=None)
+            mock_trace.get_current_span.return_value = mock_span
+
+            with manager.trace_agent(
+                "TestAgent.run",
+                input_value={"query": "hello"},
+                metadata={"agent_id": 1},
+                tags=["nexent", "agent"],
+                session_id=2,
+                user_id="user-1",
+                attributes={"agent.id": 1},
+            ):
+                pass
+
+            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
+            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_AGENT
+            assert json.loads(attrs[OPENINFERENCE_INPUT_VALUE]) == {"query": "hello"}
+            assert json.loads(attrs[OPENINFERENCE_METADATA]) == {"agent_id": 1}
+            assert json.loads(attrs[OPENINFERENCE_TAG_TAGS]) == ["nexent", "agent"]
+            assert attrs[OPENINFERENCE_SESSION_ID] == "2"
+            assert attrs[OPENINFERENCE_USER_ID] == "user-1"
+            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "agent"
+            assert attrs[LANGFUSE_SESSION_ID] == "2"
+            assert attrs[LANGFUSE_USER_ID] == "user-1"
+            assert json.loads(attrs[LANGFUSE_OBSERVATION_INPUT]) == {"query": "hello"}
+            assert attrs["langfuse.trace.metadata.agent_id"] == 1
+            assert attrs["agent.id"] == 1
+
+            with manager.trace_chain("Step 0"):
+                pass
+            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
+            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_CHAIN
+            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "chain"
+
+            with manager.trace_retriever("KnowledgeBase.search"):
+                pass
+            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
+            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_RETRIEVER
+            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "retriever"
+
+            manager.set_openinference_output({"answer": "ok"})
+            output_attrs = mock_span.set_attributes.call_args.args[0]
+            assert json.loads(output_attrs[OPENINFERENCE_OUTPUT_VALUE]) == {"answer": "ok"}
+            assert json.loads(output_attrs[LANGFUSE_OBSERVATION_OUTPUT]) == {"answer": "ok"}
 
 
 class TestAgentStepTracing:
@@ -396,6 +606,8 @@ class TestAgentStepTracing:
             assert attributes["agent.step.name"] == "web_search"
             assert "agent.step.type" in attributes
             assert attributes["agent.step.type"] == "tool_call"
+            assert attributes[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_CHAIN
+            assert attributes[LANGFUSE_OBSERVATION_TYPE] == "chain"
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_trace_agent_step_reasoning(self, mock_trace):
@@ -464,8 +676,16 @@ class TestAgentStepTracing:
             assert attributes["agent.tool.name"] == "web_search"
             assert "agent.tool.input" in attributes
             assert "query" in attributes["agent.tool.input"]
+            assert attributes[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_TOOL
+            assert attributes["tool.name"] == "web_search"
+            assert "query" in attributes["tool.parameters"]
+            assert "query" in attributes[OPENINFERENCE_INPUT_VALUE]
+            assert attributes[LANGFUSE_OBSERVATION_TYPE] == "tool"
+            assert "query" in attributes[LANGFUSE_OBSERVATION_INPUT]
 
             mock_span.set_attribute.assert_called()
+            mock_span.set_attribute.assert_any_call(OPENINFERENCE_OUTPUT_VALUE, '{"results": ["item1", "item2"]}')
+            mock_span.set_attribute.assert_any_call(LANGFUSE_OBSERVATION_OUTPUT, '{"results": ["item1", "item2"]}')
 
     def test_trace_agent_step_disabled(self):
         """Test agent step tracing when disabled."""
@@ -625,6 +845,44 @@ class TestDecorators:
             "stream_operation.after_yield",
             "stream_operation.completed",
         ]
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_monitor_endpoint_uses_openinference_span_kind(self, mock_trace):
+        """Test monitor_endpoint creates Phoenix-friendly chain/agent spans."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = MonitoringManager()
+            config = MonitoringConfig(enable_telemetry=True)
+            manager.configure(config)
+            manager._tracer = MagicMock()
+
+            mock_span = MagicMock()
+            manager._tracer.start_as_current_span.return_value.__enter__ = Mock(return_value=mock_span)
+            manager._tracer.start_as_current_span.return_value.__exit__ = Mock(return_value=None)
+            mock_trace.get_current_span.return_value = mock_span
+
+            @manager.monitor_endpoint("agent.run")
+            def agent_func():
+                return "ok"
+
+            assert agent_func() == "ok"
+            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
+            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_AGENT
+
+            @manager.monitor_endpoint("agent_service.run_agent_stream")
+            def chain_func():
+                return "ok"
+
+            assert chain_func() == "ok"
+            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
+            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_CHAIN
+
+            @manager.monitor_endpoint("agent_run")
+            def internal_agent_func():
+                return "ok"
+
+            assert internal_agent_func() == "ok"
+            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
+            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_CHAIN
 
     def test_monitor_llm_call_decorator(self):
         """Test monitor_llm_call decorator."""

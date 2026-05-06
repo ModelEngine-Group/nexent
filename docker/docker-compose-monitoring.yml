@@ -3,13 +3,15 @@ services:
     image: otel/opentelemetry-collector-contrib:0.89.0
     container_name: nexent-otel-collector
     command: ["--config=/etc/otel-collector-config.yml"]
+    environment:
+      LANGFUSE_OTLP_AUTH_HEADER: ${LANGFUSE_OTLP_AUTH_HEADER:-}
     volumes:
       - ${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-config.yml}:/etc/otel-collector-config.yml
     ports:
       - "${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"
       - "${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"
     networks:
-      - nexent-network
+      - nexent_nexent
     restart: unless-stopped
 
   phoenix:
@@ -24,7 +26,7 @@ services:
       - "${PHOENIX_PORT:-6006}:6006"
       - "${PHOENIX_GRPC_HOST_PORT:-4319}:4317"
     networks:
-      - nexent-network
+      - nexent_nexent
     restart: unless-stopped
 
   langfuse-worker:
@@ -83,7 +85,7 @@ services:
       LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_ROOT_PASSWORD:-miniosecret}
       LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
     networks:
-      - nexent-network
+      - nexent_nexent
 
   langfuse-web:
     image: docker.io/langfuse/langfuse:${LANGFUSE_VERSION:-3}
@@ -105,7 +107,7 @@ services:
     ports:
       - "${LANGFUSE_PORT:-3001}:3000"
     networks:
-      - nexent-network
+      - nexent_nexent
 
   langfuse-clickhouse:
     image: docker.io/clickhouse/clickhouse-server:${LANGFUSE_CLICKHOUSE_VERSION:-latest}
@@ -130,7 +132,7 @@ services:
       retries: 10
       start_period: 1s
     networks:
-      - nexent-network
+      - nexent_nexent
 
   langfuse-minio:
     image: docker.io/minio/minio:${LANGFUSE_MINIO_VERSION:-latest}
@@ -154,7 +156,7 @@ services:
       retries: 5
       start_period: 1s
     networks:
-      - nexent-network
+      - nexent_nexent
 
   langfuse-redis:
     image: docker.io/redis:7
@@ -174,7 +176,7 @@ services:
       timeout: 10s
       retries: 10
     networks:
-      - nexent-network
+      - nexent_nexent
 
   langfuse-postgres:
     image: docker.io/postgres:${LANGFUSE_POSTGRES_VERSION:-17}
@@ -197,10 +199,10 @@ services:
       timeout: 3s
       retries: 10
     networks:
-      - nexent-network
+      - nexent_nexent
 
 networks:
-  nexent-network:
+  nexent_nexent:
     external: true
 
 volumes:

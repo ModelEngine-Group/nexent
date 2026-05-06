@@ -74,7 +74,7 @@ from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
 
 # Monitoring utilities: expose monitoring context for downstream observers
-from nexent.monitor import set_monitoring_context
+from nexent.monitor import OPENINFERENCE_SPAN_KIND_CHAIN, set_monitoring_context
 
 # Import monitoring utilities
 from utils.monitoring import monitoring_manager
@@ -1875,6 +1875,20 @@ async def run_agent_stream(
         agent_id=agent_request.agent_id,
         conversation_id=agent_request.conversation_id,
     )
+    monitoring_manager.set_openinference_agent_context(
+        agent_id=agent_request.agent_id,
+        conversation_id=agent_request.conversation_id,
+        user_id=resolved_user_id,
+        tenant_id=resolved_tenant_id,
+        query=agent_request.query,
+        is_debug=agent_request.is_debug,
+        extra_metadata={
+            "language": language,
+            "history_count": len(agent_request.history) if agent_request.history else 0,
+            "minio_files_count": len(agent_request.minio_files) if agent_request.minio_files else 0,
+        },
+        span_kind=OPENINFERENCE_SPAN_KIND_CHAIN,
+    )
 
     # Step 2: Save user message (if needed)
     if not agent_request.is_debug and not skip_user_save:
@@ -1912,6 +1926,20 @@ async def run_agent_stream(
 
     memory_duration = time.time() - memory_start_time
     memory_enabled = memory_ctx_preview.user_config.memory_switch
+    monitoring_manager.set_openinference_agent_context(
+        agent_id=agent_request.agent_id,
+        conversation_id=agent_request.conversation_id,
+        user_id=resolved_user_id,
+        tenant_id=resolved_tenant_id,
+        query=agent_request.query,
+        is_debug=agent_request.is_debug,
+        memory_enabled=memory_enabled,
+        extra_metadata={
+            "language": language,
+            "agent_share_option": getattr(memory_ctx_preview.user_config, "agent_share_option", "unknown"),
+        },
+        span_kind=OPENINFERENCE_SPAN_KIND_CHAIN,
+    )
     monitoring_manager.add_span_event("memory_context_build.completed", {
         "duration": memory_duration,
         "memory_enabled": memory_enabled,
