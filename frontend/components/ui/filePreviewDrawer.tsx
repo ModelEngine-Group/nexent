@@ -1,14 +1,35 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import dynamic from 'next/dynamic';
 import { Drawer, Spin, Button, Table } from 'antd';
-import { Download, Minus, Plus, RotateCw, X } from 'lucide-react';
-import Papa from 'papaparse';
+import { Download, Maximize2, Minimize2, Minus, Plus, RotateCw, X } from 'lucide-react';
 import { FilePreviewProps } from '@/types/chat';
+import { DetectedFileType, ImageBaseMode } from '@/types/file';
+import {
+  CHUNK_SIZE,
+  TEXT_RENDER_BLOCK_SIZE,
+  CSV_ROW_HEIGHT,
+  isValidContainerElement,
+  updateChunkRangeState,
+  ensurePreviewTextDecoder,
+  decodePreviewChunk,
+  decodeLocalTextFile,
+  splitPreviewSafeText,
+  shouldStopFetchingChunk,
+  handlePreviewChunkBoundaryResponse,
+  appendTextPreviewContent,
+  parseCsvLine,
+  detectCsvDelimiter,
+  computeRotateFitScale,
+  clamp,
+  ignoreAbortError,
+  getPageWrapperStyle,
+} from '@/lib/filePreviewUtils';
 import { storageService } from '@/services/storageService';
 import { MarkdownRenderer, extractMarkdownHeadings, type MarkdownHeading } from '@/components/ui/markdownRenderer';
+import { formatFileSize } from '@/lib/utils';
 import log from '@/lib/logger';
 
 const PdfViewer = dynamic(() => import('@/components/ui/PdfViewer').then(mod => ({ default: mod.PdfViewer })), {
@@ -19,330 +40,6 @@ const PdfViewer = dynamic(() => import('@/components/ui/PdfViewer').then(mod => 
     </div>
   ),
 });
-
-const CHUNK_SIZE = 128 * 1024;
-
-const CSV_ROW_HEIGHT = 40;
-const TEXT_RENDER_BLOCK_SIZE = 200;
-const CSV_DELIMITER_CANDIDATES = [',', ';', '\t', '|'] as const;
-const CHARSET_PATTERN = /charset\s*=\s*([^;\s]+)/i;
-const CONTENT_RANGE_PATTERN = /bytes (\d+)-(\d+)\/(\d+)/;
-const INVALID_CONTAINER_TAGS = new Set(['head', 'style', 'script', 'link', 'meta']);
-
-function isValidContainerElement(el: Element | null): el is HTMLDivElement {
-  if (!(el instanceof HTMLDivElement)) {
-    return false;
-  }
-
-  if (!el.isConnected) {
-    return false;
-  }
-
-  const tagName = el.tagName.toLowerCase();
-  return !INVALID_CONTAINER_TAGS.has(tagName);
-}
-
-function normalizeCharsetLabel(value: string): string {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'gbk' || normalized === 'gb2312' || normalized === 'cp936') {
-    return 'gb18030';
-  }
-  return normalized;
-}
-
-function extractCharsetFromContentType(contentType: string | null): string | null {
-  if (!contentType) return null;
-  const match = CHARSET_PATTERN.exec(contentType);
-  if (!match?.[1]) return null;
-  return normalizeCharsetLabel(match[1].replaceAll(/^"|"$/g, ''));
-}
-
-function updateChunkRangeState(
-  contentRange: string | null,
-  byteLength: number,
-  byteOffsetRef: React.MutableRefObject<number>,
-  totalBytesRef: React.MutableRefObject<number | null>,
-): boolean {
-  if (!contentRange) {
-    byteOffsetRef.current += byteLength;
-    return false;
-  }
-
-  const match = CONTENT_RANGE_PATTERN.exec(contentRange);
-  if (!match) {
-    byteOffsetRef.current += byteLength;
-    return false;
-  }
-
-  const fetchedEnd = Number(match[2]);
-  const total = Number(match[3]);
-  byteOffsetRef.current = fetchedEnd + 1;
-  totalBytesRef.current = total;
-  return fetchedEnd + 1 < total;
-}
-
-function ensurePreviewTextDecoder(
-  contentType: string | null,
-  textDecoderRef: React.MutableRefObject<TextDecoder | null>,
-  decoderEncodingRef: React.MutableRefObject<string | null>,
-  decoderHasExplicitCharsetRef: React.MutableRefObject<boolean>,
-  decoderAllowGbFallbackRef: React.MutableRefObject<boolean>,
-): void {
-  if (textDecoderRef.current) {
-    return;
-  }
-
-  const headerCharset = extractCharsetFromContentType(contentType);
-  if (headerCharset) {
-    const normalized = normalizeCharsetLabel(headerCharset);
-    const isUtf8 = normalized === 'utf-8' || normalized === 'utf8';
-
-    textDecoderRef.current = isUtf8
-      ? new TextDecoder('utf-8', { fatal: true })
-      : new TextDecoder(normalized);
-    decoderEncodingRef.current = isUtf8 ? 'utf-8' : normalized;
-    decoderHasExplicitCharsetRef.current = true;
-    decoderAllowGbFallbackRef.current = isUtf8;
-    return;
-  }
-
-  // Start with strict UTF-8; if invalid bytes appear in later chunks, fallback to GB18030.
-  textDecoderRef.current = new TextDecoder('utf-8', { fatal: true });
-  decoderEncodingRef.current = 'utf-8';
-  decoderHasExplicitCharsetRef.current = false;
-  decoderAllowGbFallbackRef.current = true;
-}
-
-function decodePreviewChunk(
-  buf: ArrayBuffer,
-  hasMore: boolean,
-  textDecoderRef: React.MutableRefObject<TextDecoder | null>,
-  decoderEncodingRef: React.MutableRefObject<string | null>,
-  decoderAllowGbFallbackRef: React.MutableRefObject<boolean>,
-): string {
-  if (!textDecoderRef.current) {
-    throw new Error('Text decoder is not initialized');
-  }
-
-  try {
-    let raw = textDecoderRef.current.decode(buf, { stream: hasMore });
-    if (!hasMore) {
-      raw += textDecoderRef.current.decode();
-    }
-    return raw;
-  } catch (decodeErr) {
-    const canFallbackToGb18030 =
-      decoderAllowGbFallbackRef.current &&
-      decoderEncodingRef.current === 'utf-8';
-
-    if (!canFallbackToGb18030) {
-      throw decodeErr;
-    }
-
-    log.warn('UTF-8 decode failed for preview stream, fallback to GB18030:', decodeErr);
-    textDecoderRef.current = new TextDecoder('gb18030');
-    decoderEncodingRef.current = 'gb18030';
-    decoderAllowGbFallbackRef.current = false;
-
-    let raw = textDecoderRef.current.decode(buf, { stream: hasMore });
-    if (!hasMore) {
-      raw += textDecoderRef.current.decode();
-    }
-    return raw;
-  }
-}
-
-async function decodeLocalTextFile(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
-
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
-  } catch {
-    return new TextDecoder('gb18030').decode(buf);
-  }
-}
-
-function splitPreviewSafeText(
-  raw: string,
-  remainder: string,
-  hasMore: boolean,
-  detectedFileType: DetectedFileType,
-): { remainder: string; safeText: string } {
-  const mergedText = remainder + raw;
-  const shouldKeepTrailingLine = hasMore && detectedFileType !== 'markdown';
-  if (!shouldKeepTrailingLine) {
-    return { remainder: '', safeText: mergedText };
-  }
-
-  const lastNl = mergedText.lastIndexOf('\n');
-  if (lastNl === -1) {
-    return { remainder: mergedText, safeText: '' };
-  }
-
-  return {
-    remainder: mergedText.slice(lastNl + 1),
-    safeText: mergedText.slice(0, lastNl + 1),
-  };
-}
-
-function shouldStopFetchingChunk(
-  activeSessionId: number,
-  currentSessionId: number,
-): boolean {
-  return activeSessionId !== currentSessionId;
-}
-
-function handlePreviewChunkBoundaryResponse(
-  status: number,
-  isFirst: boolean,
-  setServerTooLarge: React.Dispatch<React.SetStateAction<boolean>>,
-  setLoading: React.Dispatch<React.SetStateAction<boolean>>,
-  setLoadingMore: React.Dispatch<React.SetStateAction<boolean>>,
-  observerRef: React.MutableRefObject<IntersectionObserver | null>,
-  isFetchingRef: React.MutableRefObject<boolean>,
-): boolean {
-  if (status === 413) {
-    setServerTooLarge(true);
-    if (isFirst) {
-      setLoading(false);
-    } else {
-      setLoadingMore(false);
-    }
-    isFetchingRef.current = false;
-    return true;
-  }
-
-  if (status === 416) {
-    observerRef.current?.disconnect();
-    if (isFirst) {
-      setLoading(false);
-    } else {
-      setLoadingMore(false);
-    }
-    isFetchingRef.current = false;
-    return true;
-  }
-
-  return false;
-}
-
-function appendTextPreviewContent(
-  params: {
-    detectedFileType: DetectedFileType;
-    safeText: string;
-    byteOffset: number;
-    currentChunkLength: number;
-    csvDelimiterRef: React.MutableRefObject<string>;
-    setTxtLines: React.Dispatch<React.SetStateAction<string[]>>;
-    setCsvRows: React.Dispatch<React.SetStateAction<string[][]>>;
-    setTextContent: React.Dispatch<React.SetStateAction<string>>;
-  },
-): void {
-  const {
-    detectedFileType,
-    safeText,
-    byteOffset,
-    currentChunkLength,
-    csvDelimiterRef,
-    setTxtLines,
-    setCsvRows,
-    setTextContent,
-  } = params;
-
-  if (!safeText) {
-    return;
-  }
-
-  if (detectedFileType === 'text') {
-    const newLines = safeText.split('\n');
-    if (newLines.at(-1) === '') {
-      newLines.pop();
-    }
-    setTxtLines(prev => [...prev, ...newLines]);
-    return;
-  }
-
-  if (detectedFileType === 'csv') {
-    if (byteOffset === currentChunkLength) {
-      csvDelimiterRef.current = detectCsvDelimiter(safeText);
-    }
-    const newLines = safeText.split('\n').filter(line => line.trim().length > 0);
-    setCsvRows(prev => [...prev, ...newLines.map((line) => parseCsvLine(line, csvDelimiterRef.current))]);
-    return;
-  }
-
-  setTextContent(prev => prev + safeText);
-}
-
-function parseCsvLine(line: string, delimiter: string): string[] {
-  const parsed = Papa.parse<string[]>(line, {
-    header: false,
-    skipEmptyLines: false,
-    dynamicTyping: false,
-    delimiter,
-    quoteChar: '"',
-    escapeChar: '"',
-  });
-
-  const row = parsed.data[0];
-  if (Array.isArray(row)) {
-    return row.map((cell) => (typeof cell === 'string' ? cell.trim() : String(cell ?? '').trim()));
-  }
-
-  return line.split(delimiter).map((cell) => cell.trim());
-}
-
-function detectCsvDelimiter(sampleText: string): string {
-  const lines = sampleText
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .slice(0, 5);
-
-  if (lines.length === 0) {
-    return ',';
-  }
-
-  let bestDelimiter = ',';
-  let bestScore = -1;
-
-  for (const delimiter of CSV_DELIMITER_CANDIDATES) {
-    const columnCounts = lines.map((line) => {
-      const parsed = Papa.parse<string[]>(line, {
-        header: false,
-        skipEmptyLines: false,
-        dynamicTyping: false,
-        delimiter,
-        quoteChar: '"',
-        escapeChar: '"',
-      });
-
-      const row = parsed.data[0];
-      return Array.isArray(row) ? row.length : 1;
-    });
-
-    const minColumns = Math.min(...columnCounts);
-    const maxColumns = Math.max(...columnCounts);
-    const averageColumns =
-      columnCounts.reduce((sum, count) => sum + count, 0) / columnCounts.length;
-
-    if (averageColumns <= 1) {
-      continue;
-    }
-
-    const consistencyBonus = maxColumns === minColumns ? 100 : 0;
-    const score = consistencyBonus + averageColumns;
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestDelimiter = delimiter;
-    }
-  }
-
-  return bestDelimiter;
-}
-
-type DetectedFileType = 'pdf' | 'image' | 'markdown' | 'csv' | 'text' | 'office' | 'unknown';
 
 export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const { open, onClose } = props;
@@ -376,6 +73,29 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const [imageScale, setImageScale] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
   const [imageLoadError, setImageLoadError] = useState(false);
+  const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
+  const [imageViewportSize, setImageViewportSize] = useState({ width: 0, height: 0 });
+  const [imageBaseMode, setImageBaseMode] = useState<ImageBaseMode>('fit');
+  const imageViewportResizeObserverRef = useRef<ResizeObserver | null>(null);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
+  const [isImageDragging, setIsImageDragging] = useState(false);
+  const imagePanRef = useRef({ x: 0, y: 0 });
+  const imageScaleRef = useRef(1);
+  const dragStateRef = useRef<{
+    isDragging: boolean;
+    pointerId: number | null;
+    startX: number;
+    startY: number;
+    startPanX: number;
+    startPanY: number;
+  }>({
+    isDragging: false,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    startPanX: 0,
+    startPanY: 0,
+  });
 
   const [serverTooLarge, setServerTooLarge] = useState(false);
 
@@ -468,6 +188,206 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   
   const isEmptyFile = fileSize === 0;
   const isTooLargeToPreview = !!(fileSize && fileSize > 100 * 1024 * 1024);
+
+  const normalizedImageRotation = ((imageRotation % 360) + 360) % 360;
+  const imageFitScale = useMemo(
+    () => computeRotateFitScale(normalizedImageRotation, imageNaturalSize, imageViewportSize),
+    [imageNaturalSize, imageViewportSize, normalizedImageRotation],
+  );
+  const imageBaseScale = imageBaseMode === 'fit' ? imageFitScale : 1;
+  const effectiveImageScale = imageScale * imageBaseScale;
+  const imageScaleMin = imageBaseScale > 0 ? 0.25 / imageBaseScale : 0.25;
+  const imageScaleMax = imageBaseScale > 0 ? 6 / imageBaseScale : 6;
+
+  const imageDisplaySize = useMemo(() => {
+    const { width: naturalWidth, height: naturalHeight } = imageNaturalSize;
+    if (naturalWidth <= 0 || naturalHeight <= 0) {
+      return { width: 0, height: 0 };
+    }
+    const isQuarterTurn = normalizedImageRotation === 90 || normalizedImageRotation === 270;
+    const displayWidth = (isQuarterTurn ? naturalHeight : naturalWidth) * effectiveImageScale;
+    const displayHeight = (isQuarterTurn ? naturalWidth : naturalHeight) * effectiveImageScale;
+    return { width: displayWidth, height: displayHeight };
+  }, [imageNaturalSize, normalizedImageRotation, effectiveImageScale]);
+
+  const clampImagePan = useCallback((pan: { x: number; y: number }) => {
+    const { width: viewportWidth, height: viewportHeight } = imageViewportSize;
+    const { width: displayWidth, height: displayHeight } = imageDisplaySize;
+    if (viewportWidth <= 0 || viewportHeight <= 0 || displayWidth <= 0 || displayHeight <= 0) {
+      return { x: 0, y: 0 };
+    }
+
+    const maxPanX = Math.max(0, (displayWidth - viewportWidth) / 2);
+    const maxPanY = Math.max(0, (displayHeight - viewportHeight) / 2);
+    return {
+      x: clamp(pan.x, -maxPanX, maxPanX),
+      y: clamp(pan.y, -maxPanY, maxPanY),
+    };
+  }, [imageDisplaySize, imageViewportSize]);
+
+  useEffect(() => {
+    imagePanRef.current = imagePan;
+  }, [imagePan]);
+
+  useEffect(() => {
+    imageScaleRef.current = imageScale;
+  }, [imageScale]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (imageNaturalSize.width === 0 || imageNaturalSize.height === 0) return;
+    if (imageViewportSize.width === 0 || imageViewportSize.height === 0) return;
+    const normalizedRotation = ((imageRotation % 360) + 360) % 360;
+    const isQuarterTurn = normalizedRotation === 90 || normalizedRotation === 270;
+    const rotatedWidth = isQuarterTurn ? imageNaturalSize.height : imageNaturalSize.width;
+    const rotatedHeight = isQuarterTurn ? imageNaturalSize.width : imageNaturalSize.height;
+    if (rotatedWidth > imageViewportSize.width || rotatedHeight > imageViewportSize.height) {
+      setImageBaseMode('fit');
+    } else {
+      setImageBaseMode('actual');
+    }
+  }, [open, imageNaturalSize, imageViewportSize, imageRotation]);
+
+  const handleImageViewportRef = useCallback((el: HTMLDivElement | null) => {
+    imageViewportResizeObserverRef.current?.disconnect();
+    imageViewportResizeObserverRef.current = null;
+
+    if (!el) {
+      setImageViewportSize({ width: 0, height: 0 });
+      return;
+    }
+
+    const updateViewportSize = () => {
+      setImageViewportSize({ width: el.clientWidth, height: el.clientHeight });
+    };
+
+    const observer = new ResizeObserver(updateViewportSize);
+    observer.observe(el);
+    imageViewportResizeObserverRef.current = observer;
+    updateViewportSize();
+  }, []);
+
+  const handleImagePanReset = useCallback(() => {
+    const nextPan = { x: 0, y: 0 };
+    setImagePan(nextPan);
+    imagePanRef.current = nextPan;
+    setIsImageDragging(false);
+  }, []);
+
+  const applyImageScale = useCallback((nextScale: number, anchorX = 0, anchorY = 0) => {
+    const currentScale = imageScaleRef.current;
+    if (nextScale === currentScale) {
+      return;
+    }
+    const scaleRatio = nextScale / currentScale;
+    const currentPan = imagePanRef.current;
+    const nextPan = clampImagePan({
+      x: anchorX - scaleRatio * (anchorX - currentPan.x),
+      y: anchorY - scaleRatio * (anchorY - currentPan.y),
+    });
+    imagePanRef.current = nextPan;
+    setImagePan(nextPan);
+    imageScaleRef.current = nextScale;
+    setImageScale(nextScale);
+  }, [clampImagePan]);
+
+  const handleImageWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    if (imageLoadError) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const currentScale = imageScaleRef.current;
+    const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+    const nextScale = clamp(currentScale * zoomFactor, imageScaleMin, imageScaleMax);
+    if (nextScale === currentScale) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const cursorX = event.clientX - rect.left - rect.width / 2;
+    const cursorY = event.clientY - rect.top - rect.height / 2;
+    applyImageScale(nextScale, cursorX, cursorY);
+  }, [applyImageScale, imageLoadError, imageScaleMin, imageScaleMax]);
+
+  const handleImagePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (imageLoadError || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsImageDragging(true);
+    dragStateRef.current = {
+      isDragging: true,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startPanX: imagePanRef.current.x,
+      startPanY: imagePanRef.current.y,
+    };
+  }, [imageLoadError]);
+
+  const handleImagePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current;
+    if (!dragState.isDragging || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextPan = {
+      x: dragState.startPanX + (event.clientX - dragState.startX),
+      y: dragState.startPanY + (event.clientY - dragState.startY),
+    };
+    const clamped = clampImagePan(nextPan);
+    imagePanRef.current = clamped;
+    setImagePan(clamped);
+  }, [clampImagePan]);
+
+  const handleImagePointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current;
+    if (dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    dragStateRef.current = {
+      isDragging: false,
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      startPanX: 0,
+      startPanY: 0,
+    };
+    setIsImageDragging(false);
+  }, []);
+
+  const handleImageDoubleClick = useCallback(() => {
+    if (imageScale !== 1 || imageBaseMode !== 'fit') {
+      setImageBaseMode('fit');
+      setImageScale(1);
+      imageScaleRef.current = 1;
+    } else {
+      setImageBaseMode('actual');
+    }
+  }, [imageBaseMode, imageScale]);
+
+  const toggleImageBaseMode = useCallback(() => {
+    if (imageBaseMode === 'fit') {
+      setImageBaseMode('actual');
+    } else {
+      setImageBaseMode('fit');
+    }
+    setImageScale(1);
+    imageScaleRef.current = 1;
+    handleImagePanReset();
+  }, [handleImagePanReset, imageBaseMode]);
+
+  useEffect(() => {
+    const clamped = clampImagePan(imagePanRef.current);
+    imagePanRef.current = clamped;
+    setImagePan(clamped);
+  }, [clampImagePan, effectiveImageScale, normalizedImageRotation, imageViewportSize]);
 
   const fetchTextChunk = useCallback(async (url: string, isFirst = false, sessionId?: number): Promise<void> => {
     const activeSessionId = sessionId ?? textFetchSessionRef.current;
@@ -678,6 +598,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       setServerTooLarge(false);
       setImageScale(1);
       setImageRotation(0);
+      setImageNaturalSize({ width: 0, height: 0 });
+      setImageViewportSize({ width: 0, height: 0 });
+      setImageBaseMode('fit');
+      handleImagePanReset();
       setTextContent('');
       setTxtLines([]);
       setCsvRows([]);
@@ -698,12 +622,21 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       decoderAllowGbFallbackRef.current = false;
       observerRef.current?.disconnect();
       observerRef.current = null;
+      imageViewportResizeObserverRef.current?.disconnect();
+      imageViewportResizeObserverRef.current = null;
       if (previousPreviewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(previousPreviewUrl);
       }
       previewUrlRef.current = '';
     }
   }, [open]);
+
+  useEffect(() => {
+    return () => {
+      imageViewportResizeObserverRef.current?.disconnect();
+      imageViewportResizeObserverRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -776,14 +709,6 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     }
   }, []);
 
-  const formatFileSize = (size: number): string => {
-    if (size < 1024) return `${size} B`;
-    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-    return `${(size / (1024 * 1024)).toFixed(2)} MB`;
-  };
-
-
-
   const renderLoading = () => (
     <div className="flex items-center justify-center h-full">
       <div className="text-center">
@@ -812,33 +737,60 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
   const renderImageViewer = () => (
     <div className="h-full relative bg-gray-100">
-      <div className="h-full overflow-auto flex items-center justify-center p-4 pb-20">
-        {imageLoadError ? (
-          renderCenteredErrorState()
-        ) : (
-          <img
-            src={previewUrl}
-            alt={fileName}
-            style={{
-              transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
-              transition: 'transform 0.2s ease-in-out',
-              maxWidth: '100%',
-              maxHeight: '100%',
-              objectFit: 'contain',
-            }}
-            className="select-none"
-            draggable={false}
-            onError={() => setImageLoadError(true)}
-          />
-        )}
+      <div
+        ref={handleImageViewportRef}
+        className="relative h-full overflow-hidden bg-gray-100 p-4 pb-20 select-none touch-none cursor-grab active:cursor-grabbing"
+        onWheel={handleImageWheel}
+        onPointerDown={handleImagePointerDown}
+        onPointerMove={handleImagePointerMove}
+        onPointerUp={handleImagePointerEnd}
+        onPointerCancel={handleImagePointerEnd}
+        onLostPointerCapture={handleImagePointerEnd}
+        onDoubleClick={handleImageDoubleClick}
+      >
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {imageLoadError ? (
+            renderCenteredErrorState()
+          ) : (
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              style={{
+                perspective: '1000px',
+              }}
+            >
+              <div
+                style={{
+                  transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${effectiveImageScale}) rotate(${imageRotation}deg)`,
+                  willChange: 'transform',
+                  transition: isImageDragging ? 'none' : 'transform 0.2s ease-in-out',
+                }}
+              >
+                <img
+                  src={previewUrl}
+                  alt={fileName}
+                  className="block select-none max-w-none"
+                  draggable={false}
+                  onLoad={(e) => {
+                    const img = e.currentTarget;
+                    setImageNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+                  }}
+                  onError={() => setImageLoadError(true)}
+                />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {!imageLoadError && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10">
           <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-full shadow-lg px-3 py-1">
             <button
-              onClick={() => setImageScale(prev => Math.max(prev - 0.25, 0.5))}
-              disabled={imageScale <= 0.5}
+              onClick={() => {
+                const nextScale = clamp(imageScaleRef.current - 0.25, imageScaleMin, imageScaleMax);
+                applyImageScale(nextScale, 0, 0);
+              }}
+              disabled={effectiveImageScale <= 0.25}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
               title={t('filePreview.zoomOut')}
             >
@@ -846,12 +798,15 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             </button>
 
             <span className="px-1 text-sm text-gray-500 select-none min-w-[52px] text-center">
-              {Math.round(imageScale * 100)}%
+              {Math.round(effectiveImageScale * 100)}%
             </span>
 
             <button
-              onClick={() => setImageScale(prev => Math.min(prev + 0.25, 3))}
-              disabled={imageScale >= 3}
+              onClick={() => {
+                const nextScale = clamp(imageScaleRef.current + 0.25, imageScaleMin, imageScaleMax);
+                applyImageScale(nextScale, 0, 0);
+              }}
+              disabled={effectiveImageScale >= 6}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
               title={t('filePreview.zoomIn')}
             >
@@ -861,7 +816,22 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             <div className="w-px h-5 bg-gray-200 mx-1" />
 
             <button
-              onClick={() => setImageRotation(prev => (prev + 90) % 360)}
+              onClick={toggleImageBaseMode}
+              className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
+              title={
+                imageBaseMode === 'fit'
+                  ? t('filePreview.image.actualSize')
+                  : t('filePreview.image.fitPage')
+              }
+            >
+              {imageBaseMode === 'fit' ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+            </button>
+
+            <button
+              onClick={() => {
+                setImageRotation(prev => prev + 90);
+                handleImagePanReset();
+              }}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
               title={t('filePreview.rotate')}
             >
