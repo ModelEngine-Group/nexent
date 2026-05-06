@@ -612,6 +612,12 @@ def test_rollback_version_impl_success(monkeypatch):
     # Mock restore_agent_draft
     mock_restore = MagicMock()
     monkeypatch.setattr(agent_version_service_module, "restore_agent_draft", mock_restore)
+    mock_query_snapshot = MagicMock(return_value=({"agent_id": 1}, [], []))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
+    monkeypatch.setattr(agent_version_db_mock, "restore_agent_draft", MagicMock(return_value=True))
+    mock_update_current = MagicMock(return_value=1)
+    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
 
     result = rollback_version_impl(
         agent_id=1,
@@ -641,12 +647,12 @@ def test_rollback_version_impl_version_not_found(monkeypatch):
 
 
 def test_rollback_version_impl_draft_not_found(monkeypatch):
-    """Test rolling back when draft doesn't exist"""
+    """Test rolling back when snapshot is not found"""
     mock_version = {"version_no": 1}
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
-    mock_update_current = MagicMock(return_value=0)
-    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
+    mock_query_snapshot = MagicMock(return_value=(None, [], []))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
 
     # Mock query_agent_snapshot to return empty agent (falsy)
     mock_query_snapshot = MagicMock(return_value=(None, [], []))
