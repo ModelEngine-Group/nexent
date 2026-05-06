@@ -230,7 +230,7 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], user
 
 def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["ZH"]) -> str:
     """
-    Call LLM to generate a title from a user question
+    Call LLM to generate a title from a user question using streaming.
 
     Args:
         question: User's question content
@@ -272,11 +272,16 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     if model_config.get("model_factory", "").lower() == "modelengine":
         messages = [{"role": msg["role"], "content": str(msg.get("content", ""))} for msg in messages]
 
-    # Call the model
-    response = llm.generate(messages)
-    if not response or not response.content or not response.content.strip():
+    try:
+        # Use llm() which is the same method as agent runtime, with full safety checks
+        response = llm(messages)
+        if not response or not response.content or not response.content.strip():
+            return DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
+        return remove_think_blocks(response.content.strip())
+
+    except Exception as exc:
+        logger.error("Failed to generate title from LLM: %s", str(exc))
         return DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
-    return remove_think_blocks(response.content.strip())
 
 
 def update_conversation_title(conversation_id: int, title: str, user_id: str = None) -> bool:

@@ -435,6 +435,7 @@ class TestConversationManagementService(unittest.TestCase):
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
+        """Test that call_llm_for_title uses llm() like agent runtime."""
         # Setup
         mock_get_model_config.return_value = {
             "model_name": "gpt-4",
@@ -452,7 +453,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_llm_instance = mock_openai.return_value
         mock_response = MagicMock()
         mock_response.content = "AI Discussion"
-        mock_llm_instance.generate.return_value = mock_response
+        mock_llm_instance.return_value = mock_response
 
         # Execute
         result = call_llm_for_title(
@@ -461,8 +462,67 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "AI Discussion")
         mock_openai.assert_called_once()
-        mock_llm_instance.generate.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='zh')
+
+    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    def test_call_llm_for_title_returns_default_on_empty_response(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
+        """Test that default title is returned when response is empty."""
+        # Setup
+        mock_get_model_config.return_value = {
+            "model_name": "gpt-4",
+            "model_repo": "openai",
+            "base_url": "http://example.com",
+            "api_key": "fake-key"
+        }
+
+        mock_prompt_template = {
+            "SYSTEM_PROMPT": "Generate a short title",
+            "USER_PROMPT": "Generate a title for: {{question}}"
+        }
+        mock_get_prompt_template.return_value = mock_prompt_template
+
+        mock_llm_instance = mock_openai.return_value
+        mock_response = MagicMock()
+        mock_response.content = "   "  # whitespace only
+        mock_llm_instance.return_value = mock_response
+
+        # Execute
+        result = call_llm_for_title(
+            "Test question", tenant_id=self.tenant_id, language="en")
+
+        # Assert - should return default title for English
+        self.assertEqual(result, "New Conversation")
+
+    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    def test_call_llm_for_title_handles_exception(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
+        """Test that exception is caught and default title is returned."""
+        # Setup
+        mock_get_model_config.return_value = {
+            "model_name": "gpt-4",
+            "model_repo": "openai",
+            "base_url": "http://example.com",
+            "api_key": "fake-key"
+        }
+
+        mock_prompt_template = {
+            "SYSTEM_PROMPT": "Generate a short title",
+            "USER_PROMPT": "Generate a title for: {{question}}"
+        }
+        mock_get_prompt_template.return_value = mock_prompt_template
+
+        mock_llm_instance = mock_openai.return_value
+        mock_llm_instance.side_effect = Exception("API Error")
+
+        # Execute
+        result = call_llm_for_title(
+            "Test question", tenant_id=self.tenant_id, language="zh")
+
+        # Assert - should return default Chinese title
+        self.assertEqual(result, "新对话")
 
     @patch('backend.services.conversation_management_service.rename_conversation')
     def test_update_conversation_title(self, mock_rename_conversation):
@@ -711,7 +771,7 @@ class TestCallLlmForTitleMonitoring(unittest.TestCase):
             "display_name": "GPT-4",
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Test Title")
         mock_model_cls.return_value = mock_llm
 
         call_llm_for_title("hello?", "tenant-123", "en")
@@ -730,7 +790,7 @@ class TestCallLlmForTitleMonitoring(unittest.TestCase):
             "display_name": "GPT-4",
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Test Title")
         mock_model_cls.return_value = mock_llm
 
         call_llm_for_title("hello?", "tenant-123", "zh")
