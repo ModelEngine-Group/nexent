@@ -641,7 +641,7 @@ def test_rollback_version_impl_version_not_found(monkeypatch):
 
 
 def test_rollback_version_impl_draft_not_found(monkeypatch):
-    """Test rolling back when snapshot is not found"""
+    """Test rolling back when draft doesn't exist"""
     mock_version = {"version_no": 1}
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
@@ -656,7 +656,7 @@ def test_rollback_version_impl_draft_not_found(monkeypatch):
     mock_query_draft = MagicMock(return_value=(None, [], []))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
 
-    with pytest.raises(ValueError, match="Agent snapshot for version 1 not found"):
+    with pytest.raises(ValueError, match="Agent draft not found"):
         rollback_version_impl(
             agent_id=1,
             tenant_id="tenant1",
