@@ -417,9 +417,10 @@ async def rollback_version_api(
     authorization: str = Header(None),
 ):
     """
-    Rollback to a specific version by updating current_version_no only.
-    This does NOT create a new version - the draft will point to the target version.
-    Use the publish endpoint to create an actual new version after rollback.
+    Rollback to a specific version by restoring draft data from that version.
+    This copies the target version's snapshot (agent, tools, relations, skills)
+    into the draft (version_no=0) and updates current_version_no.
+    The user can then edit or re-publish from the restored state.
     """
     try:
         _, tenant_id = get_current_user_id(authorization)

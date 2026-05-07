@@ -56,6 +56,11 @@ interface AgentConfigStoreState {
   editedAgent: EditableAgent;
   hasUnsavedChanges: boolean;
   isCreatingMode: boolean; // true when user is in create mode, even if currentAgentId is null
+  /**
+   * Incremented counter to signal downstream UI to force-refresh.
+   * Components that depend on this key will re-initialize when it changes.
+   */
+  forceRefreshKey: number;
 
   /**
    * Set current agent (null = create mode).
@@ -67,6 +72,12 @@ interface AgentConfigStoreState {
    * Enter create mode. Sets isCreatingMode to true and resets state.
    */
   enterCreateMode: () => void;
+
+  /**
+   * Trigger a UI force-refresh by incrementing forceRefreshKey.
+   * Call this after operations like rollback that need to force-reload form state.
+   */
+  triggerForceRefresh: () => void;
 
 
   /**
@@ -353,6 +364,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   editedAgent: { ...emptyEditableAgent },
   hasUnsavedChanges: false,
   isCreatingMode: false,
+  forceRefreshKey: 0,
 
   setCurrentAgent: (agent) => {
     const baselineAgent = agent ? toEditable(agent) : null;
@@ -364,6 +376,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       editedAgent,
       hasUnsavedChanges: false,
       isCreatingMode: false, // Exit create mode when selecting an agent
+      forceRefreshKey: 0,
     });
   },
 
@@ -375,7 +388,12 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       editedAgent: { ...emptyEditableAgent },
       hasUnsavedChanges: false,
       isCreatingMode: true,
+      forceRefreshKey: 0,
     });
+  },
+
+  triggerForceRefresh: () => {
+    set((state) => ({ forceRefreshKey: state.forceRefreshKey + 1 }));
   },
 
   updateTools: (tools) => {
@@ -494,6 +512,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       editedAgent: { ...emptyEditableAgent },
       hasUnsavedChanges: false,
       isCreatingMode: false,
+      forceRefreshKey: 0,
     });
   },
 
