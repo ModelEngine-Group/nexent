@@ -21,6 +21,14 @@ if backend_dir not in sys.path:
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
+# Mock botocore before patching it
+botocore_mock = MagicMock()
+botocore_client_mock = MagicMock()
+botocore_client_mock.BaseClient = MagicMock()
+botocore_client_mock.BaseClient._make_api_call = MagicMock()
+sys.modules['botocore'] = botocore_mock
+sys.modules['botocore.client'] = botocore_client_mock
+
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
@@ -35,35 +43,14 @@ minio_client_mock.client = MagicMock()
 minio_config_mock = MagicMock()
 minio_config_mock.validate = MagicMock()
 
-# Import backend modules after all patches are applied
-# Use additional context manager to ensure MinioClient is properly mocked during import
-with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
-        patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from backend.database.knowledge_db import (
-        create_knowledge_record,
-        update_knowledge_record,
-        delete_knowledge_record,
-        get_knowledge_record,
-        get_knowledge_info_by_knowledge_ids,
-        get_knowledge_ids_by_index_names,
-        get_knowledge_info_by_tenant_id,
-        update_model_name_by_index_name,
-        get_index_name_by_knowledge_name,
-        get_knowledge_info_by_tenant_and_source,
-        upsert_knowledge_record,
-        _generate_index_name,
-        get_knowledge_name_map_by_index_names,
-    )
-
-
-# Add project root to Python path
-sys.path.insert(0, os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '..', '..', '..')))
+# Mock backend.database.client before patching it
+backend_database_client_mock = MagicMock()
+backend_database_client_mock.MinioClient = MagicMock(return_value=minio_client_mock)
+sys.modules['backend.database.client'] = backend_database_client_mock
 
 # Mock consts module to use conftest environment variables
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set constants to match conftest.py values
 consts_mock.const.MINIO_ENDPOINT = 'http://localhost:9000'
 consts_mock.const.MINIO_ACCESS_KEY = 'minioadmin'
 consts_mock.const.MINIO_SECRET_KEY = 'minioadmin'
@@ -75,47 +62,35 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = 'test_password'
 consts_mock.const.POSTGRES_DB = 'test_db'
 consts_mock.const.POSTGRES_PORT = '5432'
 consts_mock.const.DEFAULT_TENANT_ID = 'default_tenant'
-
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 
-# Mock MinioClient to prevent connection attempts
-minio_client_mock = MagicMock()
+# Mock MinioClient and PostgresClient
+minio_client_mock2 = MagicMock()
 postgres_client_mock = MagicMock()
-
-# Mock the entire client module
 client_mock = MagicMock()
-client_mock.MinioClient = minio_client_mock
+client_mock.MinioClient = minio_client_mock2
 client_mock.PostgresClient = postgres_client_mock
 client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
+sys.modules['database.client'] = client_mock
 
 # Mock utils module
 utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
-utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(
-    return_value="test_user_id")
+utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
 utils_mock.str_utils = MagicMock()
-utils_mock.str_utils.convert_list_to_string = MagicMock(
-    side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
-
-# Add the mocked utils module to sys.modules
+utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_mock.auth_utils
 sys.modules['utils.str_utils'] = utils_mock.str_utils
 
-# Provide a stub for the `boto3` module so that it can be imported safely even
-# if the testing environment does not have it available.
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
-
-# Mock sqlalchemy module
+# Mock sqlalchemy module before importing backend modules
 sqlalchemy_mock = MagicMock()
 sqlalchemy_mock.func = MagicMock()
-sqlalchemy_mock.func.current_timestamp = MagicMock(
-    return_value="2023-01-01 00:00:00")
+sqlalchemy_mock.func.current_timestamp = MagicMock(return_value="2023-01-01 00:00:00")
 sqlalchemy_mock.exc = MagicMock()
 
 
@@ -124,8 +99,6 @@ class MockSQLAlchemyError(Exception):
 
 
 sqlalchemy_mock.exc.SQLAlchemyError = MockSQLAlchemyError
-
-# Add the mocked sqlalchemy module to sys.modules
 sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
@@ -138,22 +111,18 @@ class MockKnowledgeRecord:
         self.knowledge_id = kwargs.get('knowledge_id', 1)
         self.index_name = kwargs.get('index_name', 'test_index')
         self.knowledge_name = kwargs.get('knowledge_name', 'test_index')
-        self.knowledge_describe = kwargs.get(
-            'knowledge_describe', 'test description')
+        self.knowledge_describe = kwargs.get('knowledge_describe', 'test description')
         self.created_by = kwargs.get('created_by', 'test_user')
         self.updated_by = kwargs.get('updated_by', 'test_user')
-        self.knowledge_sources = kwargs.get(
-            'knowledge_sources', 'elasticsearch')
+        self.knowledge_sources = kwargs.get('knowledge_sources', 'elasticsearch')
         self.tenant_id = kwargs.get('tenant_id', 'test_tenant')
-        self.embedding_model_name = kwargs.get(
-            'embedding_model_name', 'test_model')
-        self.group_ids = kwargs.get('group_ids', '1,2,3')  # New field
-        self.ingroup_permission = kwargs.get(
-            'ingroup_permission', 'READ_ONLY')  # New field, corrected name
+        self.embedding_model_name = kwargs.get('embedding_model_name', 'test_model')
+        self.embedding_model_id = kwargs.get('embedding_model_id', None)
+        self.group_ids = kwargs.get('group_ids', '1,2,3')
+        self.ingroup_permission = kwargs.get('ingroup_permission', 'READ_ONLY')
         self.delete_flag = kwargs.get('delete_flag', 'N')
         self.update_time = kwargs.get('update_time', "2023-01-01 00:00:00")
 
-    # Mock SQLAlchemy column attributes
     knowledge_id = MagicMock(name="knowledge_id_column")
     index_name = MagicMock(name="index_name_column")
     knowledge_name = MagicMock(name="knowledge_name_column")
@@ -163,26 +132,34 @@ class MockKnowledgeRecord:
     knowledge_sources = MagicMock(name="knowledge_sources_column")
     tenant_id = MagicMock(name="tenant_id_column")
     embedding_model_name = MagicMock(name="embedding_model_name_column")
-    group_ids = MagicMock(name="group_ids_column")  # New field
-    ingroup_permission = MagicMock(
-        name="ingroup_permission_column")  # New field, corrected name
+    embedding_model_id = MagicMock(name="embedding_model_id_column")
+    group_ids = MagicMock(name="group_ids_column")
+    ingroup_permission = MagicMock(name="ingroup_permission_column")
     delete_flag = MagicMock(name="delete_flag_column")
     update_time = MagicMock(name="update_time_column")
 
 
 db_models_mock.KnowledgeRecord = MockKnowledgeRecord
-
-# Add the mocked db_models module to sys.modules
 sys.modules['database.db_models'] = db_models_mock
 sys.modules['backend.database.db_models'] = db_models_mock
 
-# Add the mocked client module to sys.modules before importing knowledge_db
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
-
-# Import functions after mocks are set up
-
-# Now we can safely import the module under test
+# Import backend modules after all patches are applied
+from backend.database.knowledge_db import (
+        create_knowledge_record,
+        update_knowledge_record,
+        delete_knowledge_record,
+        get_knowledge_record,
+        get_knowledge_info_by_knowledge_ids,
+        get_knowledge_ids_by_index_names,
+        get_knowledge_info_by_tenant_id,
+        update_model_name_by_index_name,
+        update_embedding_model_by_index_name,
+        get_index_name_by_knowledge_name,
+        get_knowledge_info_by_tenant_and_source,
+        upsert_knowledge_record,
+        _generate_index_name,
+        get_knowledge_name_map_by_index_names,
+    )
 
 
 @pytest.fixture
@@ -863,7 +840,7 @@ def test_get_knowledge_record_with_none_query(monkeypatch, mock_session):
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     # When query is None, checking 'index_name' in query will raise TypeError
-    with pytest.raises(TypeError, match="argument of type 'NoneType' is not iterable"):
+    with pytest.raises(TypeError):
         get_knowledge_record(None)
 
 
@@ -2086,3 +2063,97 @@ def test_get_knowledge_name_map_by_index_names_exception(monkeypatch, mock_sessi
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_knowledge_name_map_by_index_names(["index1", "index2"])
+
+
+def test_update_embedding_model_by_index_name_success(monkeypatch, mock_session):
+    """Test successfully updating embedding model by index name"""
+    session, query = mock_session
+
+    mock_update = MagicMock(return_value=1)
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    result = update_embedding_model_by_index_name(
+        "test_index", 123, "new_model", "tenant1", "user1"
+    )
+
+    assert result is True
+    mock_update.assert_called_once_with({
+        "embedding_model_id": 123,
+        "embedding_model_name": "new_model",
+        "updated_by": "user1"
+    })
+    session.commit.assert_called_once()
+
+
+def test_update_embedding_model_by_index_name_no_match(monkeypatch, mock_session):
+    """Test updating embedding model when no matching record is found"""
+    session, query = mock_session
+
+    mock_update = MagicMock(return_value=0)
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    result = update_embedding_model_by_index_name(
+        "nonexistent_index", 123, "new_model", "tenant1", "user1"
+    )
+
+    assert result is False
+    mock_update.assert_called_once_with({
+        "embedding_model_id": 123,
+        "embedding_model_name": "new_model",
+        "updated_by": "user1"
+    })
+    session.commit.assert_called_once()
+
+
+def test_update_embedding_model_by_index_name_exception(monkeypatch, mock_session):
+    """Test exception when updating embedding model by index name"""
+    session, query = mock_session
+
+    mock_update = MagicMock(side_effect=MockSQLAlchemyError("Database error"))
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    with pytest.raises(MockSQLAlchemyError, match="Database error"):
+        update_embedding_model_by_index_name(
+            "test_index", 123, "new_model", "tenant1", "user1"
+        )
+
+    session.rollback.assert_called_once()

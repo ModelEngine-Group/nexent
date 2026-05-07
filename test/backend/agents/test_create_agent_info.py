@@ -25,9 +25,25 @@ class AgentHistory(BaseModel):
     content: str
 
 
+class ValidationError(Exception):
+    """Mock ValidationError for testing."""
+    pass
+
+
 consts_model_module = types.ModuleType("consts.model")
 consts_model_module.HistoryItem = HistoryItem
 sys.modules["consts.model"] = consts_model_module
+
+# Mock consts.exceptions module with ValidationError
+consts_exceptions_module = types.ModuleType("consts.exceptions")
+consts_exceptions_module.ValidationError = ValidationError
+sys.modules["consts.exceptions"] = consts_exceptions_module
+
+# Also add model and exceptions to consts module attributes
+consts_module = sys.modules.get("consts")
+if consts_module:
+    setattr(consts_module, "model", consts_model_module)
+    setattr(consts_module, "exceptions", consts_exceptions_module)
 
 # Also add model to consts module attributes
 consts_module = sys.modules.get("consts")
@@ -240,6 +256,9 @@ from backend.agents.create_agent_info import (
 
 # Import HistoryItem for testing (from mocked consts.model)
 HistoryItem = sys.modules["consts.model"].HistoryItem
+
+# Import ValidationError for testing (from mocked consts.exceptions)
+ValidationError = sys.modules["consts.exceptions"].ValidationError
 
 # Import constants for testing
 from consts.const import MODEL_CONFIG_MAPPING
@@ -638,7 +657,8 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_discover.return_value = []
             mock_search_tools.return_value = [
@@ -648,14 +668,18 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [
+                        {"name": "index_names", "default": ["test_index"]},  # Add non-empty index_names
+                        {"name": "rerank", "default": False},
+                    ],
                     "source": "local",
                     "usage": None
                 }
             ]
             mock_vdb_core = "mock_elastic_core"
             mock_get_vector_db_core.return_value = mock_vdb_core
-            mock_embedding.return_value = "mock_embedding_model"
+            mock_embedding.return_value = ("mock_embedding_model", 123, {"status": "ok"})
+            mock_rerank.return_value = None
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -755,8 +779,9 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
+                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
             mock_search_tools.return_value = [
                 {
@@ -766,7 +791,7 @@ class TestCreateToolConfigList:
                     "inputs": "string",
                     "output_type": "string",
                     "params": [
-                        {"name": "index_names", "default": []},
+                        {"name": "index_names", "default": ["idx_a"]},  # Non-empty index_names
                         {"name": "rerank", "default": True},
                         {"name": "rerank_model_name", "default": "gte-rerank-v2"},
                     ],
@@ -778,8 +803,9 @@ class TestCreateToolConfigList:
             mock_embedding_model = "mock_embedding_model"
             mock_rerank_model = "mock_rerank_model"
             mock_get_vector_db_core.return_value = mock_vdb_core
-            mock_embedding.return_value = mock_embedding_model
+            mock_embedding.return_value = (mock_embedding_model, 123, {"status": "ok"})
             mock_rerank.return_value = mock_rerank_model
+            mock_get_knowledge_map.return_value = {"idx_a": "idx_a"}
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -788,15 +814,13 @@ class TestCreateToolConfigList:
 
             # Verify correct functions were called with correct parameters
             mock_get_vector_db_core.assert_called_once()
-            mock_embedding.assert_called_once_with(tenant_id="tenant_1")
+            mock_embedding.assert_called_once_with("tenant_1", "idx_a")
 
             # Verify metadata contains vdb_core, embedding_model, rerank_model and display_name_to_index_map
             assert "vdb_core" in mock_tool_instance.metadata
             assert "embedding_model" in mock_tool_instance.metadata
             assert "rerank_model" in mock_tool_instance.metadata
             assert "display_name_to_index_map" in mock_tool_instance.metadata
-            # display_name_to_index_map should be empty dict when index_names is empty
-            assert mock_tool_instance.metadata["display_name_to_index_map"] == {}
 
             # Explicitly verify that old fields are NOT present
             assert "index_names" not in mock_tool_instance.metadata
@@ -818,7 +842,7 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.side_effect = [mock_tool_kb, mock_tool_other]
@@ -831,7 +855,7 @@ class TestCreateToolConfigList:
                     "inputs": "string",
                     "output_type": "string",
                     "params": [
-                        {"name": "index_names", "default": []},
+                        {"name": "index_names", "default": ["kb_idx"]},  # Non-empty index_names
                         {"name": "rerank", "default": True},
                         {"name": "rerank_model_name", "default": "gte-rerank-v2"},
                     ],
@@ -850,7 +874,7 @@ class TestCreateToolConfigList:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = "embedding_instance"
+            mock_embedding.return_value = ("embedding_instance", 123, {"status": "ok"})
             mock_rerank.return_value = "rerank_instance"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
@@ -881,7 +905,7 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_tool_config.return_value = mock_tool_instance
@@ -894,6 +918,7 @@ class TestCreateToolConfigList:
                     "inputs": "string",
                     "output_type": "string",
                     "params": [
+                        {"name": "index_names", "default": ["mcp_idx"]},  # Add non-empty index_names
                         {"name": "rerank", "default": True},
                         {"name": "rerank_model_name", "default": "gte-rerank-v2"},
                     ],
@@ -902,7 +927,7 @@ class TestCreateToolConfigList:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
-            mock_embedding.return_value = "embedding"
+            mock_embedding.return_value = ("embedding", 123, {"status": "ok"})
             mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
@@ -1017,7 +1042,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
@@ -1028,6 +1053,7 @@ class TestCreateToolConfigList:
                     "inputs": "string",
                     "output_type": "string",
                     "params": [
+                        {"name": "index_names", "default": ["idx_1"]},  # Add non-empty index_names
                         {"name": "rerank", "default": True},
                         {"name": "rerank_model_name", "default": "gte-rerank-v2"},
                     ],
@@ -1041,6 +1067,7 @@ class TestCreateToolConfigList:
                     "inputs": "string",
                     "output_type": "string",
                     "params": [
+                        {"name": "index_names", "default": ["idx_2"]},  # Add non-empty index_names
                         {"name": "rerank", "default": True},
                         {"name": "rerank_model_name", "default": "gte-rerank-v2"},
                     ],
@@ -1049,7 +1076,7 @@ class TestCreateToolConfigList:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core"
-            mock_embedding.return_value = "embedding"
+            mock_embedding.return_value = ("embedding", 123, {"status": "ok"})
             mock_rerank.return_value = "rerank_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
@@ -3768,7 +3795,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
                 patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
@@ -3790,7 +3817,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = "embedding_instance"
+            mock_embedding.return_value = ("embedding_instance", 123, {"status": "ok"})
             mock_rerank.return_value = None
             # Mock the knowledge name map: index_name -> knowledge_name (display_name)
             mock_get_knowledge_map.return_value = {
@@ -3810,47 +3837,6 @@ class TestCreateToolConfigListWithDisplayNameMap:
             }
 
     @pytest.mark.asyncio
-    async def test_knowledge_base_with_empty_index_names(self):
-        """Test that KnowledgeBaseSearchTool gets empty display_name_to_index_map when no index_names"""
-        mock_tool_instance = MagicMock()
-        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
-
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
-
-            mock_tool_config.return_value = mock_tool_instance
-
-            mock_search_tools.return_value = [
-                {
-                    "class_name": "KnowledgeBaseSearchTool",
-                    "name": "knowledge_search",
-                    "description": "Knowledge search tool",
-                    "inputs": "string",
-                    "output_type": "string",
-                    "params": [
-                        {"name": "index_names", "default": []},
-                        {"name": "rerank", "default": False},
-                    ],
-                    "source": "local",
-                    "usage": None
-                }
-            ]
-            mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = "embedding_instance"
-            mock_rerank.return_value = None
-
-            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
-
-            # get_knowledge_name_map_by_index_names should NOT be called with empty index_names
-            mock_get_knowledge_map.assert_not_called()
-            assert result[0].metadata["display_name_to_index_map"] == {}
-
-    @pytest.mark.asyncio
     async def test_knowledge_base_with_partial_name_mapping(self):
         """Test that KnowledgeBaseSearchTool handles partial name mapping correctly"""
         mock_tool_instance = MagicMock()
@@ -3860,7 +3846,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
                 patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
@@ -3882,7 +3868,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = "embedding_instance"
+            mock_embedding.return_value = ("embedding_instance", 123, {"status": "ok"})
             mock_rerank.return_value = None
             # Only idx1 is found in database, idx2 and idx3 are not found
             mock_get_knowledge_map.return_value = {
@@ -3894,204 +3880,8 @@ class TestCreateToolConfigListWithDisplayNameMap:
             # display_name_to_index_map should only contain the found mappings
             # Unfound indices will use index_name as fallback (which is not in get_knowledge_name_map result)
             assert "Knowledge Base 1" in result[0].metadata["display_name_to_index_map"]
-
-
-class TestFilterMcpServersAndTools:
-    """Tests for filter_mcp_servers_and_tools function"""
-
-    def test_filter_mcp_servers_with_multiple_tools(self):
-        """Test filtering with multiple MCP tools"""
-        mock_tool1 = MagicMock()
-        mock_tool1.source = "mcp"
-        mock_tool1.usage = "server1"
-
-        mock_tool2 = MagicMock()
-        mock_tool2.source = "local"
-        mock_tool2.usage = None
-
-        mock_tool3 = MagicMock()
-        mock_tool3.source = "mcp"
-        mock_tool3.usage = "server2"
-
-        mock_sub_agent = MagicMock()
-        mock_sub_agent.tools = []
-        mock_sub_agent.managed_agents = []
-
-        mock_agent_config = MagicMock()
-        mock_agent_config.tools = [mock_tool1, mock_tool2, mock_tool3]
-        mock_agent_config.managed_agents = [mock_sub_agent]
-
-        mcp_info_dict = {
-            "server1": {"remote_mcp_server": "http://server1.example.com"},
-            "server2": {"remote_mcp_server": "http://server2.example.com"},
-        }
-
-        result = filter_mcp_servers_and_tools(mock_agent_config, mcp_info_dict)
-
-        assert len(result) == 2
-        assert "http://server1.example.com" in result
-        assert "http://server2.example.com" in result
-
-    def test_filter_mcp_servers_with_nested_sub_agents(self):
-        """Test filtering with nested sub-agents"""
-        mock_tool1 = MagicMock()
-        mock_tool1.source = "mcp"
-        mock_tool1.usage = "nested_server"
-
-        mock_sub_sub_agent = MagicMock()
-        mock_sub_sub_agent.tools = [mock_tool1]
-        mock_sub_sub_agent.managed_agents = []
-
-        mock_sub_agent = MagicMock()
-        mock_sub_agent.tools = []
-        mock_sub_agent.managed_agents = [mock_sub_sub_agent]
-
-        mock_agent_config = MagicMock()
-        mock_agent_config.tools = []
-        mock_agent_config.managed_agents = [mock_sub_agent]
-
-        mcp_info_dict = {
-            "nested_server": {"remote_mcp_server": "http://nested.example.com"},
-        }
-
-        result = filter_mcp_servers_and_tools(mock_agent_config, mcp_info_dict)
-
-        assert len(result) == 1
-        assert "http://nested.example.com" in result
-
-    def test_filter_mcp_servers_with_disabled_server(self):
-        """Test filtering excludes servers not in mcp_info_dict"""
-        mock_tool1 = MagicMock()
-        mock_tool1.source = "mcp"
-        mock_tool1.usage = "enabled_server"
-
-        mock_tool2 = MagicMock()
-        mock_tool2.source = "mcp"
-        mock_tool2.usage = "disabled_server"
-
-        mock_agent_config = MagicMock()
-        mock_agent_config.tools = [mock_tool1, mock_tool2]
-        mock_agent_config.managed_agents = []
-
-        mcp_info_dict = {
-            "enabled_server": {"remote_mcp_server": "http://enabled.example.com"},
-            # disabled_server is not in the dict
-        }
-
-        result = filter_mcp_servers_and_tools(mock_agent_config, mcp_info_dict)
-
-        assert len(result) == 1
-        assert "http://enabled.example.com" in result
-
-    def test_filter_mcp_servers_with_empty_tools(self):
-        """Test filtering with no tools returns empty list"""
-        mock_agent_config = MagicMock()
-        mock_agent_config.tools = []
-        mock_agent_config.managed_agents = []
-
-        mcp_info_dict = {
-            "server1": {"remote_mcp_server": "http://server1.example.com"},
-        }
-
-        result = filter_mcp_servers_and_tools(mock_agent_config, mcp_info_dict)
-
-        assert result == []
-
-
-class TestCreateToolConfigListWithDisplayNameMap:
-    """Tests for create_tool_config_list with display_name_to_index_map functionality"""
-
-    @pytest.mark.asyncio
-    async def test_knowledge_base_with_display_name_to_index_map(self):
-        """Test that KnowledgeBaseSearchTool gets correct display_name_to_index_map from index_names"""
-        mock_tool_instance = MagicMock()
-        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
-
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
-
-            mock_tool_config.return_value = mock_tool_instance
-
-            mock_search_tools.return_value = [
-                {
-                    "class_name": "KnowledgeBaseSearchTool",
-                    "name": "knowledge_search",
-                    "description": "Knowledge search tool",
-                    "inputs": "string",
-                    "output_type": "string",
-                    "params": [
-                        {"name": "index_names", "default": ["idx1", "idx2"]},
-                        {"name": "rerank", "default": False},
-                    ],
-                    "source": "local",
-                    "usage": None
-                }
-            ]
-            mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = "embedding_instance"
-            mock_rerank.return_value = None
-            # Mock the knowledge name map: index_name -> knowledge_name (display_name)
-            mock_get_knowledge_map.return_value = {
-                "idx1": "Knowledge Base 1",
-                "idx2": "Knowledge Base 2"
-            }
-
-            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
-
-            assert len(result) == 1
-            # Verify get_knowledge_name_map_by_index_names was called
-            mock_get_knowledge_map.assert_called_once_with(["idx1", "idx2"])
-            # Verify display_name_to_index_map contains reversed mapping
-            assert result[0].metadata["display_name_to_index_map"] == {
-                "Knowledge Base 1": "idx1",
-                "Knowledge Base 2": "idx2"
-            }
-
-    @pytest.mark.asyncio
-    async def test_knowledge_base_with_empty_index_names(self):
-        """Test that KnowledgeBaseSearchTool gets empty display_name_to_index_map when no index_names"""
-        mock_tool_instance = MagicMock()
-        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
-
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
-
-            mock_tool_config.return_value = mock_tool_instance
-
-            mock_search_tools.return_value = [
-                {
-                    "class_name": "KnowledgeBaseSearchTool",
-                    "name": "knowledge_search",
-                    "description": "Knowledge search tool",
-                    "inputs": "string",
-                    "output_type": "string",
-                    "params": [
-                        {"name": "index_names", "default": []},
-                        {"name": "rerank", "default": False},
-                    ],
-                    "source": "local",
-                    "usage": None
-                }
-            ]
-            mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = "embedding_instance"
-            mock_rerank.return_value = None
-
-            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
-
-            # get_knowledge_name_map_by_index_names should NOT be called with empty index_names
-            mock_get_knowledge_map.assert_not_called()
-            assert result[0].metadata["display_name_to_index_map"] == {}
+            assert "Knowledge Base 2" in result[0].metadata["display_name_to_index_map"]
+            assert "idx3" not in result[0].metadata["display_name_to_index_map"]
 
     @pytest.mark.asyncio
     async def test_knowledge_base_with_partial_name_mapping(self):
@@ -4103,7 +3893,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
                 patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
@@ -4125,7 +3915,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = "embedding_instance"
+            mock_embedding.return_value = ("embedding_instance", 123, {"status": "ok"})
             mock_rerank.return_value = None
             # Only idx1 is found in database, idx2 and idx3 are not found
             mock_get_knowledge_map.return_value = {
@@ -4152,7 +3942,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
                 patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
@@ -4174,7 +3964,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = "embedding_instance"
+            mock_embedding.return_value = ("embedding_instance", 123, {"status": "ok"})
             mock_rerank.return_value = None
             # Mock the knowledge name map: index_name -> knowledge_name (display_name)
             mock_get_knowledge_map.return_value = {
@@ -4213,7 +4003,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
                 patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
@@ -4235,7 +4025,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_embedding.return_value = "embedding_instance"
+            mock_embedding.return_value = ("embedding_instance", 123, {"status": "ok"})
             mock_rerank.return_value = None
             # Only idx1 and idx2 are found, idx3 is not in the database
             mock_get_knowledge_map.return_value = {
@@ -4255,6 +4045,274 @@ class TestCreateToolConfigListWithDisplayNameMap:
             assert "Knowledge Base 1" in result[0].metadata["display_name_to_index_map"]
             assert "Knowledge Base 2" in result[0].metadata["display_name_to_index_map"]
             assert "idx3" not in result[0].metadata["display_name_to_index_map"]
+
+    @pytest.mark.asyncio
+    async def test_knowledge_base_empty_index_names_raises_validation_error(self):
+        """Test that ValidationError is raised when index_names is empty for KnowledgeBaseSearchTool."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
+                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            # Tool with empty index_names
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "knowledge_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "index_names", "default": []},  # Empty list
+                        {"name": "rerank", "default": False},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core_instance"
+            mock_rerank.return_value = None
+            mock_get_knowledge_map.return_value = {}
+
+            # Should raise ValidationError
+            with pytest.raises(ValidationError) as exc_info:
+                await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify error message
+            assert "Embedding model is required for knowledge_base_search but index_names is empty" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_knowledge_base_no_embedding_model_raises_validation_error(self):
+        """Test that ValidationError is raised when get_embedding_model_by_index_name returns None."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
+                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_get_emb_by_index:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            # Tool with non-empty index_names but no embedding model
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "knowledge_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "index_names", "default": ["idx1"]},  # Non-empty list
+                        {"name": "rerank", "default": False},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core_instance"
+            mock_rerank.return_value = None
+            mock_get_knowledge_map.return_value = {"idx1": "Knowledge Base 1"}
+            # Simulate get_embedding_model_by_index_name returning None
+            mock_get_emb_by_index.return_value = (None, None, {"status": "needs_config", "message": "No model configured"})
+
+            # Should raise ValidationError
+            with pytest.raises(ValidationError) as exc_info:
+                await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify error message contains index name and guidance
+            assert "No embedding model found for index 'idx1'" in str(exc_info.value)
+            assert "Please configure an embedding model for this knowledge base" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_knowledge_base_with_valid_embedding_model(self):
+        """Test that KnowledgeBaseSearchTool correctly sets embedding_model when get_embedding_model_by_index_name succeeds."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
+                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_get_emb_by_index:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            # Tool with index_names and valid embedding model
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "knowledge_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "index_names", "default": ["idx1", "idx2"]},
+                        {"name": "rerank", "default": True},
+                        {"name": "rerank_model_name", "default": "gte-rerank-v2"},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core_instance"
+            mock_rerank.return_value = "mock_rerank_model"
+            mock_get_knowledge_map.return_value = {
+                "idx1": "Knowledge Base 1",
+                "idx2": "Knowledge Base 2"
+            }
+            # Simulate get_embedding_model_by_index_name returning a valid model
+            mock_embedding_model = MagicMock()
+            mock_embedding_model.name = "text-embedding-ada-002"
+            mock_get_emb_by_index.return_value = (mock_embedding_model, 123, {"status": "ok", "message": "Model found"})
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify the tool was created successfully
+            assert len(result) == 1
+            
+            # Verify get_embedding_model_by_index_name was called with correct parameters
+            mock_get_emb_by_index.assert_called_once_with("tenant_1", "idx1")
+            
+            # Verify metadata contains the embedding_model
+            assert result[0].metadata["embedding_model"] == mock_embedding_model
+            
+            # Verify metadata also contains other expected fields
+            assert "vdb_core" in result[0].metadata
+            assert "rerank_model" in result[0].metadata
+            assert "display_name_to_index_map" in result[0].metadata
+            assert "index_name_to_display_map" in result[0].metadata
+            
+            # Verify mappings are correct
+            assert result[0].metadata["display_name_to_index_map"] == {
+                "Knowledge Base 1": "idx1",
+                "Knowledge Base 2": "idx2"
+            }
+            assert result[0].metadata["index_name_to_display_map"] == {
+                "idx1": "Knowledge Base 1",
+                "idx2": "Knowledge Base 2"
+            }
+
+    @pytest.mark.asyncio
+    async def test_knowledge_base_with_single_index_and_embedding_model(self):
+        """Test KnowledgeBaseSearchTool with single index_name and valid embedding model."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
+                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_get_emb_by_index:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            # Tool with single index_name
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "knowledge_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "index_names", "default": ["single_index"]},  # Single index
+                        {"name": "rerank", "default": False},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core_instance"
+            mock_rerank.return_value = None
+            mock_get_knowledge_map.return_value = {
+                "single_index": "My Knowledge Base"
+            }
+            mock_embedding_model = MagicMock()
+            mock_embedding_model.name = "embedding-model-v1"
+            mock_get_emb_by_index.return_value = (mock_embedding_model, 456, {"status": "ok"})
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Verify the tool was created successfully
+            assert len(result) == 1
+            
+            # Verify get_embedding_model_by_index_name was called
+            mock_get_emb_by_index.assert_called_once_with("tenant_1", "single_index")
+            
+            # Verify embedding_model is set correctly
+            assert result[0].metadata["embedding_model"] == mock_embedding_model
+            
+            # Verify mappings for single index
+            assert result[0].metadata["display_name_to_index_map"] == {
+                "My Knowledge Base": "single_index"
+            }
+            assert result[0].metadata["index_name_to_display_map"] == {
+                "single_index": "My Knowledge Base"
+            }
+
+    @pytest.mark.asyncio
+    async def test_knowledge_base_embedding_model_error_metadata(self):
+        """Test that get_embedding_model_by_index_name metadata is handled but doesn't affect tool creation on success."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
+                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_get_emb_by_index:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "kb_search",
+                    "description": "KB search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "index_names", "default": ["test_idx"]},
+                        {"name": "rerank", "default": False},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core"
+            mock_rerank.return_value = None
+            mock_get_knowledge_map.return_value = {"test_idx": "Test KB"}
+            
+            # Return valid embedding model with error metadata
+            mock_embedding_model = MagicMock()
+            mock_get_emb_by_index.return_value = (
+                mock_embedding_model, 
+                789, 
+                {"status": "error", "message": "Some error but model exists"}
+            )
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            # Should still succeed because embedding_model is not None
+            assert len(result) == 1
+            assert result[0].metadata["embedding_model"] == mock_embedding_model
 
 
 class TestFilterMcpServersAndTools:

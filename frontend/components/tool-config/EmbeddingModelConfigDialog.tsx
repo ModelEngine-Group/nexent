@@ -47,7 +47,6 @@ export default function EmbeddingModelConfigDialog({
 
   // Reset state when dialog opens
   useEffect(() => {
-    log.info("[EmbeddingModelConfigDialog] isOpen changed to:", isOpen);
     if (isOpen) {
       setSelectedModelId(null);
       setIsSubmitting(false);
@@ -56,20 +55,17 @@ export default function EmbeddingModelConfigDialog({
 
   // Handle model selection
   const handleModelChange = (value: string) => {
-    log.info("[EmbeddingModelConfigDialog] handleModelChange:", value);
     setSelectedModelId(value);
   };
 
   // Handle submit
   const handleSubmit = async () => {
-    log.info("[EmbeddingModelConfigDialog] handleSubmit called, isSubmitting:", isSubmitting, "selectedModelId:", selectedModelId);
     if (!selectedModelId) {
       message.warning(t("knowledgeBase.embeddingModel.selectPlaceholder"));
       return;
     }
 
     setIsSubmitting(true);
-    log.info("[EmbeddingModelConfigDialog] isSubmitting set to true, calling API...");
     try {
       // Determine which index names to update
       const indexNamesToUpdate =
@@ -93,29 +89,24 @@ export default function EmbeddingModelConfigDialog({
       // Save values before resetting state
       const completedModelId = selectedModelId;
       const completedModelDisplayName = modelDisplayName;
-      log.info("[EmbeddingModelConfigDialog] API succeeded, about to call onConfigComplete. resetting local state and isSubmitting");
       // Reset local UI state only — do NOT call onClose() here.
       // Closing is handled exclusively by onConfigComplete to ensure
       // the parent has processed the result before the dialog unmounts.
       setSelectedModelId(null);
       setIsSubmitting(false);
-      log.info("[EmbeddingModelConfigDialog] Calling onConfigComplete...");
       // Call onConfigComplete which handles closing and parent state updates
       onConfigComplete(indexNamesToUpdate, completedModelId, completedModelDisplayName);
-      log.info("[EmbeddingModelConfigDialog] onConfigComplete returned");
     } catch (error) {
       log.error("[EmbeddingModelConfigDialog] API failed:", error);
       message.error(
         error instanceof Error ? error.message : t("knowledgeBase.embeddingModel.updateFailed")
       );
-      log.info("[EmbeddingModelConfigDialog] isSubmitting set to false after error");
       setIsSubmitting(false);
     }
   };
 
   // Handle cancel
   const handleCancel = () => {
-    log.info("[EmbeddingModelConfigDialog] handleCancel called, isSubmitting:", isSubmitting);
     if (isSubmitting) return;
     setSelectedModelId(null);
     setIsSubmitting(false);

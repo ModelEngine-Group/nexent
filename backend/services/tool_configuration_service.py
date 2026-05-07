@@ -15,7 +15,6 @@ from pydantic_core import PydanticUndefined
 from consts.const import DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
-from database.client import minio_client
 from database.outer_api_tool_db import (
     upsert_openapi_service,
     query_openapi_services_by_tenant,
@@ -37,7 +36,7 @@ from database.tool_db import (
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
-from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model, get_vector_db_core
+from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
 from database.client import minio_client
 from services.image_service import get_vlm_model
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
