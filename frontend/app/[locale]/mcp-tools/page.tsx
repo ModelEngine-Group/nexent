@@ -235,9 +235,19 @@ function PublishedView({
     <>
       <SearchAndFilterRow
         searchValue={myPublished.search}
-        onSearchChange={myPublished.setSearch}
+        onSearchChange={(value) => myPublished.updateFilter("search", value)}
         searchPlaceholder={String(t("mcpTools.community.searchPlaceholder"))}
-        filters={null}
+        filters={
+          <McpServicesFilterBar
+            transport={myPublished.filters.transport}
+            tag={myPublished.filters.tag}
+            tagStats={myPublished.tagStats}
+            onTransportChange={(value) =>
+              myPublished.updateFilter("transport", value)
+            }
+            onTagChange={(value) => myPublished.updateFilter("tag", value)}
+          />
+        }
       />
 
       {myPublished.loading ? (

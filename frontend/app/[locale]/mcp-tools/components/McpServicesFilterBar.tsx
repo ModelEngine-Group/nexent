@@ -8,11 +8,12 @@ import type {
 } from "@/types/mcpTools";
 
 interface McpServicesFilterBarProps {
-  source: McpSourceFilter;
+  /** When omitted, the source filter is not shown (e.g. published tab). */
+  source?: McpSourceFilter;
+  onSourceChange?: (value: McpSourceFilter) => void;
   transport: McpTransportFilter;
   tag: string;
   tagStats: McpTagStat[];
-  onSourceChange: (value: McpSourceFilter) => void;
   onTransportChange: (value: McpTransportFilter) => void;
   onTagChange: (value: string) => void;
 }
@@ -24,32 +25,35 @@ interface McpServicesFilterBarProps {
  */
 export default function McpServicesFilterBar({
   source,
+  onSourceChange,
   transport,
   tag,
   tagStats,
-  onSourceChange,
   onTransportChange,
   onTagChange,
 }: McpServicesFilterBarProps) {
   const { t } = useTranslation("common");
+  const showSource = source !== undefined && onSourceChange !== undefined;
 
   return (
     <div className="flex flex-wrap gap-2">
-      <Select
-        size="large"
-        value={source}
-        onChange={onSourceChange}
-        className="min-w-[140px] flex-1 lg:flex-none lg:w-36"
-        options={[
-          { value: FILTER_ALL, label: t("mcpTools.page.sourceFilter.all") },
-          { value: McpSource.LOCAL, label: t("mcpTools.source.local") },
-          {
-            value: McpSource.REGISTRY,
-            label: t("mcpTools.source.registry"),
-          },
-          { value: McpSource.COMMUNITY, label: t("mcpTools.source.community") },
-        ]}
-      />
+      {showSource ? (
+        <Select
+          size="large"
+          value={source}
+          onChange={onSourceChange}
+          className="min-w-[140px] flex-1 lg:flex-none lg:w-36"
+          options={[
+            { value: FILTER_ALL, label: t("mcpTools.page.sourceFilter.all") },
+            { value: McpSource.LOCAL, label: t("mcpTools.source.local") },
+            {
+              value: McpSource.REGISTRY,
+              label: t("mcpTools.source.registry"),
+            },
+            { value: McpSource.COMMUNITY, label: t("mcpTools.source.community") },
+          ]}
+        />
+      ) : null}
       <Select
         size="large"
         value={transport}

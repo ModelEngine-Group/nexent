@@ -280,20 +280,6 @@ export const listMcpTools = async (params?: { tag?: string }) => {
   return { success: true, data: items } as McpToolsApiResult<McpServiceItem[]>;
 };
 
-export const fetchMcpTagStats = async () => {
-  try {
-    const response = await fetchWithAuth(API_ENDPOINTS.mcp.tagsStats);
-    const data = await parseJson<ApiEnvelope<McpTagStat[]>>(response);
-    if (data.status !== "success") {
-      throw new Error("Failed to load MCP tag stats");
-    }
-    return { success: true, data: data.data } as McpToolsApiResult<McpTagStat[]>;
-  } catch (error) {
-    log.error("fetchMcpTagStats failed", error);
-    throw error;
-  }
-};
-
 export const listRegistryMcpTools = async (query: URLSearchParams) => {
   try {
     const response = await fetchWithAuth(`${API_ENDPOINTS.mcpTools.registryList}?${query.toString()}`);

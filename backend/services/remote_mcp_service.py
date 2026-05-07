@@ -34,7 +34,6 @@ from database.remote_mcp_db import (
     delete_mcp_record_by_id,
     get_mcp_authorization_token_by_name_and_url,
     get_mcp_record_by_id_and_tenant,
-    get_mcp_tag_stats_by_tenant,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from services.mcp_container_service import MCPContainerManager
@@ -763,18 +762,6 @@ async def get_remote_mcp_server_list(
             record_dict["authorization_token"] = record.get("authorization_token")
         mcp_records_list.append(record_dict)
     return mcp_records_list
-
-
-def list_mcp_tag_stats(tenant_id: str) -> list[dict]:
-    """Get MCP tag statistics.
-
-    Args:
-        tenant_id: Tenant ID
-
-    Returns:
-        List of tag statistics
-    """
-    return get_mcp_tag_stats_by_tenant(tenant_id=tenant_id)
 
 
 def attach_mcp_container_permissions(

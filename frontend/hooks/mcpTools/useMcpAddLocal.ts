@@ -81,9 +81,6 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
-      queryClient.invalidateQueries({
-        queryKey: MCP_TOOLS_QUERY_KEYS.tagStats,
-      });
       await refreshToolListWithToast({
         message,
         t,

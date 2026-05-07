@@ -60,7 +60,6 @@ export function useMcpServiceDetail({
 
   const invalidateServices = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
-    queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.tagStats });
   }, [queryClient]);
 
   const addTag = useCallback((tag: string) => {

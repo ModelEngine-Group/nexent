@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchMcpTagStats, listMcpTools } from "@/services/mcpToolsService";
+import { useQuery } from "@tanstack/react-query";
+import { listMcpTools } from "@/services/mcpToolsService";
 import { filterServiceCards } from "@/lib/mcpTools";
 import type {
   McpServiceItem,
@@ -35,7 +35,6 @@ const INITIAL_FILTERS: McpServicesFilters = {
  * fetch / derive / filter plumbing.
  */
 export function useMcpServicesList() {
-  const queryClient = useQueryClient();
   const [filters, setFilters] = useState<McpServicesFilters>(INITIAL_FILTERS);
 
   const servicesQuery = useQuery({
@@ -47,23 +46,24 @@ export function useMcpServicesList() {
     staleTime: 30_000,
   });
 
-  const tagStatsQuery = useQuery({
-    queryKey: [...MCP_TOOLS_QUERY_KEYS.tagStats],
-    queryFn: async () => {
-      const result = await fetchMcpTagStats();
-      return result.data;
-    },
-    staleTime: 60_000,
-  });
-
   const services: McpServiceItem[] = useMemo(
     () => servicesQuery.data ?? [],
     [servicesQuery.data]
   );
-  const tagStats: McpTagStat[] = useMemo(
-    () => tagStatsQuery.data ?? [],
-    [tagStatsQuery.data]
-  );
+
+  const tagStats: McpTagStat[] = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of services) {
+      for (const raw of item.tags || []) {
+        const t = String(raw || "").trim();
+        if (!t) continue;
+        counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => a.tag.localeCompare(b.tag));
+  }, [services]);
 
   const filteredServices = useMemo(() => {
     const keywordFiltered = filterServiceCards(services, filters.search);
@@ -82,9 +82,6 @@ export function useMcpServicesList() {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
-  const refresh = () =>
-    queryClient.invalidateQueries({ queryKey: ["mcp-tools"] });
-
   return {
     services,
     filteredServices,
@@ -92,6 +89,5 @@ export function useMcpServicesList() {
     filters,
     updateFilter,
     loading: servicesQuery.isLoading,
-    refresh,
   };
 }

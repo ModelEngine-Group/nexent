@@ -34,7 +34,6 @@ from services.remote_mcp_service import (
     update_remote_mcp_server_list,
     attach_mcp_container_permissions,
     get_mcp_record_by_id,
-    list_mcp_tag_stats,
     list_mcp_service_tools_by_id,
     add_mcp_service,
     add_container_mcp_service,
@@ -641,31 +640,6 @@ async def suggest_mcp_port(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to suggest MCP port"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Tags Endpoints
-# ---------------------------------------------------------------------------
-
-@router.get("/tags/stats")
-async def get_mcp_tag_stats(
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None
-):
-    """Get MCP tag statistics."""
-    try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
-        stats = list_mcp_tag_stats(tenant_id=tenant_id)
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"status": "success", "data": stats}
-        )
-    except Exception as e:
-        logger.error(f"Failed to get MCP tag stats: {e}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to get MCP tag stats"
         )
 
 

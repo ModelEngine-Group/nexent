@@ -1,8 +1,6 @@
 import logging
 from typing import Any, Dict, List
 
-from sqlalchemy import func
-
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import McpRecord
 
@@ -132,24 +130,6 @@ def get_mcp_records_by_container_port(container_port: int) -> List[Dict[str, Any
 
         records = query.order_by(McpRecord.create_time.desc()).all()
         return [as_dict(record) for record in records]
-
-
-def get_mcp_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
-    with get_db_session() as session:
-        rows = (
-            session.query(
-                func.unnest(McpRecord.tags).label("tag"),
-                func.count(McpRecord.mcp_id).label("count"),
-            )
-            .filter(
-                McpRecord.tenant_id == tenant_id,
-                McpRecord.delete_flag != 'Y',
-            )
-            .group_by("tag")
-            .order_by(func.count(McpRecord.mcp_id).desc(), "tag")
-            .all()
-        )
-        return [{"tag": str(row.tag), "count": int(row.count)} for row in rows if row.tag]
 
 
 def update_mcp_record_manage_fields_by_id(

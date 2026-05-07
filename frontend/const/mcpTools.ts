@@ -118,15 +118,9 @@ export const MCP_GRID_CARD_OUTER =
  */
 export const MCP_TOOLS_QUERY_KEYS = {
   services: ["mcp-tools", "services"] as const,
-  tagStats: ["mcp-tools", "tag-stats"] as const,
   tools: (mcpId: number) => ["mcp-tools", "service-tools", mcpId] as const,
   registryList: ["mcp-tools", "registry"] as const,
   communityList: ["mcp-tools", "community"] as const,
   communityTags: ["mcp-tools", "community-tags"] as const,
   myCommunity: ["mcp-tools", "my-community"] as const,
 };
-
-export const MCP_TOOLS_INVALIDATION_KEYS = [
-  MCP_TOOLS_QUERY_KEYS.services,
-  MCP_TOOLS_QUERY_KEYS.tagStats,
-] as const;
