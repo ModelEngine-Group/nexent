@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { Button, Form, Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
-import { McpTransportType } from "@/const/mcpTools";
+import {
+  MCP_ADD_SERVICE_LOCAL_SECTION_WIDTH_PX,
+  McpTransportType,
+} from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { useMcpAddLocal } from "@/hooks/mcpTools/useMcpAddLocal";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
@@ -84,12 +87,15 @@ export default function AddMcpServiceLocalSection({
   const isHttpLike = draft.transportType !== McpTransportType.CONTAINER;
 
   return (
-    <>
+    <div
+      className="mx-auto w-full"
+      style={{ maxWidth: MCP_ADD_SERVICE_LOCAL_SECTION_WIDTH_PX }}
+    >
       <Form
         form={form}
         layout="vertical"
         requiredMark={false}
-        className="px-6 py-5 space-y-4"
+        className="space-y-4 px-6 py-5"
       >
         <Form.Item
           label={t("mcpTools.addModal.name")}
@@ -215,6 +221,6 @@ export default function AddMcpServiceLocalSection({
           {t("mcpTools.addModal.saveAndAdd")}
         </Button>
       </div>
-    </>
+    </div>
   );
 }

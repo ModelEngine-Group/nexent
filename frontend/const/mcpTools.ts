@@ -1,3 +1,5 @@
+import type { ModalProps } from "antd";
+
 export enum McpSource {
   LOCAL = "local",
   REGISTRY = "mcp_registry",
@@ -64,6 +66,42 @@ export const MCP_PORT_RANGE = { MIN: 1, MAX: 65535 } as const;
 
 /** Debounce for all text-filter inputs on MCP browsers. */
 export const MCP_SEARCH_DEBOUNCE_MS = 350;
+
+/** Add MCP modal width when the local (custom) tab is active. */
+export const MCP_ADD_SERVICE_MODAL_WIDTH_LOCAL = 560;
+
+/** Add MCP modal width for registry / community browser tabs. */
+export const MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS = 1100;
+
+/** Fixed content column width for the local add-MCP form (matches local tab modal). */
+export const MCP_ADD_SERVICE_LOCAL_SECTION_WIDTH_PX = 560;
+
+/** Modal `wrapClassName`: whole dialog scrolls; clears Ant Design max-height on content. */
+export const MCP_TOOLS_MODAL_WRAP_CLASS =
+  "max-h-[100dvh] overflow-y-auto overflow-x-hidden py-6 [&_.ant-modal]:max-h-none [&_.ant-modal-content]:max-h-none";
+
+export const MCP_TOOLS_MODAL_MASK_STYLE = {
+  background: "rgba(15,23,42,0.55)",
+  backdropFilter: "blur(3px)",
+} as const;
+
+export const MCP_TOOLS_MODAL_BODY_CHROME = {
+  padding: 0,
+  maxHeight: "none",
+  overflow: "visible",
+} as const;
+
+export const MCP_TOOLS_MODAL_BODY_SCROLL_UNLOCK = {
+  maxHeight: "none",
+  overflow: "visible",
+} as const;
+
+export function mcpToolsModalChromeStyles(): NonNullable<ModalProps["styles"]> {
+  return {
+    mask: { ...MCP_TOOLS_MODAL_MASK_STYLE },
+    body: { ...MCP_TOOLS_MODAL_BODY_CHROME },
+  };
+}
 
 /** Inline height for MCP grid cards (avoids Tailwind scanning `frontend/const/`). */
 export const MCP_GRID_CARD_OUTER_STYLE = {

@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { Modal, Segmented } from "antd";
 import { useTranslation } from "react-i18next";
-import { McpSource } from "@/const/mcpTools";
+import {
+  McpSource,
+  MCP_ADD_SERVICE_MODAL_WIDTH_LOCAL,
+  MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS,
+} from "@/const/mcpTools";
 import AddMcpServiceLocalSection from "./AddMcpServiceLocalSection";
 import AddMcpServiceRegistrySection from "./AddMcpServiceRegistrySection";
 import AddMcpServiceCommunitySection from "./AddMcpServiceCommunitySection";
@@ -27,28 +31,34 @@ export default function AddMcpServiceModal({
   /** Fixed body height + inner scroll: avoids size jump on tab/transport change and prevents overflow. */
   const bodyFrame = "min(95vh, 900px)";
 
+  const modalWidth =
+    tab === McpSource.LOCAL
+      ? MCP_ADD_SERVICE_MODAL_WIDTH_LOCAL
+      : MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS;
+
   return (
     <Modal
       open
       footer={null}
       closable
       centered
-      width={1100}
+      width={modalWidth}
       onCancel={onClose}
+      wrapClassName="[&_.ant-modal]:transition-[width] [&_.ant-modal]:duration-300 [&_.ant-modal]:ease-in-out"
       styles={{
         mask: { background: "rgba(4, 4, 4, 0.6)", backdropFilter: "blur(2px)" },
         body: {
           padding: 0,
           display: "flex",
           flexDirection: "column",
-          height: bodyFrame,
-          maxHeight: bodyFrame,
+          height: `calc(${bodyFrame} - 10px)`, // Decrease the fixed min height to make the white modal shorter on screen
+          maxHeight: `calc(${bodyFrame} - 10px)`,
           overflow: "hidden",
         },
       }}
     >
       <div className="flex h-full min-h-0 min-w-0 flex-col">
-        <div className="shrink-0 border-b border-slate-100 px-6 py-5">
+        <div className="shrink-0 border-b border-slate-100 px-6 py-1">
           <h2 className="text-2xl font-semibold text-slate-900">
             {t("mcpTools.addModal.title")}
           </h2>

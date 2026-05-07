@@ -102,7 +102,7 @@ export default function PublishConfirmModal({
       okText={t("mcpTools.community.publish")}
       cancelText={t("common.cancel")}
       confirmLoading={publishing}
-      width={720}
+      width={560}
       centered
       destroyOnHidden
     >

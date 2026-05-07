@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { App, Button, Form, Input, Modal } from "antd";
 import { useTranslation } from "react-i18next";
+import {
+  MCP_TOOLS_MODAL_WRAP_CLASS,
+  mcpToolsModalChromeStyles,
+} from "@/const/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { usePublishedServiceDetailEdit } from "@/hooks/mcpTools/usePublishedServiceDetailEdit";
@@ -14,6 +18,9 @@ import RegistryStatusBadge from "./shared/StatusBadge";
 import JsonPreviewModal from "./shared/JsonPreviewModal";
 import TagEditor from "./shared/TagEditor";
 
+const sectionCard =
+  "rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm";
+
 interface PublishedServiceDetailModalProps {
   open: boolean;
   service: CommunityMcpCard | null;
@@ -22,8 +29,8 @@ interface PublishedServiceDetailModalProps {
 
 /**
  * Editable detail for the "my published" tab. Read-only block mirrors
- * {@link McpCommunityDetailModal} (URL, source, type, status, times, links,
- * JSON); name / description / version / tags stay editable and persist via the
+ * {@link McpCommunityDetailModal} (URL, type, status, times, links, JSON);
+ * name / description / version / tags stay editable and persist via the
  * parent draft + save.
  */
 export default function PublishedServiceDetailModal({
@@ -118,195 +125,215 @@ export default function PublishedServiceDetailModal({
         open={open}
         onCancel={onClose}
         footer={null}
-        width={900}
+        closable
         centered
-        title={t("mcpTools.published.detailTitle")}
+        width={560}
         destroyOnHidden
-        styles={{ mask: { background: "rgba(15,23,42,0.4)" } }}
+        wrapClassName={MCP_TOOLS_MODAL_WRAP_CLASS}
+        styles={mcpToolsModalChromeStyles()}
       >
-        <Form
-          form={form}
-          layout="vertical"
-          requiredMark={false}
-          className="space-y-3"
-        >
-            <Form.Item
-              label={t("mcpTools.detail.name")}
-              name="name"
-              rules={rules.name}
-            >
-              <Input
-                value={draft?.name ?? ""}
-                onChange={(event) => {
-                  updateDraft({ name: event.target.value });
-                  form.setFieldValue("name", event.target.value);
-                }}
-                className="rounded-md"
-              />
-            </Form.Item>
-
-            <Form.Item
-              label={t("mcpTools.detail.description")}
-              name="description"
-              rules={rules.description}
-            >
-              <Input.TextArea
-                value={draft?.description ?? ""}
-                onChange={(event) => {
-                  updateDraft({ description: event.target.value });
-                  form.setFieldValue("description", event.target.value);
-                }}
-                autoSize={{ minRows: 2, maxRows: 16 }}
-                className="rounded-md"
-              />
-            </Form.Item>
-
-          <div className="space-y-5 border-b border-slate-100 py-5">
-            { !service.configJson ? <div>
-              <p className="text-sm text-slate-500">
-                {t("mcpTools.detail.serverUrl")}
-              </p>
-              <p className="mt-1 break-all rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
-                {service.serverUrl}
-              </p>
-            </div> : null }
-
-            <div className="grid gap-3 text-sm text-slate-700">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">
-                  {t("mcpTools.detail.serverType")}
-                </span>
-                <span className="font-medium text-slate-800">
-                  {serverTypeText}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">
-                  {t("mcpTools.detail.status")}
-                </span>
-                <RegistryStatusBadge
-                  status={service.status}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">
-                  {t("mcpTools.detail.createdAt")}
-                </span>
-                <span className="font-medium text-slate-800">
-                  {formatRegistryDate(service.createdAt)}
-                </span>
-              </div>
-              {service.updatedAt ? (
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">
-                    {t("mcpTools.detail.updatedAt")}
-                  </span>
-                  <span className="font-medium text-slate-800">
-                    {formatRegistryDate(service.updatedAt)}
-                  </span>
-                </div>
-              ) : null}
-              {websiteUrl ? (
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-slate-500">
-                    {t("mcpTools.detail.website")}
-                  </span>
-                  <a
-                    href={websiteUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="max-w-[70%] truncate font-medium text-sky-700 hover:text-sky-800"
-                  >
-                    {websiteUrl}
-                  </a>
-                </div>
-              ) : null}
-              {repositoryUrl ? (
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-slate-500">
-                    {t("mcpTools.detail.repository")}
-                  </span>
-                  <a
-                    href={repositoryUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="max-w-[70%] truncate font-medium text-sky-700 hover:text-sky-800"
-                  >
-                    {repositoryUrl}
-                  </a>
-                </div>
-              ) : null}
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-slate-500">
-                  {t("mcpTools.detail.tools")}
-                </span>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  {hasServerJson ? (
-                    <Button
-                      size="small"
-                      className="rounded-md"
-                      autoInsertSpace={false}
-                      onClick={() => setShowServerJsonModal(true)}
-                    >
-                      {t("mcpTools.community.viewServerJson")}
-                    </Button>
-                  ) : null}
-                  {hasConfigJson ? (
-                    <Button
-                      size="small"
-                      className="rounded-md"
-                      autoInsertSpace={false}
-                      onClick={() => setShowConfigJsonModal(true)}
-                    >
-                      {t("mcpTools.detail.viewConfigJson")}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+        <div>
+          <div className="border-b border-slate-100 bg-white px-5 py-4">
+            <h2 className="text-lg font-semibold tracking-tight text-slate-900">
+              {t("mcpTools.published.detailTitle")}
+            </h2>
           </div>
 
-            <Form.Item
-              className="pt-2"
-              label={t("mcpTools.detail.version")}
-              name="version"
-              rules={rules.version}
-            >
-              <Input
-                value={draft?.version ?? ""}
-                onChange={(event) => {
-                  updateDraft({ version: event.target.value });
-                  form.setFieldValue("version", event.target.value);
-                }}
-                placeholder="1.0.0"
-                className="rounded-md"
-              />
-            </Form.Item>
-
-            <TagEditor
-              title={t("mcpTools.detail.tags")}
-              tags={draft?.tags ?? []}
-              onAddTag={(tag) => addDraftTag((tag || "").trim())}
-              onRemoveTag={removeDraftTag}
-              removeAriaKey="mcpTools.detail.removeTagAria"
-            />
-        </Form>
-
-        <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
-          <Button
-            danger
-            loading={deleting}
-            disabled={!service.communityId}
-            onClick={handleDelete}
+          <Form
+            form={form}
+            layout="vertical"
+            requiredMark={false}
+            className="contents"
           >
-            {t("common.delete")}
-          </Button>
-          <Button type="primary" loading={saving} onClick={handleSave}>
-            {t("common.save")}
-          </Button>
+            <div className="space-y-4 px-5 py-5">
+              <div className={sectionCard}>
+                <div className="grid gap-4">
+                  <Form.Item
+                    label={t("mcpTools.detail.name")}
+                    name="name"
+                    className="mb-0 text-sm text-slate-500"
+                    rules={rules.name}
+                  >
+                    <Input
+                      value={draft?.name ?? ""}
+                      onChange={(event) => {
+                        updateDraft({ name: event.target.value });
+                        form.setFieldValue("name", event.target.value);
+                      }}
+                      className="mt-2 rounded-md"
+                    />
+                  </Form.Item>
+
+                  <Form.Item
+                    label={t("mcpTools.detail.description")}
+                    name="description"
+                    className="mb-0"
+                    rules={rules.description}
+                  >
+                    <Input.TextArea
+                      value={draft?.description ?? ""}
+                      onChange={(event) => {
+                        updateDraft({ description: event.target.value });
+                        form.setFieldValue("description", event.target.value);
+                      }}
+                      autoSize={{ minRows: 2, maxRows: 16 }}
+                      className="mt-2 rounded-md"
+                    />
+                  </Form.Item>
+                </div>
+              </div>
+
+              <div className={sectionCard}>
+                <div className="space-y-5">
+                  {!service.configJson ? (
+                    <div>
+                      <p className="text-sm text-slate-500">
+                        {t("mcpTools.detail.serverUrl")}
+                      </p>
+                      <p className="mt-1 break-all rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
+                        {service.serverUrl}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 text-sm text-slate-700">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">
+                        {t("mcpTools.detail.serverType")}
+                      </span>
+                      <span className="font-medium text-slate-800">
+                        {serverTypeText}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">
+                        {t("mcpTools.detail.status")}
+                      </span>
+                      <RegistryStatusBadge status={service.status} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">
+                        {t("mcpTools.detail.createdAt")}
+                      </span>
+                      <span className="font-medium text-slate-800">
+                        {formatRegistryDate(service.createdAt)}
+                      </span>
+                    </div>
+                    {service.updatedAt ? (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">
+                          {t("mcpTools.detail.updatedAt")}
+                        </span>
+                        <span className="font-medium text-slate-800">
+                          {formatRegistryDate(service.updatedAt)}
+                        </span>
+                      </div>
+                    ) : null}
+                    {websiteUrl ? (
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-slate-500">
+                          {t("mcpTools.detail.website")}
+                        </span>
+                        <a
+                          href={websiteUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="max-w-[70%] truncate font-medium text-sky-700 hover:text-sky-800"
+                        >
+                          {websiteUrl}
+                        </a>
+                      </div>
+                    ) : null}
+                    {repositoryUrl ? (
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-slate-500">
+                          {t("mcpTools.detail.repository")}
+                        </span>
+                        <a
+                          href={repositoryUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="max-w-[70%] truncate font-medium text-sky-700 hover:text-sky-800"
+                        >
+                          {repositoryUrl}
+                        </a>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                    <span className="text-sm text-slate-500">
+                      {t("mcpTools.detail.tools")}
+                    </span>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {hasServerJson ? (
+                        <Button
+                          size="small"
+                          className="rounded-md"
+                          autoInsertSpace={false}
+                          onClick={() => setShowServerJsonModal(true)}
+                        >
+                          {t("mcpTools.community.viewServerJson")}
+                        </Button>
+                      ) : null}
+                      {hasConfigJson ? (
+                        <Button
+                          size="small"
+                          className="rounded-md"
+                          autoInsertSpace={false}
+                          onClick={() => setShowConfigJsonModal(true)}
+                        >
+                          {t("mcpTools.detail.viewConfigJson")}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className={sectionCard}>
+                <Form.Item
+                  className="mb-0"
+                  label={t("mcpTools.detail.version")}
+                  name="version"
+                  rules={rules.version}
+                >
+                  <Input
+                    value={draft?.version ?? ""}
+                    onChange={(event) => {
+                      updateDraft({ version: event.target.value });
+                      form.setFieldValue("version", event.target.value);
+                    }}
+                    placeholder="1.0.0"
+                    className="mt-2 rounded-md"
+                  />
+                </Form.Item>
+                <div className="mt-4">
+                  <TagEditor
+                    title={t("mcpTools.detail.tags")}
+                    tags={draft?.tags ?? []}
+                    onAddTag={(tag) => addDraftTag((tag || "").trim())}
+                    onRemoveTag={removeDraftTag}
+                    removeAriaKey="mcpTools.detail.removeTagAria"
+                  />
+                </div>
+              </div>
+            </div>
+          </Form>
+
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/80 bg-white px-5 py-3.5">
+            <Button
+              danger
+              loading={deleting}
+              disabled={!service.communityId}
+              onClick={handleDelete}
+            >
+              {t("common.delete")}
+            </Button>
+            <Button type="primary" loading={saving} onClick={handleSave}>
+              {t("common.save")}
+            </Button>
+          </div>
         </div>
       </Modal>
 

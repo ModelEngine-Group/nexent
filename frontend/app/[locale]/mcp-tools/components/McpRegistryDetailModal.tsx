@@ -9,6 +9,10 @@ import {
 } from "@/lib/mcpTools";
 import type { RegistryMcpCard } from "@/types/mcpTools";
 import RegistryStatusBadge from "./shared/StatusBadge";
+import {
+  MCP_TOOLS_MODAL_WRAP_CLASS,
+  mcpToolsModalChromeStyles,
+} from "@/const/mcpTools";
 import JsonPreviewModal from "./shared/JsonPreviewModal";
 
 interface McpRegistryDetailModalProps {
@@ -284,18 +288,16 @@ export default function McpRegistryDetailModal({
         footer={null}
         closable
         centered
-        width={900}
+        width={560}
         onCancel={onClose}
-        styles={{
-          mask: { background: "rgba(15,23,42,0.4)" },
-          body: { padding: 0 },
-        }}
+        wrapClassName={MCP_TOOLS_MODAL_WRAP_CLASS}
+        styles={mcpToolsModalChromeStyles()}
       >
         <div>
-          <div className="border-b border-slate-100 px-6 py-5">
+          <div className="border-b border-slate-100 bg-white px-5 py-4">
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="break-all text-2xl font-semibold text-slate-900">
+              <div className="min-w-0">
+                <h3 className="break-all text-lg font-semibold tracking-tight text-slate-900">
                   {server.name}
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">
@@ -308,7 +310,7 @@ export default function McpRegistryDetailModal({
             </div>
           </div>
 
-          <div className="px-6 py-5 space-y-4">
+          <div className="space-y-4 bg-slate-50/50 px-5 py-5">
             <p className="text-sm text-slate-700">{server.description || ""}</p>
 
             <p className="text-xs text-slate-500">
@@ -616,7 +618,7 @@ export default function McpRegistryDetailModal({
             ) : null}
           </div>
 
-          <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
+          <div className="flex items-center justify-end gap-3 border-t border-slate-200/80 bg-white px-5 py-3.5">
             {hasServerJson ? (
               <Button onClick={() => setShowServerJsonModal(true)}>
                 {t("mcpTools.registry.viewServerJson")}

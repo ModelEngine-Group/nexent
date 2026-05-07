@@ -20,7 +20,7 @@ export default function JsonPreviewModal({
       footer={null}
       closable
       centered
-      width={960}
+      width={720}
       onCancel={onCancel}
       title={title}
       styles={{ body: { paddingTop: 8 } }}

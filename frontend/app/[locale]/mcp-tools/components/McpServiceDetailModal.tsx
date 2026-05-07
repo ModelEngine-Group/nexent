@@ -5,6 +5,8 @@ import {
   McpHealthStatus,
   McpServiceStatus,
   McpTransportType,
+  MCP_TOOLS_MODAL_WRAP_CLASS,
+  mcpToolsModalChromeStyles,
 } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import {
@@ -111,24 +113,21 @@ export default function McpServiceDetailModal({
         footer={null}
         closable
         centered
-        width={900}
+        width={560}
         onCancel={onClose}
-        styles={{
-          mask: {
-            background: "rgba(15,23,42,0.6)",
-            backdropFilter: "blur(2px)",
-          },
-          body: { padding: 0 },
-        }}
+        wrapClassName={MCP_TOOLS_MODAL_WRAP_CLASS}
+        styles={mcpToolsModalChromeStyles()}
       >
         <div>
-          <div className="border-b border-slate-100 px-6 py-5">
-            <h2 className="text-2xl font-semibold text-slate-900">
+          <div className="border-b border-slate-100 bg-white px-5 py-4">
+            <h2 className="text-lg font-semibold tracking-tight text-slate-900">
               {t("mcpTools.detail.title")}
             </h2>
           </div>
 
-          <div className="px-6 py-5 space-y-5">
+          <div className="px-5 py-5">
+            <div className="space-y-4">
+            <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm">
             <Form
               form={form}
               layout="vertical"
@@ -215,7 +214,9 @@ export default function McpServiceDetailModal({
                 </Form.Item>
               ) : null}
             </Form>
+            </div>
 
+            <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm">
             <div className="grid gap-3 text-sm text-slate-700">
               <DetailRow
                 label={t("mcpTools.detail.source")}
@@ -273,8 +274,9 @@ export default function McpServiceDetailModal({
                 />
               ) : null}
             </div>
+            </div>
 
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/90 bg-white px-4 py-3 shadow-sm">
               <span className="text-slate-500 text-sm">
                 {t("mcpTools.detail.tools")}
               </span>
@@ -317,6 +319,7 @@ export default function McpServiceDetailModal({
               </div>
             </div>
 
+            <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm">
             <TagEditor
               title={t("mcpTools.detail.tags")}
               tags={draft.tags}
@@ -325,9 +328,11 @@ export default function McpServiceDetailModal({
               removeAriaKey="mcpTools.detail.removeTagAria"
               placeholderKey="mcpTools.detail.tagInputPlaceholder"
             />
+            </div>
+            </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/80 bg-white px-5 py-3.5">
             <Button
               danger
               autoInsertSpace={false}
@@ -385,7 +390,7 @@ export default function McpServiceDetailModal({
         onCancel={() => setShowConfigJson(false)}
       />
 
-              {draft.transportType === McpTransportType.CONTAINER &&
+      {draft.transportType === McpTransportType.CONTAINER &&
       draft.containerId ? (
         <McpContainerLogsModal
           open={logsOpen}
@@ -436,22 +441,24 @@ function healthLampVariant(
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-slate-500">{label}</span>
-      <span className="font-medium text-slate-800">{value}</span>
+    <div className="flex items-start justify-between gap-3 text-sm">
+      <span className="shrink-0 text-slate-500">{label}</span>
+      <span className="min-w-0 max-w-[68%] text-right font-medium text-slate-800 break-words">
+        {value}
+      </span>
     </div>
   );
 }
 
 function DetailLink({ label, href }: { label: string; href: string }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-slate-500">{label}</span>
+    <div className="flex items-start justify-between gap-3 text-sm">
+      <span className="shrink-0 text-slate-500">{label}</span>
       <a
         href={href}
         target="_blank"
         rel="noreferrer"
-        className="max-w-[70%] truncate font-medium text-sky-700 hover:text-sky-800"
+        className="min-w-0 max-w-[68%] truncate text-right font-medium text-sky-700 hover:text-sky-800"
       >
         {href}
       </a>
