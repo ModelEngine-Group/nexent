@@ -176,7 +176,7 @@ export default function PublishedServiceDetailModal({
                         updateDraft({ description: event.target.value });
                         form.setFieldValue("description", event.target.value);
                       }}
-                      autoSize={{ minRows: 2, maxRows: 16 }}
+                      autoSize={{ minRows: 1, maxRows: 16 }}
                       className="mt-2 rounded-md"
                     />
                   </Form.Item>
