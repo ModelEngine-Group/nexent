@@ -83,7 +83,9 @@ class ModelEngineProvider(AbstractModelProvider):
                 "asr": "stt",
                 "tts": "tts",
                 "rerank": "rerank",
-                "multimodal": "vlm",
+                "image_understanding": "image_understanding",
+                "image_generation": "image_generation",
+                "video_understanding": "video_understanding",
             }
 
             filtered_models = []
@@ -100,7 +102,7 @@ class ModelEngineProvider(AbstractModelProvider):
                         "id": model.get("id", ""),
                         "model_type": internal_type,
                         "model_tag": me_type,
-                        "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm") else 0,
+                        "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm", "image_understanding", "image_generation", "video_understanding") else 0,
                         "base_url": host,
                         "api_key": api_key,
                     })

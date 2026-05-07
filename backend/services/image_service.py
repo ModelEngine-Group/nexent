@@ -33,7 +33,7 @@ async def proxy_image_impl(decoded_url: str):
 def get_vlm_model(tenant_id: str):
     # Get the tenant config
     vlm_model_config = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["vlm"], tenant_id=tenant_id)
+        key=MODEL_CONFIG_MAPPING.get("imageUnderstanding", "IMAGE_UNDERSTANDING_ID"), tenant_id=tenant_id)
     if not vlm_model_config:
         return None
     return OpenAIVLModel(

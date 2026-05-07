@@ -1,5 +1,6 @@
 import logging
 from typing import Optional
+import httpx
 
 from nexent.core import MessageObserver
 from nexent.core.models import OpenAIModel, OpenAIVLModel
@@ -80,6 +81,8 @@ async def _perform_connectivity_check(
     Returns:
         bool: Connectivity check result
     """
+    logger.info(f"Performing connectivity check for model={model_name} type={model_type} url={model_base_url}")
+    
     if LOCALHOST_NAME in model_base_url or LOCALHOST_IP in model_base_url:
         model_base_url = model_base_url.replace(
             LOCALHOST_NAME, DOCKER_INTERNAL_HOST).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
@@ -122,7 +125,8 @@ async def _perform_connectivity_check(
             ssl_verify=ssl_verify,
         )
         connectivity = await rerank_model.connectivity_check()
-    elif model_type == "vlm":
+    elif model_type in ("vlm", "image_understanding", "video_understanding"):
+        # Vision/language models use OpenAIVLModel for connectivity check
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)
@@ -133,6 +137,29 @@ async def _perform_connectivity_check(
             api_key=model_api_key,
             ssl_verify=ssl_verify
         ).check_connectivity()
+    elif model_type == "image_generation":
+        # Image generation models have a separate API endpoint
+        # Use simple HTTP request to verify the API is accessible
+        connectivity = False
+        try:
+            headers = {"Authorization": f"Bearer {model_api_key}"}
+            async with httpx.AsyncClient(verify=ssl_verify, timeout=30) as client:
+                # Test if the endpoint is reachable
+                logger.info(f"Image generation connectivity check for model={model_name} url={model_base_url}")
+                response = await client.post(
+                    model_base_url,
+                    headers=headers,
+                    json={"model": model_name, "prompt": "test"}
+                )
+                logger.info(f"Image generation connectivity check response: status={response.status_code}")
+                # Any response (even error) means the endpoint is reachable
+                connectivity = response.status_code < 500
+        except httpx.TimeoutException as e:
+            logger.warning(f"Image generation connectivity check timeout for model={model_name} url={model_base_url}: {e}")
+        except httpx.ConnectError as e:
+            logger.warning(f"Image generation connectivity check failed (connect error) for model={model_name} url={model_base_url}: {e}")
+        except Exception as e:
+            logger.warning(f"Image generation connectivity check failed (exception) for model={model_name} url={model_base_url}: {type(e).__name__}: {e}")
     elif model_type in ["tts", "stt"]:
         voice_service = get_voice_service()
         connectivity = await voice_service.check_voice_connectivity(model_type)

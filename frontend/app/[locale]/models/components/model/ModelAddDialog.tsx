@@ -715,8 +715,14 @@ export const ModelAddDialog = ({
         case MODEL_TYPES.MULTI_EMBEDDING:
           configUpdate = { multiEmbedding: modelConfig };
           break;
-        case MODEL_TYPES.VLM:
-          configUpdate = { vlm: modelConfig };
+        case MODEL_TYPES.IMAGE_UNDERSTANDING:
+          configUpdate = { imageUnderstanding: modelConfig };
+          break;
+        case MODEL_TYPES.IMAGE_GENERATION:
+          configUpdate = { imageGeneration: modelConfig };
+          break;
+        case MODEL_TYPES.VIDEO_UNDERSTANDING:
+          configUpdate = { videoUnderstanding: modelConfig };
           break;
         case MODEL_TYPES.RERANK:
           configUpdate = { rerank: modelConfig };
@@ -842,7 +848,15 @@ export const ModelAddDialog = ({
             <Option value={MODEL_TYPES.EMBEDDING}>
               {t("model.type.embedding")}
             </Option>
-            <Option value={MODEL_TYPES.VLM}>{t("model.type.vlm")}</Option>
+            <Option value={MODEL_TYPES.IMAGE_UNDERSTANDING}>
+              {t("model.type.image_understanding")}
+            </Option>
+            <Option value={MODEL_TYPES.IMAGE_GENERATION}>
+              {t("model.type.image_generation")}
+            </Option>
+            <Option value={MODEL_TYPES.VIDEO_UNDERSTANDING}>
+              {t("model.type.video_understanding")}
+            </Option>
             <Option value={MODEL_TYPES.RERANK}>
               {t("model.type.rerank")}
             </Option>
@@ -1440,7 +1454,7 @@ export const ModelAddDialog = ({
                   <span className="ml-1.5">...</span>
                 </>
               )}
-              {form.type === "vlm" && !form.isBatchImport && (
+              {(form.type === MODEL_TYPES.IMAGE_UNDERSTANDING || form.type === MODEL_TYPES.IMAGE_GENERATION || form.type === MODEL_TYPES.VIDEO_UNDERSTANDING) && !form.isBatchImport && (
                 <>
                   <Tooltip title="Qwen">
                     <a

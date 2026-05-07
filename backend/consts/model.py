@@ -155,6 +155,9 @@ class ModelConfig(BaseModel):
     vlm: SingleModelConfig
     stt: SingleModelConfig
     tts: SingleModelConfig
+    imageUnderstanding: SingleModelConfig
+    imageGeneration: SingleModelConfig
+    videoUnderstanding: SingleModelConfig
 
 
 class AppConfig(BaseModel):

@@ -1,9 +1,15 @@
+import logging
 import httpx
 from typing import Dict, List
 
 from consts.const import DEFAULT_LLM_MAX_TOKENS
-from consts.provider import SILICON_GET_URL
+from consts.provider import SILICON_GET_URL, SILICON_BASE_URL
 from services.providers.base import AbstractModelProvider, _classify_provider_error
+
+logger = logging.getLogger("silicon_provider")
+
+# Silicon Flow image generation endpoint
+SILICON_IMAGE_GEN_URL = "https://api.siliconflow.cn/v1/images/generations"
 
 
 class SiliconModelProvider(AbstractModelProvider):
@@ -26,7 +32,7 @@ class SiliconModelProvider(AbstractModelProvider):
             headers = {"Authorization": f"Bearer {model_api_key}"}
 
             # Choose endpoint by model type
-            if model_type in ("llm", "vlm"):
+            if model_type in ("llm", "vlm", "image_understanding", "image_generation", "video_understanding"):
                 silicon_url = f"{SILICON_GET_URL}?sub_type=chat"
             elif model_type in ("embedding", "multi_embedding"):
                 silicon_url = f"{SILICON_GET_URL}?sub_type=embedding"
@@ -41,11 +47,51 @@ class SiliconModelProvider(AbstractModelProvider):
                 model_list: List[Dict] = response.json()["data"]
 
             # Annotate models with canonical fields expected downstream
-            if model_type in ("llm", "vlm"):
+            if model_type in ("llm", "vlm", "image_understanding", "image_generation", "video_understanding"):
                 for item in model_list:
                     item["model_tag"] = "chat"
                     item["model_type"] = model_type
                     item["max_tokens"] = DEFAULT_LLM_MAX_TOKENS
+
+                # Filter models based on the requested model_type
+                if model_type == "llm":
+                    # For LLM, exclude vision/image/video generation related models
+                    model_list = [
+                        m for m in model_list
+                        if not any(kw in m.get("id", "").lower() for kw in [
+                            "-vl", "vl-", "vision", "video", "ocr",
+                            "image_gen", "img_gen", "wanx", "flux",
+                            "stable-diffusion", "dall", "llava", "qwen-v"
+                        ])
+                    ]
+                elif model_type == "image_understanding":
+                    # Only include image understanding models
+                    model_list = [
+                        m for m in model_list
+                        if any(kw in m.get("id", "").lower() for kw in [
+                            "-vl", "vl-", "ocr", "vision", "llava",
+                            "qwen-v", "qwen2-v", "vit", "clip"
+                        ])
+                    ]
+                elif model_type == "image_generation":
+                    # Only include image generation models
+                    model_list = [
+                        m for m in model_list
+                        if any(kw in m.get("id", "").lower() for kw in [
+                            "image_gen", "img_gen", "wanx", "flux",
+                            "stable-diffusion", "dall", "sd-", "sdxl",
+                            "midjourney", "imgen", "t2i", "text2img",
+                            "qwen-img", "qwen-image", "cog", "minimax",
+                            "polux", "edit", "image-edit"
+                        ])
+                    ]
+                    logger.info(f"SiliconFlow image generation models after filter: {[m.get('id') for m in model_list]}")
+                elif model_type == "video_understanding":
+                    # Only include video understanding models
+                    model_list = [
+                        m for m in model_list
+                        if "video" in m.get("id", "").lower()
+                    ]
             elif model_type in ("embedding", "multi_embedding"):
                 for item in model_list:
                     item["model_tag"] = "embedding"
@@ -54,6 +100,12 @@ class SiliconModelProvider(AbstractModelProvider):
                 for item in model_list:
                     item["model_tag"] = "rerank"
                     item["model_type"] = model_type
+
+            # For image generation models, set the correct base_url
+            if model_type == "image_generation":
+                for item in model_list:
+                    # Set the image generation endpoint as base_url
+                    item["base_url"] = SILICON_IMAGE_GEN_URL
 
             # Return empty list to indicate successful API call but no models
             if not model_list:

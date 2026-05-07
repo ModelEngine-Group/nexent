@@ -136,9 +136,15 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         if provider == ProviderEnum.DASHSCOPE.value:
             model_dict["base_url"] = f"{model_url.replace('compatible-mode/v1','api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
         else:
-            model_dict["base_url"] = f"{model_url.rstrip('/')}/rerank" 
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/rerank"
+    elif model["model_type"] == "image_generation":
+        # For image generation models, use the images/generations endpoint
+        if provider == ProviderEnum.SILICON.value:
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/images/generations"
+        else:
+            model_dict["base_url"] = model_url
     else:
-        # For non-embedding models
+        # For non-embedding, non-rerank, non-image-generation models
         if provider == ProviderEnum.MODELENGINE.value:
             # Ensure ModelEngine models have the full API path
             model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}"

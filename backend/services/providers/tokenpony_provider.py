@@ -42,10 +42,13 @@ class TokenPonyModelProvider(AbstractModelProvider):
                 # OpenAI standard response puts the model list inside the "data" array
                 all_models: List[Dict] = response.json().get("data", [])
 
-            # Initialize containers for the 6 main categories
+            # Initialize containers for the 9 main categories
             categorized_models = {
                 "chat": [],       # Maps to "llm"
                 "vlm": [],        # Maps to "vlm"
+                "image_understanding": [],  # Maps to "image_understanding"
+                "image_generation": [],    # Maps to "image_generation"
+                "video_understanding": [], # Maps to "video_understanding"
                 "embedding": [],  # Maps to "embedding" / "multi_embedding"
                 "rerank": [],   # Maps to "rerank"
                 "tts": [],        # Maps to "tts"
@@ -86,11 +89,16 @@ class TokenPonyModelProvider(AbstractModelProvider):
                     cleaned_model.update({"model_tag": "tts", "model_type": "tts"})
                     categorized_models['tts'].append(cleaned_model)
 
-                # 5. VLM (Vision Language Model / Image & Video Generation)
-
-                elif any(keyword in m_id for keyword in ['-vl', 'vl-', 'ocr', 'vision']):
-                    cleaned_model.update({"model_tag": "chat", "model_type": "vlm"})
-                    categorized_models['vlm'].append(cleaned_model)
+                # 5. Image Generation / Image Understanding / Video Understanding
+                elif any(keyword in m_id for keyword in ['image_gen', 'img_gen', 'wanx', 'stable-diffusion', 'dall', 'flux', 'sd-', 'sdxl', 'midjourney']):
+                    cleaned_model.update({"model_tag": "image_generation", "model_type": "image_generation"})
+                    categorized_models['image_generation'].append(cleaned_model)
+                elif 'video' in m_id or 'video_understanding' in m_id:
+                    cleaned_model.update({"model_tag": "video_understanding", "model_type": "video_understanding"})
+                    categorized_models['video_understanding'].append(cleaned_model)
+                elif any(keyword in m_id for keyword in ['-vl', 'vl-', 'ocr', 'vision', 'qwen-vl', 'qwen2-vl']):
+                    cleaned_model.update({"model_tag": "image_understanding", "model_type": "image_understanding"})
+                    categorized_models['image_understanding'].append(cleaned_model)
 
                 # 6. Chat (Pure Text Conversation / Reasoning)
                 # Fallback check added: 'not metadata' catches standard OpenAI models that lack modality data
@@ -103,6 +111,8 @@ class TokenPonyModelProvider(AbstractModelProvider):
                 return categorized_models["chat"]
             elif target_model_type in ("embedding", "multi_embedding"):
                 return categorized_models["embedding"]
+            elif target_model_type in ("image_understanding", "image_generation", "video_understanding"):
+                return categorized_models[target_model_type]
             elif target_model_type in categorized_models:
                 return categorized_models[target_model_type]
             else:

@@ -263,8 +263,13 @@ export function useConfig() {
 
   const config: GlobalConfig = (query.data as GlobalConfig | undefined) ?? defaultConfig;
 
-  // Whether config has selected a VLM model
-  const isVlmAvailable = !!(config?.models?.vlm?.modelName || config?.models?.vlm?.displayName);
+  // Whether config has selected a VLM model (image understanding, image generation, or video understanding)
+  const isVlmAvailable = !!(
+    config?.models?.vlm?.modelName || config?.models?.vlm?.displayName ||
+    config?.models?.imageUnderstanding?.modelName || config?.models?.imageUnderstanding?.displayName ||
+    config?.models?.imageGeneration?.modelName || config?.models?.imageGeneration?.displayName ||
+    config?.models?.videoUnderstanding?.modelName || config?.models?.videoUnderstanding?.displayName
+  );
 
   // Whether config has selected an Embedding model
   const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);
