@@ -347,6 +347,43 @@ def update_model_name_by_index_name(index_name: str, embedding_model_name: str, 
         raise e
 
 
+def update_embedding_model_by_index_name(
+    index_name: str,
+    embedding_model_id: int,
+    embedding_model_name: str,
+    tenant_id: str,
+    user_id: str
+) -> bool:
+    """
+    Update the embedding model (both ID and name) for a knowledge base.
+
+    Args:
+        index_name: Internal index name of the knowledge base
+        embedding_model_id: New embedding model ID
+        embedding_model_name: New embedding model name
+        tenant_id: Tenant ID
+        user_id: User ID making the update
+
+    Returns:
+        bool: Whether the update was successful
+    """
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y',
+                KnowledgeRecord.tenant_id == tenant_id
+            ).update({
+                "embedding_model_id": embedding_model_id,
+                "embedding_model_name": embedding_model_name,
+                "updated_by": user_id
+            })
+            session.commit()
+            return result > 0
+    except SQLAlchemyError as e:
+        raise e
+
+
 def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str:
     """
     Get the internal index_name from user-facing knowledge_name.

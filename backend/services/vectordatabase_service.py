@@ -36,6 +36,7 @@ from database.knowledge_db import (
     update_knowledge_record,
     get_knowledge_info_by_tenant_id,
     update_model_name_by_index_name,
+    update_embedding_model_by_index_name,
 )
 from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -98,29 +99,87 @@ def _get_embedding_model_display_name(model_id: Optional[int], tenant_id: str) -
     return ""
 
 
-def get_embedding_model_by_index_name(tenant_id: str, index_name: str) -> tuple[Optional[Any], Optional[int]]:
+class KnowledgeBaseNeedsModelConfigError(Exception):
+    """Exception raised when a knowledge base needs an embedding model to be configured."""
+    def __init__(self, index_name: str, message: str = None):
+        self.index_name = index_name
+        self.message = message or f"Knowledge base '{index_name}' needs an embedding model to be configured"
+        super().__init__(self.message)
+
+
+def get_embedding_model_by_index_name(tenant_id: str, index_name: str) -> tuple[Optional[Any], Optional[int], dict]:
     """
-    Get the embedding model instance for a knowledge base by its index_name.
+    Get the embedding model for a knowledge base by its index_name.
 
     Args:
         tenant_id: Tenant ID
         index_name: The index name of the knowledge base
 
     Returns:
-        Tuple of (embedding model instance or None, model_id or None)
+        Tuple of (embedding model instance or None, model_id or None, metadata dict)
+        metadata contains: {
+            "status": str,           # "ok" | "needs_config" | "error"
+            "needs_update": bool,    # Whether the database needs to be updated
+            "update_info": dict,     # Fields to update if needs_update is True
+            "message": str           # Status message
+        }
+
+    Design principles:
+        - Force explicit configuration: model_id must be explicitly set by user
+        - No auto-fix: never automatically use tenant default model
+        - Clear error guidance: return needs_config status for user action
     """
     try:
         knowledge_record = get_knowledge_record({
             "index_name": index_name,
             "tenant_id": tenant_id
         })
-        if knowledge_record:
-            model_id = knowledge_record.get("embedding_model_id")
-            if model_id:
-                return get_embedding_model_by_id(tenant_id, model_id)
+
+        if not knowledge_record:
+            return None, None, {
+                "status": "error",
+                "needs_update": False,
+                "message": f"Knowledge base '{index_name}' not found"
+            }
+
+        model_id = knowledge_record.get("embedding_model_id")
+
+        # Case 1: model_id exists and is valid, use it
+        if model_id:
+            model, _ = get_embedding_model_by_id(tenant_id, model_id)
+            if model:
+                return model, model_id, {
+                    "status": "ok",
+                    "needs_update": False,
+                    "message": "Embedding model found"
+                }
+            # Model ID exists but model not found - fall through to error
+            logger.warning(f"Model ID {model_id} specified for index '{index_name}' but model not found")
+
+        # Case 2: model_id does not exist or is invalid
+        # Design principle: Force explicit configuration, no auto-fix
+        # Return needs_config to guide user to select a model
+        embedding_model_name = knowledge_record.get("embedding_model_name")
+        if embedding_model_name:
+            # Has model_name but no valid model_id (legacy data)
+            logger.warning(f"Index '{index_name}' has embedding_model_name but no valid model_id, needs explicit configuration")
+        else:
+            # No model configured at all
+            logger.error(f"Index '{index_name}' has no embedding model configured")
+
+        return None, None, {
+            "status": "needs_config",
+            "needs_update": False,
+            "message": f"No embedding model configured for knowledge base '{index_name}'. Please select a model."
+        }
+
     except Exception as e:
         logger.warning(f"Failed to get embedding model for index {index_name}: {e}")
-    return None, None
+        return None, None, {
+            "status": "error",
+            "needs_update": False,
+            "message": str(e)
+        }
 
 
 ALLOWED_CHUNK_FIELDS = {
@@ -661,6 +720,77 @@ class ElasticSearchService:
                 f"Knowledge base '{index_name}' updated successfully by user '{user_id}'")
 
         return result
+
+    @staticmethod
+    def update_embedding_model(
+            index_name: str,
+            model_id: int,
+            tenant_id: str,
+            user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update the embedding model for a knowledge base.
+
+        Args:
+            index_name: Internal index name of the knowledge base
+            model_id: ID of the embedding model to use
+            tenant_id: Tenant ID
+            user_id: ID of the user making the update
+
+        Returns:
+            Dict containing update result information
+
+        Raises:
+            ValueError: If model is not found or is not an embedding model
+            Exception: If update fails
+        """
+        try:
+            # Validate the model exists and is an embedding model
+            model = get_model_by_model_id(model_id, tenant_id)
+            if not model:
+                raise ValueError(f"Model with id {model_id} not found")
+
+            if model.get("model_type") not in ["embedding", "multi_embedding"]:
+                raise ValueError(
+                    f"Model '{model.get('display_name', model_id)}' is not an embedding model. "
+                    f"Please select an embedding model."
+                )
+
+            # Update the database record
+            # Use display_name as embedding_model_name
+            embedding_model_name = model.get("display_name")
+            success = update_embedding_model_by_index_name(
+                index_name=index_name,
+                embedding_model_id=model_id,
+                embedding_model_name=embedding_model_name,
+                tenant_id=tenant_id,
+                user_id=user_id or ""
+            )
+
+            if not success:
+                raise Exception(f"Failed to update embedding model for index '{index_name}'")
+
+            logger.info(
+                f"Embedding model updated for knowledge base '{index_name}' "
+                f"to model '{model.get('display_name', model_id)}' (id: {model_id}) by user '{user_id}'"
+            )
+
+            # Use display_name for consistency with database update
+            model_display_name = model.get("display_name")
+            return {
+                "status": "success",
+                "index_name": index_name,
+                "model_id": model_id,
+                "model_name": model_display_name,
+                "model_display_name": model.get("display_name"),
+                "message": f"Embedding model updated successfully to '{model_display_name}'"
+            }
+
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to update embedding model for index '{index_name}': {e}")
+            raise Exception(f"Failed to update embedding model: {str(e)}")
 
     @staticmethod
     async def delete_index(
@@ -1808,11 +1938,19 @@ class ElasticSearchService:
             if not index_names:
                 raise ValueError("At least one index name is required")
 
-            embedding_model, model_id = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            embedding_model, model_id, meta = get_embedding_model_by_index_name(tenant_id, index_names[0])
+
             if not embedding_model:
-                raise ValueError(
-                    f"No embedding model found for index '{index_names[0]}'. "
-                    f"Please configure an embedding model for this knowledge base.")
+                if meta.get("status") == "needs_config":
+                    # Return a clear error indicating model needs to be configured
+                    raise KnowledgeBaseNeedsModelConfigError(
+                        index_name=index_names[0],
+                        message=f"Knowledge base '{index_names[0]}' does not have an embedding model configured. Please select a model in the knowledge base settings."
+                    )
+                else:
+                    raise ValueError(
+                        f"No embedding model found for index '{index_names[0]}'. "
+                        f"Please configure an embedding model for this knowledge base.")
 
             start_time = time.perf_counter()
             raw_results = vdb_core.hybrid_search(
@@ -1838,6 +1976,8 @@ class ElasticSearchService:
                 "total": len(formatted_results),
                 "query_time_ms": elapsed_ms,
             }
+        except KnowledgeBaseNeedsModelConfigError:
+            raise
         except ValueError:
             raise
         except Exception as exc:

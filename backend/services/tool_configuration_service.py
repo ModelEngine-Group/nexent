@@ -711,7 +711,7 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     "Embedding model is required for knowledge_base_search but index_names or tenant_id is missing")
 
-            embedding_model, model_id = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            embedding_model, model_id, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
             if not embedding_model:
                 raise ToolExecutionException(
                     f"No embedding model found for index '{index_names[0]}'. "

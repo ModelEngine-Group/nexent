@@ -500,7 +500,7 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                 raise ValidationError(
                     "Embedding model is required for knowledge_base_search but index_names is empty")
 
-            embedding_model, model_id = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
             if not embedding_model:
                 raise ValidationError(
                     f"No embedding model found for index '{index_names[0]}'. "

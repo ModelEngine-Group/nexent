@@ -21,6 +21,10 @@ import {
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { ToolKbType } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
+import { useModelList } from "@/hooks/model/useModelList";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
+import log from "@/lib/logger";
+import EmbeddingModelConfigDialog from "./EmbeddingModelConfigDialog";
 
 interface KnowledgeBaseSelectorProps {
   isOpen: boolean;
@@ -102,6 +106,22 @@ export default function KnowledgeBaseSelectorModal({
   difyConfig,
 }: KnowledgeBaseSelectorModalProps) {
   const { t } = useTranslation("common");
+  const { data: allModels = [] } = useModelList();
+
+  // Memoized lookup function for model display names using the fetched model list
+  const resolveModelDisplayName = useMemo(() => {
+    const modelLookup = new Map<string, string>();
+    allModels.forEach((model) => {
+      const displayName = model.displayName || model.name || "";
+      if (model.displayName) modelLookup.set(model.displayName, displayName);
+      if (model.name) modelLookup.set(model.name, displayName);
+      if (model.id) modelLookup.set(String(model.id), displayName);
+    });
+    return (modelId: string) => modelLookup.get(modelId) || modelId;
+  }, [allModels]);
+
+  // Use the internal model lookup to get display names
+  const effectiveGetModelDisplayName = resolveModelDisplayName;
 
   // Selection state (kept for internal logic but not displayed)
   const [tempSelectedIds, setTempSelectedIds] = useState<string[]>([]);
@@ -121,6 +141,28 @@ export default function KnowledgeBaseSelectorModal({
     newKBName: string;
   } | null>(null);
 
+  // Embedding model config dialog state
+  const [embeddingModelDialogOpen, setEmbeddingModelDialogOpen] = useState(false);
+  const [embeddingModelDialogData, setEmbeddingModelDialogData] = useState<{
+    indexName: string;
+    knowledgeName: string;
+  } | null>(null);
+  const [embeddingModelDialogMismatch, setEmbeddingModelDialogMismatch] = useState(false);
+  const [configuringKbIds, setConfiguringKbIds] = useState<Set<string>>(new Set());
+
+  // Debug: track every state change
+  const embeddingDialogOpenRef = React.useRef(embeddingModelDialogOpen);
+  embeddingDialogOpenRef.current = embeddingModelDialogOpen;
+  useEffect(() => {
+    log.info("[KnowledgeBaseSelectorModal] embeddingModelDialogOpen changed to:", embeddingModelDialogOpen, "at:", new Error().stack);
+  }, [embeddingModelDialogOpen]);
+  // Track configured models for display - use model display name instead of ID
+  const [configuredModels, setConfiguredModels] = useState<Map<string, string>>(new Map());
+  // Track KB IDs that need to be updated in mismatch mode
+  const [kbIdsForMismatchUpdate, setKbIdsForMismatchUpdate] = useState<string[]>([]);
+  // Track index names of KBs that have been configured (so they won't be checked again)
+  const [configuredKbIndexNames, setConfiguredKbIndexNames] = useState<Set<string>>(new Set());
+
   // Initialize selection state when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -128,6 +170,11 @@ export default function KnowledgeBaseSelectorModal({
       setSearchKeyword("");
       setSelectedSources([]);
       setSelectedModels([]);
+      setEmbeddingModelDialogOpen(false);
+      setEmbeddingModelDialogData(null);
+      setEmbeddingModelDialogMismatch(false);
+      setConfiguringKbIds(new Set());
+      setConfiguredModels(new Map());
     }
   }, [isOpen]);
 
@@ -343,18 +390,196 @@ export default function KnowledgeBaseSelectorModal({
     setSelectedModels([]); // Clear the model filter as well
   }, []);
 
+  // Check embedding model status for a knowledge base
+  const checkEmbeddingModelStatus = useCallback(
+    async (kb: KnowledgeBase): Promise<boolean> => {
+      // Only check for nexent knowledge bases
+      if (kb.source !== "nexent") {
+        return true;
+      }
+
+      // Skip if already configuring or already configured
+      if (configuringKbIds.has(kb.id)) {
+        return true;
+      }
+
+      try {
+        const status = await knowledgeBaseService.getEmbeddingModelStatus(kb.index_name || kb.name);
+
+        if (status.needs_config) {
+          // Show the embedding model config dialog
+          setEmbeddingModelDialogData({
+            indexName: kb.index_name || kb.name,
+            knowledgeName: kb.name,
+          });
+          setEmbeddingModelDialogOpen(true);
+          return false;
+        }
+
+        return true;
+      } catch (error) {
+        log.error("Failed to check embedding model status:", error);
+        // On error, allow selection to continue
+        return true;
+      }
+    },
+    [configuringKbIds]
+  );
+
+  // Handle embedding model configuration complete
+  const handleEmbeddingModelConfigComplete = useCallback(
+    (indexNames: string, modelId: string, modelDisplayName?: string) => {
+      log.info("[KnowledgeBaseSelectorModal] handleEmbeddingModelConfigComplete called:", { indexNames, modelId, modelDisplayName });
+
+      // Parse comma-separated index names
+      const indexNameList = indexNames.split(",").filter(Boolean);
+      log.info("[KnowledgeBaseSelectorModal] Parsed index names:", indexNameList);
+
+      // Find KBs matching the index names
+      const matchingKBs = knowledgeBases.filter((k) =>
+        indexNameList.includes(k.index_name || k.name) || tempSelectedIds.includes(k.id)
+      );
+      log.info("[KnowledgeBaseSelectorModal] Matching KBs:", matchingKBs.map(kb => ({ id: kb.id, name: kb.name })));
+
+      // Deduplicate - keep unique KBs
+      const seen = new Set<string>();
+      const selectedKBs = matchingKBs.filter((kb) => {
+        if (seen.has(kb.id)) return false;
+        seen.add(kb.id);
+        return true;
+      });
+      log.info("[KnowledgeBaseSelectorModal] Final selected KBs:", selectedKBs.map(kb => ({ id: kb.id, name: kb.name })));
+
+      // Update the configured models map with model display name for all KBs
+      if (modelDisplayName) {
+        setConfiguredModels((prev) => {
+          const newMap = new Map(prev);
+          selectedKBs.forEach((kb) => {
+            newMap.set(kb.id, modelDisplayName);
+          });
+          return newMap;
+        });
+      }
+
+      // Track these index names as configured so they won't be checked again
+      setConfiguredKbIndexNames((prev) => {
+        const newSet = new Set(prev);
+        indexNameList.forEach((idxName) => newSet.add(idxName.trim()));
+        return newSet;
+      });
+
+      // Close the embedding model dialog first
+      log.info("[KnowledgeBaseSelectorModal] Closing embeddingModelDialog, current state:", {
+        embeddingModelDialogOpen,
+        dialogData: embeddingModelDialogData,
+        dialogMismatch: embeddingModelDialogMismatch,
+        configuringKbIds: Array.from(configuringKbIds),
+      });
+      setEmbeddingModelDialogOpen(false);
+      setEmbeddingModelDialogData(null);
+      setEmbeddingModelDialogMismatch(false);
+      setConfiguringKbIds(new Set());
+      log.info("[KnowledgeBaseSelectorModal] Embedding model configured successfully, main modal stays open");
+    },
+    [knowledgeBases, tempSelectedIds]
+  );
+
   // Handle confirm
-  const handleConfirm = useCallback(() => {
-    const selectedKnowledgeBases = knowledgeBases.filter((kb) =>
+  const handleConfirm = useCallback(async () => {
+    log.info("[KnowledgeBaseSelectorModal] handleConfirm called");
+    const selectedKBs = knowledgeBases.filter((kb) =>
       tempSelectedIds.includes(kb.id)
     );
-    onConfirm(selectedKnowledgeBases);
+    log.info("[KnowledgeBaseSelectorModal] Selected KBs:", selectedKBs.map(kb => ({ id: kb.id, name: kb.name, model: kb.embeddingModel })));
+
+    // Check for model mismatch among selected nexent KBs
+    const nexentKBs = selectedKBs.filter((kb) => kb.source === "nexent");
+    const nexentModelIds = [...new Set(nexentKBs.map((kb) => kb.embeddingModel).filter((m) => m && m !== "unknown"))];
+    log.info("[KnowledgeBaseSelectorModal] Nexent KBs:", nexentKBs.length, "Unique models:", nexentModelIds);
+
+    if (nexentModelIds.length > 1) {
+      // Multiple different models - show the embedding model config dialog
+      // to allow user to select a unified model
+      const firstKB = nexentKBs[0];
+      log.info("[KnowledgeBaseSelectorModal] Model mismatch detected, opening dialog");
+      setEmbeddingModelDialogData({
+        indexName: firstKB.index_name || firstKB.name,
+        knowledgeName: `${nexentKBs.length} knowledge bases`,
+      });
+      setEmbeddingModelDialogMismatch(true);
+      setEmbeddingModelDialogOpen(true);
+      // Track all selected nexent KB index names for batch update
+      setConfiguringKbIds(new Set(nexentKBs.map((k) => k.index_name || k.name)));
+      return; // Wait for user to configure before confirming
+    }
+
+    // Collect all KBs that need embedding model configuration
+    const kbIdsNeedingConfig: string[] = [];
+    const kbNamesNeedingConfig: string[] = [];
+
+    // Check each nexent KB that needs config
+    for (const kb of selectedKBs) {
+      if (kb.source !== "nexent") {
+        continue;
+      }
+
+      const kbIndexName = kb.index_name || kb.name;
+
+      // Skip if already configured (either in current session or previously)
+      if (configuringKbIds.has(kb.id) || configuredKbIndexNames.has(kbIndexName)) {
+        continue;
+      }
+
+      try {
+        const status = await knowledgeBaseService.getEmbeddingModelStatus(kbIndexName);
+
+        if (status.needs_config) {
+          kbIdsNeedingConfig.push(kbIndexName);
+          kbNamesNeedingConfig.push(kb.name);
+        }
+      } catch (error) {
+        log.error("Failed to check embedding model status:", error);
+        // If API fails, check if the KB might be missing model_id by checking local state
+        // If embeddingModel is empty/unknown, add to list needing config
+        if (!kb.embeddingModel || kb.embeddingModel === "unknown") {
+          kbIdsNeedingConfig.push(kbIndexName);
+          kbNamesNeedingConfig.push(kb.name);
+        }
+      }
+    }
+
+    // If any KBs need configuration, show the dialog with all of them
+    if (kbIdsNeedingConfig.length > 0) {
+      log.info("[KnowledgeBaseSelectorModal] KBs needing config:", kbIdsNeedingConfig);
+      const firstIndexName = kbIdsNeedingConfig[0];
+      const knowledgeBaseName = kbIdsNeedingConfig.length === 1
+        ? kbNamesNeedingConfig[0]
+        : `${kbIdsNeedingConfig.length} knowledge bases`;
+
+      setEmbeddingModelDialogData({
+        indexName: firstIndexName,
+        knowledgeName: knowledgeBaseName,
+      });
+      setEmbeddingModelDialogMismatch(false);
+      setEmbeddingModelDialogOpen(true);
+      // Track all KBs that need configuration for batch update
+      setConfiguringKbIds(new Set(kbIdsNeedingConfig));
+      return; // Wait for user to configure before confirming
+    }
+
+    // All checks passed, proceed with confirm
+    onConfirm(selectedKBs);
     onClose();
-  }, [knowledgeBases, tempSelectedIds, onConfirm, onClose]);
+  }, [knowledgeBases, tempSelectedIds, configuringKbIds, configuredKbIndexNames, onConfirm, onClose]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
     setTempSelectedIds(selectedIds);
+    // Reset embedding model dialog state to prevent it from staying open
+    setEmbeddingModelDialogOpen(false);
+    setEmbeddingModelDialogData(null);
+    setEmbeddingModelDialogMismatch(false);
+    setConfiguringKbIds(new Set());
     onClose();
   }, [selectedIds, onClose]);
 
@@ -744,7 +969,8 @@ export default function KnowledgeBaseSelectorModal({
                             <span
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model} mr-1`}
                             >
-                              {getModelDisplayName(kb.embeddingModel)}
+                              {/* Use configuredModels state for updated display name, fallback to effectiveGetModelDisplayName */}
+                              {configuredModels.get(kb.id) || effectiveGetModelDisplayName(kb.embeddingModel)}
                               {t("knowledgeBase.tag.model", {
                                 model: "",
                               })}
@@ -867,6 +1093,23 @@ export default function KnowledgeBaseSelectorModal({
           </p>
         </div>
       </Modal>
+
+      {/* Embedding Model Config Dialog */}
+      <EmbeddingModelConfigDialog
+        isOpen={embeddingModelDialogOpen}
+        knowledgeBaseName={embeddingModelDialogData?.knowledgeName || ""}
+        indexName={embeddingModelDialogData?.indexName || ""}
+        isModelMismatch={embeddingModelDialogMismatch}
+        kbIdsToUpdate={Array.from(configuringKbIds)}
+        onClose={() => {
+          log.info("[KnowledgeBaseSelectorModal] embeddingModelDialog onClose called, embeddingModelDialogOpen:", embeddingModelDialogOpen);
+          setEmbeddingModelDialogOpen(false);
+          setEmbeddingModelDialogData(null);
+          setEmbeddingModelDialogMismatch(false);
+          setConfiguringKbIds(new Set());
+        }}
+        onConfigComplete={handleEmbeddingModelConfigComplete}
+      />
     </Modal>
   );
 }
