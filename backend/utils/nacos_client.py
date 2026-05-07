@@ -530,6 +530,7 @@ class NacosClient:
         try:
             session = await self._get_session()
 
+            access_token = None
             if self.username and self.password:
                 access_token = await self._get_access_token(session)
                 if not access_token:

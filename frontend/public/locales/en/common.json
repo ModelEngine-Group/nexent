@@ -2246,7 +2246,6 @@
   "a2a.discovery.editNacosConfig": "Edit Config",
   "a2a.discovery.updateNacosConfigSuccess": "Configuration updated successfully",
   "a2a.discovery.updateNacosConfigFailed": "Failed to update configuration",
-  "a2a.discovery.enterAgentNames": "Enter agent names, press Enter to add",
 
   "a2a.agent.name": "Name",
   "a2a.agent.description": "Description",

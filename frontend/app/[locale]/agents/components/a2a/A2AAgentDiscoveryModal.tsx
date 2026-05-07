@@ -196,7 +196,7 @@ export default function A2AAgentDiscoveryModal({
   const [chatAgent, setChatAgent] = useState<A2AExternalAgent | null>(null);
 
   // Discovery mode
-  const [mode, setMode] = useState<"url" | "nacos">("url");
+  const [mode, setMode] = useState<"url" | "nacos" | "list">("url");
   const [loading, setLoading] = useState(false);
   const [discoveredAgents, setDiscoveredAgents] = useState<A2AExternalAgent[]>([]);
 
@@ -451,10 +451,9 @@ export default function A2AAgentDiscoveryModal({
           <Tabs
             activeKey={mode}
             onChange={(key) => {
-              setMode(key as "url" | "nacos");
+              setMode(key);
               setDiscoveredAgents([]);
               setSelectedAgent(null);
-              // Load agents when switching to list tab
               if (key === "list") {
                 loadAgents();
               }

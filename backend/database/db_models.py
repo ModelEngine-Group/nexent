@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, ForeignKey, ForeignKeyConstraint, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float
+from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
@@ -817,12 +817,6 @@ class A2AExternalAgentRelation(TableBase):
             name="uq_local_external_agent",
             deferrable=True,
         ),
-        ForeignKeyConstraint(
-            ["external_agent_id"],
-            [f"{SCHEMA}.ag_a2a_external_agent_t.id"],
-            name="fk_external_agent",
-            deferrable=True,
-        ),
         {"schema": SCHEMA},
     )
 
@@ -933,7 +927,7 @@ class A2AMessage(SimpleTableBase):
 
     # Core identifiers (following A2A spec)
     message_id = Column(String(64), primary_key=True, doc="Message ID (A2A spec: messageId)")
-    task_id = Column(String(64), ForeignKey(f"{SCHEMA}.ag_a2a_task_t.id", ondelete="CASCADE"), nullable=True, doc="Task ID this message belongs to (nullable for standalone/simple requests)")
+    task_id = Column(String(64), nullable=True, doc="Task ID this message belongs to (nullable for standalone/simple requests)")
 
     # Message attributes
     message_index = Column(Integer, nullable=False, doc="Order of message in the conversation")
@@ -961,7 +955,7 @@ class A2AArtifact(SimpleTableBase):
     # Core identifiers (following A2A spec)
     id = Column(String(64), primary_key=True, doc="Internal primary key")
     artifact_id = Column(String(64), nullable=False, doc="Artifact ID (A2A spec: artifactId)")
-    task_id = Column(String(64), ForeignKey(f"{SCHEMA}.ag_a2a_task_t.id", ondelete="CASCADE"), nullable=False, doc="Task ID this artifact belongs to")
+    task_id = Column(String(64), nullable=False, doc="Task ID this artifact belongs to")
 
     # Artifact attributes
     name = Column(String(255), doc="Human-readable artifact name")
