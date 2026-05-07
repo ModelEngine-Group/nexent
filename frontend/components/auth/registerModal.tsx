@@ -526,7 +526,7 @@ export function RegisterModal() {
                         <div className="text-sm text-gray-600 dark:text-gray-400">
                           {t("auth.inviteCodeHint.step3")}
                           <a
-                            href={`http://60.204.251.153:3001/${pathname.split("/").filter(Boolean)[0] || "zh"}/contact`}
+                            href={`http://60.204.251.153:3001/${pathname.split("/").find(Boolean) || "zh"}/contact`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
