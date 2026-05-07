@@ -451,7 +451,7 @@ export default function A2AAgentDiscoveryModal({
           <Tabs
             activeKey={mode}
             onChange={(key) => {
-              setMode(key);
+              setMode(key as "url" | "nacos" | "list");
               setDiscoveredAgents([]);
               setSelectedAgent(null);
               if (key === "list") {
