@@ -201,12 +201,20 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         try:
             set_monitoring_context(tenant_id=tenant_id)
 
+            ssl_verify_fallback = False
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
                 model_factory, model_appid, access_token,display_name=display_name,
                 display_name=display_name,
                 timeout_seconds=timeout_seconds,
             )
+            if not connectivity and ssl_verify:
+                ssl_verify_fallback = True
+                connectivity = await _perform_connectivity_check(
+                    model_name, model_type, model_base_url, model_api_key, False,
+                    display_name=display_name,
+                    timeout_seconds=timeout_seconds,
+                )
         except Exception as e:
             update_data = {
                 "connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
@@ -222,6 +230,8 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
                 f"UNCONNECTED: {model_name}")
         connect_status = ModelConnectStatusEnum.AVAILABLE.value if connectivity else ModelConnectStatusEnum.UNAVAILABLE.value
         update_data = {"connect_status": connect_status}
+        if ssl_verify_fallback:
+            update_data["ssl_verify"] = False
         update_model_record(model["model_id"], update_data)
         return {
             "connectivity": connectivity,

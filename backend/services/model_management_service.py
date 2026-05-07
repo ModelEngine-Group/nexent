@@ -46,9 +46,15 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                 model_base_url.replace(LOCALHOST_NAME, DOCKER_INTERNAL_HOST)
                 .replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
             )
-        model_data['ssl_verify'] = True
-        if "open/router" in model_base_url:
-            model_data['ssl_verify'] = False
+        # Auto-set ssl_verify based on api_key:
+        # - Empty api_key (local/LAN services) -> ssl_verify=False
+        # - "open/router" URL -> ssl_verify=False
+        # - Otherwise -> ssl_verify=True
+        model_api_key = model_data.get("api_key", "")
+        if not model_api_key or "open/router" in model_base_url:
+            model_data["ssl_verify"] = False
+        else:
+            model_data["ssl_verify"] = True
         # Split model_name into repo and name
         model_repo, model_name = split_repo_name(
             model_data["model_name"]) if model_data.get("model_name") else ("", "")
@@ -251,6 +257,15 @@ async def update_single_model_for_tenant(
         has_multi_embedding = any(
             m.get("model_type") == "multi_embedding" for m in existing_models
         )
+
+        # Auto-set ssl_verify based on api_key if provided:
+        # - Empty api_key -> ssl_verify=False
+        # - Otherwise -> ssl_verify=True
+        if "api_key" in model_data:
+            if not model_data["api_key"]:
+                model_data["ssl_verify"] = False
+            else:
+                model_data["ssl_verify"] = True
 
         if has_multi_embedding:
             # Update both embedding and multi_embedding records
