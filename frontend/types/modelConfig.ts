@@ -51,6 +51,7 @@ export interface ModelOption {
   modelAppid?: string;
   accessToken?: string;
   timeoutSeconds?: number;
+  concurrencyLimit?: number;
 }
 
 // Application configuration interface

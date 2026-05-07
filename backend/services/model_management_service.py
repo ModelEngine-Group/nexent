@@ -17,7 +17,7 @@ from database.model_management_db import (
 )
 from services.model_provider_service import (
     prepare_model_dict,
-    merge_existing_model_tokens,
+    merge_existing_model_attributes,
     get_provider_models,
 )
 from services.model_health_service import embedding_dimension_check
@@ -121,8 +121,8 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
         # Get provider model list
         model_list = await get_provider_models(provider_request)
 
-        # Merge existing model's max_tokens attribute
-        model_list = merge_existing_model_tokens(
+        # Merge existing model's attributes (max_tokens, api_key, timeout_seconds, concurrency_limit)
+        model_list = merge_existing_model_attributes(
             model_list, tenant_id, provider_request["provider"], provider_request["model_type"])
 
         # Sort model list by ID

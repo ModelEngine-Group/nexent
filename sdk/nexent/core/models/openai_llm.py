@@ -25,6 +25,7 @@ class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
                  ssl_verify=True, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None, timeout_seconds: Optional[float] = None,
+                 concurrency_limit: Optional[int] = None,
                  *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -38,6 +39,7 @@ class OpenAIModel(OpenAIServerModel):
             model_factory: Provider identifier (e.g., openai, modelengine)
             display_name: Human-readable display name for monitoring
             timeout_seconds: Request timeout in seconds. If None, uses httpx default.
+            concurrency_limit: Maximum concurrent requests. If None, no limit.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -49,6 +51,10 @@ class OpenAIModel(OpenAIServerModel):
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
         self.timeout_seconds = timeout_seconds
+        self.concurrency_limit = concurrency_limit
+        self._semaphore = None
+        if concurrency_limit is not None and concurrency_limit > 0:
+            self._semaphore = asyncio.Semaphore(concurrency_limit)
 
         # Create http_client based on ssl_verify parameter and timeout_seconds
         if not ssl_verify or timeout_seconds is not None:
@@ -304,11 +310,19 @@ class OpenAIModel(OpenAIServerModel):
                 import httpx
                 request_kwargs["timeout"] = httpx.Timeout(self.timeout_seconds)
 
-            # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
-            await asyncio.to_thread(
-                self.client.chat.completions.create,
-                **request_kwargs,
-            )
+            # Use semaphore for concurrency control if configured
+            async def _make_request():
+                # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
+                await asyncio.to_thread(
+                    self.client.chat.completions.create,
+                    **request_kwargs,
+                )
+
+            if self._semaphore is not None:
+                async with self._semaphore:
+                    await _make_request()
+            else:
+                await _make_request()
 
             # If no exception is raised, the connection is successful
             return True

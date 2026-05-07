@@ -184,6 +184,8 @@ class ModelRecord(TableBase):
         String(100), doc="Access token for model authentication (used by some STT/TTS providers like Volcano Engine)")
     timeout_seconds = Column(
         Integer, doc="Request timeout in seconds for this model. Default is 120 seconds.")
+    concurrency_limit = Column(
+        Integer, doc="Maximum concurrent requests for this model. Default is null (unlimited).")
 
 
 class ModelMonitoringRecord(SimpleTableBase):

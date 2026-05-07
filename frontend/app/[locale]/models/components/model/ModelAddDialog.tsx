@@ -24,6 +24,7 @@ import {
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
 } from "./ModelChunkSizeSilder";
+import { ProviderConfigEditDialog } from "./ModelEditDialog";
 
 const { Option } = Select;
 
@@ -51,6 +52,7 @@ const DEFAULT_FORM_STATE = {
   apiKey: "",
   maxTokens: "4096",
   timeoutSeconds: "120",
+  concurrencyLimit: "",
   isMultimodal: false,
   isBatchImport: false,
   provider: "modelengine",
@@ -248,12 +250,9 @@ export const ModelAddDialog = ({
     }
   }, [saveConfig, message, t]);
 
-  // Settings modal state
-  const [settingsModalVisible, setSettingsModalVisible] = useState(false);
-  const [selectedModelForSettings, setSelectedModelForSettings] =
-    useState<any>(null);
-  const [modelMaxTokens, setModelMaxTokens] = useState("4096");
-  const [modelTimeoutSeconds, setModelTimeoutSeconds] = useState("120");
+  // Single model settings modal state
+  const [isSingleModelSettingsOpen, setIsSingleModelSettingsOpen] = useState(false);
+  const [selectedSingleModel, setSelectedSingleModel] = useState<any>(null);
 
   // Use the silicon model list hook
   const siliconHook  = useSiliconModelList({
@@ -637,53 +636,10 @@ export const ModelAddDialog = ({
     }
   };
 
-  // Handle settings button click
-  const handleSettingsClick = (model: any) => {
-    setSelectedModelForSettings(model);
-    setModelMaxTokens(model.max_tokens?.toString() || "4096");
-    setModelTimeoutSeconds(model.timeout_seconds?.toString() || "120");
-    setSettingsModalVisible(true);
-  };
-
-  // Handle settings save
-  const handleSettingsSave = async () => {
-    if (!selectedModelForSettings) return;
-
-    try {
-      // Use model_name as the identifier (API returns model_name field, id is combined format)
-      const modelName = selectedModelForSettings.model_name || selectedModelForSettings.id;
-
-      // Call API to update model settings
-      await modelService.updateBatchModel(
-        [
-          {
-            model_id: modelName,
-            apiKey: selectedModelForSettings.api_key || "",
-            maxTokens: parseInt(modelMaxTokens) || 4096,
-            timeoutSeconds: parseInt(modelTimeoutSeconds) || 120,
-          },
-        ],
-        selectedModelForSettings.model_factory
-      );
-
-      // Update the model in the list with new max_tokens and timeout_seconds
-      setModelList((prev) =>
-        prev.map((model) =>
-          model.id === selectedModelForSettings.id
-            ? {
-                ...model,
-                max_tokens: parseInt(modelMaxTokens) || 4096,
-                timeout_seconds: parseInt(modelTimeoutSeconds) || 120,
-              }
-            : model
-        )
-      );
-    } catch (error) {
-      console.error("Failed to update model settings:", error);
-    } finally {
-      setSettingsModalVisible(false);
-      setSelectedModelForSettings(null);
-    }
+  // Handle single model settings button click
+  const handleSingleModelSettingsClick = (model: any) => {
+    setSelectedSingleModel(model);
+    setIsSingleModelSettingsOpen(true);
   };
 
   // Handle adding a model
@@ -759,6 +715,9 @@ export const ModelAddDialog = ({
           timeoutSeconds: !isEmbeddingModel && !isRerankModel
             ? parseInt(form.timeoutSeconds) || 120
             : undefined,
+          concurrencyLimit: !isEmbeddingModel && !isRerankModel
+            ? form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined
+            : undefined,
         });
 >>>>>>> a64daaea1 (Feat: support user to configurate model timeout)
       } else {
@@ -802,6 +761,7 @@ export const ModelAddDialog = ({
           ...(!isEmbeddingModel && !isRerankModel
             ? {
                 timeoutSeconds: parseInt(form.timeoutSeconds) || 120,
+                concurrencyLimit: form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined,
               }
             : {}),
         });
@@ -1272,6 +1232,29 @@ export const ModelAddDialog = ({
           </div>
         )}
 
+        {/* Concurrency Limit */}
+        {!isEmbeddingModel && !isRerankModel && !form.isBatchImport && (
+          <div>
+            <label
+              htmlFor="concurrencyLimit"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.concurrencyLimit")}
+            </label>
+            <Input
+              id="concurrencyLimit"
+              type="number"
+              min="1"
+              placeholder={t("model.dialog.placeholder.concurrencyLimit")}
+              value={form.concurrencyLimit}
+              onChange={(e) => handleFormChange("concurrencyLimit", e.target.value)}
+            />
+            <div className="text-xs text-gray-500 mt-1">
+              {t("model.dialog.hint.concurrencyLimit")}
+            </div>
+          </div>
+        )}
+
         {/* Connectivity verification area */}
         {!form.isBatchImport && (
           <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
@@ -1428,7 +1411,7 @@ export const ModelAddDialog = ({
                                 size="small"
                                 onClick={(e) => {
                                   e.stopPropagation(); // Prevent switch toggle
-                                  handleSettingsClick(model);
+                                  handleSingleModelSettingsClick(model);
                                 }}
                               />
                             </Tooltip>
@@ -1773,42 +1756,52 @@ export const ModelAddDialog = ({
         </div>
       </div>
 
-      {/* Settings Modal */}
-      <Modal
-        title={t("model.dialog.settings.title")}
-        open={settingsModalVisible}
-        onCancel={() => setSettingsModalVisible(false)}
-        onOk={handleSettingsSave}
-        cancelText={t("common.cancel")}
-        okText={t("common.confirm")}
-        destroyOnHidden
-      >
-        <div className="space-y-3">
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.settings.label.maxTokens")}
-            </label>
-            <Input
-              type="number"
-              value={modelMaxTokens}
-              onChange={(e) => setModelMaxTokens(e.target.value)}
-              placeholder={t("model.dialog.placeholder.maxTokens")}
-            />
-          </div>
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.timeoutSeconds")}
-            </label>
-            <Input
-              type="number"
-              min="1"
-              value={modelTimeoutSeconds}
-              onChange={(e) => setModelTimeoutSeconds(e.target.value)}
-              placeholder="120"
-            />
-          </div>
-        </div>
-      </Modal>
+      {/* Single Model Settings Modal */}
+      <ProviderConfigEditDialog
+        isOpen={isSingleModelSettingsOpen}
+        onClose={() => {
+          setIsSingleModelSettingsOpen(false);
+          setSelectedSingleModel(null);
+        }}
+        initialMaxTokens={selectedSingleModel?.max_tokens?.toString() || "4096"}
+        initialTimeoutSeconds={selectedSingleModel?.timeout_seconds?.toString() || "120"}
+        modelType={form.type}
+        showApiKeyField={false}
+        onSave={async (config) => {
+          if (!selectedSingleModel) return;
+          try {
+            const modelName = selectedSingleModel.model_name || selectedSingleModel.id;
+            await modelService.updateBatchModel(
+              [
+                {
+                  model_id: modelName,
+                  apiKey: config.apiKey,
+                  maxTokens: config.maxTokens,
+                  timeoutSeconds: config.timeoutSeconds,
+                  concurrencyLimit: config.concurrencyLimit,
+                },
+              ],
+              selectedSingleModel.model_factory
+            );
+
+            // Update the model in the list
+            setModelList((prev) =>
+              prev.map((model) =>
+                model.id === selectedSingleModel.id
+                  ? {
+                      ...model,
+                      api_key: config.apiKey,
+                      max_tokens: config.maxTokens,
+                      timeout_seconds: config.timeoutSeconds,
+                    }
+                  : model
+              )
+            );
+          } catch (error) {
+            console.error("Failed to update model settings:", error);
+          }
+        }}
+      />
     </Modal>
   );
 };

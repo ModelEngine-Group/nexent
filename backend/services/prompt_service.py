@@ -357,9 +357,18 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
     stop_flags = {"duty": False, "constraint": False, "few_shots": False,
                   "agent_var_name": False, "agent_display_name": False, "agent_description": False}
 
-    # Start all generation threads
+    # Get model concurrency limit to control the number of concurrent LLM calls
+    # If None or >= 6, no limit (all 6 calls run concurrently)
+    # If < 6, use semaphore to limit concurrent calls
+    from database.model_management_db import get_model_by_model_id
+    model_config = get_model_by_model_id(model_id, tenant_id)
+    concurrency_limit = model_config.get("concurrency_limit") if model_config else None
+
+    # Start all generation threads with concurrency control
     threads, error_holder = _start_generation_threads(
-        content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id)
+        content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id,
+        concurrency_limit=concurrency_limit
+    )
 
     # Stream results
     yield from _stream_results(produce_queue, latest, stop_flags, threads, error_holder)
@@ -425,11 +434,33 @@ def _resolve_prompt_generation_sub_agents(
         tenant_id=tenant_id, agent_id=agent_id
     )
 
+def _start_generation_threads(content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id,
+                                concurrency_limit: Optional[int] = None):
+    """Start all prompt generation threads with optional concurrency control.
 
-def _start_generation_threads(content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id):
-    """Start all prompt generation threads"""
+    Args:
+        concurrency_limit: Maximum concurrent LLM calls. If None or >= 6, no limit.
+                         If < 6, use semaphore to control concurrency.
+    """
     # Shared error tracking across threads
     error_holder = {"error": None}
+
+    # Total number of generation tasks
+    total_tasks = 6
+
+    # Determine effective concurrency limit
+    # None means unlimited, 0 or negative means unlimited
+    if concurrency_limit is None or concurrency_limit <= 0 or concurrency_limit >= total_tasks:
+        effective_limit = None
+    else:
+        effective_limit = concurrency_limit
+
+    # Use semaphore if concurrency is limited
+    semaphore = threading.Semaphore(effective_limit) if effective_limit else None
+    if semaphore:
+        logger.info(f"Using concurrency limit of {effective_limit} for prompt generation (total tasks: {total_tasks})")
+    else:
+        logger.info("Using unlimited concurrency for prompt generation")
 
     def make_callback(tag):
         def callback_fn(current_text):
@@ -439,8 +470,16 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
 
     def run_and_flag(tag, sys_prompt):
         try:
-            call_llm_for_system_prompt(
-                model_id, content, sys_prompt, make_callback(tag), tenant_id)
+            # Acquire semaphore before starting (if limited)
+            if semaphore:
+                semaphore.acquire()
+            try:
+                call_llm_for_system_prompt(
+                    model_id, content, sys_prompt, make_callback(tag), tenant_id)
+            finally:
+                # Always release semaphore after completion
+                if semaphore:
+                    semaphore.release()
         except Exception as e:
             logger.error(f"Error in {tag} generation: {e}")
             error_holder["error"] = e

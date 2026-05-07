@@ -72,6 +72,7 @@ export const modelService = {
           modelAppid: model.model_appid,
           accessToken: model.access_token,
           timeoutSeconds: model.timeout_seconds,
+          concurrencyLimit: model.concurrency_limit,
         }));
       }
       return [];
@@ -108,6 +109,7 @@ export const modelService = {
     modelAppid?: string;
     accessToken?: string;
     timeoutSeconds?: number;
+    concurrencyLimit?: number;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -318,6 +320,7 @@ export const modelService = {
     modelAppid?: string;
     accessToken?: string;
     timeoutSeconds?: number;
+    concurrencyLimit?: number;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -356,6 +359,9 @@ export const modelService = {
             ...(model.timeoutSeconds !== undefined
               ? { timeout_seconds: model.timeoutSeconds }
               : {}),
+            ...(model.concurrencyLimit !== undefined
+              ? { concurrency_limit: model.concurrencyLimit }
+              : {}),
           }),
         }
       );
@@ -378,6 +384,7 @@ export const modelService = {
       apiKey: string;
       maxTokens?: number;
       timeoutSeconds?: number;
+      concurrencyLimit?: number;
     }[],
     provider?: string
   ): Promise<any> => {
@@ -391,6 +398,7 @@ export const modelService = {
             api_key: m.apiKey,
             ...(m.maxTokens !== undefined ? { max_tokens: m.maxTokens } : {}),
             ...(m.timeoutSeconds !== undefined ? { timeout_seconds: m.timeoutSeconds } : {}),
+            ...(m.concurrencyLimit !== undefined ? { concurrency_limit: m.concurrencyLimit } : {}),
             ...(provider ? { model_factory: provider } : {}),
           }))
         ),
@@ -653,6 +661,7 @@ export const modelService = {
             modelAppid: model.model_appid,
             accessToken: model.access_token,
             timeoutSeconds: model.timeout_seconds,
+            concurrencyLimit: model.concurrency_limit,
           })),
           total: result.data.total || 0,
           page: result.data.page || 1,
@@ -700,6 +709,7 @@ export const modelService = {
     modelAppid?: string;
     accessToken?: string;
     timeoutSeconds?: number;
+    concurrencyLimit?: number;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -767,6 +777,7 @@ export const modelService = {
     modelAppid?: string;
     accessToken?: string;
     timeoutSeconds?: number;
+    concurrencyLimit?: number;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -791,6 +802,7 @@ export const modelService = {
             ...(params.modelAppid !== undefined ? { model_appid: params.modelAppid } : {}),
             ...(params.accessToken !== undefined ? { access_token: params.accessToken } : {}),
             ...(params.timeoutSeconds !== undefined ? { timeout_seconds: params.timeoutSeconds } : {}),
+            ...(params.concurrencyLimit !== undefined ? { concurrency_limit: params.concurrencyLimit } : {}),
           }),
         }
       );
