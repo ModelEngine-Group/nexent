@@ -135,16 +135,6 @@ export function AvatarDropdown() {
         });
       },
     },
-    {
-      key: "revoke",
-      icon: <Power size={16} />,
-      label: t("auth.revoke"),
-      // danger: true,
-      className: "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
-      onClick: () => {
-        setIsDeleteModalOpen(true);
-      },
-    },
   ];
 
   return (

@@ -54,6 +54,10 @@ export default function Homepage() {
   const navigateToSetup = () => navigateWithPermissionCheck("/setup");
   const navigateToSpace = () => navigateWithPermissionCheck("/space");
 
+  // Check if user has access to setup and space routes
+  const hasSetupAccess = canAccessRoute("/setup");
+  const hasSpaceAccess = canAccessRoute("/space");
+
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
       {/* Hero area */}
@@ -80,14 +84,15 @@ export default function Homepage() {
           {t("page.description")}
         </motion.p>
 
-        {/* Three parallel buttons - responsive: row on wide, column on narrow */}
+        {/* Action buttons - responsive: row on wide, column on narrow */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.4 }}
         >
+          {/* Always show the primary "Start Chat" button */}
           <Row gutter={[16, 16]} justify="center">
-            <Col xs={24} sm={24} md={8}>
+            <Col xs={24} sm={24} md={hasSetupAccess || hasSpaceAccess ? 8 : 24}>
               <Button
                 onClick={navigateToChat}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
@@ -96,24 +101,30 @@ export default function Homepage() {
                 {t("page.startChat")}
               </Button>
             </Col>
-            <Col xs={24} sm={24} md={8}>
-              <Button
-                onClick={navigateToSetup}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-              >
-                <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
-                {t("page.quickConfig")}
-              </Button>
-            </Col>
-            <Col xs={24} sm={24} md={8}>
-              <Button
-                onClick={navigateToSpace}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-              >
-                <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
-                {t("page.agentSpace")}
-              </Button>
-            </Col>
+            {/* Show setup button only for users with access */}
+            {hasSetupAccess && (
+              <Col xs={24} sm={24} md={8}>
+                <Button
+                  onClick={navigateToSetup}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
+                >
+                  <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                  {t("page.quickConfig")}
+                </Button>
+              </Col>
+            )}
+            {/* Show space button only for users with access */}
+            {hasSpaceAccess && (
+              <Col xs={24} sm={24} md={8}>
+                <Button
+                  onClick={navigateToSpace}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
+                >
+                  <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                  {t("page.agentSpace")}
+                </Button>
+              </Col>
+            )}
           </Row>
         </motion.div>
 
