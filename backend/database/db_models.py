@@ -786,6 +786,9 @@ class A2AExternalAgent(TableBase):
     nacos_config_id = Column(String(64), doc="Reference to Nacos config used for discovery")
     nacos_agent_name = Column(String(255), doc="Original name used for Nacos query")
 
+    # Base URL for infrastructure health checks
+    base_url = Column(String(512), doc="Base URL for health checks (service root address), e.g., http://agent:8080")
+
     # Tenant isolation
     tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
 

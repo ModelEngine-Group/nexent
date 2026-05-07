@@ -5,6 +5,7 @@ These endpoints allow users to discover and manage external A2A agents.
 Used internally for configuring A2A sub-agents.
 """
 import logging
+import uuid
 from typing import Annotated, List, Optional
 from http import HTTPStatus
 
@@ -43,6 +44,14 @@ class UpdateAgentProtocolRequest(BaseModel):
     protocol_type: str = Field(
         description="Protocol type to use: JSONRPC, HTTP+JSON, or GRPC"
     )
+
+
+class TestNacosConnectionRequest(BaseModel):
+    """Request to test Nacos connectivity without saving the config."""
+    nacos_addr: str = Field(description="Nacos server address (e.g., http://nacos-server:8848)")
+    nacos_username: Optional[str] = None
+    nacos_password: Optional[str] = None
+    namespace_id: Optional[str] = "public"
 
 
 # =============================================================================
@@ -102,7 +111,7 @@ async def discover_from_nacos(
 
         results = await a2a_client_service.discover_from_nacos(
             nacos_config_id=request.nacos_config_id,
-            agent_names=request.agent_names,
+            agent_names=[name.strip() for name in request.agent_names],
             tenant_id=tenant_id,
             user_id=user_id,
             namespace=request.namespace
@@ -482,6 +491,17 @@ class CreateNacosConfigRequest(BaseModel):
     description: Optional[str] = None
 
 
+class UpdateNacosConfigRequest(BaseModel):
+    """Request to update a Nacos config."""
+    name: Optional[str] = None
+    nacos_addr: Optional[str] = None
+    nacos_username: Optional[str] = None
+    nacos_password: Optional[str] = None
+    namespace_id: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
 @router.post("/nacos-configs")
 async def create_nacos_config(
     request: CreateNacosConfigRequest,
@@ -577,6 +597,51 @@ async def get_nacos_config(
         )
 
 
+@router.put("/nacos-configs/{config_id}")
+async def update_nacos_config(
+    config_id: str,
+    request: UpdateNacosConfigRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Request = None
+):
+    """Update a Nacos configuration."""
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+
+        result = a2a_agent_db.update_nacos_config(
+            config_id=config_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=request.name,
+            nacos_addr=request.nacos_addr,
+            nacos_username=request.nacos_username,
+            nacos_password=request.nacos_password,
+            namespace_id=request.namespace_id,
+            description=request.description,
+            is_active=request.is_active
+        )
+
+        if not result:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Nacos config {config_id} not found"
+            )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": result}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update Nacos config failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to update Nacos config"
+        )
+
+
 @router.delete("/nacos-configs/{config_id}")
 async def delete_nacos_config(
     config_id: str,
@@ -607,6 +672,62 @@ async def delete_nacos_config(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to delete Nacos config"
+        )
+
+
+@router.post("/nacos-configs/test-connection")
+async def test_nacos_connection(
+    request: TestNacosConnectionRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Request = None
+):
+    """Test connectivity to Nacos server without saving the configuration."""
+    from utils.nacos_client import NacosClient, NacosConnectionError
+
+    try:
+        get_current_user_info(authorization, http_request)
+
+        async with NacosClient(
+            nacos_addr=request.nacos_addr,
+            username=request.nacos_username,
+            password=request.nacos_password
+        ) as client:
+            result = await client.test_connectivity(namespace=request.namespace_id or "public")
+
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    "status": "success",
+                    "data": {
+                        "success": result["success"],
+                        "message": result["message"]
+                    }
+                }
+            )
+
+    except NacosConnectionError as e:
+        logger.warning(f"Nacos connection test failed: {e}")
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "status": "success",
+                "data": {
+                    "success": False,
+                    "message": str(e)
+                }
+            }
+        )
+    except Exception as e:
+        logger.error(f"Test Nacos connection failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "status": "success",
+                "data": {
+                    "success": False,
+                    "message": f"Failed to test Nacos connection: {e}"
+                }
+            }
         )
 
 
@@ -648,11 +769,11 @@ async def chat_with_external_agent(
 
         # Build A2A message format following A2A protocol with parts array
         a2a_message = {
+            "message_id": f"msg-{uuid.uuid4().hex[:8]}",
             "role": "ROLE_USER",
             "parts": [
                 {
                     "text": request_body.message.strip(),
-                    "mediaType": "text/plain"
                 }
             ],
         }
