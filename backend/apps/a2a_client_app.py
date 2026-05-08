@@ -769,7 +769,7 @@ async def chat_with_external_agent(
 
         # Build A2A message format following A2A protocol with parts array
         a2a_message = {
-            "message_id": f"msg-{uuid.uuid4().hex[:8]}",
+            "message_id": f"msg_{uuid.uuid4().hex}",
             "role": "ROLE_USER",
             "parts": [
                 {
