@@ -8,8 +8,8 @@ import {
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { useMcpAddLocal } from "@/hooks/mcpTools/useMcpAddLocal";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
-import ContainerPortField from "./shared/ContainerPortField";
-import TagEditor from "./shared/TagEditor";
+import ContainerPortField from "../../shared/ContainerPortField";
+import TagEditor from "../../shared/TagEditor";
 
 const createInitialDraft = (): LocalAddMcpDraft => ({
   name: "",

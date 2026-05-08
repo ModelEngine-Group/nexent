@@ -10,7 +10,7 @@ import {
   getTransportLabelKey,
 } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
-import RegistryStatusBadge from "./shared/StatusBadge";
+import RegistryStatusBadge from "../../shared/StatusBadge";
 
 interface McpCommunityCardProps {
   service: CommunityMcpCard;

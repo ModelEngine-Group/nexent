@@ -6,9 +6,9 @@ import {
   MCP_ADD_SERVICE_MODAL_WIDTH_LOCAL,
   MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS,
 } from "@/const/mcpTools";
-import AddMcpServiceLocalSection from "./AddMcpServiceLocalSection";
-import AddMcpServiceRegistrySection from "./AddMcpServiceRegistrySection";
-import AddMcpServiceCommunitySection from "./AddMcpServiceCommunitySection";
+import AddMcpServiceLocalSection from "./local/AddMcpServiceLocalSection";
+import AddMcpServiceRegistrySection from "./registry/AddMcpServiceRegistrySection";
+import AddMcpServiceCommunitySection from "./community/AddMcpServiceCommunitySection";
 
 interface AddMcpServiceModalProps {
   open: boolean;

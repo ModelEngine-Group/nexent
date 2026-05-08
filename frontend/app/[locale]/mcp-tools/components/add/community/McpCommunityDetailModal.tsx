@@ -13,8 +13,8 @@ import {
   toPrettyRegistryJson,
 } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
-import RegistryStatusBadge from "./shared/StatusBadge";
-import JsonPreviewModal from "./shared/JsonPreviewModal";
+import RegistryStatusBadge from "../../shared/StatusBadge";
+import JsonPreviewModal from "../../shared/JsonPreviewModal";
 
 const sectionCard =
   "rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm";

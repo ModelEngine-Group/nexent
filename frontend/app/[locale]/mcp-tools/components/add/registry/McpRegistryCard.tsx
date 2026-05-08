@@ -6,7 +6,7 @@ import {
 } from "@/const/mcpTools";
 import { formatRegistryDate, formatRegistryVersion } from "@/lib/mcpTools";
 import type { RegistryMcpCard } from "@/types/mcpTools";
-import RegistryStatusBadge from "./shared/StatusBadge";
+import RegistryStatusBadge from "../../shared/StatusBadge";
 
 interface McpRegistryCardProps {
   service: RegistryMcpCard;

@@ -14,7 +14,7 @@ import {
   McpServiceStatus,
   McpToolsServicesTab,
 } from "@/const/mcpTools";
-import AddMcpServiceModal from "./components/AddMcpServiceModal";
+import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
 import McpServiceCard from "./components/McpServiceCard";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
 import McpServicesFilterBar from "./components/McpServicesFilterBar";
