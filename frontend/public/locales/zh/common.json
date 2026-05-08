@@ -429,8 +429,8 @@
   "subAgentPool.tooltip.exitCreateMode": "点击退出创建模式",
   "subAgentPool.tooltip.exitEditMode": "点击退出编辑模式",
   "subAgentPool.tooltip.editAgent": "点击编辑",
-  "subAgentPool.tooltip.duplicateNameDisabled": "该智能体因与其他智能体同名而被禁用，请修改名称后使用",
-  "subAgentPool.message.duplicateNameDisabled": "该智能体因与其他智能体同名而被禁用，请修改名称后使用",
+  "subAgentPool.tooltip.duplicateNameDisabled": "该智能体因与其他智能体名称（或变量名）相同而被禁用，请修改名称后使用",
+  "subAgentPool.message.duplicateNameDisabled": "该智能体因与其他智能体名称（或变量名）相同而被禁用，请修改名称后使用",
 
   "toolConfig.title.paramConfig": "配置参数",
   "toolConfig.message.loadError": "加载工具配置失败",

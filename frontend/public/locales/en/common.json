@@ -437,8 +437,8 @@
   "subAgentPool.tooltip.exitCreateMode": "Click to exit create mode",
   "subAgentPool.tooltip.exitEditMode": "Click to exit edit mode",
   "subAgentPool.tooltip.editAgent": "Click to edit",
-  "subAgentPool.tooltip.duplicateNameDisabled": "Agent name already exists",
-  "subAgentPool.message.duplicateNameDisabled": "This Agent is disabled due to duplicate name with other Agents. Please change the name to use it",
+  "subAgentPool.tooltip.duplicateNameDisabled": "Agent name (or display name) already exists",
+  "subAgentPool.message.duplicateNameDisabled": "This Agent is disabled due to duplicate name (or display name) with other Agents. Please change the name to use it",
 
   "toolConfig.title.paramConfig": "Parameter Configuration",
   "toolConfig.message.loadError": "Failed to load tool configuration",
