@@ -61,7 +61,6 @@ import json
 import time
 import sys
 import threading
-import types
 from unittest.mock import Mock, MagicMock, patch, call
 
 
@@ -87,8 +86,6 @@ class TestMonitoringConfig:
         assert config.fastapi_excluded_urls == ""
         assert config.fastapi_exclude_spans == ["receive", "send"]
         assert config.telemetry_sample_rate == 1.0
-        assert config.llm_slow_request_threshold_seconds == 5.0
-        assert config.llm_slow_token_rate_threshold == 10.0
 
     def test_custom_config(self):
         """Test configuration with custom OTLP values."""
@@ -104,11 +101,8 @@ class TestMonitoringConfig:
             instrument_requests=True,
             fastapi_excluded_urls="/agent/run",
             fastapi_exclude_spans="send",
-            use_platform_sdk=True,
             project_name="nexent-test",
-            telemetry_sample_rate=0.5,
-            llm_slow_request_threshold_seconds=10.0,
-            llm_slow_token_rate_threshold=20.0
+            telemetry_sample_rate=0.5
         )
 
         assert config.enable_telemetry is True
@@ -122,11 +116,8 @@ class TestMonitoringConfig:
         assert config.instrument_requests is True
         assert config.fastapi_excluded_urls == "/agent/run"
         assert config.fastapi_exclude_spans == ["send"]
-        assert config.use_platform_sdk is True
         assert config.project_name == "nexent-test"
         assert config.telemetry_sample_rate == 0.5
-        assert config.llm_slow_request_threshold_seconds == 10.0
-        assert config.llm_slow_token_rate_threshold == 20.0
 
     def test_invalid_protocol_defaults_to_http(self):
         """Test that invalid protocol defaults to http."""
@@ -383,63 +374,6 @@ class TestMonitoringManager:
             assert calls["excluded_urls"] == "/health"
             assert calls["exclude_spans"] == ["receive", "send"]
 
-    @patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True)
-    @patch('sdk.nexent.monitor.monitoring.trace')
-    @patch('sdk.nexent.monitor.monitoring.metrics')
-    @patch('sdk.nexent.monitor.monitoring.TracerProvider')
-    @patch('sdk.nexent.monitor.monitoring.MeterProvider')
-    @patch('sdk.nexent.monitor.monitoring.OTLPSpanExporterHTTP')
-    @patch('sdk.nexent.monitor.monitoring.Resource')
-    @patch('sdk.nexent.monitor.monitoring.RequestsInstrumentor')
-    def test_phoenix_platform_sdk_reuses_registered_tracer_provider(
-        self,
-        mock_requests_instr,
-        mock_resource,
-        mock_span_exporter_http,
-        mock_meter_provider,
-        mock_tracer_provider,
-        mock_metrics,
-        mock_trace
-    ):
-        """Test Phoenix SDK provider is reused instead of double-registering traces."""
-        manager = MonitoringManager()
-        sdk_tracer_provider = MagicMock()
-        phoenix_module = types.ModuleType("phoenix")
-        phoenix_otel_module = types.ModuleType("phoenix.otel")
-        phoenix_otel_module.register = MagicMock(return_value=sdk_tracer_provider)
-
-        mock_resource.create.return_value = MagicMock()
-        mock_metrics.get_meter.return_value = MagicMock()
-        mock_trace.get_tracer.return_value = MagicMock()
-
-        with patch.dict(sys.modules, {
-            "phoenix": phoenix_module,
-            "phoenix.otel": phoenix_otel_module,
-        }):
-            config = MonitoringConfig(
-                enable_telemetry=True,
-                provider="phoenix",
-                otlp_endpoint="https://app.phoenix.arize.com/s/test-space",
-                otlp_headers={"Authorization": "Bearer test-key"},
-                export_metrics=False,
-                use_platform_sdk=True,
-                project_name="nexent-test"
-            )
-            manager.configure(config)
-
-        phoenix_otel_module.register.assert_called_once_with(
-            project_name="nexent-test",
-            endpoint="https://app.phoenix.arize.com/s/test-space",
-            protocol="http/protobuf",
-            headers={"Authorization": "Bearer test-key"},
-            auto_instrument=False
-        )
-        assert manager._tracer_provider is sdk_tracer_provider
-        mock_tracer_provider.assert_not_called()
-        mock_trace.set_tracer_provider.assert_not_called()
-        mock_span_exporter_http.assert_not_called()
-        mock_requests_instr().instrument.assert_called_once()
-
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_trace_llm_request_openinference_attrs(self, mock_trace):
         """Test LLM request tracing uses OpenInference attribute names."""
@@ -663,6 +597,8 @@ class TestAgentStepTracing:
             mock_span = MagicMock()
             manager._tracer.start_as_current_span.return_value.__enter__ = Mock(return_value=mock_span)
             manager._tracer.start_as_current_span.return_value.__exit__ = Mock(return_value=None)
+            mock_span.is_recording.return_value = True
+            mock_trace.get_current_span.return_value = mock_span
 
             tool_input = {"query": "test search", "limit": 10}
 
@@ -751,6 +687,7 @@ class TestLLMTokenTracker:
                 "llm.token_count.prompt": 20,
                 "llm.token_count.completion": 30,
                 "llm.token_count.total": 50,
+                "langfuse.observation.usage_details": '{"input": 20, "output": 30, "total": 50}',
                 "llm.generation_rate": 5.0,
                 "llm.duration.total": 2.0,
                 "llm.time_to_first_token": 0.5

@@ -12,16 +12,17 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose-monitoring.yml"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [collector|phoenix|langfuse|grafana]
-       $(basename "$0") --stack <collector|phoenix|langfuse|grafana>
+Usage: $(basename "$0") [otlp|collector|phoenix|langfuse|grafana]
+       $(basename "$0") --stack <otlp|collector|phoenix|langfuse|grafana>
 
 Stacks:
-  collector  Start OpenTelemetry Collector only. This is the default.
+  otlp       Start OpenTelemetry Collector only. This is the default.
+  collector  Alias for otlp.
   phoenix    Start Collector and local Arize Phoenix.
   langfuse   Start Collector and local Langfuse self-host stack.
   grafana    Start Collector, Grafana, and Tempo.
 
-Set MONITORING_STACK in monitoring/monitoring.env to change the default.
+Set MONITORING_PROVIDER in monitoring/monitoring.env to change the default.
 EOF
 }
 
@@ -41,7 +42,7 @@ while [ $# -gt 0 ]; do
             usage
             exit 0
             ;;
-        collector|phoenix|langfuse|grafana)
+        otlp|collector|phoenix|langfuse|grafana)
             STACK_ARG="$1"
             shift
             ;;
@@ -82,17 +83,23 @@ set -a
 . "$MONITORING_DIR/monitoring.env"
 set +a
 
-MONITORING_STACK="${STACK_ARG:-${MONITORING_STACK:-collector}}"
-case "$MONITORING_STACK" in
-    collector)
+MONITORING_PROVIDER="${STACK_ARG:-${MONITORING_PROVIDER:-otlp}}"
+case "$MONITORING_PROVIDER" in
+    collector|otlp)
+        LOCAL_STACK="collector"
+        BACKEND_MONITORING_PROVIDER="otlp"
         OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-config.yml}"
         COMPOSE_PROFILES=()
         ;;
     phoenix)
+        LOCAL_STACK="phoenix"
+        BACKEND_MONITORING_PROVIDER="phoenix"
         OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-phoenix-config.yml}"
         COMPOSE_PROFILES=(--profile phoenix)
         ;;
     langfuse)
+        LOCAL_STACK="langfuse"
+        BACKEND_MONITORING_PROVIDER="langfuse"
         OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-langfuse-config.yml}"
         COMPOSE_PROFILES=(--profile langfuse)
         LANGFUSE_INIT_PROJECT_PUBLIC_KEY="${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-pk-lf-nexent-local}"
@@ -103,11 +110,13 @@ case "$MONITORING_STACK" in
         export LANGFUSE_OTLP_AUTH_HEADER
         ;;
     grafana)
+        LOCAL_STACK="grafana"
+        BACKEND_MONITORING_PROVIDER="grafana"
         OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-grafana-config.yml}"
         COMPOSE_PROFILES=(--profile grafana)
         ;;
     *)
-        echo "❌ Error: unsupported MONITORING_STACK '$MONITORING_STACK'."
+        echo "❌ Error: unsupported MONITORING_PROVIDER '$MONITORING_PROVIDER'."
         usage
         exit 1
         ;;
@@ -124,7 +133,7 @@ else
 fi
 
 # Start monitoring services
-echo "🐳 Starting monitoring services with stack: $MONITORING_STACK"
+echo "🐳 Starting monitoring services with provider: $MONITORING_PROVIDER"
 "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$MONITORING_DIR/monitoring.env" "${COMPOSE_PROFILES[@]}" up -d --remove-orphans
 
 # Wait for services to be ready
@@ -152,7 +161,7 @@ check_service() {
 # Check OpenTelemetry Collector HTTP receiver
 check_service "OpenTelemetry Collector HTTP receiver" "http://localhost:${OTEL_COLLECTOR_HTTP_PORT:-4318}" "${OTEL_COLLECTOR_HTTP_PORT:-4318}" || true
 
-case "$MONITORING_STACK" in
+case "$LOCAL_STACK" in
     phoenix)
         check_service "Phoenix UI" "http://localhost:${PHOENIX_PORT:-6006}" "${PHOENIX_PORT:-6006}" || true
         ;;
@@ -171,7 +180,7 @@ echo ""
 echo "📊 Access your monitoring tools:"
 echo "   • OTLP HTTP receiver: http://localhost:${OTEL_COLLECTOR_HTTP_PORT:-4318}"
 echo "   • OTLP gRPC receiver: localhost:${OTEL_COLLECTOR_GRPC_PORT:-4317}"
-case "$MONITORING_STACK" in
+case "$LOCAL_STACK" in
     phoenix)
         echo "   • Phoenix UI: http://localhost:${PHOENIX_PORT:-6006}"
         ;;
@@ -185,23 +194,12 @@ case "$MONITORING_STACK" in
         echo "   • Tempo API: http://localhost:${TEMPO_PORT:-3200}"
         ;;
     collector)
-        echo "   • Configure Phoenix, Langfuse, Tempo, Jaeger, or another OTLP backend in monitoring.env"
+        echo "   • Configure Phoenix, Langfuse, Tempo, or another OTLP backend in monitoring.env"
         ;;
 esac
 echo ""
 echo "🔧 To enable monitoring in your Nexent backend:"
 echo "   1. Set ENABLE_TELEMETRY=true in your .env file"
-case "$MONITORING_STACK" in
-    collector)
-        BACKEND_MONITORING_PROVIDER="otlp"
-        ;;
-    grafana)
-        BACKEND_MONITORING_PROVIDER="grafana"
-        ;;
-    *)
-        BACKEND_MONITORING_PROVIDER="$MONITORING_STACK"
-        ;;
-esac
 echo "   2. Set MONITORING_PROVIDER=$BACKEND_MONITORING_PROVIDER in your .env file"
 echo "   3. Set OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 for Docker services"
 echo "      or http://localhost:${OTEL_COLLECTOR_HTTP_PORT:-4318} for a backend running on the host"

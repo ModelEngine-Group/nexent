@@ -98,6 +98,8 @@ def pytest_configure(config):
         if module_name in sys.modules:
             original_modules[module_name] = sys.modules[module_name]
         sys.modules[module_name] = module
+    sys.modules["sdk"].nexent = sys.modules["sdk.nexent"]
+    sys.modules["sdk.nexent"].monitor = sys.modules["sdk.nexent.monitor"]
 
     repo_root = Path(__file__).resolve().parents[3]
     monitoring_path = repo_root / "sdk" / "nexent" / "monitor" / "monitoring.py"

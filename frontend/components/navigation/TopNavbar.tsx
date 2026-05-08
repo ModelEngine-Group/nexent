@@ -22,7 +22,6 @@ const { Header } = Layout;
 const MONITORING_PROVIDER_UI: Record<string, { port: string; path: string }> = {
   phoenix: { port: "6006", path: "/" },
   langfuse: { port: "3001", path: "/project/nexent" },
-  jaeger: { port: "16686", path: "/" },
   grafana: {
     port: "3002",
     path: "/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1",

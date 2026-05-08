@@ -149,7 +149,7 @@ LANGFUSE_USER_ID = "langfuse.user.id"
 AGENT_OPERATION_NAMES = {
     "agent.run",
 }
-SUPPORTED_PROVIDERS = {"otlp", "phoenix", "langfuse", "jaeger", "grafana", "custom"}
+SUPPORTED_PROVIDERS = {"otlp", "phoenix", "langfuse", "grafana"}
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -290,11 +290,8 @@ class MonitoringConfig:
     instrument_requests: bool = False
     fastapi_excluded_urls: str = ""
     fastapi_exclude_spans: List[str] = field(default_factory=lambda: ["receive", "send"])
-    use_platform_sdk: bool = False
     project_name: Optional[str] = None
     telemetry_sample_rate: float = 1.0
-    llm_slow_request_threshold_seconds: float = 5.0
-    llm_slow_token_rate_threshold: float = 10.0
 
     @classmethod
     def from_file(cls, config_file: str, overrides: Optional[Dict[str, Any]] = None) -> "MonitoringConfig":
@@ -342,11 +339,8 @@ class MonitoringConfig:
             "instrument_requests": data.get("instrument_requests"),
             "fastapi_excluded_urls": data.get("fastapi_excluded_urls"),
             "fastapi_exclude_spans": data.get("fastapi_exclude_spans"),
-            "use_platform_sdk": exporter.get("use_platform_sdk", data.get("use_platform_sdk")),
             "project_name": exporter.get("project_name", data.get("project_name")),
             "telemetry_sample_rate": data.get("telemetry_sample_rate"),
-            "llm_slow_request_threshold_seconds": data.get("llm_slow_request_threshold_seconds"),
-            "llm_slow_token_rate_threshold": data.get("llm_slow_token_rate_threshold"),
         })
 
         if overrides:
@@ -362,9 +356,9 @@ class MonitoringConfig:
         self.provider = (self.provider or "otlp").strip().lower()
         if self.provider not in SUPPORTED_PROVIDERS:
             logger.warning(
-                f"Unknown monitoring provider '{self.provider}'. Using 'custom'."
+                f"Unknown monitoring provider '{self.provider}'. Using 'otlp'."
             )
-            self.provider = "custom"
+            self.provider = "otlp"
 
         self.enable_telemetry = _as_bool(self.enable_telemetry)
         self.export_traces = _as_bool(self.export_traces, True)
@@ -383,12 +377,7 @@ class MonitoringConfig:
                 for item in self.fastapi_exclude_spans
                 if str(item).strip()
             ]
-        self.use_platform_sdk = _as_bool(self.use_platform_sdk)
         self.telemetry_sample_rate = _as_float(self.telemetry_sample_rate, 1.0)
-        self.llm_slow_request_threshold_seconds = _as_float(
-            self.llm_slow_request_threshold_seconds, 5.0)
-        self.llm_slow_token_rate_threshold = _as_float(
-            self.llm_slow_token_rate_threshold, 10.0)
         self.otlp_headers = _parse_headers(self.otlp_headers)
 
         if self.enable_telemetry and not OPENTELEMETRY_AVAILABLE:
@@ -494,24 +483,22 @@ class MonitoringManager:
             return
 
         try:
-            # Setup resource with service name
-            resource = Resource.create({
+            # Setup resource with service name.
+            resource_attributes = {
                 "service.name": self._config.service_name,
                 "service.version": "1.0.0",
                 "service.instance.id": "nexent-instance-1",
                 "telemetry.provider": self._config.provider,
-            })
-
-            platform_tracer_provider = None
-            if self._config.use_platform_sdk and self._config.export_traces:
-                platform_tracer_provider = self._initialize_platform_sdk()
+            }
+            if self._config.project_name:
+                resource_attributes["project.name"] = self._config.project_name
+            resource = Resource.create(resource_attributes)
 
             # Initialize TracerProvider with OTLP exporter
-            self._tracer_provider = platform_tracer_provider or TracerProvider(resource=resource)
-            if platform_tracer_provider is None:
-                trace.set_tracer_provider(self._tracer_provider)
+            self._tracer_provider = TracerProvider(resource=resource)
+            trace.set_tracer_provider(self._tracer_provider)
 
-            if self._config.export_traces and platform_tracer_provider is None:
+            if self._config.export_traces:
                 # Choose exporter based on protocol
                 if self._config.otlp_protocol == "grpc":
                     span_exporter = OTLPSpanExporterGRPC(
@@ -532,10 +519,6 @@ class MonitoringManager:
                     max_export_batch_size=512
                 )
                 self._tracer_provider.add_span_processor(span_processor)
-            elif self._config.export_traces:
-                logger.info(
-                    "Using platform SDK tracer provider; skipping explicit OTLP span exporter"
-                )
 
             metric_readers = []
             if self._config.export_metrics:
@@ -637,39 +620,6 @@ class MonitoringManager:
         except Exception as e:
             logger.error(f"Failed to initialize OTLP telemetry: {str(e)}")
             # Do not raise - allow application to continue without monitoring
-
-    def _initialize_platform_sdk(self) -> Optional[Any]:
-        """Optionally initialize provider SDKs that wrap OpenTelemetry."""
-        if not self._config:
-            return None
-
-        if self._config.provider == "phoenix":
-            try:
-                from phoenix.otel import register
-
-                kwargs = {
-                    "project_name": self._config.project_name or self._config.service_name,
-                    "endpoint": self._config.otlp_endpoint,
-                    "protocol": "http/protobuf" if self._config.otlp_protocol == "http" else "grpc",
-                    "headers": self._config.otlp_headers,
-                    "auto_instrument": False,
-                }
-                tracer_provider = register(**kwargs)
-                logger.info("Phoenix SDK initialized for OpenTelemetry tracing")
-                return tracer_provider
-            except Exception as exc:
-                logger.warning(f"Phoenix SDK initialization skipped: {exc}")
-        elif self._config.provider == "langfuse":
-            try:
-                from langfuse import get_client
-
-                client = get_client()
-                if hasattr(client, "auth_check"):
-                    client.auth_check()
-                logger.info("Langfuse SDK client initialized")
-            except Exception as exc:
-                logger.warning(f"Langfuse SDK initialization skipped: {exc}")
-        return None
 
     @property
     def is_enabled(self) -> bool:

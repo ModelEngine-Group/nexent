@@ -5,17 +5,16 @@
 
 ## 设计目标
 
-Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成标准 span、event、metric，并通过 OTLP 导出。Phoenix、Langfuse、Grafana Tempo、Jaeger 等平台作为可配置 exporter 或可选 SDK 增强层接入，业务代码不绑定单一平台。
+Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成标准 span、event、metric，并通过 OTLP 导出。Phoenix、Langfuse、Grafana Tempo 和标准 OTLP 后端作为可配置 exporter 接入，业务代码不绑定单一平台。
 
 核心目标：
 
 - Agent 流式运行期间保持 trace 上下文，覆盖 API、服务准备、Agent 异步 generator、Agent 线程、LLM 流式输出、Python 解释器执行、真实工具调用和最终答案。
 - 通过 OpenInference 属性适配 Phoenix，通过 `langfuse.*` 属性适配 Langfuse，同一套业务埋点可同时服务多个监控平台。
-- 支持 `otlp`、`phoenix`、`langfuse`、`jaeger`、`grafana`、`custom` provider profile。
-- 同时支持环境变量和 JSON/YAML 配置文件，环境变量可覆盖文件配置。
+- 支持 `otlp`、`phoenix`、`langfuse`、`grafana` provider profile。
+- 通过环境变量统一控制后端导出配置和本地部署形态，`MONITORING_PROVIDER` 是唯一 provider 入口。
 - 支持 base endpoint 和 signal-specific endpoint，避免 `/v1/traces`、`/v1/metrics` 路径重复拼接。
 - FastAPI/requests 自动埋点可配置，默认压制流式接口中的 ASGI `receive/send` 噪声。
-- 平台 SDK 只通过 `MONITORING_USE_PLATFORM_SDK=true` 显式启用，默认保持 OpenTelemetry 原生实现。
 
 ## 技术栈
 
@@ -28,9 +27,8 @@ Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成
 | 自动埋点 | FastAPI instrumentation、requests instrumentation；requests 默认关闭 |
 | AI 语义 | OpenInference 属性、Langfuse OTel 属性、Nexent 自定义业务属性 |
 | Agent 框架 | SmolAgents `CodeAgent` 扩展、Nexent `CoreAgent`、`NexentAgent` |
-| 配置 | 环境变量、`MONITORING_CONFIG_FILE` JSON/YAML |
+| 配置 | 环境变量 |
 | Collector | `otel/opentelemetry-collector-contrib`，支持 logging、Phoenix、Langfuse、Grafana/Tempo 四类本地部署形态 |
-| 可选 SDK | `phoenix.otel.register`、`langfuse.get_client`；Phoenix SDK 成功注册时复用其 tracer provider |
 
 ## 总体架构
 
@@ -42,7 +40,7 @@ flowchart LR
   Collector --> Phoenix[Arize Phoenix]
   Collector --> Langfuse[Langfuse]
   Collector --> Tempo[Grafana Tempo]
-  Collector --> Other[Jaeger / Custom Backend]
+  Collector --> Other[OTLP Backend]
 
   Backend --> FastAPI[FastAPI Auto Instrumentation]
   Backend --> Manual[Manual AI Spans]
@@ -57,10 +55,7 @@ flowchart LR
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 监控总开关 |
-| `MONITORING_CONFIG_FILE` | 空 | JSON/YAML 配置文件路径 |
-| `MONITORING_PROVIDER` | `otlp` | `otlp`、`phoenix`、`langfuse`、`jaeger`、`grafana`、`custom` |
-| `MONITORING_STACK` | `collector` | 本地部署形态：`collector`、`phoenix`、`langfuse`、`grafana` |
-| `MONITORING_USE_PLATFORM_SDK` | `false` | 是否额外初始化平台 SDK |
+| `MONITORING_PROVIDER` | `otlp` | 监控 provider 和本地部署形态：`otlp`、`phoenix`、`langfuse`、`grafana` |
 | `MONITORING_PROJECT_NAME` | `nexent` | 平台项目名 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | OpenTelemetry service name |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint |
@@ -88,31 +83,6 @@ flowchart LR
 | `GRAFANA_DEFAULT_LANGUAGE` | `zh-Hans` | 本地 Grafana 默认界面语言 |
 | `TEMPO_VERSION` | `2.10.5` | 本地 Tempo 镜像版本，避免浮动 tag 带来的配置兼容性漂移 |
 | `TEMPO_PORT` | `3200` | 本地 Tempo HTTP API 端口 |
-
-### 配置文件
-
-```yaml
-monitoring:
-  enable_telemetry: true
-  service_name: nexent-backend
-  project_name: nexent-production
-  instrument_fastapi: true
-  instrument_requests: false
-  fastapi_excluded_urls: ""
-  fastapi_exclude_spans: [receive, send]
-  exporter:
-    provider: langfuse
-    protocol: http
-    endpoint: https://cloud.langfuse.com/api/public/otel
-    headers:
-      Authorization: Basic BASE64_ENCODED_KEY
-      x-langfuse-ingestion-version: "4"
-    export_traces: true
-    export_metrics: false
-    use_platform_sdk: false
-```
-
-环境变量中显式设置的非默认值会覆盖配置文件，便于同一镜像在不同环境接入不同平台。
 
 ## Endpoint 规则
 
@@ -143,9 +113,8 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 
 - `phoenix` -> `${currentHostname}:${PHOENIX_PORT:-6006}/`
 - `langfuse` -> `${currentHostname}:${LANGFUSE_PORT:-3001}/project/nexent`
-- `jaeger` -> `${currentHostname}:${JAEGER_UI_PORT:-16686}/`
 - `grafana` -> `${currentHostname}:${GRAFANA_PORT:-3002}/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1`
-- `otlp` / `custom` 默认不显示顶栏监控入口
+- `otlp` 默认不显示顶栏监控入口
 
 因此本地 Grafana 形态需要在后端 `.env` 中设置：
 
@@ -163,12 +132,6 @@ OTEL_EXPORTER_OTLP_ENDPOINT=https://app.phoenix.arize.com/s/YOUR_SPACE
 OTEL_EXPORTER_OTLP_AUTHORIZATION="Bearer YOUR_PHOENIX_API_KEY"
 OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 MONITORING_PROJECT_NAME=nexent-production
-```
-
-可选启用平台 SDK。启用后如果 `phoenix.otel.register` 成功返回 tracer provider，Nexent 会复用该 provider，避免重复注册全局 OpenTelemetry tracer provider：
-
-```bash
-MONITORING_USE_PLATFORM_SDK=true
 ```
 
 ### Langfuse
@@ -191,7 +154,7 @@ OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 
 | 形态 | Collector 配置 | 本地服务 | 数据去向 | 说明 |
 |------|----------------|----------|----------|------|
-| `collector` | `otel-collector-config.yml` | Collector | logging exporter | 最小形态，用于验证 span/metric 是否产生，或手动改配置转发到云端平台 |
+| `otlp` | `otel-collector-config.yml` | Collector | logging exporter | 最小形态，用于验证 span/metric 是否产生，或手动改配置转发到云端平台；`collector` 仅作为启动脚本兼容别名 |
 | `phoenix` | `otel-collector-phoenix-config.yml` | Collector + Phoenix | `http://phoenix:6006/v1/traces` | Phoenix 容器同时提供 UI 和 OTLP HTTP/gRPC trace collector，适合本地 trace debug |
 | `langfuse` | `otel-collector-langfuse-config.yml` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | `http://langfuse-web:3000/api/public/otel/v1/traces` | Langfuse v3 依赖多组件，适合完整 LLMOps 能力验证 |
 | `grafana` | `otel-collector-grafana-config.yml` | Collector + Grafana + Tempo | traces 转发到 `tempo:4317`，metrics 只进入 Collector logging pipeline | Grafana + Tempo trace 查询 |
@@ -200,7 +163,7 @@ OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 
 ```bash
 cd docker
-./start-monitoring.sh --stack collector
+./start-monitoring.sh --stack otlp
 ./start-monitoring.sh --stack phoenix
 ./start-monitoring.sh --stack langfuse
 ./start-monitoring.sh --stack grafana
@@ -210,7 +173,7 @@ cd docker
 
 - 创建或复用 `nexent-network`。
 - 首次启动时从 `monitoring.env.example` 生成 `monitoring.env`。
-- 根据 `MONITORING_STACK` 或 `--stack` 选择 Docker Compose profile。
+- 根据 `MONITORING_PROVIDER` 或 `--stack` 选择 Docker Compose profile。
 - 根据部署形态设置 `OTEL_COLLECTOR_CONFIG_FILE`。
 - Langfuse 本地形态下，如果 `LANGFUSE_OTLP_AUTH_HEADER` 未显式配置，则使用初始化项目的 public/secret key 生成 Basic Auth header。
 
@@ -257,7 +220,7 @@ Grafana 本地形态面向 trace 调试：
 | `grafana` | 展示 Nexent Agent trace dashboard，并预置 Tempo datasource |
 | `tempo` | 接收 Collector 转发的 OTLP traces，并提供 Grafana Explore 查询后端 |
 
-Collector trace pipeline 使用 `otlp/tempo` exporter 转发到 `tempo:4317`。Tempo 启用 `metrics-generator` 的 `local-blocks` processor，用于支持 Grafana trace breakdown 中的 TraceQL metrics 查询。Collector metrics pipeline 保留为 logging exporter，用于兼容后端仍开启 OTLP metrics 的场景，但本地 Grafana 形态不再提供 Prometheus 指标存储和指标 dashboard。
+Collector trace pipeline 使用 `otlp/tempo` exporter 转发到 `tempo:4317`。Tempo 启用 `metrics-generator` 的 `local-blocks` processor，用于支持 Grafana trace breakdown 中的 TraceQL metrics 查询。Collector metrics pipeline 保留为 debug exporter，用于兼容后端仍开启 OTLP metrics 的场景，但本地 Grafana 形态不提供独立指标存储和指标 dashboard。
 
 默认访问地址：
 
@@ -374,7 +337,7 @@ flowchart TD
   Collector --> Phoenix[Phoenix]
   Collector --> Langfuse[Langfuse]
   Collector --> Tempo[Grafana Tempo]
-  Collector --> Other[Jaeger / Custom Backend]
+  Collector --> Other[OTLP Backend]
 ```
 
 预期平台树形结构：

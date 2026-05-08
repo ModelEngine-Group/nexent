@@ -5,7 +5,7 @@
 ## 系统架构
 
 ```
-NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / Jaeger
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / OTLP Backend
      │                                        │
      │   OpenInference 语义约定                │
      │   (llm.*, agent.* 属性)                 │
@@ -41,7 +41,7 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 也可以在 `docker/monitoring/monitoring.env` 中设置默认形态：
 
 ```bash
-MONITORING_STACK=phoenix
+MONITORING_PROVIDER=phoenix
 ```
 
 ### 本地 Phoenix
@@ -89,7 +89,7 @@ cd docker
 
 ### 本地 Grafana + Tempo
 
-Grafana 本地部署使用 Grafana Tempo 存储 traces，并启用 Tempo `metrics-generator` 的 `local-blocks` processor 支持 Grafana trace breakdown 中的 TraceQL metrics 查询。Collector 接收 Nexent 后端的 OTLP traces/metrics，其中 traces 通过 OTLP gRPC 转发到 Tempo；OTLP metrics 只进入 Collector logging pipeline，不再启动 Prometheus 或暴露 Prometheus scrape 端口。
+Grafana 本地部署使用 Grafana Tempo 存储 traces，并启用 Tempo `metrics-generator` 的 `local-blocks` processor 支持 Grafana trace breakdown 中的 TraceQL metrics 查询。Collector 接收 Nexent 后端的 OTLP traces/metrics，其中 traces 通过 OTLP gRPC 转发到 Tempo；OTLP metrics 只进入 Collector debug pipeline，不提供独立指标存储或指标 dashboard。
 
 ```bash
 cd docker
@@ -128,13 +128,6 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 ```
 
-如果希望使用 Phoenix 官方 SDK 负责部分 OpenTelemetry 初始化，可额外启用。启用后 SDK 返回的 tracer provider 会被复用，避免重复注册 OpenTelemetry 全局 provider：
-
-```bash
-MONITORING_USE_PLATFORM_SDK=true
-MONITORING_PROJECT_NAME=nexent-production
-```
-
 **功能特性：**
 - LLM 调用链可视化（Prompt/Completion）
 - Token 级性能指标
@@ -170,37 +163,12 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 - 用户反馈收集
 - 模型成本追踪
 
-### 本地 Jaeger（OTLP）
-
-本地开发可继续使用 Jaeger，通过 OTLP 协议对接。
-
-**配置：**
-
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http
-```
-
-**Docker 配置：**
-
-```yaml
-jaeger:
-  image: jaegertracing/all-in-one:1.52
-  environment:
-    - COLLECTOR_OTLP_ENABLED=true
-  ports:
-    - "16686:16686"
-    - "4318:4318"
-```
-
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
-| `MONITORING_CONFIG_FILE` | （空） | JSON/YAML 监控配置文件路径 |
-| `MONITORING_PROVIDER` | `otlp` | 平台配置：`otlp`、`phoenix`、`langfuse`、`jaeger`、`grafana`、`custom` |
-| `MONITORING_USE_PLATFORM_SDK` | `false` | 是否额外初始化平台 SDK |
+| `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`grafana` |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | 服务标识 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint，SDK 会派生 `/v1/traces` 和 `/v1/metrics` |
@@ -230,28 +198,6 @@ jaeger:
 | `GRAFANA_DEFAULT_LANGUAGE` | `zh-Hans` | 本地 Grafana 默认界面语言 |
 | `TEMPO_VERSION` | `2.10.5` | 本地 Tempo 镜像版本，避免浮动 tag 带来的配置兼容性漂移 |
 | `TEMPO_PORT` | `3200` | 本地 Tempo HTTP API 端口 |
-
-## 配置文件
-
-除环境变量外，也可以通过 `MONITORING_CONFIG_FILE` 指定 JSON/YAML 文件。环境变量中显式设置的非默认值会覆盖文件配置。
-
-```yaml
-monitoring:
-  enable_telemetry: true
-  service_name: nexent-backend
-  project_name: nexent-production
-  instrument_fastapi: true
-  instrument_requests: false
-  fastapi_exclude_spans: [receive, send]
-  exporter:
-    provider: langfuse
-    protocol: http
-    endpoint: https://cloud.langfuse.com/api/public/otel
-    headers:
-      Authorization: Basic BASE64_ENCODED_KEY
-      x-langfuse-ingestion-version: "4"
-    export_metrics: false
-```
 
 ## 代码集成
 

@@ -5,7 +5,7 @@ Enterprise-grade observability for AI agents using OpenTelemetry OTLP protocol. 
 ## Architecture
 
 ```
-NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / Jaeger
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / OTLP Backend
      │                                        │
      │   OpenInference Semantics              │
      │   (llm.*, agent.* attributes)          │
@@ -43,13 +43,6 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 ```
 
-To let the Phoenix SDK handle part of the OpenTelemetry setup, also enable this. When the SDK returns a tracer provider, Nexent reuses it to avoid registering a second global OpenTelemetry provider:
-
-```bash
-MONITORING_USE_PLATFORM_SDK=true
-MONITORING_PROJECT_NAME=nexent-production
-```
-
 **Features:**
 - LLM trace visualization with prompt/completion
 - Token-level performance metrics
@@ -85,37 +78,12 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 - User feedback collection
 - Model cost tracking
 
-### Local Jaeger (OTLP)
-
-For local development, Jaeger still works via OTLP.
-
-**Configuration:**
-
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http
-```
-
-**Docker setup:**
-
-```yaml
-jaeger:
-  image: jaegertracing/all-in-one:1.52
-  environment:
-    - COLLECTOR_OTLP_ENABLED=true
-  ports:
-    - "16686:16686"
-    - "4318:4318"
-```
-
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
-| `MONITORING_CONFIG_FILE` | (empty) | JSON/YAML monitoring config file path |
-| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `jaeger`, `grafana`, `custom` |
-| `MONITORING_USE_PLATFORM_SDK` | `false` | Whether to also initialize a provider SDK |
+| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `grafana` |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint; SDK derives `/v1/traces` and `/v1/metrics` |
@@ -127,25 +95,6 @@ jaeger:
 | `OTEL_EXPORTER_OTLP_X_API_KEY` | (empty) | `x-api-key` header for platforms that require it |
 | `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION` | (empty) | Langfuse ingestion version, for example `4` |
 | `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | `true` | Whether to export OTLP metrics |
-
-## Configuration File
-
-You can also set `MONITORING_CONFIG_FILE` to a JSON/YAML file. Explicit non-default environment variables override file values.
-
-```yaml
-monitoring:
-  enable_telemetry: true
-  service_name: nexent-backend
-  project_name: nexent-production
-  exporter:
-    provider: langfuse
-    protocol: http
-    endpoint: https://cloud.langfuse.com/api/public/otel
-    headers:
-      Authorization: Basic BASE64_ENCODED_KEY
-      x-langfuse-ingestion-version: "4"
-    export_metrics: false
-```
 
 ## Code Integration
 

@@ -75,13 +75,6 @@ service:
 #       x-langfuse-ingestion-version: "4"
 # Then add otlphttp/langfuse to the traces pipeline exporters.
 #
-# === Local Jaeger (OTLP) ===
-# For gradual migration, you can still use Jaeger via OTLP:
-#   otlp/jaeger:
-#     endpoint: jaeger:4317
-#     tls:
-#       insecure: true
-#
 # === Multiple Exporters ===
 # To export to multiple backends simultaneously, create multiple exporters
 # and add them to the pipelines:
