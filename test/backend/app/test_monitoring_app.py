@@ -153,3 +153,68 @@ class TestListModelsEndpoint:
             headers={"Authorization": "Bearer test"},
         )
         assert response.status_code == 500
+
+
+class TestMonitoringStatus:
+    """Verify monitoring status endpoint used by the frontend top bar."""
+
+    def test_grafana_provider_status_when_telemetry_enabled(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setenv("ENABLE_TELEMETRY", "true")
+        monkeypatch.setenv("MONITORING_PROVIDER", "grafana")
+        monkeypatch.setenv("GRAFANA_PORT", "3002")
+
+        status = get_monitoring_status()
+
+        assert status["telemetry_enabled"] is True
+        assert status["ui_enabled"] is True
+        assert status["provider"] == "grafana"
+        assert status["provider_name"] == "Grafana"
+        assert status["dashboard_port"] == "3002"
+        assert status["dashboard_path"].startswith("/d/nexent-llm-agent/")
+
+    def test_otlp_provider_status_has_no_ui(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setenv("ENABLE_TELEMETRY", "true")
+        monkeypatch.setenv("MONITORING_PROVIDER", "otlp")
+
+        status = get_monitoring_status()
+
+        assert status["telemetry_enabled"] is True
+        assert status["ui_enabled"] is False
+        assert status["dashboard_port"] is None
+        assert status["dashboard_path"] is None
+
+    def test_jaeger_provider_maps_to_jaeger_ui(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setenv("ENABLE_TELEMETRY", "true")
+        monkeypatch.setenv("MONITORING_PROVIDER", "jaeger")
+        monkeypatch.setenv("JAEGER_UI_PORT", "16686")
+
+        status = get_monitoring_status()
+
+        assert status["ui_enabled"] is True
+        assert status["provider"] == "jaeger"
+        assert status["provider_name"] == "Jaeger"
+        assert status["dashboard_port"] == "16686"
+        assert status["dashboard_path"] == "/"
+
+    def test_status_endpoint_returns_success(self, monkeypatch):
+        from apps.monitoring_app import router
+
+        monkeypatch.setenv("ENABLE_TELEMETRY", "true")
+        monkeypatch.setenv("MONITORING_PROVIDER", "phoenix")
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+
+        response = client.get("/monitoring/status")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == 0
+        assert body["data"]["ui_enabled"] is True

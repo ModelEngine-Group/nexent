@@ -373,6 +373,7 @@ export const API_ENDPOINTS = {
   },
   monitoring: {
     models: `${API_BASE_URL}/monitoring/models`,
+    status: `${API_BASE_URL}/monitoring/status`,
   },
 };
 

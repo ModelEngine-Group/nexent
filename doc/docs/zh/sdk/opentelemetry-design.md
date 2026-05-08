@@ -1,19 +1,21 @@
 # Nexent OpenTelemetry 可观测性设计
 
-生成日期：2026-04-28
-基准分支：`dev/opentelemetry`
+生成日期：2026-05-06
+基准分支：当前 OpenTelemetry 功能分支
 
 ## 设计目标
 
-Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成标准 span、event、metric，并通过 OTLP 导出。Phoenix、Langfuse、Jaeger 等平台只作为可配置的 exporter 或可选 SDK 增强层，避免把业务代码绑定到单一平台。
+Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成标准 span、event、metric，并通过 OTLP 导出。Phoenix、Langfuse、Grafana Tempo、Jaeger 等平台作为可配置 exporter 或可选 SDK 增强层接入，业务代码不绑定单一平台。
 
-目标：
+核心目标：
 
-- Agent 流式运行期间保持 trace 上下文，完整覆盖 API、服务准备、Agent 线程、LLM 流式输出、工具调用。
-- 支持 `otlp`、`phoenix`、`langfuse`、`jaeger`、`custom` provider profile。
+- Agent 流式运行期间保持 trace 上下文，覆盖 API、服务准备、Agent 异步 generator、Agent 线程、LLM 流式输出、Python 解释器执行、真实工具调用和最终答案。
+- 通过 OpenInference 属性适配 Phoenix，通过 `langfuse.*` 属性适配 Langfuse，同一套业务埋点可同时服务多个监控平台。
+- 支持 `otlp`、`phoenix`、`langfuse`、`jaeger`、`grafana`、`custom` provider profile。
 - 同时支持环境变量和 JSON/YAML 配置文件，环境变量可覆盖文件配置。
 - 支持 base endpoint 和 signal-specific endpoint，避免 `/v1/traces`、`/v1/metrics` 路径重复拼接。
-- 保持 OpenTelemetry 原生实现，平台 SDK 只通过 `MONITORING_USE_PLATFORM_SDK=true` 显式启用。
+- FastAPI/requests 自动埋点可配置，默认压制流式接口中的 ASGI `receive/send` 噪声。
+- 平台 SDK 只通过 `MONITORING_USE_PLATFORM_SDK=true` 显式启用，默认保持 OpenTelemetry 原生实现。
 
 ## 技术栈
 
@@ -23,34 +25,61 @@ Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成
 | 导出协议 | OTLP HTTP、OTLP gRPC |
 | Trace exporter | `opentelemetry-exporter-otlp` HTTP/gRPC trace exporter |
 | Metric exporter | `opentelemetry-exporter-otlp` HTTP/gRPC metric exporter |
-| 自动埋点 | FastAPI instrumentation、requests instrumentation |
-| AI 语义 | OpenInference 风格属性：`llm.*`、`agent.*`、`agent.tool.*` |
+| 自动埋点 | FastAPI instrumentation、requests instrumentation；requests 默认关闭 |
+| AI 语义 | OpenInference 属性、Langfuse OTel 属性、Nexent 自定义业务属性 |
+| Agent 框架 | SmolAgents `CodeAgent` 扩展、Nexent `CoreAgent`、`NexentAgent` |
 | 配置 | 环境变量、`MONITORING_CONFIG_FILE` JSON/YAML |
-| Collector | `otel/opentelemetry-collector-contrib`，使用 `otlphttp` 转发 HTTP 平台；本地可选择 logging、Phoenix、Langfuse 三类部署形态 |
-| 可选 SDK | `phoenix.otel.register`、`langfuse.get_client`，默认不启用；Phoenix SDK 成功注册时复用其 tracer provider |
+| Collector | `otel/opentelemetry-collector-contrib`，支持 logging、Phoenix、Langfuse、Grafana/Tempo 四类本地部署形态 |
+| 可选 SDK | `phoenix.otel.register`、`langfuse.get_client`；Phoenix SDK 成功注册时复用其 tracer provider |
+
+## 总体架构
+
+```mermaid
+flowchart LR
+  Backend[Nexent Backend / SDK] --> OTel[OpenTelemetry TracerProvider / MeterProvider]
+  OTel --> Exporter[OTLP Trace / Metric Exporter]
+  Exporter --> Collector[OpenTelemetry Collector]
+  Collector --> Phoenix[Arize Phoenix]
+  Collector --> Langfuse[Langfuse]
+  Collector --> Tempo[Grafana Tempo]
+  Collector --> Other[Jaeger / Custom Backend]
+
+  Backend --> FastAPI[FastAPI Auto Instrumentation]
+  Backend --> Manual[Manual AI Spans]
+  Manual --> OI[OpenInference Attributes]
+  Manual --> LF[Langfuse Attributes]
+```
 
 ## 配置模型
 
 ### 环境变量
 
-| 变量 | 说明 |
-|------|------|
-| `ENABLE_TELEMETRY` | 总开关 |
-| `MONITORING_CONFIG_FILE` | JSON/YAML 配置文件路径 |
-| `MONITORING_PROVIDER` | `otlp`、`phoenix`、`langfuse`、`jaeger`、`custom` |
-| `MONITORING_STACK` | 本地部署形态：`collector`、`phoenix`、`langfuse` |
-| `MONITORING_USE_PLATFORM_SDK` | 是否额外初始化平台 SDK |
-| `MONITORING_PROJECT_NAME` | 平台项目名 |
-| `OTEL_SERVICE_NAME` | OpenTelemetry service name |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP base endpoint |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | 可选 trace 专用 endpoint |
-| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | 可选 metric 专用 endpoint |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http` 或 `grpc` |
-| `OTEL_EXPORTER_OTLP_HEADERS` | 通用 `key=value,key2=value2` header |
-| `OTEL_EXPORTER_OTLP_AUTHORIZATION` | `Authorization` header，常用于 Phoenix bearer auth 和 Langfuse Basic Auth |
-| `OTEL_EXPORTER_OTLP_X_API_KEY` | `x-api-key` header，用于兼容需要该 header 的平台 |
-| `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION` | Langfuse 摄取版本，例如 `4` |
-| `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | 是否导出 metric |
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ENABLE_TELEMETRY` | `false` | 监控总开关 |
+| `MONITORING_CONFIG_FILE` | 空 | JSON/YAML 配置文件路径 |
+| `MONITORING_PROVIDER` | `otlp` | `otlp`、`phoenix`、`langfuse`、`jaeger`、`grafana`、`custom` |
+| `MONITORING_STACK` | `collector` | 本地部署形态：`collector`、`phoenix`、`langfuse`、`grafana` |
+| `MONITORING_USE_PLATFORM_SDK` | `false` | 是否额外初始化平台 SDK |
+| `MONITORING_PROJECT_NAME` | `nexent` | 平台项目名 |
+| `OTEL_SERVICE_NAME` | `nexent-backend` | OpenTelemetry service name |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | 空 | 可选 trace 专用 endpoint |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | 空 | 可选 metric 专用 endpoint |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http` | `http` 或 `grpc` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | 空 | 通用 `key=value,key2=value2` header |
+| `OTEL_EXPORTER_OTLP_AUTHORIZATION` | 空 | `Authorization` header，常用于 Phoenix bearer auth 和 Langfuse Basic Auth |
+| `OTEL_EXPORTER_OTLP_X_API_KEY` | 空 | `x-api-key` header，用于兼容需要该 header 的平台 |
+| `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION` | 空 | Langfuse 摄取版本，例如 `4` |
+| `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | `true` | 是否导出 metric |
+| `MONITORING_INSTRUMENT_FASTAPI` | `true` | 是否启用 FastAPI 自动 HTTP server span |
+| `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span |
+| `MONITORING_FASTAPI_EXCLUDED_URLS` | 空 | FastAPI 自动埋点排除 URL，逗号分隔正则 |
+| `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span，流式接口建议保持默认 |
+| `GRAFANA_PORT` | `3002` | 本地 Grafana UI 端口 |
+| `GRAFANA_DEFAULT_LANGUAGE` | `zh-Hans` | 本地 Grafana 默认界面语言 |
+| `TEMPO_VERSION` | `2.10.1` | 本地 Tempo 镜像版本，避免 `latest` 配置兼容性漂移 |
+| `TEMPO_PORT` | `3200` | 本地 Tempo HTTP API 端口 |
 
 ### 配置文件
 
@@ -59,6 +88,10 @@ monitoring:
   enable_telemetry: true
   service_name: nexent-backend
   project_name: nexent-production
+  instrument_fastapi: true
+  instrument_requests: false
+  fastapi_excluded_urls: ""
+  fastapi_exclude_spans: [receive, send]
   exporter:
     provider: langfuse
     protocol: http
@@ -98,9 +131,23 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
 ```
 
+前端顶栏监控入口只根据后端 `MONITORING_PROVIDER` 映射 UI 端口和路径，最终跳转地址由前端使用当前页面 URL 的 hostname 组装，避免固定写死 `localhost`：
+
+- `phoenix` -> `${currentHostname}:${PHOENIX_PORT:-6006}/`
+- `langfuse` -> `${currentHostname}:${LANGFUSE_PORT:-3001}/project/nexent-local`
+- `jaeger` -> `${currentHostname}:${JAEGER_UI_PORT:-16686}/`
+- `grafana` -> `${currentHostname}:${GRAFANA_PORT:-3002}/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1`
+- `otlp` / `custom` 默认不显示顶栏监控入口
+
+因此本地 Grafana 形态需要在后端 `.env` 中设置：
+
+```bash
+MONITORING_PROVIDER=grafana
+```
+
 ### Phoenix
 
-Phoenix 支持通过 OTLP HTTP 接收 traces，也提供 `phoenix.otel` SDK 包装 OpenTelemetry。
+Phoenix 通过 OpenInference 属性识别 AI span 类型，核心字段是 `openinference.span.kind`。
 
 ```bash
 MONITORING_PROVIDER=phoenix
@@ -128,6 +175,8 @@ OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION=4
 OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 ```
 
+当前实现会同时写入 `langfuse.observation.type`、`langfuse.session.id`、`langfuse.user.id`、`langfuse.trace.tags`、`langfuse.trace.metadata.*`、`langfuse.observation.input`、`langfuse.observation.output` 等属性，以便 Langfuse 正确展示 generation/tool/agent 并支持过滤聚合。
+
 ## 本地化部署设计
 
 本地化部署通过 `docker/start-monitoring.sh` 选择形态。所有形态都保留 OpenTelemetry Collector 作为入口，Nexent 后端统一上报到 `http://otel-collector:4318` 或宿主机的 `http://localhost:4318`，平台差异只体现在 Collector exporter 和本地服务组合上。
@@ -137,6 +186,7 @@ OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 | `collector` | `otel-collector-config.yml` | Collector | logging exporter | 最小形态，用于验证 span/metric 是否产生，或手动改配置转发到云端平台 |
 | `phoenix` | `otel-collector-phoenix-config.yml` | Collector + Phoenix | `http://phoenix:6006/v1/traces` | Phoenix 容器同时提供 UI 和 OTLP HTTP/gRPC trace collector，适合本地 trace debug |
 | `langfuse` | `otel-collector-langfuse-config.yml` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | `http://langfuse-web:3000/api/public/otel/v1/traces` | Langfuse v3 依赖多组件，适合完整 LLMOps 能力验证 |
+| `grafana` | `otel-collector-grafana-config.yml` | Collector + Grafana + Tempo | traces 转发到 `tempo:4317`，metrics 只进入 Collector logging pipeline | Grafana + Tempo trace 查询 |
 
 启动命令：
 
@@ -145,6 +195,7 @@ cd docker
 ./start-monitoring.sh --stack collector
 ./start-monitoring.sh --stack phoenix
 ./start-monitoring.sh --stack langfuse
+./start-monitoring.sh --stack grafana
 ```
 
 部署脚本职责：
@@ -168,7 +219,7 @@ Compose 中设置 `PHOENIX_WORKING_DIR=/mnt/data` 并挂载 `phoenix-data` volum
 
 ### Langfuse 本地形态
 
-Langfuse v3 本地形态按官方自托管架构拆分为应用容器和存储组件：
+Langfuse v3 本地形态按自托管架构拆分为应用容器和存储组件：
 
 | 组件 | 用途 |
 |------|------|
@@ -189,24 +240,69 @@ headers:
 
 默认密钥仅用于本地验证。生产或共享环境必须替换认证密钥、数据库密码、对象存储密钥和 `LANGFUSE_ENCRYPTION_KEY`，并补充备份、高可用和升级策略。
 
+### Grafana 本地形态
+
+Grafana 本地形态面向 trace 调试：
+
+| 组件 | 用途 |
+|------|------|
+| `grafana` | 展示 Nexent Agent trace dashboard，并预置 Tempo datasource |
+| `tempo` | 接收 Collector 转发的 OTLP traces，并提供 Grafana Explore 查询后端 |
+
+Collector trace pipeline 使用 `otlp/tempo` exporter 转发到 `tempo:4317`。Tempo 启用 `metrics-generator` 的 `local-blocks` processor，用于支持 Grafana trace breakdown 中的 TraceQL metrics 查询。Collector metrics pipeline 保留为 logging exporter，用于兼容后端仍开启 OTLP metrics 的场景，但本地 Grafana 形态不再提供 Prometheus 指标存储和指标 dashboard。
+
+默认访问地址：
+
+- Grafana：`http://localhost:3002`
+- Tempo API：`http://localhost:3200`
+
+## Span 语义映射
+
+| Nexent 场景 | Phoenix / OpenInference | Langfuse |
+|-------------|-------------------------|----------|
+| Agent 入口 | `openinference.span.kind=AGENT` | `langfuse.observation.type=agent` |
+| 服务准备、流式生成、线程执行、普通步骤 | `openinference.span.kind=CHAIN` | `langfuse.observation.type=chain` |
+| LLM 调用 | `openinference.span.kind=LLM` | `langfuse.observation.type=generation` |
+| 工具调用 | `openinference.span.kind=TOOL` | `langfuse.observation.type=tool` |
+| 检索类调用 | `openinference.span.kind=RETRIEVER` | `langfuse.observation.type=retriever` |
+
+上下文属性：
+
+| 属性 | 说明 |
+|------|------|
+| `input.value` / `output.value` | OpenInference 输入输出 |
+| `metadata` | OpenInference JSON metadata |
+| `session.id` / `user.id` | OpenInference 会话和用户 |
+| `tag.tags` | OpenInference tags |
+| `langfuse.observation.input` / `langfuse.observation.output` | Langfuse observation 输入输出 |
+| `langfuse.session.id` / `langfuse.user.id` | Langfuse 会话和用户 |
+| `langfuse.trace.tags` | Langfuse trace tags |
+| `langfuse.trace.metadata.*` / `langfuse.observation.metadata.*` | Langfuse 可过滤业务 metadata |
+
 ## 埋点信息
 
-| 埋点 | 位置 | 内容 | 目的 |
-|------|------|------|------|
-| FastAPI 自动 span | `backend/apps/app_factory.py` | route、method、status、duration | API 入口耗时和错误定位 |
-| requests 自动 span | `MonitoringManager` 初始化 | 外部 HTTP 调用 | 观测模型服务、工具服务、MCP 等依赖 |
-| `agent.run` | `backend/apps/agent_app.py` | `/agent/run` 请求 | Agent 运行入口追踪 |
-| `agent_service.run_agent_stream` | `backend/services/agent_service.py` | `agent_id`、`conversation_id`、debug、文件数、记忆开关、策略、准备耗时 | 分析 SSE 创建前的准备阶段 |
-| `user_resolution.*` | `run_agent_stream` | 用户、租户、语言和耗时 | 鉴权与租户解析定位 |
-| `user_message_save.*` | `run_agent_stream` | 保存或跳过原因、耗时 | 判断会话写入是否正常 |
-| `memory_context_build.*` | `run_agent_stream` | 记忆开关、共享策略、耗时 | 定位记忆上下文瓶颈 |
-| `streaming_strategy.*` | `run_agent_stream` | `with_memory` 或 `no_memory` | 判断实际执行分支 |
-| `generate_stream_no_memory.*` | `generate_stream_no_memory` | 准备与流式输出事件 | 追踪无记忆流式执行 |
-| `agent_run` | `sdk/nexent/core/agents/run_agent.py` | 线程启动、缓存读取、消息 yield | 追踪 Agent 流式输出 |
-| `agent_run_thread` | `run_agent.py` | Agent 创建、MCP 工具装载、执行错误 | 追踪实际 Agent 执行线程 |
-| `chat_completion` | `openai_llm.py` | 模型、温度、top_p、消息数、token、TTFT、chunk 数、输出长度 | LLM 性能、成本和异常分析 |
-| `trace_agent_step` | SDK 公共 API | `agent.name`、`agent.step.name`、`agent.step.type` | 供后续推理步骤、工具选择等细粒度埋点扩展 |
-| `trace_tool_call` | SDK 公共 API | 工具名、输入、输出、耗时、错误 | 工具可用性和延迟分析 |
+| 埋点 | 位置 | 类型 | 内容 | 目的 |
+|------|------|------|------|------|
+| FastAPI 自动 span | `MonitoringManager.setup_fastapi_app` | HTTP server | route、method、status、duration | API 入口耗时和错误定位 |
+| FastAPI `receive/send` 排除 | `fastapi_exclude_spans` | 降噪配置 | 默认 `receive,send` | 避免 SSE 流式接口生成大量 `unknown POST /agent/run http ...` |
+| requests 自动 span | `MonitoringConfig.instrument_requests` | HTTP client | 外部请求 URL、method、status | 默认关闭；需要分析外部 HTTP 依赖时开启 |
+| `agent.run` | `backend/apps/agent_app.py` | AGENT | `/agent/run` 请求入口 | 作为一次 Agent 运行的顶层业务 trace |
+| `agent_service.run_agent_stream` | `backend/services/agent_service.py` | CHAIN | `agent_id`、`conversation_id`、debug、文件数、记忆开关、策略、准备耗时 | 分析 SSE 创建前的准备阶段 |
+| `set_openinference_agent_context` | `run_agent_stream` | 当前 span 上下文 | session、user、tenant、agent、metadata、tags | 给 Phoenix/Langfuse 建立 Agent、用户、会话维度 |
+| `user_resolution.*` | `run_agent_stream` | event | 用户、租户、语言和耗时 | 鉴权与租户解析定位 |
+| `user_message_save.*` | `run_agent_stream` | event | 保存或跳过原因、耗时 | 判断会话写入是否正常 |
+| `memory_context_build.*` | `run_agent_stream` | event | 记忆开关、共享策略、耗时 | 定位记忆上下文瓶颈 |
+| `streaming_strategy.*` | `run_agent_stream` | event | `with_memory` 或 `no_memory` | 判断实际执行分支 |
+| `generate_stream_with_memory` | `backend/services/agent_service.py` | CHAIN | memory token、预处理任务、fallback 分支 | 追踪带记忆路径的流式执行 |
+| `generate_stream_no_memory` | `backend/services/agent_service.py` | CHAIN | 准备与流式输出事件 | 追踪无记忆流式执行 |
+| `agent_run` | `sdk/nexent/core/agents/run_agent.py` | CHAIN | 线程启动、缓存读取、消息 yield | 追踪 Agent 异步 generator 消费过程 |
+| `agent_run_thread` | `sdk/nexent/core/agents/run_agent.py` | CHAIN | Agent 创建、MCP 工具装载、执行错误 | 追踪实际 Agent 执行线程 |
+| `{display_name or model_id}.generate` | `sdk/nexent/core/models/openai_llm.py` | LLM / generation | 模型、温度、top_p、消息、输入输出、token、TTFT、chunk 数 | LLM 性能、成本、输出和异常分析 |
+| `python_interpreter` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 生成代码、step number、执行输出、日志、是否最终答案 | 观测 CodeAgent 解释器执行 |
+| 真实工具名 | `sdk/nexent/core/agents/nexent_agent.py` | TOOL | local/MCP/langchain/builtin 工具输入输出 | 观测真实工具可用性、延迟、错误和输入输出 |
+| `FinalAnswerTool` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 最终答案输出 | 让 Phoenix/Langfuse 中能明确看到最终答案节点 |
+| `trace_agent` / `trace_chain` / `trace_retriever` | SDK 公共 API | AGENT / CHAIN / RETRIEVER | 自定义输入输出、metadata、tags、session、user | SDK 用户自定义层级埋点 |
+| `trace_tool_call` | SDK 公共 API | TOOL | 工具名、输入、输出、耗时、错误 | SDK 用户自定义工具埋点 |
 
 ### 事件清单
 
@@ -221,9 +317,8 @@ headers:
 | `agent_service.run_agent_stream` | `streaming_response.creating` / `streaming_response.created` / `run_agent_stream.preparation_completed` | `duration`、`media_type`、`total_preparation_time` | 观测 SSE 响应创建和整体准备耗时 |
 | `generate_stream_no_memory` | `generate_stream_no_memory.started` / `generate_stream_no_memory.completed` / `generate_stream_no_memory.streaming.started` / `generate_stream_no_memory.streaming.completed` | 无 | 观测无记忆路径的准备和流式消费边界 |
 | `agent_run` | `agent_run.started` / `agent_run.thread_started` / `agent_run.get_cached_message` / `agent_run.get_cached_message_completed` / `agent_run.yield_message` | 无 | 观测 Agent 线程启动、缓存轮询和消息 yield |
-| `monitor_llm_call` | `llm_call_started` / `llm_call_completed` / `llm_call_error` | `error.*` | 统一记录 LLM 调用生命周期 |
-| `openai_chat.chat_completion` | `completion_started` / `completion_finished` / `model_stopped` / `error_occurred` | `model_id`、`temperature`、`top_p`、`message_count`、`total_duration`、`output_length`、`chunk_count`、`error.*` | 分析模型参数、流式输出耗时、停止和异常 |
-| `trace_tool_call` | span 属性 `agent.tool.input` / `agent.tool.output` | JSON 字符串、`agent.tool.duration_ms`、`error.*` | 分析工具输入输出、耗时和异常 |
+| LLM span | `completion_started` / `first_token_received` / `token_generated` / `completion_finished` / `model_stopped` / `error_occurred` | `model_id`、`temperature`、`top_p`、`message_count`、`total_duration`、`output_length`、`chunk_count`、`error.*` | 分析模型参数、流式输出耗时、停止和异常 |
+| Tool span | span 属性 `agent.tool.input` / `agent.tool.output` | JSON 字符串、`agent.tool.duration_ms`、`error.*` | 分析工具输入输出、耗时和异常 |
 
 ## 指标
 
@@ -245,58 +340,80 @@ headers:
 flowchart TD
   U[用户] --> FE[前端 Chat]
   FE --> API[POST /agent/run]
-  API --> S1[agent.run span]
-  S1 --> S2[agent_service.run_agent_stream span]
-  S2 --> A[user_resolution]
-  S2 --> B[user_message_save]
-  S2 --> C[memory_context_build]
-  C --> D{streaming_strategy}
-  D -->|with_memory| E[generate_stream_with_memory]
-  D -->|no_memory| F[generate_stream_no_memory span]
-  E --> G[StreamingResponse]
-  F --> G
-  G --> H[agent_run async generator span]
-  H --> I[agent_run_thread span]
-  I --> J[NexentAgent]
-  J --> K[Tool / MCP / HTTP spans]
-  J --> L[chat_completion span]
-  L --> M[token events and LLM metrics]
-  K --> OTel[OpenTelemetry Tracer/Meter Provider]
-  M --> OTel
+  API --> HTTP[FastAPI HTTP span: 可配置隐藏]
+  HTTP --> A0[agent.run span: AGENT]
+  A0 --> S1[agent_service.run_agent_stream: CHAIN]
+  S1 --> R[user_resolution events]
+  S1 --> Save[user_message_save events]
+  S1 --> Mem[memory_context_build events]
+  Mem --> Strategy{streaming_strategy}
+  Strategy -->|with_memory| G1[generate_stream_with_memory: CHAIN]
+  Strategy -->|no_memory| G2[generate_stream_no_memory: CHAIN]
+  G1 --> AR[agent_run async generator: CHAIN]
+  G2 --> AR
+  AR --> Thread[agent_run_thread: CHAIN]
+  Thread --> NX[NexentAgent / CoreAgent]
+  NX --> Step[Agent step / code action]
+  Step --> LLM[Model.generate: LLM / generation]
+  Step --> PY[python_interpreter: TOOL]
+  PY --> Tool[Real local / MCP / langchain / builtin tool: TOOL]
+  PY --> Final[FinalAnswerTool: TOOL]
+  LLM --> Attr1[OpenInference + Langfuse attrs]
+  Tool --> Attr1
+  Final --> Attr1
+  Attr1 --> OTel[OpenTelemetry Tracer/Meter Provider]
   OTel --> Collector[OTLP Collector]
   Collector --> Phoenix[Phoenix]
   Collector --> Langfuse[Langfuse]
+  Collector --> Tempo[Grafana Tempo]
   Collector --> Other[Jaeger / Custom Backend]
 ```
+
+预期平台树形结构：
+
+```text
+agent.run                         agent
+└─ agent_service.run_agent_stream chain
+   └─ agent_service.generate_*    chain
+      └─ agent_run                chain
+         └─ agent_run_thread      chain
+            ├─ Model.generate     llm / generation
+            ├─ python_interpreter tool
+            │  └─ RealTool        tool
+            └─ FinalAnswerTool    tool
+```
+
+FastAPI HTTP span 可以保留在最上层用于接口视角，也可以通过 `MONITORING_FASTAPI_EXCLUDED_URLS=/agent/run` 在 AI trace 视图中隐藏。
 
 ## 监控页面结构
 
 ```mermaid
 flowchart TB
   Page[Agent 监控页] --> Filters[筛选区: 时间 / 租户 / 用户 / Agent / 会话 / 模型 / 状态]
-  Page --> KPIs[指标区: 成功率 / P95 / TTFT / tokens/s / token 成本 / 错误数]
-  Page --> List[Trace 列表]
+  Page --> KPIs[指标区: 成功率 / P95 / TTFT / tokens/s / token 成本 / 工具错误数]
+  Page --> TraceList[Trace 列表: Agent / 会话 / 用户 / 状态 / 耗时 / Token / 模型 / 最后错误]
   Page --> Detail[Trace 详情]
-  Detail --> Waterfall[Span 瀑布图]
-  Detail --> Timeline[Agent 时间线]
-  Detail --> LLM[LLM 调用面板]
-  Detail --> Tool[工具调用面板]
-  Detail --> Raw[原始 OTel 属性]
-  Detail --> Eval[反馈和评估]
+  Detail --> Waterfall[Span 瀑布图: agent / chain / llm / tool]
+  Detail --> Timeline[Agent 时间线: 准备 / 记忆 / LLM / 工具 / 最终答案]
+  Detail --> LLMPanel[LLM 面板: prompt / output / token / TTFT / generation rate]
+  Detail --> ToolPanel[工具面板: 工具名 / 输入 / 输出 / 耗时 / 错误]
+  Detail --> Session[会话和用户上下文]
+  Detail --> Raw[原始 OTel 属性和 events]
+  Detail --> Eval[反馈、评分和评估]
 ```
 
 与 Phoenix 和 Langfuse 对比：
 
-| 方案 | 优点 | 不足 |
-|------|------|------|
-| Phoenix | OpenInference 生态匹配好，适合 trace debug、实验、评估；`phoenix.otel` 可降低接入成本 | Nexent 的租户、权限、Agent 配置需要额外映射 |
-| Langfuse | Trace、session、user、prompt、evaluation、dashboard 能力完整，OTLP endpoint 和 SDK 都基于 OpenTelemetry | 需要补充 `langfuse.*` 属性才能获得更好的筛选聚合体验 |
-| Nexent 自建页 | 可直接关联租户、会话、Agent 配置和权限，适合产品内闭环 | 需要自建 trace 存储、查询、聚合和瀑布图 |
+| 方案 | 优点 | 不足 | Nexent 当前适配 |
+|------|------|------|----------------|
+| Phoenix | OpenInference 生态匹配好，适合 trace debug、实验、评估；`phoenix.otel` 可降低接入成本 | Nexent 的租户、权限、Agent 配置需要通过属性映射；HTTP 自动 span 容易产生 `unknown` 噪声 | 写入 `openinference.span.kind`、`input.value`、`output.value`、`metadata`、`session.id`、`user.id`，并支持 FastAPI 降噪 |
+| Langfuse | Trace、session、user、prompt、evaluation、dashboard 能力完整，适合 LLMOps 闭环 | 需要 `langfuse.*` 属性才能获得更好的 observation 类型、用户、会话和 metadata 聚合 | 写入 `langfuse.observation.type`、`langfuse.session.id`、`langfuse.user.id`、`langfuse.trace.metadata.*`、`langfuse.observation.input/output` |
+| Nexent 自建页 | 可直接关联租户、会话、Agent 配置、权限、版本和业务动作，适合产品内闭环 | 需要自建 trace 存储、查询、聚合、瀑布图、权限隔离和成本统计 | 当前先通过 OTLP 对接外部平台，后续可基于同一批属性构建自有页面 |
 
 推荐路径：
 
-1. 短期使用 OTLP 对接 Phoenix/Langfuse，先满足调试和分析。
-2. 中期在 Nexent 增加 trace 跳转、轻量指标概览。
+1. 短期使用 OTLP 对接 Phoenix/Langfuse，满足调试和分析。
+2. 中期在 Nexent 增加 trace 跳转、轻量指标概览和异常聚合。
 3. 长期按租户、会话、Agent 版本建立自有监控页，同时保留 OTLP 双写能力。
 
 ## 已修复的设计风险
@@ -305,8 +422,39 @@ flowchart TB
 |------|------|
 | async generator span 提前结束 | `monitor_endpoint` 使用 `inspect.isasyncgenfunction`，在 `async for` 消费期间保持 span 打开 |
 | `/v1/traces` 路径重复拼接 | SDK 支持 base endpoint 和 signal endpoint 自动归一化 |
-| Collector header 无法兼容平台 | Collector 默认只 logging；平台转发示例改用 `otlphttp/<provider>` exporter，并拆分 `Authorization`、`x-api-key`、`x-langfuse-ingestion-version` |
-| 单测漏掉流式函数 | 增加 async generator 装饰器测试 |
+| Collector header 无法兼容平台 | Collector 默认只 logging；平台转发配置拆分 `Authorization`、`x-api-key`、`x-langfuse-ingestion-version` |
+| Phoenix 只看到接口看不到 Agent | 顶层 `agent.run` 标记为 AGENT，内部服务、线程、generator 标记为 CHAIN |
+| Phoenix/Langfuse 中出现大量 `unknown POST /agent/run http ...` | 默认排除 FastAPI ASGI `receive/send` span；requests 自动埋点默认关闭；可配置隐藏 `/agent/run` HTTP span |
+| Langfuse 无法识别 observation 类型 | 增加 `langfuse.observation.type` 和 trace/session/user/metadata/input/output 属性 |
+| LLM span 不明显或缺输出 | LLM span 命名为 `{display_name or model_id}.generate`，并写入 `output.value` 和 `langfuse.observation.output` |
+| 工具 span 缺失 | 在 `NexentAgent.create_single_agent` 统一包装 local/MCP/langchain/builtin 工具，并在 `CoreAgent` 增加 `python_interpreter` 和 `FinalAnswerTool` span |
+| 单测漏掉流式函数 | 增加 async generator 装饰器测试和 OpenInference/Langfuse 属性测试 |
+
+## 使用建议
+
+只看 Agent 业务链路时：
+
+```bash
+MONITORING_INSTRUMENT_FASTAPI=true
+MONITORING_FASTAPI_EXCLUDE_SPANS=receive,send
+MONITORING_FASTAPI_EXCLUDED_URLS=/agent/run
+MONITORING_INSTRUMENT_REQUESTS=false
+```
+
+同时看接口入口和 Agent 业务链路时：
+
+```bash
+MONITORING_INSTRUMENT_FASTAPI=true
+MONITORING_FASTAPI_EXCLUDE_SPANS=receive,send
+MONITORING_FASTAPI_EXCLUDED_URLS=
+MONITORING_INSTRUMENT_REQUESTS=false
+```
+
+需要排查外部 HTTP 依赖时：
+
+```bash
+MONITORING_INSTRUMENT_REQUESTS=true
+```
 
 ## 参考
 

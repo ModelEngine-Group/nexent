@@ -2,7 +2,7 @@
 
 # Nexent LLM Performance Monitoring Setup Script
 # This script starts the OpenTelemetry Collector alone, or with a local
-# Phoenix/Langfuse observability backend.
+# Phoenix/Langfuse/Grafana observability backend.
 
 set -e
 
@@ -12,13 +12,14 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose-monitoring.yml"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [collector|phoenix|langfuse]
-       $(basename "$0") --stack <collector|phoenix|langfuse>
+Usage: $(basename "$0") [collector|phoenix|langfuse|grafana]
+       $(basename "$0") --stack <collector|phoenix|langfuse|grafana>
 
 Stacks:
   collector  Start OpenTelemetry Collector only. This is the default.
   phoenix    Start Collector and local Arize Phoenix.
   langfuse   Start Collector and local Langfuse self-host stack.
+  grafana    Start Collector, Grafana, and Tempo.
 
 Set MONITORING_STACK in monitoring/monitoring.env to change the default.
 EOF
@@ -40,7 +41,7 @@ while [ $# -gt 0 ]; do
             usage
             exit 0
             ;;
-        collector|phoenix|langfuse)
+        collector|phoenix|langfuse|grafana)
             STACK_ARG="$1"
             shift
             ;;
@@ -61,11 +62,11 @@ if ! docker info > /dev/null 2>&1; then
 fi
 
 # Create external network if it doesn't exist
-if ! docker network ls | grep -q nexent-network; then
-    echo "🔗 Creating nexent-network..."
-    docker network create nexent-network
+if ! docker network ls | grep -q nexent_nexent; then
+    echo "🔗 Creating nexent_nexent..."
+    docker network create nexent_nexent
 else
-    echo "✅ nexent-network already exists"
+    echo "✅ nexent_nexent already exists"
 fi
 
 # Copy environment file if it doesn't exist
@@ -101,6 +102,10 @@ case "$MONITORING_STACK" in
         fi
         export LANGFUSE_OTLP_AUTH_HEADER
         ;;
+    grafana)
+        OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-grafana-config.yml}"
+        COMPOSE_PROFILES=(--profile grafana)
+        ;;
     *)
         echo "❌ Error: unsupported MONITORING_STACK '$MONITORING_STACK'."
         usage
@@ -120,7 +125,7 @@ fi
 
 # Start monitoring services
 echo "🐳 Starting monitoring services with stack: $MONITORING_STACK"
-"${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$MONITORING_DIR/monitoring.env" "${COMPOSE_PROFILES[@]}" up -d
+"${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" --env-file "$MONITORING_DIR/monitoring.env" "${COMPOSE_PROFILES[@]}" up -d --remove-orphans
 
 # Wait for services to be ready
 echo "⏳ Waiting for services to start..."
@@ -154,6 +159,10 @@ case "$MONITORING_STACK" in
     langfuse)
         check_service "Langfuse UI" "http://localhost:${LANGFUSE_PORT:-3001}" "${LANGFUSE_PORT:-3001}" || true
         ;;
+    grafana)
+        check_service "Grafana" "http://localhost:${GRAFANA_PORT:-3002}/api/health" "${GRAFANA_PORT:-3002}" || true
+        check_service "Tempo API" "http://localhost:${TEMPO_PORT:-3200}/ready" "${TEMPO_PORT:-3200}" || true
+        ;;
 esac
 
 echo ""
@@ -170,24 +179,41 @@ case "$MONITORING_STACK" in
         echo "   • Langfuse UI: http://localhost:${LANGFUSE_PORT:-3001}"
         echo "   • Langfuse admin: ${LANGFUSE_INIT_USER_EMAIL:-admin@nexent.local} / ${LANGFUSE_INIT_USER_PASSWORD:-nexent-langfuse-admin}"
         ;;
+    grafana)
+        echo "   • Grafana UI: http://localhost:${GRAFANA_PORT:-3002}"
+        echo "   • Grafana admin: ${GRAFANA_ADMIN_USER:-admin} / ${GRAFANA_ADMIN_PASSWORD:-nexent-grafana-admin}"
+        echo "   • Tempo API: http://localhost:${TEMPO_PORT:-3200}"
+        ;;
     collector)
-        echo "   • Configure Phoenix, Langfuse, Jaeger, or another OTLP backend in monitoring.env"
+        echo "   • Configure Phoenix, Langfuse, Tempo, Jaeger, or another OTLP backend in monitoring.env"
         ;;
 esac
 echo ""
 echo "🔧 To enable monitoring in your Nexent backend:"
 echo "   1. Set ENABLE_TELEMETRY=true in your .env file"
-echo "   2. Set OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 for Docker services"
+case "$MONITORING_STACK" in
+    collector)
+        BACKEND_MONITORING_PROVIDER="otlp"
+        ;;
+    grafana)
+        BACKEND_MONITORING_PROVIDER="grafana"
+        ;;
+    *)
+        BACKEND_MONITORING_PROVIDER="$MONITORING_STACK"
+        ;;
+esac
+echo "   2. Set MONITORING_PROVIDER=$BACKEND_MONITORING_PROVIDER in your .env file"
+echo "   3. Set OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 for Docker services"
 echo "      or http://localhost:${OTEL_COLLECTOR_HTTP_PORT:-4318} for a backend running on the host"
-echo "   3. Install performance dependencies:"
+echo "   4. Install performance dependencies:"
 echo "      uv sync --extra performance"
-echo "   4. Restart your Nexent backend service"
+echo "   5. Restart your Nexent backend service"
 echo ""
-echo "📈 Key Metrics to Monitor:"
-echo "   • Token Generation Rate (tokens/second)"
-echo "   • Time to First Token (TTFT)"
-echo "   • Request Duration"
-echo "   • Error Rates"
+echo "🔎 Key Trace Data to Inspect:"
+echo "   • Agent span hierarchy"
+echo "   • LLM generation spans"
+echo "   • Tool call spans"
+echo "   • Error events"
 echo ""
 echo "🛑 To stop monitoring services:"
-echo "   ${COMPOSE_CMD[*]} -f $COMPOSE_FILE --env-file $MONITORING_DIR/monitoring.env --profile phoenix --profile langfuse down"
+echo "   ${COMPOSE_CMD[*]} -f $COMPOSE_FILE --env-file $MONITORING_DIR/monitoring.env --profile phoenix --profile langfuse --profile grafana down --remove-orphans"

@@ -5,7 +5,7 @@ Enterprise-grade observability for AI agents using OpenTelemetry OTLP protocol. 
 ## Architecture
 
 ```
-NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Jaeger
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / Jaeger
      │                                        │
      │   OpenInference Semantics              │
      │   (llm.*, agent.* attributes)          │
@@ -114,7 +114,7 @@ jaeger:
 |----------|---------|-------------|
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
 | `MONITORING_CONFIG_FILE` | (empty) | JSON/YAML monitoring config file path |
-| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `jaeger`, `custom` |
+| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `jaeger`, `grafana`, `custom` |
 | `MONITORING_USE_PLATFORM_SDK` | `false` | Whether to also initialize a provider SDK |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |

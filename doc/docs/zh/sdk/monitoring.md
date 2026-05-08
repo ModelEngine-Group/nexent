@@ -5,7 +5,7 @@
 ## 系统架构
 
 ```
-NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Jaeger
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / Jaeger
      │                                        │
      │   OpenInference 语义约定                │
      │   (llm.*, agent.* 属性)                 │
@@ -29,13 +29,14 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 
 ## 本地化部署形态
 
-`docker/start-monitoring.sh` 支持三种形态，均以 OpenTelemetry Collector 作为统一入口。业务服务只需要把 OTLP 发到 Collector，不需要感知后端平台差异。
+`docker/start-monitoring.sh` 支持四种形态，均以 OpenTelemetry Collector 作为统一入口。业务服务只需要把 OTLP 发到 Collector，不需要感知后端平台差异。
 
 | 形态 | 命令 | 包含服务 | 适用场景 |
 |------|------|----------|----------|
 | `collector` | `./start-monitoring.sh --stack collector` | OpenTelemetry Collector | 只验证埋点、或转发到外部云端平台 |
 | `phoenix` | `./start-monitoring.sh --stack phoenix` | Collector + Phoenix | 本地 trace 调试、OpenInference 属性查看、实验分析 |
 | `langfuse` | `./start-monitoring.sh --stack langfuse` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | 本地完整 LLMOps 体验、会话/用户/反馈/成本分析 |
+| `grafana` | `./start-monitoring.sh --stack grafana` | Collector + Grafana + Tempo | 本地 Tempo trace 查询 |
 
 也可以在 `docker/monitoring/monitoring.env` 中设置默认形态：
 
@@ -85,6 +86,31 @@ cd docker
 - 默认项目 Key：`pk-lf-nexent-local` / `sk-lf-nexent-local`
 
 启动脚本会在 `LANGFUSE_OTLP_AUTH_HEADER` 为空时自动生成 `Basic base64(public_key:secret_key)`，并让 Collector 将 trace 转发到 `http://langfuse-web:3000/api/public/otel`。本地默认密钥只适合开发验证，生产部署必须替换 `LANGFUSE_NEXTAUTH_SECRET`、`LANGFUSE_SALT`、`LANGFUSE_ENCRYPTION_KEY`、数据库密码和对象存储密钥。
+
+### 本地 Grafana + Tempo
+
+Grafana 本地部署使用 Grafana Tempo 存储 traces，并启用 Tempo `metrics-generator` 的 `local-blocks` processor 支持 Grafana trace breakdown 中的 TraceQL metrics 查询。Collector 接收 Nexent 后端的 OTLP traces/metrics，其中 traces 通过 OTLP gRPC 转发到 Tempo；OTLP metrics 只进入 Collector logging pipeline，不再启动 Prometheus 或暴露 Prometheus scrape 端口。
+
+```bash
+cd docker
+./start-monitoring.sh --stack grafana
+```
+
+后端 `.env` 使用已有的 `MONITORING_PROVIDER` 控制前端顶栏监控入口：
+
+```bash
+ENABLE_TELEMETRY=true
+MONITORING_PROVIDER=grafana
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+```
+
+访问地址：
+
+- Grafana UI：`http://localhost:3002`
+- 默认管理员：`admin` / `nexent-grafana-admin`
+- Tempo API：`http://localhost:3200`
+
+Grafana 会自动预置 Tempo datasource，并加载 `Nexent Agent Trace Monitoring` dashboard。Trace 查询入口在 Grafana Explore 中选择 `Tempo` datasource，示例 TraceQL 为 `{ resource.service.name = "nexent-backend" }`。
 
 ## AI 可观测性平台对接
 
@@ -173,7 +199,7 @@ jaeger:
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
 | `MONITORING_CONFIG_FILE` | （空） | JSON/YAML 监控配置文件路径 |
-| `MONITORING_PROVIDER` | `otlp` | 平台配置：`otlp`、`phoenix`、`langfuse`、`jaeger`、`custom` |
+| `MONITORING_PROVIDER` | `otlp` | 平台配置：`otlp`、`phoenix`、`langfuse`、`jaeger`、`grafana`、`custom` |
 | `MONITORING_USE_PLATFORM_SDK` | `false` | 是否额外初始化平台 SDK |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | 服务标识 |
@@ -186,6 +212,16 @@ jaeger:
 | `OTEL_EXPORTER_OTLP_X_API_KEY` | （空） | `x-api-key` header，用于兼容需要该 header 的平台 |
 | `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION` | （空） | Langfuse 实时摄取版本，例如 `4` |
 | `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | `true` | 是否导出 OTLP metrics |
+| `MONITORING_INSTRUMENT_FASTAPI` | `true` | 是否启用 FastAPI 自动 HTTP server span |
+| `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span；默认关闭，避免 AI trace 被普通 HTTP 请求刷屏 |
+| `MONITORING_FASTAPI_EXCLUDED_URLS` | （空） | FastAPI 自动埋点排除 URL，逗号分隔正则；例如只看 agent 业务 span 时可设为 `/agent/run` |
+| `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span；流式接口建议保持默认值 |
+| `GRAFANA_PORT` | `3002` | 本地 Grafana UI 端口 |
+| `GRAFANA_ADMIN_USER` | `admin` | 本地 Grafana 管理员用户名 |
+| `GRAFANA_ADMIN_PASSWORD` | `nexent-grafana-admin` | 本地 Grafana 管理员密码 |
+| `GRAFANA_DEFAULT_LANGUAGE` | `zh-Hans` | 本地 Grafana 默认界面语言 |
+| `TEMPO_VERSION` | `2.10.1` | 本地 Tempo 镜像版本，避免 `latest` 配置兼容性漂移 |
+| `TEMPO_PORT` | `3200` | 本地 Tempo HTTP API 端口 |
 
 ## 配置文件
 
@@ -196,6 +232,9 @@ monitoring:
   enable_telemetry: true
   service_name: nexent-backend
   project_name: nexent-production
+  instrument_fastapi: true
+  instrument_requests: false
+  fastapi_exclude_spans: [receive, send]
   exporter:
     provider: langfuse
     protocol: http
@@ -241,6 +280,48 @@ with monitoring_manager.trace_tool_call("web_search", "agent_name", {"query": "t
     results = search_web("test")
     monitoring_manager.set_tool_output({"results": results})
 ```
+
+### Phoenix 自定义层级埋点
+
+如果希望 Phoenix 展示 `agent -> chain -> llm/tool` 的层级结构，使用 OpenInference span kind 封装方法：
+
+```python
+from nexent.monitor import get_monitoring_manager
+
+monitoring_manager = get_monitoring_manager()
+
+with monitoring_manager.trace_agent(
+    "TestAgent.run",
+    input_value={"query": "你好"},
+    metadata={"agent_id": 1, "tenant_id": "tenant_id"},
+    tags=["nexent", "agent", "agent_id:1"],
+    session_id=1001,
+    user_id="user_id",
+):
+    with monitoring_manager.trace_chain("Step 0"):
+        with monitoring_manager.trace_chain("Step 1"):
+            with monitoring_manager.trace_llm_request("OpenAIModel.generate", "gpt-4"):
+                result = call_llm()
+
+            with monitoring_manager.trace_tool_call("FinalAnswerTool", "TestAgent", {"query": "你好"}):
+                monitoring_manager.set_tool_output({"answer": result})
+
+    monitoring_manager.set_openinference_output({"answer": result})
+```
+
+Phoenix 左侧的 `agent`、`chain`、`llm`、`tool` 标签来自 `openinference.span.kind`。span 必须通过嵌套 `with` 创建，Phoenix 才会显示成树形结构。
+
+同一套方法也会写入 Langfuse 识别的 OTel 属性：
+
+| Nexent 方法 | Phoenix 属性 | Langfuse observation type |
+|-------------|--------------|---------------------------|
+| `trace_agent` | `openinference.span.kind=AGENT` | `langfuse.observation.type=agent` |
+| `trace_chain` | `openinference.span.kind=CHAIN` | `langfuse.observation.type=chain` |
+| `trace_llm_request` | `openinference.span.kind=LLM` | `langfuse.observation.type=generation` |
+| `trace_tool_call` | `openinference.span.kind=TOOL` | `langfuse.observation.type=tool` |
+| `trace_retriever` | `openinference.span.kind=RETRIEVER` | `langfuse.observation.type=retriever` |
+
+`session_id`、`user_id`、`tags` 和 `metadata` 会同步写入 `langfuse.session.id`、`langfuse.user.id`、`langfuse.trace.tags`、`langfuse.trace.metadata.*`，可在 Langfuse 中按会话、用户和业务字段过滤。`input_value`、`output_value` 会同步写入 `langfuse.observation.input` 和 `langfuse.observation.output`。
 
 ## OpenInference 语义属性
 

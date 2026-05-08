@@ -1826,6 +1826,7 @@
   "monitoring.comingSoon.feature2": "查看并筛选智能体运行日志和历史任务",
   "monitoring.comingSoon.feature3": "配置告警策略与关键事件的运维操作",
   "monitoring.comingSoon.badge": "即将推出",
+  "monitoring.topbar.openDashboard": "打开监控面板",
   "monitoring.dashboard.title": "模型监控",
   "monitoring.dashboard.subtitle": "实时监控模型性能和健康状况",
   "monitoring.dashboard.totalRequests": "总请求数",

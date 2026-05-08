@@ -1,3 +1,5 @@
+name: monitor
+
 services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.89.0
@@ -25,6 +27,41 @@ services:
     ports:
       - "${PHOENIX_PORT:-6006}:6006"
       - "${PHOENIX_GRPC_HOST_PORT:-4319}:4317"
+    networks:
+      - nexent_nexent
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:${TEMPO_VERSION:-2.10.1}
+    container_name: nexent-tempo
+    profiles: ["grafana"]
+    command: ["--config.file=/etc/tempo.yml"]
+    volumes:
+      - ./monitoring/tempo.yml:/etc/tempo.yml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "${TEMPO_PORT:-3200}:3200"
+    networks:
+      - nexent_nexent
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:${GRAFANA_VERSION:-latest}
+    container_name: nexent-grafana
+    profiles: ["grafana"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-nexent-grafana-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_DEFAULT_LANGUAGE: ${GRAFANA_DEFAULT_LANGUAGE:-zh-Hans}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3002}:3000"
+    depends_on:
+      - tempo
     networks:
       - nexent_nexent
     restart: unless-stopped
@@ -212,3 +249,5 @@ volumes:
   langfuse-clickhouse-logs:
   langfuse-minio-data:
   langfuse-redis-data:
+  grafana-data:
+  tempo-data:

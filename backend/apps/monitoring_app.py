@@ -6,6 +6,7 @@ Uses an independent database connection pool to avoid impacting business operati
 """
 
 import logging
+import os
 from http import HTTPStatus
 from typing import Annotated, Optional
 
@@ -19,6 +20,51 @@ from utils.auth_utils import get_current_user_id
 logger = logging.getLogger("monitoring_app")
 
 router = APIRouter(prefix="/monitoring")
+
+
+def _is_truthy_env(value: Optional[str]) -> bool:
+    """Return whether an environment value means enabled."""
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_monitoring_provider(value: Optional[str]) -> str:
+    return str(value or "otlp").strip().lower()
+
+
+def _build_monitoring_ui(
+    provider: str,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Map MONITORING_PROVIDER to a monitoring UI port and path."""
+    if provider == "grafana":
+        port = os.getenv("GRAFANA_PORT", "3002")
+        path = "/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1"
+        return port, path, "Grafana"
+    if provider == "phoenix":
+        port = os.getenv("PHOENIX_PORT", "6006")
+        return port, "/", "Phoenix"
+    if provider == "langfuse":
+        port = os.getenv("LANGFUSE_PORT", "3001")
+        return port, "/project/nexent-local", "Langfuse"
+    if provider == "jaeger":
+        port = os.getenv("JAEGER_UI_PORT", "16686")
+        return port, "/", "Jaeger"
+    return None, None, None
+
+
+def get_monitoring_status() -> dict:
+    """Return telemetry state and the monitoring UI entrypoint for frontend use."""
+    telemetry_enabled = _is_truthy_env(os.getenv("ENABLE_TELEMETRY"))
+    provider = _normalize_monitoring_provider(os.getenv("MONITORING_PROVIDER"))
+    dashboard_port, dashboard_path, provider_name = _build_monitoring_ui(provider)
+
+    return {
+        "telemetry_enabled": telemetry_enabled,
+        "provider": provider,
+        "provider_name": provider_name,
+        "ui_enabled": telemetry_enabled and bool(dashboard_port),
+        "dashboard_port": dashboard_port,
+        "dashboard_path": dashboard_path,
+    }
 
 
 def _compute_time_range_filter(time_range: str) -> str:
@@ -113,3 +159,13 @@ async def list_models_endpoint(
         logger.error(f"Failed to list monitoring models: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/status", response_model=ConversationResponse)
+async def get_monitoring_status_endpoint():
+    """Return whether monitoring UI should be shown in the frontend."""
+    return ConversationResponse(
+        code=0,
+        message="success",
+        data=get_monitoring_status(),
+    )
