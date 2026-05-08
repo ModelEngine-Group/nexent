@@ -25,7 +25,7 @@ processors:
         action: insert
 
 exporters:
-  logging:
+  debug:
     verbosity: normal
 
 service:
@@ -33,12 +33,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [logging]
+      exporters: [debug]
 
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [logging]
+      exporters: [debug]
 
   telemetry:
     logs:
@@ -85,4 +85,4 @@ service:
 # === Multiple Exporters ===
 # To export to multiple backends simultaneously, create multiple exporters
 # and add them to the pipelines:
-#   exporters: [otlphttp/arize, otlphttp/langfuse, logging]
+#   exporters: [otlphttp/arize, otlphttp/langfuse, debug]

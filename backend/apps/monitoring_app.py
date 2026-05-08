@@ -44,7 +44,7 @@ def _build_monitoring_ui(
         return port, "/", "Phoenix"
     if provider == "langfuse":
         port = os.getenv("LANGFUSE_PORT", "3001")
-        return port, "/project/nexent-local", "Langfuse"
+        return port, "/project/nexent", "Langfuse"
     if provider == "jaeger":
         port = os.getenv("JAEGER_UI_PORT", "16686")
         return port, "/", "Jaeger"

@@ -216,11 +216,19 @@ jaeger:
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span；默认关闭，避免 AI trace 被普通 HTTP 请求刷屏 |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | （空） | FastAPI 自动埋点排除 URL，逗号分隔正则；例如只看 agent 业务 span 时可设为 `/agent/run` |
 | `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span；流式接口建议保持默认值 |
+| `OTEL_COLLECTOR_VERSION` | `0.150.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
+| `PHOENIX_VERSION` | `15` | 本地 Phoenix 镜像版本 |
+| `LANGFUSE_VERSION` | `3` | 本地 Langfuse Web/Worker 镜像版本 |
+| `LANGFUSE_POSTGRES_VERSION` | `15-alpine` | 本地 Langfuse Postgres 镜像版本 |
+| `LANGFUSE_CLICKHOUSE_VERSION` | `26.3-alpine` | 本地 Langfuse ClickHouse 镜像版本 |
+| `LANGFUSE_MINIO_VERSION` | `RELEASE.2023-12-20T01-00-02Z` | 本地 Langfuse MinIO 镜像版本 |
+| `LANGFUSE_REDIS_VERSION` | `alpine` | 本地 Langfuse Redis 镜像版本 |
+| `GRAFANA_VERSION` | `12.4` | 本地 Grafana 镜像版本 |
 | `GRAFANA_PORT` | `3002` | 本地 Grafana UI 端口 |
 | `GRAFANA_ADMIN_USER` | `admin` | 本地 Grafana 管理员用户名 |
 | `GRAFANA_ADMIN_PASSWORD` | `nexent-grafana-admin` | 本地 Grafana 管理员密码 |
 | `GRAFANA_DEFAULT_LANGUAGE` | `zh-Hans` | 本地 Grafana 默认界面语言 |
-| `TEMPO_VERSION` | `2.10.1` | 本地 Tempo 镜像版本，避免 `latest` 配置兼容性漂移 |
+| `TEMPO_VERSION` | `2.10.5` | 本地 Tempo 镜像版本，避免浮动 tag 带来的配置兼容性漂移 |
 | `TEMPO_PORT` | `3200` | 本地 Tempo HTTP API 端口 |
 
 ## 配置文件

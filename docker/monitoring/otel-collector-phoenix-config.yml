@@ -25,7 +25,7 @@ processors:
         action: insert
 
 exporters:
-  logging:
+  debug:
     verbosity: normal
 
   otlphttp/phoenix:
@@ -54,12 +54,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [otlphttp/phoenix, logging]
+      exporters: [otlphttp/phoenix, debug]
 
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [logging]
+      exporters: [debug]
 
   telemetry:
     logs:

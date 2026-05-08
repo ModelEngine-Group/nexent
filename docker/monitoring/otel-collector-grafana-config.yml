@@ -25,7 +25,7 @@ processors:
         action: insert
 
 exporters:
-  logging:
+  debug:
     verbosity: normal
 
   otlp/tempo:
@@ -38,12 +38,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [otlp/tempo, logging]
+      exporters: [otlp/tempo, debug]
 
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [logging]
+      exporters: [debug]
 
   telemetry:
     logs:

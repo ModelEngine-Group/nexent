@@ -76,9 +76,17 @@ flowchart LR
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | 空 | FastAPI 自动埋点排除 URL，逗号分隔正则 |
 | `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span，流式接口建议保持默认 |
+| `OTEL_COLLECTOR_VERSION` | `0.150.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
+| `PHOENIX_VERSION` | `15` | 本地 Phoenix 镜像版本 |
+| `LANGFUSE_VERSION` | `3` | 本地 Langfuse Web/Worker 镜像版本 |
+| `LANGFUSE_POSTGRES_VERSION` | `15-alpine` | 本地 Langfuse Postgres 镜像版本 |
+| `LANGFUSE_CLICKHOUSE_VERSION` | `26.3-alpine` | 本地 Langfuse ClickHouse 镜像版本 |
+| `LANGFUSE_MINIO_VERSION` | `RELEASE.2023-12-20T01-00-02Z` | 本地 Langfuse MinIO 镜像版本 |
+| `LANGFUSE_REDIS_VERSION` | `alpine` | 本地 Langfuse Redis 镜像版本 |
+| `GRAFANA_VERSION` | `12.4` | 本地 Grafana 镜像版本 |
 | `GRAFANA_PORT` | `3002` | 本地 Grafana UI 端口 |
 | `GRAFANA_DEFAULT_LANGUAGE` | `zh-Hans` | 本地 Grafana 默认界面语言 |
-| `TEMPO_VERSION` | `2.10.1` | 本地 Tempo 镜像版本，避免 `latest` 配置兼容性漂移 |
+| `TEMPO_VERSION` | `2.10.5` | 本地 Tempo 镜像版本，避免浮动 tag 带来的配置兼容性漂移 |
 | `TEMPO_PORT` | `3200` | 本地 Tempo HTTP API 端口 |
 
 ### 配置文件
@@ -134,7 +142,7 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 前端顶栏监控入口只根据后端 `MONITORING_PROVIDER` 映射 UI 端口和路径，最终跳转地址由前端使用当前页面 URL 的 hostname 组装，避免固定写死 `localhost`：
 
 - `phoenix` -> `${currentHostname}:${PHOENIX_PORT:-6006}/`
-- `langfuse` -> `${currentHostname}:${LANGFUSE_PORT:-3001}/project/nexent-local`
+- `langfuse` -> `${currentHostname}:${LANGFUSE_PORT:-3001}/project/nexent`
 - `jaeger` -> `${currentHostname}:${JAEGER_UI_PORT:-16686}/`
 - `grafana` -> `${currentHostname}:${GRAFANA_PORT:-3002}/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1`
 - `otlp` / `custom` 默认不显示顶栏监控入口
