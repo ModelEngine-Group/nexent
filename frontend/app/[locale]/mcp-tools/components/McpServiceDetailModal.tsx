@@ -390,8 +390,7 @@ export default function McpServiceDetailModal({
         onCancel={() => setShowConfigJson(false)}
       />
 
-      {draft.transportType === McpTransportType.CONTAINER &&
-      draft.containerId ? (
+      {draft.containerId ? (
         <McpContainerLogsModal
           open={logsOpen}
           onCancel={() => setLogsOpen(false)}

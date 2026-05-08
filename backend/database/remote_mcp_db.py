@@ -194,7 +194,7 @@ def update_mcp_record_status_by_id(
         ).update({"status": status, "updated_by": user_id})
 
 
-def update_mcp_record_runtime_fields_by_id(
+def update_mcp_record_container_fields_by_id(
     *,
     mcp_id: int,
     tenant_id: str,

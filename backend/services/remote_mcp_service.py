@@ -29,7 +29,7 @@ from database.remote_mcp_db import (
     update_mcp_record_by_name_and_url,
     update_mcp_record_manage_fields_by_id,
     update_mcp_record_enabled_by_id,
-    update_mcp_record_runtime_fields_by_id,
+    update_mcp_record_container_fields_by_id,
     update_mcp_record_status_by_id,
     delete_mcp_record_by_id,
     get_mcp_authorization_token_by_name_and_url,
@@ -153,46 +153,6 @@ def suggest_container_port() -> int:
             return port
         count += 1
     raise McpPortConflictError("No available port found")
-
-
-# ---------------------------------------------------------------------------
-# Container Management Functions
-# ---------------------------------------------------------------------------
-
-async def _stop_container_without_remove_if_exists(container_id: str | None) -> None:
-    """Stop a container without removing it."""
-    if not container_id:
-        return
-    try:
-        manager = MCPContainerManager()
-        await manager.stop_mcp_container_only(container_id)
-    except Exception as exc:
-        logger.warning(f"Skip stopping container {container_id}: {exc}")
-
-
-async def _remove_container_if_exists(container_id: str | None) -> None:
-    """Remove a container if it exists."""
-    if not container_id:
-        return
-    try:
-        manager = MCPContainerManager()
-        await manager.remove_mcp_container(container_id)
-    except Exception as exc:
-        logger.warning(f"Skip removing container {container_id}: {exc}")
-
-
-async def _start_container_by_id_for_record(record: dict) -> dict:
-    """Start an existing container for an MCP record."""
-    container_id = record.get("container_id")
-    if not container_id:
-        raise McpValidationError("Container ID is missing")
-
-    manager = MCPContainerManager()
-    container_info = await manager.start_existing_mcp_container(container_id)
-    if not container_info.get("mcp_url"):
-        raise McpValidationError("Container runtime URL is missing")
-    return container_info
-
 
 # ---------------------------------------------------------------------------
 # Add Functions
@@ -384,6 +344,7 @@ async def add_container_mcp_service(
             image=NEXENT_MCP_DOCKER_IMAGE,
             full_command=full_command,
         )
+        logger.info(f"Started MCP container with info: {container_info}")
 
         container_config = mcp_config.model_dump(exclude_none=True)
 
@@ -393,7 +354,7 @@ async def add_container_mcp_service(
             name=service_name,
             description=description,
             source=source,
-            server_url=container_info["mcp_url"],
+            server_url=container_info.get("mcp_url"),
             tags=tags,
             authorization_token=auth_token,
             container_config=container_config,
@@ -549,14 +510,62 @@ async def update_mcp_service_enabled(
 
     if _is_container_record(current_record):
         if enabled:
-            next_container_port = current_record.get("container_port")
-            if next_container_port is not None and not check_runtime_host_port_available(next_container_port):
-                raise McpPortConflictError(f"Port {next_container_port} is already in use")
+            port = current_record.get("container_port")
+            if port is None:
+                raise McpValidationError("Container port is missing, cannot rebuild container")
+            if not check_runtime_host_port_available(port):
+                raise McpPortConflictError(f"Port {port} is already in use")
 
-            container_info = await _start_container_by_id_for_record(current_record)
+            config_json = current_record.get("config_json")
+            if not isinstance(config_json, dict):
+                raise McpValidationError("Container configuration is missing, cannot rebuild container")
+
+            try:
+                mcp_config = MCPConfigRequest(**config_json)
+            except Exception as exc:
+                raise McpValidationError(f"Invalid container configuration: {exc}")
+
+            servers = mcp_config.mcpServers
+            if not servers or len(servers) != 1:
+                raise McpValidationError("Exactly one mcpServers entry is required")
+            _, config = next(iter(servers.items()))
+            command = config.command
+            if not command:
+                raise McpValidationError("command is required")
+
+            env_vars = dict(config.env or {})
+            if authorization_token:
+                env_vars["authorization_token"] = authorization_token
+
+            full_command = [
+                "python",
+                "-m",
+                "mcp_proxy",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                str(port),
+                "--transport",
+                "streamablehttp",
+                "--",
+                command,
+                *(config.args or []),
+            ]
+
+            container_manager = MCPContainerManager()
+            container_info = await container_manager.start_mcp_container(
+                service_name=current_record.get("mcp_name"),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                env_vars=env_vars,
+                host_port=port,
+                image=NEXENT_MCP_DOCKER_IMAGE,
+                full_command=full_command,
+            )
+
             next_server_url = container_info.get("mcp_url")
-            next_container_id = container_info.get("container_id") or current_record.get("container_id")
-            next_container_port = container_info.get("host_port") or next_container_port
+            next_container_id = container_info.get("container_id")
+            next_container_port = container_info.get("host_port") or port
 
             health_ok = False
             MCP_CONTAINER_HEALTH_CHECK_ATTEMPTS = 10
@@ -575,19 +584,23 @@ async def update_mcp_service_enabled(
                     await asyncio.sleep(MCP_CONTAINER_HEALTH_CHECK_DELAY_SECONDS)
 
             if not health_ok:
-                await _stop_container_without_remove_if_exists(next_container_id)
-                update_mcp_record_runtime_fields_by_id(
+                if next_container_id:
+                    try:
+                        await MCPContainerManager().stop_mcp_container(next_container_id)
+                    except Exception as exc:
+                        logger.warning(f"Failed to stop unhealthy container {next_container_id}: {exc}")
+                update_mcp_record_container_fields_by_id(
                     mcp_id=mcp_id,
                     tenant_id=tenant_id,
                     user_id=user_id,
-                    container_id=next_container_id,
-                    container_port=next_container_port,
+                    container_id=None,
+                    container_port=port,
                     mcp_server=next_server_url,
                     status=False,
                 )
                 raise MCPConnectionError("MCP connection failed")
 
-            update_mcp_record_runtime_fields_by_id(
+            update_mcp_record_container_fields_by_id(
                 mcp_id=mcp_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -598,12 +611,17 @@ async def update_mcp_service_enabled(
             )
         else:
             current_container_id = current_record.get("container_id")
-            await _stop_container_without_remove_if_exists(current_container_id)
-            update_mcp_record_runtime_fields_by_id(
+            if current_container_id:
+                try:
+                    manager = MCPContainerManager()
+                    await manager.stop_mcp_container(current_container_id)
+                except Exception as exc:
+                    logger.warning(f"Failed to stop container {current_container_id}: {exc}")
+            update_mcp_record_container_fields_by_id(
                 mcp_id=mcp_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                container_id=current_container_id,
+                container_id=None,
                 container_port=current_record.get("container_port"),
                 mcp_server=current_record.get("mcp_server"),
                 status=None,

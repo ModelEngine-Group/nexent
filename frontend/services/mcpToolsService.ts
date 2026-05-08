@@ -266,7 +266,7 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       enabled: s.enabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED,
       updatedAt: s.update_time,
       tags: s.tags || [],
-      transportType: (s.container_id !== undefined && s.container_id !== null) ? McpTransportType.CONTAINER : McpTransportType.URL,
+      transportType: (s.config_json !== undefined && s.config_json !== null) ? McpTransportType.CONTAINER : McpTransportType.URL,
       serverUrl: s.mcp_url,
       version: s.version ?? undefined,
       registryJson: s.registry_json ?? undefined,
