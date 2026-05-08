@@ -29,6 +29,7 @@ async def _embedding_dimension_check(
     model_base_url: str,
     model_api_key: str,
     ssl_verify: bool = True,
+    timeout_seconds: Optional[float] = None,
 ):
     # Test connectivity based on different model types
     if model_type == "embedding":
@@ -38,6 +39,7 @@ async def _embedding_dimension_check(
             api_key=model_api_key,
             embedding_dim=0,
             ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
         ).dimension_check()
         if len(embedding) > 0:
             return len(embedding[0])
@@ -51,6 +53,7 @@ async def _embedding_dimension_check(
             api_key=model_api_key,
             embedding_dim=0,
             ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
         ).dimension_check()
         if len(embedding) > 0:
             return len(embedding[0])
@@ -99,7 +102,8 @@ async def _perform_connectivity_check(
             base_url=model_base_url,
             api_key=model_api_key,
             embedding_dim=0,
-            ssl_verify=ssl_verify
+            ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
         ).dimension_check()) > 0
     elif model_type == "multi_embedding":
         connectivity = len(await JinaEmbedding(
@@ -107,7 +111,8 @@ async def _perform_connectivity_check(
             base_url=model_base_url,
             api_key=model_api_key,
             embedding_dim=0,
-            ssl_verify=ssl_verify
+            ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
         ).dimension_check()) > 0
     elif model_type == "llm":
         observer = MessageObserver()
@@ -317,9 +322,17 @@ async def embedding_dimension_check(model_config: dict):
 
     try:
         ssl_verify = model_config.get("ssl_verify", True)
+        timeout_seconds = model_config.get("timeout_seconds")
         dimension = await _embedding_dimension_check(
-            model_name, model_type, model_base_url, model_api_key, ssl_verify
+            model_name, model_type, model_base_url, model_api_key, ssl_verify,
+            timeout_seconds=timeout_seconds
         )
+        # Fallback to ssl_verify=False if initial check fails
+        if dimension == 0 and ssl_verify:
+            dimension = await _embedding_dimension_check(
+                model_name, model_type, model_base_url, model_api_key, False,
+                timeout_seconds=timeout_seconds
+            )
         return dimension
     except ValueError as e:
         logger.error(f"Error checking embedding dimension: {str(e)}")

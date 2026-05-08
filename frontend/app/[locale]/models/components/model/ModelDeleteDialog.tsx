@@ -1539,16 +1539,20 @@ export const ModelDeleteDialog = ({
           if (!selectedSingleModel) return;
           try {
             const modelName = selectedSingleModel.model_name || selectedSingleModel.id;
+
+            const updatePayload: any = {
+              model_id: modelName,
+              maxTokens: config.maxTokens,
+              timeoutSeconds: config.timeoutSeconds,
+              concurrencyLimit: config.concurrencyLimit,
+            };
+
+            if (config.apiKey) {
+              updatePayload.apiKey = config.apiKey;
+            }
+
             await modelService.updateBatchModel(
-              [
-                {
-                  model_id: modelName,
-                  apiKey: config.apiKey,
-                  maxTokens: config.maxTokens,
-                  timeoutSeconds: config.timeoutSeconds,
-                  concurrencyLimit: config.concurrencyLimit,
-                },
-              ],
+              [updatePayload],
               selectedSingleModel.model_factory
             );
 
@@ -1558,7 +1562,6 @@ export const ModelDeleteDialog = ({
                 model.id === selectedSingleModel.id
                   ? {
                       ...model,
-                      api_key: config.apiKey,
                       max_tokens: config.maxTokens,
                       timeout_seconds: config.timeoutSeconds,
                       concurrency_limit: config.concurrencyLimit,

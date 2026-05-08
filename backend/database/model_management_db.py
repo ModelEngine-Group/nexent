@@ -119,7 +119,7 @@ def update_model_record_by_model_name(
         if user_id:
             cleaned_data = add_update_tracking(cleaned_data, user_id)
 
-        db_logger.info(f"update_model_record_by_model_name: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}, cleaned_data={cleaned_data}")
+        db_logger.debug(f"update_model_record_by_model_name: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}, cleaned_data={cleaned_data}")
 
         # Build conditions list
         conditions = [

@@ -248,7 +248,8 @@ async def create_model_config_list(tenant_id):
                         url=record["base_url"],
                         ssl_verify=record.get("ssl_verify", True),
                         model_factory=record.get("model_factory"),
-                        timeout_seconds=record.get("timeout_seconds")))
+                        timeout_seconds=record.get("timeout_seconds"),
+                        concurrency_limit=record.get("concurrency_limit")))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -260,7 +261,8 @@ async def create_model_config_list(tenant_id):
                     url=main_model_config.get("base_url", ""),
                     ssl_verify=main_model_config.get("ssl_verify", True),
                     model_factory=main_model_config.get("model_factory"),
-                    timeout_seconds=main_model_config.get("timeout_seconds")))
+                    timeout_seconds=main_model_config.get("timeout_seconds"),
+                    concurrency_limit=main_model_config.get("concurrency_limit")))
     model_list.append(
         ModelConfig(cite_name="sub_model",
                     api_key=main_model_config.get("api_key", ""),
@@ -269,7 +271,8 @@ async def create_model_config_list(tenant_id):
                     url=main_model_config.get("base_url", ""),
                     ssl_verify=main_model_config.get("ssl_verify", True),
                     model_factory=main_model_config.get("model_factory"),
-                    timeout_seconds=main_model_config.get("timeout_seconds")))
+                    timeout_seconds=main_model_config.get("timeout_seconds"),
+                    concurrency_limit=main_model_config.get("concurrency_limit")))
 
     return model_list
 
