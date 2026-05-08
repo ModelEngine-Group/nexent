@@ -23,6 +23,8 @@
   "filePreview.zoomIn": "放大",
   "filePreview.zoomOut": "缩小",
   "filePreview.rotate": "旋转",
+  "filePreview.image.fitPage": "适应页面",
+  "filePreview.image.actualSize": "实际大小",
   "filePreview.tooLargeToPreview": "文件过大，暂不支持预览，请下载后查看",
   "filePreview.csv.column": "列",
   "filePreview.unsupportedSingleLine": "该文件类型暂不支持预览",
