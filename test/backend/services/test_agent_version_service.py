@@ -601,6 +601,17 @@ def test_rollback_version_impl_success(monkeypatch):
     }
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
+
+    # Mock query_agent_snapshot
+    mock_agent_snapshot = {"agent_id": 1, "name": "test"}
+    mock_tools_snapshot = []
+    mock_relations_snapshot = []
+    mock_query_snapshot = MagicMock(return_value=(mock_agent_snapshot, mock_tools_snapshot, mock_relations_snapshot))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+
+    # Mock restore_agent_draft
+    mock_restore = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "restore_agent_draft", mock_restore)
     mock_query_snapshot = MagicMock(return_value=({"agent_id": 1}, [], []))
     monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
     monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
@@ -615,7 +626,11 @@ def test_rollback_version_impl_success(monkeypatch):
     )
 
     assert result["version_no"] == 1
+    assert result["version_name"] == "v1.0"
     assert "Successfully rolled back" in result["message"]
+    mock_search.assert_called_once_with(1, "tenant1", 1)
+    mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
+    mock_restore.assert_called_once()
 
 
 def test_rollback_version_impl_version_not_found(monkeypatch):
@@ -636,6 +651,10 @@ def test_rollback_version_impl_draft_not_found(monkeypatch):
     mock_version = {"version_no": 1}
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
+    mock_query_snapshot = MagicMock(return_value=(None, [], []))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+
+    # Mock query_agent_snapshot to return empty agent (falsy)
     mock_query_snapshot = MagicMock(return_value=(None, [], []))
     monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
 

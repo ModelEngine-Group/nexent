@@ -372,7 +372,10 @@ async def manage_check_model_health(
             f"Start to check model connectivity for tenant, user_id: {user_id}, "
             f"target_tenant_id: {request.tenant_id}, display_name: {request.display_name}")
 
-        result = await check_model_connectivity(request.display_name, request.tenant_id)
+        result = await check_model_connectivity(
+            request.display_name,
+            request.tenant_id
+        )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully checked model connectivity",
             "data": result

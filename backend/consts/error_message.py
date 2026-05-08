@@ -5,6 +5,8 @@ This module provides default English error messages.
 Frontend should use i18n for localized messages.
 """
 
+from typing import Dict, Tuple
+
 from .error_code import ErrorCode
 
 
@@ -145,11 +147,11 @@ class ErrorMessage:
         return cls._MESSAGES.get(error_code, "An error occurred. Please try again later.")
 
     @classmethod
-    def get_message_with_code(cls, error_code: ErrorCode) -> tuple[int, str]:
+    def get_message_with_code(cls, error_code: ErrorCode) -> Tuple[int, str]:
         """Get error code and message as tuple."""
         return (error_code.value, cls.get_message(error_code))
 
     @classmethod
-    def get_all_messages(cls) -> dict:
+    def get_all_messages(cls) -> Dict:
         """Get all error code to message mappings."""
         return {code.value: msg for code, msg in cls._MESSAGES.items()}
