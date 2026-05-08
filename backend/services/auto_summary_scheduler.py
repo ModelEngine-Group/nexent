@@ -8,22 +8,18 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
+from consts.scheduler import (
+    FREQUENCY_MAP,
+    SCHEDULER_CHECK_INTERVAL_SECONDS,
+)
 from database.knowledge_db import get_knowledge_bases_for_auto_summary
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager
 
 logger = logging.getLogger(__name__)
 
-# Mapping from frequency string to timedelta
-FREQUENCY_MAP = {
-    "3h": timedelta(hours=3),
-    "5h": timedelta(hours=5),
-    "1d": timedelta(days=1),
-    "1w": timedelta(weeks=1),
-}
-
-# Check interval: run the check every 30 minutes
-CHECK_INTERVAL_SECONDS = 30 * 60
+# Check interval from centralized config
+CHECK_INTERVAL_SECONDS = SCHEDULER_CHECK_INTERVAL_SECONDS
 
 # Track knowledge bases currently being processed to avoid duplicates
 _in_flight: set = set()

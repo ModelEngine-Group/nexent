@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
 from utils.str_utils import convert_list_to_string
+from consts.scheduler import VALID_SUMMARY_FREQUENCIES
 
 logger = logging.getLogger("knowledge_db")
 
@@ -422,7 +423,7 @@ def get_knowledge_name_map_by_index_names(index_names: List[str]) -> Dict[str, s
 def update_summary_frequency(index_name: str, summary_frequency: Optional[str],
                              _tenant_id: str, user_id: str) -> bool:
     """Update the auto-summary frequency for a knowledge base."""
-    valid_frequencies = ["3h", "5h", "1d", "1w", None]
+    valid_frequencies = VALID_SUMMARY_FREQUENCIES
     if summary_frequency not in valid_frequencies:
         raise ValueError(f"Invalid summary_frequency: {summary_frequency}")
     try:

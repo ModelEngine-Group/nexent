@@ -570,7 +570,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}
                             ></div>
 
-                            {/* Model tag - only show when model is not "unknown" */}
+{/* Model tag - only show when model is not "unknown" */}
                             {kb.embeddingModel !== "unknown" && (
                               <span
                                 className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.model} mr-1`}
@@ -580,38 +580,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 })}
                               </span>
                             )}
-
-                            {/* Auto-summary frequency selector */}
-                            <span
-                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.model}`}
-                            >
-                              <Select
-                                size="small"
-                                variant="borderless"
-                                value={kb.summaryFrequency || "disabled"}
-                                onChange={(value) => {
-                                  const freq = value === "disabled" ? null : value;
-                                  knowledgeBaseService.updateSummaryFrequency(kb.id, freq)
-                                    .then(() => {
-                                      if (onKnowledgeBaseUpdate) {
-                                        onKnowledgeBaseUpdate({ ...kb, summaryFrequency: freq });
-                                      }
-                                    })
-                                    .catch(() => {
-                                      // Revert on failure
-                                    });
-                                }}
-                                style={{ width: 72 }}
-                                popupMatchSelectWidth={false}
-                                options={[
-                                  { value: "disabled", label: t("knowledgeBase.tag.autoSummary.off") },
-                                  { value: "3h", label: "3h" },
-                                  { value: "5h", label: "5h" },
-                                  { value: "1d", label: "1d" },
-                                  { value: "1w", label: "1w" },
-                                ]}
-                              />
-                            </span>
 
                             {/* User group tags - only show when not PRIVATE */}
                             <Can permission="group:read">

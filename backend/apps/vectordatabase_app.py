@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 import re
 
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
+from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
 from services.vectordatabase_service import (
     ElasticSearchService,
@@ -24,6 +25,20 @@ router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
 logger = logging.getLogger("vectordatabase_app")
 
+
+@router.get("/summary_frequency_options")
+async def get_summary_frequency_options():
+    """
+    Get valid summary frequency options for frontend.
+    Frontend should call this API to get the list of valid frequencies.
+    """
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={
+            "options": SUMMARY_FREQUENCY_OPTIONS_FOR_API,
+            "valid_values": VALID_SUMMARY_FREQUENCIES,
+        }
+    )
 
 @router.post("/check_exist")
 async def check_knowledge_base_exist(
@@ -171,7 +186,7 @@ async def update_summary_frequency_endpoint(
         user_id, tenant_id = get_current_user_id(authorization)
         summary_frequency = request.get("summary_frequency")
 
-        valid_frequencies = ["3h", "5h", "1d", "1w", None]
+        valid_frequencies = VALID_SUMMARY_FREQUENCIES
         if summary_frequency not in valid_frequencies:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
@@ -182,7 +197,7 @@ async def update_summary_frequency_endpoint(
         success = update_summary_frequency(
             index_name=index_name,
             summary_frequency=summary_frequency,
-            tenant_id=tenant_id,
+            _tenant_id=tenant_id,
             user_id=user_id
         )
 
