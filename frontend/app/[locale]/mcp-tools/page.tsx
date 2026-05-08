@@ -131,7 +131,7 @@ export default function McpToolsPage() {
                     ),
                   },
                 ]}
-                className="h-9 w-full max-w-xs rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm shadow-sm sm:w-auto [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:px-3 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-item-label]:leading-[28px] [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
+                className="h-9 w-full max-w-xs rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm shadow-sm sm:w-auto [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:flex [&_.ant-segmented-item-label]:items-center [&_.ant-segmented-item-label]:px-3 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
               />
               <span className="pb-0.5 text-xs text-slate-400 sm:shrink-0 sm:text-right">
                 {t("mcpTools.page.resultCount", { count: resultCount })}
@@ -290,7 +290,7 @@ function SearchAndFilterRow({
         value={searchValue}
         onChange={(event) => onSearchChange(event.target.value)}
         placeholder={searchPlaceholder}
-        size="large"
+        size="middle"
         allowClear
         className="w-full rounded-md lg:flex-1"
       />

@@ -39,7 +39,7 @@ export default function McpServicesFilterBar({
     <div className="flex flex-wrap gap-2">
       {showSource ? (
         <Select
-          size="large"
+          size="middle"
           value={source}
           onChange={onSourceChange}
           className="min-w-[140px] flex-1 lg:flex-none lg:w-36"
@@ -55,7 +55,7 @@ export default function McpServicesFilterBar({
         />
       ) : null}
       <Select
-        size="large"
+        size="middle"
         value={transport}
         onChange={onTransportChange}
         className="min-w-[140px] flex-1 lg:flex-none lg:w-36"
@@ -72,7 +72,7 @@ export default function McpServicesFilterBar({
         ]}
       />
       <Select
-        size="large"
+        size="middle"
         value={tag}
         onChange={onTagChange}
         className="min-w-[140px] flex-1 lg:flex-none lg:w-40"
