@@ -727,6 +727,8 @@
   "model.dialog.placeholder.url": "Enter model URL, e.g. https://api.openai.com/v1",
   "model.dialog.placeholder.modelEngineUrl": "Enter ModelEngine host URL, e.g. https://120.253.225.102:50001",
   "model.dialog.placeholder.url.embedding": "Enter model URL, e.g. https://api.openai.com/v1/embeddings",
+  "model.dialog.placeholder.url.stt": "Enter STT URL, e.g. wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+  "model.dialog.placeholder.url.tts": "Enter TTS URL, e.g. wss://openspeech.bytedance.com/api/v1/tts/ws_binary",
   "model.dialog.placeholder.apiKey": "Enter API Key",
   "model.dialog.placeholder.modelAppid": "Enter App ID (VolcEngine Application ID)",
   "model.dialog.placeholder.accessToken": "Enter Access Token (VolcEngine Access Token)",

@@ -728,6 +728,8 @@
   "model.dialog.placeholder.url": "请输入模型URL, 例如: https://api.openai.com/v1",
   "model.dialog.placeholder.modelEngineUrl": "请输入 ModelEngine 主机地址，例如：https://120.253.225.102:50001",
   "model.dialog.placeholder.url.embedding": "请输入模型URL, 例如: https://api.openai.com/v1/embeddings",
+  "model.dialog.placeholder.url.stt": "请输入STT URL, 例如: wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+  "model.dialog.placeholder.url.tts": "请输入TTS URL, 例如: wss://openspeech.bytedance.com/api/v1/tts/ws_binary",
   "model.dialog.placeholder.apiKey": "请输入API Key",
   "model.dialog.placeholder.modelAppid": "请输入App ID（火山引擎应用ID）",
   "model.dialog.placeholder.accessToken": "请输入Access Token（火山引擎访问凭证）",

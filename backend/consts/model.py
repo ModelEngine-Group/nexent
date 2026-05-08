@@ -107,7 +107,7 @@ class ModelResponse(BaseModel):
 
 class ModelRequest(BaseModel):
     model_factory: Optional[str] = 'OpenAI-API-Compatible'
-    model_name: Optional[str] = ""
+    model_name: str
     model_type: str
     api_key: Optional[str] = ''
     base_url: Optional[str] = ''

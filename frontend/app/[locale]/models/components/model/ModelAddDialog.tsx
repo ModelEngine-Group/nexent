@@ -1013,7 +1013,11 @@ export const ModelAddDialog = ({
               placeholder={
                 form.type === MODEL_TYPES.EMBEDDING
                   ? t("model.dialog.placeholder.url.embedding")
-                  : t("model.dialog.placeholder.url")
+                  : form.type === MODEL_TYPES.STT
+                    ? t("model.dialog.placeholder.url.stt")
+                    : form.type === MODEL_TYPES.TTS
+                      ? t("model.dialog.placeholder.url.tts")
+                      : t("model.dialog.placeholder.url")
               }
               value={form.url}
               onChange={(e) => handleFormChange("url", e.target.value)}
