@@ -1131,7 +1131,7 @@ def test_check_version_snapshot_availability_model_id_zero():
 
 
 def test_check_version_snapshot_availability_no_tools():
-    """Test checking availability when no tools exist"""
+    """Test checking availability when no tools exist (should be available)"""
     agent_info = {"model_id": 1}
 
     is_available, reasons = _check_version_snapshot_availability(
@@ -1141,8 +1141,9 @@ def test_check_version_snapshot_availability_no_tools():
         tool_instances=[],
     )
 
-    assert is_available is False
-    assert "no_tools" in reasons
+    # Having no tools configured is valid - availability should not be affected
+    assert is_available is True
+    assert "no_tools" not in reasons
 
 
 def test_check_version_snapshot_availability_all_tools_disabled():

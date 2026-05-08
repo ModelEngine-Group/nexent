@@ -344,11 +344,8 @@ def _check_version_snapshot_availability(
     if model_id is None or model_id == 0:
         unavailable_reasons.append("model_not_configured")
 
-    # Check tools availability
-    if not tool_instances:
-        unavailable_reasons.append("no_tools")
-    else:
-        # Check if at least one tool is enabled
+    # Check tools availability (only when tools are configured)
+    if tool_instances:
         has_enabled_tool = any(t.get('enabled', True) for t in tool_instances)
         if not has_enabled_tool:
             unavailable_reasons.append("all_tools_disabled")
