@@ -12,7 +12,6 @@ import {
 import { refreshToolListWithToast } from "./refreshToolListWithToast";
 import { McpServiceStatus } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
-import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
 /**
  * Toggles the enabled/disabled flag on an MCP service and refreshes caches that
@@ -55,21 +54,7 @@ export function useMcpServiceToggle() {
           ? t("mcpTools.service.enabled")
           : t("mcpTools.service.disabled")
       );
-      queryClient.invalidateQueries({
-        queryKey: MCP_TOOLS_QUERY_KEYS.services,
-      });
       const nextStatus = nextEnabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED;
-
-      // Not an optimistic update: we patch the services cache only after the
-      // backend toggle succeeds, so the card list doesn't lag behind the detail
-      // modal while the list refetch is in-flight.
-      queryClient.setQueryData<McpServiceItem[] | undefined>(
-        [...MCP_TOOLS_QUERY_KEYS.services],
-        (prev) =>
-          prev?.map((item) =>
-            item.mcpId === service.mcpId ? { ...item, enabled: nextStatus } : item
-          )
-      );
 
       // Fire-and-forget tool scan / refresh. UI should update immediately after
       // enable/disable succeeds, without waiting for scan_tools.

@@ -30,13 +30,13 @@ import StatusBadge from "./shared/StatusBadge";
 interface McpServiceDetailModalProps {
   selectedService: McpServiceItem | null;
   onClose: () => void;
-  onStatusChanged?: (mcpId: number, next: McpServiceStatus) => void;
+  onToggled?: (mcpId: number, next: McpServiceStatus) => void;
 }
 
 export default function McpServiceDetailModal({
   selectedService,
   onClose,
-  onStatusChanged,
+  onToggled: onStatusChanged,
 }: McpServiceDetailModalProps) {
   const { modal } = App.useApp();
   const { t } = useTranslation("common");

@@ -89,5 +89,6 @@ export function useMcpServicesList() {
     filters,
     updateFilter,
     loading: servicesQuery.isLoading,
+    refetch: servicesQuery.refetch,
   };
 }

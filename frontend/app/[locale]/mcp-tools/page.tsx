@@ -40,10 +40,10 @@ export default function McpToolsPage() {
   const list = useMcpServicesList();
   const myPublished = useMyCommunityMcp(tab === McpToolsServicesTab.PUBLISHED);
 
-  const handleStatusChanged = (mcpId: number, nextEnabled: McpServiceStatus) => {
-    setSelectedImported((prev) =>
-      prev && prev.mcpId === mcpId ? { ...prev, enabled: nextEnabled } : prev
-    );
+  const handleToggled = async (mcpId: number) => {
+    const result = await list.refetch();
+    const updated = result.data?.find((s) => s.mcpId === mcpId);
+    if (updated) setSelectedImported(updated);
   };
 
   const handleSelectPublished = (item: CommunityMcpCard) => {
@@ -151,7 +151,7 @@ export default function McpToolsPage() {
               <McpServiceDetailModal
                 selectedService={selectedImported}
                 onClose={() => setSelectedImported(null)}
-                onStatusChanged={handleStatusChanged}
+                onToggled={handleToggled}
               />
             ) : null}
 
