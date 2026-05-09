@@ -79,7 +79,7 @@ export function useMcpServiceToggle() {
         serviceName: service.name,
         serverUrl: service.serverUrl,
       });
-      message.error(t("mcpTools.service.toggle.failed"));
+      message.error(t("mcpTools.service.toggleFailed"));
       throw error;
     } finally {
       setToggle(service.mcpId, false);
