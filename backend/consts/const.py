@@ -157,7 +157,7 @@ FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 RAY_ACTOR_NUM_CPUS = int(os.getenv("RAY_ACTOR_NUM_CPUS", "2"))
 RAY_DASHBOARD_PORT = int(os.getenv("RAY_DASHBOARD_PORT", "8265"))
 RAY_DASHBOARD_HOST = os.getenv("RAY_DASHBOARD_HOST", "0.0.0.0")
-RAY_NUM_CPUS = int(os.getenv("RAY_NUM_CPUS"))
+RAY_NUM_CPUS = int(os.getenv("RAY_NUM_CPUS", "4"))
 RAY_OBJECT_STORE_MEMORY_GB = float(
     os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
 RAY_TEMP_DIR = os.getenv("RAY_TEMP_DIR", "/tmp/ray")

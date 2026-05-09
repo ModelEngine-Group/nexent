@@ -2,6 +2,7 @@ import asyncio
 import sys
 import os
 import time
+import types
 import unittest
 from unittest.mock import MagicMock, ANY, AsyncMock, call
 # Mock MinioClient before importing modules that use it
@@ -52,6 +53,20 @@ sys.modules['nexent.core.utils.observer'] = observer_module
 sys.modules['nexent.vector_database'] = _create_package_mock(
     'nexent.vector_database')
 vector_db_base_module = ModuleType('nexent.vector_database.base')
+
+sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
+sys.modules['nexent.monitor'].set_monitoring_context = MagicMock()
+sys.modules['nexent.monitor'].set_monitoring_operation = MagicMock()
+
+# Mock nexent.memory
+nexent_memory_module = types.ModuleType('nexent.memory')
+sys.modules['nexent.memory'] = nexent_memory_module
+
+nexent_memory_service = types.ModuleType('nexent.memory.memory_service')
+nexent_memory_service.clear_memory = MagicMock()
+nexent_memory_service.add_memory = MagicMock()
+nexent_memory_service.get_memory = MagicMock()
+sys.modules['nexent.memory.memory_service'] = nexent_memory_service
 
 
 class _VectorDatabaseCore:
