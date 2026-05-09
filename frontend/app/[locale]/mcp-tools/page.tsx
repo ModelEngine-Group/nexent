@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { InboxOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { Button, ConfigProvider, Empty, Input, Segmented, Spin } from "antd";
 import { useTranslation } from "react-i18next";
@@ -43,7 +43,19 @@ export default function McpToolsPage() {
   const handleToggled = async (mcpId: number) => {
     const result = await list.refetch();
     const updated = result.data?.find((s) => s.mcpId === mcpId);
-    if (updated) setSelectedImported(updated);
+    if (updated && detailMcpIdRef.current === mcpId) {
+      setSelectedImported(updated);
+    }
+  };
+
+  const detailMcpIdRef = useRef<number | null>(null);
+  const openDetail = (service: McpServiceItem) => {
+    detailMcpIdRef.current = service.mcpId;
+    setSelectedImported(service);
+  };
+  const closeDetail = () => {
+    detailMcpIdRef.current = null;
+    setSelectedImported(null);
   };
 
   const handleSelectPublished = (item: CommunityMcpCard) => {
@@ -139,7 +151,7 @@ export default function McpToolsPage() {
             </div>
 
             {tab === McpToolsServicesTab.IMPORTED ? (
-              <ImportedView list={list} onSelect={setSelectedImported} />
+              <ImportedView list={list} onSelect={openDetail} />
             ) : (
               <PublishedView
                 myPublished={myPublished}
@@ -150,7 +162,7 @@ export default function McpToolsPage() {
             {selectedImported ? (
               <McpServiceDetailModal
                 selectedService={selectedImported}
-                onClose={() => setSelectedImported(null)}
+                onClose={closeDetail}
                 onToggled={handleToggled}
               />
             ) : null}
