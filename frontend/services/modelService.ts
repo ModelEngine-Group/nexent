@@ -124,6 +124,7 @@ export const modelService = {
         maximum_chunk_size: model.maximumChunkSize,
         chunk_batch: model.chunkingBatchSize,
         timeout_seconds: model.timeoutSeconds,
+        concurrency_limit: model.concurrencyLimit,
       };
 
       // Add STT specific fields
@@ -721,6 +722,7 @@ export const modelService = {
         api_key: params.apiKey,
         max_tokens: params.maxTokens || 4096,
         display_name: params.displayName || params.name,
+        model_factory: params.modelFactory || "OpenAI-API-Compatible",
         expected_chunk_size: params.expectedChunkSize,
         maximum_chunk_size: params.maximumChunkSize,
         chunk_batch: params.chunkingBatchSize,
