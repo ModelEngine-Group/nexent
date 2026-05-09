@@ -1000,8 +1000,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                       kbState.activeKnowledgeBase.id,
                       frequency
                     ).then(() => {
-                      const updatedKB = {
-                        ...kbState.activeKnowledgeBase,
+                      const updatedKB: KnowledgeBase = {
+                        ...kbState.activeKnowledgeBase!,
                         summaryFrequency: frequency
                       };
                       updateKnowledgeBase(updatedKB);

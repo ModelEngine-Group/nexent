@@ -145,6 +145,10 @@ export type KnowledgeBaseAction =
       type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ADD_KNOWLEDGE_BASE;
       payload: KnowledgeBase;
     }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE;
+      payload: KnowledgeBase;
+    }
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.LOADING; payload: boolean }
   | {
       type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING;
