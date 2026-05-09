@@ -3,6 +3,140 @@
 生成日期：2026-05-06
 基准分支：当前 OpenTelemetry 功能分支
 
+## 可观测性基础
+
+可观测性关注的是系统在运行过程中是否能够被理解和定位问题。相比只回答“系统是否还活着”的传统监控，可观测性更强调从运行时信号反推出系统内部状态，帮助研发和运维回答以下问题：
+
+- 当前请求为什么慢？
+- Agent 在哪一步失败？
+- 大模型调用耗时、首 token 时间和 token 速率是否异常？
+- 某个用户、会话或 Agent 的完整执行链路是什么？
+- 问题发生时有哪些输入、输出、工具调用和错误上下文？
+
+业界通常把可观测性拆成三大支柱：Metrics、Logs、Traces。三者解决的问题不同，需要组合使用。
+
+| 支柱 | 核心问题 | 典型数据 | 适合场景 | 在 Nexent 中的作用 |
+|------|----------|----------|----------|--------------------|
+| Metrics | “整体是否异常？” | 计数器、直方图、速率、分位数 | 看趋势、告警、容量评估、SLO/SLA | 统计 LLM 请求耗时、TTFT、token 速率、错误数、Agent step/tool 调用数 |
+| Logs | “当时发生了什么？” | 按时间顺序输出的文本或结构化事件 | 查看异常上下文、排查单点错误、审计关键行为 | 保留运行日志，并通过 span event/attribute 记录关键 Agent、LLM、Tool 事件 |
+| Traces | “一次请求经历了哪些步骤？” | trace、span、span event、上下游关系 | 分布式调用链、流式 Agent 执行链路、跨服务耗时定位 | 串联 HTTP 接口、Agent run、LLM generate、Tool call 和最终答案 |
+
+三大支柱之间不是替代关系。Metrics 适合发现问题，例如某段时间 LLM 错误数上升；Traces 适合定位问题，例如找到某次 `agent.run` 卡在某个 tool；Logs 适合补充细节，例如错误堆栈、原始提示词摘要或工具返回内容。对于 LLM Agent 场景，单纯的 HTTP 接口指标不足以解释 Agent 行为，因此必须把 Agent、LLM、Tool 等业务语义写入 trace 层级中。
+
+## 为什么使用 OpenTelemetry
+
+OpenTelemetry 是当前主流的可观测性开放标准，提供统一的 API、SDK、语义约定和 OTLP 传输协议。Nexent 选择 OpenTelemetry 作为监控主干，主要基于以下原因：
+
+- 标准化：用统一的 span、event、metric 表达 HTTP、Agent、LLM、Tool 等运行时信号，减少平台私有模型对业务代码的侵入。
+- 可移植：同一套埋点可以通过 OTLP 上报到 Phoenix、Langfuse、Grafana Tempo 或其他兼容后端，切换平台主要调整配置和 Collector pipeline。
+- 可扩展：OpenTelemetry Collector 可以在不改业务代码的情况下完成转发、过滤、批处理、认证 header 注入和多后端分发。
+- 生态成熟：FastAPI、requests 等基础组件已有自动埋点能力，Nexent 只需要补充 Agent/LLM/Tool 的业务 span。
+- 避免锁定：监控平台 SDK 可以作为增强层，但核心链路不依赖某一家平台 SDK，避免平台迁移或本地化部署时重写埋点。
+- 适合 Agent 场景：trace 的父子 span 结构天然适合表达 `agent.run -> chain step -> LLM generate/tool call -> final answer` 这类多步骤执行过程。
+
+因此，Nexent 的实现原则是：业务代码只产生 OpenTelemetry 标准信号和少量平台兼容属性，平台差异收敛在配置、Collector 和展示层。
+
+## OTel 规范概要
+
+本文中的 OTel 规范通常指 OpenTelemetry Specification 及其配套规范。它不是某个 SDK，也不是某个监控平台，而是一套兼容性契约：规定可观测性数据应该如何生成、命名、传播、处理和导出。各语言 SDK、Collector、后端平台和自动埋点库按这套契约实现，才能保证跨语言、跨框架、跨后端互通。
+
+一句话概括：OTel 规范是 OpenTelemetry 为 traces、metrics、logs 等可观测性数据制定的一套标准，保证不同语言、框架、Collector 和后端之间能够互通。
+
+OpenTelemetry 规范按 signal 维度独立演进。Tracing、Metrics、Logs、Baggage 是当前主要 signal；Profiles 正在发展中，Events 通常作为 Logs 的特定事件形态讨论。每个成熟 signal 通常由 API、SDK、OTLP、Collector 和 instrumentation/contrib 生态共同组成，语义约定用于保证不同语言和组件在观测同类操作时输出一致的数据。
+
+从实现视角看，OTel 规范可以拆成六个常用层面：
+
+| 规范领域 | 核心概念 | 作用 |
+|----------|----------|------|
+| Signals | Traces、Metrics、Logs、Baggage、Profiles | 定义可观测性数据类型。Nexent 当前重点使用 Traces 和 Metrics，Logs 通过应用日志与 span event 补充上下文；Profiles 暂不接入 |
+| API | Tracer、Meter、Logger、Context、Propagator | 面向业务代码和 instrumentation 的稳定接口，业务埋点只依赖 API，不直接绑定具体 exporter |
+| SDK | TracerProvider、MeterProvider、SpanProcessor、MetricReader、Sampler、Resource | 提供采样、批处理、资源描述、导出等运行时能力 |
+| Data Model | Span、Metric、LogRecord、Resource、Instrumentation Scope | 定义 telemetry 数据结构，确保不同语言和平台对数据有一致理解 |
+| Context Propagation | Context、SpanContext、Baggage、Propagator | 在服务、线程、异步任务和下游请求之间传递 trace 上下文，保证调用链可以串起来 |
+| OTLP | OTLP HTTP、OTLP gRPC、protobuf payload | OpenTelemetry 原生传输协议，负责把 traces、metrics、logs 从应用或 Collector 发到后端 |
+| Semantic Conventions | 标准属性名、span name、metric name、单位和枚举值 | 统一 HTTP、数据库、RPC、Messaging 等通用语义；AI 场景中 Nexent 额外兼容 OpenInference 和 Langfuse 属性 |
+
+### Signals
+
+OTel 把可观测性数据抽象为多个 signal。每个 signal 有独立 API 和数据模型，但共享 Resource、Context 和传播机制。
+
+- Traces：由一组具有父子关系的 span 构成，用于描述一次逻辑操作的完整路径。Nexent 用 trace 表达 `agent.run` 到 LLM、Tool、Final Answer 的执行链路。
+- Metrics：由 counter、histogram、gauge 等 instrument 产生，用于描述聚合后的趋势和分布。Nexent 用 metrics 统计 LLM 延迟、TTFT、token 速率和错误数。
+- Logs：以 LogRecord 或传统日志集成的方式表达离散事件。Nexent 当前不把 Logs signal 作为主链路 exporter，但会通过应用日志和 span event 补充错误上下文。
+- Baggage：跨进程传播的键值上下文，适合传递租户、用户、实验分组等需要参与过滤和关联的业务标签。使用时需要控制基数和敏感信息。
+- Profiles：用于记录代码级资源消耗画像，当前在 OpenTelemetry 体系中仍处于发展阶段。Nexent 暂不采集 profiles，避免引入额外运行时开销。
+
+Nexent 的当前落地策略是：Traces 优先，因为 Agent 运行链路需要父子 span 表达；Metrics 保留，用于趋势、告警和 dashboard；Logs 暂以应用日志和 span event 形态承载，后续如需统一日志采集，可以通过 Collector 增加 Logs pipeline。
+
+### API 与 SDK
+
+OTel 区分 API 和 SDK：
+
+- API 是埋点代码依赖的稳定接口，例如 `trace.get_tracer()`、`start_as_current_span()`、`meter.create_counter()`。
+- SDK 是运行时实现，负责创建 provider、处理 span/metric、采样、批量导出和错误处理。
+
+这种分层让库代码可以只依赖 API，而应用在启动时统一配置 SDK。Nexent 的 SDK 埋点遵循这个模型：业务函数只创建 span、event、metric；是否启用、导出到哪里、使用 HTTP 还是 gRPC，全部由 `MonitoringConfig` 和环境变量决定。
+
+这种分层也决定了 Nexent 的边界：
+
+- 业务代码不直接创建 exporter，也不直接引用 Phoenix、Langfuse、Tempo 等平台客户端。
+- 初始化层负责创建 SDK provider、resource、processor、reader 和 exporter。
+- 平台差异通过 provider profile、OTLP endpoint、header 和 Collector pipeline 表达。
+
+### Resource 与 Instrumentation Scope
+
+Resource 描述 telemetry 来源实体，例如服务名、版本、实例、部署环境、项目名。Nexent 当前写入：
+
+- `service.name`：默认 `nexent-backend`
+- `service.version`：当前固定为 `1.0.0`
+- `service.instance.id`：当前固定为 `nexent-instance-1`
+- `telemetry.provider`：当前 provider profile，例如 `otlp`、`phoenix`、`langfuse`、`grafana`
+- `project.name`：当配置 `MONITORING_PROJECT_NAME` 时写入
+
+Instrumentation Scope 描述产生 telemetry 的 instrumentation 库或模块。后续如果需要区分 Nexent SDK、FastAPI 自动埋点、第三方库埋点，可以在 scope 层面辅助过滤。
+
+### Context Propagation
+
+Trace 的核心是上下文传播。一个请求从 HTTP 入口进入后，后续 Agent step、LLM 调用、Tool 调用必须处在同一个 trace 上下文中，监控页面才能显示正确的父子层级。
+
+OTel 的 Context 是执行范围内的不可变上下文容器，用于承载当前 span、baggage 等跨切面数据。Propagator 负责把这些上下文编码到请求边界，例如 HTTP header，再由下游服务还原。对 Nexent 来说，同进程内的 async、generator、线程和工具调用上下文保持比跨服务 header 传播更关键。
+
+Nexent 的关键处理包括：
+
+- 在 `monitor_endpoint` 中覆盖 async coroutine 和 async generator，保证流式响应真正被消费时 span 仍然处于活动状态。
+- 通过 context variable 保存 tenant、user、agent、conversation 等请求级元数据，避免把监控参数侵入业务函数签名。
+- 在 Agent、LLM、Tool span 上写入 OpenInference、Langfuse 和 Nexent 自定义属性，保证不同平台都能基于同一 trace 做展示和过滤。
+
+### Semantic Conventions
+
+Semantic Conventions 规定常见遥测字段的命名和含义，例如 HTTP 方法、URL、状态码、错误类型、metric 单位等。使用语义约定的价值是让不同服务、语言和平台对同一类数据有一致理解。
+
+Nexent 采用三层语义：
+
+- OTel 通用语义：用于 service、resource、HTTP 自动埋点、metric instrument 等基础字段。
+- OpenInference 语义：用于 AI span 类型，例如 `openinference.span.kind=AGENT|CHAIN|LLM|TOOL|RETRIEVER`，适配 Phoenix 等 AI observability 平台。
+- Langfuse OTel 语义：用于 `langfuse.observation.type`、`langfuse.session.id`、`langfuse.user.id`、`langfuse.observation.input/output` 等展示和过滤字段。
+
+当三者存在差异时，Nexent 不把业务 span 绑定到某个平台，而是在同一个 span 上补充多套兼容属性。
+
+### OTLP 与 Collector Pipeline
+
+OTLP 是 OpenTelemetry 原生传输协议，支持 HTTP 和 gRPC。Nexent 后端只需要把数据发到 OTLP endpoint，后端平台差异交给 Collector 处理。
+
+Collector pipeline 通常由三部分组成：
+
+- Receiver：接收应用上报的 OTLP traces/metrics/logs。
+- Processor：执行批处理、内存限制、资源属性补充、过滤、采样等处理。
+- Exporter：把数据转发到 Phoenix、Langfuse、Tempo 或其他 OTLP 兼容后端。
+
+OTLP 是 request/response 风格协议，客户端发送 export 请求，服务端返回成功、部分成功或失败响应。Nexent 当前支持：
+
+- OTLP HTTP：默认协议，便于通过网关、云平台和本地 Collector 接入。
+- OTLP gRPC：适合内部网络或偏高吞吐场景。
+- base endpoint 与 signal endpoint：支持配置 base endpoint，再由 SDK 推导 `/v1/traces` 和 `/v1/metrics`，也支持直接配置 signal-specific endpoint，避免路径重复拼接。
+
+这种架构的好处是：应用侧配置保持稳定，平台迁移和本地化部署主要改 Collector 配置。例如 `grafana` 形态下 traces 转发到 Tempo；`phoenix` 形态下 traces 转发到 Phoenix；`otlp` 形态下先通过 logging exporter 验证数据是否产生。
+
 ## 设计目标
 
 Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成标准 span、event、metric，并通过 OTLP 导出。Phoenix、Langfuse、Grafana Tempo 和标准 OTLP 后端作为可配置 exporter 接入，业务代码不绑定单一平台。
