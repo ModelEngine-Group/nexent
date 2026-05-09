@@ -115,14 +115,17 @@ class SendEmailTool(Tool):
 
             logger.info(f"Connecting to SMTP server {self.smtp_server}:{self.smtp_port}...")
 
-            # Create SSL context
-            context = ssl.create_default_context()
-            context.check_hostname = True
-            context.verify_mode = ssl.CERT_REQUIRED
-
-            # Connect to SMTP server using SSL
-            logger.info("Using SSL connection...")
-            server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=self.timeout)
+            # Connect to SMTP server
+            if self.smtp_port == 465:
+                # Port 465 uses implicit SSL
+                logger.info("Using implicit SSL connection (port 465)...")
+                context = ssl.create_default_context()
+                server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=self.timeout)
+            else:
+                # Port 587 (and others) use STARTTLS
+                logger.info("Using STARTTLS connection...")
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=self.timeout)
+                server.starttls(context=ssl.create_default_context())
 
             logger.info("Logging in...")
             # Login

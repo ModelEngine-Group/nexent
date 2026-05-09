@@ -209,16 +209,13 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
             ssl_verify_fallback = False
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
-                model_factory, model_appid, access_token,display_name=display_name,
-                display_name=display_name,
-                timeout_seconds=timeout_seconds,
+                model_factory, model_appid, access_token, display_name, timeout_seconds,
             )
             if not connectivity and ssl_verify:
                 ssl_verify_fallback = True
                 connectivity = await _perform_connectivity_check(
                     model_name, model_type, model_base_url, model_api_key, False,
-                    display_name=display_name,
-                    timeout_seconds=timeout_seconds,
+                    model_factory, model_appid, access_token, display_name, timeout_seconds,
                 )
         except Exception as e:
             update_data = {
@@ -273,14 +270,12 @@ async def verify_model_config_connectivity(model_config: dict):
         try:
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
-                model_factory, model_appid, access_token
-                timeout_seconds=timeout_seconds,
+                model_factory, model_appid, access_token, None, timeout_seconds,
             )
             if not connectivity and ssl_verify:
                 connectivity = await _perform_connectivity_check(
                     model_name, model_type, model_base_url, model_api_key, False,
-                    model_factory, model_appid, access_token
-                    timeout_seconds=timeout_seconds,
+                    model_factory, model_appid, access_token, None, timeout_seconds,
                 )
             if not connectivity:
                 error_msg = f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."
