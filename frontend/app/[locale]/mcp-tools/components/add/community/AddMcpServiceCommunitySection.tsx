@@ -100,7 +100,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
         open={visible}
         onCancel={controller.close}
         footer={null}
-        width={900}
+        width={560}
       />
     );
   }
@@ -135,7 +135,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
       okText={t("mcpTools.community.quickAddConfirm")}
       cancelText={t("common.cancel")}
       confirmLoading={submitting}
-      width={900}
+      width={560}
     >
       <Form
         form={form}

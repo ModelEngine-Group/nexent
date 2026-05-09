@@ -29,7 +29,7 @@ export default function AddMcpServiceModal({
   if (!open) return null;
 
   /** Fixed body height + inner scroll: avoids size jump on tab/transport change and prevents overflow. */
-  const bodyFrame = "min(95vh, 900px)";
+  const bodyFrame = "min(90vh, 700px)";
 
   const modalWidth =
     tab === McpSource.LOCAL
@@ -51,8 +51,8 @@ export default function AddMcpServiceModal({
           padding: 0,
           display: "flex",
           flexDirection: "column",
-          height: `calc(${bodyFrame} - 10px)`, // Decrease the fixed min height to make the white modal shorter on screen
-          maxHeight: `calc(${bodyFrame} - 10px)`,
+          height: bodyFrame,
+          maxHeight: bodyFrame,
           overflow: "hidden",
         },
       }}
