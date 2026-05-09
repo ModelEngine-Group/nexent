@@ -9,7 +9,7 @@ import {
   disableMcpToolService,
   enableMcpToolService,
 } from "@/services/mcpToolsService";
-import { refreshToolListWithToast } from "./refreshToolListWithToast";
+import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
 import { McpServiceStatus } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 

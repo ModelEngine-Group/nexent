@@ -11,7 +11,7 @@ import {
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
-import { refreshToolListWithToast } from "./refreshToolListWithToast";
+import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
 import {
   buildInitialQuickAddValues,
   collectPackageEnvValues,

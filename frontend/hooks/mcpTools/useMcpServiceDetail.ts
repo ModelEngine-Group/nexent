@@ -13,7 +13,7 @@ import {
   publishCommunityMcpTool,
   updateMcpToolService,
 } from "@/services/mcpToolsService";
-import { refreshToolListWithToast } from "./refreshToolListWithToast";
+import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
 import { isHttpUrl, isSameStringArray } from "@/lib/mcpTools";
 import { McpHealthStatus, McpTransportType } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
