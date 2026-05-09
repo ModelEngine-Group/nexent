@@ -35,6 +35,7 @@ import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { ChatMessageType, MaxStepsInfo } from "@/types/chat";
 import { chatConfig, Opinion } from "@/const/chatConfig";
 import { conversationService } from "@/services/conversationService";
+import { useConfig } from "@/hooks/useConfig";
 import { copyToClipboard } from "@/lib/clipboard";
 import log from "@/lib/logger";
 import { AttachmentItem } from "@/types/chat";
@@ -89,6 +90,10 @@ function ChatStreamFinalMessageInner({
   const ttsServiceRef = useRef<ReturnType<
     typeof conversationService.tts.createTTSService
   > | null>(null);
+
+  // Get TTS model config for model selection
+  const { modelConfig } = useConfig();
+  const ttsModelName = modelConfig?.tts?.modelName;
 
   // Animation effect - message enters and fades in
   useEffect(() => {
@@ -194,9 +199,20 @@ function ChatStreamFinalMessageInner({
     }
 
     try {
-      await ttsServiceRef.current.playAudio(contentToPlay, (status) => {
-        setTtsStatus(status);
-      });
+      await ttsServiceRef.current.playAudio(
+        contentToPlay,
+        (status) => {
+          setTtsStatus(status);
+        },
+        {
+          model_name: ttsModelName,
+          model_factory: modelConfig?.tts?.modelFactory,
+          api_key: modelConfig?.tts?.apiConfig?.apiKey,
+          model_appid: modelConfig?.tts?.modelAppid,
+          access_token: modelConfig?.tts?.accessToken,
+          base_url: modelConfig?.tts?.apiConfig?.modelUrl
+        }
+      );
     } catch (error) {
       setTtsStatus(chatConfig.ttsStatus.ERROR);
       setTimeout(() => setTtsStatus(chatConfig.ttsStatus.IDLE), 2000);

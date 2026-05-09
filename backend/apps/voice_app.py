@@ -1,15 +1,12 @@
-import asyncio
 import logging
 from http import HTTPStatus
 
-from fastapi import APIRouter, WebSocket, HTTPException, Body, Query
+from fastapi import APIRouter, WebSocket, HTTPException
 from fastapi.responses import JSONResponse
 
 from consts.exceptions import (
     VoiceServiceException,
     STTConnectionException,
-    TTSConnectionException,
-    VoiceConfigException
 )
 from consts.model import VoiceConnectivityRequest, VoiceConnectivityResponse
 from services.voice_service import get_voice_service
@@ -26,10 +23,29 @@ async def stt_websocket(websocket: WebSocket):
     logger.info("STT WebSocket connection attempt...")
     await websocket.accept()
     logger.info("STT WebSocket connection accepted")
-    
+
+    # Receive config from client
+    client_config = {}
+    try:
+        msg = await websocket.receive()
+        if msg["type"] == "websocket.receive":
+            import json
+            client_config = json.loads(msg["text"])
+            logger.info(f"Received client config: {client_config}")
+        elif msg["type"] == "bytes":
+            try:
+                import json
+                client_config = json.loads(msg["bytes"].decode('utf-8'))
+                logger.info(f"Received client config from bytes: {client_config}")
+            except Exception as e:
+                logger.warning(f"Failed to parse bytes as JSON: {e}")
+    except Exception as e:
+        logger.error(f"Error receiving config: {e}")
+        client_config = {}
+
     try:
         voice_service = get_voice_service()
-        await voice_service.start_stt_streaming_session(websocket)
+        await voice_service.start_stt_streaming_session(websocket, stt_config=client_config)
     except STTConnectionException as e:
         logger.error(f"STT WebSocket error: {str(e)}")
         await websocket.send_json({"error": str(e)})
@@ -40,55 +56,12 @@ async def stt_websocket(websocket: WebSocket):
         logger.info("STT WebSocket connection closed")
 
 
-@voice_runtime_router.websocket("/tts/ws")
-async def tts_websocket(websocket: WebSocket):
-    """WebSocket endpoint for streaming TTS"""
-    logger.info("TTS WebSocket connection attempt...")
-    await websocket.accept()
-    logger.info("TTS WebSocket connection accepted")
-
-    try:
-        # Receive text from client (single request)
-        data = await websocket.receive_json()
-        text = data.get("text")
-
-        if not text:
-            if websocket.client_state.name == "CONNECTED":
-                await websocket.send_json({"error": "No text provided"})
-            return
-
-        # Stream TTS audio to WebSocket
-        voice_service = get_voice_service()
-        await voice_service.stream_tts_to_websocket(websocket, text)
-
-    except TTSConnectionException as e:
-        logger.error(f"TTS WebSocket error: {str(e)}")
-        await websocket.send_json({"error": str(e)})
-    except Exception as e:
-        logger.error(f"TTS WebSocket error: {str(e)}")
-        await websocket.send_json({"error": str(e)})
-    finally:
-        logger.info("TTS WebSocket connection closed")
-        # Ensure connection is properly closed
-        if websocket.client_state.name == "CONNECTED":
-            await websocket.close()
-
-
 @voice_config_router.post("/connectivity")
 async def check_voice_connectivity(request: VoiceConnectivityRequest):
-    """
-    Check voice service connectivity
-    
-    Args:
-        request: VoiceConnectivityRequest containing model_type
-        
-    Returns:
-        VoiceConnectivityResponse with connectivity status
-    """
+    """Check voice service connectivity."""
     try:
         voice_service = get_voice_service()
         connected = await voice_service.check_voice_connectivity(request.model_type)
-        
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content=VoiceConnectivityResponse(
@@ -99,25 +72,10 @@ async def check_voice_connectivity(request: VoiceConnectivityRequest):
         )
     except VoiceServiceException as e:
         logger.error(f"Voice service error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=str(e)
-        )
-    except (STTConnectionException, TTSConnectionException) as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except STTConnectionException as e:
         logger.error(f"Voice connectivity error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail=str(e)
-        )
-    except VoiceConfigException as e:
-        logger.error(f"Voice configuration error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected voice service error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Voice service error"
-        )
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Voice service error")
