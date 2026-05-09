@@ -24,6 +24,7 @@ import { clearAgentNewMark } from "@/services/agentConfigService";
 import { a2aClientService } from "@/services/a2aService";
 import A2AServerSettingsPanel from "../a2a/A2AServerSettingsPanel";
 import log from "@/lib/logger";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
 interface AgentListProps {
   agentList: Agent[];
@@ -429,18 +430,8 @@ export default function AgentList({
                             <Tooltip
                               title={(() => {
                                 const reasons = agent.unavailable_reasons || [];
-                                if (reasons.includes('agent_not_found')) {
-                                  return t('subAgentPool.tooltip.unavailableAgent');
-                                } else if (reasons.includes('tool_unavailable')) {
-                                  return t('toolPool.tooltip.unavailableTool');
-                                } else if (reasons.includes('duplicate_name')) {
-                                  return t('agent.error.nameExists', { name });
-                                } else if (reasons.includes('duplicate_display_name')) {
-                                  return t('agent.error.displayNameExists', { displayName });
-                                } else if (reasons.includes('model_unavailable')) {
-                                  return t('agent.error.modelUnavailable');
-                                }
-                                return t('subAgentPool.tooltip.unavailableAgent'); // fallback
+                                const labels = getUnavailableReasonLabels(reasons, t);
+                                return labels.join(", ") || t('subAgentPool.tooltip.unavailableAgent');
                               })()}
                             >
                               <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0 cursor-pointer" />
