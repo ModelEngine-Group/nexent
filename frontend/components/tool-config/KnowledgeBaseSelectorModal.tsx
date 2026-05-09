@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
+import { ToolKbType } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 
 interface KnowledgeBaseSelectorProps {
@@ -26,7 +27,7 @@ interface KnowledgeBaseSelectorProps {
   onClose: () => void;
   onConfirm: (selectedKnowledgeBases: KnowledgeBase[]) => void;
   selectedIds: string[];
-  toolType: "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search";
+  toolType: ToolKbType;
   title?: string;
   maxSelect?: number;
   showCreateButton?: boolean;
@@ -42,7 +43,7 @@ interface KnowledgeBaseSelectorProps {
 }
 
 function getKnowledgeBaseSourcesForTool(
-  toolType: "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search"
+  toolType: ToolKbType
 ): string[] {
   switch (toolType) {
     case "knowledge_base_search":

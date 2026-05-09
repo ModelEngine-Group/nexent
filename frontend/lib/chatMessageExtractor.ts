@@ -76,7 +76,7 @@ export function extractAssistantMsgFromResponse(
             content: "",
             expanded: false,
             contents: [],
-            metrics: "",
+            metrics: null,
             thinking: { content: "", expanded: false },
             code: { content: "", expanded: false },
             output: { content: "", expanded: false },
@@ -173,7 +173,11 @@ export function extractAssistantMsgFromResponse(
         case chatConfig.messageTypes.TOKEN_COUNT: {
           const currentStep = steps[steps.length - 1];
           if (currentStep) {
-            currentStep.metrics = msg.content;
+            try {
+              currentStep.metrics = JSON.parse(msg.content);
+            } catch {
+              currentStep.metrics = null;
+            }
           }
           break;
         }
@@ -208,6 +212,34 @@ export function extractAssistantMsgFromResponse(
               expanded: true,
               timestamp: Date.now(),
             });
+          }
+          break;
+        }
+
+        case chatConfig.messageTypes.MAX_STEPS_REACHED: {
+          // Parse the max steps reached event data for historical messages
+          try {
+            const maxStepsData = JSON.parse(msg.content);
+            const currentStep = steps[steps.length - 1];
+            if (currentStep) {
+              currentStep.maxStepsInfo = {
+                completedSteps: maxStepsData.completedSteps || 0,
+                maxSteps: maxStepsData.maxSteps || 0,
+                message: maxStepsData.message || "",
+              };
+              const contentId = `max-steps-${Date.now()}-${Math.random()
+                .toString(36)
+                .substring(2, 7)}`;
+              currentStep.contents.push({
+                id: contentId,
+                type: chatConfig.messageTypes.MAX_STEPS_REACHED,
+                content: msg.content,
+                expanded: true,
+                timestamp: Date.now(),
+              });
+            }
+          } catch (e) {
+            log.error(t("extractMsg.cannotParseMaxStepsData"), e);
           }
           break;
         }
@@ -268,6 +300,7 @@ export function extractUserMsgFromResponse(
         size: item.size || 0,
         object_name: item.object_name,
         url: item.url,
+        presigned_url: item.presigned_url,  // Preserve presigned_url for MCP tool access
         description: item.description,
       };
     });

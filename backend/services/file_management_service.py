@@ -4,7 +4,7 @@ import logging
 import os
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import UploadFile
@@ -36,6 +36,7 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import save_upload_file
 
 from nexent import MessageObserver
+from nexent.multi_modal.utils import parse_s3_url
 from nexent.core.models import OpenAILongContextModel
 
 # Create upload directory
@@ -50,7 +51,115 @@ _conversion_locks_guard = asyncio.Lock()
 logger = logging.getLogger("file_management_service")
 
 
-async def upload_files_impl(destination: str, file: List[UploadFile], folder: str = None, index_name: Optional[str] = None) -> tuple:
+def check_file_access(object_name: str, user_id: Optional[str]) -> bool:
+    """
+    Check if user has permission to access the file.
+
+    Access rules:
+    - knowledge_base/*: All authenticated users can access
+    - attachments/{user_id}/*: Only the owner (user_id) can access
+    - preview/*: Accessible if the original file is accessible
+
+    Args:
+        object_name: File object name in storage
+        user_id: Current user ID
+
+    Returns:
+        True if access is allowed, False otherwise
+    """
+    if not user_id:
+        return False
+
+    if object_name.startswith("knowledge_base/"):
+        # Knowledge base files: all authenticated users can access
+        return True
+
+    # Check if file is in user's attachments folder
+    # Pattern: attachments/{user_id}/*
+    if object_name.startswith(f"attachments/{user_id}/"):
+        return True
+
+    # For backward compatibility, allow access to files in root attachments folder
+    # Pattern: attachments/{filename} (no user_id subfolder)
+    if object_name.startswith("attachments/") and "/" not in object_name.replace("attachments/", "", 1):
+        # Old format: attachments/filename (no subdirectory)
+        # Allow access for backward compatibility
+        return True
+
+    return False
+
+
+def check_file_access_batch(object_names: List[str], user_id: Optional[str]) -> Dict[str, bool]:
+    """
+    Batch check file access permissions.
+
+    Args:
+        object_names: List of file object names
+        user_id: Current user ID
+
+    Returns:
+        Dict mapping object_name to access permission (True/False)
+    """
+    return {obj_name: check_file_access(obj_name, user_id) for obj_name in object_names}
+
+
+def validate_s3_url_access(object_name: str, user_id: Optional[str]) -> None:
+    """
+    Validate if user has permission to access the S3 URL.
+
+    Args:
+        object_name: File object name in storage (extracted from S3 URL)
+        user_id: Current user ID
+
+    Raises:
+        PermissionError: If user doesn't have permission to access the file
+    """
+    if not user_id:
+        raise PermissionError("User authentication required to access files")
+
+    if not check_file_access(object_name, user_id):
+        logger.warning(f"[validate_s3_url_access] Access denied: object_name={object_name}, user_id={user_id}")
+        raise PermissionError(f"Access denied: You don't have permission to access this file ({object_name})")
+
+
+def validate_urls_access(urls: List[str], user_id: Optional[str]) -> None:
+    """
+    Validate if user has permission to access the given URLs.
+
+    Supports S3 URLs (s3://bucket/key or /bucket/key format).
+
+    Args:
+        urls: List of URLs to validate (S3, HTTP, or HTTPS)
+        user_id: Current user ID
+
+    Raises:
+        PermissionError: If user doesn't have permission to access any of the files
+    """
+    if not urls:
+        return
+
+    for url in urls:
+        if not url:
+            continue
+
+        # Only validate S3 URLs (MinIO storage)
+        # HTTP/HTTPS URLs are external resources and are not subject to MinIO access control
+        if url.startswith("s3://"):
+            try:
+                _, object_name = parse_s3_url(url)
+                validate_s3_url_access(object_name, user_id)
+            except ValueError as e:
+                logger.warning(f"[validate_urls_access] Failed to parse S3 URL: {url}, error: {e}")
+                raise PermissionError(f"Invalid S3 URL format: {url}")
+        elif url.startswith("/") and not url.startswith("//"):
+            # Handle /bucket/key format (absolute path style)
+            parts = url.strip("/").split("/", 1)
+            if len(parts) == 2:
+                bucket, object_name = parts
+                validate_s3_url_access(object_name, user_id)
+
+
+async def upload_files_impl(destination: str, file: List[UploadFile], folder: str = None, index_name: Optional[str] = None, user_id: Optional[str] = None) -> tuple:
     """
     Upload files to local storage or MinIO based on destination.
 
@@ -58,6 +167,8 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
         destination: "local" or "minio"
         file: List of UploadFile objects
         folder: Folder name for MinIO uploads
+        index_name: Knowledge base index for conflict resolution
+        user_id: User ID for attachment path isolation
 
     Returns:
         tuple: (errors, uploaded_file_paths, uploaded_filenames)
@@ -84,7 +195,20 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
                     errors.append(f"Failed to save file: {f.filename}")
 
     elif destination == "minio":
-        minio_results = await upload_to_minio(files=file, folder=folder)
+        # Determine actual folder path based on file type
+        # knowledge_base: accessible by all authenticated users
+        # other folders (attachments): user-isolated path (attachments/{user_id}/...)
+        if folder == "knowledge_base":
+            actual_folder = "knowledge_base"
+        else:
+            # User isolation for personal attachments
+            if user_id:
+                actual_folder = f"attachments/{user_id}"
+            else:
+                # Fallback to old behavior if no user_id provided
+                actual_folder = folder or "attachments"
+
+        minio_results = await upload_to_minio(files=file, folder=actual_folder)
         for result in minio_results:
             if result.get("success"):
                 uploaded_filenames.append(result.get("file_name"))
@@ -137,8 +261,18 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
     return errors, uploaded_file_paths, uploaded_filenames
 
 
-async def upload_to_minio(files: List[UploadFile], folder: str) -> List[dict]:
-    """Helper function to upload files to MinIO and return results."""
+async def upload_to_minio(files: List[UploadFile], folder: str, user_id: Optional[str] = None) -> List[dict]:
+    """
+    Helper function to upload files to MinIO and return results.
+
+    Args:
+        files: List of files to upload
+        folder: Storage folder path (will be prefixed with user_id if user_id is provided for attachments)
+        user_id: User ID for attachment path isolation
+
+    Returns:
+        List of upload results
+    """
     results = []
     for f in files:
         try:
@@ -148,11 +282,23 @@ async def upload_to_minio(files: List[UploadFile], folder: str) -> List[dict]:
             # Convert file content to BytesIO object
             file_obj = BytesIO(file_content)
 
+            # Determine actual folder path
+            # knowledge_base: no user isolation
+            # other folders: append user_id to path for isolation
+            if folder == "knowledge_base":
+                actual_folder = "knowledge_base"
+            else:
+                if user_id:
+                    actual_folder = f"attachments/{user_id}"
+                else:
+                    actual_folder = folder or "attachments"
+
             # Upload file
             result = upload_fileobj(
                 file_obj=file_obj,
                 file_name=f.filename or "",
-                prefix=folder
+                prefix=actual_folder,
+                file_size=len(file_content)
             )
 
             # Reset file pointer for potential re-reading

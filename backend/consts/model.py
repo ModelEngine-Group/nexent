@@ -52,6 +52,52 @@ class UserDeleteRequest(BaseModel):
     new_owner_id: Optional[str] = None
 
 
+class OAuthProviderDefinition(BaseModel):
+    name: str
+    display_name: str
+    icon: str
+
+    authorize_url: str
+    authorize_method: str = "GET"
+    authorize_params: Dict[str, str] = {}
+    authorize_fragment: str = ""
+    authorize_param_map: Dict[str, str] = {
+        "client_id": "client_id",
+        "redirect_uri": "redirect_uri",
+        "scope": "scope",
+        "state": "state",
+    }
+    encode_redirect_uri: bool = False
+
+    token_url: str
+    token_method: str = "POST"
+    token_params_map: Dict[str, str] = {
+        "client_id": "client_id",
+        "client_secret": "client_secret",
+        "code": "code",
+        "grant_type": "grant_type",
+    }
+    token_extra_params: Dict[str, str] = {}
+    token_error_key: Optional[str] = None
+    token_error_message_key: Optional[str] = None
+    token_response_id_key: Optional[str] = None
+
+    userinfo_url: str
+    userinfo_auth_scheme: str = "Bearer"
+    userinfo_params: Dict[str, str] = {}
+    userinfo_field_map: Dict[str, str] = {
+        "id": "id",
+        "email": "email",
+        "username": "login",
+    }
+    userinfo_needs_email_fetch: bool = False
+    userinfo_email_url: Optional[str] = None
+
+    client_id_env: str
+    client_secret_env: str
+    enabled_check: Optional[str] = None
+
+
 # Response models for model management
 class ModelResponse(BaseModel):
     code: int = 200
@@ -72,6 +118,9 @@ class ModelRequest(BaseModel):
     expected_chunk_size: Optional[int] = None
     maximum_chunk_size: Optional[int] = None
     chunk_batch: Optional[int] = None
+    # STT specific fields
+    model_appid: Optional[str] = None
+    access_token: Optional[str] = None
 
 
 class ProviderModelRequest(BaseModel):
@@ -101,14 +150,23 @@ class SingleModelConfig(BaseModel):
     dimension: Optional[int] = None
 
 
+class STTModelConfig(BaseModel):
+    """STT model specific configuration with factory, appid, and access token fields"""
+    modelName: str
+    displayName: str
+    apiConfig: Optional[ModelApiConfig] = None
+    modelFactory: Optional[str] = None
+    modelAppid: Optional[str] = None
+    accessToken: Optional[str] = None
+
+
 class ModelConfig(BaseModel):
     llm: SingleModelConfig
     embedding: SingleModelConfig
     multiEmbedding: SingleModelConfig
     rerank: SingleModelConfig
     vlm: SingleModelConfig
-    stt: SingleModelConfig
-    tts: SingleModelConfig
+    stt: STTModelConfig
 
 
 class AppConfig(BaseModel):
@@ -128,10 +186,16 @@ class GlobalConfig(BaseModel):
 
 
 # Request models
+class HistoryItem(BaseModel):
+    role: str
+    content: str
+    minio_files: Optional[List[Dict[str, Any]]] = None
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
-    history: Optional[List[Dict]] = None
+    history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
@@ -252,6 +316,8 @@ class GeneratePromptRequest(BaseModel):
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
+    knowledge_base_display_names: Optional[List[str]] = Field(
+        None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
 
 
 class GenerateTitleRequest(BaseModel):
@@ -282,6 +348,7 @@ class AgentInfoRequest(BaseModel):
     related_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
+    enable_context_manager: Optional[bool] = None
     version_no: int = 0
 
 
@@ -437,7 +504,7 @@ class MemoryAgentShareMode(str, Enum):
 class VoiceConnectivityRequest(BaseModel):
     """Request model for voice service connectivity check"""
     model_type: str = Field(...,
-                            description="Type of model to check ('stt' or 'tts')")
+                            description="Type of model to check ('stt')")
 
 
 class VoiceConnectivityResponse(BaseModel):
@@ -446,19 +513,6 @@ class VoiceConnectivityResponse(BaseModel):
                             description="Whether the service is connected")
     model_type: str = Field(..., description="Type of model checked")
     message: str = Field(..., description="Status message")
-
-
-class TTSRequest(BaseModel):
-    """Request model for TTS text-to-speech conversion"""
-    text: str = Field(..., min_length=1,
-                      description="Text to convert to speech")
-    stream: bool = Field(True, description="Whether to stream the audio")
-
-
-class TTSResponse(BaseModel):
-    """Response model for TTS conversion"""
-    status: str = Field(..., description="Status of the TTS conversion")
-    message: Optional[str] = Field(None, description="Additional message")
 
 
 class ToolValidateRequest(BaseModel):
@@ -689,15 +743,18 @@ class ManageTenantModelCreateRequest(BaseModel):
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create model for")
     model_repo: Optional[str] = Field('', description="Model repository path")
     model_name: str = Field(..., description="Model name")
-    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding', 'vlm', 'tts', 'stt')")
+    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding', 'vlm', 'stt')")
     api_key: Optional[str] = Field('', description="API key for the model")
     base_url: Optional[str] = Field('', description="Base URL for the model API")
     max_tokens: Optional[int] = Field(0, description="Maximum tokens for the model")
     display_name: Optional[str] = Field('', description="Display name for the model")
-    model_factory: Optional[str] = Field('OpenAI-API-Compatible', description="Model factory/provider name")
+    model_factory: Optional[str] = Field(None, description="Model factory/vendor for the model")
     expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
     maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
     chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
+    # STT specific fields
+    model_appid: Optional[str] = Field(None, description="Application ID for STT models (e.g., Volcano Engine)")
+    access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
 
 
 class ManageTenantModelUpdateRequest(BaseModel):
@@ -711,10 +768,13 @@ class ManageTenantModelUpdateRequest(BaseModel):
     base_url: Optional[str] = Field(None, description="Base URL for the model API")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens for the model")
     display_name: Optional[str] = Field(None, description="New display name for the model")
-    model_factory: Optional[str] = Field(None, description="Model factory/provider name")
+    model_factory: Optional[str] = Field(None, description="Model factory/vendor for the model")
     expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
     maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
     chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
+    # STT specific fields
+    model_appid: Optional[str] = Field(None, description="Application ID for STT models")
+    access_token: Optional[str] = Field(None, description="Access token for STT models")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):
@@ -772,6 +832,7 @@ class VersionListItemResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number if rollback")
     source_type: Optional[str] = Field(None, description="Source type: NORMAL / ROLLBACK")
     status: str = Field(..., description="Version status: RELEASED / DISABLED / ARCHIVED")
+    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
 
@@ -791,6 +852,7 @@ class VersionDetailResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number")
     source_type: Optional[str] = Field(None, description="Source type")
     status: str = Field(..., description="Version status")
+    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
     agent_info: Optional[dict] = Field(None, description="Agent info snapshot")
@@ -831,3 +893,69 @@ class CurrentVersionResponse(BaseModel):
     release_note: Optional[str] = Field(None, description="Release notes")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
+
+
+# Skill Management Data Models
+# ---------------------------------------------------------------------------
+class SkillCreateRequest(BaseModel):
+    """Request model for creating a skill via JSON."""
+    name: str
+    description: str
+    content: str
+    tool_ids: Optional[List[int]] = []
+    tool_names: Optional[List[str]] = []
+    tags: Optional[List[str]] = []
+    source: Optional[str] = "custom"
+    params: Optional[Dict[str, Any]] = None
+    files: Optional[List[Dict[str, str]]] = Field(
+        default_factory=list,
+        description="Additional skill files beyond SKILL.md. "
+        "Each entry has 'path' (relative path) and 'content'. "
+        "SKILL.md may also be sent here; the 'content' field is the primary SKILL.md source."
+    )
+
+
+class SkillFileData(BaseModel):
+    """A single file within a skill."""
+    path: str = Field(description="Relative file path within the skill (e.g. 'SKILL.md', 'scripts/run.py')")
+    content: str = Field(description="Full file content")
+
+
+class SkillUpdateRequest(BaseModel):
+    """Request model for updating a skill."""
+    description: Optional[str] = None
+    content: Optional[str] = None
+    tool_ids: Optional[List[int]] = None
+    tool_names: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    source: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+    files: Optional[List[SkillFileData]] = Field(
+        default_factory=list,
+        description="Updated skill files. Each entry has file_path and content. "
+        "Pass 'SKILL.md' here to update the main skill file; other files are written as-is."
+    )
+
+
+class SkillResponse(BaseModel):
+    """Response model for skill data."""
+    skill_id: int
+    name: str
+    description: str
+    content: str
+    tool_ids: List[int]
+    tags: List[str]
+    source: str
+    params: Optional[Dict[str, Any]] = None
+    created_by: Optional[str] = None
+    create_time: Optional[str] = None
+    updated_by: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class SkillCreateInteractiveRequest(BaseModel):
+    """Request model for interactive skill creation via LLM agent."""
+    user_request: str
+    existing_skill: Optional[Dict[str, Any]] = None
+    complexity: Optional[str] = "simple"
+    language: Optional[str] = "zh"

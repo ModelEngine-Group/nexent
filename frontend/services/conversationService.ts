@@ -193,7 +193,11 @@ export const conversationService = {
       const pendingChunksRef = { current: [] as Uint8Array[] };
 
       // Play audio (main entry)
-      const playAudio = async (text: string, onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void): Promise<void> => {
+      const playAudio = async (
+        text: string,
+        onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void,
+        ttsConfig?: { tenant_id?: string; model_name?: string; model_factory?: string; api_key?: string; model_appid?: string; access_token?: string; base_url?: string }
+      ): Promise<void> => {
         if (!text) return;
 
         try {
@@ -202,7 +206,7 @@ export const conversationService = {
           pendingChunksRef.current = [];
 
           if (!window.MediaSource) {
-            await playAudioTraditional(text, onStatusChange);
+            await playAudioTraditional(text, onStatusChange, ttsConfig);
             return;
           }
 
@@ -214,7 +218,7 @@ export const conversationService = {
 
           ws.onopen = () => {
             if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ text }));
+              ws.send(JSON.stringify({ text, ...ttsConfig }));
             }
           };
 
@@ -468,7 +472,11 @@ export const conversationService = {
       };
 
       // Traditional playback method
-      const playAudioTraditional = async (text: string, onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void) => {
+      const playAudioTraditional = async (
+        text: string,
+        onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void,
+        ttsConfig?: { tenant_id?: string; model_name?: string; model_factory?: string; api_key?: string; model_appid?: string; access_token?: string; base_url?: string }
+      ) => {
         audioChunksRef.current = [];
         const wsUrl = getWebSocketUrl(API_ENDPOINTS.tts.ws);
         const ws = new WebSocket(wsUrl);
@@ -476,7 +484,7 @@ export const conversationService = {
 
         ws.onopen = () => {
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ text }));
+            ws.send(JSON.stringify({ text, ...ttsConfig }));
           }
         };
 

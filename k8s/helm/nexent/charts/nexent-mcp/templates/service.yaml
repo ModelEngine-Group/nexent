@@ -9,5 +9,8 @@ spec:
     - port: 5011
       targetPort: 5011
       name: http
+    - port: 5015
+      targetPort: 5015
+      name: http-alt
   selector:
     app: nexent-mcp

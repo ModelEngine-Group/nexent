@@ -7,9 +7,12 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 # TODO: Analyze every variable if this is used
-# Test voice file path
+# Test voice file path (WAV format for volcengine STT)
 TEST_VOICE_PATH = os.path.join(os.path.dirname(
     os.path.dirname(__file__)), 'assets', 'test.wav')
+# Test PCM file path (raw PCM format for Ali STT)
+TEST_PCM_PATH = os.path.join(os.path.dirname(
+    os.path.dirname(__file__)), 'assets', 'test_voice.pcm')
 
 
 # Vector database providers
@@ -72,6 +75,12 @@ SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 # JWT secret for verifying Supabase-signed access tokens.
 # GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
 SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+
+
+# OAuth Configuration
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
+OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 
 
 # ===== To be migrated to frontend configuration =====
@@ -354,12 +363,19 @@ MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
 
-# Northbound API External URL (used for A2A Agent Card URLs)
-# When accessed through reverse proxy, set this to the public-facing URL
-# Falls back to http://localhost:5013 for local development
-_northbound_url = os.getenv("NORTHBOUND_EXTERNAL_URL", "")
-NORTHBOUND_EXTERNAL_URL = _northbound_url.rstrip("/") if _northbound_url else "http://localhost:5013"
+# Northbound API public base URL (used for A2A agent cards and external file proxy links)
+NORTHBOUND_EXTERNAL_URL = os.getenv("NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
 
 
 # APP Version
-APP_VERSION = "v2.0.1"
+APP_VERSION = "v2.1.0"
+
+
+# Skill Creation Streaming Configuration
+STREAMABLE_CONTENT_TYPES = frozenset([
+    "model_output_thinking",
+    "model_output_code",
+    "model_output_deep_thinking",
+    "tool",
+    "execution_logs",
+])

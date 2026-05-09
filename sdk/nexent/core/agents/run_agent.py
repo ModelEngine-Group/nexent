@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextvars import copy_context
 from threading import Thread
 from typing import Any, Dict, Union
 
@@ -26,13 +27,11 @@ def _detect_transport(url: str) -> str:
     """
     url_stripped = url.strip()
 
-    # Check URL ending to determine transport type
     if url_stripped.endswith("/sse"):
         return "sse"
     elif url_stripped.endswith("/mcp"):
         return "streamable-http"
 
-    # Default to streamable-http for unrecognized formats
     return "streamable-http"
 
 
@@ -63,17 +62,13 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
         result = {"url": url, "transport": transport}
 
-        # Support authorization parameter - convert to headers format
         if "authorization" in mcp_host_item and "headers" in mcp_host_item:
-            # Both provided: merge headers with authorization
             headers = mcp_host_item["headers"].copy() if isinstance(mcp_host_item["headers"], dict) else {}
             headers["Authorization"] = mcp_host_item["authorization"]
             result["headers"] = headers
         elif "authorization" in mcp_host_item:
-            # Only authorization provided: create headers dict
             result["headers"] = {"Authorization": mcp_host_item["authorization"]}
         elif "headers" in mcp_host_item:
-            # Only headers provided: use as is
             result["headers"] = mcp_host_item["headers"]
 
         return result
@@ -93,13 +88,16 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             )
             agent = nexent.create_single_agent(agent_run_info.agent_config)
             nexent.set_agent(agent)
+
+            if getattr(agent_run_info, 'context_manager', None) is not None:
+                agent.context_manager = agent_run_info.context_manager
+
             nexent.add_history_to_agent(agent_run_info.history)
             nexent.agent_run_with_observer(
                 query=agent_run_info.query, reset=False)
         else:
             agent_run_info.observer.add_message(
                 "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
-            # Normalize MCP host configurations to support both string and dict formats
             mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
 
             with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
@@ -111,6 +109,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 )
                 agent = nexent.create_single_agent(agent_run_info.agent_config)
                 nexent.set_agent(agent)
+
+                if getattr(agent_run_info, 'context_manager', None) is not None:
+                    agent.context_manager = agent_run_info.context_manager
+
                 nexent.add_history_to_agent(agent_run_info.history)
                 nexent.agent_run_with_observer(
                     query=agent_run_info.query, reset=False)
@@ -131,7 +133,8 @@ async def agent_run(agent_run_info: AgentRunInfo):
     observer = agent_run_info.observer
 
     monitoring_manager.add_span_event("agent_run.started")
-    thread_agent = Thread(target=agent_run_thread, args=(agent_run_info,))
+    ctx = copy_context()
+    thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
     thread_agent.start()
     monitoring_manager.add_span_event("agent_run.thread_started")
 
@@ -143,13 +146,10 @@ async def agent_run(agent_run_info: AgentRunInfo):
         for message in cached_message:
             yield message
             monitoring_manager.add_span_event("agent_run.yield_message")
-            # Prevent artificial slowdown of model streaming output
             if len(cached_message) < 8:
-                # Ensure streaming output has some time interval
                 await asyncio.sleep(0.05)
         await asyncio.sleep(0.1)
 
-    # Ensure all messages are sent
     cached_message = observer.get_cached_message()
     for message in cached_message:
         yield message

@@ -5,43 +5,24 @@ import { useTranslation } from 'react-i18next';
 import { Document, Page, pdfjs } from 'react-pdf';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { InputNumber } from 'antd';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
+import {
+  ChevronLeft,
+  ChevronRight,
   Plus,
   Minus,
   Minimize2,
   Maximize2,
   Menu,
-  X 
+  X
 } from 'lucide-react';
+import { OutlineItem, PdfViewerProps, ScaleMode, ViewportAnchor } from '@/types/file';
+import { ignoreAbortError, getPageWrapperStyle } from '@/lib/filePreviewUtils';
 import log from '@/lib/logger';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url,
 ).toString();
-
-interface OutlineItem {
-  title: string;
-  dest: string | null;
-  items?: OutlineItem[];
-  pageNumber?: number;
-}
-
-interface PdfViewerProps {
-  url: string;
-  fileName: string;
-}
-
-type ScaleMode = 'fit-width' | 'fit-page' | 'actual-size' | 'custom';
-
-interface ViewportAnchor {
-  page: number;
-  pageOffsetRatio: number;
-}
 
 const PDF_DOCUMENT_OPTIONS = { rangeChunkSize: 65536 };
 
@@ -57,17 +38,6 @@ function binarySearchPageAtOffset(cumulativeHeights: number[], offset: number): 
     else hi = mid - 1;
   }
   return lo + 1;
-}
-
-function ignoreAbortError(error: unknown): boolean {
-  const errorName = typeof error === 'object' && error !== null && 'name' in error
-    ? String((error as { name?: unknown }).name)
-    : '';
-  const errorMessage = typeof error === 'object' && error !== null && 'message' in error
-    ? String((error as { message?: unknown }).message)
-    : '';
-
-  return errorName === 'AbortException' || errorMessage.includes('TextLayer task cancelled');
 }
 
 function buildRawOutline(items: any[]): OutlineItem[] {
@@ -117,23 +87,6 @@ async function resolveOutlineItemPageNumber(
     log.warn('Failed to get page number for outline item:', err);
     return undefined;
   }
-}
-
-function getPageWrapperStyle(
-  isRendered: boolean,
-  hasMeasuredHeight: boolean,
-  placeholderHeight: number,
-  placeholderWidth: number,
-) {
-  if (!isRendered) {
-    return { height: placeholderHeight, width: placeholderWidth };
-  }
-
-  if (hasMeasuredHeight) {
-    return undefined;
-  }
-
-  return { minHeight: placeholderHeight, width: placeholderWidth };
 }
 
 export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {

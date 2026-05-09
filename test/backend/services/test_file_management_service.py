@@ -545,6 +545,31 @@ class TestUploadToMinio:
             mock_file.seek.assert_called_once_with(0)
             mock_logger.error.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_upload_to_minio_file_size_parameter_passed(self):
+        """Test that file_size parameter is correctly calculated and passed to upload_fileobj"""
+        from backend.services.file_management_service import upload_to_minio
+
+        # Create mock UploadFile with known content size
+        test_content = b"test file content with known size"
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=test_content)
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_fileobj', MagicMock(return_value={
+            "success": True, "file_name": "test.txt", "object_name": "folder/test.txt"
+        })) as mock_upload:
+            results = await upload_to_minio(files=[mock_file], folder="folder")
+
+            assert len(results) == 1
+            assert results[0]["success"] is True
+            mock_upload.assert_called_once()
+            # Verify file_size parameter equals the actual content length
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["file_size"] == len(test_content)
+            assert call_kwargs["file_size"] == 33  # Explicit check for known content size
+
 
 class TestGetFileUrlImpl:
     """Test cases for get_file_url_impl function"""
@@ -717,6 +742,410 @@ class TestListFilesImpl:
             mock_list.assert_called_once_with(prefix="folder/")
 
 
+class TestCheckFileAccess:
+    """Test cases for check_file_access function"""
+
+    def test_check_file_access_no_user_id_returns_false(self):
+        """Access denied when user_id is None or empty"""
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access("knowledge_base/file.txt", None) is False
+        assert check_file_access("attachments/user123/file.txt", "") is False
+        assert check_file_access("any/path.txt", None) is False
+
+    def test_check_file_access_knowledge_base_allows_access(self):
+        """All authenticated users can access knowledge_base files"""
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access("knowledge_base/file.txt", "user123") is True
+        assert check_file_access("knowledge_base/subfolder/doc.pdf", "user456") is True
+        assert check_file_access("knowledge_base/", "any_user") is True
+
+    def test_check_file_access_user_attachment_allows_owner(self):
+        """Users can access files in their own attachments folder"""
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access("attachments/user123/file.txt", "user123") is True
+        assert check_file_access("attachments/user123/subfolder/doc.pdf", "user123") is True
+
+    def test_check_file_access_user_attachment_denies_others(self):
+        """Users cannot access files in other users' attachments folders"""
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access("attachments/user123/file.txt", "user456") is False
+        assert check_file_access("attachments/other/file.txt", "user123") is False
+
+    def test_check_file_access_backward_compatibility_root_attachments(self):
+        """Old format attachments/filename (no subdirectory) allows access for backward compatibility"""
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access("attachments/file.txt", "any_user") is True
+        assert check_file_access("attachments/document.pdf", "any_user") is True
+
+    def test_check_file_access_deep_attachments_denies_non_matching_user(self):
+        """Deeply nested attachments/other/user/file paths should deny non-matching users"""
+        from backend.services.file_management_service import check_file_access
+
+        # Pattern: attachments/{user_id}/{filename} where user_id matches
+        assert check_file_access("attachments/user123/document.docx", "user123") is True
+        # Pattern: attachments/otheruser/{filename} - user123 is neither "otheruser" nor matching
+        assert check_file_access("attachments/otheruser/document.docx", "user123") is False
+
+    def test_check_file_access_denies_arbitrary_paths(self):
+        """Arbitrary paths outside knowledge_base and attachments are denied"""
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access("private/file.txt", "user123") is False
+        assert check_file_access("system/config.json", "user123") is False
+        assert check_file_access("preview/file.pdf", "user123") is False
+
+
+class TestCheckFileAccessBatch:
+    """Test cases for check_file_access_batch function"""
+
+    def test_check_file_access_batch_empty_list(self):
+        """Empty list returns empty dict"""
+        from backend.services.file_management_service import check_file_access_batch
+
+        result = check_file_access_batch([], "user123")
+        assert result == {}
+
+    def test_check_file_access_batch_mixed_permissions(self):
+        """Batch returns dict with correct permissions for each object"""
+        from backend.services.file_management_service import check_file_access_batch
+
+        object_names = [
+            "knowledge_base/file.txt",
+            "attachments/user123/doc.pdf",
+            "attachments/other/doc.pdf",
+            "private/file.txt"
+        ]
+        result = check_file_access_batch(object_names, "user123")
+
+        assert result["knowledge_base/file.txt"] is True
+        assert result["attachments/user123/doc.pdf"] is True
+        assert result["attachments/other/doc.pdf"] is False
+        assert result["private/file.txt"] is False
+
+
+class TestValidateS3UrlAccess:
+    """Test cases for validate_s3_url_access function"""
+
+    def test_validate_s3_url_access_no_user_id_raises_permission_error(self):
+        """PermissionError raised when user_id is None or empty"""
+        from backend.services.file_management_service import validate_s3_url_access
+
+        with pytest.raises(PermissionError) as exc_info:
+            validate_s3_url_access("knowledge_base/file.txt", None)
+        assert "User authentication required" in str(exc_info.value)
+
+        with pytest.raises(PermissionError) as exc_info:
+            validate_s3_url_access("knowledge_base/file.txt", "")
+        assert "User authentication required" in str(exc_info.value)
+
+    def test_validate_s3_url_access_valid_access_no_exception(self):
+        """No exception raised when user has valid access"""
+        from backend.services.file_management_service import validate_s3_url_access
+
+        # Should not raise
+        validate_s3_url_access("knowledge_base/file.txt", "user123")
+        validate_s3_url_access("attachments/user123/file.txt", "user123")
+
+    def test_validate_s3_url_access_invalid_access_raises_permission_error(self):
+        """PermissionError raised when user doesn't have access"""
+        from backend.services.file_management_service import validate_s3_url_access
+
+        with pytest.raises(PermissionError) as exc_info:
+            validate_s3_url_access("attachments/other/file.txt", "user123")
+        assert "Access denied" in str(exc_info.value)
+        assert "you don't have permission" in str(exc_info.value).lower()
+
+
+class TestValidateUrlsAccess:
+    """Test cases for validate_urls_access function"""
+
+    def test_validate_urls_access_empty_list_no_exception(self):
+        """Empty list returns without exception"""
+        from backend.services.file_management_service import validate_urls_access
+
+        # Should not raise
+        validate_urls_access([], "user123")
+
+    def test_validate_urls_access_none_urls_skipped(self):
+        """None or empty strings in list are skipped"""
+        from backend.services.file_management_service import validate_urls_access
+
+        # Should not raise
+        validate_urls_access([None, "", "knowledge_base/file.txt"], "user123")
+
+    def test_validate_urls_access_http_https_urls_not_validated(self):
+        """HTTP/HTTPS URLs are external resources and not subject to MinIO access control"""
+        from backend.services.file_management_service import validate_urls_access
+
+        # Should not raise even for inaccessible-looking URLs
+        validate_urls_access([
+            "https://example.com/file.pdf",
+            "http://other.com/doc.docx"
+        ], "user123")
+
+    def test_validate_urls_access_s3_url_valid_access_no_exception(self):
+        """S3 URL with valid access doesn't raise"""
+        from backend.services.file_management_service import validate_urls_access
+
+        # Should not raise
+        validate_urls_access(["s3://bucket/knowledge_base/file.txt"], "user123")
+
+    def test_validate_urls_access_s3_url_invalid_access_raises(self):
+        """S3 URL with invalid access raises PermissionError"""
+        from backend.services.file_management_service import validate_urls_access
+
+        with pytest.raises(PermissionError) as exc_info:
+            validate_urls_access(["s3://bucket/attachments/other/file.txt"], "user123")
+        assert "Access denied" in str(exc_info.value)
+
+    def test_validate_urls_access_invalid_s3_url_format_raises(self):
+        """Invalid S3 URL format raises PermissionError"""
+        from backend.services.file_management_service import validate_urls_access
+
+        # Missing bucket/key format
+        with pytest.raises(PermissionError) as exc_info:
+            validate_urls_access(["s3://only-bucket"], "user123")
+        assert "Invalid S3 URL format" in str(exc_info.value)
+
+    def test_validate_urls_access_bucket_key_format_valid(self):
+        """Path-style URL /bucket/key format with valid access doesn't raise"""
+        from backend.services.file_management_service import validate_urls_access
+
+        # Should not raise
+        validate_urls_access(["/bucket/knowledge_base/file.txt"], "user123")
+
+    def test_validate_urls_access_bucket_key_format_invalid_access(self):
+        """Path-style URL /bucket/key format with invalid access raises"""
+        from backend.services.file_management_service import validate_urls_access
+
+        with pytest.raises(PermissionError) as exc_info:
+            validate_urls_access(["/bucket/attachments/other/file.txt"], "user123")
+        assert "Access denied" in str(exc_info.value)
+
+    def test_validate_urls_access_bucket_key_format_trailing_slash(self):
+        """Path-style URL with only bucket (no key) is skipped or handled gracefully"""
+        from backend.services.file_management_service import validate_urls_access
+
+        # Single slash bucket - no key
+        validate_urls_access(["//bucket"], "user123")  # Starts with //
+
+    def test_validate_urls_access_mixed_s3_and_external(self):
+        """Mixed S3 and external URLs - S3 URLs are validated, others skipped"""
+        from backend.services.file_management_service import validate_urls_access
+
+        # Should not raise - S3 URL is valid, HTTPS is external
+        validate_urls_access([
+            "https://external.com/file.pdf",
+            "s3://bucket/knowledge_base/file.txt"
+        ], "user123")
+
+        # Should raise - S3 URL is invalid
+        with pytest.raises(PermissionError):
+            validate_urls_access([
+                "https://external.com/file.pdf",
+                "s3://bucket/attachments/other/file.txt"
+            ], "user123")
+
+
+class TestUploadFilesImplMinioFolderLogic:
+    """Test cases for MinIO folder logic in upload_files_impl (lines 199-212)"""
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_minio_knowledge_base_folder(self):
+        """When folder is 'knowledge_base', uses 'knowledge_base' without user isolation"""
+        from backend.services.file_management_service import upload_files_impl
+
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_to_minio', AsyncMock(return_value=[
+            {"success": True, "file_name": "test.txt", "object_name": "knowledge_base/test.txt"}
+        ])) as mock_upload:
+            errors, uploaded_paths, uploaded_names = await upload_files_impl(
+                destination="minio", file=[mock_file], folder="knowledge_base", user_id="user123")
+
+            assert errors == []
+            # Verify knowledge_base was passed without user_id prefix
+            mock_upload.assert_called_once()
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["folder"] == "knowledge_base"
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_minio_user_isolation_with_user_id(self):
+        """When folder is not knowledge_base and user_id provided, uses attachments/{user_id}"""
+        from backend.services.file_management_service import upload_files_impl
+
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_to_minio', AsyncMock(return_value=[
+            {"success": True, "file_name": "test.txt", "object_name": "attachments/user123/test.txt"}
+        ])) as mock_upload:
+            errors, uploaded_paths, uploaded_names = await upload_files_impl(
+                destination="minio", file=[mock_file], folder="documents", user_id="user123")
+
+            assert errors == []
+            # Verify user_id was used to construct attachments/{user_id}
+            mock_upload.assert_called_once()
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["folder"] == "attachments/user123"
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_minio_fallback_without_user_id(self):
+        """When folder is not knowledge_base and no user_id, falls back to folder or 'attachments'"""
+        from backend.services.file_management_service import upload_files_impl
+
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        # With folder provided but no user_id
+        with patch('backend.services.file_management_service.upload_to_minio', AsyncMock(return_value=[
+            {"success": True, "file_name": "test.txt", "object_name": "custom_folder/test.txt"}
+        ])) as mock_upload:
+            errors, uploaded_paths, uploaded_names = await upload_files_impl(
+                destination="minio", file=[mock_file], folder="custom_folder", user_id=None)
+
+            mock_upload.assert_called_once()
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["folder"] == "custom_folder"
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_minio_fallback_none_folder(self):
+        """When folder is None and no user_id, falls back to 'attachments'"""
+        from backend.services.file_management_service import upload_files_impl
+
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_to_minio', AsyncMock(return_value=[
+            {"success": True, "file_name": "test.txt", "object_name": "attachments/test.txt"}
+        ])) as mock_upload:
+            errors, uploaded_paths, uploaded_names = await upload_files_impl(
+                destination="minio", file=[mock_file], folder=None, user_id=None)
+
+            mock_upload.assert_called_once()
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["folder"] == "attachments"
+
+
+class TestUploadToMinioFolderLogic:
+    """Test cases for MinIO folder logic in upload_to_minio (lines 265-296)"""
+
+    @pytest.mark.asyncio
+    async def test_upload_to_minio_knowledge_base_folder(self):
+        """When folder is 'knowledge_base', uses 'knowledge_base' without user isolation"""
+        from backend.services.file_management_service import upload_to_minio
+
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_fileobj', MagicMock(return_value={
+            "success": True, "file_name": "test.txt", "object_name": "knowledge_base/test.txt"
+        })) as mock_upload:
+            results = await upload_to_minio(files=[mock_file], folder="knowledge_base", user_id="user123")
+
+            assert len(results) == 1
+            assert results[0]["success"] is True
+            # Verify knowledge_base was passed without user_id prefix
+            mock_upload.assert_called_once()
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["prefix"] == "knowledge_base"
+
+    @pytest.mark.asyncio
+    async def test_upload_to_minio_user_isolation_with_user_id(self):
+        """When folder is not knowledge_base and user_id provided, uses attachments/{user_id}"""
+        from backend.services.file_management_service import upload_to_minio
+
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_fileobj', MagicMock(return_value={
+            "success": True, "file_name": "test.txt", "object_name": "attachments/user456/test.txt"
+        })) as mock_upload:
+            results = await upload_to_minio(files=[mock_file], folder="documents", user_id="user456")
+
+            assert len(results) == 1
+            assert results[0]["success"] is True
+            # Verify user_id was used to construct attachments/{user_id}
+            mock_upload.assert_called_once()
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["prefix"] == "attachments/user456"
+
+    @pytest.mark.asyncio
+    async def test_upload_to_minio_fallback_without_user_id(self):
+        """When folder is not knowledge_base and no user_id, uses folder as-is"""
+        from backend.services.file_management_service import upload_to_minio
+
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_fileobj', MagicMock(return_value={
+            "success": True, "file_name": "test.txt", "object_name": "my_folder/test.txt"
+        })) as mock_upload:
+            results = await upload_to_minio(files=[mock_file], folder="my_folder", user_id=None)
+
+            mock_upload.assert_called_once()
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["prefix"] == "my_folder"
+
+    @pytest.mark.asyncio
+    async def test_upload_to_minio_fallback_none_folder(self):
+        """When folder is None and no user_id, falls back to 'attachments'"""
+        from backend.services.file_management_service import upload_to_minio
+
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_fileobj', MagicMock(return_value={
+            "success": True, "file_name": "test.txt", "object_name": "attachments/test.txt"
+        })) as mock_upload:
+            results = await upload_to_minio(files=[mock_file], folder=None, user_id=None)
+
+            mock_upload.assert_called_once()
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["prefix"] == "attachments"
+
+    @pytest.mark.asyncio
+    async def test_upload_to_minio_attachments_folder_with_user_id(self):
+        """Attachments folder with user_id uses attachments/{user_id} path"""
+        from backend.services.file_management_service import upload_to_minio
+
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch('backend.services.file_management_service.upload_fileobj', MagicMock(return_value={
+            "success": True, "file_name": "test.txt", "object_name": "attachments/abc123/test.txt"
+        })) as mock_upload:
+            results = await upload_to_minio(files=[mock_file], folder="attachments", user_id="abc123")
+
+            mock_upload.assert_called_once()
+            call_kwargs = mock_upload.call_args[1]
+            assert call_kwargs["prefix"] == "attachments/abc123"
+
+
 class TestEdgeCasesAndErrorHandling:
     """Test cases for edge cases and error handling scenarios"""
 
@@ -860,7 +1289,7 @@ class TestConcurrencyAndFileTypes:
 
     @pytest.mark.asyncio
     async def test_upload_to_minio_with_none_folder(self):
-        """Test upload_to_minio with None folder"""
+        """Test upload_to_minio with None folder falls back to 'attachments'"""
         # Create mock UploadFile
         mock_file = MagicMock()
         mock_file.filename = "test.txt"
@@ -868,23 +1297,23 @@ class TestConcurrencyAndFileTypes:
         mock_file.seek = AsyncMock()
 
         with patch('backend.services.file_management_service.upload_fileobj', MagicMock(return_value={
-            "success": True, "file_name": "test.txt", "object_name": "test.txt"
+            "success": True, "file_name": "test.txt", "object_name": "attachments/test.txt"
         })) as mock_upload:
-            # Execute with None folder
-            results = await upload_to_minio(files=[mock_file], folder=None)
+            # Execute with None folder - should fall back to 'attachments'
+            results = await upload_to_minio(files=[mock_file], folder=None, user_id=None)
 
             # Assertions
             assert len(results) == 1
             assert results[0]["success"] is True
             assert results[0]["file_name"] == "test.txt"
             mock_upload.assert_called_once()
-            # Verify that None was passed as prefix
+            # Verify that 'attachments' was passed as prefix (fallback when folder is None)
             call_args = mock_upload.call_args
-            assert call_args[1]["prefix"] is None
+            assert call_args[1]["prefix"] == "attachments"
 
     @pytest.mark.asyncio
     async def test_upload_to_minio_with_empty_folder(self):
-        """Test upload_to_minio with empty folder string"""
+        """Test upload_to_minio with empty folder string falls back to 'attachments'"""
         # Create mock UploadFile
         mock_file = MagicMock()
         mock_file.filename = "test.txt"
@@ -892,19 +1321,19 @@ class TestConcurrencyAndFileTypes:
         mock_file.seek = AsyncMock()
 
         with patch('backend.services.file_management_service.upload_fileobj', MagicMock(return_value={
-            "success": True, "file_name": "test.txt", "object_name": "test.txt"
+            "success": True, "file_name": "test.txt", "object_name": "attachments/test.txt"
         })) as mock_upload:
-            # Execute with empty folder
-            results = await upload_to_minio(files=[mock_file], folder="")
+            # Execute with empty folder - empty string is falsy, falls back to 'attachments'
+            results = await upload_to_minio(files=[mock_file], folder="", user_id=None)
 
             # Assertions
             assert len(results) == 1
             assert results[0]["success"] is True
             assert results[0]["file_name"] == "test.txt"
             mock_upload.assert_called_once()
-            # Verify that empty string was passed as prefix
+            # Verify that 'attachments' was passed as prefix (fallback when folder is empty/falsy)
             call_args = mock_upload.call_args
-            assert call_args[1]["prefix"] == ""
+            assert call_args[1]["prefix"] == "attachments"
 
 
 class TestGetLlmModel:

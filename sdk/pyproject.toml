@@ -48,7 +48,10 @@ dependencies = [
     "linkup-sdk",
     "paramiko>=3.4.0",
     "linkup-sdk",
-    "mem0ai>=0.1.117"
+    "mem0ai==0.1.117",
+    "pymysql>=1.1.0",
+    "psycopg2-binary>=2.9.9",
+    "pymssql>=2.2.11",
 ]
 
 [tool.uv]

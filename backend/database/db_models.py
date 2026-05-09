@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, ForeignKey, ForeignKeyConstraint, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, ForeignKey, ForeignKeyConstraint, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
@@ -178,6 +178,86 @@ class ModelRecord(TableBase):
         Boolean, default=True, doc="Whether to verify SSL certificates when connecting to this model API. Default is true. Set to false for local services without SSL support.")
     chunk_batch = Column(
         Integer, doc="Batch size for concurrent embedding requests during document chunking")
+    model_appid = Column(
+        String(100), doc="Application ID for model authentication (used by some STT/TTS providers like Volcano Engine)")
+    access_token = Column(
+        String(100), doc="Access token for model authentication (used by some STT/TTS providers like Volcano Engine)")
+
+
+class ModelMonitoringRecord(SimpleTableBase):
+    """
+    Model monitoring record table - stores per-request LLM performance metrics.
+    Uses SimpleTableBase to avoid audit fields (created_by, updated_by, etc.).
+    """
+
+    __tablename__ = "model_monitoring_record_t"
+    __table_args__ = (
+        Index("ix_monitoring_model_id", "model_id"),
+        Index("ix_monitoring_tenant_id", "tenant_id"),
+        Index("ix_monitoring_agent_id", "agent_id"),
+        Index("ix_monitoring_create_time", "create_time"),
+        Index("ix_monitoring_is_error", "is_error"),
+        Index("ix_monitoring_model_time", "model_id", "create_time"),
+        Index("ix_monitoring_model_type", "model_type"),
+        {"schema": SCHEMA},
+    )
+
+    monitoring_id = Column(
+        Integer,
+        Sequence("model_monitoring_record_t_monitoring_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Monitoring record ID, auto-increment primary key",
+    )
+    model_id = Column(
+        Integer, doc="Model ID, foreign key reference to model_record_t.model_id"
+    )
+    model_name = Column(
+        String(100), nullable=False, doc="Model name at the time of the request"
+    )
+    agent_id = Column(Integer, doc="Agent ID that initiated the request")
+    agent_name = Column(
+        String(100), doc="Agent name at the time of the request")
+    conversation_id = Column(
+        Integer, doc="Conversation ID associated with this request"
+    )
+    tenant_id = Column(
+        String(100), nullable=False, doc="Tenant ID for multi-tenant isolation"
+    )
+    user_id = Column(String(100), doc="User ID who initiated the request")
+    request_duration_ms = Column(
+        Integer, doc="Total request duration in milliseconds")
+    ttft_ms = Column(Integer, doc="Time to first token in milliseconds")
+    input_tokens = Column(Integer, doc="Number of input tokens")
+    output_tokens = Column(Integer, doc="Number of output tokens")
+    total_tokens = Column(Integer, doc="Total tokens (input + output)")
+    generation_rate = Column(
+        Float, doc="Token generation rate (tokens per second)")
+    is_streaming = Column(
+        Boolean, default=False, doc="Whether the request used streaming"
+    )
+    is_success = Column(
+        Boolean, default=True, doc="Whether the request completed successfully"
+    )
+    is_error = Column(
+        Boolean, default=False, doc="Whether the request resulted in an error"
+    )
+    error_type = Column(
+        String(50), doc="Error type classification (e.g., auth_error, rate_limit)"
+    )
+    error_message = Column(Text, doc="Error message details")
+    retry_count = Column(Integer, default=0, doc="Number of retry attempts")
+    operation = Column(
+        String(50), doc="Operation type (e.g., llm_completion, llm_chat)"
+    )
+    create_time = Column(
+        TIMESTAMP(timezone=False), server_default=func.now(), doc="Record creation time"
+    )
+    delete_flag = Column(String(1), default="N", doc="Soft delete flag: Y/N")
+    display_name = Column(String(200), doc="User-facing model display name")
+    model_type = Column(
+        String(20), default="llm", doc="Model type: llm, embedding, multi_embedding"
+    )
 
 
 class ToolInfo(TableBase):
@@ -237,6 +317,7 @@ class AgentInfo(TableBase):
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
     ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    enable_context_manager = Column(Boolean, default=False, doc="Whether to enable context management (compression) for this agent")
 
 
 class ToolInstance(TableBase):
@@ -493,6 +574,7 @@ class AgentVersion(TableBase):
     source_version_no = Column(Integer, doc="Source version number. If this version is a rollback, record the source version")
     source_type = Column(String(30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
     status = Column(String(30), default="RELEASED", doc="Version status: RELEASED / DISABLED / ARCHIVED")
+    is_a2a = Column(Boolean, default=False, doc="Whether this version is published as an A2A Server agent")
 
 
 class UserTokenInfo(TableBase):
@@ -521,6 +603,32 @@ class UserTokenUsageLog(TableBase):
     call_function_name = Column(String(100), doc="API function name being called")
     related_id = Column(Integer, doc="Related resource ID (e.g., conversation_id)")
     meta_data = Column(JSONB, doc="Additional metadata for this usage log entry, stored as JSON")
+
+
+class UserOAuthAccount(TableBase):
+    __tablename__ = "user_oauth_account_t"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_user_id", name="uq_oauth_provider_user"),
+        {"schema": SCHEMA},
+    )
+
+    oauth_account_id = Column(
+        Integer,
+        Sequence("user_oauth_account_t_oauth_account_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="OAuth account ID, primary key",
+    )
+    user_id = Column(String(100), nullable=False, doc="Supabase user UUID")
+    provider = Column(
+        String(30), nullable=False, doc="OAuth provider name: github, wechat"
+    )
+    provider_user_id = Column(
+        String(200), nullable=False, doc="User ID from the OAuth provider"
+    )
+    provider_email = Column(String(255), doc="Email address from the OAuth provider")
+    provider_username = Column(String(200), doc="Display name from the OAuth provider")
+    tenant_id = Column(String(100), doc="Tenant ID at time of linking")
 
 
 class SkillInfo(TableBase):

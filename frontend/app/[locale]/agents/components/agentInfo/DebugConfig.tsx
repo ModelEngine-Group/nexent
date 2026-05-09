@@ -214,7 +214,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
               title: "Error",
               content: cachedError,
               expanded: true,
-              metrics: "",
+              metrics: null,
               thinking: { content: "", expanded: true },
               code: { content: "", expanded: true },
               output: { content: cachedError, expanded: true },

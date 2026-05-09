@@ -31,6 +31,7 @@ export function useKnowledgeBasesForToolConfig(
     | "dify_search"
     | "datamate_search"
     | "idata_search"
+    | "haotian_search"
     | null = null,
   config?: {
     serverUrl?: string;
@@ -180,6 +181,7 @@ export function usePrefetchKnowledgeBases() {
         | "dify_search"
         | "datamate_search"
         | "idata_search"
+        | "haotian_search"
         | null,
       difyConfig?: {
         serverUrl?: string;

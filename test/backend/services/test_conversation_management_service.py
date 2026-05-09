@@ -42,11 +42,27 @@ class Template:
 jinja2_mod.StrictUndefined = StrictUndefined
 jinja2_mod.Template = Template
 sys.modules["jinja2"] = jinja2_mod
-# Stub nexent.core.agents.agent_model to satisfy imports in consts.model
+# Stub nexent.core.agents.agent_model to satisfy imports in consts.model and agent_run_manager
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 agent_model_mod.ToolConfig = object
+agent_model_mod.AgentRunInfo = object
 sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
 sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+
+# Stub nexent.core.agents.agent_context for agent_run_manager import
+agent_context_mod = types.ModuleType("nexent.core.agents.agent_context")
+agent_context_mod.ContextManager = object
+agent_context_mod.ContextManagerConfig = object
+sys.modules["nexent.core.agents.agent_context"] = agent_context_mod
+
+# Stub backend.agents.agent_run_manager to avoid importing the real module
+agent_run_manager_mod = types.ModuleType("backend.agents.agent_run_manager")
+mock_agent_run_manager = MagicMock()
+mock_agent_run_manager.clear_conversation_context_manager = MagicMock()
+agent_run_manager_mod.agent_run_manager = mock_agent_run_manager
+agent_run_manager_mod.AgentRunManager = object
+sys.modules["backend.agents"] = types.ModuleType("backend.agents")
+sys.modules["backend.agents.agent_run_manager"] = agent_run_manager_mod
 # Stub nexent.core.utils.observer ProcessType and MessageObserver used by conversation service
 observer_mod = types.ModuleType("nexent.core.utils.observer")
 observer_mod.MessageObserver = lambda *a, **k: types.SimpleNamespace(add_model_new_token=lambda t: None, add_model_reasoning_content=lambda r: None, flush_remaining_tokens=lambda: None)
@@ -65,7 +81,11 @@ consts_model_mod = types.ModuleType("consts.model")
 class AgentRequest:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
-            setattr(self, k, v)
+            # Convert history dicts to HistoryItem objects
+            if k == "history" and isinstance(v, list):
+                setattr(self, k, [item if isinstance(item, HistoryItem) else HistoryItem(**item) for item in v])
+            else:
+                setattr(self, k, v)
 class ConversationResponse:
     def __init__(self, code=0, message="", data=None):
         self.code = code
@@ -98,6 +118,17 @@ consts_model_mod.MessageRequest = MessageRequest
 sys.modules["consts.model"] = consts_model_mod
 # Also ensure backend.consts.model resolves to our stub for tests that import via backend.consts.model
 sys.modules["backend.consts.model"] = consts_model_mod
+
+
+class HistoryItem:
+    """Stub for Pydantic HistoryItem model."""
+    def __init__(self, role: str = "", content: str = "", minio_files: list = None, **kwargs):
+        self.role = role
+        self.content = content
+        self.minio_files = minio_files or []
+
+
+consts_model_mod.HistoryItem = HistoryItem
 
 # Stub database.client to avoid import-time DB helpers
 db_client_stub = types.ModuleType("database.client")
@@ -132,6 +163,26 @@ prompt_mod = types.ModuleType("utils.prompt_template_utils")
 prompt_mod.get_generate_title_prompt_template = lambda language="zh": {"USER_PROMPT":"{{question}}", "SYSTEM_PROMPT":"SYS"}
 sys.modules["utils.prompt_template_utils"] = prompt_mod
 
+# Stub storage components
+storage_factory_mod = types.ModuleType("nexent.storage.storage_client_factory")
+storage_factory_mod.create_storage_client_from_config = lambda *a, **k: storage_client_mock
+sys.modules["nexent.storage.storage_client_factory"] = storage_factory_mod
+
+minio_config_mod = types.ModuleType("nexent.storage.minio_config")
+class _DummyMinIOStorageConfig:
+    def validate(self): pass
+minio_config_mod.MinIOStorageConfig = _DummyMinIOStorageConfig
+sys.modules["nexent.storage.minio_config"] = minio_config_mod
+
+# Stub backend.database module so patch can find backend.database.client
+backend_database_mod = types.ModuleType("backend.database")
+
+# Create backend.database.client stub
+backend_database_client_mod = types.ModuleType("backend.database.client")
+backend_database_client_mod.MinioClient = lambda *a, **k: minio_client_mock
+sys.modules["backend.database.client"] = backend_database_client_mod
+
+sys.modules["backend.database"] = backend_database_mod
 
 from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
 import unittest
@@ -678,6 +729,49 @@ class TestConversationManagementService(unittest.TestCase):
             "How to use Python effectively?", self.tenant_id, "en")
         mock_update_title.assert_called_once_with(
             123, "Python Tips", self.user_id)
+
+
+class TestCallLlmForTitleMonitoring(unittest.TestCase):
+    """Verify call_llm_for_title sets monitoring context and operation."""
+
+    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.tenant_config_manager')
+    @patch('backend.services.conversation_management_service.set_monitoring_operation')
+    @patch('backend.services.conversation_management_service.set_monitoring_context')
+    def test_sets_monitoring_context_with_tenant_id(
+            self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
+        mock_config_mgr.get_model_config.return_value = {
+            "model_repo": "openai", "model_name": "gpt-4",
+            "base_url": "http://x", "api_key": "k",
+            "display_name": "GPT-4",
+        }
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_model_cls.return_value = mock_llm
+
+        call_llm_for_title("hello?", "tenant-123", "en")
+
+        mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id=None)
+
+    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.tenant_config_manager')
+    @patch('backend.services.conversation_management_service.set_monitoring_operation')
+    @patch('backend.services.conversation_management_service.set_monitoring_context')
+    def test_sets_monitoring_operation_with_display_name(
+            self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
+        mock_config_mgr.get_model_config.return_value = {
+            "model_repo": "openai", "model_name": "gpt-4",
+            "base_url": "http://x", "api_key": "k",
+            "display_name": "GPT-4",
+        }
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_model_cls.return_value = mock_llm
+
+        call_llm_for_title("hello?", "tenant-123", "zh")
+
+        mock_op.assert_called_once_with(
+            "title_generation", display_name="GPT-4")
 
 
 if __name__ == '__main__':

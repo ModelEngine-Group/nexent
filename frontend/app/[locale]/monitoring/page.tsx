@@ -7,13 +7,8 @@ import { Activity } from "lucide-react";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 
-/**
- * MonitoringContent - Agent monitoring and operations coming soon page
- * This will allow admins to monitor and operate agents (health, logs, alerts)
- */
 export default function MonitoringContent({}) {
   const { t } = useTranslation("common");
-  // Use custom hook for common setup flow logic
   const { pageVariants, pageTransition } = useSetupFlow();
   return (
     <>
@@ -27,7 +22,6 @@ export default function MonitoringContent({}) {
           className="w-full h-full flex items-center justify-center"
         >
           <div className="flex flex-col items-center justify-center space-y-6 p-8 max-w-md text-center">
-            {/* Icon */}
             <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
@@ -37,7 +31,6 @@ export default function MonitoringContent({}) {
               <Activity className="h-12 w-12 text-white" />
             </motion.div>
 
-            {/* Title */}
             <motion.h1
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -47,7 +40,6 @@ export default function MonitoringContent({}) {
               {t("monitoring.comingSoon.title")}
             </motion.h1>
 
-            {/* Description */}
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -57,7 +49,6 @@ export default function MonitoringContent({}) {
               {t("monitoring.comingSoon.description")}
             </motion.p>
 
-            {/* Feature list */}
             <motion.ul
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -84,7 +75,6 @@ export default function MonitoringContent({}) {
               </li>
             </motion.ul>
 
-            {/* Coming soon badge */}
             <motion.div
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}

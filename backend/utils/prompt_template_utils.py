@@ -58,6 +58,10 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'skill_creation_simple': {
             LANGUAGE["ZH"]: 'backend/prompts/skill_creation_simple_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/skill_creation_simple_en.yaml'
+        },
+        'skill_creation_complicated': {
+            LANGUAGE["ZH"]: 'backend/prompts/skill_creation_complicate_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/skill_creation_complicate_en.yaml'
         }
     }
 
@@ -77,7 +81,7 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
     # Go up one level from utils to backend, then use the template path
     backend_dir = os.path.dirname(current_dir)
     absolute_template_path = os.path.join(backend_dir, template_path.replace('backend/', ''))
-    
+
     # Read and return template content
     with open(absolute_template_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
@@ -152,30 +156,42 @@ def get_cluster_summary_reduce_prompt_template(language: str = LANGUAGE["ZH"]) -
 
 def get_skill_creation_simple_prompt_template(
     language: str = LANGUAGE["ZH"],
-    existing_skill: Optional[Dict[str, Any]] = None
+    existing_skill: Optional[Dict[str, Any]] = None,
+    complexity: str = "simple"
 ) -> Dict[str, str]:
     """
-    Get skill creation simple prompt template with Jinja2 rendering.
+    Get skill creation prompt template with Jinja2 rendering.
 
     This template is structured YAML with system_prompt and user_prompt sections.
     Supports Jinja2 template syntax for dynamic content based on existing_skill.
+    Supports both simple and complicated skill creation templates.
 
     Args:
         language: Language code ('zh' or 'en')
         existing_skill: Optional dict containing existing skill info for update scenarios.
             Expected keys: name, description, tags, content
+        complexity: Complexity level ('simple' or 'complicated')
 
     Returns:
         Dict[str, str]: Template with keys 'system_prompt' and 'user_prompt', rendered with variables
     """
     from jinja2 import Template
 
+    # Select template based on complexity
     template_path_map = {
-        LANGUAGE["ZH"]: 'backend/prompts/skill_creation_simple_zh.yaml',
-        LANGUAGE["EN"]: 'backend/prompts/skill_creation_simple_en.yaml'
+        "simple": {
+            LANGUAGE["ZH"]: 'backend/prompts/skill_creation_simple_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/skill_creation_simple_en.yaml'
+        },
+        "complicated": {
+            LANGUAGE["ZH"]: 'backend/prompts/skill_creation_complicate_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/skill_creation_complicate_en.yaml'
+        }
     }
 
-    template_path = template_path_map.get(language, template_path_map[LANGUAGE["ZH"]])
+    # Default to simple if complexity is not recognized
+    template_type = template_path_map.get(complexity, template_path_map["simple"])
+    template_path = template_type.get(language, template_type[LANGUAGE["ZH"]])
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     backend_dir = os.path.dirname(current_dir)

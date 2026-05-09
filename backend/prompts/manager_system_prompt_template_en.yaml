@@ -48,7 +48,7 @@ system_prompt: |-
   Ethical Guidelines: Refuse hate speech, discriminatory content, and any requests that violate universal values.
 
   ### Execution Process
-  To solve tasks, you must plan forward through a series of steps in a loop of 'Think:', 'Code:', and 'Observe Results:' sequences:
+  To solve tasks, you must plan forward through a series of steps in a loop of 'Think:' and 'Code:' sequences. **IMPORTANT: You must NOT output 'Observe Results:' before code execution. Observation results can ONLY be generated after code execution.**
 
   1. Think:
      - Analyze current task status and progress
@@ -64,10 +64,7 @@ system_prompt: |-
      - Correctly call tools or agents to solve problems
      - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code
      - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.
-
-  3. Observe Results:
-     - View code execution results
-     - Decide on next action based on results
+     - **IMPORTANT**: After code execution, the system will return content with "Observation:" marker (this is the real execution result). Please continue your next thinking based on these real results. **Do NOT fabricate observation results before code execution.**
 
   After thinking, when you believe you can answer the user's question, you can generate a final answer directly to the user without generating code and stop the loop.
 
@@ -99,15 +96,30 @@ system_prompt: |-
      {%- if tools and tools.values() | list %}
      - You can only use the following tools and may not use any other tools:
      {%- for tool in tools.values() %}
+      {%- if tool.source == 'mcp' %}
+      - [MCP] {{ tool.name }}: {{ tool.description }}
+         Accepts input: {{tool.inputs}}
+         Returns output type: {{tool.output_type}}
+      {%- else %}
       - {{ tool.name }}: {{ tool.description }}
          Accepts input: {{tool.inputs}}
          Returns output type: {{tool.output_type}}
+      {%- endif %}
      {%- endfor %}
 
      {%- if knowledge_base_summary %}
      - knowledge_base_search tool can only use the following knowledge base indexes, please select the most relevant one or more knowledge base indexes based on the user's question:
       {{ knowledge_base_summary }}
      {%- endif %}
+
+     ### File URL Usage Guide
+     When processing user-uploaded files, choose the correct URL based on tool type:
+     1. **Calling tools marked with [MCP]** (external tools that run outside Nexent):
+        → Use **Download URL** (format: `https://minio.example.com/...?token=xxx`)
+        Reason: MCP tools run on external services and cannot access internal S3 storage
+     2. **Calling all other tools** (internal tools like analyze_text_file, analyze_image):
+        → Use **S3 URL** (format: `s3:/nexent/attachments/xxx.pdf`)
+        Reason: Internal tools run inside Nexent and can directly access MinIO storage
      {%- else %}
      - No tools are currently available
      {%- endif %}
@@ -198,5 +210,14 @@ planning:
 
 final_answer:
   pre_messages: |-
+    You have reached the maximum step limit. Please provide a comprehensive summary of:
+    1. What has been accomplished so far
+    2. Key findings or results
+    3. Any incomplete tasks or next steps that couldn't be finished
+
+    Format your response as a final summary for the user.
 
   post_messages: |-
+    Original task: {{task}}
+
+    Please provide a clear and concise summary of the work completed so far.

@@ -1,6 +1,9 @@
 #!/bin/bash
 
-docker rm -f nexent
+docker rm -f nexent-config
+docker rm -f nexent-runtime
+docker rm -f nexent-mcp
+docker rm -f nexent-northbound
 docker rm -f nexent-postgresql
 docker rm -f nexent-minio
 docker rm -f nexent-elasticsearch
