@@ -190,6 +190,18 @@ class STTConnectionException(Exception):
     pass
 
 
+class TTSConnectionException(Exception):
+    """Raised when TTS service connection fails."""
+
+    pass
+
+
+class VoiceConfigException(Exception):
+    """Raised when voice configuration is invalid."""
+
+    pass
+
+
 class ToolExecutionException(Exception):
     """Raised when mcp tool execution failed."""
 
