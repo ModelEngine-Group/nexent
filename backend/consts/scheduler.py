@@ -6,9 +6,9 @@ from datetime import timedelta
 
 # 核心频率配置：包含值、时间间隔、显示标签；这是唯一的数据源，所有其他格式都从这里生成
 SUMMARY_FREQUENCY_CONFIG = [
-    {"value": "3min", "timedelta": timedelta(minutes=3), "label": "3min (测试)"},
+    {"value": "1h", "timedelta": timedelta(hours=1), "label": "1h"},
     {"value": "3h", "timedelta": timedelta(hours=3), "label": "3h"},
-    {"value": "5h", "timedelta": timedelta(hours=5), "label": "5h"},
+    {"value": "6h", "timedelta": timedelta(hours=6), "label": "6h"},
     {"value": "1d", "timedelta": timedelta(days=1), "label": "1d"},
     {"value": "1w", "timedelta": timedelta(weeks=1), "label": "1w"},
 ]
@@ -25,4 +25,4 @@ SUMMARY_FREQUENCY_OPTIONS_FOR_API = [
 ] + [{"value": item["value"], "label": item["value"]} for item in SUMMARY_FREQUENCY_CONFIG]
 
 # Scheduler检查间隔（秒）
-SCHEDULER_CHECK_INTERVAL_SECONDS = 1 * 60  # 测试：1分钟，正式改为 30 * 60
+SCHEDULER_CHECK_INTERVAL_SECONDS = 30 * 60
