@@ -98,6 +98,9 @@ async def tts_websocket(websocket: WebSocket):
         access_token = client_config.get("access_token")
         base_url = client_config.get("base_url")
 
+        logger.info(f"TTS request - model_name: {model_name}, model_factory: {model_factory}, "
+                    f"has_api_key: {bool(api_key)}")
+
         # Build tts_config dict for voice service
         tts_config = {
             "model_factory": model_factory,
@@ -105,6 +108,7 @@ async def tts_websocket(websocket: WebSocket):
             "model_appid": model_appid,
             "access_token": access_token,
             "base_url": base_url,
+            "model_name": model_name,
         }
 
         # Stream TTS audio to WebSocket

@@ -65,7 +65,7 @@ const DEFAULT_FORM_STATE = {
   modelAppid: "",
   accessToken: "",
   // TTS specific fields
-  ttsProvider: "ali", // ali or volcengine
+  ttsProvider: "dashscope", // ali or volcengine
 };
 
 // Connectivity status type comes from utils
@@ -511,6 +511,7 @@ export const ModelAddDialog = ({
             sttConfig.modelFactory = "volcengine";
             sttConfig.modelAppid = form.modelAppid.trim();
             sttConfig.accessToken = form.accessToken.trim();
+            sttConfig.baseUrl = form.url;
           } else {
             sttConfig.apiKey = form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
             sttConfig.modelFactory = "dashscope";
@@ -531,9 +532,10 @@ export const ModelAddDialog = ({
               ttsConfig.modelFactory = "volcengine";
               ttsConfig.modelAppid = form.modelAppid.trim();
               ttsConfig.accessToken = form.accessToken.trim();
+              ttsConfig.baseUrl = form.url;
             } else {
               ttsConfig.apiKey = form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
-              ttsConfig.modelFactory = "ali";
+              ttsConfig.modelFactory = "dashscope";
               ttsConfig.modelName = form.name;
               ttsConfig.baseUrl = form.url;
             }
@@ -747,10 +749,11 @@ export const ModelAddDialog = ({
 
         // Add TTS specific fields
         if (form.type === MODEL_TYPES.TTS) {
-          modelParams.modelFactory = form.ttsProvider === "volcengine" ? "volcengine" : "ali";
+          modelParams.modelFactory = form.ttsProvider === "volcengine" ? "volcengine" : "dashscope";
           if (form.ttsProvider === "volcengine") {
             modelParams.modelAppid = form.modelAppid;
             modelParams.accessToken = form.accessToken;
+            modelParams.baseUrl = form.url;
           }
         }
 
@@ -783,10 +786,11 @@ export const ModelAddDialog = ({
 
         // Add TTS specific fields
         if (form.type === MODEL_TYPES.TTS) {
-          modelParams.modelFactory = form.ttsProvider === "volcengine" ? "volcengine" : "ali";
+          modelParams.modelFactory = form.ttsProvider === "volcengine" ? "volcengine" : "dashscope";
           if (form.ttsProvider === "volcengine") {
             modelParams.modelAppid = form.modelAppid;
             modelParams.accessToken = form.accessToken;
+            modelParams.baseUrl = form.url;
           }
         }
 
@@ -821,7 +825,7 @@ export const ModelAddDialog = ({
 
       // Add TTS specific fields to config
       if (form.type === MODEL_TYPES.TTS) {
-        (modelConfig as TTSModelConfig).modelFactory = form.ttsProvider === "volcengine" ? "volcengine" : "ali";
+        (modelConfig as TTSModelConfig).modelFactory = form.ttsProvider === "volcengine" ? "volcengine" : "dashscope";
         if (form.ttsProvider === "volcengine") {
           (modelConfig as TTSModelConfig).modelAppid = form.modelAppid;
           (modelConfig as TTSModelConfig).accessToken = form.accessToken;
@@ -1178,7 +1182,7 @@ export const ModelAddDialog = ({
               value={form.ttsProvider}
               onChange={(value) => handleFormChange("ttsProvider", value)}
             >
-              <Option value="ali">{t("model.provider.dashscope")}</Option>
+              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
               <Option value="volcengine">{t("model.provider.volcengine")}</Option>
             </Select>
           </div>
@@ -1223,7 +1227,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* API Key (for Ali TTS) */}
-        {!form.isBatchImport && isTTSModel && form.ttsProvider === "ali" && (
+        {!form.isBatchImport && isTTSModel && form.ttsProvider === "dashscope" && (
           <div>
             <label
               htmlFor="apiKey"

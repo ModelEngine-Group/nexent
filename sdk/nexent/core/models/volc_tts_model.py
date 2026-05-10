@@ -30,7 +30,7 @@ class VolcTTSConfig:
     pitch_ratio: float = 1.0
     cluster:str="volcano_tts"
     resource_id:str="seed-tts-2.0"
-    voice_type: str = "VC_BV001_streaming"
+    voice_type: str = "zh_female_vv_uranus_bigtts"
 
     @property
     def api_url(self) -> str:
@@ -54,7 +54,7 @@ class VolcTTSModel(BaseTTSModel):
         super().__init__(audio_file_path)
         self.config = config
         self._request_template = {
-            "app": {"appid": config.appid, "token": config.token, "cluster": config.cluster},
+            "app": {"appid": config.appid, "token": config.token, "cluster": config.cluster, "resource_id": config.resource_id},
             "user": {"uid": "388808087185088"},
             "audio": {
                 "voice_type": config.voice_type,
@@ -71,6 +71,7 @@ class VolcTTSModel(BaseTTSModel):
 
     def get_auth_headers(self) -> Dict[str, str]:
         headers = {
+            "Authorization": f"Bearer; {self.config.token}",
             "X-Api-App-Id": self.config.appid,
             "X-Api-Access-Key": self.config.token,
             "X-Api-Resource-Id": self.config.resource_id
@@ -157,8 +158,7 @@ class VolcTTSModel(BaseTTSModel):
             if is_success:
                 logger.info("Volc TTS connectivity test successful")
             else:
-                error_msg = self._extract_tts_error_message(audio_data)
-                logger.error("Volc TTS connectivity test failed with error: " + error_msg)
+                logger.error("Volc TTS connectivity test failed: empty or invalid audio data")
             return is_success
         except Exception as e:
             logger.error("Volc TTS connectivity test failed with exception: " + str(e))

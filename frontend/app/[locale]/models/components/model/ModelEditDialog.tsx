@@ -342,10 +342,10 @@ export const ModelEditDialog = ({
             </label>
             <Select
               style={{ width: "100%" }}
-              value={form.modelFactory || "ali"}
+              value={form.modelFactory || "dashscope"}
               onChange={(value) => handleFormChange("modelFactory", value)}
             >
-              <Option value="ali">{t("model.provider.dashscope")}</Option>
+              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
               <Option value="volcengine">{t("model.provider.volcengine")}</Option>
             </Select>
           </div>

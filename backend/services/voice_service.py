@@ -361,9 +361,15 @@ class VoiceService:
 
             # If model_name is provided directly, use it
             effective_model = model_name_override or model_name
+            logger.info(f"TTS config - api_key: {bool(api_key)}, model_name_override: {model_name_override}, "
+                        f"model_name from config: {model_name}, effective_model: {effective_model}")
 
 
-            if api_key or effective_model:
+            # Determine model factory and create appropriate TTS model
+            use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
+
+            if use_volc:
+                # Use Volcano TTS
                 tts_model = self._get_tts_model_from_config(
                     model_factory=model_factory,
                     api_key=api_key,
@@ -373,9 +379,24 @@ class VoiceService:
                     base_url=base_url,
                     model=effective_model
                 )
+                logger.info(f"TTS model created: Volcano TTS (factory={model_factory})")
+            elif api_key:
+                # Use Ali TTS with provided api_key
+                tts_model = self._get_tts_model_from_config(
+                    model_factory=model_factory,
+                    api_key=api_key,
+                    model_appid=model_appid,
+                    access_token=access_token,
+                    speed_ratio=speed_ratio,
+                    base_url=base_url,
+                    model=effective_model
+                )
+                logger.info(f"TTS model created: Ali TTS (api_key provided)")
             elif tenant_id:
                 tts_model = self._get_tts_model_from_tenant_config(tenant_id)
+                logger.info(f"TTS model created from tenant config for tenant_id={tenant_id}")
             else:
+                logger.warning("No api_key, model_name, or tenant_id provided, using default TTS model")
                 tts_model = self._get_tts_model_from_config()
 
             speech_result = await tts_model.generate_speech(text, stream=stream)
@@ -585,6 +606,7 @@ class VoiceService:
                 access_token = stt_config.get("access_token") if stt_config else None
                 speed_ratio = float(stt_config.get("speed_ratio", 1.0)) if stt_config else 1.0
                 base_url = stt_config.get("base_url") if stt_config else None
+                model = stt_config.get("model", "qwen3-tts-flash") if stt_config else "qwen3-tts-flash"
 
                 return await self.check_tts_connectivity(
                     model_factory=model_factory,
@@ -592,7 +614,8 @@ class VoiceService:
                     model_appid=model_appid,
                     access_token=access_token,
                     speed_ratio=speed_ratio,
-                    base_url=base_url
+                    base_url=base_url,
+                    model=model
                 )
             else:
                 logger.error(f"Unknown model type: {model_type}")
