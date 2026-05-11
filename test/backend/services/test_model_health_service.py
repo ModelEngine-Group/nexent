@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 from unittest import mock
 
 import pytest
@@ -32,6 +33,10 @@ sys.modules['nexent.core.agents'] = MockModule()
 sys.modules['nexent.core.agents.agent_model'] = MockModule()
 sys.modules['nexent.core.models'] = MockModule()
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
+
+sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
+sys.modules['nexent.monitor'].set_monitoring_context = mock.MagicMock()
+sys.modules['nexent.monitor'].set_monitoring_operation = mock.MagicMock()
 
 # Mock rerank_model module with proper class exports
 

@@ -119,6 +119,13 @@ mock_langchain_core_tools_mod.BaseTool = MagicMock(name="BaseTool")
 mock_langchain_core_mod = MagicMock(name="langchain_core")
 mock_langchain_core_mod.tools = mock_langchain_core_tools_mod
 
+sys.modules['elangchain_cor'] = MagicMock()
+sys.modules['langchain_core.documents'] = MagicMock()
+sys.modules['langchain_core.documents.Document'] = MagicMock()
+sys.modules['langchain_core.documents.BaseDocumentTransformer'] = MagicMock()
+sys.modules['langchain_text_splitters'] = MagicMock()
+sys.modules['langchain_text_splitters.MarkdownHeaderTextSplitter'] = MagicMock()
+
 # Re-use mocks from test_nexent_agent for langchain and openai to avoid real imports
 mock_langchain_tools = MagicMock()
 mock_langchain_tools.StructuredTool = MagicMock()
