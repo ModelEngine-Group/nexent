@@ -24,6 +24,7 @@ import {
   ADVANCED_PROMPT_TEMPLATE_FIELDS,
   BASIC_PROMPT_TEMPLATE_FIELDS,
   createEmptyPromptTemplateContent,
+  type PromptTemplateFieldConfig,
 } from "@/const/promptTemplate";
 import {
   PromptTemplate,
@@ -162,7 +163,7 @@ export default function PromptTemplateManagerModal({
 
   const renderTemplateFields = (
     contentName: "template_content_zh" | "template_content_en",
-    fields: typeof BASIC_PROMPT_TEMPLATE_FIELDS,
+    fields: readonly PromptTemplateFieldConfig[],
     required: boolean
   ) => (
     <Flex vertical gap={12}>
