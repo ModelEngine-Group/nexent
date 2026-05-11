@@ -4,7 +4,7 @@ Centralized definition for auto-summary frequency options
 """
 from datetime import timedelta
 
-# 核心频率配置：包含值、时间间隔、显示标签；这是唯一的数据源，所有其他格式都从这里生成
+# Core frequency config: includes value, timedelta, and label; this is the single source of truth
 SUMMARY_FREQUENCY_CONFIG = [
     {"value": "1h", "timedelta": timedelta(hours=1), "label": "1h"},
     {"value": "3h", "timedelta": timedelta(hours=3), "label": "3h"},
@@ -13,16 +13,16 @@ SUMMARY_FREQUENCY_CONFIG = [
     {"value": "1w", "timedelta": timedelta(weeks=1), "label": "1w"},
 ]
 
-# 从配置生成有效频率列表（用于验证）
+# Generate valid frequency list from config (for validation)
 VALID_SUMMARY_FREQUENCIES = [item["value"] for item in SUMMARY_FREQUENCY_CONFIG] + [None]
 
-# 从配置生成频率到timedelta的映射（直接取值，无需循环转换）
+# Generate frequency to timedelta mapping from config (direct value, no loop conversion needed)
 FREQUENCY_MAP = {item["value"]: item["timedelta"] for item in SUMMARY_FREQUENCY_CONFIG}
 
-# 从配置生成API返回的选项（用于前端）
+# Generate API options from config (for frontend)
 SUMMARY_FREQUENCY_OPTIONS_FOR_API = [
-    {"value": "disabled", "label": "关闭"},
+    {"value": "disabled", "label": "Disabled"},
 ] + [{"value": item["value"], "label": item["value"]} for item in SUMMARY_FREQUENCY_CONFIG]
 
-# Scheduler检查间隔（秒）
+# Scheduler check interval (seconds)
 SCHEDULER_CHECK_INTERVAL_SECONDS = 30 * 60

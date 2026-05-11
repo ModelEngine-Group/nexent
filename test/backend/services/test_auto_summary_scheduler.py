@@ -405,7 +405,7 @@ class TestFrequencyMap:
 
     def test_frequency_map_has_expected_keys(self):
         """FREQUENCY_MAP should have all expected frequency keys."""
-        expected_keys = ["3h", "5h", "1d", "1w"]
+        expected_keys = ["1h", "3h", "6h", "1d", "1w"]
         assert all(key in FREQUENCY_MAP for key in expected_keys)
 
     def test_frequency_map_values_are_timedelta(self):
