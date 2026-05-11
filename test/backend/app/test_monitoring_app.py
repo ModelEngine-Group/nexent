@@ -187,6 +187,22 @@ class TestMonitoringStatus:
         assert status["dashboard_port"] is None
         assert status["dashboard_path"] is None
 
+    def test_skywalking_provider_status_when_telemetry_enabled(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setattr("apps.monitoring_app.ENABLE_TELEMETRY", True)
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_PROVIDER", "skywalking")
+        monkeypatch.setattr("apps.monitoring_app.SKYWALKING_UI_PORT", "8080")
+
+        status = get_monitoring_status()
+
+        assert status["telemetry_enabled"] is True
+        assert status["ui_enabled"] is True
+        assert status["provider"] == "skywalking"
+        assert status["provider_name"] == "SkyWalking"
+        assert status["dashboard_port"] == "8080"
+        assert status["dashboard_path"] == "/"
+
     def test_unsupported_provider_has_no_ui(self, monkeypatch):
         from apps.monitoring_app import get_monitoring_status
 

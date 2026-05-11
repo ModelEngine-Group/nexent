@@ -149,7 +149,7 @@ LANGFUSE_USER_ID = "langfuse.user.id"
 AGENT_OPERATION_NAMES = {
     "agent.run",
 }
-SUPPORTED_PROVIDERS = {"otlp", "phoenix", "langfuse", "grafana"}
+SUPPORTED_PROVIDERS = {"otlp", "phoenix", "langfuse", "grafana", "skywalking"}
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:

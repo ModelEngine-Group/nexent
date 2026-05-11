@@ -18,6 +18,7 @@ from consts.const import (
     LANGFUSE_PORT,
     MONITORING_PROVIDER,
     PHOENIX_PORT,
+    SKYWALKING_UI_PORT,
 )
 from consts.model import ConversationResponse
 from database.client import get_monitoring_db_session
@@ -43,6 +44,8 @@ def _build_monitoring_ui(
         return PHOENIX_PORT, "/", "Phoenix"
     if provider == "langfuse":
         return LANGFUSE_PORT, "/project/nexent", "Langfuse"
+    if provider == "skywalking":
+        return SKYWALKING_UI_PORT, "/", "SkyWalking"
     return None, None, None
 
 

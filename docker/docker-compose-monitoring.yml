@@ -67,6 +67,56 @@ services:
       - nexent_nexent
     restart: unless-stopped
 
+  skywalking-banyandb:
+    image: apache/skywalking-banyandb:${SKYWALKING_BANYANDB_VERSION:-0.9.0}
+    container_name: nexent-skywalking-banyandb
+    profiles: ["skywalking"]
+    command: ["standalone"]
+    volumes:
+      - skywalking-banyandb-data:/data
+    ports:
+      - "127.0.0.1:${SKYWALKING_BANYANDB_GRPC_PORT:-17912}:17912"
+      - "127.0.0.1:${SKYWALKING_BANYANDB_HTTP_PORT:-17913}:17913"
+    networks:
+      - nexent_nexent
+    restart: unless-stopped
+
+  skywalking-oap:
+    image: apache/skywalking-oap-server:${SKYWALKING_VERSION:-10.4.0}
+    container_name: nexent-skywalking-oap
+    profiles: ["skywalking"]
+    depends_on:
+      - skywalking-banyandb
+    environment:
+      SW_STORAGE: banyandb
+      SW_STORAGE_BANYANDB_TARGETS: skywalking-banyandb:17912
+      SW_OTEL_RECEIVER: default
+      SW_OTEL_RECEIVER_ENABLED_HANDLERS: otlp-traces
+      SW_RECEIVER_ZIPKIN: default
+      SW_QUERY_ZIPKIN: default
+    ports:
+      - "${SKYWALKING_OAP_GRPC_PORT:-11800}:11800"
+      - "${SKYWALKING_OAP_HTTP_PORT:-12800}:12800"
+      - "127.0.0.1:${SKYWALKING_ZIPKIN_RECEIVER_PORT:-9411}:9411"
+      - "127.0.0.1:${SKYWALKING_ZIPKIN_QUERY_PORT:-9412}:9412"
+    networks:
+      - nexent_nexent
+    restart: unless-stopped
+
+  skywalking-ui:
+    image: apache/skywalking-ui:${SKYWALKING_VERSION:-10.4.0}
+    container_name: nexent-skywalking-ui
+    profiles: ["skywalking"]
+    depends_on:
+      - skywalking-oap
+    environment:
+      SW_OAP_ADDRESS: http://skywalking-oap:12800
+    ports:
+      - "${SKYWALKING_UI_PORT:-8080}:8080"
+    networks:
+      - nexent_nexent
+    restart: unless-stopped
+
   langfuse-worker:
     image: docker.io/langfuse/langfuse-worker:${LANGFUSE_VERSION:-3}
     container_name: nexent-langfuse-worker
@@ -252,3 +302,4 @@ volumes:
   langfuse-redis-data:
   grafana-data:
   tempo-data:
+  skywalking-banyandb-data:

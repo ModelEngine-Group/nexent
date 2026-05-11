@@ -2,7 +2,7 @@
 
 # Nexent LLM Performance Monitoring Setup Script
 # This script starts the OpenTelemetry Collector alone, or with a local
-# Phoenix/Langfuse/Grafana observability backend.
+# Phoenix/Langfuse/Grafana/SkyWalking observability backend.
 
 set -e
 
@@ -12,8 +12,8 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose-monitoring.yml"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [otlp|collector|phoenix|langfuse|grafana]
-       $(basename "$0") --stack <otlp|collector|phoenix|langfuse|grafana>
+Usage: $(basename "$0") [otlp|collector|phoenix|langfuse|grafana|skywalking]
+       $(basename "$0") --stack <otlp|collector|phoenix|langfuse|grafana|skywalking>
 
 Stacks:
   otlp       Start OpenTelemetry Collector only. This is the default.
@@ -21,6 +21,7 @@ Stacks:
   phoenix    Start Collector and local Arize Phoenix.
   langfuse   Start Collector and local Langfuse self-host stack.
   grafana    Start Collector, Grafana, and Tempo.
+  skywalking Start Collector and local Apache SkyWalking.
 
 Set MONITORING_PROVIDER in monitoring/monitoring.env to change the default.
 EOF
@@ -42,7 +43,7 @@ while [ $# -gt 0 ]; do
             usage
             exit 0
             ;;
-        otlp|collector|phoenix|langfuse|grafana)
+        otlp|collector|phoenix|langfuse|grafana|skywalking)
             STACK_ARG="$1"
             shift
             ;;
@@ -115,6 +116,12 @@ case "$MONITORING_PROVIDER" in
         OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-grafana-config.yml}"
         COMPOSE_PROFILES=(--profile grafana)
         ;;
+    skywalking)
+        LOCAL_STACK="skywalking"
+        BACKEND_MONITORING_PROVIDER="skywalking"
+        OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-skywalking-config.yml}"
+        COMPOSE_PROFILES=(--profile skywalking)
+        ;;
     *)
         echo "❌ Error: unsupported MONITORING_PROVIDER '$MONITORING_PROVIDER'."
         usage
@@ -172,6 +179,10 @@ case "$LOCAL_STACK" in
         check_service "Grafana" "http://localhost:${GRAFANA_PORT:-3002}/api/health" "${GRAFANA_PORT:-3002}" || true
         check_service "Tempo API" "http://localhost:${TEMPO_PORT:-3200}/ready" "${TEMPO_PORT:-3200}" || true
         ;;
+    skywalking)
+        check_service "SkyWalking UI" "http://localhost:${SKYWALKING_UI_PORT:-8080}" "${SKYWALKING_UI_PORT:-8080}" || true
+        check_service "SkyWalking OAP HTTP API" "http://localhost:${SKYWALKING_OAP_HTTP_PORT:-12800}" "${SKYWALKING_OAP_HTTP_PORT:-12800}" || true
+        ;;
 esac
 
 echo ""
@@ -192,6 +203,11 @@ case "$LOCAL_STACK" in
         echo "   • Grafana UI: http://localhost:${GRAFANA_PORT:-3002}"
         echo "   • Grafana admin: ${GRAFANA_ADMIN_USER:-admin} / ${GRAFANA_ADMIN_PASSWORD:-nexent-grafana-admin}"
         echo "   • Tempo API: http://localhost:${TEMPO_PORT:-3200}"
+        ;;
+    skywalking)
+        echo "   • SkyWalking UI: http://localhost:${SKYWALKING_UI_PORT:-8080}"
+        echo "   • SkyWalking OAP HTTP API: http://localhost:${SKYWALKING_OAP_HTTP_PORT:-12800}"
+        echo "   • SkyWalking OAP gRPC API: localhost:${SKYWALKING_OAP_GRPC_PORT:-11800}"
         ;;
     collector)
         echo "   • Configure Phoenix, Langfuse, Tempo, or another OTLP backend in monitoring.env"
@@ -214,4 +230,4 @@ echo "   • Tool call spans"
 echo "   • Error events"
 echo ""
 echo "🛑 To stop monitoring services:"
-echo "   ${COMPOSE_CMD[*]} -f $COMPOSE_FILE --env-file $MONITORING_DIR/monitoring.env --profile phoenix --profile langfuse --profile grafana down --remove-orphans"
+echo "   ${COMPOSE_CMD[*]} -f $COMPOSE_FILE --env-file $MONITORING_DIR/monitoring.env --profile phoenix --profile langfuse --profile grafana --profile skywalking down --remove-orphans"

@@ -1,11 +1,11 @@
 # Nexent Agent Observability (OTLP)
 
-Enterprise-grade observability for AI agents using OpenTelemetry OTLP protocol. Supports integration with AI observability platforms like Arize Phoenix, Langfuse, and more.
+Enterprise-grade observability for AI agents using OpenTelemetry OTLP protocol. Supports integration with observability platforms like Arize Phoenix, Langfuse, Grafana Tempo, Apache SkyWalking, and more.
 
 ## Architecture
 
 ```
-NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / OTLP Backend
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / SkyWalking / OTLP Backend
      │                                        │
      │   OpenInference Semantics              │
      │   (llm.*, agent.* attributes)          │
@@ -78,12 +78,31 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 - User feedback collection
 - Model cost tracking
 
+### Apache SkyWalking
+
+SkyWalking provides general APM, service topology, endpoint analysis, and trace query capabilities. For local deployment, Nexent sends OTLP to the Collector, and the Collector forwards traces to SkyWalking OAP over OTLP gRPC.
+
+```bash
+MONITORING_PROVIDER=skywalking
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http
+```
+
+For direct OAP access:
+
+```bash
+MONITORING_PROVIDER=skywalking
+OTEL_EXPORTER_OTLP_ENDPOINT=http://skywalking-oap:11800
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+```
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
-| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `grafana` |
+| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `grafana`, `skywalking` |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint; SDK derives `/v1/traces` and `/v1/metrics` |

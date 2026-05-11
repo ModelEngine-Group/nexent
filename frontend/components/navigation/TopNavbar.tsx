@@ -26,6 +26,7 @@ const MONITORING_PROVIDER_UI: Record<string, { port: string; path: string }> = {
     port: "3002",
     path: "/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1",
   },
+  skywalking: { port: "8080", path: "/" },
 };
 
 function buildMonitoringUrl(status: MonitoringStatus | null): string | null {

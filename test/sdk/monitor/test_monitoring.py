@@ -128,6 +128,12 @@ class TestMonitoringConfig:
             )
             assert config.otlp_protocol == "http"
 
+    def test_skywalking_provider_is_supported(self):
+        """Test SkyWalking is a supported OTLP provider profile."""
+        config = MonitoringConfig(provider="skywalking")
+
+        assert config.provider == "skywalking"
+
     def test_signal_endpoint_derivation_from_base_endpoint(self):
         """Test HTTP endpoints are derived from a base OTLP endpoint."""
         config = MonitoringConfig(
