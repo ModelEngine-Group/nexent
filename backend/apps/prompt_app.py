@@ -1,9 +1,8 @@
 import logging
 from http import HTTPStatus
 from typing import Optional
-from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from starlette.responses import JSONResponse
+from fastapi import APIRouter, Header, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from consts.model import GeneratePromptRequest, OptimizePromptSectionRequest
 from services.prompt_service import (
@@ -38,8 +37,7 @@ async def generate_and_save_system_prompt_api(
         ), media_type="text/event-stream")
     except Exception as e:
         logger.exception(f"Error occurred while generating system prompt: {e}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Error occurred while generating system prompt.")
+        raise
 
 
 @router.post("/optimize")
@@ -72,8 +70,6 @@ async def optimize_prompt_section_api(
                 "data": optimized_section,
             }
         )
-    except HTTPException:
-        raise
     except Exception as exc:
         logger.exception(f"Error occurred while optimizing prompt section: {exc}")
         raise

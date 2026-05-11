@@ -1,4 +1,3 @@
--- Active: 1776876067388@@127.0.0.1@5434@nexent@nexent
 -- v2.0.2_0410_add_columns_outer_api_tools.sql
 -- Add MCP service-level columns to ag_outer_api_tools table
 -- These columns enable grouping tools from the same OpenAPI spec under a single MCP service

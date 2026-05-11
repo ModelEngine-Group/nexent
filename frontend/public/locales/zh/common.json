@@ -2345,8 +2345,7 @@
 
   "collaborativeAgent.internalAgents": "内部 Agent",
   "collaborativeAgent.externalAgents": "外部 Agent",
-  "collaborativeAgent.addExternal": "添加外部 Agent"
-  ,
+  "collaborativeAgent.addExternal": "添加外部 Agent",
   "systemPrompt.button.optimize": "优化",
   "systemPrompt.optimize.feedbackLabel": "评价反馈",
   "systemPrompt.optimize.feedbackPlaceholder": "请输入你希望这一部分如何优化",
