@@ -108,6 +108,40 @@
 有许多第三方服务如 [ModelScope](https://www.modelscope.cn/mcp) 提供了 MCP 服务，您可以快速接入使用。
 您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 工具开发](../backend/tools/mcp)。
 
+**3️⃣ 存量 API 转换为 MCP 服务**
+
+🔔 该方法适用于将已有的 REST API 接口快速转换为 MCP 工具，无需额外开发即可让智能体调用现有 API 能力：
+
+>1. 在 MCP 配置模块选择 **"API 转换为 MCP"** 接入类型
+>
+>2. 在下方的输入框中填写 API 基础信息：
+>   - **服务名称**：MCP 服务的展示名称
+>   - **OpenAPI JSON**：OpenAPI 3.x 规范的 JSON 内容
+>   - **基础服务 URL**：API 服务的基础地址（支持 http/https）
+>
+>3. 点击右下角 **+ 添加** 按钮，完成对应 MCP 服务的转换
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api.png" style="width: 80%; height: auto;" />
+</div>
+
+>
+>4. 转换完成后，可在 **Outer APIs** 页签下查看所有外部 API 转换的 MCP 工具
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api_1.png" style="width: 80%; height: auto;" />
+</div>
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api_2.png" style="width: 80%; height: auto;" />
+</div>
+
+>💡 **使用场景**：
+>- 快速接入企业内部的 REST API 接口
+>- 将第三方服务的 HTTP API 转换为 MCP 工具
+>- 无需编写 MCP Server 代码，直接通过 OpenAPI 规范生成工具
+
+
 ### ⚙️ 自定义工具
 
 您可参考以下指导文档，开发自己的工具，并接入 Nexent 使用，丰富智能体能力。

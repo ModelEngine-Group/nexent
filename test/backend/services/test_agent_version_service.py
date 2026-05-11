@@ -622,7 +622,9 @@ def test_rollback_version_impl_success(monkeypatch):
     )
 
     assert result["version_no"] == 1
+    assert result["version_name"] == "v1.0"
     assert "Successfully rolled back" in result["message"]
+    mock_search.assert_called_once_with(1, "tenant1", 1)
     mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
     mock_restore_draft.assert_called_once()
 
