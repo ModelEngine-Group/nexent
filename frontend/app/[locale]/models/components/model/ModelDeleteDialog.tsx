@@ -1053,10 +1053,10 @@ export const ModelDeleteDialog = ({
                     setMaxTokens(existingModel?.maxTokens || 0);
                   }}
                   disabled={
-                    type === MODEL_TYPES.STT || type === MODEL_TYPES.TTS
+                    type === MODEL_TYPES.STT
                   }
                   className={`p-3 flex justify-between rounded-md border transition-colors ${
-                    type === MODEL_TYPES.STT || type === MODEL_TYPES.TTS
+                    type === MODEL_TYPES.STT
                       ? `${colorScheme.border} bg-gray-100 cursor-not-allowed opacity-60`
                       : `${colorScheme.border} ${colorScheme.bg} hover:bg-opacity-80`
                   }`}
@@ -1075,8 +1075,7 @@ export const ModelDeleteDialog = ({
                         {t("model.dialog.delete.customModelCount", {
                           count: modelsByType.length,
                         })}
-                        {(type === MODEL_TYPES.STT ||
-                          type === MODEL_TYPES.TTS) &&
+                        {type === MODEL_TYPES.STT &&
                           t("model.dialog.delete.unsupportedType")}
                       </div>
                     </div>
@@ -1414,18 +1413,15 @@ export const ModelDeleteDialog = ({
                         }}
                         disabled={
                           deletingModels.has(model.displayName || model.name) ||
-                          model.type === MODEL_TYPES.STT ||
-                          model.type === MODEL_TYPES.TTS
+                          model.type === MODEL_TYPES.STT
                         }
                         className={`p-1 ${
-                          model.type === MODEL_TYPES.STT ||
-                          model.type === MODEL_TYPES.TTS
+                          model.type === MODEL_TYPES.STT
                             ? "text-gray-400 cursor-not-allowed"
                             : "text-red-500 hover:text-red-700"
                         }`}
                         title={
-                          model.type === MODEL_TYPES.STT ||
-                          model.type === MODEL_TYPES.TTS
+                          model.type === MODEL_TYPES.STT
                             ? t("model.dialog.delete.unsupportedTypeHint")
                             : t("model.dialog.delete.deleteHint")
                         }

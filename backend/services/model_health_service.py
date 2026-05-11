@@ -139,7 +139,6 @@ async def _perform_connectivity_check(
     elif model_type == 'stt':
         voice_service = get_voice_service()
 
-
         # Determine STT provider based on model_factory
         use_volc = model_factory and model_factory.lower() in ["volcengine", "volcano", "volcengine", "火山引擎"]
 
@@ -158,6 +157,33 @@ async def _perform_connectivity_check(
             # Use Ali STT (default) with api_key and model name
             connectivity = await voice_service.check_voice_connectivity(
                 model_type="stt",
+                stt_config={
+                    "api_key": model_api_key,
+                    "base_url": model_base_url,
+                    "model": model_name
+                }
+            )
+    elif model_type == 'tts':
+        voice_service = get_voice_service()
+
+        # Determine TTS provider based on model_factory
+        use_volc = model_factory and model_factory.lower() in ["volcengine", "volcano", "volcengine", "火山引擎"]
+
+        if use_volc:
+            # Use Volcano TTS with appid and access_token
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="tts",
+                stt_config={
+                    "model_factory": model_factory,
+                    "model_appid": model_appid,
+                    "access_token": access_token,
+                    "base_url": model_base_url
+                }
+            )
+        else:
+            # Use Ali TTS (default) with api_key and model name
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="tts",
                 stt_config={
                     "api_key": model_api_key,
                     "base_url": model_base_url,
