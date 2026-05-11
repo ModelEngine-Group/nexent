@@ -7,7 +7,6 @@ from .volc_stt_model import VolcSTTModel, VolcSTTConfig
 from .tts_model import BaseTTSModel
 from .ali_tts_model import AliTTSModel, AliTTSConfig
 from .volc_tts_model import VolcTTSModel, VolcTTSConfig
-from . import openai_llm, openai_vlm, openai_long_context_model
 
 __all__ = [
     "OpenAIModel",
