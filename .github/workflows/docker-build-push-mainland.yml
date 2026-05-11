@@ -43,10 +43,10 @@ jobs:
       - name: Push main image (amd64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag main image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent:amd64
       - name: Push latest main image (amd64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent:amd64
 
   build-and-push-main-arm64:
@@ -69,10 +69,10 @@ jobs:
       - name: Push main image (arm64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag main image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent:arm64
       - name: Push latest main image (arm64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent:arm64
 
   build-and-push-data-process-amd64:
@@ -104,10 +104,10 @@ jobs:
       - name: Push data process image (amd64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag data process image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:amd64
       - name: Push latest data process image (amd64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:amd64
 
   build-and-push-data-process-arm64:
@@ -139,10 +139,10 @@ jobs:
       - name: Push data process image (arm64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag data process image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:arm64
       - name: Push latest data process image (arm64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:arm64
 
   build-and-push-web-amd64:
@@ -165,10 +165,10 @@ jobs:
       - name: Push web image (amd64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag web image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent-web:amd64
       - name: Push latest web image (amd64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:amd64
 
   build-and-push-web-arm64:
@@ -191,10 +191,10 @@ jobs:
       - name: Push web image (arm64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag web image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent-web:arm64
       - name: Push latest web image (arm64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:arm64
 
   build-and-push-terminal-amd64:
@@ -217,10 +217,10 @@ jobs:
       - name: Push terminal image (amd64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag terminal image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:amd64
       - name: Push latest terminal image (amd64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:amd64
 
   build-and-push-terminal-arm64:
@@ -243,10 +243,10 @@ jobs:
       - name: Push terminal image (arm64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag terminal image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:arm64
       - name: Push latest terminal image (arm64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:arm64
 
   build-and-push-mcp-amd64:
@@ -269,10 +269,10 @@ jobs:
       - name: Push MCP image (amd64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag MCP image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:amd64
       - name: Push latest MCP image (amd64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:amd64
 
   build-and-push-mcp-arm64:
@@ -295,10 +295,10 @@ jobs:
       - name: Push MCP image (arm64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag MCP image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:arm64
       - name: Push latest MCP image (arm64) to Tencent Cloud
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:arm64
 
   manifest-push-main:
@@ -310,13 +310,14 @@ jobs:
       - name: Login to Tencent Cloud
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Create and push manifest for main (Tencent Cloud)
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
             ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for main (Tencent Cloud)
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent:latest \
             ccr.ccs.tencentyun.com/nexent-hub/nexent:amd64 \
@@ -332,13 +333,14 @@ jobs:
       - name: Login to Tencent Cloud
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Create and push manifest for data-process (Tencent Cloud)
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for data-process (Tencent Cloud)
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:latest \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:amd64 \
@@ -354,13 +356,14 @@ jobs:
       - name: Login to Tencent Cloud
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Create and push manifest for web (Tencent Cloud)
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for web (Tencent Cloud)
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-web:latest \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-web:amd64 \
@@ -376,13 +379,14 @@ jobs:
       - name: Login to Tencent Cloud
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Create and push manifest for terminal (Tencent Cloud)
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for terminal (Tencent Cloud)
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:latest \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:amd64 \
@@ -398,13 +402,14 @@ jobs:
       - name: Login to Tencent Cloud
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Create and push manifest for mcp (Tencent Cloud)
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for mcp (Tencent Cloud)
-        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        if: (github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
           docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:latest \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:amd64 \
