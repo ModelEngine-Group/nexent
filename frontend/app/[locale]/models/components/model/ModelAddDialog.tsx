@@ -483,7 +483,8 @@ export const ModelAddDialog = ({
       if (tenantId) {
         connectivity = await modelService.checkManageTenantModelConnectivity(
           tenantId,
-          form.displayName || form.name
+          form.displayName || form.name,
+          modelType
         );
       } else {
         // For STT models, build the appropriate config based on provider
