@@ -3,7 +3,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from nexent.core.models.stt_model import BaseSTTModel
-from nexent.core.models.base_tts_model import BaseTTSModel
+from nexent.core.models.tts_model import BaseTTSModel
 from nexent.core.models.volc_stt_model import VolcSTTConfig, VolcSTTModel
 from nexent.core.models.ali_stt_model import AliSTTConfig, AliSTTModel
 from nexent.core.models.volc_tts_model import VolcTTSConfig, VolcTTSModel
