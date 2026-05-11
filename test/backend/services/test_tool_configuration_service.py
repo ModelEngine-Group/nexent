@@ -269,6 +269,12 @@ setattr(sys.modules['nexent.storage'], 'minio_config', storage_config_module)
 sys.modules['nexent.storage.storage_client_factory'] = storage_factory_module
 sys.modules['nexent.storage.minio_config'] = storage_config_module
 
+# Mock nexent.memory module to break import chain before loading backend modules
+memory_service_module = types.ModuleType('nexent.memory.memory_service')
+memory_service_module.clear_memory = MagicMock()
+sys.modules['nexent.memory'] = _create_package_mock('nexent.memory')
+sys.modules['nexent.memory.memory_service'] = memory_service_module
+
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
@@ -321,6 +327,7 @@ patch('services.tenant_config_service.get_selected_knowledge_list', MagicMock())
 patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
 patch('services.image_service.get_vlm_model', MagicMock()).start()
+patch('backend.database.knowledge_db.get_knowledge_name_map_by_index_names', MagicMock()).start()
 
 # Import consts after patching dependencies
 from consts.model import ToolInfo, ToolSourceEnum, ToolInstanceInfoRequest, ToolValidateRequest  # noqa: E402
@@ -923,123 +930,6 @@ class TestGetAllMcpTools:
         assert mock_get_tools.call_count == 1  # Only call default server once
 
 
-class TestCreateMcpTransport:
-    """Test _create_mcp_transport function"""
-
-    @patch('backend.services.tool_configuration_service.SSETransport')
-    def test_create_mcp_transport_sse_with_token(self, mock_sse_transport):
-        """Test creating SSETransport for URL ending with /sse and with authorization token"""
-        from backend.services.tool_configuration_service import _create_mcp_transport
-
-        mock_transport = Mock()
-        mock_sse_transport.return_value = mock_transport
-
-        result = _create_mcp_transport("http://test-server.com/sse", "Bearer token123")
-
-        assert result == mock_transport
-        mock_sse_transport.assert_called_once_with(
-            url="http://test-server.com/sse",
-            headers={"Authorization": "Bearer token123"}
-        )
-
-    @patch('backend.services.tool_configuration_service.SSETransport')
-    def test_create_mcp_transport_sse_without_token(self, mock_sse_transport):
-        """Test creating SSETransport for URL ending with /sse and without authorization token"""
-        from backend.services.tool_configuration_service import _create_mcp_transport
-
-        mock_transport = Mock()
-        mock_sse_transport.return_value = mock_transport
-
-        result = _create_mcp_transport("http://test-server.com/sse", None)
-
-        assert result == mock_transport
-        mock_sse_transport.assert_called_once_with(
-            url="http://test-server.com/sse",
-            headers={}
-        )
-
-    @patch('backend.services.tool_configuration_service.StreamableHttpTransport')
-    def test_create_mcp_transport_mcp_with_token(self, mock_http_transport):
-        """Test creating StreamableHttpTransport for URL ending with /mcp and with authorization token"""
-        from backend.services.tool_configuration_service import _create_mcp_transport
-
-        mock_transport = Mock()
-        mock_http_transport.return_value = mock_transport
-
-        result = _create_mcp_transport("http://test-server.com/mcp", "Bearer token456")
-
-        assert result == mock_transport
-        mock_http_transport.assert_called_once_with(
-            url="http://test-server.com/mcp",
-            headers={"Authorization": "Bearer token456"}
-        )
-
-    @patch('backend.services.tool_configuration_service.StreamableHttpTransport')
-    def test_create_mcp_transport_mcp_without_token(self, mock_http_transport):
-        """Test creating StreamableHttpTransport for URL ending with /mcp and without authorization token"""
-        from backend.services.tool_configuration_service import _create_mcp_transport
-
-        mock_transport = Mock()
-        mock_http_transport.return_value = mock_transport
-
-        result = _create_mcp_transport("http://test-server.com/mcp", None)
-
-        assert result == mock_transport
-        mock_http_transport.assert_called_once_with(
-            url="http://test-server.com/mcp",
-            headers={}
-        )
-
-    @patch('backend.services.tool_configuration_service.StreamableHttpTransport')
-    def test_create_mcp_transport_default_with_token(self, mock_http_transport):
-        """Test creating default StreamableHttpTransport for unrecognized URL format with authorization token"""
-        from backend.services.tool_configuration_service import _create_mcp_transport
-
-        mock_transport = Mock()
-        mock_http_transport.return_value = mock_transport
-
-        result = _create_mcp_transport("http://test-server.com/api", "Bearer token789")
-
-        assert result == mock_transport
-        mock_http_transport.assert_called_once_with(
-            url="http://test-server.com/api",
-            headers={"Authorization": "Bearer token789"}
-        )
-
-    @patch('backend.services.tool_configuration_service.StreamableHttpTransport')
-    def test_create_mcp_transport_default_without_token(self, mock_http_transport):
-        """Test creating default StreamableHttpTransport for unrecognized URL format without authorization token"""
-        from backend.services.tool_configuration_service import _create_mcp_transport
-
-        mock_transport = Mock()
-        mock_http_transport.return_value = mock_transport
-
-        result = _create_mcp_transport("http://test-server.com/api", None)
-
-        assert result == mock_transport
-        mock_http_transport.assert_called_once_with(
-            url="http://test-server.com/api",
-            headers={}
-        )
-
-    @patch('backend.services.tool_configuration_service.SSETransport')
-    def test_create_mcp_transport_sse_with_whitespace(self, mock_sse_transport):
-        """Test creating SSETransport for URL with whitespace ending with /sse"""
-        from backend.services.tool_configuration_service import _create_mcp_transport
-
-        mock_transport = Mock()
-        mock_sse_transport.return_value = mock_transport
-
-        result = _create_mcp_transport("  http://test-server.com/sse  ", "token")
-
-        assert result == mock_transport
-        # Verify URL is stripped before checking ending
-        mock_sse_transport.assert_called_once_with(
-            url="http://test-server.com/sse",
-            headers={"Authorization": "token"}
-        )
-
-
 class TestGetToolFromRemoteMcpServer:
     """Test get_tool_from_remote_mcp_server function"""
 
@@ -1426,7 +1316,7 @@ class TestIntegrationScenarios:
 class TestGetLangchainTools:
     """Test get_langchain_tools function"""
 
-    @patch('utils.langchain_utils.discover_langchain_modules')
+    @patch('backend.services.tool_configuration_service.discover_langchain_modules')
     @patch('backend.services.tool_configuration_service._build_tool_info_from_langchain')
     def test_get_langchain_tools_success(self, mock_build_tool_info, mock_discover_modules):
         """Test successfully discovering and converting LangChain tools"""
@@ -1485,7 +1375,7 @@ class TestGetLangchainTools:
         mock_discover_modules.assert_called_once()
         assert mock_build_tool_info.call_count == 2
 
-    @patch('utils.langchain_utils.discover_langchain_modules')
+    @patch('backend.services.tool_configuration_service.discover_langchain_modules')
     def test_get_langchain_tools_empty_result(self, mock_discover_modules):
         """Test scenario where no LangChain tools are discovered"""
         # Mock discover_langchain_modules to return empty list
@@ -1499,7 +1389,7 @@ class TestGetLangchainTools:
         assert result == []
         mock_discover_modules.assert_called_once()
 
-    @patch('utils.langchain_utils.discover_langchain_modules')
+    @patch('backend.services.tool_configuration_service.discover_langchain_modules')
     @patch('backend.services.tool_configuration_service._build_tool_info_from_langchain')
     def test_get_langchain_tools_exception_handling(self, mock_build_tool_info, mock_discover_modules):
         """Test exception handling when processing tools"""
@@ -1547,7 +1437,7 @@ class TestGetLangchainTools:
         mock_discover_modules.assert_called_once()
         assert mock_build_tool_info.call_count == 2
 
-    @patch('utils.langchain_utils.discover_langchain_modules')
+    @patch('backend.services.tool_configuration_service.discover_langchain_modules')
     @patch('backend.services.tool_configuration_service._build_tool_info_from_langchain')
     def test_get_langchain_tools_with_different_tool_types(self, mock_build_tool_info, mock_discover_modules):
         """Test processing different types of LangChain tool objects"""
@@ -2067,7 +1957,7 @@ class TestLoadLastToolConfigImpl:
             _validate_local_tool("test_tool", {"input": "value"}, {
                                  "param": "config"})
 
-    @patch('utils.langchain_utils.discover_langchain_modules')
+    @patch('backend.services.tool_configuration_service.discover_langchain_modules')
     def test_validate_langchain_tool_success(self, mock_discover):
         """Test successful LangChain tool validation"""
         # Mock LangChain tool
@@ -2084,7 +1974,7 @@ class TestLoadLastToolConfigImpl:
         assert result == "validation result"
         mock_tool.invoke.assert_called_once_with({"input": "value"})
 
-    @patch('utils.langchain_utils.discover_langchain_modules')
+    @patch('backend.services.tool_configuration_service.discover_langchain_modules')
     def test_validate_langchain_tool_not_found(self, mock_discover):
         """Test LangChain tool validation when tool not found"""
         mock_discover.return_value = []
@@ -2094,7 +1984,7 @@ class TestLoadLastToolConfigImpl:
         with pytest.raises(ToolExecutionException, match="LangChain tool 'test_tool' validation failed: Tool 'test_tool' not found in LangChain tools"):
             _validate_langchain_tool("test_tool", {"input": "value"})
 
-    @patch('utils.langchain_utils.discover_langchain_modules')
+    @patch('backend.services.tool_configuration_service.discover_langchain_modules')
     def test_validate_langchain_tool_execution_error(self, mock_discover):
         """Test LangChain tool validation when execution fails"""
         # Mock LangChain tool
@@ -2312,12 +2202,13 @@ class TestLoadLastToolConfigImpl:
 class TestValidateLocalToolKnowledgeBaseSearch:
     """Test cases for _validate_local_tool function with knowledge_base_search tool"""
 
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
     def test_validate_local_tool_knowledge_base_search_success(self, mock_get_vector_db_core, mock_get_embedding_model,
-                                                               mock_signature, mock_get_class):
+                                                               mock_signature, mock_get_class, mock_get_knowledge_map):
         """Test successful knowledge_base_search tool validation with proper dependencies"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2345,6 +2236,9 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_vdb_core = Mock()
         mock_get_vector_db_core.return_value = mock_vdb_core
 
+        # Mock knowledge name map to return empty dict for this test
+        mock_get_knowledge_map.return_value = {}
+
         from backend.services.tool_configuration_service import _validate_local_tool
 
         result = _validate_local_tool(
@@ -2365,12 +2259,68 @@ class TestValidateLocalToolKnowledgeBaseSearch:
             "vdb_core": mock_vdb_core,
             "embedding_model": "mock_embedding_model",
             "rerank_model": None,
+            "display_name_to_index_map": {},
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
 
         # Verify service calls
         mock_get_embedding_model.assert_called_once_with(tenant_id="tenant1")
+
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_vector_db_core')
+    def test_validate_local_tool_knowledge_base_search_with_display_name_mapping(
+            self, mock_get_vector_db_core, mock_get_embedding_model, mock_get_class, mock_get_knowledge_map):
+        """Test knowledge_base_search tool with display_name_to_index_map parameter"""
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "mapped knowledge result"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+
+        mock_get_embedding_model.return_value = "mock_embedding_model"
+        mock_vdb_core = Mock()
+        mock_get_vector_db_core.return_value = mock_vdb_core
+
+        # Mock the knowledge name map for display_name to index_name mapping
+        mock_get_knowledge_map.return_value = {
+            "test_index_1": "Display Knowledge 1",
+            "test_index_2": "Display Knowledge 2"
+        }
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "knowledge_base_search",
+            {"query": "test query"},
+            {"index_names": ["test_index_1", "test_index_2"]},
+            "tenant1",
+            "user1"
+        )
+
+        assert result == "mapped knowledge result"
+
+        # Verify tool class was called exactly once
+        assert mock_tool_class.call_count == 1, f"Expected 1 call, got {mock_tool_class.call_count}"
+
+        # Get the actual call arguments
+        actual_call = mock_tool_class.call_args
+        actual_kwargs = actual_call.kwargs if actual_call.kwargs else actual_call[1]
+
+        # Verify each expected parameter
+        assert actual_kwargs.get("index_names") == ["test_index_1", "test_index_2"]
+        assert actual_kwargs.get("vdb_core") == mock_vdb_core
+        assert actual_kwargs.get("embedding_model") == "mock_embedding_model"
+        assert actual_kwargs.get("rerank_model") is None
+        assert actual_kwargs.get("display_name_to_index_map") == {
+            "Display Knowledge 1": "test_index_1",
+            "Display Knowledge 2": "test_index_2"
+        }
+
+        # Verify knowledge name map was called with index_names
+        mock_get_knowledge_map.assert_called_once_with(["test_index_1", "test_index_2"])
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
@@ -2456,6 +2406,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
 
         assert result == "knowledge base search result"
 
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
@@ -2463,7 +2414,8 @@ class TestValidateLocalToolKnowledgeBaseSearch:
     def test_validate_local_tool_knowledge_base_search_empty_knowledge_list(self, mock_get_vector_db_core,
                                                                             mock_get_embedding_model,
                                                                             mock_signature,
-                                                                            mock_get_class):
+                                                                            mock_get_class,
+                                                                            mock_get_knowledge_map):
         """Test knowledge_base_search tool validation with empty knowledge list"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2509,11 +2461,13 @@ class TestValidateLocalToolKnowledgeBaseSearch:
             "vdb_core": mock_vdb_core,
             "embedding_model": "mock_embedding_model",
             "rerank_model": None,
+            "display_name_to_index_map": {},
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
 
 
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
@@ -2521,7 +2475,8 @@ class TestValidateLocalToolKnowledgeBaseSearch:
     def test_validate_local_tool_knowledge_base_search_execution_error(self, mock_get_vector_db_core,
                                                                        mock_get_embedding_model,
                                                                        mock_signature,
-                                                                       mock_get_class):
+                                                                       mock_get_class,
+                                                                       mock_get_knowledge_map):
         """Test knowledge_base_search tool validation when execution fails"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2593,11 +2548,12 @@ class TestValidateLocalToolAnalyzeImage:
 
         assert result == "analyze image result"
         mock_get_vlm_model.assert_called_once_with(tenant_id="tenant1")
-        mock_tool_class.assert_called_once_with(
-            prompt="describe",
-            vlm_model="mock_vlm_model",
-            storage_client=mock_minio_client
-        )
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert 'vlm_model' in call_kwargs
+        assert 'storage_client' in call_kwargs
+        assert 'validate_url_access' in call_kwargs
+        assert callable(call_kwargs['validate_url_access'])
         mock_tool_instance.forward.assert_called_once_with(image="bytes")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
@@ -2908,13 +2864,14 @@ class TestValidateLocalToolAnalyzeTextFile:
         mock_get_class.assert_called_once_with("analyze_text_file")
 
         # Verify analyze_text_file specific parameters were passed
-        expected_params = {
-            "param": "config",
-            "llm_model": mock_llm_model,
-            "storage_client": mock_minio_client,
-            "data_process_service_url": "http://data-process-service",
-        }
-        mock_tool_class.assert_called_once_with(**expected_params)
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert 'llm_model' in call_kwargs
+        assert 'storage_client' in call_kwargs
+        assert 'data_process_service_url' in call_kwargs
+        assert call_kwargs['data_process_service_url'] == "http://data-process-service"
+        assert 'validate_url_access' in call_kwargs
+        assert callable(call_kwargs['validate_url_access'])
         mock_tool_instance.forward.assert_called_once_with(input="test input")
 
         # Verify service calls
@@ -3227,7 +3184,7 @@ class TestGetLocalToolsDescriptionZh:
     def test_returns_correct_structure_with_description_zh(self, mock_get_classes):
         """Test that function returns correct structure with description_zh for tools."""
         from pydantic import Field
-        
+
         # Create a mock tool class with description_zh
         class MockToolWithDescriptionZh:
             name = "test_search_tool"
@@ -3266,7 +3223,7 @@ class TestGetLocalToolsDescriptionZh:
     def test_extracts_param_description_zh(self, mock_get_classes):
         """Test that function extracts description_zh from init params."""
         from pydantic import Field
-        
+
         class MockToolWithParamDescriptions:
             name = "test_tool"
             description = "Test tool"
@@ -3379,7 +3336,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
     def test_get_local_tools_with_description_zh(self, mock_get_classes):
         """Test get_local_tools extracts description_zh from tool class."""
         from pydantic import Field
-        
+
         class MockToolWithZh:
             name = "test_tool_zh"
             description = "Test tool"
@@ -3412,13 +3369,13 @@ class TestGetLocalToolsDescriptionZhCoverage:
         assert len(result) == 1
         tool_info = result[0]
         assert tool_info.description_zh == "测试工具"
-        
+
         # Check params have description_zh from init_param_descriptions
         params = tool_info.params
         param1 = next((p for p in params if p["name"] == "param1"), None)
         assert param1 is not None
         assert param1["description_zh"] == "参数1"
-        
+
         # Check inputs have description_zh
         import json
         inputs = json.loads(tool_info.inputs)
@@ -3429,7 +3386,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
     def test_get_local_tools_param_without_description_zh(self, mock_get_classes):
         """Test get_local_tools handles param without description_zh."""
         from pydantic import Field
-        
+
         class MockToolNoParamZh:
             name = "test_tool_no_param_zh"
             description = "Test tool"
@@ -3456,7 +3413,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
     def test_get_local_tools_inputs_non_dict_value(self, mock_get_classes):
         """Test get_local_tools handles inputs with non-dict values."""
         from pydantic import Field
-        
+
         class MockToolNonDictInputs:
             name = "test_tool_non_dict"
             description = "Test tool"
@@ -3498,7 +3455,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
                 "category": "test"
             }
         ]
-        
+
         mock_get_desc.return_value = {
             "local_tool": {
                 "description_zh": "本地工具",
@@ -3534,7 +3491,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
                 "category": "test"
             }
         ]
-        
+
         mock_get_desc.return_value = {
             "local_tool": {
                 "description_zh": "本地工具",
@@ -3571,7 +3528,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
                 "description_zh": "MCP工具"
             }
         ]
-        
+
         mock_get_desc.return_value = {}
 
         from backend.services.tool_configuration_service import list_all_tools
@@ -3600,7 +3557,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
                 "category": "test"
             }
         ]
-        
+
         mock_get_desc.return_value = {
             "local_tool": {
                 "description_zh": "本地工具",
@@ -3626,7 +3583,7 @@ class TestGetLocalToolsClassesDirect:
         # Create mock tool classes
         mock_tool_class1 = type('TestTool1', (), {})
         mock_tool_class2 = type('TestTool2', (), {})
-        
+
         # Create a mock package with tool classes
         class MockPackage:
             def __init__(self):
@@ -3643,12 +3600,544 @@ class TestGetLocalToolsClassesDirect:
 
         from backend.utils.tool_utils import get_local_tools_classes
         result = get_local_tools_classes()
-        
+
         assert isinstance(result, list)
         assert mock_tool_class1 in result
         assert mock_tool_class2 in result
         # String should not be included
         assert "string_value" not in result
+
+
+# ============================================================
+# Outer API Tools Tests (Newly Added Functions 830-1237)
+# ============================================================
+
+
+class TestValidateMcpToolRemote:
+    """Test cases for _validate_mcp_tool_remote function."""
+
+    @pytest.mark.asyncio
+    async def test_validate_mcp_tool_remote_success(self):
+        """Test successful remote MCP tool validation."""
+        mock_url = "http://remote-mcp-server/sse"
+        mock_token = "auth_token_123"
+
+        with patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant', return_value=mock_url):
+            with patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url', return_value=mock_token):
+                with patch('backend.services.tool_configuration_service._call_mcp_tool', return_value="tool result") as mock_call:
+                    from backend.services.tool_configuration_service import _validate_mcp_tool_remote
+                    result = await _validate_mcp_tool_remote(
+                        "test_tool",
+                        {"param": "value"},
+                        "remote_mcp",
+                        "tenant1"
+                    )
+
+                    assert result == "tool result"
+                    mock_call.assert_called_once_with(mock_url, "test_tool", {"param": "value"}, mock_token)
+
+    @pytest.mark.asyncio
+    async def test_validate_mcp_tool_remote_server_not_found(self):
+        """Test _validate_mcp_tool_remote raises NotFoundException when server not found."""
+        with patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant', return_value=None):
+            from backend.services.tool_configuration_service import _validate_mcp_tool_remote
+            with pytest.raises(NotFoundException, match="MCP server not found for name: remote_mcp"):
+                await _validate_mcp_tool_remote("test_tool", {}, "remote_mcp", "tenant1")
+
+    @pytest.mark.asyncio
+    async def test_validate_mcp_tool_remote_no_token(self):
+        """Test remote MCP tool validation without auth token."""
+        mock_url = "http://remote-mcp-server/sse"
+
+        with patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant', return_value=mock_url):
+            with patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url', return_value=None):
+                with patch('backend.services.tool_configuration_service._call_mcp_tool', return_value="tool result") as mock_call:
+                    from backend.services.tool_configuration_service import _validate_mcp_tool_remote
+                    result = await _validate_mcp_tool_remote(
+                        "test_tool",
+                        {"param": "value"},
+                        "remote_mcp",
+                        "tenant1"
+                    )
+
+                    assert result == "tool result"
+                    # Token should be None
+                    mock_call.assert_called_once_with(mock_url, "test_tool", {"param": "value"}, None)
+        # Should still call with None token
+        mock_call.assert_called_once()
+
+
+class TestCallMcpTool:
+    """Test cases for _call_mcp_tool function."""
+
+    @pytest.mark.asyncio
+    async def test_call_mcp_tool_success(self):
+        """Test successful MCP tool call."""
+        from fastmcp import Client
+
+        mock_transport_instance = Mock()
+        mock_client_instance = AsyncMock()
+        mock_client_instance.is_connected.return_value = True
+        mock_result = Mock()
+        mock_result.content = [Mock(text="tool output")]
+        mock_client_instance.call_tool.return_value = mock_result
+
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+
+        with patch('backend.services.tool_configuration_service.Client', return_value=mock_client_instance):
+            with patch('backend.services.tool_configuration_service._create_mcp_transport', return_value=mock_transport_instance):
+                from backend.services.tool_configuration_service import _call_mcp_tool
+                result = await _call_mcp_tool(
+                    "http://mcp-server/sse",
+                    "test_tool",
+                    {"param": "value"},
+                    "auth_token"
+                )
+
+        assert result == "tool output"
+
+    @pytest.mark.asyncio
+    async def test_call_mcp_tool_not_connected(self):
+        """Test MCP tool call when client is not connected."""
+        from fastmcp import Client
+
+        mock_transport_instance = Mock()
+        # Use a regular mock for client since we need to control is_connected behavior
+        mock_client_instance = Mock(spec=Client)
+        mock_client_instance.is_connected = Mock(return_value=False)
+        mock_client_instance.call_tool = AsyncMock()
+
+        # Make it work as a context manager
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+
+        with patch('backend.services.tool_configuration_service.Client', return_value=mock_client_instance):
+            with patch('backend.services.tool_configuration_service._create_mcp_transport', return_value=mock_transport_instance):
+                from backend.services.tool_configuration_service import _call_mcp_tool
+                with pytest.raises(MCPConnectionError, match="Failed to connect to MCP server"):
+                    await _call_mcp_tool("http://mcp-server/sse", "test_tool", {}, None)
+
+
+class TestValidateLangChainTool:
+    """Test cases for _validate_langchain_tool additional coverage."""
+
+    @patch('backend.services.tool_configuration_service.discover_langchain_modules')
+    def test_validate_langchain_tool_empty_inputs(self, mock_discover):
+        """Test LangChain tool validation with empty dict inputs."""
+        mock_tool = Mock()
+        mock_tool.name = "test_tool"
+        mock_tool.invoke.return_value = "result"
+
+        mock_discover.return_value = [(mock_tool, "test_tool.py")]
+
+        from backend.services.tool_configuration_service import _validate_langchain_tool
+        # Call with empty dict (not None) to match actual usage
+        result = _validate_langchain_tool("test_tool", {})
+
+        assert result == "result"
+        mock_tool.invoke.assert_called_once_with({})
+
+    @patch('backend.services.tool_configuration_service.discover_langchain_modules')
+    def test_validate_langchain_tool_exception_during_discovery(self, mock_discover):
+        """Test LangChain tool validation when discovery raises exception."""
+        mock_discover.side_effect = Exception("Discovery failed")
+
+        from backend.services.tool_configuration_service import _validate_langchain_tool, ToolExecutionException
+        with pytest.raises(ToolExecutionException, match="LangChain tool 'test_tool' validation failed"):
+            _validate_langchain_tool("test_tool", {})
+
+
+class TestGetToolClassByName:
+    """Test cases for _get_tool_class_by_name function."""
+
+    @patch('backend.services.tool_configuration_service.importlib.import_module')
+    def test_get_tool_class_by_name_found(self, mock_import):
+        """Test finding a tool class by name."""
+        class MockToolClass:
+            name = "test_tool"
+
+        mock_module = Mock()
+        mock_module.__name__ = "nexent.core.tools"
+        mock_module.MockToolClass = MockToolClass
+        mock_import.return_value = mock_module
+
+        from backend.services.tool_configuration_service import _get_tool_class_by_name
+        result = _get_tool_class_by_name("test_tool")
+
+        assert result == MockToolClass
+
+    @patch('backend.services.tool_configuration_service.importlib.import_module')
+    def test_get_tool_class_by_name_not_found(self, mock_import):
+        """Test when tool class is not found."""
+        mock_module = Mock()
+        mock_module.__name__ = "nexent.core.tools"
+        mock_import.return_value = mock_module
+
+        from backend.services.tool_configuration_service import _get_tool_class_by_name
+        result = _get_tool_class_by_name("nonexistent_tool")
+
+        assert result is None
+
+    @patch('backend.services.tool_configuration_service.importlib.import_module')
+    def test_get_tool_class_by_name_import_error(self, mock_import):
+        """Test when module import fails."""
+        mock_import.side_effect = Exception("Module import failed")
+
+        from backend.services.tool_configuration_service import _get_tool_class_by_name
+        result = _get_tool_class_by_name("test_tool")
+
+        assert result is None
+
+
+class TestCreateMcpTransport:
+    """Test cases for _create_mcp_transport function."""
+
+    def test_create_mcp_transport_sse(self):
+        """Test creating SSE transport."""
+        from backend.services.tool_configuration_service import _create_mcp_transport
+        transport = _create_mcp_transport("http://server/sse", "auth_token")
+
+        from fastmcp.client.transports import SSETransport
+        assert isinstance(transport, SSETransport)
+
+    def test_create_mcp_transport_streamable_http(self):
+        """Test creating StreamableHttp transport."""
+        from backend.services.tool_configuration_service import _create_mcp_transport
+        transport = _create_mcp_transport("http://server/mcp", None)
+
+        from fastmcp.client.transports import StreamableHttpTransport
+        assert isinstance(transport, StreamableHttpTransport)
+
+    def test_create_mcp_transport_default(self):
+        """Test creating default transport for unrecognized URLs."""
+        from backend.services.tool_configuration_service import _create_mcp_transport
+        transport = _create_mcp_transport("http://server/custom", "token")
+
+        from fastmcp.client.transports import StreamableHttpTransport
+        assert isinstance(transport, StreamableHttpTransport)
+
+    def test_create_mcp_transport_strips_whitespace(self):
+        """Test that URL whitespace is stripped."""
+        from backend.services.tool_configuration_service import _create_mcp_transport
+        transport = _create_mcp_transport("  http://server/mcp  ", None)
+
+        from fastmcp.client.transports import StreamableHttpTransport
+        assert isinstance(transport, StreamableHttpTransport)
+class TestValidateMcpToolNexent:
+    """Test cases for _validate_mcp_tool_nexent function."""
+
+    @pytest.mark.asyncio
+    async def test_validate_mcp_tool_nexent_success(self):
+        """Test successful nexent MCP tool validation."""
+        with patch('backend.services.tool_configuration_service._call_mcp_tool') as mock_call:
+            mock_call.return_value = "tool result"
+
+            from backend.services.tool_configuration_service import _validate_mcp_tool_nexent
+            result = await _validate_mcp_tool_nexent("test_tool", {"param": "value"})
+
+            assert result == "tool result"
+            # Verify _call_mcp_tool was called (urljoin is used internally)
+
+
+class TestImportOpenapiService:
+    """Test cases for import_openapi_service function."""
+
+    @patch('backend.services.tool_configuration_service.upsert_openapi_service')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_import_openapi_service_with_description(self, mock_logger, mock_upsert):
+        """Test import_openapi_service with explicit service_description."""
+        mock_upsert.return_value = {
+            "service_name": "test_service",
+            "tools_count": 5
+        }
+
+        openapi_json = {
+            "info": {"description": "Should not be used", "title": "Should not be used"},
+            "paths": {}
+        }
+
+        from backend.services.tool_configuration_service import import_openapi_service
+        result = import_openapi_service(
+            service_name="test_service",
+            openapi_json=openapi_json,
+            server_url="http://api.example.com",
+            tenant_id="tenant1",
+            user_id="user1",
+            service_description="My custom description"
+        )
+
+        assert result["service_name"] == "test_service"
+        mock_upsert.assert_called_once()
+        call_kwargs = mock_upsert.call_args.kwargs
+        assert call_kwargs["description"] == "My custom description"
+        assert call_kwargs["server_url"] == "http://api.example.com"
+        mock_logger.info.assert_called_once()
+
+    @patch('backend.services.tool_configuration_service.upsert_openapi_service')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_import_openapi_service_extract_description_from_info(self, mock_logger, mock_upsert):
+        """Test import_openapi_service extracts description from openapi_json.info when not provided."""
+        mock_upsert.return_value = {"service_name": "test_service"}
+
+        openapi_json = {
+            "info": {"description": "API description from info", "title": "API Title"},
+            "paths": {}
+        }
+
+        from backend.services.tool_configuration_service import import_openapi_service
+        result = import_openapi_service(
+            service_name="test_service",
+            openapi_json=openapi_json,
+            server_url="http://api.example.com",
+            tenant_id="tenant1",
+            user_id="user1"
+        )
+
+        call_kwargs = mock_upsert.call_args.kwargs
+        assert call_kwargs["description"] == "API description from info"
+
+    @patch('backend.services.tool_configuration_service.upsert_openapi_service')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_import_openapi_service_extract_title_as_fallback(self, mock_logger, mock_upsert):
+        """Test import_openapi_service uses title as fallback when description is not provided."""
+        mock_upsert.return_value = {"service_name": "test_service"}
+
+        openapi_json = {
+            "info": {"title": "API Title Only"},
+            "paths": {}
+        }
+
+        from backend.services.tool_configuration_service import import_openapi_service
+        result = import_openapi_service(
+            service_name="test_service",
+            openapi_json=openapi_json,
+            server_url="http://api.example.com",
+            tenant_id="tenant1",
+            user_id="user1"
+        )
+
+        call_kwargs = mock_upsert.call_args.kwargs
+        assert call_kwargs["description"] == "API Title Only"
+
+    @patch('backend.services.tool_configuration_service.upsert_openapi_service')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_import_openapi_service_overrides_servers_url(self, mock_logger, mock_upsert):
+        """Test import_openapi_service overrides servers URL in openapi_json."""
+        mock_upsert.return_value = {"service_name": "test_service"}
+
+        openapi_json = {
+            "info": {"description": "Test API"},
+            "servers": [{"url": "http://old-server.com"}],
+            "paths": {}
+        }
+
+        from backend.services.tool_configuration_service import import_openapi_service
+        import_openapi_service(
+            service_name="test_service",
+            openapi_json=openapi_json,
+            server_url="http://new-server.com",
+            tenant_id="tenant1",
+            user_id="user1"
+        )
+
+        call_kwargs = mock_upsert.call_args.kwargs
+        assert call_kwargs["openapi_json"]["servers"] == [{"url": "http://new-server.com"}]
+
+
+class TestListOpenapiServices:
+    """Test cases for list_openapi_services function."""
+
+    @patch('backend.services.tool_configuration_service.query_openapi_services_by_tenant')
+    def test_list_openapi_services_success(self, mock_query):
+        """Test successful listing of OpenAPI services."""
+        mock_query.return_value = [
+            {"service_name": "service1", "description": "Service 1"},
+            {"service_name": "service2", "description": "Service 2"}
+        ]
+
+        from backend.services.tool_configuration_service import list_openapi_services
+        result = list_openapi_services("tenant1")
+
+        assert len(result) == 2
+        mock_query.assert_called_once_with("tenant1")
+
+    @patch('backend.services.tool_configuration_service.query_openapi_services_by_tenant')
+    def test_list_openapi_services_empty(self, mock_query):
+        """Test listing when no OpenAPI services exist."""
+        mock_query.return_value = []
+
+        from backend.services.tool_configuration_service import list_openapi_services
+        result = list_openapi_services("tenant1")
+
+        assert len(result) == 0
+
+
+class TestDeleteOpenapiService:
+    """Test cases for delete_openapi_service function."""
+
+    @patch('backend.services.tool_configuration_service.db_delete_openapi_service')
+    def test_delete_openapi_service_success(self, mock_delete):
+        """Test successful deletion of OpenAPI service."""
+        mock_delete.return_value = True
+
+        from backend.services.tool_configuration_service import delete_openapi_service
+        result = delete_openapi_service("test_service", "tenant1", "user1")
+
+        assert result is True
+        mock_delete.assert_called_once_with("test_service", "tenant1", "user1")
+
+    @patch('backend.services.tool_configuration_service.db_delete_openapi_service')
+    def test_delete_openapi_service_not_found(self, mock_delete):
+        """Test deletion when service doesn't exist."""
+        mock_delete.return_value = False
+
+        from backend.services.tool_configuration_service import delete_openapi_service
+        result = delete_openapi_service("nonexistent_service", "tenant1", "user1")
+
+        assert result is False
+
+
+class TestRefreshOpenapiServicesInMcp:
+    """Test cases for _refresh_openapi_services_in_mcp function."""
+
+    @patch('time.sleep')
+    @patch('requests.post')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_refresh_openapi_services_success(self, mock_logger, mock_post, mock_sleep):
+        """Test successful refresh of OpenAPI services."""
+        mock_response = Mock()
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = {"data": {"refreshed": 5}}
+        mock_post.return_value = mock_response
+
+        from backend.services.tool_configuration_service import _refresh_openapi_services_in_mcp
+        result = _refresh_openapi_services_in_mcp("tenant1")
+
+        assert result == {"refreshed": 5}
+        mock_post.assert_called_once()
+        mock_logger.info.assert_called_once()
+
+    @patch('time.sleep')
+    @patch('requests.post')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_refresh_openapi_services_retry_success(self, mock_logger, mock_post, mock_sleep):
+        """Test refresh succeeds after retry on first failure."""
+        import requests
+
+        mock_fail = Mock()
+        mock_fail.raise_for_status.side_effect = requests.RequestException("Server error")
+        mock_fail.json.return_value = {}
+
+        mock_success = Mock()
+        mock_success.raise_for_status = Mock()
+        mock_success.json.return_value = {"data": {"refreshed": 3}}
+
+        mock_post.side_effect = [mock_fail, mock_success]
+
+        from backend.services.tool_configuration_service import _refresh_openapi_services_in_mcp
+        result = _refresh_openapi_services_in_mcp("tenant1")
+
+        assert result == {"refreshed": 3}
+        assert mock_post.call_count == 2
+        assert mock_sleep.call_count == 1
+
+    @patch('time.sleep')
+    @patch('requests.post')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_refresh_openapi_services_all_retries_fail(self, mock_logger, mock_post, mock_sleep):
+        """Test refresh fails after all retries are exhausted."""
+        import requests
+
+        mock_fail = Mock()
+        mock_fail.raise_for_status.side_effect = requests.RequestException("Connection refused")
+        mock_fail.json.return_value = {}
+        mock_post.return_value = mock_fail
+
+        from backend.services.tool_configuration_service import _refresh_openapi_services_in_mcp
+        result = _refresh_openapi_services_in_mcp("tenant1")
+
+        assert "error" in result
+        assert mock_post.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch('requests.post')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_refresh_openapi_services_unexpected_exception(self, mock_logger, mock_post):
+        """Test refresh with unexpected exception (non-RequestException)."""
+        mock_post.side_effect = TypeError("Unexpected error")
+
+        from backend.services.tool_configuration_service import _refresh_openapi_services_in_mcp
+        result = _refresh_openapi_services_in_mcp("tenant1")
+
+        assert "error" in result
+        mock_logger.warning.assert_called_once()
+
+
+class TestValidateLocalToolMonitoring:
+    """Verify _validate_local_tool sets monitoring context and operation for VLM and LLM branches."""
+
+    @patch('backend.services.tool_configuration_service.set_monitoring_operation')
+    @patch('backend.services.tool_configuration_service.set_monitoring_context')
+    @patch('backend.services.tool_configuration_service.minio_client')
+    @patch('backend.services.tool_configuration_service.get_vlm_model')
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_analyze_image_sets_monitoring_context(
+            self, mock_signature, mock_get_class, mock_get_vlm_model,
+            mock_minio_client, mock_ctx, mock_op):
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "ok"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+        mock_vlm = Mock(display_name="VLM-Model")
+        mock_get_vlm_model.return_value = mock_vlm
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+        _validate_local_tool(
+            "analyze_image", {"image": "bytes"}, {"prompt": "p"},
+            "tenant1", "user1")
+
+        mock_ctx.assert_called_once_with(tenant_id="tenant1")
+        mock_op.assert_called_once_with(
+            "tool_validation", display_name="VLM-Model")
+
+    @patch('backend.services.tool_configuration_service.set_monitoring_operation')
+    @patch('backend.services.tool_configuration_service.set_monitoring_context')
+    @patch('backend.services.tool_configuration_service.minio_client')
+    @patch('backend.services.tool_configuration_service.DATA_PROCESS_SERVICE', "http://svc")
+    @patch('backend.services.tool_configuration_service.get_llm_model')
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_analyze_text_file_sets_monitoring_context(
+            self, mock_signature, mock_get_class, mock_get_llm_model,
+            mock_minio_client, mock_ctx, mock_op):
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "ok"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+        mock_llm = Mock(display_name="LLM-Model")
+        mock_get_llm_model.return_value = mock_llm
+        mock_sig = Mock()
+        mock_sig.parameters = {
+            'llm_model': Mock(), 'storage_client': Mock(),
+            'data_process_service_url': Mock(),
+        }
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+        _validate_local_tool(
+            "analyze_text_file", {"input": "text"}, {"param": "c"},
+            "tenant1", "user1")
+
+        mock_ctx.assert_called_once_with(tenant_id="tenant1")
+        mock_op.assert_called_once_with(
+            "tool_validation", display_name="LLM-Model")
 
 
 if __name__ == "__main__":

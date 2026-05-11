@@ -2,35 +2,47 @@ import importlib
 import inspect
 import json
 import logging
+import time
 from typing import Any, List, Optional, Dict
 from urllib.parse import urljoin
 
-from pydantic_core import PydanticUndefined
-from fastmcp import Client
-from fastmcp.client.transports import StreamableHttpTransport, SSETransport
 import jsonref
-from mcpadapt.smolagents_adapter import _sanitize_function_name
+import requests
+from fastmcp import Client
+from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from pydantic_core import PydanticUndefined
 
-from consts.const import LOCAL_MCP_SERVER, DATA_PROCESS_SERVICE
-from consts.exceptions import MCPConnectionError, ToolExecutionException, NotFoundException
+from consts.const import DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API
+from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
+from database.client import minio_client
+from database.outer_api_tool_db import (
+    upsert_openapi_service,
+    query_openapi_services_by_tenant,
+    delete_openapi_service as db_delete_openapi_service,
+)
 from database.remote_mcp_db import (
+    get_mcp_authorization_token_by_name_and_url,
     get_mcp_records_by_tenant,
     get_mcp_server_by_name_and_tenant,
-    get_mcp_authorization_token_by_name_and_url,
 )
 from database.tool_db import (
+    check_tool_list_initialized,
     create_or_update_tool_by_tool_info,
     query_all_tools,
     query_tool_instances_by_id,
-    update_tool_table_from_scan_tool_list,
     search_last_tool_instance_by_tool_id,
-    check_tool_list_initialized,
+    update_tool_table_from_scan_tool_list,
 )
-from services.file_management_service import get_llm_model
+from database.knowledge_db import get_knowledge_name_map_by_index_names
+from mcpadapt.smolagents_adapter import _sanitize_function_name
+from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model, get_rerank_model, get_vector_db_core
 from database.client import minio_client
 from services.image_service import get_vlm_model
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from services.vectordatabase_service import get_embedding_model, get_vector_db_core
+from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
@@ -107,13 +119,13 @@ def get_local_tools() -> List[ToolInfo]:
     for tool_class in tools_classes:
         # Get class-level init_param_descriptions for fallback
         init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
-        
+
         init_params_list = []
         sig = inspect.signature(tool_class.__init__)
         for param_name, param in sig.parameters.items():
             if param_name == "self":
                 continue
-            
+
             # Check if parameter has a default value and if it should be excluded
             if param.default != inspect.Parameter.empty:
                 if hasattr(param.default, 'exclude') and param.default.exclude:
@@ -121,10 +133,10 @@ def get_local_tools() -> List[ToolInfo]:
 
             # Get description in both languages
             param_description = param.default.description if hasattr(param.default, 'description') else ""
-            
+
             # First try to get from param.default.description_zh (FieldInfo)
             param_description_zh = param.default.description_zh if hasattr(param.default, 'description_zh') else None
-            
+
             # Fallback to init_param_descriptions if not found
             if param_description_zh is None and param_name in init_param_descriptions:
                 param_description_zh = init_param_descriptions[param_name].get('description_zh')
@@ -225,8 +237,6 @@ def get_langchain_tools() -> List[ToolInfo]:
     LangChain tools (based on presence of `name` & `description`).  Any valid
     tool is converted to ToolInfo with source = "langchain".
     """
-    from utils.langchain_utils import discover_langchain_modules
-
     tools_info: List[ToolInfo] = []
     # Discover all objects that look like LangChain tools
     discovered_tools = discover_langchain_modules()
@@ -266,7 +276,7 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
 
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
     tools_info.extend(await get_tool_from_remote_mcp_server(
-        mcp_server_name="nexent",
+        mcp_server_name="outer-apis",
         remote_mcp_server=default_mcp_url,
         tenant_id=None
     ))
@@ -417,7 +427,8 @@ async def init_tool_list_for_tenant(tenant_id: str, user_id: str):
 
 async def update_tool_list(tenant_id: str, user_id: str):
     """
-        Scan and gather all available tools from both local and MCP sources
+        Scan and gather all available tools from local, MCP, and outer API sources.
+        Also refreshes dynamic outer API tools in MCP server.
 
         Args:
             tenant_id: Tenant ID for MCP tools (required for MCP tools)
@@ -427,8 +438,9 @@ async def update_tool_list(tenant_id: str, user_id: str):
             List of ToolInfo objects containing tool metadata
         """
     local_tools = get_local_tools()
-    # Discover LangChain tools (decorated functions) and include them in the
     langchain_tools = get_langchain_tools()
+
+    _refresh_openapi_services_in_mcp(tenant_id)
 
     try:
         mcp_tools = await get_all_mcp_tools(tenant_id)
@@ -702,11 +714,20 @@ def _validate_local_tool(
             if rerank and rerank_model_name:
                 rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
 
+            # Build display_name to index_name mapping for LLM parameter conversion
+            index_names = instantiation_params.get("index_names", [])
+            display_name_to_index_map = {}
+            if index_names:
+                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                for idx_name, kb_name in knowledge_name_map.items():
+                    display_name_to_index_map[kb_name] = idx_name
+
             params = {
                 **instantiation_params,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
                 'rerank_model': rerank_model,
+                'display_name_to_index_map': display_name_to_index_map,
             }
             tool_instance = tool_class(**params)
         elif tool_name in ["dify_search", "datamate_search"]:
@@ -722,15 +743,29 @@ def _validate_local_tool(
                 'rerank_model': rerank_model,
             }
             tool_instance = tool_class(**params)
+        elif tool_name == "haotian_search":
+            # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
+            # Must explicitly pass observer=None: if omitted, Python applies the FieldInfo default
+            # (not None), causing 'FieldInfo has no attr lang' errors in forward()
+            filtered_params = {k: v for k, v in instantiation_params.items()
+                              if k not in ["observer", "rerank_model", "rerank"]}
+            filtered_params["observer"] = None
+            tool_instance = tool_class(**filtered_params)
         elif tool_name == "analyze_image":
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
+            vlm_display_name = getattr(
+                image_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=vlm_display_name)
             params = {
                 **instantiation_params,
                 'vlm_model': image_to_text_model,
-                'storage_client': minio_client
+                'storage_client': minio_client,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_text_file":
@@ -738,11 +773,17 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
+            llm_display_name = getattr(
+                long_text_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=llm_display_name)
             params = {
                 **instantiation_params,
                 'llm_model': long_text_to_text_model,
                 'storage_client': minio_client,
-                "data_process_service_url": DATA_PROCESS_SERVICE
+                "data_process_service_url": DATA_PROCESS_SERVICE,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }
             tool_instance = tool_class(**params)
         else:
@@ -775,7 +816,6 @@ def _validate_langchain_tool(
         ToolExecutionException: If tool execution fails
     """
     try:
-        from utils.langchain_utils import discover_langchain_modules
 
         # Discover all LangChain tools
         discovered_tools = discover_langchain_modules()
@@ -826,7 +866,7 @@ async def validate_tool_impl(
         tool_name, inputs, source, usage, params = (
             request.name, request.inputs, request.source, request.usage, request.params)
         if source == ToolSourceEnum.MCP.value:
-            if usage == "nexent":
+            if usage == "outer-apis":
                 return await _validate_mcp_tool_nexent(tool_name, inputs)
             else:
                 return await _validate_mcp_tool_remote(tool_name, inputs, usage, tenant_id)
@@ -846,3 +886,126 @@ async def validate_tool_impl(
     except Exception as e:
         logger.error(f"Validate Tool failed: {e}")
         raise ToolExecutionException(str(e))
+
+
+# --------------------------------------------------
+# Outer API Tools (OpenAPI to MCP Conversion)
+# --------------------------------------------------
+
+def import_openapi_service(
+    service_name: str,
+    openapi_json: Dict[str, Any],
+    server_url: str,
+    tenant_id: str,
+    user_id: str,
+    service_description: str = None,
+    force_update: bool = False
+) -> Dict[str, Any]:
+    """
+    Import OpenAPI JSON as an MCP service, using FastMCP.from_openapi() approach.
+    All tools from the same OpenAPI spec share the same mcp_service_name.
+
+    Args:
+        service_name: MCP service name for grouping tools
+        openapi_json: OpenAPI 3.x specification as dictionary
+        server_url: Base URL of the REST API server
+        tenant_id: Tenant ID for multi-tenancy
+        user_id: User ID for audit
+        service_description: Optional service description (if not provided, reads from openapi_json.info.description)
+        force_update: If True, replace all existing tools for this service
+
+    Returns:
+        Dictionary with import result
+    """
+    # If service_description not provided, extract from openapi_json info
+    if service_description is None:
+        info = openapi_json.get("info", {})
+        service_description = info.get("description") or info.get("title", "")
+
+    # Override server URL in openapi_json if different
+    openapi_spec = openapi_json.copy()
+    openapi_spec["servers"] = [{"url": server_url}]
+
+    result = upsert_openapi_service(
+        service_name=service_name,
+        openapi_json=openapi_spec,
+        server_url=server_url,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        description=service_description
+    )
+
+    logger.info(f"Imported service '{service_name}' for tenant {tenant_id}")
+    return result
+
+
+def list_openapi_services(tenant_id: str) -> List[Dict[str, Any]]:
+    """
+    List all OpenAPI services for a tenant.
+
+    Args:
+        tenant_id: Tenant ID
+
+    Returns:
+        List of service dictionaries
+    """
+    return query_openapi_services_by_tenant(tenant_id)
+
+
+def delete_openapi_service(service_name: str, tenant_id: str, user_id: str) -> bool:
+    """
+    Delete an OpenAPI service (all tools belonging to it).
+
+    Args:
+        service_name: MCP service name
+        tenant_id: Tenant ID
+        user_id: User ID for audit
+
+    Returns:
+        True if deleted, False if not found
+    """
+    return db_delete_openapi_service(service_name, tenant_id, user_id)
+
+
+def _refresh_openapi_services_in_mcp(tenant_id: str) -> Dict[str, Any]:
+    """
+    Refresh OpenAPI services in MCP server via HTTP API using from_openapi approach.
+
+    This replaces the old per-tool registration with service-level registration,
+    using FastMCP.from_openapi() to batch-load all tools from each service.
+
+    Args:
+        tenant_id: Tenant ID
+
+    Returns:
+        Dictionary with refresh result
+    """
+    refresh_url = f"{MCP_MANAGEMENT_API}/tools/openapi_service/refresh"
+    max_retries = 3
+    retry_delay = 1.0
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                refresh_url,
+                params={"tenant_id": tenant_id},
+                timeout=30
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Refreshed OpenAPI services for tenant {tenant_id}: {result}")
+            return result.get("data", {})
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                logger.warning(
+                    f"Failed to refresh OpenAPI services (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {retry_delay}s..."
+                )
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                logger.error(f"Failed to refresh OpenAPI services after {max_retries} attempts: {e}")
+                return {"error": str(e)}
+        except Exception as e:
+            logger.warning(f"Failed to refresh OpenAPI services in MCP: {e}")
+            return {"error": str(e)}

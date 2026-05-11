@@ -1699,6 +1699,26 @@ class TestDeleteSkill:
 
         assert result is True
 
+    def test_delete_skill_already_deleted(self, monkeypatch, mock_session):
+        """Test deleting a skill that is already deleted returns False."""
+        session, query = mock_session
+
+        mock_first = MagicMock()
+        mock_first.return_value = None
+        mock_filter = MagicMock()
+        mock_filter.first = mock_first
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        result = delete_skill('already_deleted_skill')
+
+        assert result is False
+
 
 # ===== get_tool_names_by_ids Tests =====
 

@@ -4,7 +4,7 @@ import logging
 import os
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import UploadFile
@@ -23,8 +23,10 @@ from database.attachment_db import (
     delete_file,
     file_exists,
     get_content_type,
+    get_file_range,
     get_file_size_from_minio,
     get_file_stream,
+    get_file_stream_raw,
     get_file_url,
     list_files,
     upload_fileobj,
@@ -34,6 +36,7 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import save_upload_file
 
 from nexent import MessageObserver
+from nexent.multi_modal.utils import parse_s3_url
 from nexent.core.models import OpenAILongContextModel
 
 # Create upload directory
@@ -48,7 +51,115 @@ _conversion_locks_guard = asyncio.Lock()
 logger = logging.getLogger("file_management_service")
 
 
-async def upload_files_impl(destination: str, file: List[UploadFile], folder: str = None, index_name: Optional[str] = None) -> tuple:
+def check_file_access(object_name: str, user_id: Optional[str]) -> bool:
+    """
+    Check if user has permission to access the file.
+
+    Access rules:
+    - knowledge_base/*: All authenticated users can access
+    - attachments/{user_id}/*: Only the owner (user_id) can access
+    - preview/*: Accessible if the original file is accessible
+
+    Args:
+        object_name: File object name in storage
+        user_id: Current user ID
+
+    Returns:
+        True if access is allowed, False otherwise
+    """
+    if not user_id:
+        return False
+
+    if object_name.startswith("knowledge_base/"):
+        # Knowledge base files: all authenticated users can access
+        return True
+
+    # Check if file is in user's attachments folder
+    # Pattern: attachments/{user_id}/*
+    if object_name.startswith(f"attachments/{user_id}/"):
+        return True
+
+    # For backward compatibility, allow access to files in root attachments folder
+    # Pattern: attachments/{filename} (no user_id subfolder)
+    if object_name.startswith("attachments/") and "/" not in object_name.replace("attachments/", "", 1):
+        # Old format: attachments/filename (no subdirectory)
+        # Allow access for backward compatibility
+        return True
+
+    return False
+
+
+def check_file_access_batch(object_names: List[str], user_id: Optional[str]) -> Dict[str, bool]:
+    """
+    Batch check file access permissions.
+
+    Args:
+        object_names: List of file object names
+        user_id: Current user ID
+
+    Returns:
+        Dict mapping object_name to access permission (True/False)
+    """
+    return {obj_name: check_file_access(obj_name, user_id) for obj_name in object_names}
+
+
+def validate_s3_url_access(object_name: str, user_id: Optional[str]) -> None:
+    """
+    Validate if user has permission to access the S3 URL.
+
+    Args:
+        object_name: File object name in storage (extracted from S3 URL)
+        user_id: Current user ID
+
+    Raises:
+        PermissionError: If user doesn't have permission to access the file
+    """
+    if not user_id:
+        raise PermissionError("User authentication required to access files")
+
+    if not check_file_access(object_name, user_id):
+        logger.warning(f"[validate_s3_url_access] Access denied: object_name={object_name}, user_id={user_id}")
+        raise PermissionError(f"Access denied: You don't have permission to access this file ({object_name})")
+
+
+def validate_urls_access(urls: List[str], user_id: Optional[str]) -> None:
+    """
+    Validate if user has permission to access the given URLs.
+
+    Supports S3 URLs (s3://bucket/key or /bucket/key format).
+
+    Args:
+        urls: List of URLs to validate (S3, HTTP, or HTTPS)
+        user_id: Current user ID
+
+    Raises:
+        PermissionError: If user doesn't have permission to access any of the files
+    """
+    if not urls:
+        return
+
+    for url in urls:
+        if not url:
+            continue
+
+        # Only validate S3 URLs (MinIO storage)
+        # HTTP/HTTPS URLs are external resources and are not subject to MinIO access control
+        if url.startswith("s3://"):
+            try:
+                _, object_name = parse_s3_url(url)
+                validate_s3_url_access(object_name, user_id)
+            except ValueError as e:
+                logger.warning(f"[validate_urls_access] Failed to parse S3 URL: {url}, error: {e}")
+                raise PermissionError(f"Invalid S3 URL format: {url}")
+        elif url.startswith("/") and not url.startswith("//"):
+            # Handle /bucket/key format (absolute path style)
+            parts = url.strip("/").split("/", 1)
+            if len(parts) == 2:
+                bucket, object_name = parts
+                validate_s3_url_access(object_name, user_id)
+
+
+async def upload_files_impl(destination: str, file: List[UploadFile], folder: str = None, index_name: Optional[str] = None, user_id: Optional[str] = None) -> tuple:
     """
     Upload files to local storage or MinIO based on destination.
 
@@ -56,6 +167,8 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
         destination: "local" or "minio"
         file: List of UploadFile objects
         folder: Folder name for MinIO uploads
+        index_name: Knowledge base index for conflict resolution
+        user_id: User ID for attachment path isolation
 
     Returns:
         tuple: (errors, uploaded_file_paths, uploaded_filenames)
@@ -82,7 +195,20 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
                     errors.append(f"Failed to save file: {f.filename}")
 
     elif destination == "minio":
-        minio_results = await upload_to_minio(files=file, folder=folder)
+        # Determine actual folder path based on file type
+        # knowledge_base: accessible by all authenticated users
+        # other folders (attachments): user-isolated path (attachments/{user_id}/...)
+        if folder == "knowledge_base":
+            actual_folder = "knowledge_base"
+        else:
+            # User isolation for personal attachments
+            if user_id:
+                actual_folder = f"attachments/{user_id}"
+            else:
+                # Fallback to old behavior if no user_id provided
+                actual_folder = folder or "attachments"
+
+        minio_results = await upload_to_minio(files=file, folder=actual_folder)
         for result in minio_results:
             if result.get("success"):
                 uploaded_filenames.append(result.get("file_name"))
@@ -135,8 +261,18 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
     return errors, uploaded_file_paths, uploaded_filenames
 
 
-async def upload_to_minio(files: List[UploadFile], folder: str) -> List[dict]:
-    """Helper function to upload files to MinIO and return results."""
+async def upload_to_minio(files: List[UploadFile], folder: str, user_id: Optional[str] = None) -> List[dict]:
+    """
+    Helper function to upload files to MinIO and return results.
+
+    Args:
+        files: List of files to upload
+        folder: Storage folder path (will be prefixed with user_id if user_id is provided for attachments)
+        user_id: User ID for attachment path isolation
+
+    Returns:
+        List of upload results
+    """
     results = []
     for f in files:
         try:
@@ -146,11 +282,23 @@ async def upload_to_minio(files: List[UploadFile], folder: str) -> List[dict]:
             # Convert file content to BytesIO object
             file_obj = BytesIO(file_content)
 
+            # Determine actual folder path
+            # knowledge_base: no user isolation
+            # other folders: append user_id to path for isolation
+            if folder == "knowledge_base":
+                actual_folder = "knowledge_base"
+            else:
+                if user_id:
+                    actual_folder = f"attachments/{user_id}"
+                else:
+                    actual_folder = folder or "attachments"
+
             # Upload file
             result = upload_fileobj(
                 file_obj=file_obj,
                 file_name=f.filename or "",
-                prefix=folder
+                prefix=actual_folder,
+                file_size=len(file_content)
             )
 
             # Reset file pointer for potential re-reading
@@ -215,16 +363,19 @@ def get_llm_model(tenant_id: str):
     return long_text_to_text_model
 
 
-async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
+async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
     """
-    Preview a file by returning its contents as a stream.
+    Resolve the actual object name, content type, and total size for preview.
 
     Args:
         object_name: File object name in storage
 
     Returns:
-        Tuple[BytesIO, str]: (file_stream, content_type)
+        Tuple[str, str, int]: (actual_object_name, content_type, total_size)
     """
+    if not file_exists(object_name):
+        raise NotFoundException(f"File not found: {object_name}")
+
     file_size = get_file_size_from_minio(object_name)
     if file_size > FILE_PREVIEW_SIZE_LIMIT:
         raise FileTooLargeException(
@@ -235,10 +386,7 @@ async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
 
     # PDF, images, and text files - return directly
     if content_type == 'application/pdf' or content_type.startswith('image/') or content_type in ['text/plain', 'text/csv', 'text/markdown']:
-        file_stream = get_file_stream(object_name)
-        if file_stream is None:
-            raise NotFoundException("File not found or failed to read from storage")
-        return file_stream, content_type
+        return object_name, content_type, file_size
 
     # Office documents - convert to PDF with caching
     elif content_type in OFFICE_MIME_TYPES:
@@ -247,42 +395,72 @@ async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
         pdf_object_name = f"preview/converted/{name_without_ext}_{hash_suffix}.pdf"
         temp_pdf_object_name = f"preview/converting/{name_without_ext}_{hash_suffix}.pdf.tmp"
 
-        # Fast path: return from cache without acquiring any lock
-        cached_stream = _get_cached_pdf_stream(pdf_object_name)
-        if cached_stream is not None:
-            return cached_stream, 'application/pdf'
+        # Trigger conversion if cache is missing or corrupted
+        if not _is_pdf_cache_valid(pdf_object_name):
+            await _convert_office_to_cached_pdf(object_name, pdf_object_name, temp_pdf_object_name)
 
-        # Slow path: convert with locking
-        file_stream = await _convert_office_to_cached_pdf(object_name, pdf_object_name, temp_pdf_object_name)
-        return file_stream, 'application/pdf'
+        pdf_size = get_file_size_from_minio(pdf_object_name)
+        return pdf_object_name, 'application/pdf', pdf_size
 
     # Unsupported file type
     else:
         raise UnsupportedFileTypeException(f"Unsupported file type for preview: {content_type}")
 
 
-def _get_cached_pdf_stream(pdf_object_name: str) -> Optional[BytesIO]:
+def get_preview_stream(actual_object_name: str, start: Optional[int] = None, end: Optional[int] = None):
     """
-    Return the cached PDF stream if available, or None if missing or corrupted.
+    Fetch a preview stream for the given object, optionally limited to a byte range.
 
-    If the file exists but cannot be read, the corrupted entry is deleted so
-    a subsequent call will trigger a fresh conversion.
+    Args:
+        actual_object_name: Resolved object name (after Office conversion if needed)
+        start: Start byte offset (inclusive). Must be provided together with end.
+        end: End byte offset (inclusive), matching HTTP Range semantics.
+
+    Returns:
+        Raw boto3 Body stream
     """
-    if file_exists(pdf_object_name):
-        file_stream = get_file_stream(pdf_object_name)
-        if file_stream is None:
-            logger.warning(f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
-            delete_file(pdf_object_name)
-            return None
-        return file_stream
-    return None
+    if (start is None) != (end is None):
+        raise ValueError("start and end must be provided together")
+
+    if start is None:
+        stream = get_file_stream_raw(actual_object_name)
+    else:
+        stream = get_file_range(actual_object_name, start, end)
+
+    if stream is None:
+        raise NotFoundException("File not found or failed to read from storage")
+    return stream
+
+
+def _is_pdf_cache_valid(pdf_object_name: str) -> bool:
+    """
+    Check whether a cached PDF exists and is readable.
+    """
+    if not file_exists(pdf_object_name):
+        return False
+
+    # Verify the cached file is readable by fetching a small range
+    stream = get_file_range(pdf_object_name, 0, 0)
+    if stream is None:
+        logger.warning(f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
+        delete_file(pdf_object_name)
+        return False
+
+    close_fn = getattr(stream, "close", None)
+    if callable(close_fn):
+        try:
+            close_fn()
+        except Exception as e:
+            logger.warning(f"Failed to close cache probe stream for {pdf_object_name}: {str(e)}")
+
+    return True
 
 
 async def _convert_office_to_cached_pdf(
     object_name: str,
     pdf_object_name: str,
     temp_pdf_object_name: str,
-) -> BytesIO:
+) -> None:
     """
     Convert an Office document to PDF and store the result in MinIO.
 
@@ -290,9 +468,6 @@ async def _convert_office_to_cached_pdf(
         object_name: Source Office file path in MinIO
         pdf_object_name: Final cached PDF path in MinIO
         temp_pdf_object_name: Temporary PDF path used during conversion
-
-    Returns:
-        BytesIO stream of the converted PDF
     """
     # Get or create a lock for this specific file to prevent duplicate conversions
     async with _conversion_locks_guard:
@@ -303,9 +478,8 @@ async def _convert_office_to_cached_pdf(
     try:
         async with file_lock:
             # Double-check: another request may have completed the conversion while we waited
-            cached_stream = _get_cached_pdf_stream(pdf_object_name)
-            if cached_stream is not None:
-                return cached_stream
+            if _is_pdf_cache_valid(pdf_object_name):
+                return
 
             # Conversion semaphore is enforced inside the data-process service
             try:
@@ -319,27 +493,37 @@ async def _convert_office_to_cached_pdf(
                         },
                     )
                 if response.status_code != 200:
-                    raise Exception(
-                        f"data-process conversion returned {response.status_code}: {response.text}"
+                    logger.error(
+                        "Office conversion failed with non-200 response: object=%s, status=%s, body=%s",
+                        object_name,
+                        response.status_code,
+                        response.text,
+                    )
+                    raise RuntimeError(
+                        f"Conversion service returned status {response.status_code}"
                     )
 
                 # Atomic move from temp to final location, then clean up temp
                 copy_result = copy_file(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
                 if not copy_result.get('success'):
-                    raise Exception(f"Failed to finalize PDF cache: {copy_result.get('error', 'Unknown error')}")
+                    logger.error(
+                        "Failed to finalize converted PDF cache: object=%s, temp=%s, dest=%s, error=%s",
+                        object_name,
+                        temp_pdf_object_name,
+                        pdf_object_name,
+                        copy_result.get('error', 'Unknown error'),
+                    )
+                    raise RuntimeError("Failed to finalize converted PDF cache")
                 delete_file(temp_pdf_object_name)
 
             except Exception as e:
                 if file_exists(temp_pdf_object_name):
                     delete_file(temp_pdf_object_name)
                 logger.error(f"Office conversion failed: {str(e)}")
-                raise OfficeConversionException(f"Failed to convert Office document to PDF: {str(e)}") from e
+                if isinstance(e, OfficeConversionException):
+                    raise
+                raise OfficeConversionException("Office file conversion failed") from e
     finally:
         # Clean up the file lock (prevents memory leak for many unique files)
         async with _conversion_locks_guard:
             _conversion_locks.pop(object_name, None)
-
-    file_stream = get_file_stream(pdf_object_name)
-    if file_stream is None:
-        raise NotFoundException("Converted PDF not found or failed to read from storage")
-    return file_stream

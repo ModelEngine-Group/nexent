@@ -214,7 +214,7 @@ class TerminalTool(Tool):
                 return True
                 
             return False
-        except:
+        except Exception:
             return False
 
     def _cleanup_session(self, session: Dict[str, Any]):
@@ -228,7 +228,7 @@ class TerminalTool(Tool):
                 session["channel"].close()
             if session and "client" in session:
                 session["client"].close()
-        except:
+        except Exception:
             pass
 
     def _clean_output(self, raw_output: str, command: str) -> str:

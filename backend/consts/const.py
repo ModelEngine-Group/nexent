@@ -1,14 +1,18 @@
 import os
 from enum import Enum
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv(override=True)
 
 # TODO: Analyze every variable if this is used
-# Test voice file path
+# Test voice file path (WAV format for volcengine STT)
 TEST_VOICE_PATH = os.path.join(os.path.dirname(
     os.path.dirname(__file__)), 'assets', 'test.wav')
+# Test PCM file path (raw PCM format for Ali STT)
+TEST_PCM_PATH = os.path.join(os.path.dirname(
+    os.path.dirname(__file__)), 'assets', 'test_voice.pcm')
 
 
 # Vector database providers
@@ -43,6 +47,11 @@ CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
 # Limit concurrent Office-to-PDF conversions
 MAX_CONCURRENT_CONVERSIONS = 5
+# LibreOffice profile directory
+LIBREOFFICE_PROFILE_DIR = os.getenv(
+    "LIBREOFFICE_PROFILE_DIR",
+    str(Path.home() / ".cache" / "nexent" / "libreoffice-profile"),
+)
 # Supported Office file MIME types
 OFFICE_MIME_TYPES = [
     'application/msword',  # .doc
@@ -61,6 +70,12 @@ SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 # JWT secret for verifying Supabase-signed access tokens.
 # GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
 SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+
+
+# OAuth Configuration
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
+OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 
 
 # ===== To be migrated to frontend configuration =====
@@ -205,6 +220,7 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
+MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 
 
 # Invite code
@@ -325,9 +341,24 @@ DEFAULT_EN_TITLE = "New Conversation"
 # Model Engine Configuration
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
-# APP Version
-APP_VERSION = "v1.8.1"
 
 # Container Platform Configuration
 IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
+
+# Northbound API public base URL (used for A2A agent cards and external file proxy links)
+NORTHBOUND_EXTERNAL_URL = os.getenv("NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
+
+
+# APP Version
+APP_VERSION = "v2.1.0"
+
+
+# Skill Creation Streaming Configuration
+STREAMABLE_CONTENT_TYPES = frozenset([
+    "model_output_thinking",
+    "model_output_code",
+    "model_output_deep_thinking",
+    "tool",
+    "execution_logs",
+])

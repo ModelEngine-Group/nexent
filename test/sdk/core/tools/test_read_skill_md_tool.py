@@ -497,3 +497,124 @@ class TestGetReadSkillMdToolReuse:
         # Should have the original params from first call
         assert tool1.local_skills_dir == "/path/one"
         assert tool1.agent_id == 1
+
+
+class TestReadDirectFile:
+    """Test _read_direct_file method for empty skill_name."""
+
+    def test_read_direct_file_no_local_dir(self, read_skill_md_tool):
+        """Test _read_direct_file without local_skills_dir returns error."""
+        read_skill_md_tool.local_skills_dir = None
+        result = read_skill_md_tool._read_direct_file(())
+        assert "[Error]" in result
+        assert "local_skills_dir" in result.lower()
+
+    def test_read_direct_file_default_skill_md(self, read_skill_md_tool, temp_skills_dir):
+        """Test _read_direct_file reads SKILL.md when no path specified."""
+        read_skill_md_tool.local_skills_dir = temp_skills_dir
+        # Create SKILL.md in root
+        skill_md = """---
+name: root-skill
+description: Root skill
+---
+# Root Content
+"""
+        with open(os.path.join(temp_skills_dir, "SKILL.md"), 'w', encoding='utf-8') as f:
+            f.write(skill_md)
+
+        result = read_skill_md_tool._read_direct_file(())
+
+        assert "Root Content" in result
+        assert "name:" not in result  # frontmatter stripped
+
+    def test_read_direct_file_with_path(self, read_skill_md_tool, temp_skills_dir):
+        """Test _read_direct_file reads specified file."""
+        read_skill_md_tool.local_skills_dir = temp_skills_dir
+        # Create a file in root
+        test_file = os.path.join(temp_skills_dir, "test-file.txt")
+        with open(test_file, 'w', encoding='utf-8') as f:
+            f.write("test content")
+
+        result = read_skill_md_tool._read_direct_file(("test-file.txt",))
+
+        assert "test content" in result
+
+    def test_read_direct_file_nested_path(self, read_skill_md_tool, temp_skills_dir):
+        """Test _read_direct_file reads nested file path."""
+        read_skill_md_tool.local_skills_dir = temp_skills_dir
+        # Create nested file
+        nested_dir = os.path.join(temp_skills_dir, "subdir")
+        os.makedirs(nested_dir)
+        nested_file = os.path.join(nested_dir, "nested.md")
+        with open(nested_file, 'w', encoding='utf-8') as f:
+            f.write("""---
+title: Nested
+---
+# Nested Content
+""")
+
+        result = read_skill_md_tool._read_direct_file(("subdir", "nested.md"))
+
+        assert "Nested Content" in result
+        assert "title:" not in result  # frontmatter stripped
+
+    def test_read_direct_file_not_found(self, read_skill_md_tool, temp_skills_dir):
+        """Test _read_direct_file returns error for missing file."""
+        read_skill_md_tool.local_skills_dir = temp_skills_dir
+        result = read_skill_md_tool._read_direct_file(("missing.txt",))
+        assert "not found" in result.lower()
+
+    def test_read_direct_file_exception(self, read_skill_md_tool, temp_skills_dir):
+        """Test _read_direct_file handles read exceptions."""
+        read_skill_md_tool.local_skills_dir = temp_skills_dir
+        # Create file but mock open to raise error
+        test_file = os.path.join(temp_skills_dir, "error.md")
+        with open(test_file, 'w') as f:
+            f.write("content")
+
+        with patch('builtins.open', side_effect=OSError("Read error")):
+            result = read_skill_md_tool._read_direct_file(("error.md",))
+        assert "[Error]" in result
+
+
+class TestExecuteEmptySkillName:
+    """Test execute with empty skill_name (reads directly from local_skills_dir)."""
+
+    def test_execute_empty_skill_name_reads_root(self, read_skill_md_tool, temp_skills_dir):
+        """Test execute with empty skill_name reads from local_skills_dir root."""
+        read_skill_md_tool.local_skills_dir = temp_skills_dir
+        # Create SKILL.md in root
+        skill_md = """---
+name: root
+description: Root skill
+---
+# Root Skill Content
+"""
+        with open(os.path.join(temp_skills_dir, "SKILL.md"), 'w', encoding='utf-8') as f:
+            f.write(skill_md)
+
+        result = read_skill_md_tool.execute("")
+
+        assert "Root Skill Content" in result
+
+    def test_execute_empty_skill_name_with_file(self, read_skill_md_tool, temp_skills_dir):
+        """Test execute with empty skill_name and additional_files parameter."""
+        read_skill_md_tool.local_skills_dir = temp_skills_dir
+        # Create a file
+        test_file = os.path.join(temp_skills_dir, "readme.md")
+        with open(test_file, 'w', encoding='utf-8') as f:
+            f.write("""---
+title: Readme
+---
+# Readme Content
+""")
+
+        result = read_skill_md_tool.execute("", "readme.md")
+
+        assert "Readme Content" in result
+
+    def test_execute_empty_skill_name_file_not_found(self, read_skill_md_tool, temp_skills_dir):
+        """Test execute with empty skill_name returns error for missing file."""
+        read_skill_md_tool.local_skills_dir = temp_skills_dir
+        result = read_skill_md_tool.execute("", "nonexistent.txt")
+        assert "not found" in result.lower()

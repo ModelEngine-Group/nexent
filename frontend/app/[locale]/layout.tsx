@@ -11,6 +11,8 @@ import "@/styles/globals.css";
 import "@/styles/react-markdown.css";
 import "github-markdown-css/github-markdown.css";
 import "katex/dist/katex.min.css";
+import "react-pdf/dist/Page/TextLayer.css";
+import "react-pdf/dist/Page/AnnotationLayer.css";
 
 const inter = Inter({ subsets: ["latin"] });
 

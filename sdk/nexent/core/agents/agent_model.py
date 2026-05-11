@@ -3,9 +3,19 @@ from __future__ import annotations
 from threading import Event
 from typing import Any, Dict, List, Optional, Union
 
+# Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
+PROTOCOL_JSONRPC = "JSONRPC"
+PROTOCOL_HTTP_JSON = "HTTP+JSON"
+PROTOCOL_GRPC = "GRPC"
+
 from pydantic import BaseModel, Field
 
 from ..utils.observer import MessageObserver
+
+# TYPE_CHECKING to avoid circular import
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .agent_context import ContextManagerConfig
 
 
 class ModelConfig(BaseModel):
@@ -42,6 +52,19 @@ class AgentConfig(BaseModel):
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
     managed_agents: List[AgentConfig] = Field(description="Managed Agents", default=[])
+    instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
+    managed_agents: List["AgentConfig"] = Field(
+        description="Internal managed sub-agents created locally",
+        default=[]
+    )
+    external_a2a_agents: List["ExternalA2AAgentConfig"] = Field(
+        description="External A2A agents called via HTTP requests",
+        default=[]
+    )
+    context_manager_config: Optional[Any] = Field(
+        description="Context manager configuration for conversation-level memory compression",
+        default=None
+    )
 
 
 class AgentHistory(BaseModel):
@@ -64,6 +87,11 @@ class AgentRunInfo(BaseModel):
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
+    context_manager: Optional[Any] = Field(
+        description="Conversation-level reusable ContextManager instance. "
+                    "If provided, it will be attached to the CoreAgent instead of creating a new one.",
+        default=None
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -87,3 +115,85 @@ class MemoryUserConfig(BaseModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.model_dump_json(indent=2, ensure_ascii=False)
+
+
+class ExternalA2AAgentConfig(BaseModel):
+    """Configuration for an external A2A agent that can be called as sub-agent."""
+    agent_id: str = Field(description="External agent ID")
+    name: str = Field(description="Agent display name")
+    description: str = Field(description="Agent description for prompt", default="")
+    url: str = Field(description="A2A endpoint URL")
+    api_key: Optional[str] = Field(description="API key for authentication", default=None)
+    transport_type: str = Field(
+        description="Transport type: http-streaming or http-polling",
+        default="http-streaming"
+    )
+    protocol_version: str = Field(description="A2A protocol version", default="1.0")
+    protocol_type: str = Field(
+        description="Protocol type: JSONRPC, HTTP+JSON, or GRPC",
+        default=PROTOCOL_JSONRPC
+    )
+    timeout: float = Field(description="Request timeout in seconds", default=300.0)
+    raw_card: Optional[Dict[str, Any]] = Field(
+        description="Raw Agent Card containing skills and capabilities",
+        default=None
+    )
+
+    def model_post_init(self, __context) -> None:
+        """Auto-enhance description with skills info from raw_card."""
+        # Only auto-enhance if raw_card is present
+        if self.raw_card:
+            skills_info = self._build_skills_description()
+            if skills_info:
+                if self.description:
+                    self.description = f"{self.description}\n\n{skills_info}"
+                else:
+                    self.description = skills_info
+
+    def _build_skills_description(self) -> str:
+        """Build detailed skills description from raw_card."""
+        if not self.raw_card:
+            return ""
+        
+        skills = self.raw_card.get("skills", [])
+        if not skills:
+            return ""
+        
+        # Build examples section
+        examples_lines = []
+        for skill in skills:
+            examples = skill.get("examples", [])
+            if examples:
+                examples_lines.extend(examples[:3])
+        
+        examples_section = ""
+        if examples_lines:
+            # Shuffle and pick some examples
+            examples_str = ', '.join(f'"{ex}"' for ex in examples_lines[:8])
+            examples_section = f"\n  调用示例: {examples_str}"
+        
+        # Build capability description (without explicit skill IDs)
+        capability_names = [skill.get("name", "") for skill in skills if skill.get("name")]
+        capability_str = "、".join(capability_names) if capability_names else ""
+        
+        return f"[此助手可处理: {capability_str}]{examples_section}"
+
+    def to_a2a_agent_info(self) -> "A2AAgentInfo":
+        """Convert to A2AAgentInfo for SDK usage."""
+        from .a2a_agent_proxy import A2AAgentInfo
+        return A2AAgentInfo(
+            agent_id=self.agent_id,
+            name=self.name,
+            url=self.url,
+            api_key=self.api_key,
+            transport_type=self.transport_type,
+            protocol_version=self.protocol_version,
+            protocol_type=self.protocol_type,
+            timeout=self.timeout,
+            raw_card=self.raw_card
+        )
+
+
+# Rebuild models to resolve forward references
+AgentConfig.model_rebuild()
+AgentRunInfo.model_rebuild()

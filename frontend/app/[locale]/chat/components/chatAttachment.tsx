@@ -1,7 +1,6 @@
 import { chatConfig } from "@/const/chatConfig";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Download } from "lucide-react";
 import {
   FileImageFilled,
   FilePdfFilled,
@@ -15,228 +14,21 @@ import {
   FileZipFilled,
 } from "@ant-design/icons";
 import {
-  storageService,
   convertImageUrlToApiUrl,
   extractObjectNameFromUrl,
 } from "@/services/storageService";
-
-import log from "@/lib/logger";
-
-import { Modal, App } from "antd";
 import { cn } from "@/lib/utils";
 import { AttachmentItem, ChatAttachmentProps } from "@/types/chat";
+import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
+import { App } from "antd";
 
-// Image viewer component
-const ImageViewer = ({
-  url,
-  isOpen,
-  onClose,
-}: {
-  url: string;
-  isOpen: boolean;
-  onClose: () => void;
-}) => {
-  if (!isOpen) return null;
-  const { t } = useTranslation("common");
-
-  // Convert image URL to backend API URL
-  const imageUrl = convertImageUrlToApiUrl(url);
-
-  return (
-    <Modal
-      open={isOpen}
-      onCancel={onClose}
-      footer={null}
-      centered
-      title={t("chatAttachment.imagePreview")}
-    >
-      <div className="flex items-center justify-center">
-        <img src={imageUrl} alt="img" />
-      </div>
-    </Modal>
-  );
-};
-
-// File viewer component
-const FileViewer = ({
-  objectName,
-  url,
-  name,
-  contentType,
-  isOpen,
-  onClose,
-}: {
-  objectName?: string;
-  url?: string;
-  name: string;
-  contentType?: string;
-  isOpen: boolean;
-  onClose: () => void;
-}) => {
-  if (!isOpen) return null;
-  const { t } = useTranslation("common");
-  const { message } = App.useApp();
-  const [isDownloading, setIsDownloading] = useState(false);
-
-  // Handle file download
-  const handleDownload = async (e: React.MouseEvent) => {
-    // Prevent dialog from closing immediately
-    e.preventDefault();
-    e.stopPropagation();
-
-    // Check if URL is a direct http/https URL that can be accessed directly
-    // Exclude backend API endpoints (containing /api/file/download/)
-    if (
-      url &&
-      (url.startsWith("http://") || url.startsWith("https://")) &&
-      !url.includes("/api/file/download/")
-    ) {
-      // Direct download from HTTP/HTTPS URL without backend
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = name;
-      link.style.display = "none";
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        document.body.removeChild(link);
-      }, 100);
-      message.success(
-        t("chatAttachment.downloadSuccess", "File download started")
-      );
-      setTimeout(() => {
-        onClose();
-      }, 500);
-      return;
-    }
-
-    // Try to get object_name from props or extract from URL
-    let finalObjectName: string | undefined = objectName;
-
-    if (!finalObjectName && url) {
-      finalObjectName = extractObjectNameFromUrl(url) || undefined;
-    }
-
-    if (!finalObjectName) {
-      // If we still don't have object_name, fall back to direct URL download
-      if (url) {
-        // Create a temporary link to download from URL
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = name;
-        link.style.display = "none";
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => {
-          document.body.removeChild(link);
-        }, 100);
-        message.success(
-          t("chatAttachment.downloadSuccess", "File download started")
-        );
-        return;
-      } else {
-        message.error(
-          t(
-            "chatAttachment.downloadError",
-            "File object name or URL is missing"
-          )
-        );
-        return;
-      }
-    }
-
-    setIsDownloading(true);
-    try {
-      // Start download (non-blocking, browser handles it)
-      await storageService.downloadFile(finalObjectName, name);
-      // Show success message immediately after triggering download
-      message.success(
-        t("chatAttachment.downloadSuccess", "File download started")
-      );
-      // Keep dialog open for a moment to show the message, then close
-      setTimeout(() => {
-        setIsDownloading(false);
-        onClose();
-      }, 500);
-    } catch (error) {
-      log.error("Failed to download file:", error);
-      setIsDownloading(false);
-      // If backend download fails and we have URL, try direct download as fallback
-      if (url) {
-        try {
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = name;
-          link.style.display = "none";
-          document.body.appendChild(link);
-          link.click();
-          setTimeout(() => {
-            document.body.removeChild(link);
-          }, 100);
-          message.success(
-            t("chatAttachment.downloadSuccess", "File download started")
-          );
-          setTimeout(() => {
-            onClose();
-          }, 500);
-        } catch (fallbackError) {
-          message.error(
-            t(
-              "chatAttachment.downloadError",
-              "Failed to download file. Please try again."
-            )
-          );
-        }
-      } else {
-        message.error(
-          t(
-            "chatAttachment.downloadError",
-            "Failed to download file. Please try again."
-          )
-        );
-      }
-    }
-  };
-
-  return (
-    <Modal
-      open={isOpen}
-      onCancel={onClose}
-      footer={null}
-      centered
-      title={
-        <div className="flex items-center gap-2">
-          {getFileIcon(name, contentType)}
-          <span className="truncate max-w-[400px]" title={name}>
-            {name}
-          </span>
-        </div>
-      }
-    >
-      <div className="border rounded-md max-h-[70vh] overflow-auto">
-        <div className="p-16 text-center">
-          <div className="flex justify-center mb-4">
-            {getFileIcon(name, contentType)}
-          </div>
-          <p className="text-gray-600 mb-4">
-            {t("chatAttachment.previewNotSupported")}
-          </p>
-          <button
-            onClick={handleDownload}
-            disabled={(!objectName && !url) || isDownloading}
-            type="button"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Download size={16} />
-            {isDownloading
-              ? t("chatAttachment.downloading", "Downloading...")
-              : t("chatAttachment.downloadToView")}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-};
+// Selected file state for preview drawer
+interface SelectedFileState {
+  objectName: string;
+  fileName: string;
+  fileType?: string;
+  fileSize?: number;
+}
 
 // Get file extension
 const getFileExtension = (filename: string): string => {
@@ -316,49 +108,43 @@ export function ChatAttachment({
   onImageClick,
   className = "",
 }: ChatAttachmentProps) {
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<{
-    objectName?: string;
-    url?: string;
-    name: string;
-    contentType?: string;
-  } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<SelectedFileState | null>(null);
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
 
   if (!attachments || attachments.length === 0) return null;
 
-  // Handle image click
-  const handleImageClick = (url: string) => {
-    // Use internal preview
-    setSelectedImage(url);
-
-    // Also call external callback if provided (for compatibility)
-    if (onImageClick) {
-      onImageClick(url);
-    }
-  };
-
-  // Handle file click
+  //Handle file click
   const handleFileClick = (attachment: AttachmentItem) => {
-    if (attachment.url) {
+    let objectName = attachment.object_name;
+    
+    if (!objectName && attachment.url) {
+      objectName = extractObjectNameFromUrl(attachment.url) || undefined;
+    }
+    
+    if (!objectName) {
+      message.warning(t("filePreview.previewFailed"));
+      return;
+    }
+
+    setSelectedFile({
+      objectName,
+      fileName: attachment.name,
+      fileType: attachment.contentType,
+      fileSize: attachment.size,
+    });
+
+    // Also call external callback if provided (for compatibility with images)
+    if (onImageClick && attachment.url) {
       const extension = getFileExtension(attachment.name);
       const isImage =
         attachment.type === "image" ||
         (attachment.contentType &&
           attachment.contentType.startsWith("image/")) ||
         chatConfig.imageExtensions.includes(extension);
-
+      
       if (isImage) {
-        // For images, use image processing logic
-        handleImageClick(attachment.url);
-      } else {
-        // For files, use internal preview
-        setSelectedFile({
-          objectName: attachment.object_name,
-          url: attachment.url,
-          name: attachment.name,
-          contentType: attachment.contentType,
-        });
+        onImageClick(attachment.url);
       }
     }
   };
@@ -431,23 +217,14 @@ export function ChatAttachment({
         );
       })}
 
-      {/* Image viewer */}
-      {selectedImage && (
-        <ImageViewer
-          url={selectedImage}
-          isOpen={!!selectedImage}
-          onClose={() => setSelectedImage(null)}
-        />
-      )}
-
-      {/* File viewer */}
+      {/* File preview drawer */}
       {selectedFile && (
-        <FileViewer
+        <FilePreviewDrawer
+          open={!!selectedFile}
           objectName={selectedFile.objectName}
-          url={selectedFile.url}
-          name={selectedFile.name}
-          contentType={selectedFile.contentType}
-          isOpen={!!selectedFile}
+          fileName={selectedFile.fileName}
+          fileType={selectedFile.fileType}
+          fileSize={selectedFile.fileSize}
           onClose={() => setSelectedFile(null)}
         />
       )}

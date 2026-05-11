@@ -21,6 +21,7 @@ data:
   ELASTICSEARCH_SERVICE: {{ .Values.config.services.elasticsearchService | quote }}
   RUNTIME_SERVICE_URL: {{ .Values.config.services.runtimeUrl | quote }}
   NEXENT_MCP_SERVER: {{ .Values.config.services.mcpServer | quote }}
+  MCP_MANAGEMENT_API: {{ .Values.config.services.mcpManagementServer | quote }}
   DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}
   NORTHBOUND_API_SERVER: {{ .Values.config.services.northboundServer | quote }}
 
@@ -123,3 +124,21 @@ data:
   # Kubernetes Deployment Mode
   IS_DEPLOYED_BY_KUBERNETES: {{ .Values.config.isDeployedByKubernetes | quote }}
   KUBERNETES_NAMESPACE: {{ .Values.global.namespace | quote }}
+
+
+  # ===== OAuth Configuration =====
+  # GitHub OAuth - get credentials from https://github.com/settings/developers
+  GITHUB_OAUTH_CLIENT_ID: {{ .Values.config.oauth.githubClientId | quote }}
+  GITHUB_OAUTH_CLIENT_SECRET: {{ .Values.config.oauth.githubClientSecret | quote }}
+  # GDE OAuth
+  GDE_URL: {{ .Values.config.oauth.gdeUrl | quote }}
+  GDE_OAUTH_CLIENT_ID: {{ .Values.config.oauth.gdeClientId | quote }}
+  GDE_OAUTH_CLIENT_SECRET: {{ .Values.config.oauth.gdeClientSecret | quote }}
+  # WeChat OAuth (set ENABLE_WECHAT_OAUTH=true to enable)
+  ENABLE_WECHAT_OAUTH: {{ .Values.config.oauth.enableWechat | quote }}
+  WECHAT_OAUTH_APP_ID: {{ .Values.config.oauth.wechatClientId | quote }}
+  WECHAT_OAUTH_APP_SECRET: {{ .Values.config.oauth.wechatClientSecret | quote }}
+  # Base URL for OAuth callback (e.g., http://localhost:3000 for local dev)
+  OAUTH_SSL_VERIFY: {{ .Values.config.oauth.sslVerify | quote }}
+  OAUTH_CA_BUNDLE: {{ .Values.config.oauth.caBundle | quote }}
+  OAUTH_CALLBACK_BASE_URL: {{ .Values.config.oauth.callbackBaseUrl | quote }}

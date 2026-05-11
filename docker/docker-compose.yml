@@ -142,6 +142,7 @@ services:
     restart: always
     ports:
       - "5011:5011" # MCP service port
+      - "5015:5015" # MCP management API port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
@@ -205,7 +206,7 @@ services:
       - WS_BACKEND=ws://nexent-runtime:5014
       - RUNTIME_HTTP_BACKEND=http://nexent-runtime:5014
       - MINIO_ENDPOINT=http://nexent-minio:9000
-      - MARKET_BACKEND=https://market.nexent.tech
+      - MARKET_BACKEND=http://60.204.251.153:8010
       - MODEL_ENGINE_ENABLED=${MODEL_ENGINE_ENABLED:-false}
     logging:
       driver: "json-file"

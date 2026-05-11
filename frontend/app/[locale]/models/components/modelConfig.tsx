@@ -713,6 +713,18 @@ export const ModelConfigSection = forwardRef<
           },
         };
       }
+      // Clear STT specific fields
+      if (configKey === MODEL_TYPES.STT) {
+        configUpdate[configKey].modelFactory = "";
+        configUpdate[configKey].modelAppid = "";
+        configUpdate[configKey].accessToken = "";
+      }
+      // Clear TTS specific fields
+      if (configKey === MODEL_TYPES.TTS) {
+        configUpdate[configKey].modelFactory = "";
+        configUpdate[configKey].modelAppid = "";
+        configUpdate[configKey].accessToken = "";
+      }
     } else {
       configUpdate = {
         [configKey]: {
@@ -724,6 +736,18 @@ export const ModelConfigSection = forwardRef<
       // embedding needs dimension field
       if (configKey === "embedding" || configKey === "multiEmbedding") {
         configUpdate[configKey].dimension = modelInfo?.maxTokens || 0;
+      }
+      // Add STT specific fields
+      if (configKey === MODEL_TYPES.STT) {
+        configUpdate[configKey].modelFactory = modelInfo?.source || "";
+        configUpdate[configKey].modelAppid = modelInfo?.modelAppid || "";
+        configUpdate[configKey].accessToken = modelInfo?.accessToken || "";
+      }
+      // Add TTS specific fields
+      if (configKey === MODEL_TYPES.TTS) {
+        configUpdate[configKey].modelFactory = modelInfo?.source || "";
+        configUpdate[configKey].modelAppid = modelInfo?.modelAppid || "";
+        configUpdate[configKey].accessToken = modelInfo?.accessToken || "";
       }
     }
 

@@ -108,62 +108,38 @@ export const ModelEditDialog = ({
     try {
       const modelType = form.type as ModelType;
 
-      // Use manage interface if tenantId is provided
-      if (tenantId) {
-        // Call backend healthcheck API for tenant management
-        const result = await modelService.checkManageTenantModelConnectivity(
-          tenantId,
-          form.displayName || form.name
-        );
-
-        // Set connectivity status
-        let connectivityMessage = "";
-        if (result) {
-          connectivityMessage = t("model.dialog.connectivity.status.available");
-        } else {
-          connectivityMessage = t("model.dialog.connectivity.status.unavailable");
-        }
-        setConnectivityStatus({
-          status: result
-            ? MODEL_STATUS.AVAILABLE
-            : MODEL_STATUS.UNAVAILABLE,
-          message: connectivityMessage,
-        });
-      } else {
-        // Use local config verification for non-tenant operations
-        const config = {
-          modelName: form.name,
-          modelType: modelType,
-          baseUrl: form.url,
-          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          maxTokens:
-            form.type === MODEL_TYPES.EMBEDDING
-              ? parseInt(form.vectorDimension)
-              : form.type === MODEL_TYPES.RERANK
-                ? 0
+      const config = {
+        modelName: form.name,
+        modelType: modelType,
+        baseUrl: form.url,
+        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+        maxTokens:
+          form.type === MODEL_TYPES.EMBEDDING
+            ? parseInt(form.vectorDimension)
+            : form.type === MODEL_TYPES.RERANK
+              ? 0
               : parseInt(form.maxTokens),
-          embeddingDim:
-            form.type === MODEL_TYPES.EMBEDDING
-              ? parseInt(form.vectorDimension)
-              : undefined,
-        };
+        embeddingDim:
+          form.type === MODEL_TYPES.EMBEDDING
+            ? parseInt(form.vectorDimension)
+            : undefined,
+      };
 
-        const result = await modelService.verifyModelConfigConnectivity(config);
+      const result = await modelService.verifyModelConfigConnectivity(config);
 
-        // Set connectivity status
-        let connectivityMessage = "";
-        if (result.connectivity) {
-          connectivityMessage = t("model.dialog.connectivity.status.available");
-        } else {
-          connectivityMessage = t("model.dialog.connectivity.status.unavailable");
-        }
-        setConnectivityStatus({
-          status: result.connectivity
-            ? MODEL_STATUS.AVAILABLE
-            : MODEL_STATUS.UNAVAILABLE,
-          message: connectivityMessage,
-        });
+      // Set connectivity status
+      let connectivityMessage = "";
+      if (result.connectivity) {
+        connectivityMessage = t("model.dialog.connectivity.status.available");
+      } else {
+        connectivityMessage = t("model.dialog.connectivity.status.unavailable");
       }
+      setConnectivityStatus({
+        status: result.connectivity
+          ? MODEL_STATUS.AVAILABLE
+          : MODEL_STATUS.UNAVAILABLE,
+        message: connectivityMessage,
+      });
     } catch (error) {
       setConnectivityStatus({
         status: "unavailable",
@@ -313,6 +289,7 @@ export const ModelEditDialog = ({
             value={form.apiKey}
             onChange={(e) => handleFormChange("apiKey", e.target.value)}
             autoComplete="new-password"
+            visibilityToggle={false}
           />
         </div>
 
@@ -485,7 +462,7 @@ export const ProviderConfigEditDialog = ({
           <label className="block mb-1 text-sm font-medium text-gray-700">
             {t('model.dialog.label.apiKey')}
           </label>
-          <Input.Password value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          <Input.Password value={apiKey} onChange={(e) => setApiKey(e.target.value)} visibilityToggle={false} />
         </div>
         {!isEmbeddingModel && (
           <div>

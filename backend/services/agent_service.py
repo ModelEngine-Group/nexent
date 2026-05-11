@@ -62,6 +62,7 @@ from database import skill_db
 from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.a2a_agent_db import get_server_agent_ids
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import save_conversation_assistant, save_conversation_user
 from services.memory_config_service import build_memory_context
@@ -71,6 +72,9 @@ from utils.memory_utils import build_memory_config
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
+
+# Monitoring utilities: expose monitoring context for downstream observers
+from nexent.monitor import set_monitoring_context
 
 # Import monitoring utilities
 from utils.monitoring import monitoring_manager
@@ -1367,6 +1371,9 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
 
         agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
 
+        # Get all agent IDs that are registered as A2A Server agents
+        a2a_server_agent_ids = get_server_agent_ids(tenant_id)
+
         model_cache: Dict[int, Optional[dict]] = {}
         enriched_agents: list[dict] = []
 
@@ -1437,6 +1444,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "group_ids": convert_string_to_list(agent.get("group_ids")),
                 "permission": permission,
                 "is_published": agent.get("current_version_no") is not None,
+                "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
             })
 
         return simple_agent_list
@@ -1632,7 +1640,20 @@ async def prepare_agent_run(
         language=language,
         allow_memory_search=allow_memory_search,
         is_debug=agent_request.is_debug,
+        override_version_no=agent_request.version_no,
+        override_model_id=agent_request.model_id,
     )
+
+    # Mount conversation-level reusable ContextManager if enabled
+    cm_config = getattr(agent_run_info.agent_config, 'context_manager_config', None)
+    if cm_config and cm_config.enabled:
+        cm = agent_run_manager.get_or_create_context_manager(
+            conversation_id=str(agent_request.conversation_id),
+            config=cm_config,
+            max_steps=agent_run_info.agent_config.max_steps
+        )
+        agent_run_info.context_manager = cm
+
     agent_run_manager.register_agent_run(
         agent_request.conversation_id, agent_run_info, user_id)
     return agent_run_info, memory_context
@@ -1653,6 +1674,9 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
 
 
 # Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
+@monitoring_manager.monitor_endpoint(
+    "agent_service.generate_stream_with_memory", exclude_params=["authorization"]
+)
 async def generate_stream_with_memory(
     agent_request: AgentRequest,
     user_id: str,
@@ -1844,6 +1868,13 @@ async def run_agent_stream(
         language=language,
         user_resolution_duration=resolve_duration
     )
+    # Expose resolved identity to downstream monitoring (LLM-level record writing)
+    set_monitoring_context(
+        tenant_id=resolved_tenant_id,
+        user_id=resolved_user_id,
+        agent_id=agent_request.agent_id,
+        conversation_id=agent_request.conversation_id,
+    )
 
     # Step 2: Save user message (if needed)
     if not agent_request.is_debug and not skip_user_save:
@@ -1985,8 +2016,8 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
         return {"status": "success", "message": message}
     else:
         message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
-        logging.error(message)
-        return {"status": "error", "message": message}
+        logging.info(message)
+        return {"status": "success", "message": message, "already_stopped": True}
 
 
 async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:

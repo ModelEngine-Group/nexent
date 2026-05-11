@@ -1,61 +1,27 @@
 """Skill management HTTP endpoints."""
 
 import logging
-import os
-import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Header
-from starlette.responses import JSONResponse
-from pydantic import BaseModel
+from starlette.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
+from consts.const import APP_VERSION, STREAMABLE_CONTENT_TYPES
 from consts.exceptions import SkillException, UnauthorizedError
-from services.skill_service import SkillService
-from consts.model import SkillInstanceInfoRequest
-from utils.auth_utils import get_current_user_id
+from services.skill_service import (
+    SkillService,
+    skill_creation_task_manager,
+    stream_skill_creation,
+)
+from consts.model import SkillInstanceInfoRequest, SkillCreateRequest, SkillCreateInteractiveRequest, SkillUpdateRequest, SkillResponse
+from utils.auth_utils import get_current_user_id, get_current_user_info
+from nexent.core.agents.agent_model import ModelConfig
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/skills", tags=["skills"])
-
-
-class SkillCreateRequest(BaseModel):
-    """Request model for creating a skill."""
-    name: str
-    description: str
-    content: str
-    tool_ids: Optional[List[int]] = []  # Use tool_id list, link to ag_tool_info_t
-    tool_names: Optional[List[str]] = []  # Alternative: use tool name list, will be converted to tool_ids
-    tags: Optional[List[str]] = []
-    source: Optional[str] = "custom"   # official, custom, partner
-    params: Optional[Dict[str, Any]] = None  # Skill config (JSON object)
-
-
-class SkillUpdateRequest(BaseModel):
-    """Request model for updating a skill."""
-    description: Optional[str] = None
-    content: Optional[str] = None
-    tool_ids: Optional[List[int]] = None  # Use tool_id list
-    tool_names: Optional[List[str]] = None  # Alternative: use tool name list, will be converted to tool_ids
-    tags: Optional[List[str]] = None
-    source: Optional[str] = None
-    params: Optional[Dict[str, Any]] = None
-
-
-class SkillResponse(BaseModel):
-    """Response model for skill data."""
-    skill_id: int
-    name: str
-    description: str
-    content: str
-    tool_ids: List[int]
-    tags: List[str]
-    source: str
-    params: Optional[Dict[str, Any]] = None
-    created_by: Optional[str] = None
-    create_time: Optional[str] = None
-    updated_by: Optional[str] = None
-    update_time: Optional[str] = None
+skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
 
 
 # List routes first (no path parameters)
@@ -87,7 +53,7 @@ async def create_skill(
         # Convert tool_names to tool_ids if provided
         tool_ids = request.tool_ids or []
         if request.tool_names:
-            tool_ids = service.repository.get_tool_ids_by_names(request.tool_names, tenant_id)
+            raise NotImplementedError("Tool names are not supported for skill creation")
 
         skill_data = {
             "name": request.name,
@@ -97,6 +63,7 @@ async def create_skill(
             "tags": request.tags,
             "source": request.source,
             "params": request.params,
+            "files": request.files if request.files else [],
         }
         skill = service.create_skill(skill_data, user_id=user_id)
         return JSONResponse(content=skill, status_code=201)
@@ -116,6 +83,7 @@ async def create_skill(
 async def create_skill_from_file(
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
     skill_name: Optional[str] = Form(None, description="Optional skill name override"),
+    source: Optional[str] = Form("自定义", description="Skill source"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Create a skill from file upload.
@@ -124,10 +92,9 @@ async def create_skill_from_file(
     - Single SKILL.md file: Extracts metadata and saves directly
     - ZIP archive: Contains SKILL.md plus scripts/assets folders
     """
-    try:
+    try:        
         user_id, tenant_id = get_current_user_id(authorization)
         service = SkillService()
-
         content = await file.read()
 
         file_type = "auto"
@@ -141,19 +108,22 @@ async def create_skill_from_file(
             file_content=content,
             skill_name=skill_name,
             file_type=file_type,
+            source=source,
             user_id=user_id,
             tenant_id=tenant_id
         )
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
+        logger.warning(f"Unauthorized: {e}")
         raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
         error_msg = str(e).lower()
+        logger.warning(f"SkillException: {e}")
         if "already exists" in error_msg:
             raise HTTPException(status_code=409, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error creating skill from file: {e}")
+        logger.error(f"Unexpected error: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -399,21 +369,14 @@ async def update_skill(
             update_data["description"] = request.description
         if request.content is not None:
             update_data["content"] = request.content
-        if request.tool_ids is not None:
-            # Convert tool_names to tool_ids if tool_names provided, else use tool_ids directly
-            if request.tool_names:
-                update_data["tool_ids"] = service.repository.get_tool_ids_by_names(request.tool_names, tenant_id)
-            else:
-                update_data["tool_ids"] = request.tool_ids
-        elif request.tool_names is not None:
-            # Only tool_names provided, convert to tool_ids
-            update_data["tool_ids"] = service.repository.get_tool_ids_by_names(request.tool_names, tenant_id)
         if request.tags is not None:
             update_data["tags"] = request.tags
         if request.source is not None:
             update_data["source"] = request.source
         if request.params is not None:
             update_data["params"] = request.params
+        if request.files is not None:
+            update_data["files"] = [f.model_dump() for f in request.files]
 
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
@@ -453,88 +416,90 @@ async def delete_skill(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{skill_name}/files/{file_path:path}")
-async def delete_skill_file(
-    skill_name: str,
-    file_path: str,
+def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
+    """Build ModelConfig from tenant's quick-config LLM model."""
+    from utils.config_utils import tenant_config_manager, get_model_name_from_config
+    from consts.const import MODEL_CONFIG_MAPPING
+
+    quick_config = tenant_config_manager.get_model_config(
+        key=MODEL_CONFIG_MAPPING["llm"],
+        tenant_id=tenant_id
+    )
+    if not quick_config:
+        raise ValueError("No LLM model configured for tenant")
+
+    return ModelConfig(
+        cite_name=quick_config.get("display_name", "default"),
+        api_key=quick_config.get("api_key", ""),
+        model_name=get_model_name_from_config(quick_config),
+        url=quick_config.get("base_url", ""),
+        temperature=0.1,
+        top_p=0.95,
+        ssl_verify=True,
+        model_factory=quick_config.get("model_factory")
+    )
+
+
+@skill_creator_router.post("/create")
+async def create_skill(
+    request: SkillCreateInteractiveRequest,
     authorization: Optional[str] = Header(None)
-) -> JSONResponse:
-    """Delete a specific file within a skill directory.
+):
+    """Create a skill interactively via LLM agent.
+
+    Loads the skill creation prompt template (simple or complicated based on complexity),
+    runs an internal agent with WriteSkillFileTool and ReadSkillMdTool, extracts the skill content
+    from the final answer, and streams step progress and token content via SSE.
+
+    Yields SSE events:
+        - step_count: Current agent step number
+        - skill_content: Token-level content (thinking, code, deep_thinking, tool output)
+        - final_answer: Complete skill content with <SKILL> and <FILE> delimiters
+        - done: Stream completion signal
+    """
+    try:
+        _, tenant_id, user_language = get_current_user_info(authorization)
+    except Exception as e:
+        logger.error(f"Unauthorized access attempt: {e}")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Build model config from tenant
+    model_config = _build_model_config_from_tenant(tenant_id)
+
+    # Get language from request or user preference
+    lang = request.language or user_language or "zh"
+
+    # Delegate to service layer
+    task_id, generator = stream_skill_creation(
+        user_request=request.user_request,
+        language=lang,
+        model_config=model_config,
+        existing_skill=request.existing_skill,
+        complexity=request.complexity or "simple"
+    )
+
+    return StreamingResponse(generator(), media_type="text/event-stream", headers={"X-Task-ID": task_id})
+
+
+@skill_creator_router.get("/stop/{task_id}")
+async def stop_skill_creation(
+    task_id: str,
+    authorization: Optional[str] = Header(None)
+):
+    """Stop an active skill creation task.
 
     Args:
-        skill_name: Name of the skill
-        file_path: Relative path to the file within the skill directory
+        task_id: The task ID returned from the /create endpoint (passed via X-Task-ID header)
     """
     try:
         _, _ = get_current_user_id(authorization)
-        service = SkillService()
-
-        # Validate skill_name so it cannot be used for path traversal
-        if not skill_name:
-            raise HTTPException(status_code=400, detail="Invalid skill name")
-        if os.sep in skill_name or "/" in skill_name or ".." in skill_name:
-            raise HTTPException(status_code=400, detail="Invalid skill name")
-
-        # Read config to get temp_filename for validation
-        config_content = service.get_skill_file_content(skill_name, "config.yaml")
-        if config_content is None:
-            raise HTTPException(status_code=404, detail="Config file not found")
-
-        # Parse config to get temp_filename
-        import yaml
-        config = yaml.safe_load(config_content)
-        temp_filename = config.get("temp_filename", "")
-
-        # Get the base directory for the skill
-        local_dir = os.path.join(service.skill_manager.local_skills_dir, skill_name)
-
-        # Check for path traversal patterns in the raw file_path BEFORE any normalization
-        # This catches attempts like ../../etc/passwd or /etc/passwd
-        normalized_for_check = os.path.normpath(file_path)
-        if ".." in file_path or file_path.startswith("/") or (os.sep in file_path and file_path.startswith(os.sep)):
-            # Additional check: ensure the normalized path doesn't escape local_dir
-            abs_local_dir = os.path.abspath(local_dir)
-            abs_full_path = os.path.abspath(os.path.join(local_dir, normalized_for_check))
-            try:
-                common = os.path.commonpath([abs_local_dir, abs_full_path])
-                if common != abs_local_dir:
-                    raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
-
-        # Normalize the requested file path - use basename to strip directory components
-        safe_file_path = os.path.basename(os.path.normpath(file_path))
-
-        # Build full path and validate it stays within local_dir
-        full_path = os.path.normpath(os.path.join(local_dir, safe_file_path))
-        abs_local_dir = os.path.abspath(local_dir)
-        abs_full_path = os.path.abspath(full_path)
-
-        # Check for path traversal: abs_full_path should be within abs_local_dir
-        try:
-            common = os.path.commonpath([abs_local_dir, abs_full_path])
-            if common != abs_local_dir:
-                raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
-        except ValueError:
-            # Different drives on Windows
-            raise HTTPException(status_code=400, detail="Invalid file path: path traversal detected")
-
-        # Validate the filename matches temp_filename
-        if not temp_filename or safe_file_path != temp_filename:
-            raise HTTPException(status_code=400, detail="Can only delete temp_filename files")
-
-        # Check if file exists
-        if not os.path.exists(full_path):
-            raise HTTPException(status_code=404, detail=f"File not found: {safe_file_path}")
-
-        os.remove(full_path)
-        logger.info(f"Deleted skill file: {full_path}")
-
-        return JSONResponse(content={"message": f"File {safe_file_path} deleted successfully"})
-    except UnauthorizedError as e:
-        raise HTTPException(status_code=401, detail=str(e))
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error deleting skill file {skill_name}/{file_path}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unauthorized access attempt: {e}")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    success = skill_creation_task_manager.stop_task(task_id)
+
+    if success:
+        return JSONResponse(content={"status": "success", "message": "Skill creation task stopped"})
+    else:
+        return JSONResponse(content={"status": "not_found", "message": "Task not found or already completed"}, status_code=404)

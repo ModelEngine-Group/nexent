@@ -2,18 +2,20 @@ import logging
 import re
 import base64
 from http import HTTPStatus
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from urllib.parse import urlparse, urlunparse, unquote, quote
 
 import httpx
 from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Path as PathParam, Query, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
-from consts.exceptions import FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
+from consts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException
 from consts.model import ProcessParams
 from services.file_management_service import upload_to_minio, upload_files_impl, \
     get_file_url_impl, get_file_stream_impl, delete_file_impl, list_files_impl, \
-    preview_file_impl
+    resolve_preview_file, get_preview_stream, check_file_access, check_file_access_batch
+from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import trigger_data_process
 
 logger = logging.getLogger("file_management_app")
@@ -90,27 +92,36 @@ async def upload_files(
         folder: str = Form(
             "attachments", description="Storage folder path for MinIO (optional)"),
         index_name: Optional[str] = Form(
-            None, description="Knowledge base index for conflict resolution")
+            None, description="Knowledge base index for conflict resolution"),
+        authorization: Optional[str] = Header(None, alias="Authorization")
 ):
-    if not file:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
-                            detail="No files in the request")
+    try:
+        if not file:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
+                                detail="No files in the request")
 
-    errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(destination, file, folder, index_name)
+        user_id, tenant_id = get_current_user_id(authorization)
+        errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(destination, file, folder, index_name, user_id)
 
-    if uploaded_file_paths:
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={
-                "message": f"Files uploaded successfully to {destination}, ready for processing.",
-                "uploaded_filenames": uploaded_filenames,
-                "uploaded_file_paths": uploaded_file_paths,
-                "errors": errors
-            }
-        )
-    else:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
-                            detail="No valid files uploaded")
+        if uploaded_file_paths:
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    "message": f"Files uploaded successfully to {destination}, ready for processing.",
+                    "uploaded_filenames": uploaded_filenames,
+                    "uploaded_file_paths": uploaded_file_paths,
+                    "errors": errors
+                }
+            )
+        else:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
+                                detail="No valid files uploaded")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"File upload error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="File upload error.")
 
 
 @file_management_config_router.post("/process")
@@ -167,39 +178,48 @@ async def get_storage_file(
             "'base64' (return base64-encoded content for images)."
         ),
     ),
-    expires: int = Query(3600, description="URL validity period (seconds)"),
-    filename: Optional[str] = Query(None, description="Original filename for download (optional)")
+    expires: int = Query(86400, description="URL validity period (seconds)"),
+    filename: Optional[str] = Query(None, description="Original filename for download (optional)"),
+    authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Get information, download link, or file stream for a single file
+    Get information, download link, or file stream for a single file.
+
+    Access control:
+    - knowledge_base/*: All authenticated users can access
+    - attachments/{user_id}/*: Only the owner (user_id) can access
 
     - **object_name**: File object name
     - **download**: Download mode: ignore (default, return file info), stream (return file stream), redirect (redirect to download URL)
-    - **expires**: URL validity period in seconds (default 3600)
+    - **expires**: URL validity period in seconds (default 86400 = 24 hours)
     - **filename**: Original filename for download (optional, if not provided, will use object_name)
 
     Returns file information, download link, or file content
     """
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        if not check_file_access(object_name, user_id):
+            logger.warning(f"[get_storage_file] Access denied: object_name={object_name}, user_id={user_id}")
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="You don't have permission to access this file"
+            )
+
         logger.info(f"[get_storage_file] Route matched! object_name={object_name}, download={download}, filename={filename}")
         if download == "redirect":
-            # return a redirect download URL
             result = await get_file_url_impl(object_name=object_name, expires=expires)
             return RedirectResponse(url=result["url"])
         elif download == "stream":
-            # return a readable file stream
             file_stream, content_type = await get_file_stream_impl(object_name=object_name)
             logger.info(f"Streaming file: object_name={object_name}, content_type={content_type}")
-            
-            # Use provided filename or extract from object_name
+
             download_filename = filename
             if not download_filename:
-                # Extract filename from object_name (get the last part after the last slash)
                 download_filename = object_name.split("/")[-1] if "/" in object_name else object_name
-            
-            # Build Content-Disposition header with proper encoding for non-ASCII characters
+
             content_disposition = build_content_disposition_header(download_filename)
-            
+
             return StreamingResponse(
                 file_stream,
                 media_type=content_type,
@@ -210,7 +230,6 @@ async def get_storage_file(
                 }
             )
         elif download == "base64":
-            # Return base64 encoded file content (primarily for images)
             file_stream, content_type = await get_file_stream_impl(object_name=object_name)
             try:
                 data = file_stream.read()
@@ -232,13 +251,13 @@ async def get_storage_file(
                 },
             )
         else:
-            # return file metadata
             return await get_file_url_impl(object_name=object_name, expires=expires)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get file: object_name={object_name}, error={str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get file information: {str(e)}"
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to get file."
         )
 
 
@@ -247,17 +266,45 @@ async def get_storage_file(
 async def storage_upload_files(
     files: List[UploadFile] = File(..., description="List of files to upload"),
     folder: str = Form(
-        "attachments", description="Storage folder path (optional)")
+        "attachments", description="Storage folder path (optional)"),
+    authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Upload one or more files to MinIO storage
+    Upload one or more files to MinIO storage.
 
     - **files**: List of files to upload
     - **folder**: Storage folder path (optional, defaults to 'attachments')
+                   Use 'knowledge_base' for shared files accessible by all users.
+                   Other folders (like 'attachments') will be isolated by user_id.
 
     Returns upload results including file information and access URLs
     """
-    results = await upload_to_minio(files=files, folder=folder)
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        if folder == "knowledge_base":
+            actual_folder = "knowledge_base"
+        else:
+            if user_id:
+                actual_folder = f"attachments/{user_id}"
+            else:
+                actual_folder = folder or "attachments"
+
+        results = await upload_to_minio(files=files, folder=actual_folder, user_id=user_id)
+
+        return {
+            "message": f"Processed {len(results)} files",
+            "success_count": sum(1 for r in results if r.get("success", False)),
+            "failed_count": sum(1 for r in results if not r.get("success", False)),
+            "results": results
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Storage upload error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Storage upload error."
+        )
 
     # Return upload results for all files
     return {
@@ -273,10 +320,16 @@ async def get_storage_files(
     prefix: str = Query("", description="File prefix filter"),
     limit: int = Query(100, description="Maximum number of files to return"),
     include_urls: bool = Query(
-        True, description="Whether to include presigned URLs")
+        True, description="Whether to include presigned URLs"),
+    authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Get list of files from MinIO storage
+    Get list of files from MinIO storage.
+
+    Access control:
+    - Returns only files the user has permission to access:
+      - knowledge_base/*: All authenticated users can access
+      - attachments/{user_id}/*: Only the owner's files
 
     - **prefix**: File prefix filter (optional)
     - **limit**: Maximum number of files to return (default 100)
@@ -285,8 +338,22 @@ async def get_storage_files(
     Returns file list and metadata
     """
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
         files = await list_files_impl(prefix, limit)
-        # Remove URLs if not needed
+
+        if user_id:
+            filtered_files = [
+                f for f in files
+                if f.get("key") and check_file_access(f.get("key"), user_id)
+            ]
+        else:
+            filtered_files = [
+                f for f in files
+                if f.get("key") and f.get("key", "").startswith("knowledge_base/")
+            ]
+
+        files = filtered_files
+
         if not include_urls:
             for file in files:
                 if "url" in file:
@@ -296,10 +363,12 @@ async def get_storage_files(
             "total": len(files),
             "files": files
         }
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Get storage files error: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get file list: {str(e)}"
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get storage files error."
         )
 
 
@@ -480,7 +549,7 @@ async def download_datamate_file(
 
             # Build Content-Disposition header with proper encoding for non-ASCII characters
             content_disposition = build_content_disposition_header(download_filename)
-            
+
             return StreamingResponse(
                 iter([response.content]),
                 media_type=content_type,
@@ -506,25 +575,41 @@ async def download_datamate_file(
 
 @file_management_config_router.delete("/storage/{object_name:path}")
 async def remove_storage_file(
-    object_name: str = PathParam(..., description="File object name to delete")
+    object_name: str = PathParam(..., description="File object name to delete"),
+    authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Delete file from MinIO storage
+    Delete file from MinIO storage.
+
+    Access control:
+    - knowledge_base/*: Only allow deletion (admin operation)
+    - attachments/{user_id}/*: Only the owner (user_id) can delete
 
     - **object_name**: File object name to delete
 
     Returns deletion operation result
     """
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        if not check_file_access(object_name, user_id):
+            logger.warning(f"[remove_storage_file] Access denied: object_name={object_name}, user_id={user_id}")
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="You don't have permission to delete this file"
+            )
+
         await delete_file_impl(object_name=object_name)
         return {
             "success": True,
             "message": f"File {object_name} successfully deleted"
         }
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Remove storage file error: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete file: {str(e)}"
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Remove storage file error."
         )
 
 
@@ -532,84 +617,100 @@ async def remove_storage_file(
 async def get_storage_file_batch_urls(
     request_data: dict = Body(...,
                               description="JSON containing list of file object names"),
-    expires: int = Query(3600, description="URL validity period (seconds)")
+    expires: int = Query(3600, description="URL validity period (seconds)"),
+    authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Batch get download URLs for multiple files (JSON request)
+    Batch get download URLs for multiple files (JSON request).
+
+    Access control:
+    - knowledge_base/*: All authenticated users can access
+    - attachments/{user_id}/*: Only the owner (user_id) can access
 
     - **request_data**: JSON request body containing object_names list
-    - **expires**: URL validity period in seconds (default 3600)
+    - **expires**: URL validity period in seconds (default 86400 = 24 hours)
 
     Returns URL and status information for each file
     """
-    # Extract object_names from request body
-    object_names = request_data.get("object_names", [])
-    if not object_names or not isinstance(object_names, list):
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        object_names = request_data.get("object_names", [])
+        if not object_names or not isinstance(object_names, list):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST, detail="Request body must contain object_names array")
+
+        results = []
+
+        for object_name in object_names:
+            if not check_file_access(object_name, user_id):
+                results.append({
+                    "object_name": object_name,
+                    "success": False,
+                    "error": "Access denied"
+                })
+                continue
+
+            try:
+                result = get_file_url_impl(object_name=object_name, expires=expires)
+                results.append({
+                    "object_name": object_name,
+                    "success": result["success"],
+                    "url": result.get("url"),
+                    "error": result.get("error")
+                })
+            except Exception as e:
+                results.append({
+                    "object_name": object_name,
+                    "success": False,
+                    "error": str(e)
+                })
+
+        return {
+            "total": len(results),
+            "success_count": sum(1 for r in results if r.get("success", False)),
+            "failed_count": sum(1 for r in results if not r.get("success", False)),
+            "results": results
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch URLs error: {str(e)}")
         raise HTTPException(
-            status_code=400, detail="Request body must contain object_names array")
-
-    results = []
-
-    for object_name in object_names:
-        try:
-            # Get file URL
-            result = get_file_url_impl(
-                object_name=object_name, expires=expires)
-            results.append({
-                "object_name": object_name,
-                "success": result["success"],
-                "url": result.get("url"),
-                "error": result.get("error")
-            })
-        except Exception as e:
-            results.append({
-                "object_name": object_name,
-                "success": False,
-                "error": str(e)
-            })
-
-    return {
-        "total": len(results),
-        "success_count": sum(1 for r in results if r.get("success", False)),
-        "failed_count": sum(1 for r in results if not r.get("success", False)),
-        "results": results
-    }
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Batch URLs error."
+        )
 
 @file_management_config_router.get("/preview/{object_name:path}")
 async def preview_file(
     object_name: str = PathParam(..., description="File object name to preview"),
-    filename: Optional[str] = Query(None, description="Original filename for display (optional)")
+    filename: Annotated[Optional[str], Query(description="Original filename for display (optional)")] = None,
+    range_header: Annotated[Optional[str], Header(alias="range")] = None,
+    authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Preview file inline in browser 
-    
+    Preview file inline in browser.
+
+    Access control:
+    - knowledge_base/*: All authenticated users can access
+    - attachments/{user_id}/*: Only the owner (user_id) can access
+
     - **object_name**: File object name in storage
     - **filename**: Original filename for Content-Disposition header (optional)
-    
-    Returns file stream with Content-Disposition: inline for browser preview
+
+    Supports HTTP Range requests (RFC 7233) for partial content delivery.
+    Returns 206 Partial Content when a valid Range header is present.
     """
     try:
-        # Get file stream from preview service
-        file_stream, content_type = await preview_file_impl(object_name=object_name)
-        
-        # Use provided filename or extract from object_name
-        display_filename = filename
-        if not display_filename:
-            display_filename = object_name.split("/")[-1] if "/" in object_name else object_name
-        
-        # Build Content-Disposition header for inline display
-        content_disposition = build_content_disposition_header(display_filename, inline=True)
+        user_id, tenant_id = get_current_user_id(authorization)
 
-        return StreamingResponse(
-            file_stream,
-            media_type=content_type,
-            headers={
-                "Content-Disposition": content_disposition,
-                "Cache-Control": "public, max-age=3600",
-                "ETag": f'"{object_name}"',
-            }
-        )
-    
+        if not check_file_access(object_name, user_id):
+            logger.warning(f"[preview_file] Access denied: object_name={object_name}, user_id={user_id}")
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="You don't have permission to access this file"
+            )
+
+        actual_name, content_type, total_size = await resolve_preview_file(object_name=object_name)
     except FileTooLargeException as e:
         logger.warning(f"[preview_file] File too large: object_name={object_name}, error={str(e)}")
         raise HTTPException(
@@ -628,15 +729,129 @@ async def preview_file(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"File format not supported for preview: {str(e)}"
         )
-    except OfficeConversionException as e:
-        logger.error(f"[preview_file] Conversion failed: object_name={object_name}, error={str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to preview file: {str(e)}"
-        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[preview_file] Unexpected error: object_name={object_name}, error={str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to preview file: {str(e)}"
+            detail="Failed to preview file"
         )
+
+    display_filename = filename or (object_name.split("/")[-1] if "/" in object_name else object_name)
+    content_disposition = build_content_disposition_header(display_filename, inline=True)
+
+    common_headers = {
+        "Content-Disposition": content_disposition,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600",
+        "ETag": f'"{object_name}"',
+    }
+
+    if total_size == 0:
+        return StreamingResponse(
+            iter([]),
+            status_code=HTTPStatus.OK,
+            media_type=content_type,
+            headers={
+                **common_headers,
+                "Content-Length": "0",
+            },
+        )
+
+    # Parse Range header
+    start, end = None, None
+    if range_header:
+        parsed = _parse_range_header(range_header, total_size)
+        if parsed is None:
+            return StreamingResponse(
+                iter([]),
+                status_code=HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+                headers={"Content-Range": f"bytes */{total_size}"},
+            )
+        start, end = parsed
+
+    try:
+        if start is not None:
+            # 206 Partial Content
+            stream = get_preview_stream(actual_name, start, end)
+            return StreamingResponse(
+                stream.iter_chunks(chunk_size=64 * 1024),
+                status_code=HTTPStatus.PARTIAL_CONTENT,
+                media_type=content_type,
+                background=BackgroundTask(stream.close),
+                headers={
+                    **common_headers,
+                    "Content-Range": f"bytes {start}-{end}/{total_size}",
+                    "Content-Length": str(end - start + 1),
+                },
+            )
+        else:
+            # 200 Full Content — no Range header present.
+            stream = get_preview_stream(actual_name)
+            return StreamingResponse(
+                stream.iter_chunks(chunk_size=64 * 1024),
+                status_code=HTTPStatus.OK,
+                media_type=content_type,
+                background=BackgroundTask(stream.close),
+                headers={
+                    **common_headers,
+                    "Content-Length": str(total_size),
+                },
+            )
+    except NotFoundException as e:
+        logger.error(f"[preview_file] File not found when streaming: object_name={object_name}, error={str(e)}")
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"File not found: {object_name}")
+    except Exception as e:
+        logger.error(f"[preview_file] Unexpected error when streaming: object_name={object_name}, error={str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to preview file")
+
+
+def _parse_range_header(range_header: str, total_size: int) -> Optional[tuple]:
+    """
+    Parse an HTTP Range header and return (start, end) byte offsets (both inclusive).
+
+    Supports:
+      - bytes=start-end
+      - bytes=start-      (to end of file)
+      - bytes=-suffix     (last N bytes)
+
+    Returns None if the range is malformed or not satisfiable.
+    """
+    try:
+        if total_size <= 0:
+            return None
+        if not range_header.startswith("bytes="):
+            return None
+        range_spec = range_header[6:].strip()
+        if "-" not in range_spec:
+            return None
+        start_str, end_str = range_spec.split("-", 1)
+        start_str = start_str.strip()
+        end_str = end_str.strip()
+
+        if start_str == "":
+            # Suffix range: bytes=-N
+            if not end_str:
+                return None
+            suffix = int(end_str)
+            start = max(0, total_size - suffix)
+            end = total_size - 1
+        elif end_str == "":
+            # Open-ended range: bytes=N-
+            start = int(start_str)
+            end = total_size - 1
+        else:
+            start = int(start_str)
+            end = int(end_str)
+
+        # Clamp end to last byte (RFC 7233 §2.1 allows end to exceed file size)
+        end = min(end, total_size - 1)
+
+        # Validate bounds
+        if start < 0 or start >= total_size or end < start:
+            return None
+
+        return start, end
+    except (ValueError, AttributeError):
+        return None

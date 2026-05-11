@@ -27,7 +27,9 @@ from database.conversation_db import (
     update_message_opinion
 )
 from nexent.core.utils.observer import MessageObserver, ProcessType
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
+from agents.agent_run_manager import agent_run_manager
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
@@ -200,7 +202,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str):
     user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.get("role") == MESSAGE_ROLE["USER"])
+        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2,
                                       role=MESSAGE_ROLE["USER"], message=[MessageUnit(type="string", content=request.query)], minio_files=request.minio_files)
@@ -209,7 +211,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str):
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
     user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.get("role") == MESSAGE_ROLE["USER"])
+        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
     message_list = []
     for item in messages:
@@ -239,9 +241,12 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
         str: Generated title
     """
     prompt_template = get_generate_title_prompt_template(language=language)
+    set_monitoring_context(tenant_id=tenant_id, user_id=None)
 
     model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    display_name = model_config.get("display_name", "") if model_config else ""
+    set_monitoring_operation("title_generation", display_name=display_name or None)
 
     # Create OpenAIModel instance
     llm = OpenAIModel(
@@ -362,6 +367,11 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         success = delete_conversation(conversation_id, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
+
+        # Defensive cleanup: release the ContextManager associated with this conversation
+        # to avoid memory leaks in edge cases
+        agent_run_manager.clear_conversation_context_manager(conversation_id)
+
         return True
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")

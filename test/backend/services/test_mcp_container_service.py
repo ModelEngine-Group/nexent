@@ -1412,7 +1412,7 @@ class TestLoadImageFromTarFile:
             # Clean up
             try:
                 os.unlink(temp_file_path)
-            except:
+            except Exception:
                 pass
 
     @pytest.mark.asyncio
@@ -1438,7 +1438,7 @@ class TestLoadImageFromTarFile:
             # Clean up
             try:
                 os.unlink(temp_file_path)
-            except:
+            except Exception:
                 pass
 
     @pytest.mark.asyncio
@@ -1458,7 +1458,7 @@ class TestLoadImageFromTarFile:
             # Clean up
             try:
                 os.unlink(temp_file_path)
-            except:
+            except Exception:
                 pass
 
     @pytest.mark.asyncio
@@ -1479,7 +1479,7 @@ class TestLoadImageFromTarFile:
             # Clean up
             try:
                 os.unlink(temp_file_path)
-            except:
+            except Exception:
                 pass
 
 

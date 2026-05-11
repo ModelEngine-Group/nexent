@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -128,10 +129,14 @@ class SkillManager:
         return skill.get("content") if skill else None
 
     def save_skill(self, skill_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Save a skill to local storage only.
+        """Save a skill to local storage.
+
+        If skill_data contains a "files" key (list of dicts with file_path and content),
+        those files are written alongside SKILL.md.
 
         Args:
             skill_data: Skill dict with name, description, content, etc.
+            May include "files": [{"file_path": "...", "content": "..."}]
 
         Returns:
             Saved skill dict
@@ -144,12 +149,41 @@ class SkillManager:
 
         local_dir = os.path.join(self.local_skills_dir, name)
         os.makedirs(local_dir, exist_ok=True)
-        local_path = os.path.join(local_dir, SKILL_FILE_NAME)
-        with open(local_path, "w", encoding="utf-8") as f:
+
+        # Write SKILL.md
+        skill_md_path = os.path.join(local_dir, SKILL_FILE_NAME)
+        with open(skill_md_path, "w", encoding="utf-8") as f:
             f.write(content)
 
-        logger.info(f"Saved skill '{name}' to local storage")
+        # Write additional files
+        extra_files = skill_data.get("files") or []
+        for file_entry in extra_files:
+            file_path = file_entry.get("path") or file_entry.get("file_path") or ""
+            file_content = file_entry.get("content", "")
+            if not file_path or file_path.lower() == SKILL_FILE_NAME.lower():
+                continue
+            self._write_skill_file(name, file_path, file_content)
+
+        logger.info(f"Saved skill '{name}' to local storage with {len(extra_files)} extra file(s)")
         return self.load_skill(name)
+
+    def _write_skill_file(self, skill_name: str, file_path: str, content: str) -> None:
+        """Write a single file inside a skill directory.
+
+        Args:
+            skill_name: Skill directory name
+            file_path: Relative path inside the skill (e.g. "scripts/run.py", "README.md")
+            content: File content to write
+        """
+        if not self.local_skills_dir:
+            return
+        local_dir = os.path.join(self.local_skills_dir, skill_name)
+        normalized_path = file_path.replace("/", os.sep).replace("\\", os.sep)
+        full_path = os.path.normpath(os.path.join(local_dir, normalized_path))
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.debug(f"Wrote skill file '{skill_name}/{file_path}'")
 
     def upload_skill_from_file(
         self,
@@ -317,7 +351,8 @@ class SkillManager:
                 file_data = zf.read(file_path)
 
                 local_dir = os.path.join(self.local_skills_dir, name)
-                local_path = os.path.join(local_dir, relative_path)
+                normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
+                local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
                 with open(local_path, "wb") as f:
                     f.write(file_data)
@@ -445,7 +480,8 @@ class SkillManager:
                 file_data = zf.read(file_path)
 
                 local_dir = os.path.join(self.local_skills_dir, skill_name)
-                local_path = os.path.join(local_dir, relative_path)
+                normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
+                local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
                 with open(local_path, "wb") as f:
                     f.write(file_data)
@@ -477,28 +513,18 @@ class SkillManager:
             for root, dirs, files in os.walk(local_dir):
                 rel_root = os.path.relpath(root, local_dir)
 
-                # Handle root directory files (including SKILL.md)
                 if rel_root == ".":
                     for f in files:
-                        if f == SKILL_FILE_NAME:
-                            # Add SKILL.md as a special file
-                            tree.setdefault("children", []).append({
-                                "name": f,
-                                "type": "file"
-                            })
-                        else:
-                            tree.setdefault("children", []).append({
-                                "name": f,
-                                "type": "file"
-                            })
+                        # Use just the filename (relative to skill directory)
+                        tree.setdefault("children", []).append({
+                            "name": f,
+                            "type": "file"
+                        })
                     continue
 
                 parts = rel_root.split(os.sep)
-
-                # First, add the directory structure (all parent dirs)
                 current = tree
-                for i, part in enumerate(parts[:-1]):
-                    # Find or create directory
+                for part in parts:
                     found = None
                     for child in current.get("children", []):
                         if child.get("name") == part and child.get("type") == "directory":
@@ -509,24 +535,11 @@ class SkillManager:
                         current.setdefault("children", []).append(found)
                     current = found
 
-                # Get or create the leaf directory
-                leaf_dir_name = parts[-1]
-                leaf_dir = None
-                for child in current.get("children", []):
-                    if child.get("name") == leaf_dir_name and child.get("type") == "directory":
-                        leaf_dir = child
-                        break
-                if not leaf_dir:
-                    leaf_dir = {"name": leaf_dir_name, "type": "directory", "children": []}
-                    current.setdefault("children", []).append(leaf_dir)
-
-                # Add files in this directory
                 for f in files:
-                    if f != SKILL_FILE_NAME:
-                        leaf_dir.setdefault("children", []).append({
-                            "name": f,
-                            "type": "file"
-                        })
+                    current.setdefault("children", []).append({
+                        "name": f,
+                        "type": "file"
+                    })
 
         return tree
 
@@ -629,7 +642,7 @@ class SkillManager:
         lines.append("</skills>")
 
         return "\n".join(lines)
-    
+
 
     def load_skill_directory(self, name: str) -> Optional[Dict[str, Any]]:
         """Load entire skill directory including scripts.
@@ -704,7 +717,7 @@ class SkillManager:
         self,
         skill_name: str,
         script_path: str,
-        params: Optional[Dict[str, Any]] = None,
+        params: Optional[str] = None,
         agent_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         version_no: int = 0,
@@ -714,7 +727,8 @@ class SkillManager:
         Args:
             skill_name: Name of the skill containing the script
             script_path: Path to script relative to skill directory (e.g., "scripts/analyze.py")
-            params: Parameters to pass to the script
+            params: Raw command-line argument string to pass to the script.
+                Example: "--target /path/to/file -c --code \"SELECT 1\""
             agent_id: Agent ID for DB-based available skills lookup
             tenant_id: Tenant ID for DB-based available skills lookup
             version_no: Version number for DB-based available skills lookup
@@ -730,7 +744,8 @@ class SkillManager:
         if not os.path.isdir(local_skill_dir):
             raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
 
-        full_path = os.path.join(local_skill_dir, script_path)
+        normalized_script_path = script_path.replace("/", os.sep).replace("\\", os.sep)
+        full_path = os.path.normpath(os.path.join(local_skill_dir, normalized_script_path))
         if not os.path.isfile(full_path):
             # List available scripts directly from local directory (no temp needed)
             available = []
@@ -746,8 +761,6 @@ class SkillManager:
                 f"Available scripts: {available if available else 'none'}"
             )
 
-        params = params or {}
-
         if script_path.endswith(".py"):
             return self._run_python_script(full_path, params)
         elif script_path.endswith(".sh"):
@@ -755,54 +768,21 @@ class SkillManager:
         else:
             raise ValueError(f"Unsupported script type: {script_path}")
 
-    def _build_command_args(self, params: Dict[str, Any]) -> List[str]:
-        """Build command-line arguments from params dict.
-
-        Handles different parameter formats:
-        - "--name": value -> ["--name", "value"]
-        - "--flag": True -> ["--flag"]
-        - "--flag": False -> (not included)
-        - "key": value -> ["key", "value"]
-
-        Args:
-            params: Parameters dictionary
-
-        Returns:
-            List of command-line arguments
-        """
-        args = []
-        for key, value in params.items():
-            if value is None:
-                continue
-
-            if isinstance(value, bool):
-                if value:
-                    args.append(key)
-            elif isinstance(value, (list, tuple)):
-                for item in value:
-                    args.append(key)
-                    args.append(str(item))
-            else:
-                args.append(key)
-                args.append(str(value))
-
-        return args
-
-    def _run_python_script(self, script_path: str, params: Dict[str, Any]) -> str:
+    def _run_python_script(self, script_path: str, params: Optional[str]) -> str:
         """Run a Python script with parameters.
 
         Args:
             script_path: Full path to the Python script
-            params: Parameters to pass as command-line arguments
+            params: Raw command-line argument string to pass to the script
 
         Returns:
             Script output as string
         """
-        cmd_args = self._build_command_args(params)
+        cmd_parts = shlex.split(params) if params else []
 
         try:
             result = subprocess.run(
-                ["python", script_path] + cmd_args,
+                ["python", script_path] + cmd_parts,
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -818,21 +798,21 @@ class SkillManager:
             logger.error(f"Failed to run script: {e}")
             raise
 
-    def _run_shell_script(self, script_path: str, params: Dict[str, Any]) -> str:
+    def _run_shell_script(self, script_path: str, params: Optional[str]) -> str:
         """Run a shell script with parameters.
 
         Args:
             script_path: Full path to the shell script
-            params: Parameters to pass as command-line arguments
+            params: Raw command-line argument string to pass to the script
 
         Returns:
             Script output as string
         """
-        cmd_args = self._build_command_args(params)
+        cmd_parts = shlex.split(params) if params else []
 
         try:
             result = subprocess.run(
-                ["bash", script_path] + cmd_args,
+                ["bash", script_path] + cmd_parts,
                 capture_output=True,
                 text=True,
                 timeout=300,

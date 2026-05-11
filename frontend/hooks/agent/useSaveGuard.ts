@@ -4,7 +4,7 @@ import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useConfirmModal } from "../useConfirmModal";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { updateAgentInfo, updateToolConfig, searchToolConfig } from "@/services/agentConfigService";
+import { updateAgentInfo, updateToolConfig, searchToolConfig, searchAgentInfo } from "@/services/agentConfigService";
 import { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 
@@ -152,9 +152,29 @@ export const useSaveGuard = () => {
         );
 
         // Get the final agent ID (from result for new agents, existing currentAgentId for updates)
+        const isCreatingMode = useAgentConfigStore.getState().isCreatingMode;
         const finalAgentId = result.data?.agent_id || currentAgentId;
         if (!finalAgentId) {
           throw new Error("Failed to get agent ID after save operation");
+        }
+
+        // Handle create mode: exit create mode and select the newly created agent
+        if (isCreatingMode) {
+          try {
+            // Load the full agent details
+            const agentDetailResult = await searchAgentInfo(Number(finalAgentId));
+            if (agentDetailResult.success && agentDetailResult.data) {
+              // Exit create mode and set the newly created agent as current
+              useAgentConfigStore.getState().setCurrentAgent({
+                ...agentDetailResult.data,
+                permission: "EDIT",
+              });
+            }
+          } catch (error) {
+            log.error("Failed to load newly created agent details:", error);
+            // Still exit create mode even if detail loading fails
+            useAgentConfigStore.getState().setCurrentAgent(null);
+          }
         }
 
         // Batch process tool configurations for both create and update modes

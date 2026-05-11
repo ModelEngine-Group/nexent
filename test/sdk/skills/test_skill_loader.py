@@ -218,6 +218,18 @@ description: Say "hello" to YAML
         fixed = SkillLoader._fix_yaml_frontmatter(frontmatter)
         assert 'description: Say "hello" to YAML' in fixed
 
+    def test_skip_yaml_list_item_lines(self):
+        """Test that YAML list item lines (starting with '-') are preserved."""
+        frontmatter = """name: test
+allowed-tools:
+  - tool1
+  - tool2
+description: Test
+"""
+        fixed = SkillLoader._fix_yaml_frontmatter(frontmatter)
+        assert "- tool1" in fixed
+        assert "- tool2" in fixed
+
     def test_fix_value_with_multiple_special_chars(self):
         """Test fixing values with multiple special characters."""
         frontmatter = """name: test
@@ -341,8 +353,8 @@ This skill was loaded from a file.
 class TestSkillLoaderEdgeCases:
     """Test edge cases for SkillLoader."""
 
-    def test_parse_with_invalid_yaml_raises(self):
-        """Test parsing with invalid YAML structure."""
+    def test_parse_with_invalid_yaml_falls_back_to_regex(self):
+        """Test parsing with invalid YAML falls back to regex extraction."""
         content = """---
 name: test
 description: Test
@@ -350,8 +362,10 @@ description: Test
 ---
 # Body
 """
-        with pytest.raises(Exception):
-            SkillLoader.parse(content)
+        # YAML parsing fails, but regex extraction succeeds since name/description are valid
+        result = SkillLoader.parse(content)
+        assert result["name"] == "test"
+        assert result["description"] == "Test"
 
     def test_parse_empty_content(self):
         """Test parsing empty content."""
@@ -380,7 +394,9 @@ description: >
 ---
 # Body
 """
-        with pytest.raises(ValueError, match="Invalid YAML frontmatter"):
+        # Frontmatter is a YAML list (not a dict), so regex fallback extracts nothing
+        # and raises because 'name' field is missing
+        with pytest.raises(ValueError, match="'name' field"):
             SkillLoader.parse(content)
 
     def test_parse_with_block_sequence_frontmatter_raises(self):
@@ -391,8 +407,70 @@ description: >
 ---
 # Body
 """
-        with pytest.raises(ValueError, match="Invalid YAML frontmatter"):
+        # Frontmatter is a YAML list (block sequence), so regex fallback extracts nothing
+        # and raises because 'name' field is missing
+        with pytest.raises(ValueError, match="'name' field"):
             SkillLoader.parse(content)
+
+    def test_regex_extract_block_scalar_description(self):
+        """Test regex extraction when description uses block scalar (>)."""
+        content = """---
+name: test
+description: >
+  This is a
+  multiline
+  description
+---
+# Body
+"""
+        # This triggers the regex fallback path because yaml.safe_load might fail
+        result = SkillLoader._extract_frontmatter_by_regex("name: test\ndescription: >\n  This is a\n  multiline\n  description")
+        assert "description" in result
+        assert "multiline" in result["description"]
+
+    def test_regex_extract_block_scalar_with_empty_lines(self):
+        """Test regex extraction with empty lines in block scalar content."""
+        frontmatter = """name: test
+description: >
+  Line 1
+
+  Line 2
+"""
+        result = SkillLoader._extract_frontmatter_by_regex(frontmatter)
+        assert "description" in result
+        assert "Line 1" in result["description"]
+        assert "Line 2" in result["description"]
+
+    def test_regex_extract_block_scalar_stops_at_unindented(self):
+        """Test regex extraction stops at unindented line."""
+        frontmatter = """name: test
+description: >
+  Line 1
+unindented_line
+  Line 2
+"""
+        result = SkillLoader._extract_frontmatter_by_regex(frontmatter)
+        assert "description" in result
+        assert "Line 1" in result["description"]
+        assert "unindented_line" not in result["description"]
+
+    def test_regex_extract_tags_inline(self):
+        """Test regex extraction of tags from inline list format."""
+        frontmatter = """name: test
+description: Test skill
+tags: [python, ml, data]
+"""
+        result = SkillLoader._extract_frontmatter_by_regex(frontmatter)
+        assert result["tags"] == ["python", "ml", "data"]
+
+    def test_regex_extract_allowed_tools_inline(self):
+        """Test regex extraction of allowed-tools from inline list format."""
+        frontmatter = """name: test
+description: Test skill
+allowed-tools: [tool1, tool2, tool3]
+"""
+        result = SkillLoader._extract_frontmatter_by_regex(frontmatter)
+        assert result["allowed-tools"] == ["tool1", "tool2", "tool3"]
 
     def test_parse_with_inline_yaml_list(self):
         """Test parsing with inline YAML list at top level."""

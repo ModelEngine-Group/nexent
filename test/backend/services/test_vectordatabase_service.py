@@ -80,10 +80,6 @@ sys.modules['nexent.storage.minio_config'] = storage_config_module
 sys.modules['nexent.core.agents.agent_model'].ToolConfig = MagicMock()
 sys.modules['nexent.core.models.stt_model'].STTConfig = MagicMock()
 sys.modules['nexent.core.models.stt_model'].STTModel = MagicMock()
-sys.modules['nexent.core.models.tts_model'] = MagicMock()
-sys.modules['nexent.core.models.tts_model'].TTSConfig = MagicMock()
-sys.modules['nexent.core.models.tts_model'].TTSModel = MagicMock()
-
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
 storage_client_mock = MagicMock()

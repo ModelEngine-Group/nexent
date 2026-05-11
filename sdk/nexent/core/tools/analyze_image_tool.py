@@ -58,6 +58,9 @@ class AnalyzeImageTool(Tool):
         },
         "storage_client": {
             "description": "Storage client for downloading files"
+        },
+        "validate_url_access": {
+            "description": "Callback function to validate URL access permissions (passed to LoadSaveObjectManager)"
         }
     }
     output_type = "array"
@@ -77,6 +80,10 @@ class AnalyzeImageTool(Tool):
             storage_client: MinIOStorageClient = Field(
                 description="Storage client for downloading files from S3 URLs、HTTP URLs、HTTPS URLs.",
                 default=None,
+                exclude=True),
+            validate_url_access: callable = Field(
+                description="Callback function to validate URL access permissions",
+                default=None,
                 exclude=True)
     ):
         super().__init__()
@@ -87,8 +94,15 @@ class AnalyzeImageTool(Tool):
         # Determine if the language is Chinese for internationalization
         self._is_chinese = bool(observer and observer.lang == "zh")
 
-        # Create LoadSaveObjectManager with the storage client
-        self.mm = LoadSaveObjectManager(storage_client=self.storage_client)
+        # Create LoadSaveObjectManager with the storage client and validation callback
+        # Ensure validate_url_access is callable before passing to LoadSaveObjectManager
+        validate_callback = None
+        if validate_url_access is not None and callable(validate_url_access):
+            validate_callback = validate_url_access
+        self.mm = LoadSaveObjectManager(
+            storage_client=self.storage_client,
+            validate_url_access=validate_callback
+        )
 
         # Dynamically apply the load_object decorator to forward method
         self.forward = self.mm.load_object(

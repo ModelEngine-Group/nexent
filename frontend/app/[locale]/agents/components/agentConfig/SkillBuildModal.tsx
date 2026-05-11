@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
 import {
   Modal,
   Tabs,
@@ -13,10 +12,10 @@ import {
   Select,
   message,
   Flex,
-  Progress,
   Row,
   Col,
   Spin,
+  Tooltip,
 } from "antd";
 import {
   Upload as UploadIcon,
@@ -24,26 +23,39 @@ import {
   Trash2,
   MessagesSquare,
   HardDriveUpload,
+  Loader2,
+  Plus,
+  X,
+  Pencil,
+  Square,
 } from "lucide-react";
-import { getAgentByName } from "@/services/agentConfigService";
-import { conversationService } from "@/services/conversationService";
-import { extractSkillInfo } from "@/lib/skillFileUtils";
+import { extractSkillInfo, extractSkillInfoFromContent } from "@/lib/skillFileUtils";
+import yaml from "js-yaml";
 import {
   MAX_RECENT_SKILLS,
   THINKING_STEPS_ZH,
   type SkillFormData,
   type ChatMessage,
+  type SkillFileContent,
 } from "@/types/skill";
 import {
   fetchSkillsList,
   submitSkillForm,
   submitSkillFromFile,
-  processSkillStream,
-  deleteSkillCreatorTempFile,
   findSkillByName,
   searchSkillsByName as searchSkillsByNameUtil,
+  createSkillStream,
+  clearChatAndTempFile,
+  stopSkillCreation,
   type SkillListItem,
+  type SkillData,
 } from "@/services/skillService";
+import {
+  fetchSkillFiles,
+  fetchSkillFileContent,
+  type SkillFileNode,
+} from "@/services/agentConfigService";
+import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import log from "@/lib/logger";
 
 const { TextArea } = Input;
@@ -61,14 +73,7 @@ export default function SkillBuildModal({
 }: SkillBuildModalProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
-  // TODO: [FEATURE] Re-enable interactive skill creation tab
-  // Reason: Interactive tab depends on skill_creator agent which may not be available in all deployments
-  // When to re-enable:
-  //   1. Ensure skill_creator agent is properly configured and deployed
-  //   2. Verify conversationService works correctly with the agent
-  //   3. Test the full chat-to-form workflow end-to-end
-  //   4. Remove this TODO and restore the interactive tab in tabItems
-  const [activeTab, setActiveTab] = useState<string>("upload");
+  const [activeTab, setActiveTab] = useState<string>("interactive");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
   const [searchResults, setSearchResults] = useState<SkillListItem[]>([]);
@@ -81,18 +86,88 @@ export default function SkillBuildModal({
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
-  const [thinkingStep, setThinkingStep] = useState<number>(0);
   const [thinkingDescription, setThinkingDescription] = useState<string>("");
   const [isThinkingVisible, setIsThinkingVisible] = useState(false);
   const [interactiveSkillName, setInteractiveSkillName] = useState<string>("");
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // skill_creator agent state (cached after first lookup)
-  const [skillCreatorAgentId, setSkillCreatorAgentId] = useState<number | null>(null);
-  const skillCreatorAgentIdRef = useRef<number | null>(null);
+  // Content input streaming state - multi-file tabs
+  const [skillTabs, setSkillTabs] = useState<SkillFileContent[]>([
+    { path: "SKILL.md", content: "" },
+  ]);
+  const [activeSkillTab, setActiveSkillTab] = useState<string>("SKILL.md");
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  // Tab management state
+  const [editingTabKey, setEditingTabKey] = useState<string | null>(null);
+  const [editingTabName, setEditingTabName] = useState<string>("");
+
+  // Summary content for chat bubble
+  const [summaryContent, setSummaryContent] = useState<string>("");
+
+  // Frontmatter buffer for streaming - accumulate and parse at completion
+  const frontmatterBufferRef = useRef<string>("");
+
+  // Refs for per-tab scroll state: tracks whether each textarea should auto-scroll
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const textareaRefs = useRef<Record<string, any>>({});
+  const shouldAutoScrollRef = useRef<Record<string, boolean>>({});
+
+  // Detect if the textarea is currently near the bottom (within threshold pixels)
+  const isTextareaAtBottom = (tabPath: string): boolean => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ref = textareaRefs.current[tabPath] as any;
+    const textarea = ref?.resizableTextArea?.textArea || ref?.textArea || ref;
+    if (!textarea) return true;
+    return textarea.scrollHeight - textarea.scrollTop - textarea.clientHeight < 20;
+  };
+
+  // Update shouldAutoScrollRef when user scrolls manually
+  const handleTextareaScroll = (tabPath: string) => {
+    shouldAutoScrollRef.current[tabPath] = isTextareaAtBottom(tabPath);
+  };
+
+  // Scroll textarea to bottom, respecting user scroll preference and throttled via RAF
+  const scrollTextareaToBottom = (tabPath: string) => {
+    if (!shouldAutoScrollRef.current[tabPath]) return;
+    requestAnimationFrame(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ref = textareaRefs.current[tabPath] as any;
+      const textarea = ref?.resizableTextArea?.textArea || ref?.textArea || ref;
+      if (textarea) {
+        textarea.scrollTop = textarea.scrollHeight;
+      }
+    });
+  };
 
   // Track if component is mounted to prevent state updates after unmount
   const isMountedRef = useRef(true);
+  const currentAssistantIdRef = useRef<string>("");
+  // Track if streaming is complete to prevent late onFormContent callbacks from overwriting cleaned content
+  const isStreamingCompleteRef = useRef(false);
+
+  // Track current tabs during streaming to avoid stale closure issues
+  const streamingTabsRef = useRef<SkillFileContent[]>([{ path: "SKILL.md", content: "" }]);
+
+  // AbortController ref for stopping streaming
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Task ID ref for backend stop API
+  const taskIdRef = useRef<string>("");
+
+  // Multi-turn conversation state: accumulated skill draft from previous turns.
+  // When the user sends a follow-up message, this draft is passed as existing_skill
+  // so the backend can refine the skill rather than generating from scratch.
+  const [accumulatedDraft, setAccumulatedDraft] = useState<{
+    name: string;
+    description: string;
+    tags: string[];
+    content: string;
+  } | null>(null);
+
+  // Whether the user is in multi-turn refinement mode (has already received a draft).
+  // Used to switch the placeholder from "创建" to "继续修改" and to pass existing_skill.
+  const [isMultiTurn, setIsMultiTurn] = useState(false);
 
   // Name input dropdown control
   const [isNameDropdownOpen, setIsNameDropdownOpen] = useState(false);
@@ -118,7 +193,9 @@ export default function SkillBuildModal({
     let cancelled = false;
     fetchSkillsList()
       .then((list) => {
-        if (!cancelled) setAllSkills(list);
+        if (!cancelled) {
+          setAllSkills(list);
+        }
       })
       .catch((err) => {
         log.error("Failed to load skills for SkillBuildModal", err);
@@ -128,11 +205,17 @@ export default function SkillBuildModal({
     };
   }, [isOpen]);
 
-  // TODO: [FEATURE] Update setActiveTab("upload") when interactive tab is re-enabled
   useEffect(() => {
     if (!isOpen) {
+      // Abort any ongoing streaming request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort("Modal closed");
+        abortControllerRef.current = null;
+      }
+      // Reset task ID
+      taskIdRef.current = "";
       form.resetFields();
-      setActiveTab("upload");
+      setActiveTab("interactive");
       setSelectedSkillName("");
       setUploadFile(null);
       setSearchResults([]);
@@ -144,11 +227,19 @@ export default function SkillBuildModal({
       setIsCreateMode(true);
       setUploadExtractingName(false);
       setUploadExtractedSkillName("");
-      setSkillCreatorAgentId(null);
-      skillCreatorAgentIdRef.current = null;
-      setThinkingStep(0);
       setThinkingDescription("");
       setIsThinkingVisible(false);
+      setSkillTabs([{ path: "SKILL.md", content: "" }]);
+      streamingTabsRef.current = [{ path: "SKILL.md", content: "" }];
+      shouldAutoScrollRef.current = {};
+      setActiveSkillTab("SKILL.md");
+      setIsStreaming(false);
+      setSummaryContent("");
+      currentAssistantIdRef.current = "";
+      setAccumulatedDraft(null);
+      setIsMultiTurn(false);
+      setEditingTabKey(null);
+      setEditingTabName("");
     }
   }, [isOpen, form]);
 
@@ -160,6 +251,20 @@ export default function SkillBuildModal({
     };
   }, []);
 
+  // Sync summary content to the current assistant chat message for real-time display.
+  useEffect(() => {
+    if (!currentAssistantIdRef.current) return;
+    if (!summaryContent) return;
+    setChatMessages((prev) => {
+      if (!prev.some((m) => m.id === currentAssistantIdRef.current)) return prev;
+      return prev.map((msg) =>
+        msg.id === currentAssistantIdRef.current
+          ? { ...msg, content: summaryContent }
+          : msg
+      );
+    });
+  }, [summaryContent]);
+
   // Detect create/update mode when skill name changes
   useEffect(() => {
     const nameValue = interactiveSkillName.trim();
@@ -168,11 +273,8 @@ export default function SkillBuildModal({
       setIsCreateMode(!matchedSkill);
       if (matchedSkill) {
         setSelectedSkillName(matchedSkill.name);
-        form.setFieldsValue({
-          description: matchedSkill.description || "",
-          source: matchedSkill.source || "自定义",
-          content: matchedSkill.content || "",
-        });
+        // Load all skill data including files
+        loadSkillData(nameValue);
       }
     } else {
       setIsCreateMode(true);
@@ -233,21 +335,32 @@ export default function SkillBuildModal({
     setSelectedSkillName(value);
     setInteractiveSkillName(value);
     setIsNameDropdownOpen(false);
-    const skill = allSkills.find((s) => s.name === value);
-    if (skill) {
-      form.setFieldsValue({
-        name: skill.name,
-        description: skill.description || "",
-        source: skill.source || "Custom",
-        content: skill.content || "",
-      });
-    }
+  };
+
+  // Load skill data when name is selected or typed
+  const loadSkillData = async (skillName: string) => {
+    const skill = allSkills.find((s) => s.name === skillName);
+    if (!skill) return;
+
+    const fieldsToSet = {
+      name: skill.name,
+      description: skill.description || "",
+      source: skill.source || "自定义",
+      tags: skill.tags || [],
+      content: skill.content || "",
+    };
+    form.setFieldsValue(fieldsToSet);
+
+    await loadSkillFiles(skillName);
   };
 
   const handleNameChange = (value: string) => {
     setInteractiveSkillName(value);
     if (!value || value.trim() === "") {
       setSelectedSkillName("");
+      // Reset skillTabs when input is cleared
+      setSkillTabs([{ path: "SKILL.md", content: "" }]);
+      setActiveSkillTab("SKILL.md");
     }
   };
 
@@ -261,11 +374,8 @@ export default function SkillBuildModal({
     }, 200);
   };
 
-  // Cleanup temp file when modal is closed
-  const handleModalClose = async () => {
-    if (activeTab === "interactive" && chatMessages.length > 0) {
-      await deleteSkillCreatorTempFile();
-    }
+  // Cleanup when modal is closed
+  const handleModalClose = () => {
     onCancel();
   };
 
@@ -273,8 +383,19 @@ export default function SkillBuildModal({
     try {
       const values = await form.validateFields();
       setIsSubmitting(true);
+
+      const skillTab = skillTabs.find(t => t.path === "SKILL.md");
+      const content = skillTab?.content || "";
+
+      const extraFiles = skillTabs
+        .filter(t => t.path !== "SKILL.md")
+        .map(t => ({
+          path: t.path,
+          content: t.content || "",
+        }));
+
       await submitSkillForm(
-        values,
+        { ...values, content, files: extraFiles.length > 0 ? extraFiles : undefined } as SkillData,
         allSkills,
         onSuccess,
         onCancel,
@@ -313,17 +434,129 @@ export default function SkillBuildModal({
     }
   };
 
-  // Resolve skill_creator agent
-  const resolveSkillCreatorAgent = async (): Promise<number | null> => {
-    if (skillCreatorAgentIdRef.current !== null) {
-      const cached = skillCreatorAgentIdRef.current;
-      return cached < 0 ? null : cached;
+  // Helper function to update tab content
+  const updateTabContent = (tabPath: string, content: string) => {
+    setSkillTabs((prev) => {
+      const newTabs = prev.map((tab) =>
+        tab.path === tabPath ? { ...tab, content: tab.content + content } : tab
+      );
+      streamingTabsRef.current = newTabs;
+      return newTabs;
+    });
+    // Scroll to bottom after content update during streaming
+    if (isStreaming) {
+      setTimeout(() => scrollTextareaToBottom(tabPath), 0);
     }
-    const result = await getAgentByName("skill_creator");
-    if (!result) return null;
-    skillCreatorAgentIdRef.current = -result.agent_id;
-    setSkillCreatorAgentId(result.agent_id);
-    return result.agent_id;
+  };
+
+  // Assemble skill files into XML-like format for agent consumption
+  const assembleSkillContent = (tabs: SkillFileContent[]): string => {
+    const parts: string[] = [];
+
+    for (const tab of tabs) {
+      if (tab.path === "SKILL.md") {
+        parts.push(`<SKILL>\n${tab.content}\n</SKILL>`);
+      } else {
+        parts.push(`<FILE path="${tab.path}">\n${tab.content}\n</FILE>`);
+      }
+    }
+
+    return parts.join("\n\n");
+  };
+
+  // Load all files for a skill into skillTabs
+  const loadSkillFiles = async (skillName: string) => {
+    try {
+      const files = await fetchSkillFiles(skillName);
+      if (files.length === 0) {
+        // Fallback: load SKILL.md content from the skill list item
+        const skill = allSkills.find((s) => s.name === skillName);
+        if (skill?.content) {
+          setSkillTabs([{ path: "SKILL.md", content: skill.content }]);
+        }
+        return;
+      }
+
+      // Flatten file tree and get all file paths.
+      // The root node's name IS the skill_name — skip the root itself and
+      // start from its children so paths stay relative (e.g. "SKILL.md", not "skill_name/SKILL.md").
+      const flattenFiles = (nodes: SkillFileNode[], prefix = ""): string[] => {
+        const result: string[] = [];
+        for (const node of nodes) {
+          if (node.type === "directory" && node.name === skillName && prefix === "") {
+            // Root directory — recurse into children without prepending the root name
+            if (node.children) {
+              result.push(...flattenFiles(node.children, ""));
+            }
+          } else {
+            const fullPath = prefix ? `${prefix}/${node.name}` : node.name;
+            if (node.type === "file") {
+              result.push(fullPath);
+            } else if (node.children) {
+              result.push(...flattenFiles(node.children, fullPath));
+            }
+          }
+        }
+        return result;
+      };
+
+      const filePaths = flattenFiles(files);
+
+      // Load content for each file
+      const tabsContent: SkillFileContent[] = [];
+      for (const filePath of filePaths) {
+        const content = await fetchSkillFileContent(skillName, filePath);
+        tabsContent.push({ path: filePath, content: content || "" });
+      }
+
+      // Sort so SKILL.md is always first
+      tabsContent.sort((a, b) => {
+        if (a.path === "SKILL.md") return -1;
+        if (b.path === "SKILL.md") return 1;
+        return a.path.localeCompare(b.path);
+      });
+
+      setSkillTabs(tabsContent);
+      setActiveSkillTab("SKILL.md");
+    } catch (error) {
+      log.error("Failed to load skill files:", error);
+      // Fallback to basic content
+      const skill = allSkills.find((s) => s.name === skillName);
+      if (skill?.content) {
+        setSkillTabs([{ path: "SKILL.md", content: skill.content }]);
+        setActiveSkillTab("SKILL.md");
+      }
+    }
+  };
+
+  // Parse frontmatter YAML and update form fields
+  const parseAndUpdateFrontmatter = (frontmatterYaml: string) => {
+    try {
+      // Parse the frontmatter using js-yaml
+      const parsed = yaml.load(frontmatterYaml) as Record<string, unknown> | null;
+      if (parsed && typeof parsed === "object") {
+        const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+        const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
+        const tags = Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === "string") : [];
+
+        if (name) {
+          form.setFieldsValue({ name });
+          setInteractiveSkillName(name);
+          const existingSkill = allSkills.find(
+            (s) => s.name.toLowerCase() === name.toLowerCase()
+          );
+          setIsCreateMode(!existingSkill);
+        }
+        if (description) {
+          form.setFieldsValue({ description });
+        }
+        if (tags.length > 0) {
+          form.setFieldsValue({ tags });
+        }
+      }
+    } catch (e) {
+      log.warn("Failed to parse frontmatter:", e);
+    }
   };
 
   // Handle chat send for interactive creation
@@ -332,6 +565,19 @@ export default function SkillBuildModal({
 
     const currentInput = chatInput.trim();
     setChatInput("");
+
+    // Read current form fields to provide context to the model.
+    const formValues = form.getFieldsValue();
+    const draft = accumulatedDraft;
+
+    // Assemble skill content from all tabs
+    const assembledContent = assembleSkillContent(skillTabs);
+    const formContext = [
+      formValues.name ? `当前技能名称：${formValues.name}` : "",
+      formValues.description ? `当前技能描述：${formValues.description}` : "",
+      formValues.tags?.length ? `当前标签：${formValues.tags.join(", ")}` : "",
+      assembledContent ? `当前技能文件内容：\n${assembledContent}` : "",
+    ].filter(Boolean).join("\n\n");
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -342,123 +588,263 @@ export default function SkillBuildModal({
 
     setChatMessages((prev) => [...prev, userMessage]);
     setIsChatLoading(true);
-    setThinkingStep(0);
-    setThinkingDescription(THINKING_STEPS_ZH.find((s) => s.step === 0)?.description || "");
     setIsThinkingVisible(true);
+    setThinkingDescription(t("skillManagement.generatingSkill") || "生成技能内容中 ...");
+
+    // Clear content input before streaming — start fresh so the streamed content
+    // reflects the (possibly refined) result of this turn.
+    setSkillTabs([{ path: "SKILL.md", content: "" }]);
+    streamingTabsRef.current = [{ path: "SKILL.md", content: "" }];
+    shouldAutoScrollRef.current = { "SKILL.md": true };
+    setActiveSkillTab("SKILL.md");
+    setIsStreaming(true);
+    setSummaryContent("");
+    isStreamingCompleteRef.current = false;
 
     const assistantId = (Date.now() + 1).toString();
+
     setChatMessages((prev) => [
       ...prev,
       { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
     ]);
 
+    currentAssistantIdRef.current = assistantId;
+
     try {
-      const agentId = await resolveSkillCreatorAgent();
-      if (!agentId) {
-        throw new Error("skill_creator agent not found");
-      }
+      // Create AbortController for this request
+      abortControllerRef.current = new AbortController();
 
-      const history = chatMessages.map((msg) => ({
-        role: msg.role === "user" ? "user" : "assistant",
-        content: msg.content,
-      }));
+      // On first turn, no existing_skill is sent → backend creates from scratch.
+      // On subsequent turns (accumulatedDraft exists), existing_skill is passed
+      // → backend follows the modify-workflow template and refines the draft.
+      const userPrompt = formContext
+        ? `用户需求：${currentInput}\n\n${formContext}`
+        : `用户需求：${currentInput}`;
 
-      const reader = await conversationService.runAgent(
+      await createSkillStream(
         {
-          query: currentInput,
-          conversation_id: 0,
-          history,
-          agent_id: agentId,
-          is_debug: true,
+          user_request: userPrompt,
+          existing_skill: draft ? {
+            name: draft.name || formValues.name || "",
+            description: draft.description || formValues.description || "",
+            tags: draft.tags?.length ? draft.tags : (formValues.tags || []),
+            content: assembledContent,
+          } : undefined,
+          complexity: "complicated",
+          language: "zh",
         },
-        undefined as unknown as AbortSignal
-      );
-
-      await processSkillStream(
-        reader,
-        (step, description) => {
-          setThinkingStep(step);
-          setThinkingDescription(description);
-        },
-        setIsThinkingVisible,
-        async (finalAnswer) => {
-          if (!isMountedRef.current) return;
-
-          setChatMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: finalAnswer } : msg
-            )
-          );
-
-          const { parseSkillDraft } = await import("@/lib/skillFileUtils");
-          const skillDraft = parseSkillDraft(finalAnswer);
-
-          if (skillDraft) {
-            form.setFieldValue("name", skillDraft.name);
-            form.setFieldValue("description", skillDraft.description);
-            form.setFieldValue("tags", skillDraft.tags);
-            form.setFieldValue("content", skillDraft.content);
-            setInteractiveSkillName(skillDraft.name);
-            const existingSkill = allSkills.find(
-              (s) => s.name.toLowerCase() === skillDraft.name.toLowerCase()
-            );
-            setIsCreateMode(!existingSkill);
-            message.success(t("skillManagement.message.skillReadyForSave"));
-          } else {
-            // Fallback: read from temp file
+        {
+          onTaskId: (taskId) => {
+            taskIdRef.current = taskId;
+          },
+          onThinkingUpdate: (step, desc) => {
+            setThinkingDescription(desc || "生成技能内容中 ...");
+          },
+          onThinkingVisible: (visible) => {
+            setIsThinkingVisible(visible);
+          },
+          onStepCount: (step) => {
+            setThinkingDescription(THINKING_STEPS_ZH.find((s) => s.step === step)?.description || "生成技能内容中 ...");
+          },
+          onFrontmatter: (content) => {
+            // Accumulate frontmatter content as it streams in
+            // Parse frontmatter incrementally as it streams to update form fields
+            frontmatterBufferRef.current += content;
+            // Try to parse incrementally for form field updates
             try {
-              const { fetchSkillConfig, fetchSkillFileContent } = await import("@/services/agentConfigService");
-              const config = await fetchSkillConfig("simple-skill-creator");
+              const parsed = yaml.load(frontmatterBufferRef.current) as Record<string, unknown> | null;
+              if (parsed && typeof parsed === "object") {
+                const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+                const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
+                const tags = Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === "string") : [];
 
-              if (config && config.temp_filename) {
-                const tempFilename = config.temp_filename as string;
-                const tempContent = await fetchSkillFileContent("simple-skill-creator", tempFilename);
-
-                if (tempContent) {
-                  const { extractSkillInfoFromContent } = await import("@/lib/skillFileUtils");
-                  const skillInfo = extractSkillInfoFromContent(tempContent);
-
-                  if (skillInfo && skillInfo.name) {
-                    form.setFieldValue("name", skillInfo.name);
-                    setInteractiveSkillName(skillInfo.name);
-                    const existingSkill = allSkills.find(
-                      (s) => s.name.toLowerCase() === skillInfo.name.toLowerCase()
-                    );
-                    setIsCreateMode(!existingSkill);
-                  }
-                  if (skillInfo && skillInfo.description) {
-                    form.setFieldValue("description", skillInfo.description);
-                  }
-                  if (skillInfo && skillInfo.tags && skillInfo.tags.length > 0) {
-                    form.setFieldValue("tags", skillInfo.tags);
-                  }
-                  // Use content without frontmatter
-                  if (skillInfo.contentWithoutFrontmatter) {
-                    form.setFieldValue("content", skillInfo.contentWithoutFrontmatter);
-                  }
+                if (name) {
+                  form.setFieldsValue({ name });
+                  setInteractiveSkillName(name);
+                }
+                if (description) {
+                  form.setFieldsValue({ description });
+                }
+                if (tags.length > 0) {
+                  form.setFieldsValue({ tags });
                 }
               }
-            } catch (error) {
-              log.warn("Failed to load temp file content:", error);
+            } catch {
+              // YAML not complete yet, will parse when skill body starts
             }
-          }
+          },
+          onSkillBody: (content) => {
+            if (isStreamingCompleteRef.current) return;
+            // Frontmatter is complete when skill_body starts - clear the buffer
+            frontmatterBufferRef.current = "";
+            // Only add body content to textarea (no frontmatter)
+            updateTabContent("SKILL.md", content);
+          },
+          onFileContent: (path, content, isNewFile) => {
+            if (isStreamingCompleteRef.current) return;
+
+            if (isNewFile) {
+              // New file detected, create a new tab
+              setSkillTabs((prev) => {
+                const newTabs = prev.find((t) => t.path === path) ? prev : [...prev, { path, content: "" }];
+                streamingTabsRef.current = newTabs;
+                shouldAutoScrollRef.current[path] = true;
+                return newTabs;
+              });
+            }
+
+            updateTabContent(path, content);
+            setActiveSkillTab(path);
+          },
+          onSummary: (content) => {
+            if (isStreamingCompleteRef.current) return;
+            setSummaryContent((prev) => prev + content);
+          },
+          onDone: (result) => {
+            if (!isMountedRef.current) return;
+            setIsThinkingVisible(false);
+            setIsStreaming(false);
+            currentAssistantIdRef.current = "";
+            isStreamingCompleteRef.current = true;
+
+            // Get SKILL.md content and strip frontmatter for textarea display
+            const skillTab = result.skillTabs.find(t => t.path === "SKILL.md");
+            const fullContent = skillTab?.content || "";
+
+            if (fullContent || result.skillTabs.length > 0) {
+              // Strip frontmatter from SKILL.md content for textarea display
+              const skillInfo = extractSkillInfoFromContent(fullContent);
+              const contentWithoutFrontmatter = skillInfo?.contentWithoutFrontmatter || "";
+
+              // Use the current tabs from ref (avoids stale closure)
+              const currentTabs = streamingTabsRef.current;
+
+              // Build updated tabs: start with current tabs, update matching ones from backend
+              const updatedTabs = currentTabs.map((tab) => {
+                const backendTab = result.skillTabs.find((t) => t.path === tab.path);
+                if (tab.path === "SKILL.md") {
+                  return { ...tab, content: contentWithoutFrontmatter };
+                }
+                if (backendTab) {
+                  return { ...tab, content: backendTab.content || tab.content };
+                }
+                return tab;
+              });
+
+              // Add any new tabs from backend that don't exist in current tabs
+              const newTabsFromBackend = result.skillTabs.filter((t) => !currentTabs.find((tab) => tab.path === t.path));
+              const finalTabs = [...updatedTabs, ...newTabsFromBackend];
+
+              // Sort so SKILL.md is always first
+              finalTabs.sort((a, b) => {
+                if (a.path === "SKILL.md") return -1;
+                if (b.path === "SKILL.md") return 1;
+                return a.path.localeCompare(b.path);
+              });
+
+              setSkillTabs(finalTabs);
+
+              // Update form fields from parsed skill info
+              if (skillInfo && skillInfo.name) {
+                form.setFieldsValue({ name: skillInfo.name });
+                setInteractiveSkillName(skillInfo.name);
+                const existingSkill = allSkills.find(
+                  (s) => s.name.toLowerCase() === skillInfo.name?.toLowerCase()
+                );
+                setIsCreateMode(!existingSkill);
+              }
+              if (skillInfo && skillInfo.description) {
+                form.setFieldsValue({ description: skillInfo.description });
+              }
+              if (skillInfo && skillInfo.tags && skillInfo.tags.length > 0) {
+                form.setFieldsValue({ tags: skillInfo.tags });
+              }
+
+              // Update accumulated draft with assembled content for next turn
+              const assembledDraft = assembleSkillContent(updatedTabs);
+              const newDraft = {
+                name: skillInfo?.name || draft?.name || "",
+                description: skillInfo?.description || draft?.description || "",
+                tags: skillInfo?.tags?.length ? skillInfo.tags : (draft?.tags || []),
+                content: assembledDraft,
+              };
+              setAccumulatedDraft(newDraft);
+              setIsMultiTurn(true);
+
+              // Scroll to bottom after content is fully loaded
+              setTimeout(() => scrollTextareaToBottom("SKILL.md"), 0);
+
+              message.success(t("skillManagement.message.skillReadyForSave"));
+            }
+          },
+          onError: (errorMsg) => {
+            log.error("Interactive skill creation error:", errorMsg);
+            message.error(t("skillManagement.message.chatError"));
+            setChatMessages((prev) => prev.filter((m) => m.id !== assistantId));
+            setIsStreaming(false);
+            currentAssistantIdRef.current = "";
+          },
         },
-        "zh"
+        { signal: abortControllerRef.current.signal }
       );
     } catch (error) {
+      // Handle AbortError gracefully when user stops the stream
+      const err = error as Error;
+      if (err?.name === "AbortError") {
+        // User stopped - just reset states silently
+        setIsChatLoading(false);
+        setIsStreaming(false);
+        setIsThinkingVisible(false);
+        return;
+      }
       log.error("Interactive skill creation error:", error);
       message.error(t("skillManagement.message.chatError"));
       setChatMessages((prev) => prev.filter((m) => m.id !== assistantId));
+      setIsStreaming(false);
     } finally {
+      abortControllerRef.current = null;
       setIsChatLoading(false);
     }
   };
 
-  // Handle chat clear
+  // Handle chat clear - reset all form fields
   const handleChatClear = async () => {
-    const { clearChatAndTempFile } = await import("@/services/skillService");
     await clearChatAndTempFile();
     setChatMessages([]);
+    form.resetFields(["name", "description", "source", "tags", "content"]);
+    setInteractiveSkillName("");
+    setSkillTabs([{ path: "SKILL.md", content: "" }]);
+    streamingTabsRef.current = [{ path: "SKILL.md", content: "" }];
+    setActiveSkillTab("SKILL.md");
+    setSummaryContent("");
+    setAccumulatedDraft(null);
+    setIsMultiTurn(false);
+  };
+
+  // Handle stop - cancel the ongoing streaming request
+  const handleStop = async () => {
+    // Call backend stop API first
+    if (taskIdRef.current) {
+      try {
+        await stopSkillCreation(taskIdRef.current);
+      } catch (error) {
+        log.error("Failed to stop backend task:", error);
+      }
+    }
+
+    // Abort frontend fetch
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort("User stopped");
+      abortControllerRef.current = null;
+    }
+
+    // Reset all states
+    setIsChatLoading(false);
+    setIsStreaming(false);
+    setIsThinkingVisible(false);
+    currentAssistantIdRef.current = "";
+    taskIdRef.current = "";
+    isStreamingCompleteRef.current = true;
   };
 
   // Scroll to bottom of chat when new messages arrive
@@ -467,15 +853,6 @@ export default function SkillBuildModal({
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatMessages]);
-
-  // Import extractSkillGenerationResult
-  const extractSkillGenerationResult = (content: string): string => {
-    const skillTagIndex = content.indexOf("</SKILL>");
-    if (skillTagIndex !== -1) {
-      return content.substring(skillTagIndex + 8).trim();
-    }
-    return content;
-  };
 
   const renderInteractiveTab = () => {
     return (
@@ -523,25 +900,21 @@ export default function SkillBuildModal({
                       : "bg-gray-100 text-gray-800"
                   }`}
                 >
-                  {msg.role === "assistant" && isThinkingVisible && msg.content === "" ? (
-                    <div className="min-w-[200px]">
-                      <Progress
-                        percent={thinkingStep * 20}
-                        status="active"
-                        strokeColor="#52c41a"
-                        railColor="#e8e8e8"
-                      />
+                  {msg.role === "assistant" && msg.id === currentAssistantIdRef.current && isThinkingVisible ? (
+                    <div className="min-w-[200px] flex flex-col items-center">
+                      <Loader2 size={24} className="animate-spin text-blue-500" />
                       {thinkingDescription && (
-                        <span className="text-xs text-gray-500 mt-1 block">
+                        <span className="text-xs text-gray-500 mt-2">
                           {thinkingDescription}
                         </span>
                       )}
                     </div>
                   ) : msg.role === "assistant" ? (
-                    <div className="markdown-body">
-                      <ReactMarkdown>
-                        {extractSkillGenerationResult(msg.content)}
-                      </ReactMarkdown>
+                    <div className="markdown-content">
+                      <MarkdownRenderer
+                        content={msg.content}
+                        className="text-sm"
+                      />
                     </div>
                   ) : (
                     <div className="whitespace-pre-wrap">{msg.content}</div>
@@ -560,118 +933,271 @@ export default function SkillBuildModal({
                 onPressEnter={(e) => {
                   if (!e.shiftKey) {
                     e.preventDefault();
-                    handleChatSend();
+                    if (!isChatLoading && !isStreaming) {
+                      handleChatSend();
+                    }
                   }
                 }}
-                placeholder={t("skillManagement.form.chatPlaceholder")}
-                disabled={isChatLoading}
+                placeholder={isMultiTurn
+                  ? t("skillManagement.form.multiTurnPlaceholder")
+                  : t("skillManagement.form.chatPlaceholder")
+                }
+                disabled={isChatLoading || isStreaming}
                 autoSize={{ minRows: 1, maxRows: 3 }}
                 className="resize-none"
               />
-              <Button
-                type="primary"
-                icon={<Send size={14} />}
-                onClick={handleChatSend}
-                loading={isChatLoading}
-                disabled={!chatInput.trim()}
-                style={{ width: 30, height: 30, flexShrink: 0 }}
-              />
+              {isChatLoading || isStreaming ? (
+                <Tooltip title={t("skillManagement.stopGenerating") || "停止生成"}>
+                  <Button
+                    type="primary"
+                    danger
+                    shape="circle"
+                    icon={<Square size={14} />}
+                    onClick={handleStop}
+                    style={{ backgroundColor: "#ef4444" }}
+                  />
+                </Tooltip>
+              ) : (
+                <Button
+                  type="primary"
+                  icon={<Send size={14} />}
+                  onClick={handleChatSend}
+                  disabled={!chatInput.trim()}
+                  style={{ width: 30, height: 30, flexShrink: 0 }}
+                />
+              )}
             </Flex>
           </div>
         </div>
 
         {/* Right side: Form */}
-        <div style={{ width: "60%" }} className="overflow-y-auto overflow-x-hidden custom-scrollbar pr-1">
-          <Form
-            form={form}
-            layout="vertical"
-            initialValues={{
-              source: "自定义",
-              tags: [],
-            }}
-          >
-            <Form.Item
-              name="name"
-              label={t("skillManagement.form.name")}
-              rules={[
-                { required: true, message: t("skillManagement.form.nameRequired") },
-              ]}
-              help={interactiveSkillName.trim() ? (
-                isCreateMode ? (
-                  <span className="text-xs text-green-600">
-                    {t("skillManagement.form.newSkillHint")}
-                  </span>
-                ) : (
-                  <span className="text-xs text-amber-600">
-                    {t("skillManagement.form.existingSkillHint")}
-                  </span>
-                )
-              ) : undefined}
-              validateStatus={interactiveSkillName.trim() ? (isCreateMode ? "success" : "warning") : undefined}
+        <div
+          style={{ width: "60%" }}
+          className="flex flex-col border border-gray-200 rounded-lg overflow-hidden"
+        >
+          {/* Form header area */}
+          <div className="px-3 pt-3 pb-0 flex-shrink-0">
+            <Form
+              form={form}
+              layout="vertical"
+              initialValues={{
+                source: "自定义",
+                tags: [],
+              }}
             >
-              <AutoComplete
-                open={shouldShowDropdown && dropdownOptions.length > 0}
-                options={dropdownOptions}
-                onSearch={handleNameSearch}
-                onSelect={handleNameSelect}
-                onChange={handleNameChange}
-                onFocus={handleNameFocus}
-                onBlur={handleNameBlur}
-                value={interactiveSkillName}
-                placeholder={t("skillManagement.form.namePlaceholder")}
-                allowClear
-              />
-            </Form.Item>
+              <Form.Item
+                name="name"
+                label={t("skillManagement.form.name")}
+                rules={[
+                  { required: true, message: t("skillManagement.form.nameRequired") },
+                ]}
+                help={interactiveSkillName.trim() ? (
+                  isCreateMode ? (
+                    <span className="text-xs text-green-600">
+                      {t("skillManagement.form.newSkillHint")}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-amber-600">
+                      {t("skillManagement.form.existingSkillHint")}
+                    </span>
+                  )
+                ) : undefined}
+                validateStatus={interactiveSkillName.trim() ? (isCreateMode ? "success" : "warning") : undefined}
+              >
+                <AutoComplete
+                  open={shouldShowDropdown && dropdownOptions.length > 0}
+                  options={dropdownOptions}
+                  onSearch={handleNameSearch}
+                  onSelect={handleNameSelect}
+                  onChange={handleNameChange}
+                  onFocus={handleNameFocus}
+                  onBlur={handleNameBlur}
+                  value={interactiveSkillName}
+                  placeholder={t("skillManagement.form.namePlaceholder")}
+                  allowClear
+                />
+              </Form.Item>
 
-            <Form.Item
-              name="description"
-              label={t("skillManagement.form.description")}
-              rules={[
-                { required: true, message: t("skillManagement.form.descriptionRequired") },
-              ]}
-            >
-              <TextArea
-                rows={2}
-                placeholder={t("skillManagement.form.descriptionPlaceholder")}
-              />
-            </Form.Item>
+              <Form.Item
+                name="description"
+                label={t("skillManagement.form.description")}
+                rules={[
+                  { required: true, message: t("skillManagement.form.descriptionRequired") },
+                ]}
+              >
+                <TextArea
+                  rows={2}
+                  placeholder={t("skillManagement.form.descriptionPlaceholder")}
+                />
+              </Form.Item>
 
-            <Row gutter={12}>
-              <Col span={8}>
-                <Form.Item
-                  name="source"
-                  label={t("skillManagement.form.source")}
-                >
-                  <Input value="自定义" />
-                </Form.Item>
-              </Col>
-              <Col span={16}>
-                <Form.Item
-                  name="tags"
-                  label={t("skillManagement.form.tags")}
-                >
-                  <Select
-                    mode="tags"
-                    suffixIcon={null}
-                    placeholder={t("skillManagement.form.tagsPlaceholder")}
-                    onFocus={() => setIsTagsFocused(true)}
-                    onBlur={() => setIsTagsFocused(false)}
-                    open={false}
+              <Row gutter={12}>
+                <Col span={8}>
+                  <Form.Item
+                    name="source"
+                    label={t("skillManagement.form.source")}
+                  >
+                    <Input value="自定义" />
+                  </Form.Item>
+                </Col>
+                <Col span={16}>
+                  <Form.Item
+                    name="tags"
+                    label={t("skillManagement.form.tags")}
+                  >
+                    <div className="overflow-x-auto" style={{ maxWidth: "100%" }}>
+                      <Select
+                        mode="tags"
+                        suffixIcon={null}
+                        placeholder={t("skillManagement.form.tagsPlaceholder")}
+                        onFocus={() => setIsTagsFocused(true)}
+                        onBlur={() => setIsTagsFocused(false)}
+                        open={false}
+                        style={{ width: "100%", minWidth: 200 }}
+                        popupMatchSelectWidth={false}
+                      />
+                    </div>
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Form>
+          </div>
+
+          {/* Tabs area */}
+          <div className="flex-1 min-h-0 px-3 pb-3 flex flex-col">
+            <Tabs
+              activeKey={activeSkillTab}
+              onChange={(key) => setActiveSkillTab(key)}
+              type="card"
+              size="small"
+              className="flex-1 flex flex-col"
+              tabBarStyle={{ marginBottom: 0, flexShrink: 0 }}
+              tabBarExtraContent={{
+                right: (
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<Plus size={14} />}
+                    onClick={() => {
+                      const newPath = `file_${Date.now()}.md`;
+                      setSkillTabs((prev) => [...prev, { path: newPath, content: "" }]);
+                      setActiveSkillTab(newPath);
+                      shouldAutoScrollRef.current[newPath] = true;
+                    }}
+                    className="add-tab-btn"
                   />
-                </Form.Item>
-              </Col>
-            </Row>
-
-            <Form.Item
-              name="content"
-              label={t("skillManagement.form.content")}
-            >
-              <TextArea
-                rows={6}
-                placeholder={t("skillManagement.form.contentPlaceholder")}
-              />
-            </Form.Item>
-          </Form>
+                ),
+              }}
+              items={skillTabs.map((tab) => ({
+                key: tab.path,
+                label: (
+                  <div className="flex items-center group/tab">
+                    {editingTabKey === tab.path ? (
+                      <input
+                        className="text-xs px-1 py-0.5 border border-blue-400 rounded w-24"
+                        value={editingTabName}
+                        autoFocus
+                        onChange={(e) => setEditingTabName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSkillTabs((prev) =>
+                              prev.map((t) => (t.path === editingTabKey ? { ...t, path: editingTabName } : t))
+                            );
+                            if (activeSkillTab === editingTabKey) {
+                              setActiveSkillTab(editingTabName);
+                            }
+                            setEditingTabKey(null);
+                            setEditingTabName("");
+                          } else if (e.key === "Escape") {
+                            e.stopPropagation();
+                            setEditingTabKey(null);
+                            setEditingTabName("");
+                          }
+                        }}
+                        onBlur={() => {
+                          setSkillTabs((prev) =>
+                            prev.map((t) => (t.path === editingTabKey ? { ...t, path: editingTabName } : t))
+                          );
+                          if (activeSkillTab === editingTabKey) {
+                            setActiveSkillTab(editingTabName);
+                          }
+                          setEditingTabKey(null);
+                          setEditingTabName("");
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className={activeSkillTab === tab.path ? "font-bold" : ""}>
+                        {tab.path}
+                      </span>
+                    )}
+                    {!isStreaming && (
+                      <div className="flex items-center ml-1 w-0 group-hover/tab:w-auto overflow-hidden transition-all duration-200">
+                        {tab.path !== "SKILL.md" && (
+                          <button
+                            className="p-0.5 hover:bg-gray-200 rounded flex-shrink-0"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setTimeout(() => {
+                                setEditingTabKey(tab.path);
+                                setEditingTabName(tab.path);
+                              }, 0);
+                            }}
+                            title="Rename"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        )}
+                        {tab.path !== "SKILL.md" && (
+                          <button
+                            className="p-0.5 hover:bg-gray-200 rounded flex-shrink-0"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const newTabs = skillTabs.filter((t) => t.path !== tab.path);
+                              setSkillTabs(newTabs);
+                              if (activeSkillTab === tab.path) {
+                                setActiveSkillTab(newTabs[0]?.path || "");
+                              }
+                            }}
+                            title="Delete"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ),
+                children: (
+                  <TextArea
+                    rows={6}
+                    placeholder={isStreaming ? "" : `${tab.path} content...`}
+                    value={tab.content}
+                    disabled={isStreaming}
+                    ref={(el) => {
+                      textareaRefs.current[tab.path] = el;
+                      if (el && shouldAutoScrollRef.current[tab.path] === undefined) {
+                        shouldAutoScrollRef.current[tab.path] = true;
+                      }
+                    }}
+                    onScroll={() => handleTextareaScroll(tab.path)}
+                    onChange={(e) => {
+                      if (isStreaming) return;
+                      setSkillTabs((prev) =>
+                        prev.map((t) =>
+                          t.path === tab.path ? { ...t, content: e.target.value } : t
+                        )
+                      );
+                    }}
+                  />
+                ),
+              }))}
+            />
+          </div>
         </div>
       </div>
     );
@@ -834,19 +1360,17 @@ export default function SkillBuildModal({
     );
   };
 
-  // TODO: [FEATURE] Re-enable interactive skill creation tab
-  // See comment above for re-enablement criteria
   const tabItems = [
-    // {
-    //   key: "interactive",
-    //   label: (
-    //     <Flex gap={6} align="center">
-    //       <MessagesSquare size={14} />
-    //       <span>{t("skillManagement.tabs.interactive")}</span>
-    //     </Flex>
-    //   ),
-    //   children: renderInteractiveTab(),
-    // },
+    {
+      key: "interactive",
+      label: (
+        <Flex gap={6} align="center">
+          <MessagesSquare size={14} />
+          <span>{t("skillManagement.tabs.interactive")}</span>
+        </Flex>
+      ),
+      children: renderInteractiveTab(),
+    },
     {
       key: "upload",
       label: (

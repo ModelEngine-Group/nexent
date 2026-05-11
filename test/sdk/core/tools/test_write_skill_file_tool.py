@@ -188,12 +188,6 @@ class TestGetSkillManager:
 class TestExecute:
     """Test execute method."""
 
-    def test_execute_empty_skill_name(self, write_skill_file_tool):
-        """Test execute with empty skill_name."""
-        result = write_skill_file_tool.execute("", "file.txt", "content")
-        assert "[Error]" in result
-        assert "skill_name" in result.lower()
-
     def test_execute_empty_file_path(self, write_skill_file_tool):
         """Test execute with empty file_path."""
         result = write_skill_file_tool.execute("skill", "", "content")
@@ -301,14 +295,17 @@ description: A skill md file
 
     def test_execute_handles_manager_init_error(self, write_skill_file_tool, temp_skills_dir):
         """Test execute handles errors during skill manager initialization."""
-        # Force an error during _get_skill_manager
-        write_skill_file_tool.skill_manager = None
+        # When skill_name is empty and local_skills_dir is None, it returns direct error
+        # So we test with a non-empty skill_name to trigger manager init error
         write_skill_file_tool.local_skills_dir = None
+        write_skill_file_tool.skill_manager = None
 
-        result = write_skill_file_tool.execute("skill", "file.txt", "content")
+        # Mock _get_skill_manager to raise exception
+        with patch.object(write_skill_file_tool, '_get_skill_manager', side_effect=ImportError("Import failed")):
+            result = write_skill_file_tool.execute("skill", "file.txt", "content")
 
         assert "[Error]" in result
-        assert "Failed to initialize" in result or "skill manager" in result.lower()
+        assert "Failed to initialize" in result
 
     def test_execute_handles_write_error(self, write_skill_file_tool, temp_skills_dir):
         """Test execute handles errors during file write."""
@@ -681,3 +678,88 @@ class TestExecuteNormalization:
         # File should be created without leading slash
         expected_path = os.path.join(temp_skills_dir, skill_name, "file.txt")
         assert os.path.exists(expected_path)
+
+
+class TestWriteDirectFile:
+    """Test _write_direct_file method for empty skill_name."""
+
+    def test_write_direct_file_no_local_dir(self, write_skill_file_tool):
+        """Test _write_direct_file without local_skills_dir returns error."""
+        write_skill_file_tool.local_skills_dir = None
+        result = write_skill_file_tool._write_direct_file("file.txt", "content")
+        assert "[Error]" in result
+        assert "local_skills_dir" in result.lower()
+
+    def test_write_direct_file_creates_file(self, write_skill_file_tool, temp_skills_dir):
+        """Test _write_direct_file creates file directly in local_skills_dir."""
+        write_skill_file_tool.local_skills_dir = temp_skills_dir
+        result = write_skill_file_tool._write_direct_file("direct-file.txt", "direct content")
+
+        assert "Successfully" in result
+        file_path = os.path.join(temp_skills_dir, "direct-file.txt")
+        assert os.path.exists(file_path)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            assert f.read() == "direct content"
+
+    def test_write_direct_file_nested_path(self, write_skill_file_tool, temp_skills_dir):
+        """Test _write_direct_file creates nested directories."""
+        write_skill_file_tool.local_skills_dir = temp_skills_dir
+        result = write_skill_file_tool._write_direct_file("subdir/nested/file.py", "print('hello')")
+
+        assert "Successfully" in result
+        file_path = os.path.join(temp_skills_dir, "subdir", "nested", "file.py")
+        assert os.path.exists(file_path)
+
+    def test_write_direct_file_overwrites(self, write_skill_file_tool, temp_skills_dir):
+        """Test _write_direct_file overwrites existing file."""
+        write_skill_file_tool.local_skills_dir = temp_skills_dir
+        file_path = os.path.join(temp_skills_dir, "overwrite.txt")
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write("old content")
+
+        result = write_skill_file_tool._write_direct_file("overwrite.txt", "new content")
+
+        with open(file_path, 'r', encoding='utf-8') as f:
+            assert f.read() == "new content"
+
+    def test_write_direct_file_error(self, write_skill_file_tool, temp_skills_dir):
+        """Test _write_direct_file handles write errors."""
+        write_skill_file_tool.local_skills_dir = temp_skills_dir
+
+        with patch('builtins.open', side_effect=PermissionError("Permission denied")):
+            result = write_skill_file_tool._write_direct_file("error.txt", "content")
+
+        assert "[Error]" in result or "Permission denied" in result
+
+
+class TestExecuteEmptySkillName:
+    """Test execute with empty skill_name (writes directly to local_skills_dir)."""
+
+    def test_execute_empty_skill_name_direct_write(self, write_skill_file_tool, temp_skills_dir):
+        """Test execute with empty skill_name writes directly to local_skills_dir."""
+        write_skill_file_tool.local_skills_dir = temp_skills_dir
+        result = write_skill_file_tool.execute("", "root-file.txt", "root content")
+
+        assert "Successfully" in result
+        file_path = os.path.join(temp_skills_dir, "root-file.txt")
+        assert os.path.exists(file_path)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            assert f.read() == "root content"
+
+    def test_execute_empty_skill_name_nested_path(self, write_skill_file_tool, temp_skills_dir):
+        """Test execute with empty skill_name and nested path."""
+        write_skill_file_tool.local_skills_dir = temp_skills_dir
+        result = write_skill_file_tool.execute("", "dir1/dir2/file.md", "# Markdown")
+
+        assert "Successfully" in result
+        file_path = os.path.join(temp_skills_dir, "dir1", "dir2", "file.md")
+        assert os.path.exists(file_path)
+
+    def test_execute_empty_skill_name_no_local_dir(self, write_skill_file_tool):
+        """Test execute with empty skill_name but no local_skills_dir."""
+        write_skill_file_tool.local_skills_dir = None
+        result = write_skill_file_tool.execute("", "file.txt", "content")
+
+        assert "[Error]" in result
+        assert "local_skills_dir" in result.lower()

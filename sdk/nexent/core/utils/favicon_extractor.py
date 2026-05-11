@@ -32,7 +32,7 @@ def check_favicon_exists(url):
     try:
         response = requests.head(url, timeout=3, allow_redirects=True)
         return response.status_code == 200
-    except:
+    except Exception:
         return False
 
 
