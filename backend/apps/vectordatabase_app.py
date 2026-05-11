@@ -1,13 +1,14 @@
 import logging
 import json
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 import re
 
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
+from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
 from services.vectordatabase_service import (
     ElasticSearchService,
@@ -24,6 +25,20 @@ router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
 logger = logging.getLogger("vectordatabase_app")
 
+
+@router.get("/summary_frequency_options")
+async def get_summary_frequency_options():
+    """
+    Get valid summary frequency options for frontend.
+    Frontend should call this API to get the list of valid frequencies.
+    """
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={
+            "options": SUMMARY_FREQUENCY_OPTIONS_FOR_API,
+            "valid_values": VALID_SUMMARY_FREQUENCIES,
+        }
+    )
 
 @router.post("/check_exist")
 async def check_knowledge_base_exist(
@@ -165,6 +180,51 @@ async def update_index(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error updating index: {str(exc)}")
 
 
+@router.patch("/{index_name}/summary_frequency")
+async def update_summary_frequency_endpoint(
+        index_name: Annotated[str, Path(..., description="Name of the index to update")],
+        request: Annotated[Dict[str, Any], Body(..., description="Update payload with summary_frequency")],
+        authorization: Annotated[Optional[str], Header()] = None,
+):
+    """Update the auto-summary frequency for a knowledge base."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        summary_frequency = request.get("summary_frequency")
+
+        valid_frequencies = VALID_SUMMARY_FREQUENCIES
+        if summary_frequency not in valid_frequencies:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=f"Invalid summary_frequency. Must be one of: {valid_frequencies}"
+            )
+
+        from database.knowledge_db import update_summary_frequency
+        success = update_summary_frequency(
+            index_name=index_name,
+            summary_frequency=summary_frequency,
+            _tenant_id=tenant_id,
+            user_id=user_id
+        )
+
+        if success:
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={"message": "Summary frequency updated successfully", "status": "success"}
+            )
+        else:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Knowledge base '{index_name}' not found"
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error updating summary frequency")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error updating summary frequency: {str(exc)}"
+        )
+
+
 @router.get("")
 def get_list_indices(
         pattern: str = Query("*", description="Pattern to match index names"),
@@ -196,6 +256,8 @@ def create_index_documents(
         authorization: Optional[str] = Header(None),
         task_id: Optional[str] = Header(
             None, alias="X-Task-Id", description="Task ID for progress tracking"),
+        large_mode: bool = Query(
+            False, description="Force large-batch path when current request chunk count is below threshold"),
 ):
     """
     Index documents with embeddings, creating the index if it doesn't exist.
@@ -203,7 +265,7 @@ def create_index_documents(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        
+
         # Get the knowledge base record to retrieve the saved embedding model
         knowledge_record = get_knowledge_record(
             {"index_name": index_name, "tenant_id": tenant_id}
@@ -229,6 +291,7 @@ def create_index_documents(
             data=data,
             vdb_core=vdb_core,
             task_id=task_id,
+            large_mode=large_mode,
         )
     except Exception as e:
         error_msg = str(e)

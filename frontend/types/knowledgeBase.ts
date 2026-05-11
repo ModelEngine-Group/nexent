@@ -34,6 +34,8 @@ export interface KnowledgeBase {
   tokenNum: number;
   source: string;
   tenant_id?: string;
+  summaryFrequency?: string | null;
+  lastSummaryTime?: string | null;
 }
 
 // Create knowledge base parameter type
@@ -144,6 +146,10 @@ export type KnowledgeBaseAction =
     }
   | {
       type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ADD_KNOWLEDGE_BASE;
+      payload: KnowledgeBase;
+    }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE;
       payload: KnowledgeBase;
     }
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.LOADING; payload: boolean }

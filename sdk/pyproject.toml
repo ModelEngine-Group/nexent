@@ -52,6 +52,9 @@ dependencies = [
     "pymysql>=1.1.0",
     "psycopg2-binary>=2.9.9",
     "pymssql>=2.2.11",
+    "ijson==3.5.0",
+    "langchain-text-splitters==1.1.2",
+    "ebooklib==0.20",
 ]
 
 [tool.uv]

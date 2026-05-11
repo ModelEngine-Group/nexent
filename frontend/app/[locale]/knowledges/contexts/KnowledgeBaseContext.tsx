@@ -71,6 +71,13 @@ const knowledgeBaseReducer = (
         ...state,
         knowledgeBases: [...state.knowledgeBases, action.payload],
       };
+    case KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE:
+      return {
+        ...state,
+        knowledgeBases: state.knowledgeBases.map((kb) =>
+          kb.id === action.payload.id ? action.payload : kb
+        ),
+      };
     case KNOWLEDGE_BASE_ACTION_TYPES.LOADING:
       return {
         ...state,
@@ -116,6 +123,7 @@ export const KnowledgeBaseContext = createContext<{
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
   setActiveKnowledgeBase: (kb: KnowledgeBase | null) => void;
+  updateKnowledgeBase: (kb: KnowledgeBase) => void;
   isKnowledgeBaseSelectable: (kb: KnowledgeBase) => boolean;
   hasKnowledgeBaseModelMismatch: (kb: KnowledgeBase) => boolean;
   refreshKnowledgeBaseData: (forceRefresh?: boolean) => Promise<void>;
@@ -137,6 +145,7 @@ export const KnowledgeBaseContext = createContext<{
   deleteKnowledgeBase: async () => false,
   selectKnowledgeBase: () => {},
   setActiveKnowledgeBase: () => {},
+  updateKnowledgeBase: () => {},
   isKnowledgeBaseSelectable: () => false,
   hasKnowledgeBaseModelMismatch: () => false,
   refreshKnowledgeBaseData: async () => {},
@@ -323,6 +332,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   // Set current active knowledge base - memoized with useCallback
   const setActiveKnowledgeBase = useCallback((kb: KnowledgeBase | null) => {
     dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.SET_ACTIVE, payload: kb });
+  }, []);
+
+  // Update knowledge base in list - memoized with useCallback
+  const updateKnowledgeBase = useCallback((kb: KnowledgeBase) => {
+    dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE, payload: kb });
   }, []);
 
   // Create knowledge base - memoized with useCallback
@@ -632,6 +646,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       deleteKnowledgeBase,
       selectKnowledgeBase,
       setActiveKnowledgeBase,
+      updateKnowledgeBase,
       isKnowledgeBaseSelectable,
       hasKnowledgeBaseModelMismatch,
       refreshKnowledgeBaseData,
@@ -639,11 +654,13 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     }),
     [
       state,
+      dispatch,
       fetchKnowledgeBases,
       createKnowledgeBase,
       deleteKnowledgeBase,
       selectKnowledgeBase,
       setActiveKnowledgeBase,
+      updateKnowledgeBase,
       isKnowledgeBaseSelectable,
       hasKnowledgeBaseModelMismatch,
       refreshKnowledgeBaseData,

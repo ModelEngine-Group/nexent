@@ -362,6 +362,12 @@ class KnowledgeRecord(TableBase):
     ingroup_permission = Column(
         String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
     is_multimodal = Column(String(1), default="N",  doc="Whether it is multimodal. Optional values: Y/N")
+    summary_frequency = Column(String(10), nullable=True,
+        doc="Auto-summary frequency: '3h', '5h', '1d', '1w', or NULL (disabled)")
+    last_summary_time = Column(TIMESTAMP(timezone=False), nullable=True,
+        doc="Timestamp of last summary generation")
+    last_doc_update_time = Column(TIMESTAMP(timezone=False), nullable=True,
+        doc="Timestamp of last document add/delete operation")
 
 
 class TenantConfig(TableBase):

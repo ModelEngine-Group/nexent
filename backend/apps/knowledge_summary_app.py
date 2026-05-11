@@ -8,6 +8,7 @@ from nexent.vector_database.base import VectorDatabaseCore
 from consts.model import ChangeSummaryRequest
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.auth_utils import get_current_user_id, get_current_user_info
+from utils.config_utils import tenant_config_manager
 
 router = APIRouter(prefix="/summary")
 logger = logging.getLogger("knowledge_summary_app")
@@ -30,6 +31,19 @@ async def auto_summary(
         _, tenant_id, language = get_current_user_info(
             authorization, http_request)
         service = ElasticSearchService()
+
+        # Get model_id from tenant config if not provided
+        if model_id is None and tenant_id:
+            try:
+                tenant_config = tenant_config_manager.load_config(tenant_id)
+                model_id_str = tenant_config.get("LLM_ID")
+                if model_id_str:
+                    model_id = int(model_id_str)
+                    logger.info(f"Using LLM_ID {model_id} from tenant config for auto-summary")
+                else:
+                    logger.warning(f"No LLM_ID configured for tenant {tenant_id}, summary may be placeholder")
+            except Exception as e:
+                logger.warning(f"Failed to get LLM_ID from tenant config: {e}")
 
         return await service.summary_index_name(
             index_name=index_name,
