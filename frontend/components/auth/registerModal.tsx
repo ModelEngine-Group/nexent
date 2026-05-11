@@ -522,35 +522,11 @@ export function RegisterModal() {
                         </div>
                       </div>
                       <div className="flex items-start">
-                        <span className="mr-1 leading-none">💬</span>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {t("auth.inviteCodeHint.step2")}
-                          <a
-                            href={t("auth.inviteCodeHint.contributionWallUrl")}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                          >
-                            {t("auth.inviteCodeHint.contributionWallLink")}
-                          </a>
-                          {t("auth.inviteCodeHint.step2Action")}
-                          <a
-                            href={t("auth.inviteCodeHint.documentationUrl")}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ml-1 text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center"
-                            title={t("auth.inviteCodeHint.viewDocumentation")}
-                          >
-                            <BookMarked size={16} />
-                          </a>
-                        </div>
-                      </div>
-                      <div className="flex items-start">
                         <span className="mr-1 leading-none">🎁</span>
                         <div className="text-sm text-gray-600 dark:text-gray-400">
                           {t("auth.inviteCodeHint.step3")}
                           <a
-                            href="http://nexent.tech/contact"
+                            href={`http://60.204.251.153:3001/${pathname.split("/").find(Boolean) || "zh"}/contact`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
