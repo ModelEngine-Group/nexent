@@ -17,6 +17,8 @@ on:
         required: true
         default: '["ubuntu-latest"]'
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -35,16 +37,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Build main image (amd64) and load locally
         run: |
-          docker buildx build --platform linux/amd64 -t nexent/nexent:${{ github.event.inputs.version || github.ref_name }}-amd64 --load -f make/main/Dockerfile .
+          docker buildx build --platform linux/amd64 -t nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 --load -f make/main/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push main image (amd64) to DockerHub
-        run: docker push nexent/nexent:${{ github.event.inputs.version || github.ref_name }}-amd64
+        run: docker push nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag main image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent:${{ github.event.inputs.version || github.ref_name }}-amd64 nexent/nexent:amd64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 nexent/nexent:amd64
       - name: Push latest main image (amd64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent:amd64
 
   build-and-push-main-arm64:
@@ -61,16 +63,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Build main image (arm64) and load locally
         run: |
-          docker buildx build --platform linux/arm64 -t nexent/nexent:${{ github.event.inputs.version || github.ref_name }}-arm64 --load -f make/main/Dockerfile .
+          docker buildx build --platform linux/arm64 -t nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 --load -f make/main/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push main image (arm64) to DockerHub
-        run: docker push nexent/nexent:${{ github.event.inputs.version || github.ref_name }}-arm64
+        run: docker push nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag main image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent:${{ github.event.inputs.version || github.ref_name }}-arm64 nexent/nexent:arm64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 nexent/nexent:arm64
       - name: Push latest main image (arm64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent:arm64
 
   build-and-push-data-process-amd64:
@@ -96,16 +98,16 @@ jobs:
           rm -rf .git .gitattributes
       - name: Build data process image (amd64) and load locally
         run: |
-          docker buildx build --platform linux/amd64 -t nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }}-amd64 --load -f make/data_process/Dockerfile .
+          docker buildx build --platform linux/amd64 -t nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 --load -f make/data_process/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push data process image (amd64) to DockerHub
-        run: docker push nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }}-amd64
+        run: docker push nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag data process image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }}-amd64 nexent/nexent-data-process:amd64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 nexent/nexent-data-process:amd64
       - name: Push latest data process image (amd64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent-data-process:amd64
 
   build-and-push-data-process-arm64:
@@ -131,16 +133,16 @@ jobs:
           rm -rf .git .gitattributes
       - name: Build data process image (arm64) and load locally
         run: |
-          docker buildx build --platform linux/arm64 -t nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }}-arm64 --load -f make/data_process/Dockerfile .
+          docker buildx build --platform linux/arm64 -t nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 --load -f make/data_process/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push data process image (arm64) to DockerHub
-        run: docker push nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }}-arm64
+        run: docker push nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag data process image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }}-arm64 nexent/nexent-data-process:arm64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 nexent/nexent-data-process:arm64
       - name: Push latest data process image (arm64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent-data-process:arm64
 
   build-and-push-web-amd64:
@@ -157,16 +159,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Build web image (amd64) and load locally
         run: |
-          docker buildx build --platform linux/amd64 -t nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }}-amd64 --load -f make/web/Dockerfile .
+          docker buildx build --platform linux/amd64 -t nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 --load -f make/web/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push web image (amd64) to DockerHub
-        run: docker push nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }}-amd64
+        run: docker push nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag web image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }}-amd64 nexent/nexent-web:amd64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 nexent/nexent-web:amd64
       - name: Push latest web image (amd64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent-web:amd64
 
   build-and-push-web-arm64:
@@ -183,16 +185,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Build web image (arm64) and load locally
         run: |
-          docker buildx build --platform linux/arm64 -t nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }}-arm64 --load -f make/web/Dockerfile .
+          docker buildx build --platform linux/arm64 -t nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 --load -f make/web/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push web image (arm64) to DockerHub
-        run: docker push nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }}-arm64
+        run: docker push nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag web image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }}-arm64 nexent/nexent-web:arm64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 nexent/nexent-web:arm64
       - name: Push latest web image (arm64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent-web:arm64
 
   build-and-push-terminal-amd64:
@@ -209,16 +211,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Build terminal image (amd64) and load locally
         run: |
-          docker buildx build --platform linux/amd64 -t nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }}-amd64 --load -f make/terminal/Dockerfile .
+          docker buildx build --platform linux/amd64 -t nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 --load -f make/terminal/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push terminal image (amd64) to DockerHub
-        run: docker push nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }}-amd64
+        run: docker push nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag terminal image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }}-amd64 nexent/nexent-ubuntu-terminal:amd64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 nexent/nexent-ubuntu-terminal:amd64
       - name: Push latest terminal image (amd64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent-ubuntu-terminal:amd64
 
   build-and-push-terminal-arm64:
@@ -235,16 +237,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Build terminal image (arm64) and load locally
         run: |
-          docker buildx build --platform linux/arm64 -t nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }}-arm64 --load -f make/terminal/Dockerfile .
+          docker buildx build --platform linux/arm64 -t nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 --load -f make/terminal/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push terminal image (arm64) to DockerHub
-        run: docker push nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }}-arm64
+        run: docker push nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag terminal image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }}-arm64 nexent/nexent-ubuntu-terminal:arm64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 nexent/nexent-ubuntu-terminal:arm64
       - name: Push latest terminal image (arm64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent-ubuntu-terminal:arm64
 
   build-and-push-mcp-amd64:
@@ -261,16 +263,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Build MCP image (amd64) and load locally
         run: |
-          docker buildx build --platform linux/amd64 -t nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }}-amd64 --load -f make/mcp/Dockerfile .
+          docker buildx build --platform linux/amd64 -t nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 --load -f make/mcp/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push MCP image (amd64) to DockerHub
-        run: docker push nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }}-amd64
+        run: docker push nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64
       - name: Tag MCP image (amd64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }}-amd64 nexent/nexent-mcp:amd64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 nexent/nexent-mcp:amd64
       - name: Push latest MCP image (amd64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent-mcp:amd64
 
   build-and-push-mcp-arm64:
@@ -287,16 +289,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Build MCP image (arm64) and load locally
         run: |
-          docker buildx build --platform linux/arm64 -t nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }}-arm64 --load -f make/mcp/Dockerfile .
+          docker buildx build --platform linux/arm64 -t nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 --load -f make/mcp/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push MCP image (arm64) to DockerHub
-        run: docker push nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }}-arm64
+        run: docker push nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
       - name: Tag MCP image (arm64) as latest
-        if: github.event.inputs.push_latest == 'true'
-        run: docker tag nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }}-arm64 nexent/nexent-mcp:arm64
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
+        run: docker tag nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64 nexent/nexent-mcp:arm64
       - name: Push latest MCP image (arm64) to DockerHub
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: docker push nexent/nexent-mcp:arm64
 
   manifest-push-main:
@@ -309,12 +311,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Create and push manifest for main (DockerHub)
         run: |
-          docker manifest create nexent/nexent:${{ github.event.inputs.version || github.ref_name }} \
-            nexent/nexent:${{ github.event.inputs.version || github.ref_name }}-amd64 \
-            nexent/nexent:${{ github.event.inputs.version || github.ref_name }}-arm64
-          docker manifest push nexent/nexent:${{ github.event.inputs.version || github.ref_name }}
+          docker manifest create nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
+            nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
+            nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
+          docker manifest push nexent/nexent:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for main (DockerHub)
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: |
           docker manifest create nexent/nexent:latest \
             nexent/nexent:amd64 \
@@ -331,12 +333,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Create and push manifest for data-process (DockerHub)
         run: |
-          docker manifest create nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }} \
-            nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }}-amd64 \
-            nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }}-arm64
-          docker manifest push nexent/nexent-data-process:${{ github.event.inputs.version || github.ref_name }}
+          docker manifest create nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
+            nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
+            nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
+          docker manifest push nexent/nexent-data-process:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for data-process (DockerHub)
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: |
           docker manifest create nexent/nexent-data-process:latest \
             nexent/nexent-data-process:amd64 \
@@ -353,12 +355,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Create and push manifest for web (DockerHub)
         run: |
-          docker manifest create nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }} \
-            nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }}-amd64 \
-            nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }}-arm64
-          docker manifest push nexent/nexent-web:${{ github.event.inputs.version || github.ref_name }}
+          docker manifest create nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
+            nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
+            nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
+          docker manifest push nexent/nexent-web:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for web (DockerHub)
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: |
           docker manifest create nexent/nexent-web:latest \
             nexent/nexent-web:amd64 \
@@ -375,12 +377,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Create and push manifest for terminal (DockerHub)
         run: |
-          docker manifest create nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }} \
-            nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }}-amd64 \
-            nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }}-arm64
-          docker manifest push nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || github.ref_name }}
+          docker manifest create nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
+            nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
+            nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
+          docker manifest push nexent/nexent-ubuntu-terminal:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for terminal (DockerHub)
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: |
           docker manifest create nexent/nexent-ubuntu-terminal:latest \
             nexent/nexent-ubuntu-terminal:amd64 \
@@ -397,12 +399,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Create and push manifest for mcp (DockerHub)
         run: |
-          docker manifest create nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }} \
-            nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }}-amd64 \
-            nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }}-arm64
-          docker manifest push nexent/nexent-mcp:${{ github.event.inputs.version || github.ref_name }}
+          docker manifest create nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }} \
+            nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-amd64 \
+            nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}-arm64
+          docker manifest push nexent/nexent-mcp:${{ github.event.inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'latest') || github.ref_name }}
       - name: Create and push latest manifest for mcp (DockerHub)
-        if: github.event.inputs.push_latest == 'true'
+        if: github.event.inputs.push_latest == 'true' && github.event_name == 'workflow_dispatch'
         run: |
           docker manifest create nexent/nexent-mcp:latest \
             nexent/nexent-mcp:amd64 \
