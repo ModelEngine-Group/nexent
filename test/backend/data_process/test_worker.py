@@ -89,6 +89,8 @@ def setup_mocks_for_worker(mocker, initialized=False):
     
     if "celery.result" not in sys.modules:
         result_mod = types.ModuleType("celery.result")
+    else:
+        result_mod = sys.modules["celery.result"]
     result_mod.AsyncResult = type("AsyncResult", (), {})
     # Simple mock that can be used as a decorator/context manager
     class MockAllowJoinResult:
@@ -707,3 +709,33 @@ def test_task_failure_handler(mocker):
     )
     
     assert worker_module.worker_state['tasks_failed'] == initial_failed + 1
+
+
+def test_worker_ready_handler_starts_background_threads(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.worker_state['start_time'] = 1000.0
+    mocker.patch("backend.data_process.worker.time.time", return_value=1001.0)
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=7)
+
+    calls = []
+
+    class FakeThread:
+        def __init__(self, target=None, daemon=None):
+            calls.append((target, daemon))
+
+        def start(self):
+            return None
+
+    mocker.patch.object(worker_module.threading, "Thread", FakeThread)
+    worker_module.worker_ready_handler()
+    assert len(calls) >= 1
+
+
+def test_worker_ready_handler_thread_schedule_failure(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.worker_state['start_time'] = 1000.0
+    mocker.patch("backend.data_process.worker.time.time", return_value=1001.0)
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=7)
+    mocker.patch.object(worker_module.threading, "Thread", side_effect=RuntimeError("thread failed"))
+    worker_module.worker_ready_handler()
+    assert worker_module.worker_state["ready"] is True

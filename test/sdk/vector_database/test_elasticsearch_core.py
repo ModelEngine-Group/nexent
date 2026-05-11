@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import time
+import types
 from typing import List, Dict, Any
 from contextlib import contextmanager
 from elasticsearch import exceptions
@@ -2197,3 +2198,29 @@ def test_hybrid_search_empty_embedding_skips_storage(elasticsearch_core_instance
         mock_client.index.assert_not_called()
         # Should still complete search
         assert mock_semantic.call_count == 2
+
+
+def test_create_index_request_error_already_exists(elasticsearch_core_instance):
+    from elasticsearch import exceptions as es_exceptions
+    with patch.object(elasticsearch_core_instance, "client") as mock_client, \
+            patch.object(elasticsearch_core_instance, "_ensure_index_ready") as mock_ready:
+        mock_client.indices.exists.return_value = False
+        mock_client.indices.create.side_effect = es_exceptions.RequestError(
+            message="resource_already_exists_exception",
+            meta=types.SimpleNamespace(status=400),
+            body={"error": {"type": "resource_already_exists_exception"}},
+        )
+        assert elasticsearch_core_instance.create_index("idx") is True
+        mock_ready.assert_called_once_with("idx")
+
+
+def test_create_index_generic_exception_returns_false(elasticsearch_core_instance):
+    with patch.object(elasticsearch_core_instance, "client") as mock_client:
+        mock_client.indices.exists.side_effect = RuntimeError("boom")
+        assert elasticsearch_core_instance.create_index("idx") is False
+
+
+def test_get_user_indices_error_returns_empty(elasticsearch_core_instance):
+    with patch.object(elasticsearch_core_instance, "client") as mock_client:
+        mock_client.indices.get_alias.side_effect = RuntimeError("x")
+        assert elasticsearch_core_instance.get_user_indices("*") == []

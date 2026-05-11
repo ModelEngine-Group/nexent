@@ -1907,3 +1907,294 @@ def test_forward_large_chunks_batch_success(monkeypatch):
     success_state = [s for s in self.states if s.get(
         "state") == tasks.states.SUCCESS][0]
     assert success_state.get("meta", {}).get("chunks_stored") == 150
+
+
+def test_wait_for_split_ready_branches(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://x")
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, key):
+            self.calls += 1
+            if key.endswith(":ready"):
+                return "1" if self.calls >= 1 else None
+            return '["a", "b"]'
+
+    fake_redis_mod = types.SimpleNamespace(
+        Redis=types.SimpleNamespace(from_url=lambda *a, **k: FakeClient())
+    )
+    monkeypatch.setitem(sys.modules, "redis", fake_redis_mod)
+    assert tasks._wait_for_split_ready("dp:k", timeout_s=1, poll_interval_ms=1) == 2
+
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "")
+    with pytest.raises(RuntimeError):
+        tasks._wait_for_split_ready("dp:k", timeout_s=1, poll_interval_ms=1)
+
+
+def test_wait_for_split_ready_timeout_and_bad_json(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://x")
+
+    class ClientBadJson:
+        def get(self, key):
+            return "1" if key.endswith(":ready") else "{bad"
+
+    fake_redis_mod = types.SimpleNamespace(
+        Redis=types.SimpleNamespace(from_url=lambda *a, **k: ClientBadJson())
+    )
+    monkeypatch.setitem(sys.modules, "redis", fake_redis_mod)
+    assert tasks._wait_for_split_ready("dp:k", timeout_s=1, poll_interval_ms=1) == 0
+
+    class ClientNeverReady:
+        def get(self, key):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "redis",
+        types.SimpleNamespace(Redis=types.SimpleNamespace(from_url=lambda *a, **k: ClientNeverReady())),
+    )
+    monkeypatch.setattr(tasks.time, "sleep", lambda _s: None)
+    t = {"v": 0.0}
+
+    def _time():
+        t["v"] += 0.2
+        return t["v"]
+
+    monkeypatch.setattr(tasks.time, "time", _time)
+    with pytest.raises(TimeoutError):
+        tasks._wait_for_split_ready("dp:k", timeout_s=1, poll_interval_ms=1)
+
+
+def test_estimate_parallel_parts_and_batch_helpers(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "RAY_NUM_CPUS", 8)
+    monkeypatch.setattr(tasks, "RAY_ACTOR_NUM_CPUS", 2)
+    assert tasks._estimate_parallel_parts() == 4
+
+    batches = [[{"a": 1}], [{"a": 2}]]
+    assert tasks._get_next_available_batch_index(batches, 0, batch_size=2) == 0
+    with pytest.raises(RuntimeError):
+        tasks._get_next_available_batch_index([[1], [2]], 0, batch_size=1)
+
+
+def test_extract_error_code_from_es_response_detail_string(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    parsed = {"detail": "{\"error_code\":\"es_detail_code\"}"}
+    assert tasks._extract_error_code_from_es_response(parsed, "x") == "es_detail_code"
+
+
+def test_run_async_loop_not_running_branch(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class FakeLoop:
+        def is_running(self):
+            return False
+
+        def run_until_complete(self, _c):
+            return "ok"
+
+    monkeypatch.setattr(asyncio, "get_running_loop", lambda: FakeLoop())
+    assert tasks.run_async(asyncio.sleep(0)) == "ok"
+
+
+def test_global_pool_manager_paths(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+
+    class Actor:
+        def __init__(self):
+            self.ping = types.SimpleNamespace(remote=lambda: "pong")
+
+    monkeypatch.setattr(tasks, "DataProcessorRayActor", types.SimpleNamespace(remote=lambda: Actor()))
+    monkeypatch.setattr(tasks.ray, "get", lambda ref, timeout=None: True)
+    manager = tasks.GlobalRayActorPoolManager(warm_timeout_s=1)
+    assert manager.ensure_pool(desired=2, max_allowed=3) == 2
+    assert manager.get_actor() is not None
+
+
+def test_global_pool_manager_warm_fail(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+
+    class Actor:
+        def __init__(self):
+            self.ping = types.SimpleNamespace(remote=lambda: "x")
+
+    monkeypatch.setattr(tasks, "DataProcessorRayActor", types.SimpleNamespace(remote=lambda: Actor()))
+    monkeypatch.setattr(tasks.ray, "get", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("warm fail")))
+    monkeypatch.setattr(tasks.ray, "kill", lambda *a, **k: None, raising=False)
+    manager = tasks.GlobalRayActorPoolManager(warm_timeout_s=1)
+    assert manager.ensure_pool(desired=1, max_allowed=1) == 0
+    with pytest.raises(RuntimeError):
+        manager.get_actor()
+
+
+def test_get_or_create_global_pool_manager_fallbacks(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "init_ray_in_worker", lambda: None)
+
+    class _Opts:
+        def options(self, **_kw):
+            raise TypeError("no get_if_exists")
+
+    monkeypatch.setattr(tasks, "GlobalRayActorPoolManager", _Opts())
+    monkeypatch.setattr(tasks.ray, "get_actor", lambda *a, **k: "manager", raising=False)
+    assert tasks._get_or_create_global_pool_manager() == "manager"
+
+
+def test_prewarm_ray_actors(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+    manager = types.SimpleNamespace(ensure_pool=types.SimpleNamespace(remote=lambda **k: "ref"))
+    monkeypatch.setattr(tasks, "_get_or_create_global_pool_manager", lambda: manager)
+    monkeypatch.setattr(tasks, "_estimate_parallel_parts", lambda: 4)
+    monkeypatch.setattr(fake_ray, "get", lambda ref: 3)
+    assert tasks.prewarm_ray_actors(target_size=3) == 3
+
+
+def test_process_part_success_and_failure(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://x")
+
+    class Actor:
+        def __init__(self):
+            self.process_bytes = types.SimpleNamespace(remote=lambda *a, **k: "chunks-ref")
+
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: Actor())
+    fake_ray.get_returns = {"chunks-ref": [{"content": "x"}]}
+
+    store = {}
+
+    class Client:
+        def set(self, k, v):
+            store[k] = v
+
+        def expire(self, *a, **k):
+            return True
+
+    monkeypatch.setitem(sys.modules, "redis", types.SimpleNamespace(Redis=types.SimpleNamespace(from_url=lambda *a, **k: Client())))
+    out = tasks.process_part(
+        types.SimpleNamespace(request=types.SimpleNamespace(id="p1"), retry=lambda **k: None),
+        part_bytes=b"a", filename="a.txt", chunking_strategy="basic", part_redis_key="k1",
+        source="s", source_type="local"
+    )
+    assert out["chunks_count"] == 1
+    assert "k1" in store
+
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "")
+    out2 = tasks.process_part(
+        types.SimpleNamespace(request=types.SimpleNamespace(id="p2"), retry=lambda **k: None),
+        part_bytes=b"a", filename="a.txt", chunking_strategy="basic", part_redis_key="k2",
+        source="s", source_type="local"
+    )
+    assert out2["chunks_count"] == 0
+
+
+def test_aggregate_store_chunks_paths(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    self = types.SimpleNamespace(request=types.SimpleNamespace(id="agg1"))
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://x")
+    kv = {
+        "part1": '[{"a":1}]',
+        "part2": "bad-json",
+    }
+    written = {}
+
+    class Client:
+        def get(self, k):
+            return kv.get(k)
+
+        def set(self, k, v):
+            written[k] = v
+
+        def expire(self, *a, **k):
+            return True
+
+        def delete(self, k):
+            kv.pop(k, None)
+
+    monkeypatch.setitem(sys.modules, "redis", types.SimpleNamespace(Redis=types.SimpleNamespace(from_url=lambda *a, **k: Client())))
+    res = tasks.aggregate_store_chunks(
+        self,
+        parts_results=[{"part_redis_key": "part1"}, {"part_redis_key": "part2"}],
+        redis_key="maink",
+        source="s",
+        index_name="idx",
+        original_filename="a.txt",
+    )
+    assert res["redis_key"] == "maink"
+    assert "maink" in written and "maink:ready" in written
+
+
+def test_forward_part_success_and_progress(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: {"success": True, "total_indexed": 2, "total_submitted": 2},
+    )
+    calls = {"inc": 0}
+
+    class _Svc:
+        def is_task_cancelled(self, _tid):
+            return False
+
+        def increment_progress_info(self, **kwargs):
+            calls["inc"] += 1
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _Svc())
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp1", retries=0),
+        retry=lambda **k: (_ for _ in ()).throw(RuntimeError("should not retry")),
+    )
+    out = tasks.forward_part(
+        self,
+        chunks=[{"content": "x"}],
+        index_name="idx",
+        parent_task_id="pt1",
+        parent_total_chunks=5,
+        batch_index=1,
+        total_batches=3,
+    )
+    assert out["success"] is True
+    assert calls["inc"] == 1
+
+
+def test_forward_part_failure_retries(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "_send_chunks_to_es", lambda **kwargs: {"success": False, "message": "bad"})
+    captured = {}
+
+    def _retry(**kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("retried")
+
+    self = types.SimpleNamespace(request=types.SimpleNamespace(id="fp2", retries=1), retry=_retry)
+    with pytest.raises(RuntimeError, match="retried"):
+        tasks.forward_part(
+            self,
+            chunks=[{"content": "x"}],
+            index_name="idx",
+            batch_index=2,
+            total_batches=4,
+        )
+    assert "exc" in captured
+
+
+def test_aggregate_forward_parts_paths(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    self = types.SimpleNamespace(request=types.SimpleNamespace(id="af1"))
+    out = tasks.aggregate_forward_parts(
+        self,
+        parts_results=[
+            {"success": True, "total_indexed": 3, "total_submitted": 3},
+            {"success": True, "total_indexed": 2, "total_submitted": 2},
+        ],
+        source="s",
+        index_name="idx",
+        original_filename="a.txt",
+    )
+    assert out["success"] is True
+    assert out["total_indexed"] == 5
