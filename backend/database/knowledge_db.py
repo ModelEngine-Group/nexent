@@ -460,6 +460,23 @@ def update_last_summary_time(index_name: str):
         raise
 
 
+def update_last_doc_update_time(index_name: str):
+    """Update last_doc_update_time to now after document add/delete operation."""
+    from datetime import datetime
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if record:
+                record.last_doc_update_time = datetime.now()
+                session.commit()
+    except SQLAlchemyError:
+        logger.exception("Update last doc update time error")
+        raise
+
+
 def get_knowledge_bases_for_auto_summary() -> List[Dict[str, Any]]:
     """Query all knowledge bases with non-null summary_frequency."""
     try:

@@ -39,15 +39,40 @@ def _parse_last_summary_time(last_summary_time) -> Optional[datetime]:
     return None
 
 
-def _is_due_for_summary(last_summary_time, frequency: str) -> bool:
-    """Check if a knowledge base is due for summary regeneration."""
+def _is_due_for_summary(last_summary_time, frequency: str, last_doc_update_time) -> bool:
+    """Check if a knowledge base is due for summary regeneration.
+    
+    Args:
+        last_summary_time: Timestamp of last summary generation
+        frequency: Summary frequency (e.g., '3h', '1d')
+        last_doc_update_time: Timestamp of last document add/delete operation
+    
+    Returns:
+        True if summary should be regenerated, False otherwise
+    """
     interval = FREQUENCY_MAP.get(frequency)
     if interval is None:
         return False
+    
     last = _parse_last_summary_time(last_summary_time)
     if last is None:
         return True  # Never summarized, do it now
-    return (datetime.now() - last) >= interval
+    
+    # Check if time interval has elapsed
+    if (datetime.now() - last) < interval:
+        return False
+    
+    # Check if there are new document changes since last summary
+    doc_update = _parse_last_summary_time(last_doc_update_time)
+    if doc_update is None:
+        return True  # No doc update time recorded, assume need summary
+    
+    # Skip if no new documents since last summary
+    if doc_update <= last:
+        logger.info(f"Skipping summary: no document changes since last summary")
+        return False
+    
+    return True
 
 
 def _run_auto_summary_for_kb(index_name: str, tenant_id: str):
@@ -133,7 +158,11 @@ def _scheduler_loop(stop_event: threading.Event):
                 if stop_event.is_set():
                     break
                 frequency = kb.get("summary_frequency")
-                if _is_due_for_summary(kb.get("last_summary_time"), frequency):
+                if _is_due_for_summary(
+                    kb.get("last_summary_time"),
+                    frequency,
+                    kb.get("last_doc_update_time")
+                ):
                     _run_auto_summary_for_kb(
                         index_name=kb["index_name"],
                         tenant_id=kb.get("tenant_id", ""),

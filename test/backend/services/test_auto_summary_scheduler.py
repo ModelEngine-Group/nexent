@@ -170,37 +170,56 @@ class TestIsDueForSummary:
 
     def test_due_when_never_summarized(self):
         """Should be due if last_summary_time is None."""
-        result = _is_due_for_summary(None, "3h")
+        result = _is_due_for_summary(None, "3h", None)
         assert result is True
 
     def test_due_when_interval_elapsed(self):
-        """Should be due when time elapsed exceeds frequency."""
+        """Should be due when time elapsed exceeds frequency and has new docs."""
         last_time = datetime.now() - timedelta(hours=4)
-        result = _is_due_for_summary(last_time, "3h")
+        doc_update = datetime.now() - timedelta(hours=2)  # New docs after last summary
+        result = _is_due_for_summary(last_time, "3h", doc_update)
         assert result is True
 
     def test_not_due_when_interval_not_elapsed(self):
         """Should not be due when time elapsed is less than frequency."""
         last_time = datetime.now() - timedelta(hours=2)
-        result = _is_due_for_summary(last_time, "3h")
+        doc_update = datetime.now()  # Recent doc update
+        result = _is_due_for_summary(last_time, "3h", doc_update)
         assert result is False
+
+    def test_not_due_when_no_doc_changes(self):
+        """Should not be due when no document changes since last summary."""
+        last_time = datetime.now() - timedelta(hours=4)  # 4h ago
+        doc_update = last_time - timedelta(hours=1)  # Doc update before last summary
+        result = _is_due_for_summary(last_time, "3h", doc_update)
+        assert result is False
+
+    def test_due_when_new_docs_after_last_summary(self):
+        """Should be due when new documents added after last summary."""
+        last_time = datetime.now() - timedelta(hours=4)
+        doc_update = datetime.now() - timedelta(hours=1)  # New docs 1h ago
+        result = _is_due_for_summary(last_time, "3h", doc_update)
+        assert result is True
 
     def test_invalid_frequency_returns_false(self):
         """Invalid frequency should return False."""
         last_time = datetime.now() - timedelta(hours=10)
-        result = _is_due_for_summary(last_time, "invalid")
+        doc_update = datetime.now()
+        result = _is_due_for_summary(last_time, "invalid", doc_update)
         assert result is False
 
     def test_due_for_1d_frequency(self):
         """Should correctly check 1 day frequency."""
         last_time = datetime.now() - timedelta(days=2)
-        result = _is_due_for_summary(last_time, "1d")
+        doc_update = datetime.now() - timedelta(days=1)
+        result = _is_due_for_summary(last_time, "1d", doc_update)
         assert result is True
 
     def test_due_for_1w_frequency(self):
         """Should correctly check 1 week frequency."""
         last_time = datetime.now() - timedelta(weeks=2)
-        result = _is_due_for_summary(last_time, "1w")
+        doc_update = datetime.now() - timedelta(weeks=1)
+        result = _is_due_for_summary(last_time, "1w", doc_update)
         assert result is True
 
 

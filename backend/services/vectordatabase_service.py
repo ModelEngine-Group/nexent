@@ -36,6 +36,7 @@ from database.knowledge_db import (
     update_knowledge_record,
     get_knowledge_info_by_tenant_id,
     update_model_name_by_index_name,
+    update_last_doc_update_time,
 )
 from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -962,6 +963,9 @@ class ElasticSearchService:
                         logger.warning(
                             f"[REDIS PROGRESS] Exception updating final progress for task {task_id}: {str(e)}")
 
+                # Update last_doc_update_time for auto-summary tracking
+                update_last_doc_update_time(index_name)
+
                 return {
                     "success": True,
                     "message": f"Successfully indexed {total_indexed} documents",
@@ -1231,6 +1235,10 @@ class ElasticSearchService:
             index_name, path_or_url)
         # 2. Delete MinIO file
         minio_result = delete_file(path_or_url)
+        
+        # Update last_doc_update_time for auto-summary tracking
+        update_last_doc_update_time(index_name)
+        
         return {"status": "success", "deleted_es_count": deleted_count, "deleted_minio": minio_result.get("success")}
 
     @staticmethod
