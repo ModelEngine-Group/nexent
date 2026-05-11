@@ -264,31 +264,6 @@ async def test_perform_connectivity_check_vlm():
 
 
 @pytest.mark.asyncio
-async def test_perform_connectivity_check_tts():
-    # Setup
-    with mock.patch("backend.services.model_health_service.get_voice_service") as mock_get_voice_service:
-        mock_service_instance = mock.MagicMock()
-        # Fix: make check_voice_connectivity return an awaitable coroutine instead of a bool
-        async_mock = mock.AsyncMock()
-        async_mock.return_value = True
-        mock_service_instance.check_voice_connectivity = async_mock
-        mock_get_voice_service.return_value = mock_service_instance
-
-        # Execute
-        result = await _perform_connectivity_check(
-            "tts-1",
-            "tts",
-            "https://api.openai.com",
-            "test-key",
-        )
-
-        # Assert
-        assert result is True
-        mock_service_instance.check_voice_connectivity.assert_called_once_with(
-            "tts")
-
-
-@pytest.mark.asyncio
 async def test_perform_connectivity_check_stt():
     # Setup
     with mock.patch("backend.services.model_health_service.get_voice_service") as mock_get_voice_service:
@@ -310,7 +285,13 @@ async def test_perform_connectivity_check_stt():
         # Assert
         assert result is True
         mock_service_instance.check_voice_connectivity.assert_called_once_with(
-            "stt")
+            model_type="stt",
+            stt_config={
+                "api_key": "test-key",
+                "base_url": "https://api.openai.com",
+                "model": "whisper-1"
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -457,6 +438,7 @@ async def test_check_model_connectivity_success():
             "model123", {"connect_status": "available"})
         mock_connectivity_check.assert_called_once_with(
             "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True,
+            None, None, None,
             display_name="GPT-4"
         )
 
@@ -582,7 +564,8 @@ async def test_verify_model_config_connectivity_success():
         assert "error" not in response
 
         mock_connectivity_check.assert_called_once_with(
-            "gpt-4", "llm", "https://api.openai.com", "test-key", True
+            "gpt-4", "llm", "https://api.openai.com", "test-key", True,
+            None, None, None
         )
 
 

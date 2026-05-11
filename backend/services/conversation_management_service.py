@@ -202,7 +202,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str):
     user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.get("role") == MESSAGE_ROLE["USER"])
+        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2,
                                       role=MESSAGE_ROLE["USER"], message=[MessageUnit(type="string", content=request.query)], minio_files=request.minio_files)
@@ -211,7 +211,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str):
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
     user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.get("role") == MESSAGE_ROLE["USER"])
+        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
     message_list = []
     for item in messages:

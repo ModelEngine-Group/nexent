@@ -620,6 +620,7 @@ def test_rollback_version_impl_success(monkeypatch):
     )
 
     assert result["version_no"] == 1
+    assert result["version_name"] == "v1.0"
     assert "Successfully rolled back" in result["message"]
     mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
     mock_restore_draft.assert_called_once()
@@ -639,7 +640,7 @@ def test_rollback_version_impl_version_not_found(monkeypatch):
 
 
 def test_rollback_version_impl_draft_not_found(monkeypatch):
-    """Test rolling back when draft doesn't exist"""
+    """Test rolling back when snapshot is not found"""
     mock_version = {"version_no": 1}
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
