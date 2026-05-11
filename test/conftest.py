@@ -19,15 +19,6 @@ _mem0_stubs = {
     "mem0.configs.embeddings": MagicMock(),
     "mem0.configs.embeddings.base": MagicMock(),
 }
-_smolagents_stubs = {
-    "smolagents": MagicMock(),
-    "smolagents.memory": MagicMock(),
-    "smolagents.models": MagicMock(),
-}
-_all_stubs = {**_mem0_stubs, **_smolagents_stubs}
-for _mod_name in _all_stubs:
-    if _mod_name not in sys.modules:
-        sys.modules[_mod_name] = _all_stubs[_mod_name]
 
 # Add backend and sdk directories to sys.path so that modules can be imported
 # as `from backend.xxx import ...` and `from sdk.xxx import ...`
