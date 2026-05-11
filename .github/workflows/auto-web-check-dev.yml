@@ -11,12 +11,12 @@ on:
         description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
         default: '["ubuntu-latest"]'
   pull_request:
-    branches: [develop]
+    branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'frontend/**'
       - '.github/workflows/**'
   push:
-    branches: [develop]
+    branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'frontend/**'
       - '.github/workflows/**'
