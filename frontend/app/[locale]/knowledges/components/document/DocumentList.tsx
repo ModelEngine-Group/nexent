@@ -693,10 +693,12 @@ const [isSummarizing, setIsSummarizing] = useState(false);
                       }}
                       disabled={isReadOnlyMode}
                       style={{ width: 85 }}
-                      placeholder={t("knowledgeBase.tag.autoSummary.off")}
-options={frequencyOptions.map(opt => ({
+placeholder={t("knowledgeBase.tag.autoSummary.off")}
+                      options={frequencyOptions.map(opt => ({
                           value: opt.value,
-                          label: opt.label,
+                          label: opt.value === "disabled" 
+                            ? t("knowledgeBase.tag.autoSummary.off") 
+                            : opt.label,
                         }))}
                     />
                   </div>
