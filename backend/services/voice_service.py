@@ -553,12 +553,15 @@ class VoiceService:
 
             connected = await tts_model.check_connectivity()
             if not connected:
-                logger.warning("TTS service connectivity check returned False")
-                return False
+                msg = "TTS service connectivity check returned False"
+                logger.warning(msg)
+                raise TTSConnectionException(msg)
             return connected
+        except TTSConnectionException:
+            raise
         except Exception as e:
             logger.error(f"TTS connectivity check failed: {str(e)}")
-            return False
+            raise TTSConnectionException(f"TTS connectivity check failed: {str(e)}") from e
 
     async def check_voice_connectivity(
         self,
