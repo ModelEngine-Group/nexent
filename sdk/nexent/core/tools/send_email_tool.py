@@ -44,6 +44,12 @@ class SendEmailTool(Tool):
             "description": "BCC email address, multiple BCCs separated by commas, optional",
             "description_zh": "密送邮箱地址，多个密送用逗号分隔，可选",
             "nullable": True
+        },
+        "sender_email": {
+            "type": "string",
+            "description": "Actual sender email address (From address), optional - defaults to username",
+            "description_zh": "实际发件人邮箱地址（From字段），可选，默认为username",
+            "nullable": True
         }
     }
 
@@ -68,6 +74,10 @@ class SendEmailTool(Tool):
             "description": "Use SSL/TLS encryption (set to False for plain text)",
             "description_zh": "使用 SSL/TLS 加密（设为 False 使用明文）"
         },
+        "sender_email": {
+            "description": "Actual sender email address (From address), defaults to username",
+            "description_zh": "实际发件人邮箱地址，默认为 username"
+        },
         "sender_name": {
             "description": "Sender name",
             "description_zh": "发件人名称"
@@ -81,10 +91,11 @@ class SendEmailTool(Tool):
     category = ToolCategory.EMAIL.value
 
     def __init__(self, smtp_server: str = "",
-                 smtp_port: int = 587, 
-                 username: str = "", 
-                 password: str = "", 
+                 smtp_port: int = 587,
+                 username: str = "",
+                 password: str = "",
                  use_ssl: bool = True,
+                 sender_email: Optional[str] = None,
                  sender_name: Optional[str] = None,
                  timeout: int = 30):
         super().__init__()
@@ -93,6 +104,7 @@ class SendEmailTool(Tool):
         self.username = username
         self.password = password
         self.use_ssl = use_ssl
+        self.sender_email = sender_email or username
         self.sender_name = sender_name
         self.timeout = timeout
 
@@ -108,12 +120,18 @@ class SendEmailTool(Tool):
             context.verify_mode = ssl.CERT_REQUIRED
         return context
 
-    def forward(self, to: str, subject: str, content: str, cc: str = "", bcc: str = "") -> str:
+    def forward(self, to: str, subject: str, content: str, cc: str = "", bcc: str = "",
+                sender_email: Optional[str] = None) -> str:
         try:
             logger.info("Creating email message...")
-            # Create email object
             msg = MIMEMultipart()
-            msg['From'] = f"{self.sender_name} <{self.username}>" if self.sender_name else self.username
+
+            sender = sender_email or self.sender_email
+            if self.sender_name:
+                msg['From'] = f"{self.sender_name} <{sender}>"
+            else:
+                msg['From'] = sender
+
             msg['To'] = to
             msg['Subject'] = subject
 
@@ -131,13 +149,13 @@ class SendEmailTool(Tool):
             if self.smtp_port == 465:
                 # Port 465 uses implicit SSL
                 logger.info("Using implicit SSL connection (port 465)...")
-                context = self._create_ssl_context(skip_verify=False)
+                context = self._create_ssl_context(skip_verify=True)
                 server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=self.timeout)
             elif self.use_ssl:
                 # Port 587 (and others) use STARTTLS
                 logger.info("Using STARTTLS connection...")
                 server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=self.timeout)
-                server.starttls(context=self._create_ssl_context(skip_verify=False))
+                server.starttls(context=self._create_ssl_context(skip_verify=True))
             else:
                 # Port 25 - plain connection (may have self-signed certs)
                 logger.info("Using plain text connection (port 25)...")

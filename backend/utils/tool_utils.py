@@ -46,7 +46,8 @@ def get_local_tools_description_zh() -> Dict[str, Dict]:
                 if hasattr(param.default, 'exclude') and param.default.exclude:
                     continue
 
-            param_description_zh = param.default.description_zh if hasattr(param.default, 'description_zh') else None
+            # Note: Pydantic Field doesn't have description_zh attribute
+            param_description_zh = getattr(param.default, 'description_zh', None) if hasattr(param.default, 'description_zh') else None
 
             if param_description_zh is None and param_name in init_param_descriptions:
                 param_description_zh = init_param_descriptions[param_name].get('description_zh')

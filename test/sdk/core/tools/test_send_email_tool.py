@@ -19,6 +19,7 @@ def send_email_tool():
         username="test@test.com",
         password="test_password",
         use_ssl=True,
+        sender_email="actual@test.com",
         sender_name="Test Sender",
         timeout=30
     )
@@ -102,6 +103,10 @@ class TestSendEmailTool:
         assert inputs["bcc"]["type"] == "string"
         assert inputs["bcc"]["nullable"] is True
 
+        assert "sender_email" in inputs
+        assert inputs["sender_email"]["type"] == "string"
+        assert inputs["sender_email"]["nullable"] is True
+
     @patch('smtplib.SMTP')
     @patch('ssl.create_default_context')
     def test_forward_success_basic_email(self, mock_ssl_context, mock_smtp, send_email_tool):
@@ -168,7 +173,7 @@ class TestSendEmailTool:
         call_args = mock_server.send_message.call_args[0][0]
 
         # Verify email headers
-        assert call_args['From'] == "Test Sender <test@test.com>"
+        assert call_args['From'] == "Test Sender <actual@test.com>"
         assert call_args['To'] == "recipient@example.com"
         assert call_args['Subject'] == "Test Subject"
         assert call_args['Cc'] == "cc1@example.com,cc2@example.com"
@@ -465,6 +470,39 @@ class TestSendEmailTool:
             assert result_data["status"] == "success"
             assert result_data["to"] == ""
             assert result_data["subject"] == ""
+
+    @patch('smtplib.SMTP')
+    @patch('ssl.create_default_context')
+    def test_forward_sender_email_override(self, mock_ssl_context, mock_smtp):
+        """Test that sender_email parameter in forward overrides instance sender_email"""
+        tool = SendEmailTool(
+            smtp_server="smtp.test.com",
+            smtp_port=587,
+            username="auth@test.com",
+            password="password",
+            use_ssl=True,
+            sender_email="instance@test.com",
+            sender_name="Instance Sender"
+        )
+
+        mock_context = Mock()
+        mock_ssl_context.return_value = mock_context
+
+        mock_server = Mock()
+        mock_smtp.return_value = mock_server
+
+        result = tool.forward(
+            to="recipient@example.com",
+            subject="Test Subject",
+            content="<p>Test content</p>",
+            sender_email="override@test.com"
+        )
+
+        result_data = json.loads(result)
+        assert result_data["status"] == "success"
+
+        call_args = mock_server.send_message.call_args[0][0]
+        assert call_args['From'] == "Instance Sender <override@test.com>"
 
 
 if __name__ == '__main__':
