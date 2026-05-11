@@ -75,6 +75,30 @@ sys.modules['nexent.vector_database'] = _create_package_mock(
 vector_db_base_module = ModuleType('nexent.vector_database.base')
 
 
+consts_mock = MagicMock()
+consts_mock.const = MagicMock()
+consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
+consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
+consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
+consts_mock.const.MINIO_REGION = "us-east-1"
+consts_mock.const.MINIO_DEFAULT_BUCKET = "test-bucket"
+consts_mock.const.POSTGRES_HOST = "localhost"
+consts_mock.const.POSTGRES_USER = "test_user"
+consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
+consts_mock.const.POSTGRES_DB = "test_db"
+consts_mock.const.POSTGRES_PORT = 5432
+consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.PERMISSION_EDIT = "EDIT"
+consts_mock.const.PERMISSION_READ = "READ_ONLY"
+consts_mock.const.PERMISSION_PRIVATE = "PRIVATE"
+sys.modules['consts'] = consts_mock
+sys.modules['consts.const'] = consts_mock.const
+sys.modules['consts.model'] = MagicMock()
+sys.modules['consts.error_code'] = MagicMock()
+sys.modules['consts.exceptions'] = MagicMock()
+
+
+
 class _VectorDatabaseCore:
     """Lightweight stand-in for the real VectorDatabaseCore for import-time typing."""
     pass
@@ -2206,7 +2230,8 @@ class TestElasticSearchService(unittest.TestCase):
             index_names=["test_index"], query="test query", top_k=10
         )
 
-    def test_search_hybrid_success(self):
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_search_hybrid_success(self, mock_get_knowledge_record):
         """
         Test hybrid search (combining semantic and accurate search).
 
@@ -2225,12 +2250,17 @@ class TestElasticSearchService(unittest.TestCase):
                 "scores": {"accurate": 0.85, "semantic": 0.95}
             }
         ]
+        mock_get_knowledge_record.return_value = {
+            "tenant_id": consts_mock.const.DEFAULT_TENANT_ID,
+            "embedding_model_name": self.mock_embedding.model,
+            "is_multimodal": "N",
+        }
 
         # Execute
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id="test_tenant",
+            tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=0.5,
             vdb_core=self.mock_vdb_core
@@ -2252,6 +2282,12 @@ class TestElasticSearchService(unittest.TestCase):
             embedding_model=self.mock_embedding,
             top_k=10,
             weight_accurate=0.5
+        )
+        mock_get_knowledge_record.assert_called_once_with(
+            {
+                "index_name": "test_index",
+                "tenant_id": consts_mock.const.DEFAULT_TENANT_ID,
+            }
         )
 
     def test_search_hybrid_missing_tenant_id(self):
@@ -2321,17 +2357,23 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("weight_accurate must be between 0 and 1",
                       str(context.exception))
 
-    def test_search_hybrid_no_embedding_model(self):
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_search_hybrid_no_embedding_model(self, mock_get_knowledge_record):
         """Test search_hybrid raises ValueError when embedding model is not configured."""
         # Stop the mock to test the real get_embedding_model
         self.get_embedding_model_patcher.stop()
         try:
+            mock_get_knowledge_record.return_value = {
+                "tenant_id": consts_mock.const.DEFAULT_TENANT_ID,
+                "embedding_model_name": self.mock_embedding.model,
+                "is_multimodal": "N",
+            }
             with patch('backend.services.vectordatabase_service.get_embedding_model', return_value=None):
                 with self.assertRaises(ValueError) as context:
                     ElasticSearchService.search_hybrid(
                         index_names=["test_index"],
                         query="test query",
-                        tenant_id="test_tenant",
+                        tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
                         top_k=10,
                         weight_accurate=0.5,
                         vdb_core=self.mock_vdb_core
@@ -2357,7 +2399,8 @@ class TestElasticSearchService(unittest.TestCase):
             )
         self.assertIn("Error executing hybrid search", str(context.exception))
 
-    def test_search_hybrid_weight_accurate_boundary_values(self):
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_search_hybrid_weight_accurate_boundary_values(self, mock_get_knowledge_record):
         """Test search_hybrid with different weight_accurate values to ensure line 1146 is covered."""
         # Test with weight_accurate = 0.0 (semantic only)
         self.mock_vdb_core.hybrid_search.return_value = [
@@ -2367,11 +2410,16 @@ class TestElasticSearchService(unittest.TestCase):
                 "index": "test_index",
             }
         ]
+        mock_get_knowledge_record.return_value = {
+            "tenant_id": consts_mock.const.DEFAULT_TENANT_ID,
+            "embedding_model_name": self.mock_embedding.model,
+            "is_multimodal": "N",
+        }
 
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id="test_tenant",
+            tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=0.0,
             vdb_core=self.mock_vdb_core
@@ -2390,7 +2438,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id="test_tenant",
+            tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=1.0,
             vdb_core=self.mock_vdb_core
@@ -2408,7 +2456,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id="test_tenant",
+            tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=0.3,
             vdb_core=self.mock_vdb_core
