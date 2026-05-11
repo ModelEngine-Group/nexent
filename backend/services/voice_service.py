@@ -611,7 +611,7 @@ class VoiceService:
                 base_url = stt_config.get("base_url") if stt_config else None
                 model = stt_config.get("model", "qwen3-tts-flash") if stt_config else "qwen3-tts-flash"
 
-                return await self.check_tts_connectivity(
+                connected = await self.check_tts_connectivity(
                     model_factory=model_factory,
                     api_key=api_key,
                     model_appid=model_appid,
@@ -620,6 +620,9 @@ class VoiceService:
                     base_url=base_url,
                     model=model
                 )
+                if not connected:
+                    raise TTSConnectionException("TTS service connectivity check returned False")
+                return connected
             else:
                 logger.error(f"Unknown model type: {model_type}")
                 raise VoiceServiceException(f"Unknown model type: {model_type}")

@@ -605,26 +605,26 @@ class TestCheckTTSConnectivity:
                 p.stop()
 
     @pytest.mark.asyncio
-    async def test_failure_returns_false(self):
-        """Test check_tts_connectivity returns False when connectivity check fails."""
+    async def test_failure_raises(self):
+        """Test check_tts_connectivity raises TTSConnectionException when connectivity check fails."""
         _reset_singleton()
         patches, _, _ = _mock_all_models(tts_success=False)
         for p in patches:
             p.start()
         try:
             service = VoiceService()
-            result = await service.check_tts_connectivity(
-                api_key="test_key",
-                model="qwen3-tts-flash"
-            )
-            assert result is False
+            with pytest.raises(TTSConnectionException, match="TTS service connectivity check returned False"):
+                await service.check_tts_connectivity(
+                    api_key="test_key",
+                    model="qwen3-tts-flash"
+                )
         finally:
             for p in reversed(patches):
                 p.stop()
 
     @pytest.mark.asyncio
-    async def test_exception_returns_false(self):
-        """Test check_tts_connectivity returns False when an exception occurs."""
+    async def test_exception_raises(self):
+        """Test check_tts_connectivity raises TTSConnectionException when an exception occurs."""
         _reset_singleton()
         exc = RuntimeError("connection timeout")
         patches, _, _ = _mock_all_models(tts_exc=exc)
@@ -632,10 +632,10 @@ class TestCheckTTSConnectivity:
             p.start()
         try:
             service = VoiceService()
-            result = await service.check_tts_connectivity(
-                api_key="test_key"
-            )
-            assert result is False
+            with pytest.raises(TTSConnectionException, match="connection timeout"):
+                await service.check_tts_connectivity(
+                    api_key="test_key"
+                )
         finally:
             for p in reversed(patches):
                 p.stop()
