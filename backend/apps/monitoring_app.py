@@ -7,7 +7,7 @@ Uses an independent database connection pool to avoid impacting business operati
 
 import logging
 from http import HTTPStatus
-from typing import Annotated, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from sqlalchemy import text
@@ -29,13 +29,13 @@ logger = logging.getLogger("monitoring_app")
 router = APIRouter(prefix="/monitoring")
 
 
-def _normalize_monitoring_provider(value: Optional[str]) -> str:
+def _normalize_monitoring_provider(value: str | None) -> str:
     return str(value or "otlp").strip().lower()
 
 
 def _build_monitoring_ui(
     provider: str,
-) -> tuple[Optional[str], Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None, str | None]:
     """Map MONITORING_PROVIDER to a monitoring UI port and path."""
     if provider == "grafana":
         path = "/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1"
@@ -49,7 +49,7 @@ def _build_monitoring_ui(
     return None, None, None
 
 
-def get_monitoring_status() -> dict:
+def get_monitoring_status() -> dict[str, Any]:
     """Return telemetry state and the monitoring UI entrypoint for frontend use."""
     telemetry_enabled = ENABLE_TELEMETRY
     provider = _normalize_monitoring_provider(MONITORING_PROVIDER)
@@ -72,12 +72,12 @@ def _compute_time_range_filter(time_range: str) -> str:
 
 
 def _query_model_metrics_from_db(
-    time_range: str, tenant_id: Optional[str] = None
-) -> list[dict]:
+    time_range: str, tenant_id: str | None = None
+) -> list[dict[str, Any]]:
     time_filter = _compute_time_range_filter(time_range)
 
     tenant_filter = ""
-    params = {}
+    params: dict[str, str] = {}
     if tenant_id:
         tenant_filter = "AND m.tenant_id = :tenant_id"
         params["tenant_id"] = tenant_id
@@ -140,7 +140,7 @@ async def list_models_endpoint(
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(
         ge=1, le=100, description="Items per page")] = 20,
-    authorization: Annotated[Optional[str], Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ):
     """List all models with aggregated monitoring metrics from database."""
     try:

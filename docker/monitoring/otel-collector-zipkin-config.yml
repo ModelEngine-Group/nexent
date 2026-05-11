@@ -28,27 +28,16 @@ exporters:
   debug:
     verbosity: normal
 
-  otlp/skywalking:
-    endpoint: skywalking-oap:11800
-    tls:
-      insecure: true
-    timeout: 5s
-    sending_queue:
-      enabled: true
-      num_consumers: 10
-      queue_size: 5000
-    retry_on_failure:
-      enabled: true
-      initial_interval: 1s
-      max_interval: 30s
-      max_elapsed_time: 300s
+  zipkin:
+    endpoint: http://zipkin:9411/api/v2/spans
+    format: proto
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [otlp/skywalking, debug]
+      exporters: [zipkin, debug]
 
     metrics:
       receivers: [otlp]
