@@ -600,25 +600,28 @@ def test_rollback_version_impl_success(monkeypatch):
         "version_name": "v1.0",
     }
 
+    # Assign the mock to a variable
+    mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(
         agent_version_service_module,
         "search_version_by_version_no",
-        MagicMock(return_value=mock_version)
+        mock_search
     )
 
+    # Assign the mock to a variable
+    mock_query_snapshot = MagicMock(return_value=(
+        {"agent_id": 1, "name": "Test Agent"},
+        [],
+        [],
+    ))
     monkeypatch.setattr(
         agent_version_service_module,
         "query_agent_snapshot",
-        MagicMock(return_value=(
-            {"agent_id": 1, "name": "Test Agent"},
-            [],
-            [],
-        ))
+        mock_query_snapshot
     )
 
     # mock restore
     mock_restore = MagicMock()
-
     monkeypatch.setattr(
         agent_version_service_module,
         "restore_agent_draft",
@@ -641,10 +644,10 @@ def test_rollback_version_impl_success(monkeypatch):
     assert result["version_no"] == 1
     assert result["version_name"] == "v1.0"
     assert "Successfully rolled back" in result["message"]
+    
+    # Now these variables are defined
     mock_search.assert_called_once_with(1, "tenant1", 1)
     mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
-    mock_restore.assert_called_once()
-
     mock_restore.assert_called_once()
 
 

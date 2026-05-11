@@ -2,14 +2,19 @@
 Unit tests for config_sync_service STT model config saving.
 These tests cover the STT specific fields in save_config_impl.
 """
+import importlib
 import sys
+import types
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 # Patch boto3 and other dependencies before importing anything from backend
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 
 # Apply critical patches before importing any modules
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
