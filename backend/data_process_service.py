@@ -564,7 +564,11 @@ except Exception as e_exec:
         
         if success_count > 0:
             self.log_service_info()
-        
+
+        # Start auto-summary scheduler
+        from services.auto_summary_scheduler import auto_summary_scheduler
+        auto_summary_scheduler.start()
+
         return success_count == enabled_count
     
     def log_service_info(self):
@@ -700,7 +704,11 @@ except Exception as e_exec:
                         logger.error(f"Final attempt to kill Flower process failed: {final_e}")
             finally:
                 service_processes['flower'] = None
-        
+
+        # Stop auto-summary scheduler
+        from services.auto_summary_scheduler import auto_summary_scheduler
+        auto_summary_scheduler.stop()
+
         # Stop Redis last
         if service_processes['redis']:
             try:
