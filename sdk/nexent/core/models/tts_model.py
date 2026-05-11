@@ -86,7 +86,7 @@ class BaseTTSModel(ABC):
         if isinstance(result, dict):
             if 'error' in result:
                 return False
-            return 'audio' in result or 'text' in result
+            return 'audio' in result or 'text' in result or 'message' in result
         return False
 
     def _extract_tts_error_message(self, result: Any) -> str:

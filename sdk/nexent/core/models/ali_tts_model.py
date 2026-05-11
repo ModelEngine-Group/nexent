@@ -14,7 +14,7 @@ import websockets
 DEFAULT_WS_OPEN_TIMEOUT = 60
 DEFAULT_WS_CLOSE_TIMEOUT = 10
 
-from .base_tts_model  import BaseTTSModel
+from .tts_model  import BaseTTSModel
 
 logger = logging.getLogger(__name__)
 
