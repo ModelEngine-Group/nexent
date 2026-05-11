@@ -100,9 +100,18 @@ def call_llm_for_system_prompt(
         reasoning_content_seen = False
         content_tokens_seen = 0
         for chunk in current_request:
-            delta = chunk.choices[0].delta
+            choices = getattr(chunk, "choices", None) or []
+            if len(choices) == 0:
+                logger.debug("Skipping LLM stream chunk without choices")
+                continue
+
+            delta = getattr(choices[0], "delta", None)
+            if delta is None:
+                logger.debug("Skipping LLM stream chunk without delta")
+                continue
+
             reasoning_content = getattr(delta, "reasoning_content", None)
-            new_token = delta.content
+            new_token = getattr(delta, "content", None)
 
             # Note: reasoning_content is separate metadata and doesn't affect content filtering
             # We only filter content based on <think> tags in delta.content

@@ -914,8 +914,6 @@
   "businessLogic.config.template.manage": "Manage Templates",
   "businessLogic.config.template.manageDescription": "Choose a prompt template for generation, or create your own private templates.",
   "businessLogic.config.template.create": "New Template",
-  "businessLogic.config.template.edit": "Edit",
-  "businessLogic.config.template.delete": "Delete",
   "businessLogic.config.template.use": "Use",
   "businessLogic.config.template.current": "Current",
   "businessLogic.config.template.system": "System",

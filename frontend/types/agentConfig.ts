@@ -4,6 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { ChatMessageType } from "./chat";
 import { ModelOption } from "@/types/modelConfig";
 import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
+import type { PromptTemplateFieldKey } from "../const/promptTemplate";
 
 export type AgentBusinessInfo = Partial<Pick<
   Agent,
@@ -437,19 +438,7 @@ export interface StreamResponseData {
   is_complete: boolean;
 }
 
-export interface PromptTemplateContent {
-  DUTY_SYSTEM_PROMPT: string;
-  CONSTRAINT_SYSTEM_PROMPT: string;
-  FEW_SHOTS_SYSTEM_PROMPT: string;
-  AGENT_VARIABLE_NAME_SYSTEM_PROMPT: string;
-  AGENT_DISPLAY_NAME_SYSTEM_PROMPT: string;
-  AGENT_DESCRIPTION_SYSTEM_PROMPT: string;
-  USER_PROMPT: string;
-  AGENT_NAME_REGENERATE_SYSTEM_PROMPT: string;
-  AGENT_NAME_REGENERATE_USER_PROMPT: string;
-  AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT: string;
-  AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT: string;
-}
+export type PromptTemplateContent = Record<PromptTemplateFieldKey, string>;
 
 export interface PromptTemplate {
   template_id: number;

@@ -915,8 +915,6 @@
   "businessLogic.config.template.manage": "管理模板",
   "businessLogic.config.template.manageDescription": "选择用于生成的提示词模板，或创建仅自己可见的私有模板。",
   "businessLogic.config.template.create": "新建模板",
-  "businessLogic.config.template.edit": "编辑",
-  "businessLogic.config.template.delete": "删除",
   "businessLogic.config.template.use": "使用",
   "businessLogic.config.template.current": "当前使用",
   "businessLogic.config.template.system": "系统",

@@ -21,17 +21,17 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import { promptTemplateService } from "@/services/promptTemplateService";
 import {
+  ADVANCED_PROMPT_TEMPLATE_FIELDS,
+  BASIC_PROMPT_TEMPLATE_FIELDS,
+  createEmptyPromptTemplateContent,
+} from "@/const/promptTemplate";
+import {
   PromptTemplate,
   PromptTemplateContent,
   PromptTemplatePayload,
 } from "@/types/agentConfig";
 
 const { Text } = Typography;
-
-type TemplateFieldDefinition = {
-  key: keyof PromptTemplateContent;
-  labelKey: string;
-};
 
 type PromptTemplateFormValues = {
   template_name: string;
@@ -40,44 +40,11 @@ type PromptTemplateFormValues = {
   template_content_en?: Partial<PromptTemplateContent>;
 };
 
-const BASIC_TEMPLATE_FIELDS: TemplateFieldDefinition[] = [
-  { key: "DUTY_SYSTEM_PROMPT", labelKey: "systemPrompt.card.duty.title" },
-  { key: "CONSTRAINT_SYSTEM_PROMPT", labelKey: "systemPrompt.card.constraint.title" },
-  { key: "FEW_SHOTS_SYSTEM_PROMPT", labelKey: "systemPrompt.card.fewShots.title" },
-  { key: "USER_PROMPT", labelKey: "businessLogic.config.template.field.userPrompt" },
-];
-
-const ADVANCED_TEMPLATE_FIELDS: TemplateFieldDefinition[] = [
-  { key: "AGENT_VARIABLE_NAME_SYSTEM_PROMPT", labelKey: "businessLogic.config.template.field.agentVariableName" },
-  { key: "AGENT_DISPLAY_NAME_SYSTEM_PROMPT", labelKey: "businessLogic.config.template.field.agentDisplayName" },
-  { key: "AGENT_DESCRIPTION_SYSTEM_PROMPT", labelKey: "businessLogic.config.template.field.agentDescription" },
-  { key: "AGENT_NAME_REGENERATE_SYSTEM_PROMPT", labelKey: "businessLogic.config.template.field.agentNameRegenerateSystem" },
-  { key: "AGENT_NAME_REGENERATE_USER_PROMPT", labelKey: "businessLogic.config.template.field.agentNameRegenerateUser" },
-  { key: "AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT", labelKey: "businessLogic.config.template.field.agentDisplayNameRegenerateSystem" },
-  { key: "AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT", labelKey: "businessLogic.config.template.field.agentDisplayNameRegenerateUser" },
-];
-
-function createEmptyTemplateContent(): PromptTemplateContent {
-  return {
-    DUTY_SYSTEM_PROMPT: "",
-    CONSTRAINT_SYSTEM_PROMPT: "",
-    FEW_SHOTS_SYSTEM_PROMPT: "",
-    AGENT_VARIABLE_NAME_SYSTEM_PROMPT: "",
-    AGENT_DISPLAY_NAME_SYSTEM_PROMPT: "",
-    AGENT_DESCRIPTION_SYSTEM_PROMPT: "",
-    USER_PROMPT: "",
-    AGENT_NAME_REGENERATE_SYSTEM_PROMPT: "",
-    AGENT_NAME_REGENERATE_USER_PROMPT: "",
-    AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT: "",
-    AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT: "",
-  };
-}
-
 function mergeTemplateContent(
   seedContent?: Partial<PromptTemplateContent> | null,
   formContent?: Partial<PromptTemplateContent>
 ): PromptTemplateContent {
-  const mergedContent = createEmptyTemplateContent();
+  const mergedContent = createEmptyPromptTemplateContent() as PromptTemplateContent;
   const keys = Object.keys(mergedContent) as Array<keyof PromptTemplateContent>;
 
   keys.forEach((key) => {
@@ -137,8 +104,8 @@ export default function PromptTemplateManagerModal({
       editorForm.setFieldsValue({
         template_name: "",
         description: "",
-        template_content_zh: seedTemplate?.template_content_zh || createEmptyTemplateContent(),
-        template_content_en: seedTemplate?.template_content_en || createEmptyTemplateContent(),
+        template_content_zh: seedTemplate?.template_content_zh || createEmptyPromptTemplateContent(),
+        template_content_en: seedTemplate?.template_content_en || createEmptyPromptTemplateContent(),
       });
       setEditingTemplate(null);
       setEditorSeedTemplate(seedTemplate);
@@ -154,8 +121,8 @@ export default function PromptTemplateManagerModal({
     editorForm.setFieldsValue({
       template_name: template.template_name,
       description: template.description || "",
-      template_content_zh: template.template_content_zh || createEmptyTemplateContent(),
-      template_content_en: template.template_content_en || createEmptyTemplateContent(),
+      template_content_zh: template.template_content_zh || createEmptyPromptTemplateContent(),
+      template_content_en: template.template_content_en || createEmptyPromptTemplateContent(),
     });
     setEditingTemplate(template);
     setEditorSeedTemplate(template);
@@ -195,7 +162,7 @@ export default function PromptTemplateManagerModal({
 
   const renderTemplateFields = (
     contentName: "template_content_zh" | "template_content_en",
-    fields: TemplateFieldDefinition[],
+    fields: typeof BASIC_PROMPT_TEMPLATE_FIELDS,
     required: boolean
   ) => (
     <Flex vertical gap={12}>
@@ -243,7 +210,7 @@ export default function PromptTemplateManagerModal({
           ) : null}
         </Flex>
 
-        {renderTemplateFields(contentName, BASIC_TEMPLATE_FIELDS, isChinese)}
+        {renderTemplateFields(contentName, BASIC_PROMPT_TEMPLATE_FIELDS, isChinese)}
 
         <Collapse
           ghost
@@ -256,7 +223,7 @@ export default function PromptTemplateManagerModal({
                   <Text type="secondary">
                     {t("businessLogic.config.template.advancedDescription")}
                   </Text>
-                  {renderTemplateFields(contentName, ADVANCED_TEMPLATE_FIELDS, false)}
+                  {renderTemplateFields(contentName, ADVANCED_PROMPT_TEMPLATE_FIELDS, false)}
                 </Flex>
               ),
             },
@@ -447,14 +414,14 @@ export default function PromptTemplateManagerModal({
                           disabled={!editable || isSystemDefault}
                           onClick={() => openTemplateEditor(template)}
                         >
-                          {t("businessLogic.config.template.edit")}
+                          {t("common.edit")}
                         </Button>
                         <Button
                           danger
                           disabled={!editable || isSystemDefault}
                           onClick={() => handleDelete(template)}
                         >
-                          {t("businessLogic.config.template.delete")}
+                          {t("common.delete")}
                         </Button>
                       </Space>
                     </Flex>

@@ -312,15 +312,15 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
     logger.info("Generating system prompt")
 
     prompt_configs = [
-        ("duty", prompt_for_generate["DUTY_SYSTEM_PROMPT"]),
-        ("constraint", prompt_for_generate["CONSTRAINT_SYSTEM_PROMPT"]),
-        ("few_shots", prompt_for_generate["FEW_SHOTS_SYSTEM_PROMPT"]),
+        ("duty", prompt_for_generate["duty_system_prompt"]),
+        ("constraint", prompt_for_generate["constraint_system_prompt"]),
+        ("few_shots", prompt_for_generate["few_shots_system_prompt"]),
         ("agent_var_name",
-         prompt_for_generate["AGENT_VARIABLE_NAME_SYSTEM_PROMPT"]),
+         prompt_for_generate["agent_variable_name_system_prompt"]),
         ("agent_display_name",
-         prompt_for_generate["AGENT_DISPLAY_NAME_SYSTEM_PROMPT"]),
+         prompt_for_generate["agent_display_name_system_prompt"]),
         ("agent_description",
-         prompt_for_generate["AGENT_DESCRIPTION_SYSTEM_PROMPT"])
+         prompt_for_generate["agent_description_system_prompt"])
     ]
 
     for tag, sys_prompt in prompt_configs:
@@ -418,7 +418,7 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
     template_context["knowledge_base_names"] = kb_names_str
 
     # Generate content using template
-    content = Template(prompt_for_generate["USER_PROMPT"], undefined=StrictUndefined).render(template_context)
+    content = Template(prompt_for_generate["user_prompt"], undefined=StrictUndefined).render(template_context)
     return content
 
 

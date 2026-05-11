@@ -16,6 +16,7 @@ from agents.agent_run_manager import agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
 from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
+from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
 from consts.exceptions import MemoryPreparationException
@@ -332,7 +333,9 @@ def _regenerate_agent_value_with_llm(
             prompt_template_id=prompt_template_id,
         )
     else:
-        prompt_template = get_prompt_generate_prompt_template(language)
+        prompt_template = normalize_prompt_generate_template_content(
+            get_prompt_generate_prompt_template(language)
+        )
     system_prompt = _render_prompt_template(
         prompt_template.get(system_prompt_key, ""),
         original_value=original_value
@@ -400,8 +403,8 @@ def _regenerate_agent_name_with_llm(
         model_id=model_id,
         tenant_id=tenant_id,
         language=language,
-        system_prompt_key="AGENT_NAME_REGENERATE_SYSTEM_PROMPT",
-        user_prompt_key="AGENT_NAME_REGENERATE_USER_PROMPT",
+        system_prompt_key="agent_name_regenerate_system_prompt",
+        user_prompt_key="agent_name_regenerate_user_prompt",
         default_system_prompt=(
             "You refine agent variable names so that they stay close to the "
             "original meaning and remain unique within the tenant."
@@ -445,8 +448,8 @@ def _regenerate_agent_display_name_with_llm(
         model_id=model_id,
         tenant_id=tenant_id,
         language=language,
-        system_prompt_key="AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT",
-        user_prompt_key="AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT",
+        system_prompt_key="agent_display_name_regenerate_system_prompt",
+        user_prompt_key="agent_display_name_regenerate_user_prompt",
         default_system_prompt=(
             "You refine agent display names so they remain unique, concise, "
             "and aligned with the agent's capability."
@@ -772,7 +775,7 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     elif "business_logic_model_name" not in agent_info:
         agent_info["business_logic_model_name"] = None
 
-    if agent_info.get("prompt_template_id") is None:
+    if not agent_info.get("prompt_template_id"):
         agent_info["prompt_template_id"] = SYSTEM_PROMPT_TEMPLATE_ID
     if not agent_info.get("prompt_template_name"):
         agent_info["prompt_template_name"] = SYSTEM_PROMPT_TEMPLATE_NAME

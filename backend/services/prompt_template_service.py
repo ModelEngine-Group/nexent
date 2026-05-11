@@ -31,6 +31,22 @@ SYSTEM_PROMPT_TEMPLATE_TENANT_ID = DEFAULT_TENANT_ID
 SYSTEM_PROMPT_TEMPLATE_USER_ID = DEFAULT_USER_ID
 
 
+def _normalize_prompt_template_entity(template: Optional[dict]) -> Optional[dict]:
+    """Normalize prompt template entity content keys to lowercase."""
+    if not template:
+        return template
+
+    normalized_template = dict(template)
+    normalized_template["template_content_zh"] = normalize_prompt_generate_template_content(
+        normalized_template.get("template_content_zh")
+    )
+    template_content_en = normalize_prompt_generate_template_content(
+        normalized_template.get("template_content_en")
+    )
+    normalized_template["template_content_en"] = template_content_en or None
+    return normalized_template
+
+
 def build_system_default_prompt_template_payload() -> dict:
     """Build the canonical system default prompt template payload from YAML files."""
     system_template_zh = normalize_prompt_generate_template_content(
@@ -63,7 +79,7 @@ def sync_system_default_prompt_template() -> dict:
         user_id=SYSTEM_PROMPT_TEMPLATE_USER_ID,
     )
     prompt_template["is_system_default"] = True
-    return prompt_template
+    return _normalize_prompt_template_entity(prompt_template)
 
 
 def get_system_default_prompt_template() -> dict:
@@ -76,10 +92,10 @@ def get_system_default_prompt_template() -> dict:
         prompt_template = sync_system_default_prompt_template()
     else:
         prompt_template["is_system_default"] = True
-    return {
+    return _normalize_prompt_template_entity({
         **prompt_template,
         "is_system_default": True,
-    }
+    })
 
 
 def _normalize_template_request(request: PromptTemplateRequest) -> dict:
@@ -123,10 +139,10 @@ def list_prompt_templates_impl(tenant_id: str, user_id: str) -> list[dict]:
         template_type=PROMPT_TEMPLATE_TYPE_AGENT_GENERATE,
     )
     return [system_default_template, *[
-        {
+        _normalize_prompt_template_entity({
             **template,
             "is_system_default": False,
-        }
+        })
         for template in templates
         if template.get("template_id") != SYSTEM_PROMPT_TEMPLATE_ID
     ]]
@@ -147,7 +163,7 @@ def get_prompt_template_detail_impl(template_id: int, tenant_id: str, user_id: s
         raise NotFoundException("Prompt template not found")
 
     template["is_system_default"] = False
-    return template
+    return _normalize_prompt_template_entity(template)
 
 
 def create_prompt_template_impl(
@@ -174,7 +190,7 @@ def create_prompt_template_impl(
         "updated_by": user_id,
     })
     created_template["is_system_default"] = False
-    return created_template
+    return _normalize_prompt_template_entity(created_template)
 
 
 def update_prompt_template_impl(
@@ -212,7 +228,7 @@ def update_prompt_template_impl(
         user_id=user_id,
     )
     updated_template["is_system_default"] = False
-    return updated_template
+    return _normalize_prompt_template_entity(updated_template)
 
 
 def delete_prompt_template_impl(template_id: int, tenant_id: str, user_id: str) -> dict:

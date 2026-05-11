@@ -1,8 +1,10 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from nexent.core.agents.agent_model import ToolConfig
+
+from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 
 
 class ModelConnectStatusEnum(Enum):
@@ -310,17 +312,41 @@ class GeneratePromptRequest(BaseModel):
 
 
 class PromptTemplateContentRequest(BaseModel):
-    DUTY_SYSTEM_PROMPT: str
-    CONSTRAINT_SYSTEM_PROMPT: str
-    FEW_SHOTS_SYSTEM_PROMPT: str
-    AGENT_VARIABLE_NAME_SYSTEM_PROMPT: str
-    AGENT_DISPLAY_NAME_SYSTEM_PROMPT: str
-    AGENT_DESCRIPTION_SYSTEM_PROMPT: str
-    USER_PROMPT: str
-    AGENT_NAME_REGENERATE_SYSTEM_PROMPT: str
-    AGENT_NAME_REGENERATE_USER_PROMPT: str
-    AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT: str
-    AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT: str
+    model_config = ConfigDict(populate_by_name=True)
+
+    duty_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["duty_system_prompt"]
+    )
+    constraint_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["constraint_system_prompt"]
+    )
+    few_shots_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["few_shots_system_prompt"]
+    )
+    agent_variable_name_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_variable_name_system_prompt"]
+    )
+    agent_display_name_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_system_prompt"]
+    )
+    agent_description_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_description_system_prompt"]
+    )
+    user_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["user_prompt"]
+    )
+    agent_name_regenerate_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_system_prompt"]
+    )
+    agent_name_regenerate_user_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_user_prompt"]
+    )
+    agent_display_name_regenerate_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_system_prompt"]
+    )
+    agent_display_name_regenerate_user_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_user_prompt"]
+    )
 
 
 class PromptTemplateRequest(BaseModel):

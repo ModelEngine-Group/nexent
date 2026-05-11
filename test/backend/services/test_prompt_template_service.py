@@ -67,17 +67,17 @@ def prompt_template_service_module(monkeypatch):
 def template_content_factory():
     def _build(seed: str = "value", **overrides):
         content = {
-            "DUTY_SYSTEM_PROMPT": f"{seed}-duty",
-            "CONSTRAINT_SYSTEM_PROMPT": f"{seed}-constraint",
-            "FEW_SHOTS_SYSTEM_PROMPT": f"{seed}-few-shots",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": f"{seed}-agent-name",
-            "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": f"{seed}-display-name",
-            "AGENT_DESCRIPTION_SYSTEM_PROMPT": f"{seed}-description",
-            "USER_PROMPT": f"{seed}-user",
-            "AGENT_NAME_REGENERATE_SYSTEM_PROMPT": f"{seed}-regen-name-system",
-            "AGENT_NAME_REGENERATE_USER_PROMPT": f"{seed}-regen-name-user",
-            "AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT": f"{seed}-regen-display-system",
-            "AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT": f"{seed}-regen-display-user",
+            "duty_system_prompt": f"{seed}-duty",
+            "constraint_system_prompt": f"{seed}-constraint",
+            "few_shots_system_prompt": f"{seed}-few-shots",
+            "agent_variable_name_system_prompt": f"{seed}-agent-name",
+            "agent_display_name_system_prompt": f"{seed}-display-name",
+            "agent_description_system_prompt": f"{seed}-description",
+            "user_prompt": f"{seed}-user",
+            "agent_name_regenerate_system_prompt": f"{seed}-regen-name-system",
+            "agent_name_regenerate_user_prompt": f"{seed}-regen-name-user",
+            "agent_display_name_regenerate_system_prompt": f"{seed}-regen-display-system",
+            "agent_display_name_regenerate_user_prompt": f"{seed}-regen-display-user",
         }
         content.update(overrides)
         return content
@@ -133,8 +133,8 @@ def test_build_system_default_prompt_template_payload(
     assert payload["template_name"] == "system_default"
     assert payload["tenant_id"] == prompt_template_service_module.SYSTEM_PROMPT_TEMPLATE_TENANT_ID
     assert payload["user_id"] == prompt_template_service_module.SYSTEM_PROMPT_TEMPLATE_USER_ID
-    assert payload["template_content_zh"]["DUTY_SYSTEM_PROMPT"] == "zh-duty"
-    assert payload["template_content_en"]["DUTY_SYSTEM_PROMPT"] == "en-duty"
+    assert payload["template_content_zh"]["duty_system_prompt"] == "zh-duty"
+    assert payload["template_content_en"]["duty_system_prompt"] == "en-duty"
 
 
 def test_sync_system_default_prompt_template_marks_system_default(
@@ -191,22 +191,22 @@ def test_normalize_template_request_trims_and_drops_empty_optional_fields(
         description="   ",
         template_content_zh=template_content_factory(
             "zh",
-            CONSTRAINT_SYSTEM_PROMPT="",
-            FEW_SHOTS_SYSTEM_PROMPT="   ",
+            constraint_system_prompt="",
+            few_shots_system_prompt="   ",
         ),
         template_content_en=template_content_factory(
             "en",
-            DUTY_SYSTEM_PROMPT="",
-            CONSTRAINT_SYSTEM_PROMPT="",
-            FEW_SHOTS_SYSTEM_PROMPT="",
-            AGENT_VARIABLE_NAME_SYSTEM_PROMPT="",
-            AGENT_DISPLAY_NAME_SYSTEM_PROMPT="",
-            AGENT_DESCRIPTION_SYSTEM_PROMPT="",
-            USER_PROMPT="",
-            AGENT_NAME_REGENERATE_SYSTEM_PROMPT="",
-            AGENT_NAME_REGENERATE_USER_PROMPT="",
-            AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT="",
-            AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT="",
+            duty_system_prompt="",
+            constraint_system_prompt="",
+            few_shots_system_prompt="",
+            agent_variable_name_system_prompt="",
+            agent_display_name_system_prompt="",
+            agent_description_system_prompt="",
+            user_prompt="",
+            agent_name_regenerate_system_prompt="",
+            agent_name_regenerate_user_prompt="",
+            agent_display_name_regenerate_system_prompt="",
+            agent_display_name_regenerate_user_prompt="",
         ),
     )
 
@@ -214,7 +214,7 @@ def test_normalize_template_request_trims_and_drops_empty_optional_fields(
 
     assert result["template_name"] == "template-a"
     assert result["description"] is None
-    assert "CONSTRAINT_SYSTEM_PROMPT" not in result["template_content_zh"]
+    assert "constraint_system_prompt" not in result["template_content_zh"]
     assert result["template_content_en"] is None
 
 
@@ -228,17 +228,17 @@ def test_normalize_template_request_requires_non_empty_zh_content(
     request = prompt_template_request_factory(
         template_content_zh=template_content_factory(
             "zh",
-            DUTY_SYSTEM_PROMPT="",
-            CONSTRAINT_SYSTEM_PROMPT="",
-            FEW_SHOTS_SYSTEM_PROMPT="",
-            AGENT_VARIABLE_NAME_SYSTEM_PROMPT="",
-            AGENT_DISPLAY_NAME_SYSTEM_PROMPT="",
-            AGENT_DESCRIPTION_SYSTEM_PROMPT="",
-            USER_PROMPT="",
-            AGENT_NAME_REGENERATE_SYSTEM_PROMPT="",
-            AGENT_NAME_REGENERATE_USER_PROMPT="",
-            AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT="",
-            AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT="",
+            duty_system_prompt="",
+            constraint_system_prompt="",
+            few_shots_system_prompt="",
+            agent_variable_name_system_prompt="",
+            agent_display_name_system_prompt="",
+            agent_description_system_prompt="",
+            user_prompt="",
+            agent_name_regenerate_system_prompt="",
+            agent_name_regenerate_user_prompt="",
+            agent_display_name_regenerate_system_prompt="",
+            agent_display_name_regenerate_user_prompt="",
         )
     )
 
@@ -402,8 +402,8 @@ def test_resolve_prompt_generate_template_falls_back_to_system_default_when_cust
         prompt_template_service_module,
         "sync_system_default_prompt_template",
         return_value={
-            "template_content_en": {"DUTY_SYSTEM_PROMPT": "system-en-duty"},
-            "template_content_zh": {"CONSTRAINT_SYSTEM_PROMPT": "system-zh-constraint"},
+            "template_content_en": {"duty_system_prompt": "system-en-duty"},
+            "template_content_zh": {"constraint_system_prompt": "system-zh-constraint"},
         },
     )
     mocker.patch.object(
@@ -420,8 +420,8 @@ def test_resolve_prompt_generate_template_falls_back_to_system_default_when_cust
     )
 
     assert result == {
-        "DUTY_SYSTEM_PROMPT": "system-en-duty",
-        "CONSTRAINT_SYSTEM_PROMPT": "system-zh-constraint",
+        "duty_system_prompt": "system-en-duty",
+        "constraint_system_prompt": "system-zh-constraint",
     }
 
 
@@ -432,8 +432,8 @@ def test_resolve_prompt_generate_template_merges_custom_and_system_fallbacks(
         prompt_template_service_module,
         "sync_system_default_prompt_template",
         return_value={
-            "template_content_en": {"FEW_SHOTS_SYSTEM_PROMPT": "system-en-few"},
-            "template_content_zh": {"USER_PROMPT": "system-zh-user"},
+            "template_content_en": {"few_shots_system_prompt": "system-en-few"},
+            "template_content_zh": {"user_prompt": "system-zh-user"},
         },
     )
     mocker.patch.object(
@@ -441,8 +441,8 @@ def test_resolve_prompt_generate_template_merges_custom_and_system_fallbacks(
         "get_prompt_template_by_id",
         return_value={
             "template_id": 6,
-            "template_content_en": {"DUTY_SYSTEM_PROMPT": "custom-en-duty"},
-            "template_content_zh": {"CONSTRAINT_SYSTEM_PROMPT": "custom-zh-constraint"},
+            "template_content_en": {"duty_system_prompt": "custom-en-duty"},
+            "template_content_zh": {"constraint_system_prompt": "custom-zh-constraint"},
         },
     )
 
@@ -454,10 +454,10 @@ def test_resolve_prompt_generate_template_merges_custom_and_system_fallbacks(
     )
 
     assert result == {
-        "DUTY_SYSTEM_PROMPT": "custom-en-duty",
-        "CONSTRAINT_SYSTEM_PROMPT": "custom-zh-constraint",
-        "FEW_SHOTS_SYSTEM_PROMPT": "system-en-few",
-        "USER_PROMPT": "system-zh-user",
+        "duty_system_prompt": "custom-en-duty",
+        "constraint_system_prompt": "custom-zh-constraint",
+        "few_shots_system_prompt": "system-en-few",
+        "user_prompt": "system-zh-user",
     }
 
 

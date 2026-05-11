@@ -458,24 +458,23 @@ export default function AgentGenerateDetail({
     if (!selectedTemplate) {
       return;
     }
+    handleSelectPromptTemplate(selectedTemplate);
+  };
 
+  const handleSelectPromptTemplate = (template: PromptTemplate) => {
     setBusinessInfo((prev) => ({
       ...prev,
-      promptTemplateId: selectedTemplate.template_id,
-      promptTemplateName: selectedTemplate.template_name,
+      promptTemplateId: template.template_id,
+      promptTemplateName: template.template_name,
     }));
 
     updateBusinessInfo({
       business_description: businessInfo.businessDescription || "",
       business_logic_model_id: businessInfo.businessLogicModelId,
       business_logic_model_name: businessInfo.businessLogicModelName,
-      prompt_template_id: selectedTemplate.template_id,
-      prompt_template_name: selectedTemplate.template_name,
+      prompt_template_id: template.template_id,
+      prompt_template_name: template.template_name,
     });
-  };
-
-  const handleSelectPromptTemplate = (template: PromptTemplate) => {
-    handlePromptTemplateChange(template.template_id);
   };
 
   // Handle expand modal functions
@@ -866,6 +865,32 @@ export default function AgentGenerateDetail({
     disabled: model.connect_status !== "available",
   }));
 
+  const promptTemplateSelectOptions = useMemo(() => {
+    const options = promptTemplates.map((template) => ({
+      value: template.template_id,
+      label: template.is_system_default
+        ? t("businessLogic.config.template.systemDefault")
+        : template.template_name,
+    }));
+
+    if (
+      businessInfo.promptTemplateId &&
+      !options.some((option) => option.value === businessInfo.promptTemplateId)
+    ) {
+      options.unshift({
+        value: businessInfo.promptTemplateId,
+        label: businessInfo.promptTemplateName || t("businessLogic.config.template.label"),
+      });
+    }
+
+    return options;
+  }, [
+    businessInfo.promptTemplateId,
+    businessInfo.promptTemplateName,
+    promptTemplates,
+    t,
+  ]);
+
   const generationControlSelectStyle = {
     width: "min(300px, 100%)",
     minWidth: "220px",
@@ -1251,12 +1276,7 @@ export default function AgentGenerateDetail({
                       value={businessInfo.promptTemplateId}
                       onChange={handlePromptTemplateChange}
                       loading={loadingPromptTemplates}
-                      options={promptTemplates.map((template) => ({
-                        value: template.template_id,
-                        label: template.is_system_default
-                          ? t("businessLogic.config.template.systemDefault")
-                          : template.template_name,
-                      }))}
+                      options={promptTemplateSelectOptions}
                       size="middle"
                       disabled={!editable || isGenerating}
                       style={generationControlSelectStyle}
