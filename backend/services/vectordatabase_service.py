@@ -37,6 +37,7 @@ from database.knowledge_db import (
     get_knowledge_info_by_tenant_id,
     update_model_name_by_index_name,
     update_last_doc_update_time,
+    update_last_summary_time,
 )
 from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -1462,7 +1463,6 @@ class ElasticSearchService:
             }
             update_knowledge_record(update_data)
             # Update last_summary_time for auto-summary tracking
-            from database.knowledge_db import update_last_summary_time
             update_last_summary_time(index_name)
             return {"status": "success", "message": f"Index {index_name} summary updated successfully",
                     "summary": summary_result}
