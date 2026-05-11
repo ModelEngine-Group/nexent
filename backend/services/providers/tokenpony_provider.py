@@ -25,6 +25,10 @@ class TokenPonyModelProvider(AbstractModelProvider):
         """
         try:
             target_model_type: str = provider_config["model_type"]
+            # Normalize model_type to snake_case for consistency
+            # Convert camelCase to snake_case (e.g., "imageUnderstanding" -> "image_understanding")
+            import re
+            model_type_normalized = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', target_model_type).lower()
             model_api_key: str = provider_config["api_key"]
 
             headers = {"Authorization": f"Bearer {model_api_key}"}
@@ -96,7 +100,7 @@ class TokenPonyModelProvider(AbstractModelProvider):
                 elif 'video' in m_id or 'video_understanding' in m_id:
                     cleaned_model.update({"model_tag": "video_understanding", "model_type": "video_understanding"})
                     categorized_models['video_understanding'].append(cleaned_model)
-                elif any(keyword in m_id for keyword in ['-vl', 'vl-', 'ocr', 'vision', 'qwen-vl', 'qwen2-vl']):
+                elif any(keyword in m_id for keyword in ['-vl', 'vl-', 'ocr', 'vision', 'qwen-vl', 'qwen2-vl', 'qwen-vl-', 'qwen2.5-vl', 'glm-4v-flash']):
                     cleaned_model.update({"model_tag": "image_understanding", "model_type": "image_understanding"})
                     categorized_models['image_understanding'].append(cleaned_model)
 
@@ -107,14 +111,14 @@ class TokenPonyModelProvider(AbstractModelProvider):
                     categorized_models['chat'].append(cleaned_model)
 
             # Return the specific list based on the requested target_model_type
-            if target_model_type == "llm":
+            if model_type_normalized == "llm":
                 return categorized_models["chat"]
-            elif target_model_type in ("embedding", "multi_embedding"):
+            elif model_type_normalized in ("embedding", "multi_embedding"):
                 return categorized_models["embedding"]
-            elif target_model_type in ("image_understanding", "image_generation", "video_understanding"):
-                return categorized_models[target_model_type]
-            elif target_model_type in categorized_models:
-                return categorized_models[target_model_type]
+            elif model_type_normalized in ("image_understanding", "image_generation", "video_understanding"):
+                return categorized_models[model_type_normalized]
+            elif model_type_normalized in categorized_models:
+                return categorized_models[model_type_normalized]
             else:
                 return []
 

@@ -57,14 +57,42 @@ def query_version_list(
     """
     Query version list for an agent
     """
-    with get_db_session() as session:
-        versions = session.query(AgentVersion).filter(
-            AgentVersion.agent_id == agent_id,
-            AgentVersion.tenant_id == tenant_id,
-            AgentVersion.delete_flag == 'N',
-        ).order_by(AgentVersion.version_no.desc()).all()
+    try:
+        with get_db_session() as session:
+            versions = session.query(AgentVersion).filter(
+                AgentVersion.agent_id == agent_id,
+                AgentVersion.tenant_id == tenant_id,
+                AgentVersion.delete_flag == 'N',
+            ).order_by(AgentVersion.version_no.desc()).all()
 
-        return [as_dict(v) for v in versions]
+            return [as_dict(v) for v in versions]
+    except Exception as e:
+        error_str = str(e).lower()
+        # If is_a2a column doesn't exist, retry with explicit column selection
+        if "is_a2a" in str(e) and ("does not exist" in error_str or "undefinedcolumn" in error_str):
+            with get_db_session() as session:
+                from sqlalchemy import select
+                columns = [
+                    AgentVersion.id,
+                    AgentVersion.tenant_id,
+                    AgentVersion.agent_id,
+                    AgentVersion.version_no,
+                    AgentVersion.version_name,
+                    AgentVersion.release_note,
+                    AgentVersion.source_version_no,
+                    AgentVersion.source_type,
+                    AgentVersion.status,
+                    AgentVersion.created_by,
+                    AgentVersion.create_time,
+                ]
+                versions = session.query(*columns).filter(
+                    AgentVersion.agent_id == agent_id,
+                    AgentVersion.tenant_id == tenant_id,
+                    AgentVersion.delete_flag == 'N',
+                ).order_by(AgentVersion.version_no.desc()).all()
+
+                return [dict(zip([c.key for c in columns], v)) for v in versions]
+        raise
 
 
 def query_current_version_no(
@@ -141,11 +169,35 @@ def insert_version(
     Insert a new version metadata record
     Returns: version id
     """
-    with get_db_session() as session:
-        result = session.execute(
-            insert(AgentVersion).values(**version_data).returning(AgentVersion.id)
-        )
-        return result.scalar_one()
+    from sqlalchemy import text
+
+    # First try with full data
+    try:
+        with get_db_session() as session:
+            result = session.execute(
+                insert(AgentVersion).values(**version_data).returning(AgentVersion.id)
+            )
+            return result.scalar_one()
+    except Exception as e:
+        error_str = str(e).lower()
+        # If is_a2a column doesn't exist, retry without it using native SQL
+        if "is_a2a" in str(e) and ("does not exist" in error_str or "undefinedcolumn" in error_str):
+            logger.info("is_a2a column not found, using native SQL to insert")
+            # Build column list and parameter placeholders
+            columns = [k for k in version_data.keys() if k != 'is_a2a']
+            col_list = ', '.join(columns)
+            placeholders = ', '.join([f':{c}' for c in columns])
+            insert_sql = text(f"""
+                INSERT INTO nexent.ag_tenant_agent_version_t (id, {col_list})
+                VALUES (nextval('nexent.ag_tenant_agent_version_t_id_seq'), {placeholders})
+                RETURNING id
+            """)
+            # Build params without is_a2a
+            params = {k: v for k, v in version_data.items() if k != 'is_a2a'}
+            with get_db_session() as session:
+                result = session.execute(insert_sql, params)
+                return result.scalar_one()
+        raise
 
 
 def update_version_status(

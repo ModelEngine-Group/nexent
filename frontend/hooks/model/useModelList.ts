@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { modelService } from "@/services/modelService";
 import { ModelOption } from "@/types/modelConfig";
 import { useMemo } from "react";
+import { MODEL_TYPES } from "@/const/modelConfig";
 export function useModelList(options?: { enabled?: boolean; staleTime?: number }) {
 	const queryClient = useQueryClient();
 
@@ -47,11 +48,11 @@ export function useModelList(options?: { enabled?: boolean; staleTime?: number }
 	}, [models]);
 
 	const imageUnderstandingModels = useMemo(() => {
-		return models.filter((model) => model.type === "image_understanding");
+		return models.filter((model) => model.type === MODEL_TYPES.IMAGE_UNDERSTANDING);
 	}, [models]);
 
 	const availableImageUnderstandingModels = useMemo(() => {
-		return models.filter((model) => model.type === "image_understanding" && model.connect_status === "available");
+		return models.filter((model) => model.type === MODEL_TYPES.IMAGE_UNDERSTANDING && model.connect_status === "available");
 	}, [models]);
 
 	const imageGenerationModels = useMemo(() => {

@@ -369,11 +369,18 @@ class A2AClientService:
         Returns:
             List of agent information dicts.
         """
-        return a2a_agent_db.list_external_agents(
-            tenant_id=tenant_id,
-            source_type=source_type,
-            is_available=is_available
-        )
+        try:
+            return a2a_agent_db.list_external_agents(
+                tenant_id=tenant_id,
+                source_type=source_type,
+                is_available=is_available
+            )
+        except Exception as e:
+            # Return empty list if table doesn't exist (migration not applied)
+            if "relation" in str(e).lower() and "does not exist" in str(e).lower():
+                logger.warning(f"A2A external agents table not found, returning empty list: {e}")
+                return []
+            raise
 
     def update_agent_protocol(
         self,

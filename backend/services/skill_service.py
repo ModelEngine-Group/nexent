@@ -460,6 +460,10 @@ class SkillService:
             skills = skill_db.list_skills()
             return [self._overlay_params_from_local_config_yaml(s) for s in skills]
         except Exception as e:
+            # Return empty list if table doesn't exist (migration not applied)
+            if "relation" in str(e).lower() and "does not exist" in str(e).lower():
+                logger.warning(f"Skills table not found, returning empty list: {e}")
+                return []
             logger.error(f"Error listing skills: {e}")
             raise SkillException(f"Failed to list skills: {str(e)}") from e
 

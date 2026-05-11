@@ -396,7 +396,6 @@ export interface UpdateAgentInfoPayload {
   model_id?: number;
   max_steps?: number;
   provide_run_summary?: boolean;
-  enable_context_manager?: boolean;
   enabled?: boolean;
   business_description?: string;
   business_logic_model_name?: string;

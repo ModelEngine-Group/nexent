@@ -300,14 +300,24 @@ export const ModelConfigSection = forwardRef<
           )
         : true;
 
+      // vlm is now called image_understanding, but we need to support legacy vlm models
+      const legacyVlm = modelConfig.vlm?.displayName;
+      const legacyVlmExists = legacyVlm
+        ? allModels.some(
+            (m) =>
+              m.displayName === legacyVlm &&
+              (m.type === MODEL_TYPES.VLM || m.type === MODEL_TYPES.IMAGE_UNDERSTANDING)
+          )
+        : true;
+
       const imageUnderstanding = modelConfig.imageUnderstanding?.displayName;
       const imageUnderstandingExists = imageUnderstanding
         ? allModels.some(
             (m) =>
               m.displayName === imageUnderstanding &&
-              m.type === MODEL_TYPES.IMAGE_UNDERSTANDING
+              (m.type === MODEL_TYPES.IMAGE_UNDERSTANDING || m.type === MODEL_TYPES.VLM)
           )
-        : true;
+        : legacyVlmExists;
 
       const imageGeneration = modelConfig.imageGeneration?.displayName;
       const imageGenerationExists = imageGeneration
@@ -398,6 +408,11 @@ export const ModelConfigSection = forwardRef<
         configUpdates.rerank = { modelName: "", displayName: "" };
       }
 
+      // Handle legacy vlm configuration - migrate to imageUnderstanding or clear
+      if (!legacyVlmExists && legacyVlm) {
+        configUpdates.vlm = { modelName: "", displayName: "" };
+      }
+
       if (!imageUnderstandingExists && imageUnderstanding) {
         configUpdates.imageUnderstanding = { modelName: "", displayName: "" };
       }
@@ -426,6 +441,9 @@ export const ModelConfigSection = forwardRef<
       }
 
       // Check if there are configured models that need connectivity verification
+      // Handle legacy vlm configuration check
+      const hasLegacyVlmConfigured = !!modelConfig.vlm?.modelName;
+
       const hasConfiguredModels =
         !!modelConfig.llm.modelName ||
         !!modelConfig.embedding.modelName ||
@@ -435,7 +453,8 @@ export const ModelConfigSection = forwardRef<
         !!modelConfig.imageGeneration?.modelName ||
         !!modelConfig.videoUnderstanding?.modelName ||
         !!modelConfig.tts.modelName ||
-        !!modelConfig.stt.modelName;
+        !!modelConfig.stt.modelName ||
+        hasLegacyVlmConfigured;
 
       // Perform verification directly here instead of using setTimeout
       // This ensures we use model data from the current function scope instead of relying on state updates

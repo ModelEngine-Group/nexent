@@ -14,6 +14,11 @@ class ProviderEnum(str, Enum):
 SILICON_BASE_URL = "https://api.siliconflow.cn/v1/"
 SILICON_GET_URL = "https://api.siliconflow.cn/v1/models"
 
+# Silicon Flow model tags (for filtering)
+# Based on SiliconFlow website: https://cloud.siliconflow.cn/me/models
+SILICON_TAG_VISION = "VLM"  # Vision tag - VLM models (e.g., Kimi-K2.6, Qwen3.6)
+SILICON_TAG_VIDEO = "视频"  # Video tag - Video understanding models
+
 # Dashcope
 DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
 DASHSCOPE_GET_URL = "https://dashscope.aliyuncs.com/api/v1/models"

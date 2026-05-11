@@ -294,7 +294,13 @@ def get_db_session(db_session=None):
     except Exception as e:
         if db_session is None:
             session.rollback()
-        logger.error(f"Database operation failed: {str(e)}")
+        error_str = str(e).lower()
+        # For "is_a2a column does not exist" errors, just log warning and raise
+        # The caller should handle this by removing the field and retrying
+        if "is_a2a" in str(e) and "does not exist" in error_str:
+            logger.warning(f"Database operation failed (expected for missing is_a2a column): {str(e)}")
+        else:
+            logger.error(f"Database operation failed: {str(e)}")
         raise e
     finally:
         if db_session is None:
@@ -373,6 +379,11 @@ def get_monitoring_db_session(db_session=None):
     except Exception as e:
         if db_session is None:
             session.rollback()
+        # Silently ignore "table does not exist" errors for monitoring
+        # This allows the app to work even if the monitoring table hasn't been created yet
+        if "does not exist" in str(e).lower():
+            logger.warning(f"Monitoring table not found, skipping: {str(e)}")
+            return
         logger.error(f"Monitoring database operation failed: {str(e)}")
         raise
     finally:

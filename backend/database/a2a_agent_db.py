@@ -1214,12 +1214,19 @@ def get_server_agent_ids(tenant_id: str) -> set[int]:
     Returns:
         Set of agent IDs that have A2A Server registration.
     """
-    with _get_db_session() as session:
-        agent_ids = session.query(A2AServerAgent.agent_id).filter(
-            A2AServerAgent.tenant_id == tenant_id,
-            A2AServerAgent.delete_flag != 'Y'
-        ).all()
-        return {row[0] for row in agent_ids}
+    try:
+        with _get_db_session() as session:
+            agent_ids = session.query(A2AServerAgent.agent_id).filter(
+                A2AServerAgent.tenant_id == tenant_id,
+                A2AServerAgent.delete_flag != 'Y'
+            ).all()
+            return {row[0] for row in agent_ids}
+    except Exception as e:
+        # Return empty set if table doesn't exist (migration not applied)
+        if "does not exist" in str(e).lower():
+            logger.warning(f"A2A server agent table not found, returning empty set: {e}")
+            return set()
+        raise
 
 
 # =============================================================================

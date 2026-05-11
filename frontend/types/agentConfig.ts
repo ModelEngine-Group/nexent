@@ -42,7 +42,6 @@ export interface Agent {
   model_id?: number;
   max_step: number;
   provide_run_summary: boolean;
-  enable_context_manager?: boolean;
   tools: Tool[];
   duty_prompt?: string;
   constraint_prompt?: string;

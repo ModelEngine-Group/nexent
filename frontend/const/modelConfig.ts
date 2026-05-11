@@ -7,9 +7,9 @@ export const MODEL_TYPES = {
   STT: "stt",
   TTS: "tts",
   VLM: "vlm",
-  IMAGE_UNDERSTANDING: "image_understanding",
-  IMAGE_GENERATION: "image_generation",
-  VIDEO_UNDERSTANDING: "video_understanding",
+  IMAGE_UNDERSTANDING: "imageUnderstanding",
+  IMAGE_GENERATION: "imageGeneration",
+  VIDEO_UNDERSTANDING: "videoUnderstanding",
 } as const;
 
 // Model source constants
