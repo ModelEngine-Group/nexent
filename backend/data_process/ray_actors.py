@@ -51,6 +51,7 @@ class DataProcessorRayActor:
         Normalize task/model-related processing params.
         """
         process_params = dict(params)
+        self._apply_model_paths(process_params)
         if task_id:
             process_params["task_id"] = task_id
 
@@ -90,24 +91,19 @@ class DataProcessorRayActor:
         process_params: Dict[str, Any],
         log_subject: str,
     ) -> List[Dict[str, Any]]:
-        chunks = self._processor.file_process(
+        result = self._processor.file_process(
             file_data=file_data,
             filename=filename,
             chunking_strategy=chunking_strategy,
             **process_params
         )
-
-        if chunks is None:
-            logger.warning(
-                f"[RayActor] file_process returned None for {log_subject}='{filename}'")
-            return []
-        if not isinstance(chunks, list):
-            logger.error(
-                f"[RayActor] file_process returned non-list type {type(chunks)} for {log_subject}='{filename}'")
-            return []
-        if len(chunks) == 0:
-            logger.warning(
-                f"[RayActor] file_process returned empty list for {log_subject}='{filename}'")
+        
+        chunks, images_info = self._normalize_processor_result(result)
+        if images_info:
+            self._append_image_chunks(
+                source=filename, chunks=chunks, images_info=images_info)
+        chunks = self._validate_chunks(chunks, filename)
+        if not chunks:
             return []
 
         logger.info(
@@ -169,19 +165,7 @@ class DataProcessorRayActor:
             chunking_strategy=chunking_strategy,
             process_params=process_params,
             log_subject="source",
-        )
-        chunks, images_info = self._normalize_processor_result(result)
-        if images_info:
-            self._append_image_chunks(
-                source=source, chunks=chunks, images_info=images_info)
-
-        chunks = self._validate_chunks(chunks, source)
-        if not chunks:
-            return []
-
-        logger.info(
-            f"[RayActor] Processing done: produced {len(chunks)} chunks for source='{source}'")
-        return chunks
+        ) 
 
     def _apply_model_paths(self, params: Dict[str, Any]) -> None:
         params["table_transformer_model_path"] = TABLE_TRANSFORMER_MODEL_PATH
@@ -303,6 +287,7 @@ class DataProcessorRayActor:
                 f"[RayActor] file_process returned empty list for source='{source}'")
             return []
         return chunks
+    
     def process_bytes(
         self,
         file_bytes: bytes,

@@ -32,7 +32,7 @@ class TestDataProcessCore:
         assert "Unstructured" in core.processors
         assert "OpenPyxl" in core.processors
         assert "UniversalImageExtractor" in core.processors
-        assert len(core.processors) == 3
+        assert len(core.processors) == 4
 
     def test_file_process_with_excel_file(self, core, mocker: MockFixture):
         """Test file processing with Excel file"""

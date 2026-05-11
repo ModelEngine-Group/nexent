@@ -111,7 +111,7 @@ sys.modules['consts.const'] = consts_mock.const
 sys.modules['consts.model'] = MagicMock()
 sys.modules['consts.error_code'] = MagicMock()
 sys.modules['consts.exceptions'] = MagicMock()
-
+sys.modules['consts.scheduler'] = MagicMock()
 
 
 class _VectorDatabaseCore:
@@ -1718,8 +1718,10 @@ class TestElasticSearchService(unittest.TestCase):
         mock_embedding_model.model_type = "multimodal"
 
         with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
-                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
-            mock_get_record.return_value = {"tenant_id": "tenant-1"}
+                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
+                patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
+            mock_get_record.return_value = {
+                "tenant_id": consts_mock.const.DEFAULT_TENANT_ID}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 6}
 
             result = ElasticSearchService.index_documents(
@@ -1731,7 +1733,7 @@ class TestElasticSearchService(unittest.TestCase):
 
             self.assertTrue(result["success"])
             mock_tenant_cfg.get_model_config.assert_called_once_with(
-                key="MULTI_EMBEDDING_ID", tenant_id="tenant-1"
+                key="MULTI_EMBEDDING_ID", tenant_id=consts_mock.const.DEFAULT_TENANT_ID
             )
 
     def test_index_documents_fetches_image_bytes(self):
@@ -1743,8 +1745,10 @@ class TestElasticSearchService(unittest.TestCase):
 
         with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
                 patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
-                patch('backend.services.vectordatabase_service.get_file_stream') as mock_get_stream:
-            mock_get_record.return_value = {"tenant_id": "tenant-1"}
+                patch('backend.services.vectordatabase_service.get_file_stream') as mock_get_stream, \
+                patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
+            mock_get_record.return_value = {
+                "tenant_id": consts_mock.const.DEFAULT_TENANT_ID}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
             mock_get_stream.return_value = io.BytesIO(b"img-bytes")
 
