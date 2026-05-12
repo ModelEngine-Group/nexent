@@ -275,8 +275,8 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     if model_config.get("model_factory", "").lower() == "modelengine":
         messages = [{"role": msg["role"], "content": str(msg.get("content", ""))} for msg in messages]
 
-    # Call the model
-    response = llm.generate(messages)
+    # Call the model with stream=False to get a single response
+    response = llm.generate(messages, stream=False)
     if not response or not response.content or not response.content.strip():
         return DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
     return remove_think_blocks(response.content.strip())

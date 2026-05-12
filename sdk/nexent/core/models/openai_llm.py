@@ -142,7 +142,7 @@ class OpenAIModel(OpenAIServerModel):
         completion_kwargs["stream_options"] = {"include_usage": True}
 
         current_request = self.client.chat.completions.create(
-            stream=True, **completion_kwargs)
+            stream=kwargs.get("stream", True), **completion_kwargs)
 
         # Validate response type: ensure we got a proper iterator, not error strings or dicts
         # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
