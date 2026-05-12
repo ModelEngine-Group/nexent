@@ -46,7 +46,6 @@ rerank_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
 sys.modules['nexent.core.models.rerank_model'] = rerank_module
 
 sys.modules['nexent.core.models.stt_model'] = MagicMock()
-sys.modules['nexent.core.models.tts_model'] = MagicMock()
 sys.modules['nexent.core.nlp'] = MagicMock()
 sys.modules['nexent.core.nlp.tokenizer'] = MagicMock()
 vector_db_module = types.ModuleType("nexent.vector_database")
@@ -85,11 +84,6 @@ class MockSTTConfig:
     def __init__(self, *args, **kwargs): pass
 class MockSTTModel:
     def __init__(self, *args, **kwargs): pass
-class MockTTSConfig:
-    def __init__(self, *args, **kwargs): pass
-class MockTTSModel:
-    def __init__(self, *args, **kwargs): pass
-
 sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
 sys.modules['nexent.core.models.embedding_model'].BaseEmbedding = MockBaseEmbedding
 sys.modules['nexent.core.models.embedding_model'].OpenAICompatibleEmbedding = MockOpenAICompatibleEmbedding
@@ -97,8 +91,6 @@ sys.modules['nexent.core.models.embedding_model'].JinaEmbedding = MockJinaEmbedd
 sys.modules['nexent.core.nlp.tokenizer'].Tokenizer = MockTokenizer
 sys.modules['nexent.core.models.stt_model'].STTConfig = MockSTTConfig
 sys.modules['nexent.core.models.stt_model'].STTModel = MockSTTModel
-sys.modules['nexent.core.models.tts_model'].TTSConfig = MockTTSConfig
-sys.modules['nexent.core.models.tts_model'].TTSModel = MockTTSModel
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()
 

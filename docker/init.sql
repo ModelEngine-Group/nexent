@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "tenant_id" varchar(100) COLLATE "pg_catalog"."default",
   "knowledge_sources" varchar(100) COLLATE "pg_catalog"."default",
   "embedding_model_name" varchar(200) COLLATE "pg_catalog"."default",
+  "embedding_model_id" INTEGER,
   "group_ids" varchar,
   "ingroup_permission" varchar(30),
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
@@ -218,6 +219,9 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
   "updated_by" varchar(100) COLLATE "pg_catalog"."default",
   "created_by" varchar(100) COLLATE "pg_catalog"."default",
+  "summary_frequency" varchar(10) COLLATE "pg_catalog"."default",
+  "last_summary_time" timestamp(0),
+  "last_doc_update_time" timestamp(0),
   CONSTRAINT "knowledge_record_t_pk" PRIMARY KEY ("knowledge_id")
 );
 ALTER TABLE "knowledge_record_t" OWNER TO "root";
@@ -228,11 +232,17 @@ COMMENT ON COLUMN "knowledge_record_t"."knowledge_describe" IS 'Knowledge base d
 COMMENT ON COLUMN "knowledge_record_t"."tenant_id" IS 'Tenant ID';
 COMMENT ON COLUMN "knowledge_record_t"."knowledge_sources" IS 'Knowledge base sources';
 COMMENT ON COLUMN "knowledge_record_t"."embedding_model_name" IS 'Embedding model name, used to record the embedding model used by the knowledge base';
+COMMENT ON COLUMN "knowledge_record_t"."embedding_model_id" IS 'Embedding model ID, foreign key reference to model_record_t.model_id';
 COMMENT ON COLUMN "knowledge_record_t"."group_ids" IS 'Knowledge base group IDs list';
 COMMENT ON COLUMN "knowledge_record_t"."ingroup_permission" IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 COMMENT ON COLUMN "knowledge_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
+COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'User who last updated the record, audit field';
+COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'User who created the record, audit field';
+COMMENT ON COLUMN "knowledge_record_t"."summary_frequency" IS 'Auto-summary frequency: 1h, 3h, 6h, 1d, 1w, or NULL (disabled)';
+COMMENT ON COLUMN "knowledge_record_t"."last_summary_time" IS 'Timestamp of last summary generation';
+COMMENT ON COLUMN "knowledge_record_t"."last_doc_update_time" IS 'Timestamp of last document add/delete operation, used for auto-summary optimization to skip unnecessary summary regeneration';
 COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "knowledge_record_t" IS 'Records knowledge base description and status information';

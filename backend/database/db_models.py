@@ -178,6 +178,10 @@ class ModelRecord(TableBase):
         Boolean, default=True, doc="Whether to verify SSL certificates when connecting to this model API. Default is true. Set to false for local services without SSL support.")
     chunk_batch = Column(
         Integer, doc="Batch size for concurrent embedding requests during document chunking")
+    model_appid = Column(
+        String(100), doc="Application ID for model authentication (used by some STT/TTS providers like Volcano Engine)")
+    access_token = Column(
+        String(100), doc="Access token for model authentication (used by some STT/TTS providers like Volcano Engine)")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -353,10 +357,17 @@ class KnowledgeRecord(TableBase):
     knowledge_describe = Column(String(3000), doc="Knowledge base description")
     knowledge_sources = Column(String(300), doc="Knowledge base sources")
     embedding_model_name = Column(String(200), doc="Embedding model name, used to record the embedding model used by the knowledge base")
+    embedding_model_id = Column(Integer, doc="Embedding model ID, foreign key reference to model_record_t.model_id")
     tenant_id = Column(String(100), doc="Tenant ID")
     group_ids = Column(String, doc="Knowledge base group IDs list")
     ingroup_permission = Column(
         String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    summary_frequency = Column(String(10), nullable=True,
+        doc="Auto-summary frequency: '3h', '5h', '1d', '1w', or NULL (disabled)")
+    last_summary_time = Column(TIMESTAMP(timezone=False), nullable=True,
+        doc="Timestamp of last summary generation")
+    last_doc_update_time = Column(TIMESTAMP(timezone=False), nullable=True,
+        doc="Timestamp of last document add/delete operation")
 
 
 class TenantConfig(TableBase):

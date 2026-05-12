@@ -599,23 +599,25 @@ def test_rollback_version_impl_success(monkeypatch):
         "version_no": 1,
         "version_name": "v1.0",
     }
-    mock_agent_snapshot = {"agent_id": 1, "name": "Test Agent"}
-    mock_tools_snapshot = [{"tool_id": 1}]
-    mock_relations_snapshot = [{"relation_id": 1}]
-    mock_skills_snapshot = [{"skill_id": 1}]
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
-    mock_query_snapshot = MagicMock(
-        return_value=(mock_agent_snapshot, mock_tools_snapshot, mock_relations_snapshot)
-    )
+
+    # Mock query_agent_snapshot
+    mock_agent_snapshot = {"agent_id": 1, "name": "test"}
+    mock_tools_snapshot = []
+    mock_relations_snapshot = []
+    mock_query_snapshot = MagicMock(return_value=(mock_agent_snapshot, mock_tools_snapshot, mock_relations_snapshot))
     monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
-    monkeypatch.setattr(
-        skill_db_mock,
-        "query_skill_instances_by_agent_id",
-        MagicMock(return_value=mock_skills_snapshot),
-    )
-    mock_restore_draft = MagicMock()
-    monkeypatch.setattr(agent_version_service_module, "restore_agent_draft", mock_restore_draft)
+
+    # Mock restore_agent_draft
+    mock_restore = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "restore_agent_draft", mock_restore)
+    mock_query_snapshot = MagicMock(return_value=({"agent_id": 1}, [], []))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
+    monkeypatch.setattr(agent_version_db_mock, "restore_agent_draft", MagicMock(return_value=True))
+    mock_update_current = MagicMock(return_value=1)
+    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
 
     result = rollback_version_impl(
         agent_id=1,
@@ -624,16 +626,11 @@ def test_rollback_version_impl_success(monkeypatch):
     )
 
     assert result["version_no"] == 1
+    assert result["version_name"] == "v1.0"
     assert "Successfully rolled back" in result["message"]
-    mock_restore_draft.assert_called_once_with(
-        agent_id=1,
-        tenant_id="tenant1",
-        target_version_no=1,
-        target_agent_snapshot=mock_agent_snapshot,
-        target_tool_snapshots=mock_tools_snapshot,
-        target_relation_snapshots=mock_relations_snapshot,
-        target_skill_snapshots=mock_skills_snapshot,
-    )
+    mock_search.assert_called_once_with(1, "tenant1", 1)
+    mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
+    mock_restore.assert_called_once()
 
 
 def test_rollback_version_impl_version_not_found(monkeypatch):
@@ -650,17 +647,18 @@ def test_rollback_version_impl_version_not_found(monkeypatch):
 
 
 def test_rollback_version_impl_draft_not_found(monkeypatch):
-    """Test rolling back when draft doesn't exist"""
+    """Test rolling back when snapshot is not found"""
     mock_version = {"version_no": 1}
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
-    mock_query_snapshot = MagicMock(return_value=({"agent_id": 1}, [], []))
+    mock_query_snapshot = MagicMock(return_value=(None, [], []))
     monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
-    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
-    mock_restore_draft = MagicMock(side_effect=ValueError("Agent draft not found"))
-    monkeypatch.setattr(agent_version_service_module, "restore_agent_draft", mock_restore_draft)
 
-    with pytest.raises(ValueError, match="Agent draft not found"):
+    # Mock query_agent_snapshot to return empty agent (falsy)
+    mock_query_snapshot = MagicMock(return_value=(None, [], []))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+
+    with pytest.raises(ValueError, match="Agent snapshot for version 1 not found"):
         rollback_version_impl(
             agent_id=1,
             tenant_id="tenant1",

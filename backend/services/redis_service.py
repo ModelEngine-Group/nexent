@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, Optional, Tuple, Set
 
 import redis
 
@@ -215,7 +216,7 @@ class RedisService:
 
         return result
 
-    def _recursively_delete_task_and_parents(self, task_id: str) -> tuple[int, set]:
+    def _recursively_delete_task_and_parents(self, task_id: str) -> Tuple[int, Set[str]]:
         """
         Iteratively delete a Celery task and all its parent tasks from Redis.
         A single task chain is deleted, and the IDs of the deleted tasks are returned.
@@ -309,16 +310,11 @@ class RedisService:
 
                             # Check for failed tasks where metadata is in the exception message
                             if task_index_name is None and 'exc_message' in result:
-                                try:
-                                    exc_str = str(result['exc_message'])
-                                    if '{' in exc_str and '}' in exc_str:
-                                        json_part = exc_str[exc_str.find('{'):exc_str.rfind('}')+1]
-                                        cleaned_json_part = json_part.replace('\\"', '"')
-                                        error_data = json.loads(cleaned_json_part)
-                                        task_index_name = error_data.get('index_name')
-                                except (json.JSONDecodeError, TypeError, IndexError) as e:
-                                    key_str = key.decode('utf-8') if isinstance(key, bytes) else key
-                                    logger.warning(f"Could not parse exception metadata for task key {key_str}: {e}")
+                                error_data = self._extract_error_metadata_from_exc_message(
+                                    result.get("exc_message")
+                                )
+                                if error_data:
+                                    task_index_name = error_data.get('index_name')
 
                         if task_index_name == index_name:
                             key_str = key.decode('utf-8') if isinstance(key, bytes) else key
@@ -366,15 +362,11 @@ class RedisService:
                             )
 
                             if task_index_name is None and 'exc_message' in result:
-                                try:
-                                    exc_str = str(result['exc_message'])
-                                    if '{' in exc_str and '}' in exc_str:
-                                        json_part = exc_str[exc_str.find('{'):exc_str.rfind('}')+1]
-                                        cleaned_json_part = json_part.replace('\\"', '"')
-                                        error_data = json.loads(cleaned_json_part)
-                                        task_index_name = error_data.get('index_name')
-                                except (json.JSONDecodeError, TypeError, IndexError):
-                                    pass
+                                error_data = self._extract_error_metadata_from_exc_message(
+                                    result.get("exc_message")
+                                )
+                                if error_data:
+                                    task_index_name = error_data.get('index_name')
 
                         if task_index_name == index_name:
                             key_str = key.decode('utf-8') if isinstance(key, bytes) else key
@@ -497,16 +489,12 @@ class RedisService:
 
                             # Check for failed tasks where metadata is in the exception message
                             if task_index_name is None and 'exc_message' in result:
-                                try:
-                                    exc_str = str(result['exc_message'])
-                                    if '{' in exc_str and '}' in exc_str:
-                                        json_part = exc_str[exc_str.find('{'):exc_str.rfind('}')+1]
-                                        cleaned_json_part = json_part.replace('\\"', '"')
-                                        error_data = json.loads(cleaned_json_part)
-                                        task_index_name = error_data.get('index_name')
-                                        task_source = error_data.get('source') or error_data.get('path_or_url')
-                                except (json.JSONDecodeError, TypeError, IndexError) as e:
-                                    logger.warning(f"Could not parse exception metadata for task {task_id}: {e}")
+                                error_data = self._extract_error_metadata_from_exc_message(
+                                    result.get("exc_message")
+                                )
+                                if error_data:
+                                    task_index_name = error_data.get('index_name')
+                                    task_source = error_data.get('source') or error_data.get('path_or_url')
 
                         # Match both index name and document path/source
                         if task_index_name == index_name and task_source == path_or_url:
@@ -727,6 +715,122 @@ class RedisService:
         except Exception as e:
             logger.error(f"Failed to save progress info for task {task_id}: {str(e)}")
             return False
+
+    def increment_progress_info(self, task_id: str, delta_processed: int, total_chunks: Optional[int] = None, ttl_hours: int = 24) -> bool:
+        """
+        Atomically increment processed chunks for a task.
+        """
+        if not task_id:
+            logger.error("Cannot increment progress info: task_id is empty")
+            return False
+        if delta_processed <= 0:
+            return True
+
+        progress_key = f"progress:{task_id}"
+        ttl_seconds = ttl_hours * 3600
+        max_retries = 5
+
+        for attempt in range(max_retries):
+            pipe = self.client.pipeline()
+            try:
+                pipe.watch(progress_key)
+                raw = pipe.get(progress_key)
+                current_processed, current_total = self._parse_progress(raw, total_chunks)
+                new_processed, current_total = self._compute_next_progress(
+                    current_processed=current_processed,
+                    delta_processed=delta_processed,
+                    current_total=current_total,
+                    total_chunks=total_chunks,
+                )
+
+                payload = json.dumps({
+                    "processed_chunks": new_processed,
+                    "total_chunks": current_total,
+                })
+
+                pipe.multi()
+                pipe.setex(progress_key, ttl_seconds, payload)
+                pipe.execute()
+                logger.info(
+                    f"[REDIS PROGRESS] Incremented progress for task {task_id}: "
+                    f"+{delta_processed}, now {new_processed}/{current_total}"
+                )
+                return True
+            except redis.WatchError:
+                continue
+            except Exception as exc:
+                logger.warning(f"Failed to increment progress for task {task_id}: {exc}")
+                return False
+            finally:
+                pipe.reset()
+
+        logger.warning(f"Failed to increment progress for task {task_id}: too many concurrent updates")
+        return False
+
+    def _parse_progress(self, raw: Any, total_chunks: Optional[int]) -> Tuple[int, int]:
+        """
+        Parse persisted progress payload from Redis with tolerant fallback.
+        """
+        default_total = int(total_chunks or 0)
+        if not raw:
+            return 0, default_total
+
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+
+        try:
+            data = json.loads(raw)
+            processed = int(data.get("processed_chunks", 0) or 0)
+            total = default_total if total_chunks else int(data.get("total_chunks", 0) or 0)
+            return processed, total
+        except Exception:
+            return 0, default_total
+
+    def _compute_next_progress(
+        self,
+        current_processed: int,
+        delta_processed: int,
+        current_total: int,
+        total_chunks: Optional[int],
+    ) -> Tuple[int, int]:
+        """
+        Compute new processed/total values, clamping to known total when available.
+        """
+        next_processed = current_processed + int(delta_processed)
+        next_total = int(current_total or 0)
+
+        if next_total <= 0 and total_chunks:
+            next_total = int(total_chunks)
+
+        if next_total > 0:
+            next_processed = min(next_processed, next_total)
+
+        return next_processed, next_total
+
+    def _extract_error_metadata_from_exc_message(self, exc_message: Any) -> Optional[Dict[str, Any]]:
+        """
+        Try to parse embedded JSON metadata from exception message with tolerant escaping.
+        """
+        try:
+            exc_str = str(exc_message or "")
+            if "{" not in exc_str or "}" not in exc_str:
+                return None
+            json_part = exc_str[exc_str.find("{"): exc_str.rfind("}") + 1]
+            candidates = [
+                json_part,
+                json_part.replace('\\"', '"'),
+                re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', json_part),
+            ]
+            for candidate in candidates:
+                try:
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    continue
+            return None
+        except Exception:
+            return None
 
     def get_progress_info(self, task_id: str) -> Optional[Dict[str, int]]:
         """

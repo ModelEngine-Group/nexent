@@ -60,6 +60,8 @@
 > 2. 请选择 `analyze_text_file` 工具，启用文档类、文本类文件的解析功能。
 > 3. 请选择 `analyze_image` 工具，启用图片类文件的解析功能。
 > 
+> ⚠️ **向量化模型配置**：使用 `knowledge_base_search` 工具时，需要确保知识库已配置向量化模型。对于存量知识库，系统会提示选择向量化模型，请务必选择**创建该知识库时使用的向量化模型**。若选择的模型与知识库创建时使用的模型不一致，可能导致检索失败或结果不准确。
+> 
 > 📚 想了解系统已经内置的所有本地工具能力？请参阅 [本地工具概览](./local-tools/index.md)。
 
 ### 🔌 添加 MCP 工具
@@ -108,6 +110,40 @@
 有许多第三方服务如 [ModelScope](https://www.modelscope.cn/mcp) 提供了 MCP 服务，您可以快速接入使用。
 您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 工具开发](../backend/tools/mcp)。
 
+**3️⃣ 存量 API 转换为 MCP 服务**
+
+🔔 该方法适用于将已有的 REST API 接口快速转换为 MCP 工具，无需额外开发即可让智能体调用现有 API 能力：
+
+>1. 在 MCP 配置模块选择 **"API 转换为 MCP"** 接入类型
+>
+>2. 在下方的输入框中填写 API 基础信息：
+>   - **服务名称**：MCP 服务的展示名称
+>   - **OpenAPI JSON**：OpenAPI 3.x 规范的 JSON 内容
+>   - **基础服务 URL**：API 服务的基础地址（支持 http/https）
+>
+>3. 点击右下角 **+ 添加** 按钮，完成对应 MCP 服务的转换
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api.png" style="width: 80%; height: auto;" />
+</div>
+
+>
+>4. 转换完成后，可在 **Outer APIs** 页签下查看所有外部 API 转换的 MCP 工具
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api_1.png" style="width: 80%; height: auto;" />
+</div>
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api_2.png" style="width: 80%; height: auto;" />
+</div>
+
+>💡 **使用场景**：
+>- 快速接入企业内部的 REST API 接口
+>- 将第三方服务的 HTTP API 转换为 MCP 工具
+>- 无需编写 MCP Server 代码，直接通过 OpenAPI 规范生成工具
+
+
 ### ⚙️ 自定义工具
 
 您可参考以下指导文档，开发自己的工具，并接入 Nexent 使用，丰富智能体能力。
@@ -129,8 +165,8 @@
      - 测试的 `query`，例如"维生素C的功效"
      - 检索的模式 `search_mode`（默认为 `hybrid`）
      - 目标检索的知识库列表 `index_names`，如 `["医疗", "维生素知识大全"]`
-     - 若不输入 `index_names`，则默认检索知识库页面所选中的全部知识库
-     - 是否启用重排模型（默认为 `false`），启用后配置重排模型，实现对检索结果的重排优化 
+   - 若不输入 `index_names`，则默认检索知识库页面所选中的全部知识库
+      - 是否启用重排模型（默认为 `false`），启用后配置重排模型，实现对检索结果的重排优化 
 6. 输入完成后点击"执行测试"开始测试，并在下方查看测试结果
 
 <div style="display: flex; justify-content: left;">

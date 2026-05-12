@@ -81,7 +81,11 @@ consts_model_mod = types.ModuleType("consts.model")
 class AgentRequest:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
-            setattr(self, k, v)
+            # Convert history dicts to HistoryItem objects
+            if k == "history" and isinstance(v, list):
+                setattr(self, k, [item if isinstance(item, HistoryItem) else HistoryItem(**item) for item in v])
+            else:
+                setattr(self, k, v)
 class ConversationResponse:
     def __init__(self, code=0, message="", data=None):
         self.code = code
@@ -114,6 +118,17 @@ consts_model_mod.MessageRequest = MessageRequest
 sys.modules["consts.model"] = consts_model_mod
 # Also ensure backend.consts.model resolves to our stub for tests that import via backend.consts.model
 sys.modules["backend.consts.model"] = consts_model_mod
+
+
+class HistoryItem:
+    """Stub for Pydantic HistoryItem model."""
+    def __init__(self, role: str = "", content: str = "", minio_files: list = None, **kwargs):
+        self.role = role
+        self.content = content
+        self.minio_files = minio_files or []
+
+
+consts_model_mod.HistoryItem = HistoryItem
 
 # Stub database.client to avoid import-time DB helpers
 db_client_stub = types.ModuleType("database.client")
@@ -148,6 +163,26 @@ prompt_mod = types.ModuleType("utils.prompt_template_utils")
 prompt_mod.get_generate_title_prompt_template = lambda language="zh": {"USER_PROMPT":"{{question}}", "SYSTEM_PROMPT":"SYS"}
 sys.modules["utils.prompt_template_utils"] = prompt_mod
 
+# Stub storage components
+storage_factory_mod = types.ModuleType("nexent.storage.storage_client_factory")
+storage_factory_mod.create_storage_client_from_config = lambda *a, **k: storage_client_mock
+sys.modules["nexent.storage.storage_client_factory"] = storage_factory_mod
+
+minio_config_mod = types.ModuleType("nexent.storage.minio_config")
+class _DummyMinIOStorageConfig:
+    def validate(self): pass
+minio_config_mod.MinIOStorageConfig = _DummyMinIOStorageConfig
+sys.modules["nexent.storage.minio_config"] = minio_config_mod
+
+# Stub backend.database module so patch can find backend.database.client
+backend_database_mod = types.ModuleType("backend.database")
+
+# Create backend.database.client stub
+backend_database_client_mod = types.ModuleType("backend.database.client")
+backend_database_client_mod.MinioClient = lambda *a, **k: minio_client_mock
+sys.modules["backend.database.client"] = backend_database_client_mod
+
+sys.modules["backend.database"] = backend_database_mod
 
 from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
 import unittest

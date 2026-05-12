@@ -401,7 +401,11 @@ class TestUnstructuredProcessor:
         assert ".odt" in result
         assert ".pptx" in result
         assert ".ppt" in result
-        assert len(result) == 11
+        assert ".json" in result
+        assert ".csv" in result
+        assert ".xml" in result
+        assert ".epub" in result
+        assert len(result) == 15
 
     @pytest.mark.parametrize(
         "filename,expected",
@@ -556,3 +560,53 @@ class TestUnstructuredProcessor:
 
         assert len(result) >= 1
         assert result[0]["filename"] is None
+
+    def test_get_supported_formats_includes_new_types(self, processor):
+        """Ensure that the new format has been added to the supported list."""
+        formats = processor.get_supported_formats()
+        assert ".json" in formats
+        assert ".epub" in formats
+        assert ".csv" in formats
+        assert ".xml" in formats
+        # HTML already supported
+        assert ".html" in formats
+
+    @pytest.mark.parametrize("filename", ["test.json", "test.epub", "test.csv", "test.xml", "test.html"])
+    def test_validate_file_format_new_types(self, processor, filename):
+        """Verify that the newly added file type can pass format verification."""
+        assert processor.validate_file_format(filename) is True
+
+    def test_process_epub_csv_xml_html_uses_partition(self, processor, mocker: MockFixture):
+        """Test EPUB/CSV/XML/HTML using unstructured.partition processing"""
+        test_cases = [
+            (b"EPUB content", "book.epub"),
+            (b"name,age\nAlice,30", "data.csv"),
+            (b"<root><item>value</item></root>", "data.xml"),
+            (b"<html><body>Test</body></html>", "page.html"),
+        ]
+
+        for file_data, filename in test_cases:
+            # Mock partition returns an element containing text
+            mock_element = Mock()
+            mock_element.text = "Mocked content from " + filename
+            mock_element.metadata.to_dict.return_value = {}
+
+            mock_partition = setup_partition_mock(
+                mocker, return_value=[mock_element])
+
+            result = processor._process_file(file_data, "basic", filename)
+
+            # Verify that the partition function is called
+            mock_partition.assert_called_once()
+            call_kwargs = mock_partition.call_args[1]
+            assert isinstance(call_kwargs["file"], io.BytesIO)
+            assert call_kwargs["chunking_strategy"] == "basic"
+
+            # Validation result structure
+            assert len(result) == 1
+            assert result[0]["content"] == "Mocked content from " + filename
+            assert result[0]["filename"] == filename
+
+    def test_process_unsupported_format_rejected(self, processor):
+        """Ensure that unsupported formats (such as .exe) are still rejected"""
+        assert processor.validate_file_format("malware.exe") is False

@@ -36,11 +36,14 @@ from database.knowledge_db import (
     update_knowledge_record,
     get_knowledge_info_by_tenant_id,
     update_model_name_by_index_name,
+    update_last_doc_update_time,
+    update_last_summary_time,
+    update_embedding_model_by_index_name,
 )
 from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
-from database.model_management_db import get_model_records
+from database.model_management_db import get_model_by_display_name, get_model_by_model_id, get_model_records
 from services.redis_service import get_redis_service
 from services.group_service import get_tenant_default_group_id
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
@@ -74,6 +77,111 @@ def _update_progress(task_id: str, processed: int, total: int):
     except Exception as e:
         logger.warning(
             f"[PROGRESS CALLBACK] Exception updating progress for task {task_id}: {str(e)}")
+
+
+def _get_embedding_model_display_name(model_id: Optional[int], tenant_id: str) -> str:
+    """
+    Get embedding model display_name from model_id.
+
+    Args:
+        model_id: The model ID to look up
+        tenant_id: Tenant ID for the lookup
+
+    Returns:
+        The model's display_name if found, empty string otherwise
+    """
+    if model_id is None:
+        return ""
+    try:
+        model = get_model_by_model_id(model_id, tenant_id)
+        if model:
+            return model.get("display_name", "")
+    except Exception as e:
+        logger.warning(f"Failed to get display_name for model_id {model_id}: {e}")
+    return ""
+
+
+class KnowledgeBaseNeedsModelConfigError(Exception):
+    """Exception raised when a knowledge base needs an embedding model to be configured."""
+    def __init__(self, index_name: str, message: str = None):
+        self.index_name = index_name
+        self.message = message or f"Knowledge base '{index_name}' needs an embedding model to be configured"
+        super().__init__(self.message)
+
+
+def get_embedding_model_by_index_name(tenant_id: str, index_name: str) -> tuple[Optional[Any], Optional[int], dict]:
+    """
+    Get the embedding model for a knowledge base by its index_name.
+
+    Args:
+        tenant_id: Tenant ID
+        index_name: The index name of the knowledge base
+
+    Returns:
+        Tuple of (embedding model instance or None, model_id or None, metadata dict)
+        metadata contains: {
+            "status": str,           # "ok" | "needs_config" | "error"
+            "needs_update": bool,    # Whether the database needs to be updated
+            "update_info": dict,     # Fields to update if needs_update is True
+            "message": str           # Status message
+        }
+
+    Design principles:
+        - Force explicit configuration: model_id must be explicitly set by user
+        - No auto-fix: never automatically use tenant default model
+        - Clear error guidance: return needs_config status for user action
+    """
+    try:
+        knowledge_record = get_knowledge_record({
+            "index_name": index_name,
+            "tenant_id": tenant_id
+        })
+
+        if not knowledge_record:
+            return None, None, {
+                "status": "error",
+                "needs_update": False,
+                "message": f"Knowledge base '{index_name}' not found"
+            }
+
+        model_id = knowledge_record.get("embedding_model_id")
+
+        # Case 1: model_id exists and is valid, use it
+        if model_id:
+            model, _ = get_embedding_model_by_id(tenant_id, model_id)
+            if model:
+                return model, model_id, {
+                    "status": "ok",
+                    "needs_update": False,
+                    "message": "Embedding model found"
+                }
+            # Model ID exists but model not found - fall through to error
+            logger.warning(f"Model ID {model_id} specified for index '{index_name}' but model not found")
+
+        # Case 2: model_id does not exist or is invalid
+        # Design principle: Force explicit configuration, no auto-fix
+        # Return needs_config to guide user to select a model
+        embedding_model_name = knowledge_record.get("embedding_model_name")
+        if embedding_model_name:
+            # Has model_name but no valid model_id (legacy data)
+            logger.warning(f"Index '{index_name}' has embedding_model_name but no valid model_id, needs explicit configuration")
+        else:
+            # No model configured at all
+            logger.error(f"Index '{index_name}' has no embedding model configured")
+
+        return None, None, {
+            "status": "needs_config",
+            "needs_update": False,
+            "message": f"No embedding model configured for knowledge base '{index_name}'. Please select a model."
+        }
+
+    except Exception as e:
+        logger.warning(f"Failed to get embedding model for index {index_name}: {e}")
+        return None, None, {
+            "status": "error",
+            "needs_update": False,
+            "message": str(e)
+        }
 
 
 ALLOWED_CHUNK_FIELDS = {
@@ -176,70 +284,105 @@ def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabas
     return {"status": "available"}
 
 
-def get_embedding_model(tenant_id: str, model_name: Optional[str] = None):
+def get_embedding_model(tenant_id: str, model_name: Optional[str] = None) -> tuple[Optional[Any], Optional[int]]:
     """
     Get the embedding model for the tenant, optionally using a specific model name.
 
     Args:
         tenant_id: Tenant ID
-        model_name: Optional specific model name to use (format: "model_repo/model_name" or just "model_name")
-                   If provided, will try to find the model in the tenant's model list.
+        model_name: Optional display name of the embedding model to use.
+                   If provided, will find the model by display_name in the tenant's model list.
 
     Returns:
-        Embedding model instance or None
+        Tuple of (embedding model instance or None, model_id or None)
     """
-    # If model_name is provided, try to find it in the tenant's models
+    # If model_name is provided, find the model by display_name
     if model_name:
         try:
-            models = get_model_records({"model_type": "embedding"}, tenant_id)
-            for model in models:
-                model_display_name = model.get("model_repo") + "/" + model["model_name"] if model.get("model_repo") else model["model_name"]
-                if model_display_name == model_name:
-                    # Found the model, create embedding instance
-                    model_config = {
-                        "model_repo": model.get("model_repo", ""),
-                        "model_name": model["model_name"],
-                        "api_key": model.get("api_key", ""),
-                        "base_url": model.get("base_url", ""),
-                        "model_type": "embedding",
-                        "max_tokens": model.get("max_tokens", 1024),
-                        "ssl_verify": model.get("ssl_verify", True),
-                    }
-                    return OpenAICompatibleEmbedding(
+            model = get_model_by_display_name(model_name, tenant_id)
+            if model and model.get("model_type") in ["embedding", "multi_embedding"]:
+                model_config = {
+                    "model_repo": model.get("model_repo", ""),
+                    "model_name": model["model_name"],
+                    "api_key": model.get("api_key", ""),
+                    "base_url": model.get("base_url", ""),
+                    "model_type": model.get("model_type", "embedding"),
+                    "max_tokens": model.get("max_tokens", 1024),
+                    "ssl_verify": model.get("ssl_verify", True),
+                }
+                model_type = model.get("model_type", "embedding")
+                if model_type == "multi_embedding":
+                    embedding_model = JinaEmbedding(
                         api_key=model_config.get("api_key", ""),
                         base_url=model_config.get("base_url", ""),
                         model_name=get_model_name_from_config(model_config) or "",
                         embedding_dim=model_config.get("max_tokens", 1024),
                         ssl_verify=model_config.get("ssl_verify", True),
                     )
+                else:
+                    embedding_model = OpenAICompatibleEmbedding(
+                        api_key=model_config.get("api_key", ""),
+                        base_url=model_config.get("base_url", ""),
+                        model_name=get_model_name_from_config(model_config) or "",
+                        embedding_dim=model_config.get("max_tokens", 1024),
+                        ssl_verify=model_config.get("ssl_verify", True),
+                    )
+                return embedding_model, model.get("model_id")
+            else:
+                logger.warning(f"Model '{model_name}' not found or is not an embedding model")
         except Exception as e:
             logger.warning(f"Failed to get embedding model by name {model_name}: {e}")
 
-    # Fall back to default embedding model (current behavior)
-    model_config = tenant_config_manager.get_model_config(
-        key="EMBEDDING_ID", tenant_id=tenant_id)
+    # No default fallback - return None, None when no model is specified or found
+    return None, None
 
-    model_type = model_config.get("model_type", "")
 
-    if model_type == "embedding":
-        # Get the es core
-        return OpenAICompatibleEmbedding(
-            api_key=model_config.get("api_key", ""),
-            base_url=model_config.get("base_url", ""),
-            model_name=get_model_name_from_config(model_config) or "",
-            embedding_dim=model_config.get("max_tokens", 1024),
-            ssl_verify=model_config.get("ssl_verify", True),
-        )
-    elif model_type == "multi_embedding":
-        return JinaEmbedding(
-            api_key=model_config.get("api_key", ""),
-            base_url=model_config.get("base_url", ""),
-            model_name=get_model_name_from_config(model_config) or "",
-            embedding_dim=model_config.get("max_tokens", 1024),
-            ssl_verify=model_config.get("ssl_verify", True),
-        )
-    else:
-        return None
+def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[Any], Optional[int]]:
+    """
+    Get the embedding model by model_id.
+
+    Args:
+        tenant_id: Tenant ID
+        model_id: Model ID to query
+
+    Returns:
+        Tuple of (embedding model instance or None, model_id or None)
+    """
+    try:
+        model = get_model_by_model_id(model_id, tenant_id)
+        if model and model.get("model_type") in ["embedding", "multi_embedding"]:
+            model_config = {
+                "model_repo": model.get("model_repo", ""),
+                "model_name": model["model_name"],
+                "api_key": model.get("api_key", ""),
+                "base_url": model.get("base_url", ""),
+                "model_type": model.get("model_type", "embedding"),
+                "max_tokens": model.get("max_tokens", 1024),
+                "ssl_verify": model.get("ssl_verify", True),
+            }
+            model_type = model.get("model_type", "embedding")
+            if model_type == "multi_embedding":
+                embedding_model = JinaEmbedding(
+                    api_key=model_config.get("api_key", ""),
+                    base_url=model_config.get("base_url", ""),
+                    model_name=get_model_name_from_config(model_config) or "",
+                    embedding_dim=model_config.get("max_tokens", 1024),
+                    ssl_verify=model_config.get("ssl_verify", True),
+                )
+            else:
+                embedding_model = OpenAICompatibleEmbedding(
+                    api_key=model_config.get("api_key", ""),
+                    base_url=model_config.get("base_url", ""),
+                    model_name=get_model_name_from_config(model_config) or "",
+                    embedding_dim=model_config.get("max_tokens", 1024),
+                    ssl_verify=model_config.get("ssl_verify", True),
+                )
+            return embedding_model, model.get("model_id")
+        else:
+            logger.warning(f"Model with id {model_id} not found or is not an embedding model")
+    except Exception as e:
+        logger.warning(f"Failed to get embedding model by id {model_id}: {e}")
+    return None, None
 
 
 def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
@@ -415,11 +558,19 @@ class ElasticSearchService:
                 None, description="ID of the user creating the knowledge base"),
             tenant_id: Optional[str] = Body(
                 None, description="ID of the tenant creating the knowledge base"),
+            model_id: Optional[int] = Body(
+                None, description="ID of the embedding model to use"),
     ):
         try:
             if vdb_core.check_index_exists(index_name):
                 raise Exception(f"Index {index_name} already exists")
-            embedding_model = get_embedding_model(tenant_id)
+
+            # Get embedding model by model_id if provided
+            if model_id:
+                embedding_model, actual_model_id = get_embedding_model_by_id(tenant_id, model_id)
+            else:
+                embedding_model, actual_model_id = None, None
+
             success = vdb_core.create_index(index_name, embedding_dim=embedding_dim or (
                 embedding_model.embedding_dim if embedding_model else 1024))
             if not success:
@@ -427,7 +578,8 @@ class ElasticSearchService:
             knowledge_data = {"index_name": index_name,
                               "created_by": user_id,
                               "tenant_id": tenant_id,
-                              "embedding_model_name": embedding_model.model}
+                              "embedding_model_name": embedding_model.model if embedding_model else None,
+                              "embedding_model_id": actual_model_id}
             create_knowledge_record(knowledge_data)
             return {"status": "success", "message": f"Index {index_name} created successfully"}
         except Exception as e:
@@ -468,7 +620,7 @@ class ElasticSearchService:
         """
         try:
             # Get embedding model - use user-selected model if provided, otherwise use tenant default
-            embedding_model = get_embedding_model(tenant_id, embedding_model_name)
+            embedding_model, model_id = get_embedding_model(tenant_id, embedding_model_name)
 
             # Determine the embedding model name to save: use user-provided name if available,
             # otherwise use the model's display name
@@ -483,6 +635,7 @@ class ElasticSearchService:
                 "user_id": user_id,
                 "tenant_id": tenant_id,
                 "embedding_model_name": saved_embedding_model_name,
+                "embedding_model_id": model_id,
             }
 
             # Add group permission and group IDs if provided
@@ -569,6 +722,77 @@ class ElasticSearchService:
                 f"Knowledge base '{index_name}' updated successfully by user '{user_id}'")
 
         return result
+
+    @staticmethod
+    def update_embedding_model(
+            index_name: str,
+            model_id: int,
+            tenant_id: str,
+            user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update the embedding model for a knowledge base.
+
+        Args:
+            index_name: Internal index name of the knowledge base
+            model_id: ID of the embedding model to use
+            tenant_id: Tenant ID
+            user_id: ID of the user making the update
+
+        Returns:
+            Dict containing update result information
+
+        Raises:
+            ValueError: If model is not found or is not an embedding model
+            Exception: If update fails
+        """
+        try:
+            # Validate the model exists and is an embedding model
+            model = get_model_by_model_id(model_id, tenant_id)
+            if not model:
+                raise ValueError(f"Model with id {model_id} not found")
+
+            if model.get("model_type") not in ["embedding", "multi_embedding"]:
+                raise ValueError(
+                    f"Model '{model.get('display_name', model_id)}' is not an embedding model. "
+                    f"Please select an embedding model."
+                )
+
+            # Update the database record
+            # Use display_name as embedding_model_name
+            embedding_model_name = model.get("display_name")
+            success = update_embedding_model_by_index_name(
+                index_name=index_name,
+                embedding_model_id=model_id,
+                embedding_model_name=embedding_model_name,
+                tenant_id=tenant_id,
+                user_id=user_id or ""
+            )
+
+            if not success:
+                raise Exception(f"Failed to update embedding model for index '{index_name}'")
+
+            logger.info(
+                f"Embedding model updated for knowledge base '{index_name}' "
+                f"to model '{model.get('display_name', model_id)}' (id: {model_id}) by user '{user_id}'"
+            )
+
+            # Use display_name for consistency with database update
+            model_display_name = model.get("display_name")
+            return {
+                "status": "success",
+                "index_name": index_name,
+                "model_id": model_id,
+                "model_name": model_display_name,
+                "model_display_name": model.get("display_name"),
+                "message": f"Embedding model updated successfully to '{model_display_name}'"
+            }
+
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to update embedding model for index '{index_name}': {e}")
+            raise Exception(f"Failed to update embedding model: {str(e)}")
 
     @staticmethod
     async def delete_index(
@@ -774,6 +998,11 @@ class ElasticSearchService:
                     index_name = record["index_name"]
                     index_stats = indice_stats.get(index_name, {})
 
+                    # Get embedding model display_name from model_id
+                    model_id = record.get("embedding_model_id")
+                    tenant_id = record.get("tenant_id") or target_tenant_id
+                    embedding_model_display_name = _get_embedding_model_display_name(model_id, tenant_id)
+
                     stats_info.append({
                         # Internal index name (used as ID)
                         "name": index_name,
@@ -785,8 +1014,14 @@ class ElasticSearchService:
                         "knowledge_sources": record["knowledge_sources"],
                         "ingroup_permission": record["ingroup_permission"],
                         "tenant_id": record.get("tenant_id"),
+                        # Embedding model info: display_name from model_id
+                        "embedding_model_name": embedding_model_display_name or record.get("embedding_model_name", ""),
+                        "embedding_model_id": model_id,
                         # Update time for sorting and display
                         "update_time": record.get("update_time"),
+                        # Auto-summary settings
+                        "summary_frequency": record.get("summary_frequency"),
+                        "last_summary_time": record.get("last_summary_time"),
                         "stats": index_stats,
                     })
 
@@ -812,6 +1047,9 @@ class ElasticSearchService:
                        ] = Body(..., description="Document List to process"),
             vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
             task_id: Optional[str] = None,
+            model_id: Optional[int] = Body(
+                None, description="ID of the embedding model to use"),
+            large_mode: bool = False,
     ):
         """
         Index documents and create vector embeddings, create index if it doesn't exist
@@ -821,6 +1059,8 @@ class ElasticSearchService:
             index_name: Index name
             data: List containing document data to be indexed
             vdb_core: VectorDatabaseCore instance
+            task_id: Optional task ID for progress tracking
+            model_id: Optional model ID for the embedding model
 
         Returns:
             IndexingResponse object containing indexing result information
@@ -833,7 +1073,7 @@ class ElasticSearchService:
             if not vdb_core.check_index_exists(index_name):
                 try:
                     ElasticSearchService.create_index(
-                        index_name, vdb_core=vdb_core)
+                        index_name, vdb_core=vdb_core, model_id=model_id)
                     logger.info(f"Created new index {index_name}")
                 except Exception as create_error:
                     raise Exception(
@@ -939,6 +1179,7 @@ class ElasticSearchService:
                     embedding_model=embedding_model,
                     documents=documents,
                     embedding_batch_size=embedding_batch_size,
+                    large_mode=large_mode,
                     progress_callback=lambda processed, total: _update_progress(
                         task_id, processed, total) if task_id else None
                 )
@@ -958,6 +1199,9 @@ class ElasticSearchService:
                     except Exception as e:
                         logger.warning(
                             f"[REDIS PROGRESS] Exception updating final progress for task {task_id}: {str(e)}")
+
+                # Update last_doc_update_time for auto-summary tracking
+                update_last_doc_update_time(index_name)
 
                 return {
                     "success": True,
@@ -1228,6 +1472,10 @@ class ElasticSearchService:
             index_name, path_or_url)
         # 2. Delete MinIO file
         minio_result = delete_file(path_or_url)
+
+        # Update last_doc_update_time for auto-summary tracking
+        update_last_doc_update_time(index_name)
+
         return {"status": "success", "deleted_es_count": deleted_count, "deleted_minio": minio_result.get("success")}
 
     @staticmethod
@@ -1450,6 +1698,8 @@ class ElasticSearchService:
                 "index_name": index_name
             }
             update_knowledge_record(update_data)
+            # Update last_summary_time for auto-summary tracking
+            update_last_summary_time(index_name)
             return {"status": "success", "message": f"Index {index_name} summary updated successfully",
                     "summary": summary_result}
         except Exception as e:
@@ -1550,23 +1800,23 @@ class ElasticSearchService:
         Automatically generates and stores embedding for semantic search.
         """
         try:
-            # Get knowledge base's embedding model name
-            embedding_model_name = None
+            # Get knowledge base's embedding model by model_id
+            embedding_model_id = None
             if tenant_id:
                 try:
                     knowledge_record = get_knowledge_record({
                         "index_name": index_name,
                         "tenant_id": tenant_id
                     })
-                    embedding_model_name = knowledge_record.get("embedding_model_name") if knowledge_record else None
+                    embedding_model_id = knowledge_record.get("embedding_model_id") if knowledge_record else None
                 except Exception as e:
-                    logger.warning(f"Failed to get embedding model name for index {index_name}: {e}")
+                    logger.warning(f"Failed to get embedding model id for index {index_name}: {e}")
 
             # Generate embedding if we have content and can get embedding model
             embedding_vector = None
             if chunk_request.content:
                 try:
-                    embedding_model = get_embedding_model(tenant_id, embedding_model_name) if tenant_id else None
+                    embedding_model = get_embedding_model_by_id(tenant_id, embedding_model_id)[0] if tenant_id and embedding_model_id else None
                     if embedding_model:
                         embeddings = embedding_model.get_embeddings(chunk_request.content)
                         if embeddings and len(embeddings) > 0:
@@ -1596,8 +1846,8 @@ class ElasticSearchService:
             # Add embedding if generated
             if embedding_vector:
                 chunk_payload["embedding"] = embedding_vector
-                if embedding_model_name:
-                    chunk_payload["embedding_model_name"] = embedding_model_name
+                if embedding_model_id:
+                    chunk_payload["embedding_model_id"] = embedding_model_id
 
             result = vdb_core.create_chunk(index_name, chunk_payload)
             return {
@@ -1700,10 +1950,23 @@ class ElasticSearchService:
             if weight_accurate < 0 or weight_accurate > 1:
                 raise ValueError("weight_accurate must be between 0 and 1")
 
-            embedding_model = get_embedding_model(tenant_id)
+            # Get embedding model from the first index's knowledge base record
+            if not index_names:
+                raise ValueError("At least one index name is required")
+
+            embedding_model, model_id, meta = get_embedding_model_by_index_name(tenant_id, index_names[0])
+
             if not embedding_model:
-                raise ValueError(
-                    "No embedding model configured for the current tenant")
+                if meta.get("status") == "needs_config":
+                    # Return a clear error indicating model needs to be configured
+                    raise KnowledgeBaseNeedsModelConfigError(
+                        index_name=index_names[0],
+                        message=f"Knowledge base '{index_names[0]}' does not have an embedding model configured. Please select a model in the knowledge base settings."
+                    )
+                else:
+                    raise ValueError(
+                        f"No embedding model found for index '{index_names[0]}'. "
+                        f"Please configure an embedding model for this knowledge base.")
 
             start_time = time.perf_counter()
             raw_results = vdb_core.hybrid_search(
@@ -1729,6 +1992,8 @@ class ElasticSearchService:
                 "total": len(formatted_results),
                 "query_time_ms": elapsed_ms,
             }
+        except KnowledgeBaseNeedsModelConfigError:
+            raise
         except ValueError:
             raise
         except Exception as exc:

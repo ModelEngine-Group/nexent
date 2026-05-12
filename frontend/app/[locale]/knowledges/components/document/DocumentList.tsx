@@ -21,6 +21,7 @@ import {
   LAYOUT,
   DOCUMENT_STATUS,
 } from "@/const/knowledgeBase";
+import { SUMMARY_FREQUENCY_OPTIONS_API, FrequencyOption } from "@/const/scheduler";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
@@ -80,6 +81,10 @@ interface DocumentListProps {
   selectedEmbeddingModel?: string;
   onEmbeddingModelChange?: (value: string) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
+  
+  // Auto-summary frequency
+  summaryFrequency?: string | null;
+  onSummaryFrequencyChange?: (frequency: string | null) => void;
 
   // Upload related props
   isDragging?: boolean;
@@ -123,6 +128,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       selectedEmbeddingModel,
       onEmbeddingModelChange,
       permission,
+      
+      // Auto-summary frequency
+      summaryFrequency,
+      onSummaryFrequencyChange,
 
       // Upload related props
       isDragging = false,
@@ -227,13 +236,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [showDetail, setShowDetail] = React.useState(false);
     const [showChunk, setShowChunk] = React.useState(false);
     const [summary, setSummary] = useState("");
-    const [isSummarizing, setIsSummarizing] = useState(false);
-    const [isEditing, setIsEditing] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
-    const [selectedModel, setSelectedModel] = useState<number>(0);
-    const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
-    const [isLoadingModels, setIsLoadingModels] = useState(false);
-    const { t } = useTranslation();
+const [isSummarizing, setIsSummarizing] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<number>(0);
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [frequencyOptions, setFrequencyOptions] = useState<FrequencyOption[]>([]);
+  const { t } = useTranslation();
     const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
 
     // Determine if user has read-only permission
@@ -304,10 +314,30 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     // Check if group select should be disabled (when permission is PRIVATE)
     const isGroupSelectDisabled = ingroupPermission === "PRIVATE";
 
-    // Load available models when showing detail
-    useEffect(() => {
-      const loadModels = async () => {
-        if (showDetail && availableModels.length === 0) {
+    // Load frequency options from backend API
+  useEffect(() => {
+    const loadFrequencyOptions = async () => {
+      if (showDetail && frequencyOptions.length === 0) {
+        try {
+          const response = await fetch(SUMMARY_FREQUENCY_OPTIONS_API);
+          const data = await response.json();
+          setFrequencyOptions(data.options || []);
+        } catch (error) {
+          log.error("Failed to load frequency options:", error);
+          // Fallback to default options if API fails
+          setFrequencyOptions([
+            { value: "disabled", label: t("knowledgeBase.tag.autoSummary.off") },
+          ]);
+        }
+      }
+    };
+    loadFrequencyOptions();
+  }, [showDetail, frequencyOptions.length, t]);
+
+  // Load available models when showing detail
+  useEffect(() => {
+    const loadModels = async () => {
+      if (showDetail && availableModels.length === 0) {
           setIsLoadingModels(true);
           try {
             const models = await modelService.getLLMModels();
@@ -625,7 +655,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               />
             </div>
           ) : showDetail ? (
-            <div className="px-8 py-4 h-full flex flex-col">
+<div className="px-8 py-4 h-full flex flex-col">
               <div className="flex items-center justify-between mb-5">
                 <span className="font-bold text-lg">
                   {t("document.summary.title")}
@@ -647,6 +677,29 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         label: model.displayName,
                         disabled: model.connect_status === "unavailable",
                       }))}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">
+                      {t("knowledgeBase.tag.autoSummary.label")}
+                    </span>
+                    <Select
+                      value={summaryFrequency || "disabled"}
+                      onChange={(value) => {
+                        const freq = value === "disabled" ? null : value;
+                        if (onSummaryFrequencyChange) {
+                          onSummaryFrequencyChange(freq);
+                        }
+                      }}
+                      disabled={isReadOnlyMode}
+                      style={{ width: 85 }}
+placeholder={t("knowledgeBase.tag.autoSummary.off")}
+                      options={frequencyOptions.map(opt => ({
+                          value: opt.value,
+                          label: opt.value === "disabled" 
+                            ? t("knowledgeBase.tag.autoSummary.off") 
+                            : opt.label,
+                        }))}
                     />
                   </div>
                   <Button

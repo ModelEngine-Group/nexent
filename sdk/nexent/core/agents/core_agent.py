@@ -721,6 +721,7 @@ You have been provided with these additional arguments, that you can access usin
             metric["compression_ratio"] = 0.0
 
         self.step_metrics.append(metric)
+
     def _handle_max_steps_reached(self, task: str) -> Any:
         """Handle the case when max steps is reached by generating final answer with streaming.
 
