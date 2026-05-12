@@ -260,6 +260,7 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
         model_factory=model_config.get("model_factory", None),
         ssl_verify=model_config.get("ssl_verify", True),
         timeout_seconds=timeout_seconds,
+        stream=False,
     )
 
     # Build messages - use new template variable 'question' instead of 'content'
