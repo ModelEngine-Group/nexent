@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Input, Button, Card, Typography, Tooltip, Modal, Form, Tag, Skeleton } from "antd";
+import { Input, Button, Card, Typography, Tooltip, Modal, Form } from "antd";
 import { Settings, PenLine, X } from "lucide-react";
-import { CloseOutlined } from "@ant-design/icons";
 
 import { Tool, ToolParam } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
@@ -59,15 +58,8 @@ export default function ToolTestPanel({
   configParams,
   onClose,
   toolRequiresKbSelection = false,
-  knowledgeBases = [],
-  kbLoading = false,
-  onOpenKbSelector,
   selectedKbIds = [],
-  selectedKbDisplayNames = [],
-  onKbSelectionChange,
-  onRemoveKb,
   toolKbType = null,
-  haotianKnowledgeSets = [],
 }: ToolTestPanelProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
@@ -605,28 +597,10 @@ export default function ToolTestPanel({
                       // Haotian uses dataset_ids, others use index_names
                       const isKbSelectorParam = (paramName === "index_names" || paramName === "dataset_ids") && toolRequiresKbSelection;
 
-                      // Get display names based on selected KB IDs and knowledge bases
-                      let displayNames: string[] = [];
-                      if (isKbSelectorParam && selectedKbIds.length > 0) {
-                        if (toolKbType === "haotian_search" && haotianKnowledgeSets.length > 0) {
-                          // Haotian: resolve names from haotianKnowledgeSets
-                          displayNames = selectedKbIds.map((id) => {
-                            const cleanId = id.trim();
-                            for (const ks of haotianKnowledgeSets) {
-                              const kb = (ks.knowledge_bases || []).find(
-                                (b) => String(b.dify_dataset_id) === cleanId
-                              );
-                              if (kb) return kb.name;
-                            }
-                            return cleanId;
-                          });
-                        } else if (knowledgeBases.length > 0) {
-                          displayNames = selectedKbIds.map((id) => {
-                            const cleanId = id.trim();
-                            const kb = knowledgeBases.find((k) => k.id === cleanId);
-                            return kb?.display_name || kb?.name || cleanId;
-                          });
-                        }
+                      // KB selection is configured in the upper config area.
+                      // Do not render duplicated KB params in the test input area.
+                      if (isKbSelectorParam) {
+                        return null;
                       }
 
                       // Add type-specific validation rules
@@ -679,83 +653,6 @@ export default function ToolTestPanel({
                             },
                           });
                           break;
-                      }
-
-                      // Render knowledge base selector for index_names parameter
-                      if (isKbSelectorParam) {
-                        return (
-                          <Form.Item
-                            key={paramName}
-                            label={
-                              <span
-                                style={{ width: "100%" }}
-                                title={paramName}
-                              >
-                                {paramName}
-                              </span>
-                            }
-                            name={fieldName}
-                            rules={rules}
-                            tooltip={{
-                              title: getLocalizedDescription(description, description_zh),
-                              placement: "topLeft",
-                              styles: { root: { maxWidth: 400 } },
-                            }}
-                          >
-                            <div>
-                              <div
-                                className="cursor-pointer bg-white border rounded px-3 py-2 transition-colors border-gray-300 hover:border-blue-400"
-                                onClick={() => onOpenKbSelector?.(-1)} // -1 indicates this is from test panel
-                                style={{
-                                  width: "100%",
-                                  minHeight: "32px",
-                                  display: "flex",
-                                  flexWrap: "wrap",
-                                  alignItems: "center",
-                                  gap: "4px",
-                                }}
-                                title={displayNames.join(", ")}
-                              >
-                                {kbLoading && knowledgeBases.length === 0 ? (
-                                  <div className="flex items-center gap-2 w-full">
-                                    <Skeleton.Input active size="small" style={{ width: "60%" }} />
-                                  </div>
-                                ) : displayNames.length > 0 ? (
-                                  displayNames.map((name, i) => (
-                                    <Tag
-                                      key={selectedKbIds[i]}
-                                      closeIcon={
-                                        <span className="ant-tag-close-icon">
-                                          <CloseOutlined style={{ fontSize: "10px" }} />
-                                        </span>
-                                      }
-                                      onClose={(e) => {
-                                        e.stopPropagation();
-                                        onRemoveKb?.(i, -1); // -1 indicates this is from test panel
-                                      }}
-                                      style={{
-                                        marginRight: 0,
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        lineHeight: "20px",
-                                        padding: "0 8px",
-                                        fontSize: "13px",
-                                      }}
-                                    >
-                                      {name}
-                                    </Tag>
-                                  ))
-                                ) : (
-                                  <span className="text-gray-400 text-sm">
-                                    {t("toolConfig.input.knowledgeBaseSelector.placeholder", {
-                                      name: getLocalizedDescription(description, description_zh) || paramName,
-                                    })}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </Form.Item>
-                        );
                       }
 
                       return (

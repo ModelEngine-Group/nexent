@@ -1,26 +1,141 @@
-import pytest
-from unittest.mock import MagicMock, patch
+import importlib.util
 import json
 import sys
 import types
+from pathlib import Path
 
-# Stub heavy optional deps before importing sdk package chain.
-fake_unstructured = types.ModuleType("unstructured_inference")
-fake_models = types.ModuleType("unstructured_inference.models")
-fake_tables = types.ModuleType("unstructured_inference.models.tables")
-fake_tables.tables_agent = types.SimpleNamespace(model=None)
-fake_logger = types.ModuleType("unstructured_inference.logger")
-fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
-fake_models.tables = fake_tables
-fake_unstructured.models = fake_models
-sys.modules.setdefault("unstructured_inference", fake_unstructured)
-sys.modules.setdefault("unstructured_inference.models", fake_models)
-sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
-sys.modules.setdefault("unstructured_inference.logger", fake_logger)
+import pytest
+from unittest.mock import MagicMock, patch
 
-# Import target module
-from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
-from sdk.nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
+def _pkg(name, path):
+    mod = types.ModuleType(name)
+    mod.__path__ = [str(path)]
+    sys.modules.setdefault(name, mod)
+    return mod
+
+sdk_pkg = _pkg("sdk", REPO_ROOT / "sdk")
+nexent_pkg = _pkg("sdk.nexent", REPO_ROOT / "sdk" / "nexent")
+core_pkg = _pkg("sdk.nexent.core", REPO_ROOT / "sdk" / "nexent" / "core")
+tools_pkg = _pkg("sdk.nexent.core.tools", REPO_ROOT / "sdk" / "nexent" / "core" / "tools")
+utils_pkg = _pkg("sdk.nexent.core.utils", REPO_ROOT / "sdk" / "nexent" / "core" / "utils")
+models_pkg = _pkg("sdk.nexent.core.models", REPO_ROOT / "sdk" / "nexent" / "core" / "models")
+vector_pkg = _pkg("sdk.nexent.vector_database", REPO_ROOT / "sdk" / "nexent" / "vector_database")
+sdk_pkg.nexent = nexent_pkg
+nexent_pkg.core = core_pkg
+nexent_pkg.vector_database = vector_pkg
+core_pkg.tools = tools_pkg
+core_pkg.utils = utils_pkg
+core_pkg.models = models_pkg
+
+class MessageObserver:
+    def add_message(self, *args, **kwargs):
+        pass
+
+class _ProcessType:
+    TOOL = "TOOL"
+    CARD = "CARD"
+    SEARCH_CONTENT = "SEARCH_CONTENT"
+    PICTURE_WEB = "PICTURE_WEB"
+
+ProcessType = _ProcessType
+
+observer_mod = types.ModuleType("sdk.nexent.core.utils.observer")
+observer_mod.MessageObserver = MessageObserver
+observer_mod.ProcessType = _ProcessType
+sys.modules["sdk.nexent.core.utils.observer"] = observer_mod
+utils_pkg.observer = observer_mod
+
+class _EnumValue:
+    def __init__(self, value):
+        self.value = value
+
+class _ToolCategory:
+    SEARCH = _EnumValue("search")
+
+class _ToolSign:
+    KNOWLEDGE_BASE = _EnumValue("knowledge_base")
+
+class SearchResultTextMessage:
+    def __init__(self, **kwargs):
+        self.data = {
+            "title": kwargs.get("title", ""),
+            "content": kwargs.get("text", ""),
+            "source_type": kwargs.get("source_type", ""),
+            "url": kwargs.get("url", ""),
+            "filename": kwargs.get("filename", ""),
+            "published_date": kwargs.get("published_date", ""),
+            "score": kwargs.get("score", 0),
+            "score_details": kwargs.get("score_details", {}),
+            "cite_index": kwargs.get("cite_index", 0),
+            "search_type": kwargs.get("search_type", ""),
+            "tool_sign": kwargs.get("tool_sign", ""),
+        }
+
+    def to_dict(self):
+        return dict(self.data)
+
+    def to_model_dict(self):
+        return dict(self.data)
+
+tools_common_mod = types.ModuleType("sdk.nexent.core.utils.tools_common_message")
+tools_common_mod.SearchResultTextMessage = SearchResultTextMessage
+tools_common_mod.ToolCategory = _ToolCategory
+tools_common_mod.ToolSign = _ToolSign
+sys.modules["sdk.nexent.core.utils.tools_common_message"] = tools_common_mod
+utils_pkg.tools_common_message = tools_common_mod
+
+constants_mod = types.ModuleType("sdk.nexent.core.utils.constants")
+constants_mod.RERANK_OVERSEARCH_MULTIPLIER = 2
+sys.modules["sdk.nexent.core.utils.constants"] = constants_mod
+utils_pkg.constants = constants_mod
+
+class BaseEmbedding:
+    pass
+
+class BaseRerank:
+    pass
+
+embedding_mod = types.ModuleType("sdk.nexent.core.models.embedding_model")
+embedding_mod.BaseEmbedding = BaseEmbedding
+sys.modules["sdk.nexent.core.models.embedding_model"] = embedding_mod
+models_pkg.embedding_model = embedding_mod
+
+rerank_mod = types.ModuleType("sdk.nexent.core.models.rerank_model")
+rerank_mod.BaseRerank = BaseRerank
+sys.modules["sdk.nexent.core.models.rerank_model"] = rerank_mod
+models_pkg.rerank_model = rerank_mod
+
+class VectorDatabaseCore:
+    pass
+
+vector_base_mod = types.ModuleType("sdk.nexent.vector_database.base")
+vector_base_mod.VectorDatabaseCore = VectorDatabaseCore
+sys.modules["sdk.nexent.vector_database.base"] = vector_base_mod
+vector_pkg.base = vector_base_mod
+
+smolagents_mod = types.ModuleType("smolagents")
+smolagents_tools_mod = types.ModuleType("smolagents.tools")
+
+class Tool:
+    def __init__(self, *args, **kwargs):
+        pass
+
+smolagents_tools_mod.Tool = Tool
+smolagents_mod.tools = smolagents_tools_mod
+sys.modules["smolagents"] = smolagents_mod
+sys.modules["smolagents.tools"] = smolagents_tools_mod
+
+MODULE_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "tools" / "knowledge_base_search_tool.py"
+MODULE_NAME = "sdk.nexent.core.tools.knowledge_base_search_tool"
+spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
+knowledge_base_search_tool_module = importlib.util.module_from_spec(spec)
+sys.modules[MODULE_NAME] = knowledge_base_search_tool_module
+assert spec and spec.loader
+spec.loader.exec_module(knowledge_base_search_tool_module)
+tools_pkg.knowledge_base_search_tool = knowledge_base_search_tool_module
+KnowledgeBaseSearchTool = knowledge_base_search_tool_module.KnowledgeBaseSearchTool
 
 
 @pytest.fixture
@@ -760,6 +875,197 @@ class TestSourceTypeConversion:
 
         assert full_results[0]["source_type"] == "file"
 
+
+class TestKnowledgeBaseSearchToolMissingBranches:
+    def test_resolve_index_names_and_fieldinfo_paths(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+
+        tool.index_names = FieldInfo(default="alpha, beta , gamma")
+        assert tool._resolve_index_names() == ["alpha", "beta", "gamma"]
+
+        tool.index_names = FieldInfo(default=["alpha", " ", "gamma"])
+        assert tool._resolve_index_names() == ["alpha", "gamma"]
+
+        tool.index_names = None
+        assert tool._resolve_index_names() == []
+
+        tool.index_names = 123
+        assert tool._resolve_index_names() == []
+
+    def test_convert_to_index_names_with_fieldinfo_default_factory(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["Knowledge A", "raw_index"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map=FieldInfo(default_factory=lambda: {"Knowledge A": "es_index_a"}),
+        )
+
+        assert tool._convert_to_index_names(["Knowledge A", "raw_index"]) == ["es_index_a", "raw_index"]
+
+    def test_apply_rerank_empty_and_invalid_results(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            rerank=True,
+            rerank_model=MagicMock(),
+            display_name_to_index_map={},
+        )
+
+        kb_search_results = create_mock_search_result(2)
+        tool.rerank_model.rerank.return_value = []
+        assert tool._apply_rerank("query", kb_search_results, top_k=2) == kb_search_results
+
+        tool.rerank_model.rerank.return_value = [{"index": 99, "relevance_score": 0.5}]
+        assert tool._apply_rerank("query", kb_search_results, top_k=2) == kb_search_results
+
+    def test_extract_image_url_success_and_failure(self):
+        assert KnowledgeBaseSearchTool._extract_image_url(
+            {
+                "process_source": "UniversalImageExtractor",
+                "content": json.dumps({"image_url": "s3://bucket/img.png"}),
+            }
+        ) == "s3://bucket/img.png"
+
+        assert KnowledgeBaseSearchTool._extract_image_url(
+            {
+                "process_source": "UniversalImageExtractor",
+                "content": "not-json",
+            }
+        ) is None
+
+        assert KnowledgeBaseSearchTool._extract_image_url(
+            {
+                "process_source": "file",
+                "content": json.dumps({"image_url": "s3://bucket/img.png"}),
+            }
+        ) is None
+
+    def test_record_search_results_image_filter_paths(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+
+        search_results = [{"title": "Doc", "content": "Body"}]
+        tool._record_search_results(search_results, [], "query")
+        mock_observer.add_message.assert_called_once()
+        mock_observer.add_message.reset_mock()
+
+        with patch.object(tool, "_filter_images", return_value=[]):
+            tool._record_search_results(search_results, ["img1"], "query")
+        assert any(call.args[1] == ProcessType.PICTURE_WEB for call in mock_observer.add_message.call_args_list)
+        mock_observer.add_message.reset_mock()
+
+        with patch.object(tool, "_filter_images", side_effect=Exception("boom")):
+            tool._record_search_results(search_results, ["img2"], "query")
+        assert any(call.args[1] == ProcessType.PICTURE_WEB for call in mock_observer.add_message.call_args_list)
+
+    def test_search_error_wrappers(self, mock_observer, mock_vdb_core, mock_embedding_model):
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+
+        mock_vdb_core.accurate_search.side_effect = Exception("accurate boom")
+        with pytest.raises(Exception, match="Error during accurate search"):
+            tool.search_accurate("query", ["kb1"], top_k=1)
+
+        mock_vdb_core.accurate_search.side_effect = None
+        mock_vdb_core.semantic_search.side_effect = Exception("semantic boom")
+        with pytest.raises(Exception, match="Error during semantic search"):
+            tool.search_semantic("query", ["kb1"], top_k=1)
+
+    def test_filter_images_success_and_event_loop_failure(self, mock_observer, mock_vdb_core, mock_embedding_model, monkeypatch, mocker):
+        import asyncio
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            display_name_to_index_map={},
+        )
+        tool.data_process_service = "https://data-process"
+
+        class FakeResponse:
+            def __init__(self, status, payload=None):
+                self.status = status
+                self._payload = payload or {}
+
+            async def json(self):
+                return self._payload
+
+        class FakePostContext:
+            def __init__(self, url):
+                self.url = url
+
+            async def __aenter__(self):
+                if self.url == "raise":
+                    raise RuntimeError("request boom")
+                if self.url == "bad":
+                    return FakeResponse(500, {})
+                if self.url == "skip":
+                    return FakeResponse(200, {"is_important": False})
+                return FakeResponse(200, {"is_important": True})
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeSession:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            def post(self, api_url, data):
+                return FakePostContext(data["image_url"])
+
+        fake_aiohttp = types.ModuleType("aiohttp")
+        fake_aiohttp.TCPConnector = lambda limit=0: object()
+        fake_aiohttp.ClientTimeout = lambda total=0: object()
+        fake_aiohttp.ClientSession = FakeSession
+        monkeypatch.setitem(sys.modules, "aiohttp", fake_aiohttp)
+
+        assert tool._filter_images(["keep", "skip", "bad", "raise"], "query") == ["keep"]
+
+        mocker.patch("asyncio.new_event_loop", side_effect=RuntimeError("loop boom"))
+        assert tool._filter_images(["keep"], "query") == []
+
     def test_source_type_minio_converted_to_file(self, knowledge_base_search_tool, mock_vdb_core):
         """Test that source_type 'minio' is converted to 'file'."""
         mock_results = [
@@ -999,7 +1305,7 @@ class TestEdgeCases:
         result = knowledge_base_search_tool.forward("test query")
         search_results = json.loads(result)
 
-        assert search_results[0]["text"] == ""
+        assert search_results[0]["content"] == ""
 
     def test_forward_multiple_indices(self, knowledge_base_search_tool, mock_vdb_core):
         """Test forward searches across multiple indices."""

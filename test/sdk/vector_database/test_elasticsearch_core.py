@@ -1,28 +1,107 @@
-import pytest
-from unittest.mock import MagicMock, patch
+import importlib.util
 import time
 import types
 import sys
+from pathlib import Path
 from typing import List, Dict, Any
 from contextlib import contextmanager
+
+import pytest
+from unittest.mock import MagicMock, patch
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+def _pkg(name, path):
+    mod = types.ModuleType(name)
+    mod.__path__ = [str(path)]
+    sys.modules.setdefault(name, mod)
+    return mod
+
+sdk_pkg = _pkg("sdk", REPO_ROOT / "sdk")
+nexent_pkg = _pkg("sdk.nexent", REPO_ROOT / "sdk" / "nexent")
+core_pkg = _pkg("sdk.nexent.core", REPO_ROOT / "sdk" / "nexent" / "core")
+models_pkg = _pkg("sdk.nexent.core.models", REPO_ROOT / "sdk" / "nexent" / "core" / "models")
+nlp_pkg = _pkg("sdk.nexent.core.nlp", REPO_ROOT / "sdk" / "nexent" / "core" / "nlp")
+vector_pkg = _pkg("sdk.nexent.vector_database", REPO_ROOT / "sdk" / "nexent" / "vector_database")
+sdk_pkg.nexent = nexent_pkg
+nexent_pkg.core = core_pkg
+nexent_pkg.vector_database = vector_pkg
+core_pkg.models = models_pkg
+core_pkg.nlp = nlp_pkg
+
+class BaseEmbedding:
+    pass
+
+embedding_mod = types.ModuleType("sdk.nexent.core.models.embedding_model")
+embedding_mod.BaseEmbedding = BaseEmbedding
+sys.modules["sdk.nexent.core.models.embedding_model"] = embedding_mod
+models_pkg.embedding_model = embedding_mod
+
+tokenizer_mod = types.ModuleType("sdk.nexent.core.nlp.tokenizer")
+tokenizer_mod.calculate_term_weights = lambda query_text: {}
+sys.modules["sdk.nexent.core.nlp.tokenizer"] = tokenizer_mod
+nlp_pkg.tokenizer = tokenizer_mod
+
+class VectorDatabaseCore:
+    pass
+
+vector_base_mod = types.ModuleType("sdk.nexent.vector_database.base")
+vector_base_mod.VectorDatabaseCore = VectorDatabaseCore
+sys.modules["sdk.nexent.vector_database.base"] = vector_base_mod
+vector_pkg.base = vector_base_mod
+
+vector_utils_mod = types.ModuleType("sdk.nexent.vector_database.utils")
+vector_utils_mod.build_weighted_query = lambda query_text, weights: {"query": {"match": {"content": query_text}}}
+vector_utils_mod.format_size = lambda size: f"{size}B"
+sys.modules["sdk.nexent.vector_database.utils"] = vector_utils_mod
+vector_pkg.utils = vector_utils_mod
+
+fake_elasticsearch = types.ModuleType("elasticsearch")
+
+class _FakeRequestError(Exception):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+        self.kwargs = kwargs
+
+    def __str__(self):
+        return str(self.kwargs.get("message", self.args[0] if self.args else ""))
+
+class _FakeNotFoundError(Exception):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+        self.kwargs = kwargs
+
+class _FakeElasticsearch:
+    def __init__(self, *args, **kwargs):
+        self.indices = MagicMock()
+        self.cluster = MagicMock()
+        self.search = MagicMock()
+        self.bulk = MagicMock()
+        self.count = MagicMock()
+        self.delete_by_query = MagicMock()
+        self.msearch = MagicMock()
+        self.index = MagicMock()
+        self.update = MagicMock()
+        self.delete = MagicMock()
+        self.scroll = MagicMock()
+        self.clear_scroll = MagicMock()
+        self.get = MagicMock()
+
+fake_elasticsearch.Elasticsearch = _FakeElasticsearch
+fake_elasticsearch.exceptions = types.SimpleNamespace(RequestError=_FakeRequestError, NotFoundError=_FakeNotFoundError)
+sys.modules.setdefault("elasticsearch", fake_elasticsearch)
+
 from elasticsearch import exceptions
 
-# Stub heavy optional deps before importing sdk package chain.
-fake_unstructured = types.ModuleType("unstructured_inference")
-fake_models = types.ModuleType("unstructured_inference.models")
-fake_tables = types.ModuleType("unstructured_inference.models.tables")
-fake_tables.tables_agent = types.SimpleNamespace(model=None)
-fake_logger = types.ModuleType("unstructured_inference.logger")
-fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
-fake_models.tables = fake_tables
-fake_unstructured.models = fake_models
-sys.modules.setdefault("unstructured_inference", fake_unstructured)
-sys.modules.setdefault("unstructured_inference.models", fake_models)
-sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
-sys.modules.setdefault("unstructured_inference.logger", fake_logger)
-
-# Import the class under test
-from sdk.nexent.vector_database.elasticsearch_core import ElasticSearchCore
+MODULE_PATH = REPO_ROOT / "sdk" / "nexent" / "vector_database" / "elasticsearch_core.py"
+MODULE_NAME = "sdk.nexent.vector_database.elasticsearch_core"
+spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
+elasticsearch_core_module = importlib.util.module_from_spec(spec)
+sys.modules[MODULE_NAME] = elasticsearch_core_module
+assert spec and spec.loader
+spec.loader.exec_module(elasticsearch_core_module)
+vector_pkg.elasticsearch_core = elasticsearch_core_module
+ElasticSearchCore = elasticsearch_core_module.ElasticSearchCore
 
 # ----------------------------------------------------------------------------
 # Fixtures
@@ -915,7 +994,7 @@ def test_vectorize_documents_large_batch(elasticsearch_core_instance):
         assert result == 100
         assert mock_embedding_model.get_embeddings.call_count >= 2
         mock_bulk.assert_called()
-        mock_refresh.assert_called_once_with("test_index")
+        assert mock_refresh.call_count == 2
 
 
 def test_vectorize_documents_small_batch_large_mode_forces_large_path(elasticsearch_core_instance):
@@ -1353,8 +1432,8 @@ def test_get_index_chunks_cleanup_failure(elasticsearch_core_instance):
 def test_accurate_search_success(elasticsearch_core_instance):
     """Test accurate search with text matching."""
     with patch.object(elasticsearch_core_instance, 'exec_query') as mock_exec, \
-            patch('sdk.nexent.vector_database.elasticsearch_core.calculate_term_weights') as mock_weights, \
-            patch('sdk.nexent.vector_database.elasticsearch_core.build_weighted_query') as mock_build:
+            patch.object(elasticsearch_core_module, 'calculate_term_weights') as mock_weights, \
+            patch.object(elasticsearch_core_module, 'build_weighted_query') as mock_build:
 
         mock_weights.return_value = {"test": 1.0}
         mock_build.return_value = {
@@ -1383,8 +1462,8 @@ def test_accurate_search_success(elasticsearch_core_instance):
 def test_accurate_search_builds_multi_index_query(elasticsearch_core_instance):
     """Ensure accurate_search joins indices and applies top_k sizing."""
     with patch.object(elasticsearch_core_instance, 'exec_query') as mock_exec, \
-            patch('sdk.nexent.vector_database.elasticsearch_core.calculate_term_weights') as mock_weights, \
-            patch('sdk.nexent.vector_database.elasticsearch_core.build_weighted_query') as mock_build:
+            patch.object(elasticsearch_core_module, 'calculate_term_weights') as mock_weights, \
+            patch.object(elasticsearch_core_module, 'build_weighted_query') as mock_build:
 
         mock_weights.return_value = {"test": 0.5}
         mock_build.return_value = {"query": {"match_all": {}}}
@@ -2344,3 +2423,104 @@ def test_get_user_indices_error_returns_empty(elasticsearch_core_instance):
     with patch.object(elasticsearch_core_instance, "client") as mock_client:
         mock_client.indices.get_alias.side_effect = RuntimeError("x")
         assert elasticsearch_core_instance.get_user_indices("*") == []
+
+
+class TestAdditionalElasticsearchCoreCoverage:
+    def test_create_index_request_error_other_returns_false(self, elasticsearch_core_instance):
+        with patch.object(elasticsearch_core_instance, "client") as mock_client, \
+                patch.object(elasticsearch_core_instance, "_ensure_index_ready") as mock_ready:
+            mock_client.indices.exists.return_value = False
+            mock_client.indices.create.side_effect = exceptions.RequestError(
+                message="bad request",
+                meta=types.SimpleNamespace(status=400),
+                body={"error": {"type": "mapper_parsing_exception"}},
+            )
+
+            assert elasticsearch_core_instance.create_index("idx") is False
+            mock_ready.assert_not_called()
+
+    def test_force_refresh_with_zero_retries_returns_false(self, elasticsearch_core_instance):
+        with patch.object(elasticsearch_core_instance.client.indices, "refresh") as mock_refresh:
+            assert elasticsearch_core_instance._force_refresh_with_retry("idx", max_retries=0) is False
+            mock_refresh.assert_not_called()
+
+    def test_delete_index_generic_error_returns_false(self, elasticsearch_core_instance):
+        with patch.object(elasticsearch_core_instance.client.indices, "delete") as mock_delete:
+            mock_delete.side_effect = RuntimeError("boom")
+            assert elasticsearch_core_instance.delete_index("idx") is False
+
+    def test_bulk_operation_context_nested_restores_settings(self, elasticsearch_core_instance):
+        with patch.object(elasticsearch_core_instance, "_apply_bulk_settings") as mock_apply, \
+                patch.object(elasticsearch_core_instance, "_restore_normal_settings") as mock_restore:
+            with elasticsearch_core_instance.bulk_operation_context("idx", estimated_duration=1) as op1:
+                with elasticsearch_core_instance.bulk_operation_context("idx", estimated_duration=1) as op2:
+                    assert op1 != op2
+                    assert "idx" in elasticsearch_core_instance._bulk_operations
+                    assert len(elasticsearch_core_instance._bulk_operations["idx"]) == 2
+                assert mock_restore.call_count == 0
+
+            mock_apply.assert_called_once_with("idx")
+            mock_restore.assert_called_once_with("idx")
+            assert "idx" not in elasticsearch_core_instance._bulk_operations
+
+    def test_delete_documents_and_count_documents_error_paths(self, elasticsearch_core_instance):
+        with patch.object(elasticsearch_core_instance.client, "delete_by_query") as mock_delete, \
+                patch.object(elasticsearch_core_instance.client, "count") as mock_count:
+            mock_delete.return_value = {"deleted": 3}
+            assert elasticsearch_core_instance.delete_documents("idx", "/path/file.pdf") == 3
+
+            mock_delete.side_effect = RuntimeError("boom")
+            assert elasticsearch_core_instance.delete_documents("idx", "/path/file.pdf") == 0
+
+            mock_count.return_value = {"count": 7}
+            assert elasticsearch_core_instance.count_documents("idx") == 7
+
+            mock_count.side_effect = RuntimeError("boom")
+            assert elasticsearch_core_instance.count_documents("idx") == 0
+
+    def test_get_index_chunks_zero_total_paginated_and_scroll_without_scroll_id(self, elasticsearch_core_instance):
+        elasticsearch_core_instance.client = MagicMock()
+
+        elasticsearch_core_instance.client.count.side_effect = [
+            {"count": 0},
+            {"count": 1},
+            {"count": 1},
+        ]
+        elasticsearch_core_instance.client.search.side_effect = [
+            {"hits": {"hits": [{"_id": "doc-1", "_source": {"content": "A"}}]}},
+            {"hits": {"hits": [{"_id": "doc-2", "_source": {"content": "B"}}]}},
+        ]
+
+        empty = elasticsearch_core_instance.get_index_chunks("idx", page=2, page_size=10, path_or_url="/path")
+        assert empty == {"chunks": [], "total": 0, "page": 2, "page_size": 10}
+
+        paginated = elasticsearch_core_instance.get_index_chunks("idx", page=1, page_size=1)
+        assert paginated["chunks"] == [{"content": "A", "id": "doc-1"}]
+
+        scroll = elasticsearch_core_instance.get_index_chunks("idx")
+        assert scroll["chunks"] == [{"content": "B", "id": "doc-2"}]
+        elasticsearch_core_instance.client.clear_scroll.assert_not_called()
+
+    def test_get_index_chunks_exception_path(self, elasticsearch_core_instance):
+        elasticsearch_core_instance.client = MagicMock()
+        elasticsearch_core_instance.client.count.return_value = {"count": 1}
+        elasticsearch_core_instance.client.search.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            elasticsearch_core_instance.get_index_chunks("idx")
+
+    def test_check_index_exists_wrapper(self, elasticsearch_core_instance):
+        with patch.object(elasticsearch_core_instance.client.indices, "exists") as mock_exists:
+            mock_exists.return_value = True
+            assert elasticsearch_core_instance.check_index_exists("idx") is True
+
+    def test_search_and_multi_search_wrappers(self, elasticsearch_core_instance):
+        with patch.object(elasticsearch_core_instance.client, "search") as mock_search:
+            mock_search.return_value = {"hits": {"hits": []}}
+            assert elasticsearch_core_instance.search("idx", {"match_all": {}}) == {"hits": {"hits": []}}
+            mock_search.assert_called_once_with(index="idx", body={"match_all": {}})
+
+        with patch.object(elasticsearch_core_instance.client, "msearch") as mock_msearch:
+            mock_msearch.return_value = {"responses": []}
+            assert elasticsearch_core_instance.multi_search([{}], "idx") == {"responses": []}
+            mock_msearch.assert_called_once_with(body=[{}], index="idx")

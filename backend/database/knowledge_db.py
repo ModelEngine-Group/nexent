@@ -57,7 +57,6 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "knowledge_name": knowledge_name,
                 "group_ids": convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids,
                 "ingroup_permission": query.get("ingroup_permission"),
-                "is_multimodal": 'Y' if query.get("is_multimodal") else 'N'
             }
 
             # For backward compatibility: if caller explicitly provides index_name,
@@ -184,9 +183,6 @@ def update_knowledge_record(query: Dict[str, Any]) -> bool:
             # Update group IDs
             if query.get("group_ids") is not None:
                 record.group_ids = query["group_ids"]
-
-            if query.get("is_multimodal"):
-                record.is_multimodal = 'Y' if query["is_multimodal"] else 'N'
             
             # Update timestamp and user
             if query.get("user_id"):
@@ -263,11 +259,6 @@ def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, An
             if 'tenant_id' in query and query['tenant_id'] is not None:
                 db_query = db_query.filter(
                     KnowledgeRecord.tenant_id == query['tenant_id'])
-
-            if 'is_multimodal' in query:
-                db_query = db_query.filter(
-                    KnowledgeRecord.is_multimodal == query['is_multimodal']
-                )
             
             result = db_query.first()
 

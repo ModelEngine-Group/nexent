@@ -101,6 +101,28 @@ def _get_embedding_model_display_name(model_id: Optional[int], tenant_id: str) -
     return ""
 
 
+def _is_multimodal_by_model_id(model_id: Optional[int], tenant_id: str) -> bool:
+    """
+    Determine whether an embedding model is multimodal based on model_id.
+
+    Args:
+        model_id: The embedding model ID.
+        tenant_id: Tenant ID for model lookup.
+
+    Returns:
+        True when the model type is `multi_embedding`, otherwise False.
+    """
+    if model_id is None:
+        return False
+    try:
+        model = get_model_by_model_id(model_id, tenant_id)
+        if model:
+            return model.get("model_type") == "multi_embedding"
+    except Exception as e:
+        logger.warning(f"Failed to determine multimodal flag for model_id {model_id}: {e}")
+    return False
+
+
 class KnowledgeBaseNeedsModelConfigError(Exception):
     """Exception raised when a knowledge base needs an embedding model to be configured."""
     def __init__(self, index_name: str, message: str = None):
@@ -284,7 +306,11 @@ def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabas
     return {"status": "available"}
 
 
-def get_embedding_model(tenant_id: str, model_name: Optional[str] = None) -> tuple[Optional[Any], Optional[int]]:
+def get_embedding_model(
+        tenant_id: str,
+        model_name: Optional[str] = None,
+        model_type: Optional[str] = None
+) -> tuple[Optional[Any], Optional[int]]:
     """
     Get the embedding model for the tenant, optionally using a specific model name.
 
@@ -299,7 +325,18 @@ def get_embedding_model(tenant_id: str, model_name: Optional[str] = None) -> tup
     # If model_name is provided, find the model by display_name
     if model_name:
         try:
-            model = get_model_by_display_name(model_name, tenant_id)
+            normalized_model_type = None
+            if model_type:
+                if model_type in ["multiEmbedding", "multi_embedding"]:
+                    normalized_model_type = "multi_embedding"
+                elif model_type == "embedding":
+                    normalized_model_type = "embedding"
+
+            if normalized_model_type:
+                model = get_model_by_display_name(
+                    model_name, tenant_id, normalized_model_type)
+            else:
+                model = get_model_by_display_name(model_name, tenant_id)
             if model and model.get("model_type") in ["embedding", "multi_embedding"]:
                 model_config = {
                     "model_repo": model.get("model_repo", ""),
@@ -596,7 +633,7 @@ class ElasticSearchService:
             ingroup_permission: Optional[str] = None,
             group_ids: Optional[List[int]] = None,
             embedding_model_name: Optional[str] = None,
-            is_multimodal: bool = False,
+            is_multimodal: Optional[bool] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -622,7 +659,17 @@ class ElasticSearchService:
         """
         try:
             # Get embedding model - use user-selected model if provided, otherwise use tenant default
-            embedding_model, model_id = get_embedding_model(tenant_id, embedding_model_name)
+            selected_model_type = None
+            if is_multimodal is True:
+                selected_model_type = "multi_embedding"
+            elif is_multimodal is False and embedding_model_name:
+                selected_model_type = "embedding"
+
+            embedding_model, model_id = get_embedding_model(
+                tenant_id,
+                embedding_model_name,
+                selected_model_type
+            )
 
             # Determine the embedding model name to save: use user-provided name if available,
             # otherwise use the model's display name
@@ -674,7 +721,6 @@ class ElasticSearchService:
             knowledge_name: Optional[str] = None,
             ingroup_permission: Optional[str] = None,
             group_ids: Optional[List[int]] = None,
-            is_multimodal: bool = False,
             tenant_id: Optional[str] = None,
             user_id: Optional[str] = None,
     ) -> bool:
@@ -705,7 +751,6 @@ class ElasticSearchService:
         update_data = {
             "index_name": index_name,
             "updated_by": user_id,
-            "is_multimodal": is_multimodal,
         }
 
         if knowledge_name is not None:
@@ -1006,6 +1051,7 @@ class ElasticSearchService:
                     model_id = record.get("embedding_model_id")
                     tenant_id = record.get("tenant_id") or target_tenant_id
                     embedding_model_display_name = _get_embedding_model_display_name(model_id, tenant_id)
+                    is_multimodal = _is_multimodal_by_model_id(model_id, tenant_id)
 
                     stats_info.append({
                         # Internal index name (used as ID)
@@ -1017,7 +1063,7 @@ class ElasticSearchService:
                         # knowledge source and ingroup permission from DB record
                         "knowledge_sources": record["knowledge_sources"],
                         "ingroup_permission": record["ingroup_permission"],
-                        "is_multimodal": record.get("is_multimodal"),
+                        "is_multimodal": is_multimodal,
                         "tenant_id": record.get("tenant_id"),
                         # Embedding model info: display_name from model_id
                         "embedding_model_name": embedding_model_display_name or record.get("embedding_model_name", ""),
@@ -1897,37 +1943,6 @@ class ElasticSearchService:
             update_fields = chunk_request.dict(
                 exclude_unset=True, exclude={"metadata"})
             metadata = chunk_request.metadata or {}
-
-            if "content" in update_fields and update_fields.get("content"):
-                embedding_model_name = None
-                is_multimodal = False
-                if tenant_id:
-                    knowledge_record = get_knowledge_record(
-                        {"index_name": index_name, "tenant_id": tenant_id}
-                    )
-                    embedding_model_name = (
-                        knowledge_record.get("embedding_model_name")
-                        if knowledge_record
-                        else None
-                    )
-                    is_multimodal = bool(
-                        knowledge_record and knowledge_record.get("is_multimodal") == "Y"
-                    )
-
-                    embedding_model = get_embedding_model(
-                        tenant_id=tenant_id,
-                        is_multimodal=is_multimodal,
-                        model_name=embedding_model_name,
-                        strict_model_name=bool(embedding_model_name),
-                    )
-                    embeddings = embedding_model.get_embeddings(
-                        update_fields["content"]
-                    )
-                    if embeddings and len(embeddings) > 0:
-                        update_fields["embedding"] = embeddings[0]
-                        if embedding_model_name:
-                            update_fields["embedding_model_name"] = embedding_model_name
-
             update_payload = ElasticSearchService._build_chunk_payload(
                 base_fields={
                     **update_fields,

@@ -230,11 +230,29 @@ function DataConfig({ isActive }: DataConfigProps) {
   const contentRef = useRef<HTMLDivElement | null>(null);
 
   const availableEmbeddingModels = useMemo(() => {
-    return models.filter(
-      (model) =>
-        (model.type === "embedding" || model.type === "multi_embedding") &&
-        model.connect_status === "available"
+    const embeddingRelatedModels = models.filter(
+      (model) => model.type === "embedding" || model.type === "multi_embedding"
     );
+    const availableKeys = new Set(
+      embeddingRelatedModels
+        .filter((model) => model.connect_status === "available")
+        .map((model) => `${model.displayName}::${model.type}`)
+    );
+
+    return embeddingRelatedModels.filter((model) => {
+      if (model.connect_status === "available") {
+        return true;
+      }
+
+      // For paired records created from a multi-embedding model, mirror availability by display name.
+      if (model.type === "embedding") {
+        return availableKeys.has(`${model.displayName}::multi_embedding`);
+      }
+      if (model.type === "multi_embedding") {
+        return availableKeys.has(`${model.displayName}::embedding`);
+      }
+      return false;
+    });
   }, [models]);
 
   const resolveEmbeddingModelId = useCallback(

@@ -319,6 +319,26 @@ const [isSummarizing, setIsSummarizing] = useState(false);
 
     // Check if group select should be disabled (when permission is PRIVATE)
     const isGroupSelectDisabled = ingroupPermission === "PRIVATE";
+    const embeddingModelsForOptions = availableEmbeddingModels || [];
+    const availableEmbeddingModelKeys = new Set(
+      embeddingModelsForOptions
+        .filter((model) => model.connect_status === "available")
+        .map((model) => `${model.displayName}::${model.type}`)
+    );
+    const isEmbeddingModelSelectable = (model: ModelOption): boolean => {
+      if (model.connect_status === "available") return true;
+      if (model.type === "embedding") {
+        return availableEmbeddingModelKeys.has(
+          `${model.displayName}::multi_embedding`
+        );
+      }
+      if (model.type === "multi_embedding") {
+        return availableEmbeddingModelKeys.has(
+          `${model.displayName}::embedding`
+        );
+      }
+      return false;
+    };
 
     // Load frequency options from backend API
   useEffect(() => {
@@ -543,22 +563,22 @@ const [isSummarizing, setIsSummarizing] = useState(false);
                         options={[
                           {
                             label: t("modelConfig.option.embeddingModel"),
-                            options: (availableEmbeddingModels || [])
+                            options: embeddingModelsForOptions
                               .filter((model) => model.type === "embedding")
                               .map((model) => ({
                                 value: `${model.displayName}::${model.type}`,
                                 label: model.displayName,
-                                disabled: model.connect_status === "unavailable",
+                                disabled: !isEmbeddingModelSelectable(model),
                               })),
                           },
                           {
                             label: t("modelConfig.option.multiEmbeddingModel"),
-                            options: (availableEmbeddingModels || [])
+                            options: embeddingModelsForOptions
                               .filter((model) => model.type === "multi_embedding")
                               .map((model) => ({
                                 value: `${model.displayName}::${model.type}`,
                                 label: model.displayName,
-                                disabled: model.connect_status === "unavailable",
+                                disabled: !isEmbeddingModelSelectable(model),
                               })),
                           },
                         ].filter((group) => group.options.length > 0)}

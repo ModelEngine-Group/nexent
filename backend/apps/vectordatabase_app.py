@@ -82,13 +82,13 @@ def create_new_index(
         # Extract optional fields from request body
         ingroup_permission = None
         group_ids = None
-        is_multimodal = False
         embedding_model_name: Optional[str] = None
+        is_multimodal: Optional[bool] = None
         if request:
             ingroup_permission = request.get("ingroup_permission")
             group_ids = request.get("group_ids")
-            is_multimodal = request.get("is_multimodal", False)
             embedding_model_name = request.get("embeddingModel")
+            is_multimodal = request.get("is_multimodal")
 
         # Treat path parameter as user-facing knowledge base name for new creations
         return ElasticSearchService.create_knowledge_base(
@@ -144,7 +144,6 @@ async def update_index(
         knowledge_name = request.get("knowledge_name")
         ingroup_permission = request.get("ingroup_permission")
         group_ids = request.get("group_ids")
-        is_multimodal = request.get("is_multimodal")
 
         # Call service layer to update knowledge base
         result = ElasticSearchService.update_knowledge_base(
@@ -152,7 +151,6 @@ async def update_index(
             knowledge_name=knowledge_name,
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
-            is_multimodal=is_multimodal,
             tenant_id=tenant_id,
             user_id=user_id,
         )
