@@ -606,7 +606,7 @@
   "knowledgeBase.ingroup.permission.PRIVATE": "Personal Private",
   "knowledgeBase.ingroup.permission.DEFAULT": "In Group Read Only (Default)",
   "knowledgeBase.embeddingModel.configRequired": "Configure Embedding Model",
-  "knowledgeBase.embeddingModel.configDescription": "The knowledge base \"{{name}}\" requires an embedding model to perform search. Please select an available embedding model to continue.",
+  "knowledgeBase.embeddingModel.configDescription": "The knowledge base \"{{name}}\" requires an embedding model to perform search. Please select the embedding model used when creating this knowledge base, as model mismatch may cause search failures.",
   "knowledgeBase.embeddingModel.selectModel": "Select Embedding Model",
   "knowledgeBase.embeddingModel.selectPlaceholder": "Select an embedding model",
   "knowledgeBase.embeddingModel.noModelsAvailable": "No available embedding models",

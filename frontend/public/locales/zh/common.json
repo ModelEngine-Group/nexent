@@ -607,7 +607,7 @@
   "knowledgeBase.ingroup.permission.PRIVATE": "私有",
   "knowledgeBase.ingroup.permission.DEFAULT": "同组只读 (默认)",
   "knowledgeBase.embeddingModel.configRequired": "配置向量化模型",
-  "knowledgeBase.embeddingModel.configDescription": "知识库 \"{{name}}\" 需要配置向量化模型才能进行检索。请选择一个可用的向量化模型以继续。",
+  "knowledgeBase.embeddingModel.configDescription": "知识库 \"{{name}}\" 需要配置向量化模型才能进行检索。请选择该知识库创建时使用的向量化模型，模型不一致可能导致检索失败。",
   "knowledgeBase.embeddingModel.selectModel": "选择向量化模型",
   "knowledgeBase.embeddingModel.selectPlaceholder": "请选择向量化模型",
   "knowledgeBase.embeddingModel.noModelsAvailable": "没有可用的向量化模型",

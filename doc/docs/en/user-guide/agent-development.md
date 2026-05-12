@@ -60,6 +60,8 @@ Agents can use various tools to complete tasks, such as knowledge base search, f
 > 2. Please select the `analyze_text_file` tool to enable the parsing function for document and text files.
 > 3. Please select the `analyze_image` tool to enable the parsing function for image files.
 > 
+> ⚠️ **Embedding Model Configuration**: When using the `knowledge_base_search` tool, ensure that the knowledge base has an embedding model configured. For existing knowledge bases, the system will prompt you to select an embedding model. Make sure to select **the same embedding model used when creating the knowledge base**. If the selected model differs from the one used during knowledge base creation, it may cause search failures or inaccurate results.
+> 
 > 📚 Want to learn about all the built-in local tools available in the system? Please refer to [Local Tools Overview](./local-tools/index.md).
 
 ### 🔌 Add MCP Tools
@@ -129,7 +131,7 @@ Nexent provides a "Tool Testing" capability for all types of tools—whether the
      - The test `query`, such as "benefits of vitamin C"
      - The search `search_mode` (default is `hybrid`)
      - The target index list `index_names`, such as `["Medical", "Vitamin Encyclopedia"]`
-     - If `index_names` is not entered, it will default to searching all knowledge bases selected on the knowledge base page
+      - If `index_names` is not entered, it will default to searching all knowledge bases selected on the knowledge base page
 6. After entering the parameters, click "Execute Test" to start the test and view the test results below
 
 <div style="display: flex; justify-content: left;">
