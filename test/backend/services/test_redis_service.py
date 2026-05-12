@@ -1410,6 +1410,22 @@ class TestRedisService(unittest.TestCase):
         # Should still proceed with deletion
         self.assertEqual(result, 1)
 
+    def test_increment_progress_info_watch_retry_exhausted(self):
+        """Cover retry exhaustion branch in increment_progress_info."""
+        self.redis_service._client = self.mock_redis_client
+        pipe = MagicMock()
+        pipe.watch.side_effect = [redis.WatchError()] * 5
+        self.mock_redis_client.pipeline.return_value = pipe
+        ok = self.redis_service.increment_progress_info("task-1", 1, total_chunks=3)
+        self.assertFalse(ok)
+        self.assertEqual(pipe.reset.call_count, 5)
+
+    def test_parse_progress_and_extract_metadata_fallbacks(self):
+        """Cover tolerant parsing fallback branches."""
+        p, t = self.redis_service._parse_progress("not-json", total_chunks=5)
+        self.assertEqual((p, t), (0, 5))
+        self.assertIsNone(self.redis_service._extract_error_metadata_from_exc_message("plain text"))
+
 
 if __name__ == '__main__':
     unittest.main()

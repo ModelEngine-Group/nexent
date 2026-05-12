@@ -60,6 +60,8 @@ Agents can use various tools to complete tasks, such as knowledge base search, f
 > 2. Please select the `analyze_text_file` tool to enable the parsing function for document and text files.
 > 3. Please select the `analyze_image` tool to enable the parsing function for image files.
 > 
+> ⚠️ **Embedding Model Configuration**: When using the `knowledge_base_search` tool, ensure that the knowledge base has an embedding model configured. For existing knowledge bases, the system will prompt you to select an embedding model. Make sure to select **the same embedding model used when creating the knowledge base**. If the selected model differs from the one used during knowledge base creation, it may cause search failures or inaccurate results.
+> 
 > 📚 Want to learn about all the built-in local tools available in the system? Please refer to [Local Tools Overview](./local-tools/index.md).
 
 ### 🔌 Add MCP Tools
@@ -108,6 +110,39 @@ You can add MCP services to Nexent in the following two ways:
 Many third-party services such as [ModelScope](https://www.modelscope.cn/mcp) provide MCP services, which you can quickly integrate and use.
 You can also develop your own MCP services and connect them to Nexent; see [MCP Tool Development](../backend/tools/mcp).
 
+**3️⃣ Convert Stock API to MCP Service**
+
+🔔 This method is suitable for quickly converting existing REST API endpoints into MCP tools without additional development, allowing agents to call existing API capabilities:
+
+>1. In the MCP Config module, select **"API to MCP"** as the access type
+>
+>2. Fill in the API basic information in the input box below:
+>   - **Service Name**: Display name for the MCP service
+>   - **OpenAPI JSON**: OpenAPI 3.x specification in JSON format
+>   - **Base Service URL**: Base address of the API service (supports http/https)
+>
+>3. Click the **+ Add** button in the lower right corner to complete the MCP service conversion
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api.png" style="width: 80%; height: auto;" />
+</div>
+
+>4. After conversion, you can view all externally converted MCP tools in the **Outer APIs** tab
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api_1.png" style="width: 80%; height: auto;" />
+</div>
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api_2.png" style="width: 80%; height: auto;" />
+</div>
+
+>💡 **Use Cases**:
+>- Quickly integrate internal enterprise REST API endpoints
+>- Convert third-party service HTTP APIs into MCP tools
+>- Generate tools directly from OpenAPI specifications without writing MCP Server code
+
+
 ### ⚙️ Custom Tools
 
 You can refer to the following guides to develop your own tools and integrate them into Nexent to enrich agent capabilities:
@@ -129,7 +164,7 @@ Nexent provides a "Tool Testing" capability for all types of tools—whether the
      - The test `query`, such as "benefits of vitamin C"
      - The search `search_mode` (default is `hybrid`)
      - The target index list `index_names`, such as `["Medical", "Vitamin Encyclopedia"]`
-     - If `index_names` is not entered, it will default to searching all knowledge bases selected on the knowledge base page
+      - If `index_names` is not entered, it will default to searching all knowledge bases selected on the knowledge base page
 6. After entering the parameters, click "Execute Test" to start the test and view the test results below
 
 <div style="display: flex; justify-content: left;">

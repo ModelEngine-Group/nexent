@@ -547,3 +547,56 @@ def test_store_chunks_in_redis_no_url_returns_false(monkeypatch):
     actor = ray_actors.DataProcessorRayActor()
     assert actor.store_chunks_in_redis("k", [{"content": "x"}]) is False
 
+
+def test_process_bytes_and_split_file_branches(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class PartOK:
+        def getvalue(self):
+            return b"ok"
+
+    class PartBad:
+        def getvalue(self):
+            raise ValueError("bad part")
+
+    class CoreWithSplit(FakeDataProcessCore):
+        def file_split(self, file_data, filename, max_size, **params):
+            return [PartOK(), PartBad()]
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithSplit)
+    actor = ray_actors.DataProcessorRayActor()
+    chunks = actor.process_bytes(b"abc", "x.txt", "basic", task_id="t1")
+    assert len(chunks) == 1
+    parts = actor.split_file("x.txt", "local", file_data=b"seed")
+    assert parts == [b"ok"]
+
+
+def test_split_file_fetch_stream_none_raises(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+    monkeypatch.setattr(ray_actors, "get_file_stream", lambda source: None)
+    actor = ray_actors.DataProcessorRayActor()
+    with pytest.raises(FileNotFoundError):
+        actor.split_file("missing", "minio")
+
+
+def test_store_chunks_in_redis_len_error_and_client_error(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+    monkeypatch.setattr(ray_actors, "REDIS_BACKEND_URL", "redis://test")
+
+    class LenBoomList(list):
+        def __len__(self):
+            raise RuntimeError("len boom")
+
+    fake_client = FakeRedisClient()
+    fake_redis_module = types.SimpleNamespace(Redis=types.SimpleNamespace(from_url=lambda *a, **k: fake_client))
+    monkeypatch.setitem(sys.modules, "redis", fake_redis_module)
+
+    actor = ray_actors.DataProcessorRayActor()
+    assert actor.store_chunks_in_redis("k-len", LenBoomList([{"a": 1}])) is True
+    assert json.loads(fake_client.get("k-len")) == [{"a": 1}]
+
+    bad_redis_module = types.SimpleNamespace(
+        Redis=types.SimpleNamespace(from_url=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("conn"))))
+    monkeypatch.setitem(sys.modules, "redis", bad_redis_module)
+    assert actor.store_chunks_in_redis("k-err", [{"a": 1}]) is False
+

@@ -635,13 +635,11 @@ async def test_create_index_documents_success(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
-            patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index:
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
 
-        # Use Pydantic model instance
         expected_response = IndexingResponse(
             success=True,
             message="Documents indexed successfully",
@@ -651,11 +649,9 @@ async def test_create_index_documents_success(vdb_core_mock, auth_data):
 
         mock_index.return_value = expected_response
 
-        # Execute request
         response = client.post(
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
-        # Verify
         assert response.status_code == 200
         assert response.json() == expected_response.dict()
         mock_index.assert_called_once()
@@ -671,28 +667,18 @@ async def test_create_index_documents_exception(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
-            patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents", side_effect=Exception("Indexing failed")):
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
 
-        # Setup the mock to raise an exception
-        mock_index.side_effect = Exception("Elasticsearch indexing failed")
-
-        # Execute request
         response = client.post(
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
-        # Verify expected 500 status code
         assert response.status_code == 500
 
-        # Verify error response
-        expected_error_detail = "Error indexing documents: Elasticsearch indexing failed"
+        expected_error_detail = "Error indexing documents: Indexing failed"
         assert response.json() == {"detail": expected_error_detail}
-
-        # Verify index_documents was called
-        mock_index.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -703,27 +689,21 @@ async def test_create_index_documents_auth_exception(vdb_core_mock, auth_data):
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("backend.apps.vectordatabase_app.get_current_user_id") as mock_get_user, \
-            patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
+            patch("backend.apps.vectordatabase_app.get_current_user_id") as mock_get_user:
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
 
-        # Setup the mock to raise an authentication exception
         mock_get_user.side_effect = Exception("Invalid authorization token")
 
-        # Execute request
         response = client.post(
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
-        # Verify expected 500 status code
         assert response.status_code == 500
 
-        # Verify error response
         expected_error_detail = "Error indexing documents: Invalid authorization token"
         assert response.json() == {"detail": expected_error_detail}
 
-        # Verify get_current_user_id was called
         mock_get_user.assert_called_once()
 
 
@@ -733,31 +713,30 @@ async def test_create_index_documents_embedding_model_exception(vdb_core_mock, a
     Test indexing documents with embedding model exception.
     Verifies that the endpoint returns an appropriate error response when embedding model fails.
     """
-    # Setup mocks
+    # Setup mocks - need knowledge record with model_id to trigger get_embedding_model_by_id call
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
-            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_record, \
+            patch("backend.apps.vectordatabase_app.get_embedding_model_by_id") as mock_get_embedding:
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
 
-        # Setup the mock to raise an exception when getting embedding model
-        mock_get_embedding.side_effect = Exception(
-            "Embedding model not available")
+        mock_get_record.return_value = {
+            "index_name": index_name,
+            "embedding_model_id": 123
+        }
+        
+        mock_get_embedding.side_effect = Exception("Embedding model not available")
 
-        # Execute request
         response = client.post(
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
-        # Verify expected 500 status code
         assert response.status_code == 500
 
-        # Verify error response
         expected_error_detail = "Error indexing documents: Embedding model not available"
         assert response.json() == {"detail": expected_error_detail}
 
-        # Verify get_embedding_model was called
         mock_get_embedding.assert_called_once()
 
 
@@ -771,20 +750,16 @@ async def test_create_index_documents_validation_exception(vdb_core_mock, auth_d
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
-            patch("backend.apps.vectordatabase_app.get_embedding_model", return_value=MagicMock()):
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index:
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
 
-        # Setup the mock to raise a validation exception
         mock_index.side_effect = ValueError("Invalid document format")
 
-        # Execute request
         response = client.post(
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
-        # Verify expected 500 status code
         assert response.status_code == 500
 
         # Verify error response
@@ -2240,132 +2215,21 @@ async def test_hybrid_search_exception(vdb_core_mock, auth_data):
 # =============================================================================
 
 @pytest.mark.asyncio
-async def test_create_index_documents_gets_saved_embedding_model_from_knowledge_record(vdb_core_mock, auth_data):
-    """
-    Test that create_index_documents retrieves the saved embedding model name from knowledge record.
-    Verifies that the endpoint calls get_knowledge_record to get the embedding_model_name.
-    """
-    # Setup mocks
-    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
-            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_knowledge_record, \
-            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
-
-        index_name = "test_index"
-        documents = [{"id": 1, "text": "test doc"}]
-        
-        # Mock knowledge record with saved embedding model name
-        saved_model_name = "text-embedding-3-small"
-        mock_get_knowledge_record.return_value = {
-            "index_name": index_name,
-            "embedding_model_name": saved_model_name,
-            "tenant_id": auth_data["tenant_id"]
-        }
-        
-        # Mock embedding model
-        mock_embedding = MagicMock()
-        mock_get_embedding.return_value = mock_embedding
-        
-        # Mock index response
-        expected_response = {
-            "success": True,
-            "message": "Documents indexed successfully",
-            "total_indexed": 1,
-            "total_submitted": 1
-        }
-        mock_index.return_value = expected_response
-
-        # Execute request
-        response = client.post(
-            f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
-
-        # Verify
-        assert response.status_code == 200
-        
-        # Verify get_knowledge_record was called with correct index_name
-        mock_get_knowledge_record.assert_called_once_with({'index_name': index_name})
-        
-        # Verify get_embedding_model was called with the saved model name
-        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], saved_model_name)
-        
-        # Verify index_documents was called with the embedding model
-        mock_index.assert_called_once()
-        call_kwargs = mock_index.call_args[1]
-        assert call_kwargs["embedding_model"] == mock_embedding
-
-
-@pytest.mark.asyncio
-async def test_create_index_documents_fallback_to_default_when_no_saved_model(vdb_core_mock, auth_data):
-    """
-    Test that create_index_documents falls back to tenant default when knowledge record has no saved model.
-    Verifies that get_embedding_model is called with None as model_name.
-    """
-    # Setup mocks
-    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
-            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_knowledge_record, \
-            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
-
-        index_name = "test_index"
-        documents = [{"id": 1, "text": "test doc"}]
-        
-        # Mock knowledge record with no embedding_model_name (None)
-        mock_get_knowledge_record.return_value = {
-            "index_name": index_name,
-            "embedding_model_name": None,
-            "tenant_id": auth_data["tenant_id"]
-        }
-        
-        # Mock embedding model (tenant default)
-        mock_embedding = MagicMock()
-        mock_get_embedding.return_value = mock_embedding
-        
-        # Mock index response
-        expected_response = {
-            "success": True,
-            "message": "Documents indexed successfully",
-            "total_indexed": 1,
-            "total_submitted": 1
-        }
-        mock_index.return_value = expected_response
-
-        # Execute request
-        response = client.post(
-            f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
-
-        # Verify
-        assert response.status_code == 200
-        
-        # Verify get_embedding_model was called with None as model_name (fallback to default)
-        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], None)
-
-
-@pytest.mark.asyncio
 async def test_create_index_documents_fallback_when_knowledge_record_not_found(vdb_core_mock, auth_data):
     """
-    Test that create_index_documents falls back to tenant default when knowledge record is not found.
-    Verifies that get_embedding_model is called with None as model_name.
+    Test that create_index_documents handles case when knowledge record is not found.
+    Verifies that get_embedding_model_by_id is not called when knowledge_record is None.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
-            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_knowledge_record, \
-            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None), \
+            patch("backend.apps.vectordatabase_app.get_embedding_model_by_id") as mock_get_embedding:
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
         
-        # Mock knowledge record not found (returns None)
-        mock_get_knowledge_record.return_value = None
-        
-        # Mock embedding model (tenant default)
-        mock_embedding = MagicMock()
-        mock_get_embedding.return_value = mock_embedding
-        
-        # Mock index response
         expected_response = {
             "success": True,
             "message": "Documents indexed successfully",
@@ -2374,45 +2238,40 @@ async def test_create_index_documents_fallback_when_knowledge_record_not_found(v
         }
         mock_index.return_value = expected_response
 
-        # Execute request
         response = client.post(
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
-        # Verify
         assert response.status_code == 200
-        
-        # Verify get_embedding_model was called with None as model_name (fallback to default)
-        mock_get_embedding.assert_called_once_with(auth_data["tenant_id"], None)
+
+        mock_get_embedding.assert_not_called()
+
+        mock_index.assert_called_once()
+        call_kwargs = mock_index.call_args[1]
+        assert call_kwargs["embedding_model"] is None
 
 
 @pytest.mark.asyncio
 async def test_create_index_documents_with_empty_string_model_name(vdb_core_mock, auth_data):
     """
-    Test that create_index_documents handles empty string embedding_model_name correctly.
-    Empty string should be treated as no model specified (fallback to default).
+    Test that create_index_documents handles empty/None embedding_model_id correctly.
+    Empty or None model_id should result in no embedding model call.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index, \
             patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_knowledge_record, \
-            patch("backend.apps.vectordatabase_app.get_embedding_model") as mock_get_embedding:
+            patch("backend.apps.vectordatabase_app.get_embedding_model_by_id") as mock_get_embedding:
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
         
-        # Mock knowledge record with empty string embedding_model_name
         mock_get_knowledge_record.return_value = {
             "index_name": index_name,
-            "embedding_model_name": "",  # Empty string
+            "embedding_model_id": None,
             "tenant_id": auth_data["tenant_id"]
         }
         
-        # Mock embedding model (tenant default)
-        mock_embedding = MagicMock()
-        mock_get_embedding.return_value = mock_embedding
-        
-        # Mock index response
         expected_response = {
             "success": True,
             "message": "Documents indexed successfully",
@@ -2421,17 +2280,474 @@ async def test_create_index_documents_with_empty_string_model_name(vdb_core_mock
         }
         mock_index.return_value = expected_response
 
-        # Execute request
         response = client.post(
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
-        # Verify
         assert response.status_code == 200
         
-        # Verify get_embedding_model was called with empty string (will be treated as falsy in the function)
-        # The code checks `if knowledge_record:` and `saved_embedding_model_name = knowledge_record.get('embedding_model_name')`
-        # So empty string will be passed, but the service layer will handle it appropriately
-        mock_get_embedding.assert_called_once()
-        args = mock_get_embedding.call_args[0]
-        assert args[0] == auth_data["tenant_id"]
-        assert args[1] == ""  # Empty string is passed
+        mock_get_embedding.assert_not_called()
+
+
+# =============================================================================
+# Tests for get_embedding_model_status endpoint (lines 165-248)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_get_embedding_model_status_configured(auth_data):
+    """
+    Test get_embedding_model_status when model is configured with valid model_id.
+    Covers lines 165-215: configured status case.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_record, \
+            patch("backend.apps.vectordatabase_app.get_model_by_model_id") as mock_get_model:
+
+        mock_get_record.return_value = {
+            "index_name": "kb_test_uuid",
+            "knowledge_name": "Test Knowledge Base",
+            "embedding_model_id": 123,
+            "embedding_model_name": "text-embedding-3-small"
+        }
+
+        mock_get_model.return_value = {
+            "model_id": 123,
+            "model_name": "text-embedding-3-small",
+            "display_name": "Text Embedding 3 Small",
+            "model_type": "embedding"
+        }
+
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/embedding-model-status",
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "configured"
+        assert data["needs_config"] is False
+        assert data["model_id"] == 123
+        assert data["index_name"] == "kb_test_uuid"
+        assert data["knowledge_name"] == "Test Knowledge Base"
+        assert data["model_info"]["display_name"] == "Text Embedding 3 Small"
+        assert "Embedding model" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_model_status_legacy(auth_data):
+    """
+    Test get_embedding_model_status when model_name exists but no model_id (legacy data).
+    Covers lines 216-220: legacy status case.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_record:
+
+        mock_get_record.return_value = {
+            "index_name": auth_data["index_name"],
+            "knowledge_name": "Legacy Knowledge Base",
+            "embedding_model_id": None,
+            "embedding_model_name": "old-embedding-model"
+        }
+
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/embedding-model-status",
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "legacy"
+        assert data["needs_config"] is True
+        assert data["model_id"] is None
+        assert data["embedding_model_name"] == "old-embedding-model"
+        assert data["model_info"] is None
+        assert "older version" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_model_status_missing(auth_data):
+    """
+    Test get_embedding_model_status when no model is configured at all.
+    Covers lines 221-225: missing status case.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_record:
+
+        mock_get_record.return_value = {
+            "index_name": auth_data["index_name"],
+            "knowledge_name": "Missing Model KB",
+            "embedding_model_id": None,
+            "embedding_model_name": None
+        }
+
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/embedding-model-status",
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "missing"
+        assert data["needs_config"] is True
+        assert data["model_id"] is None
+        assert data["embedding_model_name"] is None
+        assert data["model_info"] is None
+        assert "No embedding model configured" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_model_status_model_id_but_model_not_found(auth_data):
+    """
+    Test when model_id exists but model not found in database, but has embedding_model_name.
+    Covers lines 200-220: model_id exists but model is None, falls to legacy status.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_record, \
+            patch("backend.apps.vectordatabase_app.get_model_by_model_id", return_value=None):
+        
+        mock_get_record.return_value = {
+            "index_name": auth_data["index_name"],
+            "knowledge_name": "Test KB",
+            "embedding_model_id": 999,
+            "embedding_model_name": "deleted-model"
+        }
+        
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/embedding-model-status",
+            headers=auth_data["auth_header"]
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "legacy"
+        assert data["needs_config"] is True
+        assert data["model_id"] == 999
+        assert data["embedding_model_name"] == "deleted-model"
+        assert data["model_info"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_model_status_kb_not_found(auth_data):
+    """
+    Test get_embedding_model_status when knowledge base doesn't exist.
+    Covers lines 189-193: knowledge_record is None.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None):
+
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/embedding-model-status",
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_model_status_exception(auth_data):
+    """
+    Test exception handling in get_embedding_model_status.
+    Covers lines 243-248: general exception handling.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", side_effect=Exception("Database error")):
+
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/embedding-model-status",
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 500
+        assert "Error checking embedding model status" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_model_status_http_exception_reraise(auth_data):
+    """
+    Test that HTTPException is re-raised without wrapping.
+    Covers lines 241-242: HTTPException handling.
+    """
+    from fastapi import HTTPException
+    from http import HTTPStatus
+
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record") as mock_get_record:
+
+        mock_get_record.side_effect = HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Access denied"
+        )
+
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/embedding-model-status",
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 403
+        assert "Access denied" in response.json()["detail"]
+
+
+# =============================================================================
+# Tests for update_embedding_model endpoint (lines 251-297)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_update_embedding_model_success(auth_data):
+    """
+    Test successful embedding model update.
+    Covers lines 264-283: successful update case.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_embedding_model") as mock_update:
+
+        mock_update.return_value = {
+            "status": "success",
+            "message": "Embedding model updated successfully",
+            "model_id": 789
+        }
+
+        response = client.put(
+            f"/indices/{auth_data['index_name']}/embedding-model",
+            json={"model_id": 789},
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+
+        mock_update.assert_called_once_with(
+            index_name=auth_data["index_name"],
+            model_id=789,
+            tenant_id=auth_data["tenant_id"],
+            user_id=auth_data["user_id"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_embedding_model_missing_model_id(auth_data):
+    """
+    Test when model_id is not provided in request.
+    Covers lines 266-271: model_id validation.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])):
+
+        response = client.put(
+            f"/indices/{auth_data['index_name']}/embedding-model",
+            json={},
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 400
+        assert "model_id is required" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_embedding_model_value_error(auth_data):
+    """
+    Test ValueError handling (knowledge base not found).
+    Covers lines 285-289: ValueError exception handling.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_embedding_model", side_effect=ValueError("Knowledge base not found")):
+
+        response = client.put(
+            f"/indices/{auth_data['index_name']}/embedding-model",
+            json={"model_id": 123},
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 404
+        assert "Knowledge base not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_embedding_model_http_exception_reraise(auth_data):
+    """
+    Test that HTTPException is re-raised without wrapping.
+    Covers lines 290-291: HTTPException handling.
+    """
+    from fastapi import HTTPException
+    from http import HTTPStatus
+
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_embedding_model", side_effect=HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Bad request")):
+
+        response = client.put(
+            f"/indices/{auth_data['index_name']}/embedding-model",
+            json={"model_id": 123},
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 400
+        assert "Bad request" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_embedding_model_exception(auth_data):
+    """
+    Test general exception handling.
+    Covers lines 292-297: general exception handling.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_embedding_model", side_effect=Exception("Update failed")):
+
+        response = client.put(
+            f"/indices/{auth_data['index_name']}/embedding-model",
+            json={"model_id": 123},
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 500
+        assert "Error updating embedding model" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_embedding_model_auth_exception(auth_data):
+    """
+    Test authentication exception handling.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", side_effect=Exception("Invalid auth token")):
+
+        response = client.put(
+            f"/indices/{auth_data['index_name']}/embedding-model",
+            json={"model_id": 123},
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 500
+        assert "Error updating embedding model" in response.json()["detail"]
+
+
+# =============================================================================
+# Tests for get_list_indices endpoint (lines 300-318)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_get_list_indices_success_default_params(auth_data, vdb_core_mock):
+    """
+    Test get_list_indices with default parameters.
+    Covers lines 300-315: successful listing with auth tenant_id.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list, \
+            patch("backend.apps.vectordatabase_app.get_vector_db_core") as mock_get_core:
+        
+        mock_get_core.return_value = vdb_core_mock
+        mock_list.return_value = {
+            "indices": [
+                {"index_name": "kb_test1", "document_count": 100},
+                {"index_name": "kb_test2", "document_count": 200}
+            ]
+        }
+        
+        response = client.get("/indices", headers=auth_data["auth_header"])
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "indices" in data
+        
+        mock_list.assert_called_once()
+        call_args = mock_list.call_args[0]
+        assert call_args[0] == "*"
+        assert call_args[1] is False
+        assert call_args[2] == auth_data["tenant_id"]
+        assert call_args[3] == auth_data["user_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_with_pattern(auth_data, vdb_core_mock):
+    """
+    Test get_list_indices with custom pattern.
+    Covers lines 302: pattern parameter.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list, \
+            patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock):
+        
+        mock_list.return_value = {"indices": []}
+        
+        response = client.get("/indices?pattern=kb_*", headers=auth_data["auth_header"])
+        
+        assert response.status_code == 200
+        
+        mock_list.assert_called_once()
+        call_args = mock_list.call_args[0]
+        assert call_args[0] == "kb_*"
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_with_stats(auth_data, vdb_core_mock):
+    """
+    Test get_list_indices with include_stats=True.
+    Covers lines 303-304: include_stats parameter.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list, \
+            patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock):
+        
+        mock_list.return_value = {
+            "indices": [
+                {"index_name": "kb_test", "document_count": 100, "stats": {"size": "10mb"}}
+            ]
+        }
+        
+        response = client.get("/indices?include_stats=true", headers=auth_data["auth_header"])
+        
+        assert response.status_code == 200
+        
+        mock_list.assert_called_once()
+        call_args = mock_list.call_args[0]
+        assert call_args[1] is True
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_with_explicit_tenant_id(auth_data, vdb_core_mock):
+    """
+    Test get_list_indices with explicit tenant_id parameter.
+    Covers lines 305-306, 314: tenant_id parameter and effective_tenant_id logic.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list, \
+            patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock):
+        
+        mock_list.return_value = {"indices": []}
+        
+        explicit_tenant = "explicit_tenant_123"
+        response = client.get(f"/indices?tenant_id={explicit_tenant}", headers=auth_data["auth_header"])
+        
+        assert response.status_code == 200
+        
+        mock_list.assert_called_once()
+        call_args = mock_list.call_args[0]
+        assert call_args[2] == explicit_tenant
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_exception(auth_data, vdb_core_mock):
+    """
+    Test exception handling in get_list_indices.
+    Covers lines 316-318: general exception handling.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices", side_effect=Exception("Connection failed")), \
+            patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock):
+        
+        response = client.get("/indices", headers=auth_data["auth_header"])
+        
+        assert response.status_code == 500
+        assert "Error get index" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_auth_exception(auth_data, vdb_core_mock):
+    """
+    Test authentication exception handling.
+    """
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", side_effect=Exception("Auth failed")), \
+            patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock):
+        
+        response = client.get("/indices", headers=auth_data["auth_header"])
+        
+        assert response.status_code == 500
+        assert "Error get index" in response.json()["detail"]

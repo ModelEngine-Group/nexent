@@ -14,7 +14,7 @@ from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
-    get_embedding_model,
+    get_embedding_model_by_index_name,
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
@@ -32,7 +32,7 @@ from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE
-import re
+from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
@@ -488,11 +488,23 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
 
             tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
-                "embedding_model": get_embedding_model(tenant_id=tenant_id),
+                "embedding_model": None,
                 "rerank_model": rerank_model,
                 "display_name_to_index_map": display_name_to_index_map,
                 "index_name_to_display_map": index_name_to_display_map,
             }
+
+            # Must have embedding model for knowledge base search
+            if not index_names:
+                raise ValidationError(
+                    "Embedding model is required for knowledge_base_search but index_names is empty")
+
+            embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            if not embedding_model:
+                raise ValidationError(
+                    f"No embedding model found for index '{index_names[0]}'. "
+                    f"Please configure an embedding model for this knowledge base.")
+            tool_config.metadata["embedding_model"] = embedding_model
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
             rerank = param_dict.get("rerank", False)
             rerank_model_name = param_dict.get("rerank_model_name", "")
@@ -595,7 +607,7 @@ async def join_minio_file_description_to_query(
     Join MinIO file descriptions to the user query.
 
     This function formats uploaded file information into a structured description
-    that includes both S3 URL (for internal tools) and Download URL (for external MCP tools).
+    that includes both S3 URL (for internal tools) and presigned_url (for external MCP tools).
     It processes files from both the current message and historical messages.
 
     De-duplication is performed using the file URL as the unique key. A maximum
@@ -655,8 +667,8 @@ async def join_minio_file_description_to_query(
             if presigned_url:
                 desc = (
                     f"File name: {file['name']}\n"
-                    f"- S3 URL: {s3_url}  [permanent, for internal tools like analyze_text_file]\n"
-                    f"- Download URL: {presigned_url}  [temporary (expires in 24h), for external MCP tools]"
+                    f"- S3 URL: {s3_url}  [for tools WITHOUT [MCP] prefix, like analyze_text_file]\n"
+                    f"- presigned_url: {presigned_url}  [for tools WITH [MCP] prefix]"
                 )
             else:
                 desc = f"File name: {file['name']}, S3 URL: {s3_url}  [permanent]"
@@ -705,7 +717,7 @@ def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files
             presigned_url = file.get("presigned_url", "")
             if presigned_url:
                 file_lines.append(
-                    f"  - {file['name']}: {s3_url} (download: {presigned_url})"
+                    f"  - {file['name']}: {s3_url} (for non-MCP tools), presigned_url: {presigned_url} (for [MCP] tools)"
                 )
             else:
                 file_lines.append(f"  - {file['name']}: {s3_url}")

@@ -1,29 +1,46 @@
 import logging
 import json
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 import re
 
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
+from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
 from services.vectordatabase_service import (
     ElasticSearchService,
-    get_embedding_model,
+    get_embedding_model_by_id,
     get_vector_db_core,
     check_knowledge_base_exist_impl,
+    KnowledgeBaseNeedsModelConfigError,
 )
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
 from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
+from database.model_management_db import get_model_by_model_id
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
 logger = logging.getLogger("vectordatabase_app")
 
+
+@router.get("/summary_frequency_options")
+async def get_summary_frequency_options():
+    """
+    Get valid summary frequency options for frontend.
+    Frontend should call this API to get the list of valid frequencies.
+    """
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={
+            "options": SUMMARY_FREQUENCY_OPTIONS_FOR_API,
+            "valid_values": VALID_SUMMARY_FREQUENCIES,
+        }
+    )
 
 @router.post("/check_exist")
 async def check_knowledge_base_exist(
@@ -160,6 +177,186 @@ async def update_index(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error updating index: {str(exc)}")
 
 
+@router.patch("/{index_name}/summary_frequency")
+async def update_summary_frequency_endpoint(
+        index_name: Annotated[str, Path(..., description="Name of the index to update")],
+        request: Annotated[Dict[str, Any], Body(..., description="Update payload with summary_frequency")],
+        authorization: Annotated[Optional[str], Header()] = None,
+):
+    """Update the auto-summary frequency for a knowledge base."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        summary_frequency = request.get("summary_frequency")
+
+        valid_frequencies = VALID_SUMMARY_FREQUENCIES
+        if summary_frequency not in valid_frequencies:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=f"Invalid summary_frequency. Must be one of: {valid_frequencies}"
+            )
+
+        from database.knowledge_db import update_summary_frequency
+        success = update_summary_frequency(
+            index_name=index_name,
+            summary_frequency=summary_frequency,
+            _tenant_id=tenant_id,
+            user_id=user_id
+        )
+
+        if success:
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={"message": "Summary frequency updated successfully", "status": "success"}
+            )
+        else:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Knowledge base '{index_name}' not found"
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error updating summary frequency")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error updating summary frequency: {str(exc)}"
+        )
+
+
+@router.get("/{index_name}/embedding-model-status")
+def get_embedding_model_status(
+        index_name: str = Path(..., description="Name of the index to check"),
+        authorization: Optional[str] = Header(None)
+):
+    """
+    Check the embedding model status of a knowledge base.
+    Returns information about whether a model is configured and if an update is needed.
+
+    This endpoint is used by the frontend to determine whether to show
+    a dialog prompting the user to select an embedding model for knowledge bases
+    that were created before the model ID feature was added.
+
+    Note: The path parameter is the internal index_name.
+    """
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+
+        # Get the knowledge base record by index_name
+        knowledge_record = get_knowledge_record({
+            "index_name": index_name,
+            "tenant_id": tenant_id
+        })
+
+        if not knowledge_record:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Knowledge base '{index_name}' not found"
+            )
+
+        # Check if model_id exists
+        model_id = knowledge_record.get("embedding_model_id")
+        embedding_model_name = knowledge_record.get("embedding_model_name")
+
+        # Get model info if model_id exists
+        model_info = None
+        if model_id:
+            model = get_model_by_model_id(model_id, tenant_id)
+            if model:
+                model_info = {
+                    "model_id": model.get("model_id"),
+                    "model_name": model.get("model_name"),
+                    "display_name": model.get("display_name"),
+                    "model_type": model.get("model_type"),
+                }
+
+        # Determine status
+        if model_id and model_info:
+            status = "configured"
+            message = f"Embedding model '{model_info.get('display_name', model_info.get('model_name'))}' is configured"
+            needs_config = False
+        elif embedding_model_name:
+            # Has model name but no model_id (legacy data)
+            status = "legacy"
+            message = "This knowledge base was created with an older version. Please select an embedding model to ensure proper functionality."
+            needs_config = True
+        else:
+            # No model configured at all
+            status = "missing"
+            message = "No embedding model configured. Please select an embedding model."
+            needs_config = True
+
+        # Get actual internal index_name from the database record
+        actual_index_name = knowledge_record.get("index_name")
+
+        return {
+            "status": status,
+            "needs_config": needs_config,
+            "index_name": actual_index_name,
+            "knowledge_name": knowledge_record.get("knowledge_name"),
+            "model_id": model_id,
+            "embedding_model_name": embedding_model_name,
+            "model_info": model_info,
+            "message": message,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting embedding model status for '{index_name}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error checking embedding model status: {str(e)}"
+        )
+
+
+@router.put("/{index_name}/embedding-model")
+def update_embedding_model(
+        index_name: str = Path(..., description="Internal index name of the knowledge base to update"),
+        request: Dict[str, Any] = Body(...,
+                                       description="Update payload with model_id"),
+        authorization: Optional[str] = Header(None)
+):
+    """
+    Update the embedding model for a knowledge base.
+    This is used when a user selects an embedding model from the dialog
+    for knowledge bases that don't have a model configured.
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        model_id = request.get("model_id")
+        if not model_id:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="model_id is required"
+            )
+
+        result = ElasticSearchService.update_embedding_model(
+            index_name=index_name,
+            model_id=model_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content=result
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc)
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Error updating embedding model for '{index_name}': {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error updating embedding model: {str(exc)}"
+        )
+
+
 @router.get("")
 def get_list_indices(
         pattern: str = Query("*", description="Pattern to match index names"),
@@ -191,6 +388,8 @@ def create_index_documents(
         authorization: Optional[str] = Header(None),
         task_id: Optional[str] = Header(
             None, alias="X-Task-Id", description="Task ID for progress tracking"),
+        large_mode: bool = Query(
+            False, description="Force large-batch path when current request chunk count is below threshold"),
 ):
     """
     Index documents with embeddings, creating the index if it doesn't exist.
@@ -198,22 +397,24 @@ def create_index_documents(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        
+
         # Get the knowledge base record to retrieve the saved embedding model
         knowledge_record = get_knowledge_record({'index_name': index_name})
-        saved_embedding_model_name = None
+        saved_embedding_model_id = None
         if knowledge_record:
-            saved_embedding_model_name = knowledge_record.get('embedding_model_name')
-        
-        # Use the saved model from knowledge base, fallback to tenant default if not set
-        embedding_model = get_embedding_model(tenant_id, saved_embedding_model_name)
-        
+            saved_embedding_model_id = knowledge_record.get('embedding_model_id')
+
+        # Use the saved model from knowledge base by model_id
+        embedding_model, _ = get_embedding_model_by_id(tenant_id, saved_embedding_model_id) if saved_embedding_model_id else (None, None)
+
         return ElasticSearchService.index_documents(
             embedding_model=embedding_model,
             index_name=index_name,
             data=data,
             vdb_core=vdb_core,
             task_id=task_id,
+            large_mode=large_mode,
+            model_id=saved_embedding_model_id,
         )
     except Exception as e:
         error_msg = str(e)
@@ -538,9 +739,19 @@ async def hybrid_search(
             vdb_core=vdb_core,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except KnowledgeBaseNeedsModelConfigError as exc:
+        # Return a specific error that frontend can detect to show the config dialog
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail={
+                "error_type": "KNOWLEDGE_BASE_NEEDS_MODEL_CONFIG",
+                "index_name": exc.index_name,
+                "message": exc.message,
+                "suggestion": "Please select an embedding model for this knowledge base before searching."
+            }
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
-                            detail=str(exc))
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except Exception as exc:
         logger.error(f"Hybrid search failed: {exc}", exc_info=True)
         raise HTTPException(

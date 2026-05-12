@@ -42,6 +42,7 @@ export const KNOWLEDGE_BASE_ACTION_TYPES = {
   SET_MODEL: "SET_MODEL",
   DELETE_KNOWLEDGE_BASE: "DELETE_KNOWLEDGE_BASE",
   ADD_KNOWLEDGE_BASE: "ADD_KNOWLEDGE_BASE",
+  UPDATE_KNOWLEDGE_BASE: "UPDATE_KNOWLEDGE_BASE",
   LOADING: "LOADING",
   SET_SYNC_LOADING: "SET_SYNC_LOADING",
   SET_DATA_MATE_SYNC_ERROR: "SET_DATA_MATE_SYNC_ERROR",
@@ -113,26 +114,36 @@ export const NOTIFICATION_TYPES = {
 
 // File extension constants
 export const FILE_EXTENSIONS = {
-  PDF: "pdf",
-  DOC: "doc",
-  DOCX: "docx",
-  XLS: "xls",
-  XLSX: "xlsx",
-  PPT: "ppt",
-  PPTX: "pptx",
-  TXT: "txt",
-  MD: "md",
+  PDF: 'pdf',
+  DOC: 'doc',
+  DOCX: 'docx',
+  XLS: 'xls',
+  XLSX: 'xlsx',
+  PPT: 'ppt',
+  PPTX: 'pptx',
+  TXT: 'txt',
+  MD: 'md',
+  EPUB: 'epub',
+  CSV: 'csv',
+  HTML: 'html',
+  XML: 'xml',
+  JSON: 'json'
 } as const;
 
 // File type constants
 export const FILE_TYPES = {
-  PDF: "PDF",
-  WORD: "Word",
-  EXCEL: "Excel",
-  POWERPOINT: "PowerPoint",
-  TEXT: "Text",
-  MARKDOWN: "Markdown",
-  UNKNOWN: "Unknown",
+  PDF: 'PDF',
+  WORD: 'Word',
+  EXCEL: 'Excel',
+  POWERPOINT: 'PowerPoint',
+  TEXT: 'Text',
+  MARKDOWN: 'Markdown',
+  EPUB: 'EPUB',
+  CSV: 'CSV',
+  JSON: 'JSON',
+  HTML: 'HTML',
+  XML: 'XML',
+  UNKNOWN: 'Unknown'
 } as const;
 
 // File extension to type mapping
@@ -146,4 +157,9 @@ export const EXTENSION_TO_TYPE_MAP = {
   [FILE_EXTENSIONS.PPTX]: FILE_TYPES.POWERPOINT,
   [FILE_EXTENSIONS.TXT]: FILE_TYPES.TEXT,
   [FILE_EXTENSIONS.MD]: FILE_TYPES.MARKDOWN,
+  [FILE_EXTENSIONS.CSV]: FILE_TYPES.CSV,
+  [FILE_EXTENSIONS.JSON]: FILE_TYPES.JSON,
+  [FILE_EXTENSIONS.HTML]: FILE_TYPES.HTML,
+  [FILE_EXTENSIONS.XML]: FILE_TYPES.XML,
+  [FILE_EXTENSIONS.EPUB]: FILE_TYPES.EPUB
 } as const;

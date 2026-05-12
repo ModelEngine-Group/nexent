@@ -11,42 +11,88 @@ Nexent is a zero-code platform for auto-generating production-grade AI agents, b
 
 > One prompt. Endless reach.
 
-### 🌐 Visit our [official website](https://nexent.tech/)
+<video controls width="100%" style="max-width: 800px;">
+  <source src="https://github.com/user-attachments/assets/db6b7f5a-9ee8-4327-ae6f-c5af896126b4" type="video/mp4" />
+  <p><a href="https://github.com/user-attachments/assets/db6b7f5a-9ee8-4327-ae6f-c5af896126b4">Watch the demo video</a></p>
+</video>
 
-![Nexent Banner](./assets/architecture_en.png)
+# 🚀 Get Started Now
 
-https://github.com/user-attachments/assets/db6b7f5a-9ee8-4327-ae6f-c5af896126b4
+> ⭐ Before you get started, please star us on [GitHub](https://github.com/ModelEngine-Group/nexent) — your support drives us forward!
 
-# ⚡ Have a try first
+## Option 1: Try Our Official Demo
 
-### 📋 Prerequisites  
+No installation required — jump right in with our **[online demo environment](http://60.204.251.153:3000/en)** to experience Nexent's capabilities instantly.
 
-| Resource | Minimum |
-|----------|---------|
-| **CPU**  | 2 cores |
-| **RAM**  | 6 GiB   |
-| **Software** | Docker & Docker Compose installed |
+## Option 2: Deploy on Your Own
 
-### 🛠️ Quick start with Docker Compose
+If you need to run Nexent locally or in your private infrastructure, we offer two deployment options:
+
+### System Requirements
+
+| Resource | Docker | Kubernetes |
+|----------|--------|-------------|
+| **CPU** | 4 cores (min) / 8 cores (rec.) | 4 cores (min) / 8 cores (rec.) |
+| **Memory** | 8 GiB (min) / 16 GiB (rec.) | 16 GiB (min) / 64 GiB (rec.) |
+| **Disk** | 40 GiB (min) / 100 GiB (rec.) | 100 GiB (min) / 200 GiB (rec.) |
+| **Architecture** | x86_64 / ARM64 | x86_64 / ARM64 |
+| **Software** | Docker 24+, Docker Compose v2+ | Kubernetes 1.24+, Helm 3+ |
+
+> **Note:** Recommended configurations ensure optimal performance in production environments.
+
+### Docker Deployment (Recommended for Individuals/Small Teams)
+
+Quick and straightforward for most users. Prerequisites: Docker 24+ and Docker Compose v2+:
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent/docker
-cp .env.example .env # fill only necessary configs
+cp .env.example .env
 bash deploy.sh
 ```
 
-When the containers are running, open **http://localhost:3000** in your browser and follow the setup wizard.
+For detailed deployment instructions, see [Docker Installation](https://modelengine-group.github.io/nexent/en/quick-start/installation.html).
+
+### Kubernetes Deployment (For Enterprise Production)
+
+Ideal for enterprise scenarios requiring high availability and elastic scaling. Prerequisites: Kubernetes 1.24+ and Helm 3+:
+
+```bash
+git clone https://github.com/ModelEngine-Group/nexent.git
+cd nexent/k8s/helm
+./deploy-helm.sh apply
+```
+
+For detailed deployment instructions, see [Kubernetes Installation](https://modelengine-group.github.io/nexent/en/quick-start/kubernetes-installation.html).
+
+# ✨ Core Features
+
+Nexent provides a comprehensive feature set for building powerful AI agents:
+
+| Feature | Description |
+|---------|-------------|
+| **⚙️ Multi-Model Integration** | OpenAI-compatible with any provider, full LLM/Embedding/VLM/STT/TTS coverage, supports domestic model switching |
+| **🤖 Zero-Code Agent Generation** | Describe requirements in natural language, generate executable agents instantly, what you think is what you get |
+| **🤝 A2A Agent Collaboration** | Agent-to-Agent protocol enables seamless multi-agent cooperation and distributed workflows |
+| **🧠 Layered Memory Mechanism** | Two-tier memory (user-level + user-agent-level) for persistent context across conversations |
+| **📝 Progressive Skill Disclosure** | Dynamically loads Skill into context, maximizing context window efficiency |
+| **🗄️ Personal-Grade Knowledge Base** | Real-time import and intelligent retrieval for 20+ document formats, auto summaries, fine-grained access control |
+| **🔧 MCP Tool Ecosystem** | Plug-and-play extension system with custom development and third-party MCP service support |
+| **🌐 Internet Knowledge Integration** | Multi-source search blending real-time information with private data |
+| **🔍 Knowledge-Level Traceability** | Precise citations and source verification, full transparency for every fact |
+| **🎭 Multimodal Interaction** | Voice, text, images, files — comprehensive natural dialogue |
+| **🔢 Agent Version Management** | Version iteration and history rollback, safe and controllable |
+| **🏪 Agent Marketplace** | Official and community curated agents, one-click install and use |
+| **👥 Multi-Tenancy & RBAC** | Multi-tenant isolation, role-based access control, fine-grained resource management |
 
 # 🤝 Join Our Community
 
 > *If you want to go fast, go alone; if you want to go far, go together.*
 
-We have released **Nexent v1**, and the platform is now relatively stable. However, there may still be some bugs, and we are continuously improving and adding new features. Stay tuned: we will announce **v2.0** soon!
+We have released **Nexent v2.0**! A comprehensive upgrade from v1.0, featuring A2A protocol support, progressive Skill disclosure, layered memory mechanism, user management with multi-tenancy, agent version management, agent marketplace, and more.
 
-* **🗺️ Check our [Feature Map](https://github.com/orgs/ModelEngine-Group/projects/6)** to explore current and upcoming features.
-* **🔍 Try the current build** and leave ideas or bugs in the [Issues](https://github.com/ModelEngine-Group/nexent/issues) tab.
-* **🐛 Check our [Known Issues page](https://github.com/orgs/ModelEngine-Group/projects/9)** for the latest issue status and solutions.
+- **🗺️ Check our [Feature Map](https://github.com/orgs/ModelEngine-Group/projects/6)** to explore current and upcoming features.
+- **🔍 Try the current build** and leave ideas or bugs in the [Issues](https://github.com/ModelEngine-Group/nexent/issues) tab.
 
 > *Rome wasn't built in a day.*
 
@@ -56,66 +102,15 @@ Early contributors won't go unnoticed: from special badges and swag to other tan
 
 Most of all, we need visibility. Star ⭐ and watch the repo, share it with friends, and help more developers discover Nexent — your click brings new hands to the project and keeps the momentum growing.
 
-## 💬 Community & contact
+# 📖 What's Next
 
-- Browse the [Documentation](https://modelengine-group.github.io/nexent) for more information.
-- Join our [Discord community](https://discord.gg/tb5H3S3wyv) to chat with other developers and get help!
-- Conntact us by Wechat, find our QR Code in our [website](https://nexent.tech/en/contact)
+Ready to dive deeper? Here are the main documentation entry points:
 
-# ✨ Key Features
-
-`1` **Smart agent prompt generation**  
-   Turn plain language into runnable prompts. Nexent automatically chooses the right tools and plans the best action path for every request.
-
-   ![Feature 1](./assets/Feature1.png)
-
-`2` **Scalable data process engine**  
-   Process 20+ data formats with fast OCR and table structure extraction, scaling smoothly from a single process to large-batch pipelines.
-
-   ![Feature 2](./assets/Feature2.png)
-
-`3` **Personal-grade knowledge base**  
-   Import files in real time, auto-summarise them, and let agents access both personal and global knowledge instantly, also knowing what it can get from each knowledge base.
-
-   ![Feature 3](./assets/Feature3.png)
-
-`4` **Internet knowledge search**  
-   Connect to 5+ web search providers so agents can mix fresh internet facts with your private data.
-
-   ![Feature 4](./assets/Feature4.png)
-
-`5` **Knowledge-level traceability**  
-   Serve answers with precise citations from web and knowledge-base sources, making every fact verifiable.
-
-   ![Feature 5](./assets/Feature5.png)
-
-`6` **Multimodal understanding & dialogue**  
-   Speak, type, files, or show images. Nexent understands voice, text, and pictures, and can even generate new images on demand.
-
-   ![Feature 6](./assets/Feature6.png)
-
-`7` **MCP tool ecosystem**  
-   Drop in or build Python plug-ins that follow the MCP spec; swap models, tools, and chains without touching core code.
-
-   ![Feature 7](./assets/Feature7.png)
-
-# 🌱 MCP Tool Ecosystem
-
-Check our [MCP Ecosystem page](https://modelengine-group.github.io/nexent/en/mcp-ecosystem/overview.html) for detailed information about the MCP tool ecosystem, including community hubs, recommended tools, and integration guides.
-
-# 🛠️ Developer Guide
-
-### 🤖 Model Configuration & Provider Recommendations
-
-Check our [Model Providers page](https://modelengine-group.github.io/nexent/en/getting-started/model-providers.html) for detailed model configuration guides and recommended provider information.
-
-### 🔧 Hack on Nexent
-
-Want to build from source or add new features? Check the [Contribution Guide](https://modelengine-group.github.io/nexent/en/contributing) for step-by-step instructions.
-
-### 🛠️ Build from Source
-
-Prefer to run Nexent from source code? Follow our [Developer Guide](https://modelengine-group.github.io/nexent/en/getting-started/development-guide) for detailed setup instructions and customization options.
+- **[Quick Start](https://modelengine-group.github.io/nexent/en/quick-start/installation.html)** — System requirements and deployment guide
+- **[Core Features](https://modelengine-group.github.io/nexent/en/getting-started/features.html)** — Comprehensive feature documentation
+- **[User Guide](https://modelengine-group.github.io/nexent/en/user-guide/home-page.html)** — Agent development and usage
+- **[Developer Guide](https://modelengine-group.github.io/nexent/en/developer-guide/overview)** — Build from source and customization
+- **[FAQ](https://modelengine-group.github.io/nexent/en/quick-start/faq.html)** — Common questions and troubleshooting
 
 # 📄 License
 

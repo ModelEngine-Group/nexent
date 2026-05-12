@@ -215,7 +215,7 @@ export default function AgentVersionCompareModal({
                   title: t("agent.version.versionName"),
                   dataIndex: "field",
                   key: "field",
-                  width: "25%",
+                  width: "24%",
                   className: "bg-gray-50 text-gray-600 font-medium",
                 },
                 {
@@ -233,7 +233,7 @@ export default function AgentVersionCompareModal({
                     ),
                   dataIndex: "current",
                   key: "current",
-                  width: "37%",
+                  width: "38%",
                 },
                 {
                   title:
