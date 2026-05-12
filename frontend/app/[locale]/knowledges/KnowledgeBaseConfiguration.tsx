@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { App, Modal, Row, Col, theme, Button, Input, Form } from "antd";
+import { App, Modal, Row, Col, theme, Button, Input } from "antd";
 import {
   ExclamationCircleFilled,
   WarningFilled,
@@ -160,6 +160,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     createKnowledgeBase,
     deleteKnowledgeBase,
     setActiveKnowledgeBase,
+    updateKnowledgeBase,
     hasKnowledgeBaseModelMismatch,
     refreshKnowledgeBaseData,
     refreshKnowledgeBaseDataWithDataMate,
@@ -900,7 +901,8 @@ function DataConfig({ isActive }: DataConfigProps) {
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
               onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
               onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
-                // Update active knowledge base in context when it's updated
+                // Update knowledge base in list and active knowledge base
+                updateKnowledgeBase(updatedKnowledgeBase);
                 if (kbState.activeKnowledgeBase && kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id) {
                   setActiveKnowledgeBase(updatedKnowledgeBase);
                 }
@@ -991,6 +993,24 @@ function DataConfig({ isActive }: DataConfigProps) {
                   knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
                 }}
                   permission={kbState.activeKnowledgeBase?.permission}
+                summaryFrequency={kbState.activeKnowledgeBase?.summaryFrequency}
+                onSummaryFrequencyChange={(frequency) => {
+                  if (kbState.activeKnowledgeBase) {
+                    knowledgeBaseService.updateSummaryFrequency(
+                      kbState.activeKnowledgeBase.id,
+                      frequency
+                    ).then(() => {
+                      const updatedKB: KnowledgeBase = {
+                        ...kbState.activeKnowledgeBase!,
+                        summaryFrequency: frequency
+                      };
+                      updateKnowledgeBase(updatedKB);
+                      setActiveKnowledgeBase(updatedKB);
+                    }).catch((error) => {
+                      log.error("Failed to update summary frequency:", error);
+                    });
+                  }
+                }}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}
@@ -1074,26 +1094,26 @@ function DataConfig({ isActive }: DataConfigProps) {
           <div className="text-sm text-gray-600">
             {t("knowledgeBase.modal.dataMateConfig.description")}
           </div>
-          <Form layout="vertical">
-            <Form.Item
-              label={t("knowledgeBase.modal.dataMateConfig.urlLabel")}
-              help={dataMateUrlError}
-              validateStatus={dataMateUrlError ? "error" : undefined}
-            >
-              <Input
-                value={dataMateUrl}
-                onChange={(e) => setDataMateUrl(e.target.value)}
-                onBlur={() => {
-                  // Validate on blur
-                  const error = validateDataMateUrl(dataMateUrl);
-                  setDataMateUrlError(error);
-                }}
-                placeholder={t(
-                  "knowledgeBase.modal.dataMateConfig.urlPlaceholder"
-                )}
-              />
-            </Form.Item>
-          </Form>
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-gray-700">
+              {t("knowledgeBase.modal.dataMateConfig.urlLabel")}
+            </label>
+            <Input
+              value={dataMateUrl}
+              onChange={(e) => setDataMateUrl(e.target.value)}
+              onBlur={() => {
+                // Validate on blur
+                const error = validateDataMateUrl(dataMateUrl);
+                setDataMateUrlError(error);
+              }}
+              placeholder={t(
+                "knowledgeBase.modal.dataMateConfig.urlPlaceholder"
+              )}
+            />
+            {dataMateUrlError && (
+              <div className="text-sm text-red-600">{dataMateUrlError}</div>
+            )}
+          </div>
         </div>
       </Modal>
     </>

@@ -4,6 +4,7 @@ import os
 import io
 import base64
 import asyncio
+import time
 import types
 from unittest.mock import patch, MagicMock, AsyncMock
 import warnings
@@ -2550,6 +2551,29 @@ class TestDataProcessService(unittest.TestCase):
                     'uploads/doc.docx', 'converted/doc.pdf'
                 )
             )
+
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=['task-1'])
+    @patch('backend.services.data_process_service.get_task_info')
+    def test_get_all_tasks_handles_string_kwargs_and_bad_json(self, mock_get_task_info, _mock_ids):
+        """Cover runtime kwargs normalization fallback branches."""
+        async def _run():
+            mock_inspector = MagicMock()
+            mock_inspector.active.return_value = {
+                "w1": [{
+                    "id": "task-1",
+                    "name": "data_process.tasks.process",
+                    "kwargs": "{bad-json"
+                }]
+            }
+            mock_inspector.reserved.return_value = {}
+            self.service._inspector = mock_inspector
+            self.service._inspector_last_time = time.time()
+            mock_get_task_info.return_value = {"task_id": "task-1", "task_name": "", "index_name": ""}
+            rows = await self.service.get_all_tasks(filter=False)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["task_name"], "process")
+
+        asyncio.run(_run())
 
 
 if __name__ == '__main__':

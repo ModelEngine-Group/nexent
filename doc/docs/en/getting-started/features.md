@@ -25,7 +25,7 @@ The system automatically extracts key information from conversations to generate
 
 ## 📝 Progressive Skill Disclosure
 
-Nexent introduces a **Progressive Skill Disclosure** mechanism. As users input tasks, the system dynamically reveals the most relevant Skill suggestions based on the current context — helping users quickly find the tools and methods best suited to the current task. This mechanism enables newcomers to progressively explore system capabilities without adding operational complexity for advanced users.
+Nexent introduces a **Progressive Skill Disclosure** mechanism. As users input tasks, the system dynamically reveals the most relevant Skill suggestions based on the current context — helping users quickly find the tools and methods best suited to the current task. This mechanism helps preventing context explosion and maximizing context window efficiency.
 
 ## 🗄️ Personal-Grade Knowledge Base
 

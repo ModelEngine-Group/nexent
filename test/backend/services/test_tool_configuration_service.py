@@ -121,6 +121,18 @@ sys.modules['nexent.core.agents'] = _create_package_mock('nexent.core.agents')
 sys.modules['nexent.core.agents.agent_model'] = MagicMock()
 sys.modules['nexent.core.models'] = _create_package_mock('nexent.core.models')
 
+# Mock nexent.multi_modal module
+multi_modal_module = types.ModuleType('nexent.multi_modal')
+sys.modules['nexent.multi_modal'] = multi_modal_module
+
+multi_modal_utils = types.ModuleType('nexent.multi_modal.utils')
+multi_modal_utils.parse_s3_url = MagicMock(return_value=("bucket", "key"))
+sys.modules['nexent.multi_modal.utils'] = multi_modal_utils
+setattr(multi_modal_module, 'utils', multi_modal_utils)
+
+sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
+sys.modules['nexent.monitor'].set_monitoring_context = MagicMock()
+sys.modules['nexent.monitor'].set_monitoring_operation = MagicMock()
 
 class MockMessageObserver:
     """Lightweight stand-in for nexent.MessageObserver."""

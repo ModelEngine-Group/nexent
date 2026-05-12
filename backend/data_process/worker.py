@@ -1,4 +1,4 @@
-"""
+﻿"""
 Celery worker script for data processing tasks
 
 This script is used to start Celery workers for processing data
@@ -21,6 +21,7 @@ import logging
 import os
 import sys
 import time
+import threading
 import traceback
 
 import ray
@@ -44,6 +45,7 @@ from consts.const import (
     REDIS_URL,
     WORKER_CONCURRENCY,
     WORKER_NAME,
+    RAY_GLOBAL_ACTOR_POOL_SIZE,
 )
 
 from .app import app
@@ -200,6 +202,60 @@ def worker_ready_handler(**kwargs):
     # Register health check endpoints, start monitoring, etc.
     logger.debug("🔍 Worker is ready to receive tasks")
 
+    # Prewarm Ray actors for process-related queues to reduce first-task latency.
+    # IMPORTANT: run asynchronously so worker queue registration is never blocked.
+    try:
+        queue_set = {q.strip() for q in QUEUES.split(",") if q.strip()}
+        if "process_q" in queue_set or "process_part_q" in queue_set:
+            from data_process.tasks import prewarm_ray_actors
+
+            # Prewarm a cluster-global shared actor pool once at startup.
+            # Multiple workers may trigger this, but pool manager is idempotent.
+            target = RAY_GLOBAL_ACTOR_POOL_SIZE
+
+            def _prewarm_in_background():
+                try:
+                    warmed = prewarm_ray_actors(target_size=target)
+                    logger.info(
+                        f"Prewarmed Ray actor pool in background, warmed_actors={warmed}, target={target}, queues={sorted(queue_set)}"
+                    )
+                except Exception as exc:
+                    logger.warning(f"Background prewarm failed: {exc}")
+
+            threading.Thread(target=_prewarm_in_background, daemon=True).start()
+    except Exception as exc:
+        logger.warning(f"Failed to schedule Ray actor prewarm on worker ready: {exc}")
+
+    # Periodic concurrency + Ray CPU availability log for process_part_q.
+    try:
+        queue_set = {q.strip() for q in QUEUES.split(",") if q.strip()}
+        if "process_part_q" in queue_set:
+            def _log_part_concurrency():
+                while True:
+                    try:
+                        inspector = app.control.inspect(timeout=1)
+                        active = inspector.active() or {}
+                        part_active = 0
+                        for _, tasks in active.items():
+                            for t in tasks or []:
+                                if t.get("name") == "data_process.tasks.process_part":
+                                    part_active += 1
+                        try:
+                            ray_available = ray.available_resources() if ray.is_initialized() else {}
+                        except Exception:
+                            ray_available = {}
+                        avail_cpu = ray_available.get("CPU", 0.0)
+                        logger.info(
+                            f"[process_part] active={part_active}, ray_available_cpu={avail_cpu}"
+                        )
+                    except Exception as exc:
+                        logger.debug(f"Failed to collect process_part concurrency stats: {exc}")
+                    time.sleep(5)
+
+            threading.Thread(target=_log_part_concurrency, daemon=True).start()
+    except Exception as exc:
+        logger.warning(f"Failed to start process_part concurrency logger: {exc}")
+
 
 @worker_shutting_down.connect
 def worker_shutdown_handler(**kwargs):
@@ -289,9 +345,9 @@ def validate_redis_connection() -> bool:
 def start_worker():
     """Start Celery worker with appropriate settings"""
 
-    # Get configuration parameters
+    # Read from runtime env first, so launcher-assigned values always win.
     queues = QUEUES
-    worker_name = WORKER_NAME or f'worker-{os.getpid()}'
+    worker_name = WORKER_NAME
     concurrency = WORKER_CONCURRENCY
 
     logger.info(f"Start Celery worker '{worker_name}' with queues: {queues}")

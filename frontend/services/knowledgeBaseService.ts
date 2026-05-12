@@ -547,6 +547,8 @@ class KnowledgeBaseService {
                       null,
                     // Use embedding_model_name (display_name) from backend, fallback to ES stats
                     embeddingModel: indexInfo.embedding_model_name || stats.embedding_model || "unknown",
+                    summaryFrequency: indexInfo.summary_frequency || null,
+                    lastSummaryTime: indexInfo.last_summary_time || null,
                     knowledge_sources:
                       indexInfo.knowledge_sources || "elasticsearch",
                     ingroup_permission: indexInfo.ingroup_permission || "",
@@ -1122,6 +1124,39 @@ class KnowledgeBaseService {
         throw error;
       }
       throw new Error("Failed to change summary");
+    }
+  }
+
+  // Update auto-summary frequency for a knowledge base
+  async updateSummaryFrequency(
+    indexName: string,
+    frequency: string | null
+  ): Promise<void> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.updateSummaryFrequency(indexName),
+        {
+          method: "PATCH",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ summary_frequency: frequency }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            `HTTP error! status: ${response.status}`
+        );
+      }
+    } catch (error) {
+      log.error("Error updating summary frequency:", error);
+      throw error;
     }
   }
 

@@ -110,6 +110,39 @@ You can add MCP services to Nexent in the following two ways:
 Many third-party services such as [ModelScope](https://www.modelscope.cn/mcp) provide MCP services, which you can quickly integrate and use.
 You can also develop your own MCP services and connect them to Nexent; see [MCP Tool Development](../backend/tools/mcp).
 
+**3️⃣ Convert Stock API to MCP Service**
+
+🔔 This method is suitable for quickly converting existing REST API endpoints into MCP tools without additional development, allowing agents to call existing API capabilities:
+
+>1. In the MCP Config module, select **"API to MCP"** as the access type
+>
+>2. Fill in the API basic information in the input box below:
+>   - **Service Name**: Display name for the MCP service
+>   - **OpenAPI JSON**: OpenAPI 3.x specification in JSON format
+>   - **Base Service URL**: Base address of the API service (supports http/https)
+>
+>3. Click the **+ Add** button in the lower right corner to complete the MCP service conversion
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api.png" style="width: 80%; height: auto;" />
+</div>
+
+>4. After conversion, you can view all externally converted MCP tools in the **Outer APIs** tab
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api_1.png" style="width: 80%; height: auto;" />
+</div>
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/add_mcp_from_api_2.png" style="width: 80%; height: auto;" />
+</div>
+
+>💡 **Use Cases**:
+>- Quickly integrate internal enterprise REST API endpoints
+>- Convert third-party service HTTP APIs into MCP tools
+>- Generate tools directly from OpenAPI specifications without writing MCP Server code
+
+
 ### ⚙️ Custom Tools
 
 You can refer to the following guides to develop your own tools and integrate them into Nexent to enrich agent capabilities:

@@ -36,6 +36,8 @@ from database.knowledge_db import (
     update_knowledge_record,
     get_knowledge_info_by_tenant_id,
     update_model_name_by_index_name,
+    update_last_doc_update_time,
+    update_last_summary_time,
     update_embedding_model_by_index_name,
 )
 from utils.str_utils import convert_list_to_string
@@ -1017,6 +1019,9 @@ class ElasticSearchService:
                         "embedding_model_id": model_id,
                         # Update time for sorting and display
                         "update_time": record.get("update_time"),
+                        # Auto-summary settings
+                        "summary_frequency": record.get("summary_frequency"),
+                        "last_summary_time": record.get("last_summary_time"),
                         "stats": index_stats,
                     })
 
@@ -1044,6 +1049,7 @@ class ElasticSearchService:
             task_id: Optional[str] = None,
             model_id: Optional[int] = Body(
                 None, description="ID of the embedding model to use"),
+            large_mode: bool = False,
     ):
         """
         Index documents and create vector embeddings, create index if it doesn't exist
@@ -1173,6 +1179,7 @@ class ElasticSearchService:
                     embedding_model=embedding_model,
                     documents=documents,
                     embedding_batch_size=embedding_batch_size,
+                    large_mode=large_mode,
                     progress_callback=lambda processed, total: _update_progress(
                         task_id, processed, total) if task_id else None
                 )
@@ -1192,6 +1199,9 @@ class ElasticSearchService:
                     except Exception as e:
                         logger.warning(
                             f"[REDIS PROGRESS] Exception updating final progress for task {task_id}: {str(e)}")
+
+                # Update last_doc_update_time for auto-summary tracking
+                update_last_doc_update_time(index_name)
 
                 return {
                     "success": True,
@@ -1462,6 +1472,10 @@ class ElasticSearchService:
             index_name, path_or_url)
         # 2. Delete MinIO file
         minio_result = delete_file(path_or_url)
+
+        # Update last_doc_update_time for auto-summary tracking
+        update_last_doc_update_time(index_name)
+
         return {"status": "success", "deleted_es_count": deleted_count, "deleted_minio": minio_result.get("success")}
 
     @staticmethod
@@ -1684,6 +1698,8 @@ class ElasticSearchService:
                 "index_name": index_name
             }
             update_knowledge_record(update_data)
+            # Update last_summary_time for auto-summary tracking
+            update_last_summary_time(index_name)
             return {"status": "success", "message": f"Index {index_name} summary updated successfully",
                     "summary": summary_result}
         except Exception as e:

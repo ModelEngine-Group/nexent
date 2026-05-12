@@ -2,6 +2,7 @@ import asyncio
 import sys
 import os
 import time
+import types
 import unittest
 from unittest.mock import MagicMock, ANY, AsyncMock, call
 # Mock MinioClient before importing modules that use it
@@ -58,6 +59,20 @@ sys.modules['nexent.vector_database'] = _create_package_mock(
     'nexent.vector_database')
 vector_db_base_module = ModuleType('nexent.vector_database.base')
 
+sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
+sys.modules['nexent.monitor'].set_monitoring_context = MagicMock()
+sys.modules['nexent.monitor'].set_monitoring_operation = MagicMock()
+
+# Mock nexent.memory
+nexent_memory_module = types.ModuleType('nexent.memory')
+sys.modules['nexent.memory'] = nexent_memory_module
+
+nexent_memory_service = types.ModuleType('nexent.memory.memory_service')
+nexent_memory_service.clear_memory = MagicMock()
+nexent_memory_service.add_memory = MagicMock()
+nexent_memory_service.get_memory = MagicMock()
+sys.modules['nexent.memory.memory_service'] = nexent_memory_service
+
 
 class _VectorDatabaseCore:
     """Lightweight stand-in for the real VectorDatabaseCore for import-time typing."""
@@ -85,10 +100,6 @@ sys.modules['nexent.storage.minio_config'] = storage_config_module
 sys.modules['nexent.core.agents.agent_model'].ToolConfig = MagicMock()
 sys.modules['nexent.core.models.stt_model'].STTConfig = MagicMock()
 sys.modules['nexent.core.models.stt_model'].STTModel = MagicMock()
-sys.modules['nexent.core.models.tts_model'] = MagicMock()
-sys.modules['nexent.core.models.tts_model'].TTSConfig = MagicMock()
-sys.modules['nexent.core.models.tts_model'].TTSModel = MagicMock()
-
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
 storage_client_mock = MagicMock()
@@ -1570,7 +1581,8 @@ class TestElasticSearchService(unittest.TestCase):
         mock_embedding_model = MagicMock()
         mock_embedding_model.model = "test-model"
         with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
-                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
+                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
+                patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
             mock_get_record.return_value = {"tenant_id": "tenant-1"}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
 
@@ -1667,7 +1679,8 @@ class TestElasticSearchService(unittest.TestCase):
         # Execute
         with patch('backend.services.vectordatabase_service.ElasticSearchService.create_index') as mock_create_index, \
                 patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
-                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
+                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
+                patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
             mock_create_index.return_value = {"status": "success"}
             mock_get_record.return_value = {"tenant_id": "tenant-1"}
             mock_tenant_cfg.get_model_config.return_value = {
@@ -1872,8 +1885,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(len(result["files"][0]["chunks"]), 0)
         self.assertEqual(result["files"][0]["chunk_count"], 0)
 
+    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.delete_file')
-    def test_delete_documents(self, mock_delete_file):
+    def test_delete_documents(self, mock_delete_file, mock_update_last_doc):
         """
         Test document deletion by path or URL.
 
@@ -1903,8 +1917,9 @@ class TestElasticSearchService(unittest.TestCase):
         # Verify that delete_file was called with the correct path
         mock_delete_file.assert_called_once_with("test_path")
 
+    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.get_redis_service')
-    def test_index_documents_respects_cancellation_flag(self, mock_get_redis_service):
+    def test_index_documents_respects_cancellation_flag(self, mock_get_redis_service, mock_update_last_doc):
         """
         Test that index_documents stops indexing when the task is marked as cancelled.
 
@@ -2748,8 +2763,9 @@ class TestElasticSearchService(unittest.TestCase):
             "test_index")
         self.mock_vdb_core.search.assert_called_once()
 
+    @patch('backend.services.vectordatabase_service.update_last_summary_time')
     @patch('backend.services.vectordatabase_service.update_knowledge_record')
-    def test_change_summary(self, mock_update_record):
+    def test_change_summary(self, mock_update_record, mock_update_last_summary):
         """
         Test changing the summary of a knowledge base.
 
@@ -3544,9 +3560,10 @@ class TestElasticSearchService(unittest.TestCase):
             index_names=["test_index"], query="valid query", top_k=10
         )
 
+    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    def test_vectorize_documents_success_status_200(self, mock_get_record, mock_tenant_cfg):
+    def test_vectorize_documents_success_status_200(self, mock_get_record, mock_tenant_cfg, mock_update_last_doc):
         """
         Test vectorize_documents method returns status code 200 on success.
 
@@ -3598,8 +3615,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("success", result)
         self.assertTrue(result["success"])
 
+    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.delete_file')
-    def test_delete_documents_success_status_200(self, mock_delete_file):
+    def test_delete_documents_success_status_200(self, mock_delete_file, mock_update_last_doc):
         """
         Test delete_documents method returns status code 200 on success.
 
@@ -4392,8 +4410,9 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         self.assertIn("Error creating knowledge base", str(exc.exception))
 
+    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    def test_index_documents_default_batch_without_tenant(self, mock_get_record):
+    def test_index_documents_default_batch_without_tenant(self, mock_get_record, mock_update_last_doc):
         """index_documents defaults embedding batch size to 10 when tenant is missing."""
         mock_get_record.return_value = None
         self.mock_vdb_core.check_index_exists.return_value = True
@@ -4418,10 +4437,11 @@ class TestRethrowOrPlain(unittest.TestCase):
         _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
         self.assertEqual(kwargs["embedding_batch_size"], 10)
 
+    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_redis_service')
-    def test_index_documents_updates_final_progress(self, mock_get_redis, mock_get_record, mock_tenant_cfg):
+    def test_index_documents_updates_final_progress(self, mock_get_redis, mock_get_record, mock_tenant_cfg, mock_update_last_doc):
         """index_documents sends final progress update to Redis when task_id is provided."""
         mock_get_record.return_value = {"tenant_id": "tenant-1"}
         mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 4}
@@ -4449,10 +4469,11 @@ class TestRethrowOrPlain(unittest.TestCase):
         last_call = mock_redis.save_progress_info.call_args_list[-1]
         self.assertEqual(last_call[0], ("task-xyz", 2, 2))
 
+    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.get_redis_service')
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    def test_index_documents_progress_init_and_final_errors(self, mock_tenant_cfg, mock_get_record, mock_get_redis):
+    def test_index_documents_progress_init_and_final_errors(self, mock_tenant_cfg, mock_get_record, mock_get_redis, mock_update_last_doc):
         """index_documents should continue when progress save fails during init and final updates."""
         mock_get_record.return_value = {"tenant_id": "tenant-1"}
         mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 4}
