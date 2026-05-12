@@ -322,51 +322,50 @@ def get_embedding_model(
     Returns:
         Tuple of (embedding model instance or None, model_id or None)
     """
-    # If model_name is provided, find the model by display_name
+    def _normalize_model_type(raw_model_type: Optional[str]) -> Optional[str]:
+        if raw_model_type in ["multiEmbedding", "multi_embedding"]:
+            return "multi_embedding"
+        if raw_model_type == "embedding":
+            return "embedding"
+        return None
+
+    def _build_model_config(model: dict) -> dict:
+        return {
+            "model_repo": model.get("model_repo", ""),
+            "model_name": model["model_name"],
+            "api_key": model.get("api_key", ""),
+            "base_url": model.get("base_url", ""),
+            "model_type": model.get("model_type", "embedding"),
+            "max_tokens": model.get("max_tokens", 1024),
+            "ssl_verify": model.get("ssl_verify", True),
+        }
+
+    def _create_embedding_model(model: dict) -> Any:
+        model_config = _build_model_config(model)
+        common_kwargs = {
+            "api_key": model_config.get("api_key", ""),
+            "base_url": model_config.get("base_url", ""),
+            "model_name": get_model_name_from_config(model_config) or "",
+            "embedding_dim": model_config.get("max_tokens", 1024),
+            "ssl_verify": model_config.get("ssl_verify", True),
+        }
+        if model.get("model_type", "embedding") == "multi_embedding":
+            return JinaEmbedding(**common_kwargs)
+        return OpenAICompatibleEmbedding(**common_kwargs)
+
     if model_name:
         try:
-            normalized_model_type = None
-            if model_type:
-                if model_type in ["multiEmbedding", "multi_embedding"]:
-                    normalized_model_type = "multi_embedding"
-                elif model_type == "embedding":
-                    normalized_model_type = "embedding"
-
+            normalized_model_type = _normalize_model_type(model_type)
             if normalized_model_type:
-                model = get_model_by_display_name(
-                    model_name, tenant_id, normalized_model_type)
+                model = get_model_by_display_name(model_name, tenant_id, normalized_model_type)
             else:
                 model = get_model_by_display_name(model_name, tenant_id)
-            if model and model.get("model_type") in ["embedding", "multi_embedding"]:
-                model_config = {
-                    "model_repo": model.get("model_repo", ""),
-                    "model_name": model["model_name"],
-                    "api_key": model.get("api_key", ""),
-                    "base_url": model.get("base_url", ""),
-                    "model_type": model.get("model_type", "embedding"),
-                    "max_tokens": model.get("max_tokens", 1024),
-                    "ssl_verify": model.get("ssl_verify", True),
-                }
-                model_type = model.get("model_type", "embedding")
-                if model_type == "multi_embedding":
-                    embedding_model = JinaEmbedding(
-                        api_key=model_config.get("api_key", ""),
-                        base_url=model_config.get("base_url", ""),
-                        model_name=get_model_name_from_config(model_config) or "",
-                        embedding_dim=model_config.get("max_tokens", 1024),
-                        ssl_verify=model_config.get("ssl_verify", True),
-                    )
-                else:
-                    embedding_model = OpenAICompatibleEmbedding(
-                        api_key=model_config.get("api_key", ""),
-                        base_url=model_config.get("base_url", ""),
-                        model_name=get_model_name_from_config(model_config) or "",
-                        embedding_dim=model_config.get("max_tokens", 1024),
-                        ssl_verify=model_config.get("ssl_verify", True),
-                    )
-                return embedding_model, model.get("model_id")
-            else:
+
+            if not model or model.get("model_type") not in ["embedding", "multi_embedding"]:
                 logger.warning(f"Model '{model_name}' not found or is not an embedding model")
+                return None, None
+
+            return _create_embedding_model(model), model.get("model_id")
         except Exception as e:
             logger.warning(f"Failed to get embedding model by name {model_name}: {e}")
 
