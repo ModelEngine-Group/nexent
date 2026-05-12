@@ -55,32 +55,12 @@ class DataProcessorRayActor:
         if task_id:
             process_params["task_id"] = task_id
 
-        if not (model_id and tenant_id):
-            return process_params
-
-        try:
-            model_record = get_model_by_model_id(
-                model_id=model_id, tenant_id=tenant_id)
-            if not model_record:
-                logger.warning(
-                    f"[RayActor] Embedding model with ID {model_id} not found for tenant '{tenant_id}', using default chunk sizes")
-                return process_params
-
-            expected_chunk_size = model_record.get(
-                "expected_chunk_size", DEFAULT_EXPECTED_CHUNK_SIZE)
-            maximum_chunk_size = model_record.get(
-                "maximum_chunk_size", DEFAULT_MAXIMUM_CHUNK_SIZE)
-            model_name = model_record.get("display_name")
-
-            process_params["max_characters"] = maximum_chunk_size
-            process_params["new_after_n_chars"] = expected_chunk_size
-
-            logger.info(
-                f"[RayActor] Using chunk sizes from embedding model '{model_name}' (ID: {model_id}): "
-                f"max_characters={maximum_chunk_size}, new_after_n_chars={expected_chunk_size}")
-        except Exception as e:
-            logger.warning(
-                f"[RayActor] Failed to retrieve chunk sizes from embedding model ID {model_id}: {e}. Using default chunk sizes")
+        # Reuse shared model param logic so we also keep extra fields
+        self._apply_model_chunk_sizes(
+            model_id=model_id,
+            tenant_id=tenant_id,
+            params=process_params,
+        )
         return process_params
 
     def _run_file_process(

@@ -5293,6 +5293,72 @@ class TestRethrowOrPlain(unittest.TestCase):
         finally:
             self.get_rerank_model_patcher.start()
 
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_create_chunk_embedding_exception_without_explicit_model_is_tolerated(
+        self, mock_get_knowledge_record
+    ):
+        """create_chunk should continue when embedding generation fails and no explicit model name exists."""
+        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
+        mock_get_knowledge_record.return_value = {
+            "embedding_model_name": None,
+            "is_multimodal": "N",
+        }
+        self.mock_get_embedding.side_effect = RuntimeError("embedding failed")
+
+        from backend.services.vectordatabase_service import ChunkCreateRequest
+        chunk_request = ChunkCreateRequest(
+            content="abc",
+            title="t",
+            filename="f.txt",
+            path_or_url="p/f.txt",
+            metadata={}
+        )
+        result = ElasticSearchService.create_chunk(
+            index_name="idx",
+            chunk_request=chunk_request,
+            vdb_core=self.mock_vdb_core,
+            user_id="u1",
+            tenant_id="t1",
+        )
+        self.assertEqual(result["status"], "success")
+        self.mock_vdb_core.create_chunk.assert_called_once()
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_chunk_minimal_payload_still_updates(self, mock_get_knowledge_record):
+        """update_chunk without business fields still sends update_time/updated_by payload."""
+        mock_get_knowledge_record.return_value = None
+        self.mock_vdb_core.update_chunk.return_value = {"id": "c1"}
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        empty_req = ChunkUpdateRequest()
+
+        result = ElasticSearchService.update_chunk(
+            index_name="idx",
+            chunk_id="c1",
+            chunk_request=empty_req,
+            vdb_core=self.mock_vdb_core,
+            user_id="u1",
+            tenant_id="t1",
+        )
+        self.assertEqual(result["status"], "success")
+        self.mock_vdb_core.update_chunk.assert_called_once()
+
+    def test_update_chunk_core_error_is_wrapped(self):
+        """update_chunk should wrap core exceptions with consistent message."""
+        self.mock_vdb_core.update_chunk.side_effect = RuntimeError("core failed")
+        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        req = ChunkUpdateRequest(content="new-content")
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.update_chunk(
+                index_name="idx",
+                chunk_id="c2",
+                chunk_request=req,
+                vdb_core=self.mock_vdb_core,
+                user_id="u1",
+                tenant_id=None,
+            )
+        self.assertIn("Error updating chunk", str(ctx.exception))
+
 
 if __name__ == '__main__':
     unittest.main()

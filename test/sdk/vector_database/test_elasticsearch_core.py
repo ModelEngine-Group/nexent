@@ -2,9 +2,24 @@ import pytest
 from unittest.mock import MagicMock, patch
 import time
 import types
+import sys
 from typing import List, Dict, Any
 from contextlib import contextmanager
 from elasticsearch import exceptions
+
+# Stub heavy optional deps before importing sdk package chain.
+fake_unstructured = types.ModuleType("unstructured_inference")
+fake_models = types.ModuleType("unstructured_inference.models")
+fake_tables = types.ModuleType("unstructured_inference.models.tables")
+fake_tables.tables_agent = types.SimpleNamespace(model=None)
+fake_logger = types.ModuleType("unstructured_inference.logger")
+fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
+fake_models.tables = fake_tables
+fake_unstructured.models = fake_models
+sys.modules.setdefault("unstructured_inference", fake_unstructured)
+sys.modules.setdefault("unstructured_inference.models", fake_models)
+sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
+sys.modules.setdefault("unstructured_inference.logger", fake_logger)
 
 # Import the class under test
 from sdk.nexent.vector_database.elasticsearch_core import ElasticSearchCore

@@ -460,7 +460,6 @@ class KnowledgeBaseSearchTool(Tool):
             raise Exception(f"Error during semantic search: {str(e)}")
         
     def _filter_images(self, images_list_url, query) -> list:
-        # kerry
         """
         Execute image filtering operation directly using the data processing service
         :param images_list_url: List of image URLs to filter

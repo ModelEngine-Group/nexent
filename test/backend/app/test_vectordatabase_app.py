@@ -2514,3 +2514,48 @@ async def test_create_index_documents_with_empty_string_model_name(vdb_core_mock
         kwargs = mock_get_embedding.call_args[1]
         assert kwargs["tenant_id"] == auth_data["tenant_id"]
         assert kwargs["model_name"] == ""  # Empty string is passed
+
+
+@pytest.mark.asyncio
+async def test_update_summary_frequency_endpoint_success(vdb_core_mock, auth_data):
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_db.update_summary_frequency", return_value=True):
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}/summary_frequency",
+            json={"summary_frequency": "1d"},
+            headers=auth_data["auth_header"],
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_update_summary_frequency_endpoint_invalid_value(auth_data):
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])):
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}/summary_frequency",
+            json={"summary_frequency": "bad"},
+            headers=auth_data["auth_header"],
+        )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_get_document_error_info_regex_fallback(auth_data):
+    with patch("backend.apps.vectordatabase_app.get_all_files_status", new=AsyncMock(return_value={"docA": {"latest_task_id": "tid1"}})), \
+            patch("backend.apps.vectordatabase_app.get_redis_service") as mock_redis:
+        mock_redis.return_value.get_error_info.return_value = '{"bad":1, "error_code":"E123"'
+        response = client.get(f"/indices/i1/documents/docA/error-info", headers=auth_data["auth_header"])
+    assert response.status_code == 200
+    assert response.json()["error_code"] == "E123"
+
+
+@pytest.mark.asyncio
+async def test_get_document_error_info_regex_failure_returns_none(auth_data):
+    with patch("backend.apps.vectordatabase_app.get_all_files_status", new=AsyncMock(return_value={"docA": {"latest_task_id": "tid1"}})), \
+            patch("backend.apps.vectordatabase_app.get_redis_service") as mock_redis, \
+            patch("backend.apps.vectordatabase_app.re.search", side_effect=RuntimeError("regex boom")):
+        mock_redis.return_value.get_error_info.return_value = "not-json"
+        response = client.get(f"/indices/i1/documents/docA/error-info", headers=auth_data["auth_header"])
+    assert response.status_code == 200
+    assert response.json()["error_code"] is None

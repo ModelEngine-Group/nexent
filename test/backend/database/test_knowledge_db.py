@@ -56,6 +56,10 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         upsert_knowledge_record,
         _generate_index_name,
         get_knowledge_name_map_by_index_names,
+        update_summary_frequency,
+        update_last_summary_time,
+        update_last_doc_update_time,
+        get_knowledge_bases_for_auto_summary,
     )
 
 
@@ -2159,3 +2163,100 @@ def test_get_knowledge_name_map_by_index_names_exception(monkeypatch, mock_sessi
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_knowledge_name_map_by_index_names(["index1", "index2"])
+
+
+def test_get_index_name_by_knowledge_name_fallback_to_index_name(monkeypatch, mock_session):
+    session, query = mock_session
+    mock_filter = MagicMock()
+    mock_filter.first.side_effect = [None, MockKnowledgeRecord(index_name="idx-1")]
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    result = get_index_name_by_knowledge_name("idx-1", "tenant1")
+    assert result == "idx-1"
+
+
+def test_update_summary_frequency_paths(monkeypatch, mock_session):
+    session, query = mock_session
+    rec = MockKnowledgeRecord(index_name="idx-1")
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = rec
+    query.filter.return_value = mock_filter
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    assert update_summary_frequency("idx-1", "1d", "tenant-1", "user-1") is True
+    assert rec.summary_frequency == "1d"
+    assert rec.updated_by == "user-1"
+
+    mock_filter.first.return_value = None
+    assert update_summary_frequency("idx-404", "1d", "tenant-1", "user-1") is False
+
+    with pytest.raises(ValueError):
+        update_summary_frequency("idx-1", "bad-frequency", "tenant-1", "user-1")
+
+
+def test_update_last_times_and_get_auto_summary(monkeypatch, mock_session):
+    session, query = mock_session
+    rec = MockKnowledgeRecord(index_name="idx-1")
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = rec
+    mock_filter.all.return_value = [rec]
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.knowledge_db.as_dict", lambda r: {"index_name": r.index_name})
+
+    update_last_summary_time("idx-1")
+    update_last_doc_update_time("idx-1")
+    session.commit.assert_called()
+
+    rows = get_knowledge_bases_for_auto_summary()
+    assert rows == [{"index_name": "idx-1"}]
+
+
+@pytest.mark.parametrize(
+    "func_name,args,kwargs",
+    [
+        ("create_knowledge_record", ({"index_name": "i1"},), {}),
+        ("upsert_knowledge_record", ({"index_name": "i1", "tenant_id": "t1"},), {}),
+        ("update_knowledge_record", ({"index_name": "i1"},), {}),
+        ("delete_knowledge_record", ({"index_name": "i1"},), {}),
+        ("get_knowledge_record", ({"index_name": "i1"},), {}),
+        ("get_knowledge_info_by_knowledge_ids", (["1"],), {}),
+        ("get_knowledge_ids_by_index_names", (["i1"],), {}),
+        ("get_knowledge_info_by_tenant_id", ("t1",), {}),
+        ("get_knowledge_info_by_tenant_and_source", ("t1", "datamate"), {}),
+        ("update_model_name_by_index_name", ("i1", "m1", "t1", "u1"), {}),
+        ("get_index_name_by_knowledge_name", ("kb1", "t1"), {}),
+        ("get_knowledge_name_map_by_index_names", (["i1"],), {}),
+        ("update_summary_frequency", ("i1", "1d", "t1", "u1"), {}),
+        ("update_last_summary_time", ("i1",), {}),
+        ("update_last_doc_update_time", ("i1",), {}),
+        ("get_knowledge_bases_for_auto_summary", tuple(), {}),
+    ],
+)
+def test_sqlalchemy_error_paths_raise(monkeypatch, func_name, args, kwargs):
+    """
+    Cover SQLAlchemyError branches for DB operations by forcing get_db_session
+    context enter to fail.
+    """
+    from backend.database import knowledge_db as knowledge_db_module
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.side_effect = MockSQLAlchemyError("db-error")
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(knowledge_db_module, "get_db_session", lambda: mock_ctx)
+
+    target = getattr(knowledge_db_module, func_name)
+    with pytest.raises(MockSQLAlchemyError, match="db-error"):
+        target(*args, **kwargs)

@@ -2312,8 +2312,14 @@ class TestValidateLocalToolKnowledgeBaseSearch:
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
-    def test_validate_local_tool_knowledge_base_search_multimodal(self, mock_get_vector_db_core, mock_get_embedding_model,
-                                                                  mock_signature, mock_get_class):
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
+    def test_validate_local_tool_knowledge_base_search_multimodal(
+            self,
+            mock_get_knowledge_map,
+            mock_get_vector_db_core,
+            mock_get_embedding_model,
+            mock_signature,
+            mock_get_class):
         mock_tool_class = Mock()
         mock_tool_instance = Mock()
         mock_tool_instance.forward.return_value = "knowledge base search result"
@@ -2333,6 +2339,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
 
         mock_get_embedding_model.return_value = "mock_embedding_model"
         mock_get_vector_db_core.return_value = Mock()
+        mock_get_knowledge_map.return_value = {}
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
@@ -4218,6 +4225,42 @@ class TestValidateLocalToolMonitoring:
         mock_ctx.assert_called_once_with(tenant_id="tenant1")
         mock_op.assert_called_once_with(
             "tool_validation", display_name="LLM-Model")
+
+
+class TestValidateToolImplBranches:
+    @pytest.mark.asyncio
+    async def test_validate_tool_impl_mcp_outer_apis(self):
+        req = ToolValidateRequest(
+            name="t1",
+            source=ToolSourceEnum.MCP.value,
+            usage="outer-apis",
+            inputs={"a": 1},
+            params={},
+        )
+        with patch("backend.services.tool_configuration_service._validate_mcp_tool_nexent", new=AsyncMock(return_value={"ok": 1})):
+            from backend.services.tool_configuration_service import validate_tool_impl
+            result = await validate_tool_impl(req, tenant_id="tid", user_id="uid")
+        assert result == {"ok": 1}
+
+    @pytest.mark.asyncio
+    async def test_validate_tool_impl_mcp_remote_and_local_and_langchain(self):
+        from backend.services.tool_configuration_service import validate_tool_impl
+        req_remote = ToolValidateRequest(name="t2", source=ToolSourceEnum.MCP.value, usage="mcp-a", inputs={}, params={})
+        req_local = ToolValidateRequest(name="t3", source=ToolSourceEnum.LOCAL.value, usage="", inputs={}, params={})
+        req_lc = ToolValidateRequest(name="t4", source=ToolSourceEnum.LANGCHAIN.value, usage="", inputs={}, params={})
+        with patch("backend.services.tool_configuration_service._validate_mcp_tool_remote", new=AsyncMock(return_value={"r": 1})), \
+                patch("backend.services.tool_configuration_service._validate_local_tool", return_value={"l": 1}), \
+                patch("backend.services.tool_configuration_service._validate_langchain_tool", return_value={"c": 1}):
+            assert await validate_tool_impl(req_remote, tenant_id="tid", user_id="uid") == {"r": 1}
+            assert await validate_tool_impl(req_local, tenant_id="tid", user_id="uid") == {"l": 1}
+            assert await validate_tool_impl(req_lc, tenant_id="tid", user_id="uid") == {"c": 1}
+
+    @pytest.mark.asyncio
+    async def test_validate_tool_impl_error_mapping(self):
+        from backend.services.tool_configuration_service import validate_tool_impl
+        req = ToolValidateRequest(name="t", source="unknown", usage="", inputs={}, params={})
+        with pytest.raises(ToolExecutionException):
+            await validate_tool_impl(req, tenant_id="tid", user_id="uid")
 
 
 if __name__ == "__main__":

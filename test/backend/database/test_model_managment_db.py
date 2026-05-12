@@ -422,3 +422,28 @@ def test_get_model_by_name_factory(monkeypatch):
     assert result is not None
     assert result["model_name"] == "gpt-4"
     assert result["model_factory"] == "openai"
+
+
+def test_get_model_by_display_name_embedding_filter(monkeypatch):
+    captured = {}
+
+    def fake_get_model_records(filters, tenant_id):
+        captured.update(filters)
+        return [{"model_id": 12, "display_name": "Embed"}]
+
+    monkeypatch.setattr(model_mgmt_db, "get_model_records", fake_get_model_records)
+    result = model_mgmt_db.get_model_by_display_name("Embed", "tenant12", model_type="embedding")
+    assert result["model_id"] == 12
+    assert captured["model_type"] == "embedding"
+
+
+def test_get_model_by_model_id_not_found(monkeypatch):
+    mock_scalars = MagicMock()
+    mock_scalars.first.return_value = None
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    assert model_mgmt_db.get_model_by_model_id(999, tenant_id="t") is None

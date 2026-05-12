@@ -676,3 +676,43 @@ def test_store_chunks_in_redis_len_error_and_client_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "redis", bad_redis_module)
     assert actor.store_chunks_in_redis("k-err", [{"a": 1}]) is False
 
+
+def test_apply_model_chunk_sizes_and_read_file_bytes_helpers(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+    actor = ray_actors.DataProcessorRayActor()
+
+    monkeypatch.setattr(
+        ray_actors,
+        "get_model_by_model_id",
+        lambda model_id, tenant_id=None: {
+            "expected_chunk_size": 111,
+            "maximum_chunk_size": 222,
+            "display_name": "emb",
+            "model_type": "embedding",
+        },
+    )
+    params = {}
+    actor._apply_model_chunk_sizes(1, "t1", params)
+    assert params["new_after_n_chars"] == 111
+    assert params["max_characters"] == 222
+    assert params["model_type"] == "embedding"
+
+    monkeypatch.setattr(ray_actors, "get_file_stream", lambda source: io.BytesIO(b"bytes"))
+    assert actor._read_file_bytes("s3://x") == b"bytes"
+
+    monkeypatch.setattr(ray_actors, "get_file_stream", lambda source: None)
+    with pytest.raises(FileNotFoundError):
+        actor._read_file_bytes("s3://missing")
+
+
+def test_split_file_returns_empty_when_no_parts(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class CoreNoParts(FakeDataProcessCore):
+        def file_split(self, *a, **k):
+            return []
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreNoParts)
+    actor = ray_actors.DataProcessorRayActor()
+    assert actor.split_file("x.txt", "local", file_data=b"abc") == []
+
