@@ -357,6 +357,7 @@ class KnowledgeRecord(TableBase):
     knowledge_describe = Column(String(3000), doc="Knowledge base description")
     knowledge_sources = Column(String(300), doc="Knowledge base sources")
     embedding_model_name = Column(String(200), doc="Embedding model name, used to record the embedding model used by the knowledge base")
+    embedding_model_id = Column(Integer, doc="Embedding model ID, foreign key reference to model_record_t.model_id")
     tenant_id = Column(String(100), doc="Tenant ID")
     group_ids = Column(String, doc="Knowledge base group IDs list")
     ingroup_permission = Column(
