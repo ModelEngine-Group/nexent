@@ -65,6 +65,11 @@ consts_mock.const.DEFAULT_TENANT_ID = 'default_tenant'
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 
+# Mock consts.scheduler module
+consts_scheduler_mock = MagicMock()
+consts_scheduler_mock.VALID_SUMMARY_FREQUENCIES = ["1h", "3h", "6h", "1d", "1w", None]
+sys.modules['consts.scheduler'] = consts_scheduler_mock
+
 # Mock MinioClient and PostgresClient
 minio_client_mock2 = MagicMock()
 postgres_client_mock = MagicMock()
