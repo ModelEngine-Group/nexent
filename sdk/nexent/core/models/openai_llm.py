@@ -56,15 +56,13 @@ class OpenAIModel(OpenAIServerModel):
         if concurrency_limit is not None and concurrency_limit > 0:
             self._semaphore = asyncio.Semaphore(concurrency_limit)
 
-        # Create http_client based on ssl_verify parameter and timeout_seconds
-        if not ssl_verify or timeout_seconds is not None:
-            import httpx
-            # Build timeout configuration
-            timeout = httpx.Timeout(timeout_seconds) if timeout_seconds is not None else httpx.Timeout(120.0)
-            http_client = httpx.Client(verify=ssl_verify, timeout=timeout)
-            client_kwargs = kwargs.get('client_kwargs', {})
-            client_kwargs['http_client'] = http_client
-            kwargs['client_kwargs'] = client_kwargs
+        # Create http_client with trust_env=False to ignore proxy env vars
+        import httpx
+        timeout = httpx.Timeout(timeout_seconds) if timeout_seconds is not None else httpx.Timeout(120.0)
+        http_client = httpx.Client(verify=ssl_verify, timeout=timeout, trust_env=False)
+        client_kwargs = kwargs.get('client_kwargs', {})
+        client_kwargs['http_client'] = http_client
+        kwargs['client_kwargs'] = client_kwargs
 
         super().__init__(*args, **kwargs)
 
