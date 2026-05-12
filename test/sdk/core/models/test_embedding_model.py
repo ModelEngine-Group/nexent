@@ -1,7 +1,7 @@
 import pytest
 import requests
 import sys
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding
 
@@ -653,9 +653,9 @@ def test_jina_get_multimodal_embeddings_missing_data_key(monkeypatch):
 
 def test_openai_get_embeddings_calls_record_model_call(mocker):
     """OpenAICompatibleEmbedding.get_embeddings calls record_model_call with correct args."""
-    mock_ctx = mocker.MagicMock()
-    mock_ctx.__enter__ = mocker.MagicMock(return_value=None)
-    mock_ctx.__exit__ = mocker.MagicMock(return_value=False)
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__ = MagicMock(return_value=None)
+    mock_ctx.__exit__ = MagicMock(return_value=False)
     mock_record = mocker.patch(
         "nexent.core.models.embedding_model.record_model_call",
         return_value=mock_ctx,
@@ -681,9 +681,9 @@ def test_openai_get_embeddings_calls_record_model_call(mocker):
 
 def test_jina_get_embeddings_calls_record_model_call(mocker):
     """JinaEmbedding.get_multimodal_embeddings calls record_model_call with correct args."""
-    mock_ctx = mocker.MagicMock()
-    mock_ctx.__enter__ = mocker.MagicMock(return_value=None)
-    mock_ctx.__exit__ = mocker.MagicMock(return_value=False)
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__ = MagicMock(return_value=None)
+    mock_ctx.__exit__ = MagicMock(return_value=False)
     mock_record = mocker.patch(
         "nexent.core.models.embedding_model.record_model_call",
         return_value=mock_ctx,

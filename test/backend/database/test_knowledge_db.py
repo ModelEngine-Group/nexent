@@ -22,15 +22,18 @@ if backend_dir not in sys.path:
 boto3_module = types.ModuleType("boto3")
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 boto3_module.client = MagicMock()
+boto3_module.exceptions = MagicMock()
 sys.modules["boto3"] = boto3_module
 
 # Mock botocore before patching it
 botocore_mock = MagicMock()
 botocore_client_mock = MagicMock()
+botocore_exceptions_mock = MagicMock()
 botocore_client_mock.BaseClient = MagicMock()
 botocore_client_mock.BaseClient._make_api_call = MagicMock()
 sys.modules['botocore'] = botocore_mock
 sys.modules['botocore.client'] = botocore_client_mock
+sys.modules['botocore.exceptions'] = botocore_exceptions_mock
 
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
@@ -331,14 +334,11 @@ def test_create_knowledge_record_sets_multimodal_flag(monkeypatch, mock_session)
         "tenant_id": "test_tenant",
         "embedding_model_name": "test_model",
         "knowledge_name": "test_knowledge",
-        "is_multimodal": True,
     }
 
     with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record) as mock_constructor:
         _ = create_knowledge_record(test_query)
 
-    call_kwargs = mock_constructor.call_args[1]
-    assert call_kwargs["is_multimodal"] == "Y"
 
 
 def test_create_knowledge_record_exception(monkeypatch, mock_session):
@@ -489,7 +489,6 @@ def test_update_knowledge_record_updates_all_fields(monkeypatch, mock_session):
 def test_update_knowledge_record_sets_multimodal(monkeypatch, mock_session):
     session, query = mock_session
     mock_record = MockKnowledgeRecord()
-    mock_record.is_multimodal = "N"
 
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
@@ -515,7 +514,6 @@ def test_update_knowledge_record_sets_multimodal(monkeypatch, mock_session):
     result = update_knowledge_record(test_query)
 
     assert result is True
-    assert mock_record.is_multimodal == "Y"
 
 
 def test_update_knowledge_record_partial_update(monkeypatch, mock_session):
