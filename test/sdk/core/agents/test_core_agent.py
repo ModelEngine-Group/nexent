@@ -231,6 +231,10 @@ def _load_core_agent_module():
     agent_context_mod.ContextManagerConfig = MagicMock()
     sys.modules["sdk.nexent.core.agents.agent_context"] = agent_context_mod
 
+    monitor_mod = ModuleType("sdk.nexent.monitor")
+    monitor_mod.get_monitoring_manager = MagicMock()
+    sys.modules["sdk.nexent.monitor"] = monitor_mod
+
     # Load the module
     spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.core_agent", core_agent_path)
     module = importlib.util.module_from_spec(spec)

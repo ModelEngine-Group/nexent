@@ -17,7 +17,7 @@ from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
 from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content, AgentMaxStepsError, \
     extract_code_from_text
 
-from nexent.monitor import get_monitoring_manager
+from ...monitor import get_monitoring_manager
 
 from ..utils.observer import MessageObserver, ProcessType
 from jinja2 import Template, StrictUndefined

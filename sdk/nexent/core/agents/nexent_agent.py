@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
-from nexent.monitor import get_monitoring_manager
+from ...monitor import get_monitoring_manager
 
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
