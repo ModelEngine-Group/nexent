@@ -53,6 +53,8 @@ data:
   # Model Path Config
   CLIP_MODEL_PATH: {{ .Values.config.modelPath.clipModelPath | quote }}
   NLTK_DATA: {{ .Values.config.modelPath.nltkData | quote }}
+  TABLE_TRANSFORMER_MODEL_PATH: {{ .Values.config.modelPath.tableTransformerModelPath | quote }}
+  UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH: {{ .Values.config.modelPath.unstructuredDefaultModelInitializeParamsJsonPath | quote }}
 
   # Terminal Tool SSH Config
   SSH_PRIVATE_KEY_PATH: {{ .Values.config.terminal.sshPrivateKeyPath | quote }}
