@@ -27,7 +27,7 @@ import HaotianKnowledgeSelectorModal, {
   HaotianKnowledgeSet,
 } from "@/components/tool-config/HaotianKnowledgeSelectorModal";
 import { useConfig } from "@/hooks/useConfig";
-import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
+import { useKnowledgeBasesForToolConfig, knowledgeBaseKeys } from "@/hooks/useKnowledgeBaseSelector";
 import {
   useKnowledgeBaseConfigChangeHandler,
   ToolKbType,
@@ -1192,6 +1192,15 @@ export default function ToolConfigModal({
     setTestPanelVisible(false);
     // Reset user modification tracking state for datamate URL
     setHasUserModifiedDatamateUrl(false);
+
+    // Clear knowledge base cache to ensure fresh data on next open
+    // This is especially important after saving tool config with KB changes
+    if (toolKbType) {
+      queryClient.invalidateQueries({
+        queryKey: knowledgeBaseKeys.list(toolKbType),
+      });
+    }
+
     onCancel();
   };
 

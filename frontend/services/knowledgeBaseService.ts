@@ -547,6 +547,7 @@ class KnowledgeBaseService {
                   return {
                     id: kbId,
                     name: kbName,
+                    index_name: kbId, // Internal index_name for API calls
                     display_name: indexInfo.display_name || indexInfo.name,
                     description: "Elasticsearch index",
                     documentCount: stats.doc_count || 0,
@@ -558,8 +559,9 @@ class KnowledgeBaseService {
                       stats.update_date ||
                       stats.creation_date ||
                       null,
-                    embeddingModel: stats.embedding_model || "unknown",
                     is_multimodal: resolveIsMultimodal(indexInfo, stats),
+                    // Use embedding_model_name (display_name) from backend, fallback to ES stats
+                    embeddingModel: indexInfo.embedding_model_name || stats.embedding_model || "unknown",
                     summaryFrequency: indexInfo.summary_frequency || null,
                     lastSummaryTime: indexInfo.last_summary_time || null,
                     knowledge_sources:
@@ -1519,6 +1521,99 @@ class KnowledgeBaseService {
     } catch (error) {
       log.error("Failed to get document error info:", error);
       throw error;
+    }
+  }
+
+  // Embedding model status and configuration
+  async getEmbeddingModelStatus(
+    indexName: string
+  ): Promise<{
+    status: "configured" | "legacy" | "missing";
+    needs_config: boolean;
+    index_name: string;
+    knowledge_name: string;
+    model_id: string | null;
+    embedding_model_name: string | null;
+    model_info: {
+      model_id: string;
+      model_name: string;
+      display_name: string;
+      model_type: string;
+    } | null;
+    message: string;
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.embeddingModelStatus(indexName),
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new ApiError(
+          response.status,
+          errorData.detail || errorData.message || "Failed to get embedding model status"
+        );
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      log.error("Failed to get embedding model status:", error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to get embedding model status");
+    }
+  }
+
+  async updateEmbeddingModel(
+    indexName: string,
+    modelId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.updateEmbeddingModel(indexName),
+        {
+          method: "PUT",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ model_id: modelId }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          data.detail || data.message || "Failed to update embedding model"
+        );
+      }
+
+      return {
+        success: true,
+        message: data.message || "Embedding model updated successfully",
+      };
+    } catch (error) {
+      log.error("Failed to update embedding model:", error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to update embedding model");
     }
   }
 }
