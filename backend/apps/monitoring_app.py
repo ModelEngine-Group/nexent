@@ -44,6 +44,8 @@ def _build_monitoring_ui(
         return PHOENIX_PORT, "/", "Phoenix"
     if provider == "langfuse":
         return LANGFUSE_PORT, "/project/nexent", "Langfuse"
+    if provider == "langsmith":
+        return None, None, "LangSmith"
     if provider == "skywalking":
         return SKYWALKING_UI_PORT, "/", "SkyWalking"
     return None, None, None

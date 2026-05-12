@@ -7,6 +7,9 @@ services:
     command: ["--config=/etc/otel-collector-config.yml"]
     environment:
       LANGFUSE_OTLP_AUTH_HEADER: ${LANGFUSE_OTLP_AUTH_HEADER:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-nexent}
+      LANGSMITH_OTLP_TRACES_ENDPOINT: ${LANGSMITH_OTLP_TRACES_ENDPOINT:-https://api.smith.langchain.com/otel/v1/traces}
     volumes:
       - ${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-config.yml}:/etc/otel-collector-config.yml
     ports:

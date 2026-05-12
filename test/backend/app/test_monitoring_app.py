@@ -203,6 +203,21 @@ class TestMonitoringStatus:
         assert status["dashboard_port"] == "8080"
         assert status["dashboard_path"] == "/"
 
+    def test_langsmith_provider_status_has_no_local_ui(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setattr("apps.monitoring_app.ENABLE_TELEMETRY", True)
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_PROVIDER", "langsmith")
+
+        status = get_monitoring_status()
+
+        assert status["telemetry_enabled"] is True
+        assert status["ui_enabled"] is False
+        assert status["provider"] == "langsmith"
+        assert status["provider_name"] == "LangSmith"
+        assert status["dashboard_port"] is None
+        assert status["dashboard_path"] is None
+
     def test_unsupported_provider_has_no_ui(self, monkeypatch):
         from apps.monitoring_app import get_monitoring_status
 

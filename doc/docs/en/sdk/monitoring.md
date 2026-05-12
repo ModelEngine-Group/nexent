@@ -1,11 +1,11 @@
 # Nexent Agent Observability (OTLP)
 
-Enterprise-grade observability for AI agents using OpenTelemetry OTLP protocol. Supports integration with observability platforms like Arize Phoenix, Langfuse, Grafana Tempo, Apache SkyWalking, and more.
+Enterprise-grade observability for AI agents using OpenTelemetry OTLP protocol. Supports integration with observability platforms like Arize Phoenix, Langfuse, LangSmith, Grafana Tempo, Apache SkyWalking, and more.
 
 ## Architecture
 
 ```
-NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / SkyWalking / OTLP Backend
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / LangSmith / Grafana Tempo / SkyWalking / OTLP Backend
      │                                        │
      │   OpenInference Semantics              │
      │   (llm.*, agent.* attributes)          │
@@ -78,6 +78,36 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 - User feedback collection
 - Model cost tracking
 
+### LangSmith
+
+LangSmith supports online OTLP trace ingestion through the OpenTelemetry endpoint. Nexent can send traces to a local Collector first, and the Collector forwards them to LangSmith.
+
+**Collector forwarding:**
+
+```bash
+cd docker
+vim monitoring/monitoring.env
+
+MONITORING_PROVIDER=langsmith
+LANGSMITH_API_KEY=lsv2_xxx
+LANGSMITH_PROJECT=nexent
+LANGSMITH_OTLP_TRACES_ENDPOINT=https://api.smith.langchain.com/otel/v1/traces
+
+./start-monitoring.sh --stack langsmith
+```
+
+Nexent backend configuration when it sends OTLP to the Collector:
+
+```bash
+ENABLE_TELEMETRY=true
+MONITORING_PROVIDER=langsmith
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http
+OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+```
+
+For direct backend-to-LangSmith export, set `OTEL_EXPORTER_OTLP_ENDPOINT=https://api.smith.langchain.com/otel`, `LANGSMITH_API_KEY`, and optionally `LANGSMITH_PROJECT`.
+
 ### Apache SkyWalking
 
 SkyWalking provides general APM, service topology, endpoint analysis, and trace query capabilities. For local deployment, Nexent sends OTLP to the Collector, and the Collector forwards traces to SkyWalking OAP over OTLP gRPC.
@@ -102,7 +132,7 @@ OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
-| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `grafana`, `skywalking` |
+| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `skywalking` |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint; SDK derives `/v1/traces` and `/v1/metrics` |
@@ -114,6 +144,9 @@ OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 | `OTEL_EXPORTER_OTLP_X_API_KEY` | (empty) | `x-api-key` header for platforms that require it |
 | `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION` | (empty) | Langfuse ingestion version, for example `4` |
 | `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | `true` | Whether to export OTLP metrics |
+| `LANGSMITH_API_KEY` | (empty) | LangSmith API key; mapped to the `x-api-key` OTLP header |
+| `LANGSMITH_PROJECT` | (empty) | Optional LangSmith project header |
+| `LANGSMITH_OTLP_TRACES_ENDPOINT` | `https://api.smith.langchain.com/otel/v1/traces` | Collector trace endpoint for online LangSmith |
 
 ## Code Integration
 
@@ -192,20 +225,20 @@ The system uses OpenInference semantic conventions for AI-specific observability
 
 ## Collector Configuration
 
-By default, the OpenTelemetry Collector only logs data through the logging exporter. This avoids forwarding data back into itself when no external backend is configured. To forward through the Collector, add a platform exporter:
+By default, the OpenTelemetry Collector only logs data through the debug exporter. This avoids forwarding data back into itself when no external backend is configured. To forward through the Collector, add a platform exporter:
 
 ```yaml
 exporters:
-  otlphttp/langfuse:
-    endpoint: https://cloud.langfuse.com/api/public/otel
+  otlphttp/langsmith:
+    traces_endpoint: https://api.smith.langchain.com/otel/v1/traces
     headers:
-      Authorization: Basic BASE64_ENCODED_KEY
-      x-langfuse-ingestion-version: "4"
+      x-api-key: YOUR_LANGSMITH_API_KEY
+      Langsmith-Project: nexent
 
 service:
   pipelines:
     traces:
-      exporters: [otlphttp/langfuse, logging]
+      exporters: [otlphttp/langsmith, debug]
 ```
 
 See `docker/monitoring/otel-collector-config.yml` for full configuration with platform examples.

@@ -75,7 +75,21 @@ service:
 #       x-langfuse-ingestion-version: "4"
 # Then add otlphttp/langfuse to the traces pipeline exporters.
 #
+# === LangSmith ===
+# Set environment variables:
+#   MONITORING_PROVIDER=langsmith
+#   LANGSMITH_API_KEY=lsv2_...
+#   LANGSMITH_PROJECT=nexent
+#
+# Or configure directly:
+#   otlphttp/langsmith:
+#     traces_endpoint: https://api.smith.langchain.com/otel/v1/traces
+#     headers:
+#       x-api-key: YOUR_LANGSMITH_API_KEY
+#       Langsmith-Project: nexent
+# Then add otlphttp/langsmith to the traces pipeline exporters.
+#
 # === Multiple Exporters ===
 # To export to multiple backends simultaneously, create multiple exporters
 # and add them to the pipelines:
-#   exporters: [otlphttp/arize, otlphttp/langfuse, debug]
+#   exporters: [otlphttp/arize, otlphttp/langfuse, otlphttp/langsmith, debug]

@@ -1,11 +1,11 @@
 # Nexent Agent 可观测性（OTLP）
 
-基于 OpenTelemetry OTLP 协议的 AI Agent 企业级可观测性方案。支持对接 Arize Phoenix、Langfuse、Grafana Tempo、Apache SkyWalking 等可观测性平台。
+基于 OpenTelemetry OTLP 协议的 AI Agent 企业级可观测性方案。支持对接 Arize Phoenix、Langfuse、LangSmith、Grafana Tempo、Apache SkyWalking 等可观测性平台。
 
 ## 系统架构
 
 ```
-NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / Grafana Tempo / SkyWalking / OTLP Backend
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / LangSmith / Grafana Tempo / SkyWalking / OTLP Backend
      │                                        │
      │   OpenInference 语义约定                │
      │   (llm.*, agent.* 属性)                 │
@@ -36,6 +36,7 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 | `collector` | `./start-monitoring.sh --stack collector` | OpenTelemetry Collector | 只验证埋点、或转发到外部云端平台 |
 | `phoenix` | `./start-monitoring.sh --stack phoenix` | Collector + Phoenix | 本地 trace 调试、OpenInference 属性查看、实验分析 |
 | `langfuse` | `./start-monitoring.sh --stack langfuse` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | 本地完整 LLMOps 体验、会话/用户/反馈/成本分析 |
+| `langsmith` | `./start-monitoring.sh --stack langsmith` | OpenTelemetry Collector | 转发 traces 到在线 LangSmith 平台 |
 | `grafana` | `./start-monitoring.sh --stack grafana` | Collector + Grafana + Tempo | 本地 Tempo trace 查询 |
 | `skywalking` | `./start-monitoring.sh --stack skywalking` | Collector + SkyWalking OAP + SkyWalking UI + BanyanDB | 本地 APM、服务拓扑、OTLP trace 查询 |
 
@@ -87,6 +88,34 @@ cd docker
 - 默认项目 Key：`pk-lf-nexent-local` / `sk-lf-nexent-local`
 
 启动脚本会在 `LANGFUSE_OTLP_AUTH_HEADER` 为空时自动生成 `Basic base64(public_key:secret_key)`，并让 Collector 将 trace 转发到 `http://langfuse-web:3000/api/public/otel`。本地默认密钥只适合开发验证，生产部署必须替换 `LANGFUSE_NEXTAUTH_SECRET`、`LANGFUSE_SALT`、`LANGFUSE_ENCRYPTION_KEY`、数据库密码和对象存储密钥。
+
+### 在线 LangSmith
+
+LangSmith 支持通过在线 OTLP endpoint 摄取 traces。Nexent 可以先把 OTLP 发到本地 Collector，再由 Collector 转发到 LangSmith，业务服务无需直接保存 LangSmith API Key。
+
+```bash
+cd docker
+vim monitoring/monitoring.env
+
+MONITORING_PROVIDER=langsmith
+LANGSMITH_API_KEY=lsv2_xxx
+LANGSMITH_PROJECT=nexent
+LANGSMITH_OTLP_TRACES_ENDPOINT=https://api.smith.langchain.com/otel/v1/traces
+
+./start-monitoring.sh --stack langsmith
+```
+
+后端在 Docker 网络内运行时：
+
+```bash
+ENABLE_TELEMETRY=true
+MONITORING_PROVIDER=langsmith
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http
+OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+```
+
+LangSmith 当前配置只转发 traces，OTLP metrics 会留在 Collector debug pipeline。若需要后端直接写入 LangSmith，可设置 `OTEL_EXPORTER_OTLP_ENDPOINT=https://api.smith.langchain.com/otel`、`LANGSMITH_API_KEY` 和可选的 `LANGSMITH_PROJECT`。
 
 ### 本地 Grafana + Tempo
 
@@ -195,7 +224,7 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
-| `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`grafana`、`skywalking` |
+| `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`skywalking` |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | 服务标识 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint，SDK 会派生 `/v1/traces` 和 `/v1/metrics` |
@@ -207,6 +236,9 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `OTEL_EXPORTER_OTLP_X_API_KEY` | （空） | `x-api-key` header，用于兼容需要该 header 的平台 |
 | `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION` | （空） | Langfuse 实时摄取版本，例如 `4` |
 | `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | `true` | 是否导出 OTLP metrics |
+| `LANGSMITH_API_KEY` | （空） | LangSmith API Key，会映射为 OTLP `x-api-key` header |
+| `LANGSMITH_PROJECT` | （空） | 可选 LangSmith project header |
+| `LANGSMITH_OTLP_TRACES_ENDPOINT` | `https://api.smith.langchain.com/otel/v1/traces` | Collector 转发到在线 LangSmith 的 trace endpoint |
 | `MONITORING_INSTRUMENT_FASTAPI` | `true` | 是否启用 FastAPI 自动 HTTP server span |
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span；默认关闭，避免 AI trace 被普通 HTTP 请求刷屏 |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | （空） | FastAPI 自动埋点排除 URL，逗号分隔正则；例如只看 agent 业务 span 时可设为 `/agent/run` |
@@ -350,28 +382,29 @@ Phoenix 左侧的 `agent`、`chain`、`llm`、`tool` 标签来自 `openinference
 
 ## Collector 配置
 
-OpenTelemetry Collector 默认只通过 logging exporter 打印数据，避免没有外部后端时把数据转发回自身。需要通过 Collector 转发到平台时，增加对应 exporter：
+OpenTelemetry Collector 默认只通过 debug exporter 打印数据，避免没有外部后端时把数据转发回自身。需要通过 Collector 转发到平台时，增加对应 exporter：
 
 ```yaml
 exporters:
-  otlphttp/langfuse:
-    endpoint: https://cloud.langfuse.com/api/public/otel
+  otlphttp/langsmith:
+    traces_endpoint: https://api.smith.langchain.com/otel/v1/traces
     headers:
-      Authorization: Basic BASE64_ENCODED_KEY
-      x-langfuse-ingestion-version: "4"
+      x-api-key: YOUR_LANGSMITH_API_KEY
+      Langsmith-Project: nexent
 
 service:
   pipelines:
     traces:
-      exporters: [otlphttp/langfuse, logging]
+      exporters: [otlphttp/langsmith, debug]
 ```
 
 本地 Phoenix 和 Langfuse 分别使用独立 Collector 配置：
 
 - `docker/monitoring/otel-collector-phoenix-config.yml`
 - `docker/monitoring/otel-collector-langfuse-config.yml`
+- `docker/monitoring/otel-collector-langsmith-config.yml`
 
-基础 logging 配置见 `docker/monitoring/otel-collector-config.yml`。
+基础 debug 配置见 `docker/monitoring/otel-collector-config.yml`。
 
 ## 优雅降级
 

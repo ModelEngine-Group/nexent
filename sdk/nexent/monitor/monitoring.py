@@ -4,7 +4,7 @@ Nexent LLM Performance Monitoring System
 A comprehensive monitoring solution specifically designed for LLM applications.
 Provides distributed tracing, token-level performance monitoring, and seamless
 integration with OpenTelemetry OTLP protocol for AI observability platforms
-like Arize Phoenix, Langfuse, and others.
+like Arize Phoenix, Langfuse, LangSmith, and others.
 
 This module uses a singleton pattern for consistent monitoring across the SDK.
 When OpenTelemetry dependencies are not available, the module gracefully degrades
@@ -149,7 +149,14 @@ LANGFUSE_USER_ID = "langfuse.user.id"
 AGENT_OPERATION_NAMES = {
     "agent.run",
 }
-SUPPORTED_PROVIDERS = {"otlp", "phoenix", "langfuse", "grafana", "skywalking"}
+SUPPORTED_PROVIDERS = {
+    "otlp",
+    "phoenix",
+    "langfuse",
+    "langsmith",
+    "grafana",
+    "skywalking",
+}
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -274,7 +281,7 @@ class MonitoringConfig:
     Configuration for monitoring system using OTLP protocol.
 
     Supports HTTP and gRPC protocols for exporting traces and metrics
-    to any OpenTelemetry-compatible backend (Arize Phoenix, Langfuse, etc).
+    to any OpenTelemetry-compatible backend (Arize Phoenix, Langfuse, LangSmith, etc).
     """
     enable_telemetry: bool = False
     service_name: str = "nexent-backend"
@@ -395,7 +402,7 @@ class MonitoringConfig:
             )
             self.otlp_protocol = "http"
 
-        if self.provider in {"phoenix", "langfuse"} and self.otlp_protocol == "grpc":
+        if self.provider in {"phoenix", "langfuse", "langsmith"} and self.otlp_protocol == "grpc":
             logger.warning(
                 f"{self.provider} OTLP integration only supports HTTP in this configuration. Using 'http'."
             )

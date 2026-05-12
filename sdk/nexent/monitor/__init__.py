@@ -3,7 +3,8 @@ Nexent Monitor Package - LLM Performance Monitoring System
 
 A comprehensive monitoring solution using OpenTelemetry OTLP protocol.
 Provides distributed tracing, token-level performance monitoring, and seamless
-integration with AI observability platforms like Arize Phoenix and Langfuse.
+integration with AI observability platforms like Arize Phoenix, Langfuse,
+and LangSmith.
 """
 
 from .monitoring import (

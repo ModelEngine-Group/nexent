@@ -2,7 +2,8 @@
 
 # Nexent LLM Performance Monitoring Setup Script
 # This script starts the OpenTelemetry Collector alone, or with a local
-# Phoenix/Langfuse/Grafana/SkyWalking observability backend.
+# Phoenix/Langfuse/Grafana/SkyWalking observability backend, or forward to
+# online LangSmith.
 
 set -e
 
@@ -12,14 +13,15 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose-monitoring.yml"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [otlp|collector|phoenix|langfuse|grafana|skywalking]
-       $(basename "$0") --stack <otlp|collector|phoenix|langfuse|grafana|skywalking>
+Usage: $(basename "$0") [otlp|collector|phoenix|langfuse|langsmith|grafana|skywalking]
+       $(basename "$0") --stack <otlp|collector|phoenix|langfuse|langsmith|grafana|skywalking>
 
 Stacks:
   otlp       Start OpenTelemetry Collector only. This is the default.
   collector  Alias for otlp.
   phoenix    Start Collector and local Arize Phoenix.
   langfuse   Start Collector and local Langfuse self-host stack.
+  langsmith  Start Collector and forward traces to online LangSmith.
   grafana    Start Collector, Grafana, and Tempo.
   skywalking Start Collector and local Apache SkyWalking.
 
@@ -43,7 +45,7 @@ while [ $# -gt 0 ]; do
             usage
             exit 0
             ;;
-        otlp|collector|phoenix|langfuse|grafana|skywalking)
+        otlp|collector|phoenix|langfuse|langsmith|grafana|skywalking)
             STACK_ARG="$1"
             shift
             ;;
@@ -110,6 +112,20 @@ case "$MONITORING_PROVIDER" in
         fi
         export LANGFUSE_OTLP_AUTH_HEADER
         ;;
+    langsmith)
+        LOCAL_STACK="langsmith"
+        BACKEND_MONITORING_PROVIDER="langsmith"
+        OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-langsmith-config.yml}"
+        COMPOSE_PROFILES=()
+        LANGSMITH_OTLP_TRACES_ENDPOINT="${LANGSMITH_OTLP_TRACES_ENDPOINT:-https://api.smith.langchain.com/otel/v1/traces}"
+        LANGSMITH_PROJECT="${LANGSMITH_PROJECT:-${MONITORING_PROJECT_NAME:-nexent}}"
+        if [ -z "${LANGSMITH_API_KEY:-}" ]; then
+            echo "❌ Error: LANGSMITH_API_KEY is required for the langsmith stack."
+            echo "   Set it in $MONITORING_DIR/monitoring.env or export it before running this script."
+            exit 1
+        fi
+        export LANGSMITH_API_KEY LANGSMITH_PROJECT LANGSMITH_OTLP_TRACES_ENDPOINT
+        ;;
     grafana)
         LOCAL_STACK="grafana"
         BACKEND_MONITORING_PROVIDER="grafana"
@@ -175,6 +191,9 @@ case "$LOCAL_STACK" in
     langfuse)
         check_service "Langfuse UI" "http://localhost:${LANGFUSE_PORT:-3001}" "${LANGFUSE_PORT:-3001}" || true
         ;;
+    langsmith)
+        echo "✅ LangSmith forwarding is configured for project: ${LANGSMITH_PROJECT:-nexent}"
+        ;;
     grafana)
         check_service "Grafana" "http://localhost:${GRAFANA_PORT:-3002}/api/health" "${GRAFANA_PORT:-3002}" || true
         check_service "Tempo API" "http://localhost:${TEMPO_PORT:-3200}/ready" "${TEMPO_PORT:-3200}" || true
@@ -199,6 +218,10 @@ case "$LOCAL_STACK" in
         echo "   • Langfuse UI: http://localhost:${LANGFUSE_PORT:-3001}"
         echo "   • Langfuse admin: ${LANGFUSE_INIT_USER_EMAIL:-admin@nexent.local} / ${LANGFUSE_INIT_USER_PASSWORD:-nexent-langfuse-admin}"
         ;;
+    langsmith)
+        echo "   • LangSmith project: ${LANGSMITH_PROJECT:-nexent}"
+        echo "   • LangSmith OTLP traces endpoint: ${LANGSMITH_OTLP_TRACES_ENDPOINT:-https://api.smith.langchain.com/otel/v1/traces}"
+        ;;
     grafana)
         echo "   • Grafana UI: http://localhost:${GRAFANA_PORT:-3002}"
         echo "   • Grafana admin: ${GRAFANA_ADMIN_USER:-admin} / ${GRAFANA_ADMIN_PASSWORD:-nexent-grafana-admin}"
@@ -210,7 +233,7 @@ case "$LOCAL_STACK" in
         echo "   • SkyWalking OAP gRPC API: localhost:${SKYWALKING_OAP_GRPC_PORT:-11800}"
         ;;
     collector)
-        echo "   • Configure Phoenix, Langfuse, Tempo, or another OTLP backend in monitoring.env"
+        echo "   • Configure Phoenix, Langfuse, LangSmith, Tempo, or another OTLP backend in monitoring.env"
         ;;
 esac
 echo ""
