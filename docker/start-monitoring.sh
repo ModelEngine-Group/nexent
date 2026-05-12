@@ -13,8 +13,8 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose-monitoring.yml"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [otlp|collector|phoenix|langfuse|langsmith|grafana|skywalking]
-       $(basename "$0") --stack <otlp|collector|phoenix|langfuse|langsmith|grafana|skywalking>
+Usage: $(basename "$0") [otlp|collector|phoenix|langfuse|langsmith|grafana|zipkin]
+       $(basename "$0") --stack <otlp|collector|phoenix|langfuse|langsmith|grafana|zipkin>
 
 Stacks:
   otlp       Start OpenTelemetry Collector only. This is the default.
@@ -23,7 +23,7 @@ Stacks:
   langfuse   Start Collector and local Langfuse self-host stack.
   langsmith  Start Collector and forward traces to online LangSmith.
   grafana    Start Collector, Grafana, and Tempo.
-  skywalking Start Collector and local Apache SkyWalking.
+  zipkin     Start Collector and local Zipkin.
 
 Set MONITORING_PROVIDER in monitoring/monitoring.env to change the default.
 EOF
@@ -45,7 +45,7 @@ while [ $# -gt 0 ]; do
             usage
             exit 0
             ;;
-        otlp|collector|phoenix|langfuse|langsmith|grafana|skywalking)
+        otlp|collector|phoenix|langfuse|langsmith|grafana|zipkin)
             STACK_ARG="$1"
             shift
             ;;
@@ -132,11 +132,11 @@ case "$MONITORING_PROVIDER" in
         OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-grafana-config.yml}"
         COMPOSE_PROFILES=(--profile grafana)
         ;;
-    skywalking)
-        LOCAL_STACK="skywalking"
-        BACKEND_MONITORING_PROVIDER="skywalking"
-        OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-skywalking-config.yml}"
-        COMPOSE_PROFILES=(--profile skywalking)
+    zipkin)
+        LOCAL_STACK="zipkin"
+        BACKEND_MONITORING_PROVIDER="zipkin"
+        OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-zipkin-config.yml}"
+        COMPOSE_PROFILES=(--profile zipkin)
         ;;
     *)
         echo "❌ Error: unsupported MONITORING_PROVIDER '$MONITORING_PROVIDER'."

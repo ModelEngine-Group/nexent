@@ -2,7 +2,7 @@ name: monitor
 
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION:-0.150.0}
+    image: otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION:-0.151.0}
     container_name: nexent-otel-collector
     command: ["--config=/etc/otel-collector-config.yml"]
     environment:
@@ -70,52 +70,12 @@ services:
       - nexent_nexent
     restart: unless-stopped
 
-  skywalking-banyandb:
-    image: apache/skywalking-banyandb:${SKYWALKING_BANYANDB_VERSION:-0.9.0}
-    container_name: nexent-skywalking-banyandb
-    profiles: ["skywalking"]
-    command: ["standalone"]
-    volumes:
-      - skywalking-banyandb-data:/data
+  zipkin:
+    image: openzipkin/zipkin:${ZIPKIN_VERSION:-latest}
+    container_name: nexent-zipkin
+    profiles: ["zipkin"]
     ports:
-      - "127.0.0.1:${SKYWALKING_BANYANDB_GRPC_PORT:-17912}:17912"
-      - "127.0.0.1:${SKYWALKING_BANYANDB_HTTP_PORT:-17913}:17913"
-    networks:
-      - nexent_nexent
-    restart: unless-stopped
-
-  skywalking-oap:
-    image: apache/skywalking-oap-server:${SKYWALKING_VERSION:-10.4.0}
-    container_name: nexent-skywalking-oap
-    profiles: ["skywalking"]
-    depends_on:
-      - skywalking-banyandb
-    environment:
-      SW_STORAGE: banyandb
-      SW_STORAGE_BANYANDB_TARGETS: skywalking-banyandb:17912
-      SW_OTEL_RECEIVER: default
-      SW_OTEL_RECEIVER_ENABLED_HANDLERS: otlp-traces
-      SW_RECEIVER_ZIPKIN: default
-      SW_QUERY_ZIPKIN: default
-    ports:
-      - "${SKYWALKING_OAP_GRPC_PORT:-11800}:11800"
-      - "${SKYWALKING_OAP_HTTP_PORT:-12800}:12800"
-      - "127.0.0.1:${SKYWALKING_ZIPKIN_RECEIVER_PORT:-9411}:9411"
-      - "127.0.0.1:${SKYWALKING_ZIPKIN_QUERY_PORT:-9412}:9412"
-    networks:
-      - nexent_nexent
-    restart: unless-stopped
-
-  skywalking-ui:
-    image: apache/skywalking-ui:${SKYWALKING_VERSION:-10.4.0}
-    container_name: nexent-skywalking-ui
-    profiles: ["skywalking"]
-    depends_on:
-      - skywalking-oap
-    environment:
-      SW_OAP_ADDRESS: http://skywalking-oap:12800
-    ports:
-      - "${SKYWALKING_UI_PORT:-8080}:8080"
+      - "${ZIPKIN_PORT:-9411}:9411"
     networks:
       - nexent_nexent
     restart: unless-stopped
@@ -305,4 +265,3 @@ volumes:
   langfuse-redis-data:
   grafana-data:
   tempo-data:
-  skywalking-banyandb-data:
