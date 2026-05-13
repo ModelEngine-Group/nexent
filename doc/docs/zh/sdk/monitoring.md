@@ -1,11 +1,11 @@
 # Nexent Agent 可观测性（OTLP）
 
-基于 OpenTelemetry OTLP 协议的 AI Agent 企业级可观测性方案。支持对接 Arize Phoenix、Langfuse、LangSmith、Grafana Tempo、Apache SkyWalking 等可观测性平台。
+基于 OpenTelemetry OTLP 协议的 AI Agent 企业级可观测性方案。支持对接 Arize Phoenix、Langfuse、LangSmith、Grafana Tempo、Zipkin 等可观测性平台。
 
 ## 系统架构
 
 ```
-NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / LangSmith / Grafana Tempo / SkyWalking / OTLP Backend
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / LangSmith / Grafana Tempo / Zipkin / OTLP Backend
      │                                        │
      │   OpenInference 语义约定                │
      │   (llm.*, agent.* 属性)                 │
@@ -16,13 +16,17 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 
 ```bash
 cd docker
+cp .env.example .env
 cp monitoring/monitoring.env.example monitoring/monitoring.env
 
-vim monitoring/monitoring.env
+vim .env
 ENABLE_TELEMETRY=true
 MONITORING_PROVIDER=otlp
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
+
+vim monitoring/monitoring.env
+MONITORING_PROVIDER=otlp
 
 ./start-monitoring.sh --stack collector
 ```
@@ -38,7 +42,7 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 | `langfuse` | `./start-monitoring.sh --stack langfuse` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | 本地完整 LLMOps 体验、会话/用户/反馈/成本分析 |
 | `langsmith` | `./start-monitoring.sh --stack langsmith` | OpenTelemetry Collector | 转发 traces 到在线 LangSmith 平台 |
 | `grafana` | `./start-monitoring.sh --stack grafana` | Collector + Grafana + Tempo | 本地 Tempo trace 查询 |
-| `skywalking` | `./start-monitoring.sh --stack skywalking` | Collector + SkyWalking OAP + SkyWalking UI + BanyanDB | 本地 APM、服务拓扑、OTLP trace 查询 |
+| `zipkin` | `./start-monitoring.sh --stack zipkin` | Collector + Zipkin | 本地 trace 查询 |
 
 也可以在 `docker/monitoring/monitoring.env` 中设置默认形态：
 
@@ -126,11 +130,12 @@ cd docker
 ./start-monitoring.sh --stack grafana
 ```
 
-后端 `.env` 使用已有的 `MONITORING_PROVIDER` 控制前端顶栏监控入口：
+后端 `.env` 使用 `MONITORING_DASHBOARD_URL` 控制前端顶栏监控入口：
 
 ```bash
 ENABLE_TELEMETRY=true
 MONITORING_PROVIDER=grafana
+MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
@@ -142,31 +147,29 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 
 Grafana 会自动预置 Tempo datasource，并加载 `Nexent Agent Trace Monitoring` dashboard。Trace 查询入口在 Grafana Explore 中选择 `Tempo` datasource，示例 TraceQL 为 `{ resource.service.name = "nexent-backend" }`。
 
-### 本地 SkyWalking
+### 本地 Zipkin
 
-SkyWalking 本地部署使用 SkyWalking OAP、SkyWalking UI 和 BanyanDB。Collector 接收 Nexent 后端的 OTLP traces/metrics，其中 traces 通过 OTLP gRPC 转发到 SkyWalking OAP；OTLP metrics 当前只进入 Collector debug pipeline。SkyWalking 的 OTel metrics 接入需要 MAL rule 映射，不建议在没有规则的情况下直接假设 LLM metrics 会自动出现在 UI 中。
+Zipkin 本地部署使用 `openzipkin/zipkin` 镜像。Collector 接收 Nexent 后端的 OTLP traces/metrics，其中 traces 转发到 Zipkin v2 spans endpoint；OTLP metrics 当前只进入 Collector debug pipeline。
 
 ```bash
 cd docker
-./start-monitoring.sh --stack skywalking
+./start-monitoring.sh --stack zipkin
 ```
 
 后端 `.env`：
 
 ```bash
 ENABLE_TELEMETRY=true
-MONITORING_PROVIDER=skywalking
+MONITORING_PROVIDER=zipkin
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
+OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+MONITORING_DASHBOARD_URL=http://localhost:9411
 ```
 
 访问地址：
 
-- SkyWalking UI：`http://localhost:8080`
-- SkyWalking OAP HTTP API：`http://localhost:12800`
-- SkyWalking OAP gRPC API：`localhost:11800`
-
-SkyWalking OAP 侧启用 `SW_OTEL_RECEIVER=default`、`SW_OTEL_RECEIVER_ENABLED_HANDLERS=otlp-traces`、`SW_RECEIVER_ZIPKIN=default` 和 `SW_QUERY_ZIPKIN=default`。这是因为 SkyWalking 的 OTLP trace handler 会按其 OTLP trace 文档进入 Zipkin trace 查询链路。
+- Zipkin UI：`http://localhost:9411`
 
 ## AI 可观测性平台对接
 
@@ -224,7 +227,8 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
-| `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`skywalking` |
+| `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
+| `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | 服务标识 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint，SDK 会派生 `/v1/traces` 和 `/v1/metrics` |
@@ -257,11 +261,8 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `GRAFANA_DEFAULT_LANGUAGE` | `zh-Hans` | 本地 Grafana 默认界面语言 |
 | `TEMPO_VERSION` | `2.10.5` | 本地 Tempo 镜像版本，避免浮动 tag 带来的配置兼容性漂移 |
 | `TEMPO_PORT` | `3200` | 本地 Tempo HTTP API 端口 |
-| `SKYWALKING_VERSION` | `10.4.0` | 本地 SkyWalking OAP/UI 镜像版本 |
-| `SKYWALKING_BANYANDB_VERSION` | `0.9.0` | 本地 SkyWalking BanyanDB 镜像版本 |
-| `SKYWALKING_UI_PORT` | `8080` | 本地 SkyWalking UI 端口 |
-| `SKYWALKING_OAP_GRPC_PORT` | `11800` | 本地 SkyWalking OAP gRPC API 端口 |
-| `SKYWALKING_OAP_HTTP_PORT` | `12800` | 本地 SkyWalking OAP HTTP API 端口 |
+| `ZIPKIN_VERSION` | `latest` | 本地 Zipkin 镜像版本 |
+| `ZIPKIN_PORT` | `9411` | 本地 Zipkin UI/API 端口 |
 
 ## 代码集成
 

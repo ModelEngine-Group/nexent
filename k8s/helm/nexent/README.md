@@ -190,7 +190,8 @@ Example:
 helm upgrade --install nexent nexent \
   --set nexent-monitoring.enabled=true \
   --set global.monitoring.enabled=true \
-  --set global.monitoring.provider=grafana
+  --set global.monitoring.provider=grafana \
+  --set 'global.monitoring.dashboardUrl=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
 ```
 
 For LangSmith, also provide an API key:
@@ -205,7 +206,8 @@ helm upgrade --install nexent nexent \
 
 The backend receives OTLP settings through the shared `nexent-config`
 ConfigMap, with `OTEL_EXPORTER_OTLP_ENDPOINT` defaulting to
-`http://nexent-otel-collector:4318`.
+`http://nexent-otel-collector:4318`. The frontend monitoring entry uses
+`global.monitoring.dashboardUrl`; leave it empty to hide the entry.
 
 ## Configuration
 

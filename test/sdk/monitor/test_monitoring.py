@@ -126,17 +126,17 @@ class TestMonitoringConfig:
             )
             assert config.otlp_protocol == "http"
 
-    def test_skywalking_provider_is_supported(self):
-        """Test SkyWalking is a supported OTLP provider profile."""
-        config = MonitoringConfig(provider="skywalking")
-
-        assert config.provider == "skywalking"
-
     def test_langsmith_provider_is_supported(self):
         """Test LangSmith is a supported OTLP provider profile."""
         config = MonitoringConfig(provider="langsmith")
 
         assert config.provider == "langsmith"
+
+    def test_zipkin_provider_is_supported(self):
+        """Test Zipkin is a supported OTLP provider profile."""
+        config = MonitoringConfig(provider="zipkin")
+
+        assert config.provider == "zipkin"
 
     def test_langsmith_grpc_protocol_defaults_to_http(self):
         """LangSmith OTLP profile uses HTTP trace ingestion."""

@@ -14,11 +14,8 @@ from sqlalchemy import text
 
 from consts.const import (
     ENABLE_TELEMETRY,
-    GRAFANA_PORT,
-    LANGFUSE_PORT,
+    MONITORING_DASHBOARD_URL,
     MONITORING_PROVIDER,
-    PHOENIX_PORT,
-    SKYWALKING_UI_PORT,
 )
 from consts.model import ConversationResponse
 from database.client import get_monitoring_db_session
@@ -33,33 +30,18 @@ def _normalize_monitoring_provider(value: str | None) -> str:
     return str(value or "otlp").strip().lower()
 
 
-def _build_monitoring_ui(
-    provider: str,
-) -> tuple[str | None, str | None]:
-    """Map MONITORING_PROVIDER to a monitoring UI port and path."""
-    if provider == "grafana":
-        path = "/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1"
-        return GRAFANA_PORT, path
-    if provider == "phoenix":
-        return PHOENIX_PORT, "/"
-    if provider == "langfuse":
-        return LANGFUSE_PORT, "/project/nexent"
-    if provider == "skywalking":
-        return SKYWALKING_UI_PORT, "/"
-    return None, None
-
-
 def get_monitoring_status() -> dict[str, Any]:
     """Return telemetry state and the monitoring UI entrypoint for frontend use."""
     telemetry_enabled = ENABLE_TELEMETRY
     provider = _normalize_monitoring_provider(MONITORING_PROVIDER)
-    dashboard_port, dashboard_path = _build_monitoring_ui(provider)
+    dashboard_url = MONITORING_DASHBOARD_URL.strip() or None
 
     return {
         "telemetry_enabled": telemetry_enabled,
         "provider": provider,
-        "dashboard_port": dashboard_port,
-        "dashboard_path": dashboard_path,
+        "dashboard_url": dashboard_url,
+        "dashboard_port": None,
+        "dashboard_path": None,
     }
 
 

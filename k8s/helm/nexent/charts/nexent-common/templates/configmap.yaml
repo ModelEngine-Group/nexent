@@ -123,10 +123,7 @@ data:
   MONITORING_INSTRUMENT_REQUESTS: {{ ternary (get $monitoring "instrumentRequests") .Values.config.telemetry.instrumentRequests (hasKey $monitoring "instrumentRequests") | quote }}
   MONITORING_FASTAPI_EXCLUDED_URLS: {{ default .Values.config.telemetry.fastapiExcludedUrls $monitoring.fastapiExcludedUrls | quote }}
   MONITORING_FASTAPI_EXCLUDE_SPANS: {{ default .Values.config.telemetry.fastapiExcludeSpans $monitoring.fastapiExcludeSpans | quote }}
-  PHOENIX_PORT: {{ default .Values.config.telemetry.phoenixPort $monitoring.phoenixPort | quote }}
-  LANGFUSE_PORT: {{ default .Values.config.telemetry.langfusePort $monitoring.langfusePort | quote }}
-  GRAFANA_PORT: {{ default .Values.config.telemetry.grafanaPort $monitoring.grafanaPort | quote }}
-  SKYWALKING_UI_PORT: {{ default .Values.config.telemetry.skywalkingUiPort $monitoring.skywalkingUiPort | quote }}
+  MONITORING_DASHBOARD_URL: {{ default .Values.config.telemetry.dashboardUrl $monitoring.dashboardUrl | quote }}
   TELEMETRY_SAMPLE_RATE: {{ default .Values.config.telemetry.telemetrySampleRate $monitoring.telemetrySampleRate | quote }}
 
   # Market Backend Address

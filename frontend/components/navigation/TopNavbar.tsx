@@ -22,15 +22,7 @@ const { Header } = Layout;
 function buildMonitoringUrl(status: MonitoringStatus | null): string | null {
   if (!status?.telemetry_enabled || typeof window === "undefined") return null;
 
-  const dashboardPort = status.dashboard_port;
-
-  if (dashboardPort) {
-    const path = status.dashboard_path || "/";
-    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-    return `${window.location.protocol}//${window.location.hostname}:${dashboardPort}${normalizedPath}`;
-  }
-
-  return null;
+  return status.dashboard_url || null;
 }
 
 export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {

@@ -23,10 +23,7 @@ global:
     instrumentRequests: false
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
-    phoenixPort: "6006"
-    langfusePort: "3001"
-    grafanaPort: "3002"
-    skywalkingUiPort: "8080"
+    dashboardUrl: ""
     telemetrySampleRate: "1.0"
 
 # Optional monitoring stack. Set provider to one of:

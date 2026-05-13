@@ -2,7 +2,7 @@
 
 # Nexent LLM Performance Monitoring Setup Script
 # This script starts the OpenTelemetry Collector alone, or with a local
-# Phoenix/Langfuse/Grafana/SkyWalking observability backend, or forward to
+# Phoenix/Langfuse/Grafana/Zipkin observability backend, or forward to
 # online LangSmith.
 
 set -e
@@ -25,7 +25,7 @@ Stacks:
   grafana    Start Collector, Grafana, and Tempo.
   zipkin     Start Collector and local Zipkin.
 
-Set MONITORING_PROVIDER in monitoring/monitoring.env to change the default.
+Set MONITORING_PROVIDER in monitoring/monitoring.env to change the default stack.
 EOF
 }
 
@@ -118,7 +118,7 @@ case "$MONITORING_PROVIDER" in
         OTEL_COLLECTOR_CONFIG_FILE="${OTEL_COLLECTOR_CONFIG_FILE:-./monitoring/otel-collector-langsmith-config.yml}"
         COMPOSE_PROFILES=()
         LANGSMITH_OTLP_TRACES_ENDPOINT="${LANGSMITH_OTLP_TRACES_ENDPOINT:-https://api.smith.langchain.com/otel/v1/traces}"
-        LANGSMITH_PROJECT="${LANGSMITH_PROJECT:-${MONITORING_PROJECT_NAME:-nexent}}"
+        LANGSMITH_PROJECT="${LANGSMITH_PROJECT:-nexent}"
         if [ -z "${LANGSMITH_API_KEY:-}" ]; then
             echo "❌ Error: LANGSMITH_API_KEY is required for the langsmith stack."
             echo "   Set it in $MONITORING_DIR/monitoring.env or export it before running this script."
@@ -139,7 +139,7 @@ case "$MONITORING_PROVIDER" in
         COMPOSE_PROFILES=(--profile zipkin)
         ;;
     *)
-        echo "❌ Error: unsupported MONITORING_PROVIDER '$MONITORING_PROVIDER'."
+        echo "❌ Error: unsupported monitoring provider '$MONITORING_PROVIDER'."
         usage
         exit 1
         ;;
@@ -198,9 +198,8 @@ case "$LOCAL_STACK" in
         check_service "Grafana" "http://localhost:${GRAFANA_PORT:-3002}/api/health" "${GRAFANA_PORT:-3002}" || true
         check_service "Tempo API" "http://localhost:${TEMPO_PORT:-3200}/ready" "${TEMPO_PORT:-3200}" || true
         ;;
-    skywalking)
-        check_service "SkyWalking UI" "http://localhost:${SKYWALKING_UI_PORT:-8080}" "${SKYWALKING_UI_PORT:-8080}" || true
-        check_service "SkyWalking OAP HTTP API" "http://localhost:${SKYWALKING_OAP_HTTP_PORT:-12800}" "${SKYWALKING_OAP_HTTP_PORT:-12800}" || true
+    zipkin)
+        check_service "Zipkin UI" "http://localhost:${ZIPKIN_PORT:-9411}" "${ZIPKIN_PORT:-9411}" || true
         ;;
 esac
 
@@ -227,10 +226,8 @@ case "$LOCAL_STACK" in
         echo "   • Grafana admin: ${GRAFANA_ADMIN_USER:-admin} / ${GRAFANA_ADMIN_PASSWORD:-nexent-grafana-admin}"
         echo "   • Tempo API: http://localhost:${TEMPO_PORT:-3200}"
         ;;
-    skywalking)
-        echo "   • SkyWalking UI: http://localhost:${SKYWALKING_UI_PORT:-8080}"
-        echo "   • SkyWalking OAP HTTP API: http://localhost:${SKYWALKING_OAP_HTTP_PORT:-12800}"
-        echo "   • SkyWalking OAP gRPC API: localhost:${SKYWALKING_OAP_GRPC_PORT:-11800}"
+    zipkin)
+        echo "   • Zipkin UI: http://localhost:${ZIPKIN_PORT:-9411}"
         ;;
     collector)
         echo "   • Configure Phoenix, Langfuse, LangSmith, Tempo, or another OTLP backend in monitoring.env"
@@ -253,4 +250,4 @@ echo "   • Tool call spans"
 echo "   • Error events"
 echo ""
 echo "🛑 To stop monitoring services:"
-echo "   ${COMPOSE_CMD[*]} -f $COMPOSE_FILE --env-file $MONITORING_DIR/monitoring.env --profile phoenix --profile langfuse --profile grafana --profile skywalking down --remove-orphans"
+echo "   ${COMPOSE_CMD[*]} -f $COMPOSE_FILE --env-file $MONITORING_DIR/monitoring.env --profile phoenix --profile langfuse --profile grafana --profile zipkin down --remove-orphans"

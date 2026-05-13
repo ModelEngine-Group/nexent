@@ -148,7 +148,7 @@ SUPPORTED_PROVIDERS = {
     "langfuse",
     "langsmith",
     "grafana",
-    "skywalking",
+    "zipkin",
 }
 
 

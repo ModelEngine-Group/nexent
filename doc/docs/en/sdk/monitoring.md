@@ -1,11 +1,11 @@
 # Nexent Agent Observability (OTLP)
 
-Enterprise-grade observability for AI agents using OpenTelemetry OTLP protocol. Supports integration with observability platforms like Arize Phoenix, Langfuse, LangSmith, Grafana Tempo, Apache SkyWalking, and more.
+Enterprise-grade observability for AI agents using OpenTelemetry OTLP protocol. Supports integration with observability platforms like Arize Phoenix, Langfuse, LangSmith, Grafana Tempo, Zipkin, and more.
 
 ## Architecture
 
 ```
-NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / LangSmith / Grafana Tempo / SkyWalking / OTLP Backend
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / LangSmith / Grafana Tempo / Zipkin / OTLP Backend
      │                                        │
      │   OpenInference Semantics              │
      │   (llm.*, agent.* attributes)          │
@@ -17,6 +17,7 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 ```bash
 cd docker
 cp .env.example .env
+cp monitoring/monitoring.env.example monitoring/monitoring.env
 
 vim .env
 ENABLE_TELEMETRY=true
@@ -24,7 +25,10 @@ MONITORING_PROVIDER=otlp
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
 
-docker-compose -f docker-compose-monitoring.yml up -d
+vim monitoring/monitoring.env
+MONITORING_PROVIDER=otlp
+
+./start-monitoring.sh --stack collector
 ```
 
 ## AI Observability Platforms
@@ -108,23 +112,24 @@ OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 
 For direct backend-to-LangSmith export, set `OTEL_EXPORTER_OTLP_ENDPOINT=https://api.smith.langchain.com/otel`, `LANGSMITH_API_KEY`, and optionally `LANGSMITH_PROJECT`.
 
-### Apache SkyWalking
+### Zipkin
 
-SkyWalking provides general APM, service topology, endpoint analysis, and trace query capabilities. For local deployment, Nexent sends OTLP to the Collector, and the Collector forwards traces to SkyWalking OAP over OTLP gRPC.
+Zipkin provides a lightweight local trace query UI. For local deployment, Nexent sends OTLP to the Collector, and the Collector forwards traces to Zipkin.
 
 ```bash
-MONITORING_PROVIDER=skywalking
+MONITORING_PROVIDER=zipkin
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
+MONITORING_DASHBOARD_URL=http://localhost:9411
 ```
 
-For direct OAP access:
+Set `MONITORING_DASHBOARD_URL` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path.
 
 ```bash
-MONITORING_PROVIDER=skywalking
-OTEL_EXPORTER_OTLP_ENDPOINT=http://skywalking-oap:11800
-OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+MONITORING_DASHBOARD_URL=http://localhost:6006
+MONITORING_DASHBOARD_URL=http://localhost:3001/project/nexent
+MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
+MONITORING_DASHBOARD_URL=http://localhost:9411
 ```
 
 ## Environment Variables
@@ -132,7 +137,8 @@ OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
-| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `skywalking` |
+| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
+| `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint; SDK derives `/v1/traces` and `/v1/metrics` |

@@ -20,6 +20,7 @@ export interface MonitoringFilter {
 export interface MonitoringStatus {
   telemetry_enabled: boolean;
   provider: string;
+  dashboard_url?: string | null;
   dashboard_port?: string | number | null;
   dashboard_path?: string | null;
 }

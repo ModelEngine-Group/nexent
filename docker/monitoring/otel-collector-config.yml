@@ -77,7 +77,6 @@ service:
 #
 # === LangSmith ===
 # Set environment variables:
-#   MONITORING_PROVIDER=langsmith
 #   LANGSMITH_API_KEY=lsv2_...
 #   LANGSMITH_PROJECT=nexent
 #
