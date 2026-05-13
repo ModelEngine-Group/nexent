@@ -17,21 +17,21 @@
 ## 快速开始
 
 1. **了解能力**：阅读 [技能系统概览](./overview) 了解已支持的技能类型
-2. **体验创建**：在 [技能管理](../user-guide/skills) 页面体验 NL-to-Skill 创建
+2. **体验创建**：在 [技能管理](../../user-guide/skills) 页面体验 NL-to-Skill 创建
 3. **手动创建**：上传 `SKILL.md` 或 ZIP 包创建自定义技能
 4. **为智能体配置**：在智能体工具配置中勾选技能
 
 ## 相关参考
 
-- [技能管理（用户指南）](../user-guide/skills)
-- [智能体开发指南](../user-guide/agent-development)
-- [本地工具概览](../user-guide/local-tools/index)
-- [SDK 工具开发规范](../sdk/core/tools)
-- [MCP 工具开发](./mcp)
-- [常见问题](../quick-start/faq)
+- [技能管理（用户指南）](../../user-guide/skills)
+- [智能体开发指南](../../user-guide/agent-development)
+- [本地工具概览](../../user-guide/local-tools/index)
+- [SDK 工具开发规范](../../sdk/core/tools)
+- [MCP 工具开发](../tools/mcp)
+- [常见问题](../../quick-start/faq)
 
 ## 获取帮助
 
-- 查看 [常见问题](../quick-start/faq) 了解常见技能使用问题
+- 查看 [常见问题](../../quick-start/faq) 了解常见技能使用问题
 - 在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中提问
 - 查看 [GitHub Issues](https://github.com/ModelEngine-Group/nexent/issues) 了解已知问题

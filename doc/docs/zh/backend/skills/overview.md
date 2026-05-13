@@ -133,7 +133,6 @@ tags:
 
 ## 相关参考
 
-- [NL-to-Skill 智能创建](./nl2skill)
-- [技能上传与书写规范](../user-guide/skills)
+- [技能管理（用户指南）](../../user-guide/skills)
 - [智能体开发指南](../../user-guide/agent-development)
 - [本地工具概览](../../user-guide/local-tools/index)

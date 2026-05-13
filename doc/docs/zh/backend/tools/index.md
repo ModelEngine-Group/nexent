@@ -14,7 +14,7 @@
 
 ### Skills 技能系统
 通过自然语言或 ZIP 包创建可复用的技能包，为智能体赋予更加灵活的工具调用能力。
-→ [Skills 技能文档](../backend/skills/index)
+→ [Skills 技能文档](../skills/index)
 
 ## 快速开始
 
