@@ -35,33 +35,29 @@ def _normalize_monitoring_provider(value: str | None) -> str:
 
 def _build_monitoring_ui(
     provider: str,
-) -> tuple[str | None, str | None, str | None]:
+) -> tuple[str | None, str | None]:
     """Map MONITORING_PROVIDER to a monitoring UI port and path."""
     if provider == "grafana":
         path = "/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1"
-        return GRAFANA_PORT, path, "Grafana"
+        return GRAFANA_PORT, path
     if provider == "phoenix":
-        return PHOENIX_PORT, "/", "Phoenix"
+        return PHOENIX_PORT, "/"
     if provider == "langfuse":
-        return LANGFUSE_PORT, "/project/nexent", "Langfuse"
-    if provider == "langsmith":
-        return None, None, "LangSmith"
+        return LANGFUSE_PORT, "/project/nexent"
     if provider == "skywalking":
-        return SKYWALKING_UI_PORT, "/", "SkyWalking"
-    return None, None, None
+        return SKYWALKING_UI_PORT, "/"
+    return None, None
 
 
 def get_monitoring_status() -> dict[str, Any]:
     """Return telemetry state and the monitoring UI entrypoint for frontend use."""
     telemetry_enabled = ENABLE_TELEMETRY
     provider = _normalize_monitoring_provider(MONITORING_PROVIDER)
-    dashboard_port, dashboard_path, provider_name = _build_monitoring_ui(provider)
+    dashboard_port, dashboard_path = _build_monitoring_ui(provider)
 
     return {
         "telemetry_enabled": telemetry_enabled,
         "provider": provider,
-        "provider_name": provider_name,
-        "ui_enabled": telemetry_enabled and bool(dashboard_port),
         "dashboard_port": dashboard_port,
         "dashboard_path": dashboard_path,
     }

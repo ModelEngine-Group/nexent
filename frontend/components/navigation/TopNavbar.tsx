@@ -19,40 +19,15 @@ import type { MonitoringStatus } from "@/types/monitoring";
 
 const { Header } = Layout;
 
-const MONITORING_PROVIDER_UI: Record<string, { port: string; path: string }> = {
-  phoenix: { port: "6006", path: "/" },
-  langfuse: { port: "3001", path: "/project/nexent" },
-  grafana: {
-    port: "3002",
-    path: "/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1",
-  },
-  skywalking: { port: "8080", path: "/" },
-};
-
 function buildMonitoringUrl(status: MonitoringStatus | null): string | null {
   if (!status?.telemetry_enabled || typeof window === "undefined") return null;
 
-  const providerConfig = status.provider
-    ? MONITORING_PROVIDER_UI[status.provider.toLowerCase()]
-    : null;
-  const dashboardPort = status.dashboard_port || providerConfig?.port;
+  const dashboardPort = status.dashboard_port;
 
   if (dashboardPort) {
-    const path = status.dashboard_path || providerConfig?.path || "/";
+    const path = status.dashboard_path || "/";
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
     return `${window.location.protocol}//${window.location.hostname}:${dashboardPort}${normalizedPath}`;
-  }
-
-  if (status.dashboard_url) {
-    try {
-      const url = new URL(status.dashboard_url);
-      if (["localhost", "127.0.0.1", "0.0.0.0"].includes(url.hostname)) {
-        url.hostname = window.location.hostname;
-      }
-      return url.toString();
-    } catch {
-      return status.dashboard_url;
-    }
   }
 
   return null;

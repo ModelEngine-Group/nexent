@@ -18,7 +18,6 @@ class TestMonitoringUtilsModule:
         assert hasattr(monitoring_manager, 'configure')
         assert hasattr(monitoring_manager, 'monitor_endpoint')
         assert hasattr(monitoring_manager, 'monitor_llm_call')
-        assert hasattr(monitoring_manager, 'trace_agent_step')
         assert hasattr(monitoring_manager, 'trace_tool_call')
 
     def test_monitoring_manager_methods_callable(self):
@@ -26,7 +25,6 @@ class TestMonitoringUtilsModule:
         monitoring_manager.add_span_event("test_event")
         monitoring_manager.set_span_attributes(key="value")
         monitoring_manager.record_llm_metrics("ttft", 0.5, {})
-        monitoring_manager.record_agent_metrics("duration", 1.0, {})
 
         is_enabled = monitoring_manager.is_enabled
         assert isinstance(is_enabled, bool)
@@ -48,23 +46,6 @@ class TestMonitoringUtilsModule:
 
         result = test_llm_function()
         assert result == {"result": "llm_success"}
-
-    def test_monitoring_manager_agent_decorator(self):
-        """Test that agent execution decorator works."""
-        @monitoring_manager.monitor_agent_execution("test_agent")
-        def test_agent_function():
-            return {"result": "agent_success"}
-
-        result = test_agent_function()
-        assert result == {"result": "agent_success"}
-
-    def test_agent_step_tracing(self):
-        """Test agent step tracing context manager."""
-        with monitoring_manager.trace_agent_step("test_step", "test_agent", "tool_call") as span:
-            pass
-
-        with monitoring_manager.trace_agent_step("reasoning", "test_agent", "reasoning") as span:
-            pass
 
     def test_tool_call_tracing(self):
         """Test tool call tracing context manager."""
@@ -130,7 +111,6 @@ class TestMonitoringUtilsModule:
             monitoring_manager.add_span_event("test_event", {"key": "value"})
             monitoring_manager.set_span_attributes(test_attr="test_value")
             monitoring_manager.record_llm_metrics("token_rate", 10.0, {"llm.model_name": "test"})
-            monitoring_manager.record_agent_metrics("duration", 1.5, {"agent.name": "test"})
         except Exception as e:
             pytest.fail(f"Monitoring methods should handle errors gracefully: {e}")
 

@@ -168,9 +168,7 @@ class TestMonitoringStatus:
         status = get_monitoring_status()
 
         assert status["telemetry_enabled"] is True
-        assert status["ui_enabled"] is True
         assert status["provider"] == "grafana"
-        assert status["provider_name"] == "Grafana"
         assert status["dashboard_port"] == "3002"
         assert status["dashboard_path"].startswith("/d/nexent-llm-agent/")
 
@@ -183,7 +181,6 @@ class TestMonitoringStatus:
         status = get_monitoring_status()
 
         assert status["telemetry_enabled"] is True
-        assert status["ui_enabled"] is False
         assert status["dashboard_port"] is None
         assert status["dashboard_path"] is None
 
@@ -197,9 +194,7 @@ class TestMonitoringStatus:
         status = get_monitoring_status()
 
         assert status["telemetry_enabled"] is True
-        assert status["ui_enabled"] is True
         assert status["provider"] == "skywalking"
-        assert status["provider_name"] == "SkyWalking"
         assert status["dashboard_port"] == "8080"
         assert status["dashboard_path"] == "/"
 
@@ -212,9 +207,7 @@ class TestMonitoringStatus:
         status = get_monitoring_status()
 
         assert status["telemetry_enabled"] is True
-        assert status["ui_enabled"] is False
         assert status["provider"] == "langsmith"
-        assert status["provider_name"] == "LangSmith"
         assert status["dashboard_port"] is None
         assert status["dashboard_path"] is None
 
@@ -226,9 +219,7 @@ class TestMonitoringStatus:
 
         status = get_monitoring_status()
 
-        assert status["ui_enabled"] is False
         assert status["provider"] == "unsupported"
-        assert status["provider_name"] is None
         assert status["dashboard_port"] is None
         assert status["dashboard_path"] is None
 
@@ -247,4 +238,4 @@ class TestMonitoringStatus:
         assert response.status_code == 200
         body = response.json()
         assert body["code"] == 0
-        assert body["data"]["ui_enabled"] is True
+        assert body["data"]["dashboard_port"] is not None

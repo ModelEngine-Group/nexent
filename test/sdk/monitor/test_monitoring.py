@@ -30,7 +30,6 @@ from sdk.nexent.monitor.monitoring import (
     _MonitoredChatCompletions,
     _MonitoredStreamIterator,
     _monitoring_operation,
-    _monitoring_tracker_snapshot,
     _monitoring_display_name,
     set_monitoring_operation,
     _enqueue_client_monitoring_record,
@@ -39,7 +38,6 @@ from sdk.nexent.monitor.monitoring import (
     OPENINFERENCE_SPAN_KIND_CHAIN,
     OPENINFERENCE_SPAN_KIND_LLM,
     OPENINFERENCE_SPAN_KIND_TOOL,
-    OPENINFERENCE_SPAN_KIND_RETRIEVER,
     OPENINFERENCE_SESSION_ID,
     OPENINFERENCE_USER_ID,
     OPENINFERENCE_METADATA,
@@ -163,44 +161,6 @@ class TestMonitoringConfig:
 
         assert config.get_trace_endpoint() == "https://collector.example.com/v1/traces"
         assert config.get_metric_endpoint() == "https://collector.example.com/v1/metrics"
-
-    def test_from_json_file_with_overrides(self, tmp_path):
-        """Test monitoring config can be loaded from a config file and env overrides."""
-        config_file = tmp_path / "monitoring.json"
-        config_file.write_text(json.dumps({
-            "monitoring": {
-                "enable_telemetry": True,
-                "service_name": "file-service",
-                "instrument_requests": True,
-                "fastapi_exclude_spans": ["receive"],
-                "exporter": {
-                    "provider": "langfuse",
-                    "endpoint": "https://cloud.langfuse.com/api/public/otel",
-                    "headers": {"Authorization": "Basic file-token"},
-                    "export_metrics": False
-                }
-            }
-        }), encoding="utf-8")
-
-        config = MonitoringConfig.from_file(
-            str(config_file),
-            overrides={
-                "service_name": "env-service",
-                "otlp_headers": {"x-langfuse-ingestion-version": "4"},
-            }
-        )
-
-        assert config.service_name == "env-service"
-        assert config.provider == "langfuse"
-        assert config.get_trace_endpoint() == "https://cloud.langfuse.com/api/public/otel/v1/traces"
-        assert config.otlp_headers == {
-            "Authorization": "Basic file-token",
-            "x-langfuse-ingestion-version": "4",
-        }
-        assert config.export_metrics is False
-        assert config.instrument_requests is True
-        assert config.fastapi_exclude_spans == ["receive"]
-
 
 class TestMonitoringManager:
     """Test MonitoringManager singleton and core functionality."""
@@ -469,55 +429,14 @@ class TestMonitoringManager:
             assert attrs[LANGFUSE_OBSERVATION_TYPE] == "chain"
 
     @patch('sdk.nexent.monitor.monitoring.trace')
-    def test_trace_openinference_convenience_spans(self, mock_trace):
-        """Test custom OpenInference span helpers build Phoenix-friendly attributes."""
+    def test_set_openinference_output_attrs(self, mock_trace):
+        """Test OpenInference output helper writes Phoenix-friendly attributes."""
         with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
             manager = MonitoringManager()
             config = MonitoringConfig(enable_telemetry=True)
             manager.configure(config)
-            manager._tracer = MagicMock()
-
             mock_span = MagicMock()
-            manager._tracer.start_as_current_span.return_value.__enter__ = Mock(return_value=mock_span)
-            manager._tracer.start_as_current_span.return_value.__exit__ = Mock(return_value=None)
             mock_trace.get_current_span.return_value = mock_span
-
-            with manager.trace_agent(
-                "TestAgent.run",
-                input_value={"query": "hello"},
-                metadata={"agent_id": 1},
-                tags=["nexent", "agent"],
-                session_id=2,
-                user_id="user-1",
-                attributes={"agent.id": 1},
-            ):
-                pass
-
-            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
-            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_AGENT
-            assert json.loads(attrs[OPENINFERENCE_INPUT_VALUE]) == {"query": "hello"}
-            assert json.loads(attrs[OPENINFERENCE_METADATA]) == {"agent_id": 1}
-            assert json.loads(attrs[OPENINFERENCE_TAG_TAGS]) == ["nexent", "agent"]
-            assert attrs[OPENINFERENCE_SESSION_ID] == "2"
-            assert attrs[OPENINFERENCE_USER_ID] == "user-1"
-            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "agent"
-            assert attrs[LANGFUSE_SESSION_ID] == "2"
-            assert attrs[LANGFUSE_USER_ID] == "user-1"
-            assert json.loads(attrs[LANGFUSE_OBSERVATION_INPUT]) == {"query": "hello"}
-            assert attrs["langfuse.trace.metadata.agent_id"] == 1
-            assert attrs["agent.id"] == 1
-
-            with manager.trace_chain("Step 0"):
-                pass
-            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
-            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_CHAIN
-            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "chain"
-
-            with manager.trace_retriever("KnowledgeBase.search"):
-                pass
-            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
-            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_RETRIEVER
-            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "retriever"
 
             manager.set_openinference_output({"answer": "ok"})
             output_attrs = mock_span.set_attributes.call_args.args[0]
@@ -525,83 +444,13 @@ class TestMonitoringManager:
             assert json.loads(output_attrs[LANGFUSE_OBSERVATION_OUTPUT]) == {"answer": "ok"}
 
 
-class TestAgentStepTracing:
-    """Test Agent step tracing functionality."""
+class TestToolCallTracing:
+    """Test tool call tracing functionality."""
 
     def setup_method(self):
         """Reset singleton state before each test."""
         MonitoringManager._instance = None
         MonitoringManager._initialized = False
-
-    @patch('sdk.nexent.monitor.monitoring.trace')
-    def test_trace_agent_step_tool_call(self, mock_trace):
-        """Test tracing agent tool call step."""
-        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
-            manager = MonitoringManager()
-            config = MonitoringConfig(enable_telemetry=True)
-            manager.configure(config)
-            manager._tracer = MagicMock()
-
-            mock_span = MagicMock()
-            manager._tracer.start_as_current_span.return_value.__enter__ = Mock(return_value=mock_span)
-            manager._tracer.start_as_current_span.return_value.__exit__ = Mock(return_value=None)
-
-            with manager.trace_agent_step("web_search", "test_agent", "tool_call") as span:
-                pass
-
-            call_args = manager._tracer.start_as_current_span.call_args
-            attributes = call_args[1]['attributes']
-
-            assert "agent.name" in attributes
-            assert attributes["agent.name"] == "test_agent"
-            assert "agent.step.name" in attributes
-            assert attributes["agent.step.name"] == "web_search"
-            assert "agent.step.type" in attributes
-            assert attributes["agent.step.type"] == "tool_call"
-            assert attributes[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_CHAIN
-            assert attributes[LANGFUSE_OBSERVATION_TYPE] == "chain"
-
-    @patch('sdk.nexent.monitor.monitoring.trace')
-    def test_trace_agent_step_reasoning(self, mock_trace):
-        """Test tracing agent reasoning step."""
-        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
-            manager = MonitoringManager()
-            config = MonitoringConfig(enable_telemetry=True)
-            manager.configure(config)
-            manager._tracer = MagicMock()
-
-            mock_span = MagicMock()
-            manager._tracer.start_as_current_span.return_value.__enter__ = Mock(return_value=mock_span)
-            manager._tracer.start_as_current_span.return_value.__exit__ = Mock(return_value=None)
-
-            with manager.trace_agent_step("analyze_query", "test_agent", "reasoning") as span:
-                pass
-
-            call_args = manager._tracer.start_as_current_span.call_args
-            attributes = call_args[1]['attributes']
-
-            assert attributes["agent.step.type"] == "reasoning"
-
-    @patch('sdk.nexent.monitor.monitoring.trace')
-    def test_trace_agent_step_action_selection(self, mock_trace):
-        """Test tracing agent action selection step."""
-        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
-            manager = MonitoringManager()
-            config = MonitoringConfig(enable_telemetry=True)
-            manager.configure(config)
-            manager._tracer = MagicMock()
-
-            mock_span = MagicMock()
-            manager._tracer.start_as_current_span.return_value.__enter__ = Mock(return_value=mock_span)
-            manager._tracer.start_as_current_span.return_value.__exit__ = Mock(return_value=None)
-
-            with manager.trace_agent_step("decide_next", "test_agent", "action_selection") as span:
-                pass
-
-            call_args = manager._tracer.start_as_current_span.call_args
-            attributes = call_args[1]['attributes']
-
-            assert attributes["agent.step.type"] == "action_selection"
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_trace_tool_call_with_input_output(self, mock_trace):
@@ -641,15 +490,6 @@ class TestAgentStepTracing:
             mock_span.set_attribute.assert_any_call(OPENINFERENCE_OUTPUT_VALUE, '{"results": ["item1", "item2"]}')
             mock_span.set_attribute.assert_any_call(LANGFUSE_OBSERVATION_OUTPUT, '{"results": ["item1", "item2"]}')
 
-    def test_trace_agent_step_disabled(self):
-        """Test agent step tracing when disabled."""
-        manager = MonitoringManager()
-        config = MonitoringConfig(enable_telemetry=False)
-        manager.configure(config)
-
-        with manager.trace_agent_step("test_step", "test_agent", "tool_call") as span:
-            assert span is None
-
     def test_trace_tool_call_disabled(self):
         """Test tool call tracing when disabled."""
         manager = MonitoringManager()
@@ -658,28 +498,6 @@ class TestAgentStepTracing:
 
         with manager.trace_tool_call("test_tool", "test_agent", {"input": "data"}) as span:
             assert span is None
-
-
-class TestAgentMetrics:
-    """Test Agent metrics functionality."""
-
-    def setup_method(self):
-        """Reset singleton state before each test."""
-        MonitoringManager._instance = None
-        MonitoringManager._initialized = False
-
-    def test_record_agent_metrics_duration(self):
-        """Test recording agent execution duration."""
-        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
-            manager = MonitoringManager()
-            config = MonitoringConfig(enable_telemetry=True)
-            manager.configure(config)
-            manager._agent_execution_duration = MagicMock()
-
-            manager.record_agent_metrics("duration", 1.5, {"agent.name": "test"})
-
-            manager._agent_execution_duration.record.assert_called_once()
-
 
 class TestLLMTokenTracker:
     """Test LLMTokenTracker with OpenInference semantics."""
@@ -852,20 +670,6 @@ class TestDecorators:
         result = test_llm_function()
         assert result == {"result": "llm_success"}
 
-    def test_monitor_agent_execution_decorator(self):
-        """Test monitor_agent_execution decorator."""
-        manager = MonitoringManager()
-        config = MonitoringConfig(enable_telemetry=False)
-        manager.configure(config)
-
-        @manager.monitor_agent_execution("test_agent")
-        def test_agent_function():
-            return {"result": "agent_success"}
-
-        result = test_agent_function()
-        assert result == {"result": "agent_success"}
-
-
 class TestGlobalFunctions:
     """Test global functions."""
 
@@ -958,12 +762,8 @@ class TestErrorHandling:
         manager.add_span_event("test_event")
         manager.set_span_attributes(key="value")
         manager.record_llm_metrics("ttft", 0.5, {})
-        manager.record_agent_metrics("duration", 1.0, {})
 
         with manager.trace_llm_request("test", "model") as span:
-            assert span is None
-
-        with manager.trace_agent_step("step", "agent", "tool_call") as span:
             assert span is None
 
         with manager.trace_tool_call("tool", "agent", {"input": "data"}) as span:
@@ -1425,7 +1225,6 @@ class TestMonitoredClientWrapper:
         _mod._monitoring_conversation_id.set(None)
         _mod._monitoring_operation.set("unknown")
         _mod._monitoring_display_name.set("TestModel")
-        _mod._monitoring_tracker_snapshot.set(None)
 
     def _make_monitored_client(self):
         mock_original = MagicMock()
@@ -1638,7 +1437,6 @@ class TestClientLevelIntegrationPaths:
         _mod._monitoring_conversation_id.set(None)
         _mod._monitoring_operation.set("unknown")
         _mod._monitoring_display_name.set(None)
-        _mod._monitoring_tracker_snapshot.set(None)
 
     def _mock_buffer(self):
         buf = MagicMock()
@@ -1715,7 +1513,6 @@ class TestClientLevelIntegrationPaths:
         buf = self._mock_buffer()
 
         with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=buf):
-            _monitoring_tracker_snapshot.set(None)
             stream = monitored.chat.completions.create(
                 stream=True, messages=[{"role": "user", "content": "generate"}]
             )

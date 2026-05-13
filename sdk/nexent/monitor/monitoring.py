@@ -42,7 +42,6 @@ import functools
 import json
 import inspect
 from collections import deque
-from pathlib import Path
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Callable, TypeVar, cast, Iterator
@@ -65,12 +64,6 @@ _monitoring_conversation_id: ContextVar[Optional[int]] = ContextVar(
 # Set at the service/call-site layer; read by the client-level monitoring wrapper.
 _monitoring_operation: ContextVar[str] = ContextVar(
     "_monitoring_operation", default="unknown")
-
-# Tracker snapshot populated by LLMTokenTracker in __call__ for streaming calls.
-# The client-level wrapper reads this after stream consumption to get TTFT/token data.
-_monitoring_tracker_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
-    "_monitoring_tracker_snapshot", default=None
-)
 
 # display_name carried from model instance to client-level monitoring wrapper
 _monitoring_display_name: ContextVar[Optional[str]] = ContextVar(
@@ -180,40 +173,6 @@ def _as_float(value: Any, default: float) -> float:
         return default
 
 
-def _compact_dict(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Drop empty values from a configuration dictionary."""
-    return {key: value for key, value in data.items() if value not in (None, "")}
-
-
-def _load_mapping_file(path: str) -> Dict[str, Any]:
-    """Load a JSON or YAML mapping from disk."""
-    if not path:
-        return {}
-
-    config_path = Path(path)
-    if not config_path.exists():
-        logger.warning(f"Monitoring config file does not exist: {path}")
-        return {}
-
-    raw_text = config_path.read_text(encoding="utf-8")
-    if config_path.suffix.lower() == ".json":
-        loaded = json.loads(raw_text)
-    else:
-        try:
-            import yaml
-        except ImportError as exc:
-            raise RuntimeError(
-                "PyYAML is required to read YAML monitoring config files."
-            ) from exc
-        loaded = yaml.safe_load(raw_text)
-
-    if not loaded:
-        return {}
-    if not isinstance(loaded, dict):
-        raise ValueError("Monitoring config file must contain a mapping object.")
-    return loaded
-
-
 def _normalize_header_value(value: Any) -> str:
     """Normalize header values from config files or environment variables."""
     if isinstance(value, (list, tuple)):
@@ -242,14 +201,6 @@ def _parse_headers(headers: Any) -> Dict[str, str]:
                 parsed[key] = value.strip()
         return parsed
     return {}
-
-
-def _merge_headers(*header_sets: Any) -> Dict[str, str]:
-    """Merge multiple header sources, with later sources taking precedence."""
-    merged: Dict[str, str] = {}
-    for headers in header_sets:
-        merged.update(_parse_headers(headers))
-    return merged
 
 
 def _derive_http_signal_endpoint(endpoint: str, signal_path: str) -> str:
@@ -299,64 +250,6 @@ class MonitoringConfig:
     fastapi_exclude_spans: List[str] = field(default_factory=lambda: ["receive", "send"])
     project_name: Optional[str] = None
     telemetry_sample_rate: float = 1.0
-
-    @classmethod
-    def from_file(cls, config_file: str, overrides: Optional[Dict[str, Any]] = None) -> "MonitoringConfig":
-        """
-        Build monitoring config from JSON/YAML and optional overrides.
-
-        Supported shape:
-
-        monitoring:
-          enable_telemetry: true
-          service_name: nexent-backend
-          exporter:
-            provider: langfuse
-            protocol: http
-            endpoint: https://cloud.langfuse.com/api/public/otel
-            traces_endpoint: https://cloud.langfuse.com/api/public/otel/v1/traces
-            headers:
-              Authorization: Basic xxx
-            export_metrics: false
-        """
-        loaded = _load_mapping_file(config_file)
-        data = loaded.get("monitoring", loaded)
-        if not isinstance(data, dict):
-            raise ValueError("The monitoring config section must be a mapping object.")
-
-        exporter = data.get("exporter", {})
-        if exporter is None:
-            exporter = {}
-        if not isinstance(exporter, dict):
-            raise ValueError("The monitoring exporter section must be a mapping object.")
-
-        headers = _merge_headers(data.get("otlp_headers"), data.get("headers"), exporter.get("headers"))
-        config_data = _compact_dict({
-            "enable_telemetry": data.get("enable_telemetry"),
-            "service_name": data.get("service_name"),
-            "provider": exporter.get("provider", data.get("provider")),
-            "otlp_endpoint": exporter.get("endpoint", data.get("otlp_endpoint")),
-            "otlp_traces_endpoint": exporter.get("traces_endpoint", data.get("otlp_traces_endpoint")),
-            "otlp_metrics_endpoint": exporter.get("metrics_endpoint", data.get("otlp_metrics_endpoint")),
-            "otlp_protocol": exporter.get("protocol", data.get("otlp_protocol")),
-            "otlp_headers": headers,
-            "export_traces": exporter.get("export_traces", data.get("export_traces")),
-            "export_metrics": exporter.get("export_metrics", data.get("export_metrics")),
-            "instrument_fastapi": data.get("instrument_fastapi"),
-            "instrument_requests": data.get("instrument_requests"),
-            "fastapi_excluded_urls": data.get("fastapi_excluded_urls"),
-            "fastapi_exclude_spans": data.get("fastapi_exclude_spans"),
-            "project_name": exporter.get("project_name", data.get("project_name")),
-            "telemetry_sample_rate": data.get("telemetry_sample_rate"),
-        })
-
-        if overrides:
-            merged_headers = _merge_headers(config_data.get("otlp_headers"), overrides.get("otlp_headers"))
-            config_data.update(_compact_dict(overrides))
-            if merged_headers:
-                config_data["otlp_headers"] = merged_headers
-
-        return cls(**config_data)
 
     def __post_init__(self):
         """Validate configuration and adjust based on OpenTelemetry availability."""
@@ -458,7 +351,6 @@ class MonitoringManager:
 
         # Agent-specific metrics (OpenInference semantics)
         self._agent_step_count: Optional[Any] = None
-        self._agent_execution_duration: Optional[Any] = None
         self._agent_error_count: Optional[Any] = None
 
         self._initialized = True
@@ -599,12 +491,6 @@ class MonitoringManager:
                 name="agent.step.count",
                 description="Number of agent execution steps",
                 unit="steps"
-            )
-
-            self._agent_execution_duration = self._meter.create_histogram(
-                name="agent.execution.duration",
-                description="Duration of agent execution in seconds",
-                unit="s"
             )
 
             self._agent_error_count = self._meter.create_counter(
@@ -833,105 +719,6 @@ class MonitoringManager:
                 span.set_attribute("error.message", str(e))
                 raise
 
-    @contextmanager
-    def trace_openinference_span(
-        self,
-        operation_name: str,
-        span_kind: str,
-        input_value: Any = None,
-        output_value: Any = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
-        session_id: Optional[Any] = None,
-        user_id: Optional[Any] = None,
-        attributes: Optional[Dict[str, Any]] = None,
-    ) -> Iterator[Optional[Any]]:
-        """Trace a custom Phoenix/OpenInference span."""
-        span_attrs = self.build_openinference_attributes(
-            span_kind=span_kind,
-            input_value=input_value,
-            output_value=output_value,
-            metadata=metadata,
-            tags=tags,
-            session_id=session_id,
-            user_id=user_id,
-            attributes=attributes,
-        )
-        with self.trace_operation(operation_name, span_kind, **span_attrs) as span:
-            yield span
-
-    def trace_agent(
-        self,
-        operation_name: str,
-        input_value: Any = None,
-        output_value: Any = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
-        session_id: Optional[Any] = None,
-        user_id: Optional[Any] = None,
-        attributes: Optional[Dict[str, Any]] = None,
-    ) -> Iterator[Optional[Any]]:
-        """Trace a custom agent span."""
-        return self.trace_openinference_span(
-            operation_name=operation_name,
-            span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
-            input_value=input_value,
-            output_value=output_value,
-            metadata=metadata,
-            tags=tags,
-            session_id=session_id,
-            user_id=user_id,
-            attributes=attributes,
-        )
-
-    def trace_chain(
-        self,
-        operation_name: str,
-        input_value: Any = None,
-        output_value: Any = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
-        session_id: Optional[Any] = None,
-        user_id: Optional[Any] = None,
-        attributes: Optional[Dict[str, Any]] = None,
-    ) -> Iterator[Optional[Any]]:
-        """Trace a custom chain span."""
-        return self.trace_openinference_span(
-            operation_name=operation_name,
-            span_kind=OPENINFERENCE_SPAN_KIND_CHAIN,
-            input_value=input_value,
-            output_value=output_value,
-            metadata=metadata,
-            tags=tags,
-            session_id=session_id,
-            user_id=user_id,
-            attributes=attributes,
-        )
-
-    def trace_retriever(
-        self,
-        operation_name: str,
-        input_value: Any = None,
-        output_value: Any = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
-        session_id: Optional[Any] = None,
-        user_id: Optional[Any] = None,
-        attributes: Optional[Dict[str, Any]] = None,
-    ) -> Iterator[Optional[Any]]:
-        """Trace a custom retriever span."""
-        return self.trace_openinference_span(
-            operation_name=operation_name,
-            span_kind=OPENINFERENCE_SPAN_KIND_RETRIEVER,
-            input_value=input_value,
-            output_value=output_value,
-            metadata=metadata,
-            tags=tags,
-            session_id=session_id,
-            user_id=user_id,
-            attributes=attributes,
-        )
-
     def set_openinference_output(
         self,
         output_value: Any,
@@ -1152,67 +939,6 @@ class MonitoringManager:
                     )
 
     @contextmanager
-    def trace_agent_step(
-        self,
-        step_name: str,
-        agent_name: str,
-        step_type: str,
-        **attributes: Any
-    ) -> Iterator[Optional[Any]]:
-        """
-        Context manager for tracing Agent execution steps.
-        Uses OpenInference semantic conventions for attribute naming.
-
-        Args:
-            step_name: Name of the step (e.g., "web_search", "reasoning_step_1")
-            agent_name: Name of the agent
-            step_type: Type of step - "tool_call", "reasoning", or "action_selection"
-            **attributes: Additional attributes to add to the span
-        """
-        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE or not self._tracer:
-            yield None
-            return
-
-        # OpenInference semantic attributes for agent
-        openinference_attrs = {
-            OPENINFERENCE_SPAN_KIND: attributes.pop(
-                OPENINFERENCE_SPAN_KIND,
-                OPENINFERENCE_SPAN_KIND_CHAIN,
-            ),
-            "agent.name": agent_name,
-            "agent.step.name": step_name,
-            "agent.step.type": step_type,
-        }
-        openinference_attrs[LANGFUSE_OBSERVATION_TYPE] = (
-            self._to_langfuse_observation_type(
-                openinference_attrs[OPENINFERENCE_SPAN_KIND])
-        )
-        openinference_attrs.update(attributes)
-
-        span_name = f"agent.{step_name}"
-
-        with self._tracer.start_as_current_span(
-            span_name,
-            attributes=openinference_attrs
-        ) as span:
-            start_time = time.time()
-            try:
-                yield span
-            except Exception as e:
-                span.set_status(Status(StatusCode.ERROR, str(e)))
-                if self._agent_error_count:
-                    self._agent_error_count.add(
-                        1, {"agent.name": agent_name, "error.type": type(e).__name__}
-                    )
-                raise
-            finally:
-                duration = time.time() - start_time
-                if self._agent_step_count:
-                    self._agent_step_count.add(
-                        1, {"agent.name": agent_name, "agent.step.type": step_type}
-                    )
-
-    @contextmanager
     def trace_tool_call(
         self,
         tool_name: str,
@@ -1366,16 +1092,6 @@ class MonitoringManager:
             self._llm_token_count_prompt.add(value, attributes)
         elif metric_type == "tokens_completion" and self._llm_token_count_completion:
             self._llm_token_count_completion.add(value, attributes)
-
-    def record_agent_metrics(self, metric_type: str, value: float, attributes: Dict[str, Any]) -> None:
-        """
-        Record Agent-specific metrics using OpenInference semantic conventions.
-        """
-        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
-            return
-
-        if metric_type == "duration" and self._agent_execution_duration:
-            self._agent_execution_duration.record(value, attributes)
 
     def monitor_endpoint(
         self,
@@ -1562,67 +1278,6 @@ class MonitoringManager:
                 return cast(F, sync_wrapper)
 
         return decorator
-
-    def monitor_agent_execution(self, agent_name: str):
-        """
-        Decorator to add monitoring to Agent execution.
-        Tracks overall execution duration and error count.
-
-        Args:
-            agent_name: Name of the agent being monitored
-        """
-        def decorator(func: F) -> F:
-            @functools.wraps(func)
-            async def async_wrapper(*args, **kwargs):
-                start_time = time.time()
-                status = "success"
-
-                try:
-                    result = await func(*args, **kwargs)
-                    return result
-                except Exception as e:
-                    status = "error"
-                    if self._agent_error_count:
-                        self._agent_error_count.add(
-                            1, {"agent.name": agent_name, "error.type": type(e).__name__}
-                        )
-                    raise
-                finally:
-                    duration = time.time() - start_time
-                    if self._agent_execution_duration:
-                        self._agent_execution_duration.record(
-                            duration, {"agent.name": agent_name, "agent.status": status}
-                        )
-
-            @functools.wraps(func)
-            def sync_wrapper(*args, **kwargs):
-                start_time = time.time()
-                status = "success"
-
-                try:
-                    result = func(*args, **kwargs)
-                    return result
-                except Exception as e:
-                    status = "error"
-                    if self._agent_error_count:
-                        self._agent_error_count.add(
-                            1, {"agent.name": agent_name, "error.type": type(e).__name__}
-                        )
-                    raise
-                finally:
-                    duration = time.time() - start_time
-                    if self._agent_execution_duration:
-                        self._agent_execution_duration.record(
-                            duration, {"agent.name": agent_name, "agent.status": status}
-                        )
-
-            if inspect.iscoroutinefunction(func):
-                return cast(F, async_wrapper)
-            else:
-                return cast(F, sync_wrapper)
-
-        return decorator
-
 
 class LLMTokenTracker:
     """
