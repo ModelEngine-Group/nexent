@@ -381,7 +381,10 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
             .filter(msg => msg.isComplete !== false) // Only pass completed messages
             .map(msg => ({
               role: msg.role,
-              content: msg.content
+              content:
+                msg.role === MESSAGE_ROLES.ASSISTANT
+                  ? msg.finalAnswer?.trim() || msg.content || ""
+                  : msg.content || "",
             })),
           is_debug: true, // Add debug mode flag
           agent_id: agentIdValue, // Use the properly parsed agent_id
