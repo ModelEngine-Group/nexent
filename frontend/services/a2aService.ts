@@ -47,6 +47,7 @@ export interface NacosConfig {
   name: string;
   nacos_addr: string;
   nacos_username?: string;
+  nacos_password?: string;
   namespace_id: string;
   description?: string;
   is_active: boolean;
@@ -92,6 +93,11 @@ export interface A2AServerSettings {
   streaming?: boolean;
   supported_interfaces?: Record<string, any>[];
   card_overrides?: Record<string, any>;
+}
+
+export interface NacosConnectivityTestResult {
+  success: boolean;
+  message: string;
 }
 
 // =============================================================================
@@ -465,6 +471,80 @@ export const a2aClientService = {
     } catch (error) {
       log.error('Failed to delete Nacos config:', error);
       return { success: false, message: t('a2a.service.deleteNacosConfigFailed') };
+    }
+  },
+
+  /**
+   * Update a Nacos config
+   */
+  async updateNacosConfig(
+    configId: string,
+    config: {
+      name: string;
+      nacos_addr: string;
+      nacos_username?: string;
+      nacos_password?: string;
+      namespace_id?: string;
+      description?: string;
+    }
+  ): Promise<{
+    success: boolean;
+    data?: NacosConfig;
+    message?: string;
+  }> {
+    try {
+      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.nacosConfig(configId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        return { success: true, data: data.data };
+      }
+
+      return { success: false, message: data.detail || t('a2a.service.updateNacosConfigFailed') };
+    } catch (error) {
+      log.error('Failed to update Nacos config:', error);
+      return { success: false, message: t('a2a.service.updateNacosConfigFailed') };
+    }
+  },
+
+  /**
+   * Test Nacos connectivity without saving the config
+   */
+  async testNacosConnection(config: {
+    nacos_addr: string;
+    nacos_username?: string;
+    nacos_password?: string;
+    namespace_id?: string;
+  }): Promise<{
+    success: boolean;
+    message?: string;
+  }> {
+    try {
+      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.nacosTestConnection, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        return {
+          success: true,
+          message: data.data?.message || t('a2a.service.testConnectionSuccess')
+        };
+      }
+
+      return {
+        success: false,
+        message: data.detail || data.message || t('a2a.service.testConnectionFailed')
+      };
+    } catch (error) {
+      log.error('Failed to test Nacos connection:', error);
+      return { success: false, message: t('a2a.service.testConnectionFailed') };
     }
   },
 
