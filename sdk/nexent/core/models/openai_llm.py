@@ -17,7 +17,6 @@ from smolagents import Tool
 from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
 from ..utils.observer import MessageObserver, ProcessType
-from .message_utils import prepare_messages_for_completion
 
 logger = logging.getLogger("openai_llm")
 
@@ -100,10 +99,6 @@ class OpenAIModel(OpenAIServerModel):
                 raise TypeError(
                     "Messages must be ChatMessage or dict objects.")
 
-        # Prepare messages for completion according to provider requirements.
-        messages_for_completion = prepare_messages_for_completion(
-            normalized_messages, self.model_factory)
-
         # Add completion started event and model parameters
         if token_tracker:
             self._monitoring.add_span_event("completion_started")
@@ -112,17 +107,18 @@ class OpenAIModel(OpenAIServerModel):
                 temperature=self.temperature,
                 top_p=self.top_p,
                 message_count=len(
-                    messages_for_completion) if messages_for_completion else 0,
+                    normalized_messages) if normalized_messages else 0,
                 **{f"llm.param.{k}": v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))}
             )
 
         completion_kwargs = self._prepare_completion_kwargs(
-            messages=messages_for_completion, stop_sequences=stop_sequences,
+            messages=normalized_messages, stop_sequences=stop_sequences,
             response_format=response_format, tools_to_call_from=tools_to_call_from, model=self.model_id,
             custom_role_conversions=self.custom_role_conversions, convert_images_to_image_urls=True,
-            temperature=self.temperature, top_p=self.top_p, **kwargs,
+            temperature=self.temperature, top_p=self.top_p,
+            flatten_messages_as_text=self.model_factory == "modelengine", **kwargs,
         )
-
+        logger.info(f"[completion_kwargs]: {completion_kwargs}")
         completion_kwargs["stream_options"] = {"include_usage": True}
 
         current_request = self.client.chat.completions.create(
@@ -213,7 +209,7 @@ class OpenAIModel(OpenAIServerModel):
                 self.last_output_token_count = output_tokens
             else:
                 input_text = ""
-                for msg in messages_for_completion:
+                for msg in normalized_messages:
                     if hasattr(msg, 'content'):
                         content = msg.content
                         if isinstance(content, str):
