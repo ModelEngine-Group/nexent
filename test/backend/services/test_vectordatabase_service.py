@@ -283,7 +283,6 @@ class TestElasticSearchService(unittest.TestCase):
 
         # Execute
         result = ElasticSearchService.create_index(
-            embedding_model=self.mock_embedding,
             index_name="test_index",
             embedding_dim=768,
             vdb_core=self.mock_vdb_core,
@@ -321,7 +320,6 @@ class TestElasticSearchService(unittest.TestCase):
         # Execute and Assert
         with self.assertRaises(Exception) as context:
             ElasticSearchService.create_index(
-                embedding_model=self.mock_embedding,
                 index_name="test_index",
                 embedding_dim=768,
                 vdb_core=self.mock_vdb_core,
@@ -504,7 +502,6 @@ class TestElasticSearchService(unittest.TestCase):
         # Execute and Assert
         with self.assertRaises(Exception) as context:
             ElasticSearchService.create_index(
-                embedding_model=self.mock_embedding,
                 index_name="test_index",
                 embedding_dim=768,
                 vdb_core=self.mock_vdb_core,

@@ -584,7 +584,6 @@ class ElasticSearchService:
 
     @staticmethod
     def create_index(
-            embedding_model: BaseEmbedding,
             index_name: str = Path(...,
                                    description="Name of the index to create"),
             embedding_dim: Optional[int] = Query(
