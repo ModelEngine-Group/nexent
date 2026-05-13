@@ -305,6 +305,36 @@ def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabas
     # Case B: Name is available in this tenant
     return {"status": "available"}
 
+def _normalize_model_type(raw_model_type: Optional[str]) -> Optional[str]:
+    if raw_model_type in ["multiEmbedding", "multi_embedding"]:
+        return "multi_embedding"
+    if raw_model_type == "embedding":
+        return "embedding"
+    return None
+
+def _build_model_config(model: dict) -> dict:
+    return {
+        "model_repo": model.get("model_repo", ""),
+        "model_name": model["model_name"],
+        "api_key": model.get("api_key", ""),
+        "base_url": model.get("base_url", ""),
+        "model_type": model.get("model_type", "embedding"),
+        "max_tokens": model.get("max_tokens", 1024),
+        "ssl_verify": model.get("ssl_verify", True),
+    }
+
+def _create_embedding_model(model: dict) -> Any:
+    model_config = _build_model_config(model)
+    common_kwargs = {
+        "api_key": model_config.get("api_key", ""),
+        "base_url": model_config.get("base_url", ""),
+        "model_name": get_model_name_from_config(model_config) or "",
+        "embedding_dim": model_config.get("max_tokens", 1024),
+        "ssl_verify": model_config.get("ssl_verify", True),
+    }
+    if model.get("model_type", "embedding") == "multi_embedding":
+        return JinaEmbedding(**common_kwargs)
+    return OpenAICompatibleEmbedding(**common_kwargs)
 
 def get_embedding_model(
         tenant_id: str,
@@ -322,37 +352,6 @@ def get_embedding_model(
     Returns:
         Tuple of (embedding model instance or None, model_id or None)
     """
-    def _normalize_model_type(raw_model_type: Optional[str]) -> Optional[str]:
-        if raw_model_type in ["multiEmbedding", "multi_embedding"]:
-            return "multi_embedding"
-        if raw_model_type == "embedding":
-            return "embedding"
-        return None
-
-    def _build_model_config(model: dict) -> dict:
-        return {
-            "model_repo": model.get("model_repo", ""),
-            "model_name": model["model_name"],
-            "api_key": model.get("api_key", ""),
-            "base_url": model.get("base_url", ""),
-            "model_type": model.get("model_type", "embedding"),
-            "max_tokens": model.get("max_tokens", 1024),
-            "ssl_verify": model.get("ssl_verify", True),
-        }
-
-    def _create_embedding_model(model: dict) -> Any:
-        model_config = _build_model_config(model)
-        common_kwargs = {
-            "api_key": model_config.get("api_key", ""),
-            "base_url": model_config.get("base_url", ""),
-            "model_name": get_model_name_from_config(model_config) or "",
-            "embedding_dim": model_config.get("max_tokens", 1024),
-            "ssl_verify": model_config.get("ssl_verify", True),
-        }
-        if model.get("model_type", "embedding") == "multi_embedding":
-            return JinaEmbedding(**common_kwargs)
-        return OpenAICompatibleEmbedding(**common_kwargs)
-
     if model_name:
         try:
             normalized_model_type = _normalize_model_type(model_type)

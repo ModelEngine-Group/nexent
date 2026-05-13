@@ -2468,6 +2468,100 @@ async def test_update_summary_frequency_endpoint_invalid_value(auth_data):
 
 
 @pytest.mark.asyncio
+async def test_get_embedding_model_status_configured(auth_data):
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value={
+                "index_name": "idx_internal",
+                "knowledge_name": "kb1",
+                "embedding_model_id": 7,
+                "embedding_model_name": "m1",
+            }), \
+            patch("backend.apps.vectordatabase_app.get_model_by_model_id", return_value={
+                "model_id": 7,
+                "model_name": "m1",
+                "display_name": "Model One",
+                "model_type": "embedding",
+            }):
+        response = client.get("/indices/idx_internal/embedding-model-status", headers=auth_data["auth_header"])
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "configured"
+    assert body["needs_config"] is False
+    assert body["model_info"]["display_name"] == "Model One"
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_model_status_legacy_and_missing_and_not_found(auth_data):
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value={
+                "index_name": "idx_legacy",
+                "knowledge_name": "kb_legacy",
+                "embedding_model_id": None,
+                "embedding_model_name": "legacy-name",
+            }):
+        legacy_resp = client.get("/indices/idx_legacy/embedding-model-status", headers=auth_data["auth_header"])
+    assert legacy_resp.status_code == 200
+    assert legacy_resp.json()["status"] == "legacy"
+    assert legacy_resp.json()["needs_config"] is True
+
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value={
+                "index_name": "idx_missing",
+                "knowledge_name": "kb_missing",
+                "embedding_model_id": None,
+                "embedding_model_name": None,
+            }):
+        missing_resp = client.get("/indices/idx_missing/embedding-model-status", headers=auth_data["auth_header"])
+    assert missing_resp.status_code == 200
+    assert missing_resp.json()["status"] == "missing"
+    assert missing_resp.json()["needs_config"] is True
+
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_knowledge_record", return_value=None):
+        not_found_resp = client.get("/indices/not-exist/embedding-model-status", headers=auth_data["auth_header"])
+    assert not_found_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_embedding_model_endpoint_branches(auth_data):
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_embedding_model", return_value={"status": "success"}) as mock_update:
+        ok_resp = client.put(
+            "/indices/idx1/embedding-model",
+            json={"model_id": 123},
+            headers=auth_data["auth_header"],
+        )
+    assert ok_resp.status_code == 200
+    mock_update.assert_called_once()
+
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])):
+        bad_resp = client.put(
+            "/indices/idx1/embedding-model",
+            json={},
+            headers=auth_data["auth_header"],
+        )
+    assert bad_resp.status_code == 400
+
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_embedding_model", side_effect=ValueError("kb not found")):
+        nf_resp = client.put(
+            "/indices/idx1/embedding-model",
+            json={"model_id": 1},
+            headers=auth_data["auth_header"],
+        )
+    assert nf_resp.status_code == 404
+
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_embedding_model", side_effect=RuntimeError("boom")):
+        err_resp = client.put(
+            "/indices/idx1/embedding-model",
+            json={"model_id": 1},
+            headers=auth_data["auth_header"],
+        )
+    assert err_resp.status_code == 500
+
+
+@pytest.mark.asyncio
 async def test_get_document_error_info_regex_fallback(auth_data):
     with patch("backend.apps.vectordatabase_app.get_all_files_status", new=AsyncMock(return_value={"docA": {"latest_task_id": "tid1"}})), \
             patch("backend.apps.vectordatabase_app.get_redis_service") as mock_redis:
