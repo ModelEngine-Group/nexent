@@ -43,7 +43,7 @@ Collaborative agents help the current agent complete complex tasks. The sources 
 5. Click × to remove an agent from the selection
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/agent-development/set-collaboration.png" style="width: 50%; height: auto;" />
+  <img src="./assets/agent-development/set-collaboration.jpg" style="width: 50%; height: auto;" />
 </div>
 
 #### 🌐 Add External A2A Agents
