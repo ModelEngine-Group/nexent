@@ -3,6 +3,36 @@ global:
   namespace: nexent
   dataDir: "/var/lib/nexent-data"
   deploymentVersion: "full"
+  monitoring:
+    enabled: false
+    provider: otlp
+    projectName: ""
+    serviceName: nexent-backend
+    otlpEndpoint: http://nexent-otel-collector:4318
+    otlpTracesEndpoint: ""
+    otlpMetricsEndpoint: ""
+    otlpProtocol: http
+    otlpHeaders: ""
+    otlpAuthorization: ""
+    otlpApiKey: ""
+    otlpLangfuseIngestionVersion: ""
+    langsmithApiKey: ""
+    langsmithProject: ""
+    otlpMetricsEnabled: true
+    instrumentFastapi: true
+    instrumentRequests: false
+    fastapiExcludedUrls: ""
+    fastapiExcludeSpans: "receive,send"
+    phoenixPort: "6006"
+    langfusePort: "3001"
+    grafanaPort: "3002"
+    skywalkingUiPort: "8080"
+    telemetrySampleRate: "1.0"
+
+# Optional monitoring stack. Set provider to one of:
+# otlp, phoenix, langfuse, langsmith, grafana, zipkin.
+nexent-monitoring:
+  enabled: false
 
 # Ingress configuration
 ingress:

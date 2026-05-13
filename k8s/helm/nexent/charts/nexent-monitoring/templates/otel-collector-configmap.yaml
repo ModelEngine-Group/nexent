@@ -1,0 +1,298 @@
+{{- if .Values.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-otel-collector-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-otel-collector
+data:
+  otel-collector-config.yml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 512
+      memory_limiter:
+        limit_mib: 256
+        check_interval: 1s
+      resource:
+        attributes:
+          - key: service.name
+            value: nexent-backend
+            action: upsert
+          - key: service.version
+            from_attribute: version
+            action: insert
+    exporters:
+      debug:
+        verbosity: normal
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug]
+      telemetry:
+        logs:
+          level: "info"
+
+  otel-collector-phoenix-config.yml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 512
+      memory_limiter:
+        limit_mib: 256
+        check_interval: 1s
+      resource:
+        attributes:
+          - key: service.name
+            value: nexent-backend
+            action: upsert
+          - key: service.version
+            from_attribute: version
+            action: insert
+    exporters:
+      debug:
+        verbosity: normal
+      otlphttp/phoenix:
+        endpoint: http://nexent-phoenix:6006
+        timeout: 5s
+        sending_queue:
+          enabled: true
+          num_consumers: 10
+          queue_size: 5000
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_elapsed_time: 300s
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlphttp/phoenix, debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug]
+      telemetry:
+        logs:
+          level: "info"
+
+  otel-collector-grafana-config.yml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 512
+      memory_limiter:
+        limit_mib: 256
+        check_interval: 1s
+      resource:
+        attributes:
+          - key: service.name
+            value: nexent-backend
+            action: upsert
+          - key: service.version
+            from_attribute: version
+            action: insert
+    exporters:
+      debug:
+        verbosity: normal
+      otlp/tempo:
+        endpoint: nexent-tempo:4317
+        tls:
+          insecure: true
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/tempo, debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug]
+      telemetry:
+        logs:
+          level: "info"
+
+  otel-collector-langfuse-config.yml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 512
+      memory_limiter:
+        limit_mib: 256
+        check_interval: 1s
+      resource:
+        attributes:
+          - key: service.name
+            value: nexent-backend
+            action: upsert
+          - key: service.version
+            from_attribute: version
+            action: insert
+    exporters:
+      debug:
+        verbosity: normal
+      otlphttp/langfuse:
+        endpoint: http://nexent-langfuse-web:3000/api/public/otel
+        headers:
+          Authorization: ${env:LANGFUSE_OTLP_AUTH_HEADER}
+          x-langfuse-ingestion-version: "4"
+        timeout: 5s
+        sending_queue:
+          enabled: true
+          num_consumers: 10
+          queue_size: 5000
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_elapsed_time: 300s
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlphttp/langfuse, debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug]
+      telemetry:
+        logs:
+          level: "info"
+
+  otel-collector-langsmith-config.yml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 512
+      memory_limiter:
+        limit_mib: 256
+        check_interval: 1s
+      resource:
+        attributes:
+          - key: service.name
+            value: nexent-backend
+            action: upsert
+          - key: service.version
+            from_attribute: version
+            action: insert
+    exporters:
+      debug:
+        verbosity: normal
+      otlphttp/langsmith:
+        traces_endpoint: ${env:LANGSMITH_OTLP_TRACES_ENDPOINT}
+        headers:
+          x-api-key: ${env:LANGSMITH_API_KEY}
+          Langsmith-Project: ${env:LANGSMITH_PROJECT}
+        timeout: 10s
+        sending_queue:
+          enabled: true
+          num_consumers: 10
+          queue_size: 5000
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_elapsed_time: 300s
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlphttp/langsmith, debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug]
+      telemetry:
+        logs:
+          level: "info"
+
+  otel-collector-zipkin-config.yml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 512
+      memory_limiter:
+        limit_mib: 256
+        check_interval: 1s
+      resource:
+        attributes:
+          - key: service.name
+            value: nexent-backend
+            action: upsert
+          - key: service.version
+            from_attribute: version
+            action: insert
+    exporters:
+      debug:
+        verbosity: normal
+      zipkin:
+        endpoint: http://nexent-zipkin:9411/api/v2/spans
+        format: proto
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [zipkin, debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug]
+      telemetry:
+        logs:
+          level: "info"
+{{- end }}

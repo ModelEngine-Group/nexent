@@ -166,6 +166,46 @@ Using `delete-all` removes all PVCs, PVs, and the namespace, permanently deletin
 | Service | Description | Enabled By |
 |---------|-------------|------------|
 | nexent-openssh-server | SSH terminal for AI agents | `--set services.openssh.enabled=true` |
+| nexent-monitoring | OpenTelemetry Collector and optional observability backend | `--set nexent-monitoring.enabled=true` |
+
+### Monitoring
+
+The Helm chart includes an optional monitoring stack that mirrors the Docker
+monitoring deployment. The collector is always installed when
+`nexent-monitoring.enabled=true`; the backend stack is selected by
+`global.monitoring.provider`.
+
+Supported providers:
+
+- `otlp` / `collector` - Collector only, debug exporter
+- `phoenix` - Collector + local Phoenix
+- `grafana` - Collector + Tempo + Grafana
+- `zipkin` - Collector + local Zipkin
+- `langfuse` - Collector + self-hosted Langfuse stack
+- `langsmith` - Collector forwarding to hosted LangSmith
+
+Example:
+
+```bash
+helm upgrade --install nexent nexent \
+  --set nexent-monitoring.enabled=true \
+  --set global.monitoring.enabled=true \
+  --set global.monitoring.provider=grafana
+```
+
+For LangSmith, also provide an API key:
+
+```bash
+helm upgrade --install nexent nexent \
+  --set nexent-monitoring.enabled=true \
+  --set global.monitoring.enabled=true \
+  --set global.monitoring.provider=langsmith \
+  --set global.monitoring.langsmithApiKey=lsv2_xxx
+```
+
+The backend receives OTLP settings through the shared `nexent-config`
+ConfigMap, with `OTEL_EXPORTER_OTLP_ENDPOINT` defaulting to
+`http://nexent-otel-collector:4318`.
 
 ## Configuration
 
