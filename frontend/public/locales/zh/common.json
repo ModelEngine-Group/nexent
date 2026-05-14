@@ -1008,6 +1008,7 @@
   "auth.oauthErrors.no_code": "未收到第三方授权码，请重新登录",
   "auth.oauthErrors.unsupported_provider": "当前第三方登录方式暂不支持",
   "auth.oauthErrors.callback_failed": "第三方登录回调失败，请稍后重试",
+  "auth.oauthErrors.oauth_account_already_bound": "该 OAuth 账号已绑定其他用户",
   "auth.linkedAccounts": "已绑定的账号",
   "auth.unlinkAccount": "解绑",
   "auth.unlinkConfirm": "确定要解绑此 {{provider}} 账号吗？您将需要使用其他登录方式。",

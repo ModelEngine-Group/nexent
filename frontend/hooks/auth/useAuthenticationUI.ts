@@ -2,6 +2,8 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { App } from "antd";
+import { useTranslation } from "react-i18next";
 
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { AUTH_EVENTS } from "@/const/auth";
@@ -27,6 +29,8 @@ export function useAuthenticationUI({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { isSpeedMode } = useDeployment();
+  const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
 
@@ -85,6 +89,18 @@ export function useAuthenticationUI({
     handleUnauthenticatedModalClose();
   }, [handleUnauthenticatedModalClose]);
 
+  const getOAuthErrorMessage = useCallback(
+    (error: string) => {
+      const key = `auth.oauthErrors.${error}`;
+      const translated = t(key);
+      if (translated !== key) {
+        return translated;
+      }
+      return t("auth.oauthLoginFailedGeneric");
+    },
+    [t]
+  );
+
   useEffect(() => {
     if (isSpeedMode) return;
 
@@ -122,6 +138,7 @@ export function useAuthenticationUI({
     if (isAuthenticated) {
       const oauthError = searchParams.get("oauth_error");
       if (oauthError) {
+        message.error(getOAuthErrorMessage(oauthError));
         router.replace("/");
       }
       return;
@@ -131,7 +148,7 @@ export function useAuthenticationUI({
     if (oauthError && !isLoginModalOpen) {
       setIsLoginModalOpen(true);
     }
-  }, [searchParams, isAuthChecking, isAuthenticated, isSpeedMode, isLoginModalOpen, router, isOAuthCompletePage]);
+  }, [searchParams, isAuthChecking, isAuthenticated, isSpeedMode, isLoginModalOpen, router, isOAuthCompletePage, message, getOAuthErrorMessage]);
 
   useEffect(() => {
     if (!isOAuthCompletePage) return;

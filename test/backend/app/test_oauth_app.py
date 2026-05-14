@@ -484,6 +484,37 @@ class TestCallback(unittest.TestCase):
             username="octocat",
         )
 
+    def test_link_user_id_binding_returns_specific_error_when_already_bound(self):
+        oauth_service_mock.reset_mock()
+        database_oauth_mock.reset_mock()
+        oauth_service_mock.parse_state.return_value = {
+            "provider": "github",
+            "token": "tok",
+            "link_user_id": "existing-user-uuid",
+        }
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {
+            "access_token": "ghu_provider_token",
+        }
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "12345",
+            "email": "octocat@github.com",
+            "username": "octocat",
+        }
+        oauth_service_mock.create_or_update_oauth_account.side_effect = _OAuthLinkError(
+            "This github account is already bound to another user"
+        )
+
+        response = client.get(
+            "/user/oauth/callback?provider=github&code=bind_code&state=github:tok:existing-user-uuid"
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        data = response.json()
+        self.assertEqual(data["data"]["oauth_error"], "oauth_account_already_bound")
+        self.assertIn("already bound", data["data"]["oauth_error_description"])
+
+        oauth_service_mock.create_or_update_oauth_account.side_effect = None
+
     def test_success_with_already_bound_oauth_account(self):
         """Callback with existing binding should use that user_id without Supabase lookup."""
         oauth_service_mock.reset_mock()

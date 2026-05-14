@@ -1007,6 +1007,7 @@
   "auth.oauthErrors.no_code": "No third-party authorization code was received. Please try again.",
   "auth.oauthErrors.unsupported_provider": "This third-party login provider is not supported.",
   "auth.oauthErrors.callback_failed": "Third-party login callback failed. Please try again later.",
+  "auth.oauthErrors.oauth_account_already_bound": "This OAuth account is already linked to another user.",
   "auth.linkedAccounts": "Linked Accounts",
   "auth.unlinkAccount": "Unlink",
   "auth.unlinkConfirm": "Are you sure you want to unlink this {{provider}} account? You will need to use another login method.",

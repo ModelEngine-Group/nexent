@@ -216,6 +216,18 @@ async def callback(
             },
         )
 
+    except OAuthLinkError as e:
+        logger.warning(f"OAuth callback link failed for provider={provider}: {e}")
+        return JSONResponse(
+            status_code=HTTPStatus.BAD_REQUEST,
+            content={
+                "message": "OAuth account link failed",
+                "data": {
+                    "oauth_error": "oauth_account_already_bound",
+                    "oauth_error_description": str(e),
+                },
+            },
+        )
     except Exception as e:
         logger.error(f"OAuth callback failed for provider={provider}: {e}")
         return JSONResponse(
