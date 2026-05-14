@@ -23,7 +23,6 @@ dependencies = [
     "httpx[socks]>=0.28.1",
     "numpy>=1.26.4",
     "openai>=1.69.0",
-    "openpyxl>=3.1.5",
     "pydantic[email]>=2.11.1",
     "python-dotenv>=1.1.0",
     "PyYAML>=6.0.1",
@@ -52,9 +51,6 @@ dependencies = [
     "pymysql>=1.1.0",
     "psycopg2-binary>=2.9.9",
     "pymssql>=2.2.11",
-    "ijson==3.5.0",
-    "langchain-text-splitters==1.1.2",
-    "ebooklib==0.20",
 ]
 
 [tool.uv]
@@ -74,8 +70,15 @@ quality = [
     "pytest>=8.1.0"
 ]
 data_process = [
+    "openpyxl>=3.1.5",
     "unstructured[all-docs]",
-    "orjson>=3.10"
+    "orjson==3.10",
+    "pypdf==6.9.1",
+    "python-pptx==1.0.2",
+    "unstructured-inference==1.2.0",
+    "ijson==3.5.0",
+    "langchain-text-splitters==1.1.2",
+    "ebooklib==0.20",
 ]
 performance = [
     "opentelemetry-api>=1.20.0",

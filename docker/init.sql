@@ -1316,6 +1316,9 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_t (
     nacos_config_id VARCHAR(64),
     nacos_agent_name VARCHAR(255),
 
+    -- Base URL for infrastructure health checks
+    base_url VARCHAR(512),
+
     -- Tenant isolation
     tenant_id VARCHAR(100) NOT NULL,
     created_by VARCHAR(100) NOT NULL,
@@ -1362,6 +1365,7 @@ COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.last_check_result IS 'Last heal
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.create_time IS 'Record creation timestamp';
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.update_time IS 'Record last update timestamp';
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.delete_flag IS 'Soft delete flag: Y/N'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.base_url IS 'Base URL for health checks (service root address)';
 
 
 CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_relation_t (
@@ -1375,8 +1379,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_relation_t (
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     delete_flag VARCHAR(1) DEFAULT 'N',
-    CONSTRAINT uq_local_external_agent UNIQUE (local_agent_id, external_agent_id),
-    CONSTRAINT fk_external_agent FOREIGN KEY (external_agent_id) REFERENCES nexent.ag_a2a_external_agent_t(id)
+    CONSTRAINT uq_local_external_agent UNIQUE (local_agent_id, external_agent_id)
 );
 
 ALTER TABLE nexent.ag_a2a_external_agent_relation_t OWNER TO "root";
@@ -1486,9 +1489,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_message_t (
     extensions JSONB,                               -- Extension URI list
     reference_task_ids JSONB,                        -- Referenced task IDs array
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(task_id, message_index),
-    CONSTRAINT ag_a2a_message_t_task_id_fk FOREIGN KEY (task_id)
-        REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE
+    UNIQUE(task_id, message_index)
 );
 
 ALTER TABLE nexent.ag_a2a_message_t OWNER TO "root";
@@ -1514,8 +1515,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_artifact_t (
     meta_data JSONB,                                -- Metadata
     extensions JSONB,                                -- Extension URI list
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_artifact_task FOREIGN KEY (task_id)
-        REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE,
     UNIQUE(task_id, artifact_id)
 );
 

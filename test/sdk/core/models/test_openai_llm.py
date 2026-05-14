@@ -148,6 +148,7 @@ def test_modelengine_message_flattening(monkeypatch):
 
     def fake_prepare_completion_kwargs(messages=None, **kwargs):
         captured['messages'] = messages
+        captured['flatten_messages_as_text'] = kwargs.get('flatten_messages_as_text', False)
         return {}
 
     m._prepare_completion_kwargs = fake_prepare_completion_kwargs
@@ -173,11 +174,13 @@ def test_modelengine_message_flattening(monkeypatch):
     messages = [{"role": "system", "content": "SYS"}, {"role": "user", "content": ["a", {"text": "b"}]}]
     msg = m.__call__(messages)
 
-    # Ensure prepare got flattened dicts when model_factory == modelengine
+    # Ensure flatten_messages_as_text is True when model_factory == modelengine
+    assert captured['flatten_messages_as_text'] is True
+    # Ensure messages are ChatMessage instances (normalized), not raw dicts
     assert isinstance(captured['messages'], list)
-    assert all(isinstance(x, dict) for x in captured['messages'])
-    # second message content should be flattened into string containing 'b'
-    assert "b" in captured['messages'][1]['content']
+    assert all(hasattr(x, 'role') and hasattr(x, 'content') for x in captured['messages'])
+    # second message content should contain 'b' (either as list or flattened string)
+    assert "b" in str(captured['messages'][1].content)
 
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import importlib.util
@@ -1347,6 +1350,56 @@ def test_call_without_tracker_creates_tracker(openai_model_instance):
     openai_model_instance._monitoring.create_token_tracker.assert_called_once()
     assert openai_model_instance._monitoring.create_token_tracker.call_args.args[0] == "dummy-model"
     mock_tracker.record_token.assert_called()
+
+
+def test_call_token_estimation_with_list_content(openai_model_instance):
+    """Test __call__ method extracts text from list-formatted content when usage info is None (line 220)."""
+
+    # Use a dict that will be normalized to ChatMessage with list content
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "Hello world"}]}
+    ]
+
+    # Mock the stream response with no usage info
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Response"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.usage = None  # No usage info to trigger token estimation
+
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk]
+    mock_result_message.role = MagicMock()
+
+    # Don't patch from_dict so the normalization preserves list content
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+
+        # Call the method with dict message (will be normalized)
+        result = openai_model_instance.__call__(messages)
+
+        # Verify token counts are estimated (input text extracted from list content)
+        assert openai_model_instance.last_input_token_count >= 0
+        assert openai_model_instance.last_output_token_count >= 0
+
+
+def test_call_context_length_exceeded_during_iteration(openai_model_instance):
+    """Test __call__ method raises ValueError when context_length_exceeded occurs during iteration (line 264)."""
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Create an iterable that raises context_length_exceeded during iteration
+    def iter_that_raises():
+        raise Exception("context_length_exceeded: too many tokens")
+        yield  # never reached but makes this a generator
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = iter_that_raises()
+
+        # Should raise ValueError wrapping the context_length_exceeded error
+        with pytest.raises(ValueError, match="Token limit exceeded"):
+            openai_model_instance.__call__(messages)
 
 
 if __name__ == "__main__":

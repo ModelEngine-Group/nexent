@@ -3,8 +3,6 @@ import os
 from copy import deepcopy
 from typing import Dict, List
 
-import openpyxl
-
 from .base import FileProcessor
 
 
@@ -38,6 +36,8 @@ class OpenPyxlProcessor(FileProcessor):
 
     def _load_workbook(self, file_data: bytes):
         """Load Excel workbook"""
+        import openpyxl
+
         try:
             file_obj = io.BytesIO(file_data)
             wb_original = openpyxl.load_workbook(file_obj)

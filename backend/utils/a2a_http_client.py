@@ -134,6 +134,7 @@ class A2AHttpClient:
             "User-Agent": "Nexent-A2A-Client/1.0",
             "Accept": CONTENT_TYPE_JSON,
             "Connection": "close",
+            "A2A-Version": "1.0",
         }
         if headers:
             request_headers.update(headers)
@@ -141,20 +142,33 @@ class A2AHttpClient:
         logger.debug(f"A2A GET request: url={url}")
 
         try:
-            _, body = await self._request_with_retry(
+            status, body = await self._request_with_retry(
                 "GET",
                 url,
                 headers=request_headers
             )
+            # Decode body and handle empty responses
+            body_text = body.decode('utf-8') if body else ""
+            
+            if not body_text.strip():
+                logger.error(
+                    f"A2A GET received empty response for {url}: HTTP status={status}. "
+                    f"Expected JSON response but got empty body."
+                )
+                raise ValueError(f"Empty response from {url} (HTTP {status})")
+            
             # Parse JSON from body
             import json
-            data = json.loads(body.decode('utf-8'))
+            data = json.loads(body_text)
             return data
         except asyncio.TimeoutError as e:
             logger.error(f"A2A GET timeout for {url}: {e}")
             raise
         except aiohttp.ClientResponseError as e:
             logger.error(f"A2A GET HTTP error for {url}: {e.status}")
+            raise
+        except ValueError:
+            # Re-raise empty response errors without wrapping
             raise
         except Exception as e:
             import traceback
@@ -176,6 +190,7 @@ class A2AHttpClient:
             "Content-Type": CONTENT_TYPE_JSON,
             "Accept": CONTENT_TYPE_JSON,
             "Connection": "close",
+            "A2A-Version": "1.0",
         }
         if headers:
             request_headers.update(headers)
@@ -183,21 +198,38 @@ class A2AHttpClient:
         logger.info(f"A2A POST request: url={url}, payload={payload}")
 
         try:
-            _, body = await self._request_with_retry(
+            status, body = await self._request_with_retry(
                 "POST",
                 url,
                 json=payload,
                 headers=request_headers
             )
+            # Decode body and handle empty responses
+            body_text = body.decode('utf-8') if body else ""
+            
+            if not body_text.strip():
+                logger.error(
+                    f"A2A POST received empty response for {url}: HTTP status={status}. "
+                    f"This usually indicates the remote agent is not responding correctly. "
+                    f"Check that the agent URL '{url}' is correct and the agent is running."
+                )
+                raise ValueError(
+                    f"Empty response from agent at {url} (HTTP {status}). "
+                    f"The agent may be unreachable, still processing, or the endpoint URL is incorrect."
+                )
+            
             # Parse JSON from body
             import json
-            data = json.loads(body.decode('utf-8'))
+            data = json.loads(body_text)
             return data
         except asyncio.TimeoutError as e:
             logger.error(f"A2A POST timeout for {url}: {e}")
             raise
         except aiohttp.ClientResponseError as e:
             logger.error(f"A2A POST HTTP error for {url}: {e.status}")
+            raise
+        except ValueError:
+            # Re-raise empty response errors without wrapping
             raise
         except Exception as e:
             import traceback
@@ -249,6 +281,7 @@ def build_a2a_headers(api_key: Optional[str] = None) -> Dict[str, str]:
     headers = {
         "Content-Type": CONTENT_TYPE_JSON,
         "Accept": CONTENT_TYPE_JSON,
+        "A2A-Version": "1.0",
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
