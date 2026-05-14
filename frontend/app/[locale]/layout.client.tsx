@@ -166,7 +166,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
       )}
 
       {/* Global authentication dialogs */}
-      {!isSpeedMode && !isOAuthCompletePage && (
+      {!isSpeedMode && (
         <>
           <AuthDialogs />
         </>

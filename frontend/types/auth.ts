@@ -41,8 +41,6 @@ export interface RegisterModalOptions {
   mode?: "register" | "oauth_complete";
   email?: string;
   emailReadOnly?: boolean;
-  provider?: string;
-  providerUsername?: string;
 }
 
 // Authorization context type

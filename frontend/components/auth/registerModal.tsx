@@ -353,6 +353,12 @@ export function RegisterModal() {
     setPasswordError({ target: "", message: "" });
     closeRegisterModal();
 
+    if (isOAuthCompletion) {
+      const locale = pathname.split("/").find(Boolean) || "zh";
+      router.push(`/${locale}`);
+      return;
+    }
+
     // If user manually cancels registration from a protected page,
     // redirect back to home instead of keeping them on the restricted page
     if (!isAuthenticated && !isSpeedMode) {

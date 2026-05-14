@@ -137,8 +137,6 @@ export function useAuthenticationUI({
     if (!isOAuthCompletePage) return;
     setIsAuthPromptModalOpen(false);
     setIsLoginModalOpen(false);
-    setIsRegisterModalOpen(false);
-    setRegisterModalOptions(null);
     setIsSessionExpiredModalOpen(false);
   }, [isOAuthCompletePage]);
 
