@@ -40,6 +40,13 @@ class UserSignInRequest(BaseModel):
     password: str
 
 
+class OAuthCompleteRequest(BaseModel):
+    """Complete a pending OAuth signup."""
+    email: Optional[EmailStr] = None
+    password: str = Field(..., min_length=6)
+    invite_code: str = Field(..., min_length=1)
+
+
 class UserUpdateRequest(BaseModel):
     """User update request model"""
     username: Optional[str] = Field(None, min_length=1, max_length=50)

@@ -37,6 +37,14 @@ export interface AuthFormValues {
   inviteCode?: string;
 }
 
+export interface RegisterModalOptions {
+  mode?: "register" | "oauth_complete";
+  email?: string;
+  emailReadOnly?: boolean;
+  provider?: string;
+  providerUsername?: string;
+}
+
 // Authorization context type
 export interface AuthContextType {
   user: User | null;
@@ -45,11 +53,12 @@ export interface AuthContextType {
   isLoading: boolean;
   isLoginModalOpen: boolean;
   isRegisterModalOpen: boolean;
+  registerModalOptions?: RegisterModalOptions | null;
   authServiceUnavailable: boolean;
   isAuthReady: boolean;
   openLoginModal: () => void;
   closeLoginModal: () => void;
-  openRegisterModal: () => void;
+  openRegisterModal: (options?: RegisterModalOptions) => void;
   closeRegisterModal: () => void;
   login: (email: string, password: string) => Promise<void>;
   register: (
@@ -118,6 +127,7 @@ export interface AuthenticationContextType {
   // UI state
   isLoginModalOpen: boolean;
   isRegisterModalOpen: boolean;
+  registerModalOptions: RegisterModalOptions | null;
   authServiceUnavailable: boolean;
 
   // Methods
@@ -138,7 +148,7 @@ export interface AuthenticationContextType {
   // UI methods
   openLoginModal: () => void;
   closeLoginModal: () => void;
-  openRegisterModal: () => void;
+  openRegisterModal: (options?: RegisterModalOptions) => void;
   closeRegisterModal: () => void;
 
   // Auth prompt modal (for side navigation pre-check)
@@ -184,7 +194,8 @@ export interface AuthenticationUIReturn {
   openLoginModal: () => void;
   closeLoginModal: () => void;
   isRegisterModalOpen: boolean;
-  openRegisterModal: () => void;
+  registerModalOptions: RegisterModalOptions | null;
+  openRegisterModal: (options?: RegisterModalOptions) => void;
   closeRegisterModal: () => void;
 
   // Auth prompt modal (for side navigation pre-check)
