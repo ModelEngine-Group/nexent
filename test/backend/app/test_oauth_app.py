@@ -511,7 +511,10 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
         data = response.json()
         self.assertEqual(data["data"]["oauth_error"], "oauth_account_already_bound")
-        self.assertIn("already bound", data["data"]["oauth_error_description"])
+        self.assertEqual(
+            data["data"]["oauth_error_description"],
+            "OAuth account is already bound to another user",
+        )
 
         oauth_service_mock.create_or_update_oauth_account.side_effect = None
 

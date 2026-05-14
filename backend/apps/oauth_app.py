@@ -224,7 +224,7 @@ async def callback(
                 "message": "OAuth account link failed",
                 "data": {
                     "oauth_error": "oauth_account_already_bound",
-                    "oauth_error_description": str(e),
+                    "oauth_error_description": "OAuth account is already bound to another user",
                 },
             },
         )
