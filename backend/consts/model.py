@@ -121,6 +121,7 @@ class ModelRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = None
     access_token: Optional[str] = None
+    timeout_seconds: Optional[int] = None
 
 
 class ProviderModelRequest(BaseModel):
@@ -772,6 +773,7 @@ class ManageTenantModelCreateRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = Field(None, description="Application ID for STT models (e.g., Volcano Engine)")
     access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
+    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
 
 
 class ManageTenantModelUpdateRequest(BaseModel):
@@ -792,6 +794,7 @@ class ManageTenantModelUpdateRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = Field(None, description="Application ID for STT models")
     access_token: Optional[str] = Field(None, description="Access token for STT models")
+    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):

@@ -71,6 +71,7 @@ async def _perform_connectivity_check(
     model_appid: Optional[str] = None,
     access_token: Optional[str] = None,
     display_name: Optional[str] = None,
+    timeout_seconds: Optional[float] = None,
 ) -> bool:
     """
     Perform specific model connectivity check
@@ -80,6 +81,8 @@ async def _perform_connectivity_check(
         model_base_url: Model base URL
         model_api_key: API key
         ssl_verify: Whether to verify SSL certificates (default: True)
+        display_name: Optional display name for monitoring
+        timeout_seconds: Optional request timeout in seconds
     Returns:
         bool: Connectivity check result
     """
@@ -115,7 +118,8 @@ async def _perform_connectivity_check(
             model_id=model_name,
             api_base=model_base_url,
             api_key=model_api_key,
-            ssl_verify=ssl_verify
+            ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
         ).check_connectivity()
     elif model_type == "rerank":
         rerank_model = OpenAICompatibleRerank(
@@ -192,6 +196,7 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         model_factory = model.get("model_factory")
         model_appid = model.get("model_appid")
         access_token = model.get("access_token")
+        timeout_seconds = model.get("timeout_seconds")
 
         try:
             set_monitoring_context(tenant_id=tenant_id)
@@ -199,6 +204,8 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
                 model_factory, model_appid, access_token,display_name=display_name,
+                display_name=display_name,
+                timeout_seconds=timeout_seconds,
             )
         except Exception as e:
             update_data = {
@@ -245,16 +252,20 @@ async def verify_model_config_connectivity(model_config: dict):
         model_factory = model_config.get("model_factory")
         model_appid = model_config.get("model_appid")
         access_token = model_config.get("access_token")
+        # Get timeout from model config if present
+        timeout_seconds = model_config.get("timeout_seconds")
 
         try:
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
                 model_factory, model_appid, access_token
+                timeout_seconds=timeout_seconds,
             )
             if not connectivity and ssl_verify:
                 connectivity = await _perform_connectivity_check(
                     model_name, model_type, model_base_url, model_api_key, False,
                     model_factory, model_appid, access_token
+                    timeout_seconds=timeout_seconds,
                 )
             if not connectivity:
                 error_msg = f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."

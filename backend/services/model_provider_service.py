@@ -100,11 +100,13 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # Build the canonical representation using the existing Pydantic schema for
     # consistency of validation and default handling.
     # For embedding/multi_embedding models, max_tokens will be set via connectivity check later,
-    # so use 0 as placeholder if not provided
+    # so use 0 as placeholder if not provided.
+    # Set default timeout_seconds to 120 for LLM models (embedding models don't need it).
     model_type = model["model_type"]
     is_embedding_type = model_type in ["embedding", "multi_embedding"]
     max_tokens_value = model.get(
         "max_tokens", 0) if not is_embedding_type else 0
+    timeout_seconds_value = 120 if not is_embedding_type else None
 
     model_obj = ModelRequest(
         model_factory=provider,
@@ -115,7 +117,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         display_name=model_display_name,
         expected_chunk_size=expected_chunk_size,
         maximum_chunk_size=maximum_chunk_size,
-        chunk_batch=chunk_batch
+        chunk_batch=chunk_batch,
+        timeout_seconds=timeout_seconds_value
     )
 
     model_dict = model_obj.model_dump()

@@ -50,6 +50,7 @@ const DEFAULT_FORM_STATE = {
   url: "",
   apiKey: "",
   maxTokens: "4096",
+  timeoutSeconds: "120",
   isMultimodal: false,
   isBatchImport: false,
   provider: "modelengine",
@@ -252,6 +253,7 @@ export const ModelAddDialog = ({
   const [selectedModelForSettings, setSelectedModelForSettings] =
     useState<any>(null);
   const [modelMaxTokens, setModelMaxTokens] = useState("4096");
+  const [modelTimeoutSeconds, setModelTimeoutSeconds] = useState("120");
 
   // Use the silicon model list hook
   const siliconHook  = useSiliconModelList({
@@ -639,23 +641,49 @@ export const ModelAddDialog = ({
   const handleSettingsClick = (model: any) => {
     setSelectedModelForSettings(model);
     setModelMaxTokens(model.max_tokens?.toString() || "4096");
+    setModelTimeoutSeconds(model.timeout_seconds?.toString() || "120");
     setSettingsModalVisible(true);
   };
 
   // Handle settings save
-  const handleSettingsSave = () => {
-    if (selectedModelForSettings) {
-      // Update the model in the list with new max_tokens
+  const handleSettingsSave = async () => {
+    if (!selectedModelForSettings) return;
+
+    try {
+      // Use model_name as the identifier (API returns model_name field, id is combined format)
+      const modelName = selectedModelForSettings.model_name || selectedModelForSettings.id;
+
+      // Call API to update model settings
+      await modelService.updateBatchModel(
+        [
+          {
+            model_id: modelName,
+            apiKey: selectedModelForSettings.api_key || "",
+            maxTokens: parseInt(modelMaxTokens) || 4096,
+            timeoutSeconds: parseInt(modelTimeoutSeconds) || 120,
+          },
+        ],
+        selectedModelForSettings.model_factory
+      );
+
+      // Update the model in the list with new max_tokens and timeout_seconds
       setModelList((prev) =>
         prev.map((model) =>
           model.id === selectedModelForSettings.id
-            ? { ...model, max_tokens: parseInt(modelMaxTokens) || 4096 }
+            ? {
+                ...model,
+                max_tokens: parseInt(modelMaxTokens) || 4096,
+                timeout_seconds: parseInt(modelTimeoutSeconds) || 120,
+              }
             : model
         )
       );
+    } catch (error) {
+      console.error("Failed to update model settings:", error);
+    } finally {
+      setSettingsModalVisible(false);
+      setSelectedModelForSettings(null);
     }
-    setSettingsModalVisible(false);
-    setSelectedModelForSettings(null);
   };
 
   // Handle adding a model
@@ -698,6 +726,7 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
+<<<<<<< HEAD
         };
 
         // Add STT specific fields
@@ -717,6 +746,21 @@ export const ModelAddDialog = ({
         }
 
         await modelService.createManageTenantModel(modelParams);
+=======
+          expectedChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[0]
+            : undefined,
+          maximumChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[1]
+            : undefined,
+          chunkingBatchSize: isEmbeddingModel
+            ? parseInt(form.chunkingBatchSize) || 10
+            : undefined,
+          timeoutSeconds: !isEmbeddingModel && !isRerankModel
+            ? parseInt(form.timeoutSeconds) || 120
+            : undefined,
+        });
+>>>>>>> a64daaea1 (Feat: support user to configurate model timeout)
       } else {
         const modelParams: any = {
           name: form.name,
@@ -725,6 +769,7 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
+<<<<<<< HEAD
         };
 
         // Add STT specific fields
@@ -744,6 +789,23 @@ export const ModelAddDialog = ({
         }
 
         await modelService.addCustomModel(modelParams);
+=======
+          // Send chunk size range for embedding models
+          ...(isEmbeddingModel
+            ? {
+                expectedChunkSize: form.chunkSizeRange[0],
+                maximumChunkSize: form.chunkSizeRange[1],
+                chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
+              }
+            : {}),
+          // Send timeout for non-embedding models
+          ...(!isEmbeddingModel && !isRerankModel
+            ? {
+                timeoutSeconds: parseInt(form.timeoutSeconds) || 120,
+              }
+            : {}),
+        });
+>>>>>>> a64daaea1 (Feat: support user to configurate model timeout)
       }
 
       // Create the model configuration object
@@ -1186,6 +1248,26 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.maxTokens")}
               value={form.maxTokens}
               onChange={(e) => handleFormChange("maxTokens", e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* Timeout Seconds */}
+        {!isEmbeddingModel && !isRerankModel && !form.isBatchImport && (
+          <div>
+            <label
+              htmlFor="timeoutSeconds"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.timeoutSeconds")}
+            </label>
+            <Input
+              id="timeoutSeconds"
+              type="number"
+              min="1"
+              placeholder={t("model.dialog.placeholder.timeoutSeconds")}
+              value={form.timeoutSeconds}
+              onChange={(e) => handleFormChange("timeoutSeconds", e.target.value)}
             />
           </div>
         )}
@@ -1711,6 +1793,18 @@ export const ModelAddDialog = ({
               value={modelMaxTokens}
               onChange={(e) => setModelMaxTokens(e.target.value)}
               placeholder={t("model.dialog.placeholder.maxTokens")}
+            />
+          </div>
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.timeoutSeconds")}
+            </label>
+            <Input
+              type="number"
+              min="1"
+              value={modelTimeoutSeconds}
+              onChange={(e) => setModelTimeoutSeconds(e.target.value)}
+              placeholder="120"
             />
           </div>
         </div>

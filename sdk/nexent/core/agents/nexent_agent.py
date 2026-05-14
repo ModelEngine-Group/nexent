@@ -70,6 +70,7 @@ class NexentAgent:
             ssl_verify=model_config.ssl_verify if model_config.ssl_verify is not None else True,
             model_factory=model_config.model_factory,
             display_name=model_config.cite_name,
+            timeout_seconds=model_config.timeout_seconds,
         )
         model.stop_event = self.stop_event
         return model

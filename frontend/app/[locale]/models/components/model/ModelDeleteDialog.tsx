@@ -57,6 +57,7 @@ export const ModelDeleteDialog = ({
   const [selectedModelForSettings, setSelectedModelForSettings] =
     useState<any>(null);
   const [modelMaxTokens, setModelMaxTokens] = useState("4096");
+  const [modelTimeoutSeconds, setModelTimeoutSeconds] = useState("120");
   const [providerModelSearchTerm, setProviderModelSearchTerm] = useState("");
 
   // Embedding model chunk config modal state
@@ -589,9 +590,11 @@ export const ModelDeleteDialog = ({
   const handleProviderConfigSave = async ({
     apiKey,
     maxTokens,
+    timeoutSeconds,
   }: {
     apiKey: string;
     maxTokens: number;
+    timeoutSeconds?: number;
   }) => {
     setMaxTokens(maxTokens);
     if (
@@ -624,6 +627,7 @@ export const ModelDeleteDialog = ({
             model_id: String(m.id),
             apiKey: apiKey || m.apiKey,
             maxTokens: maxTokens || m.maxTokens,
+            ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
           }));
 
         await modelService.updateBatchModel(
@@ -653,23 +657,52 @@ export const ModelDeleteDialog = ({
   const handleSettingsClick = (model: any) => {
     setSelectedModelForSettings(model);
     setModelMaxTokens(model.max_tokens?.toString() || "4096");
+    setModelTimeoutSeconds(model.timeout_seconds?.toString() || "120");
     setSettingsModalVisible(true);
   };
 
   // Handle settings save
-  const handleSettingsSave = () => {
-    if (selectedModelForSettings) {
-      // Update the model in the list with new max_tokens
+  const handleSettingsSave = async () => {
+    if (!selectedModelForSettings) return;
+
+    try {
+      // Use model_name as the identifier (API returns model_name field, id is combined format)
+      const modelName = selectedModelForSettings.model_name || selectedModelForSettings.id;
+
+      // Call API to update model settings
+      await modelService.updateBatchModel(
+        [
+          {
+            model_id: modelName,
+            apiKey: selectedModelForSettings.api_key || "",
+            maxTokens: parseInt(modelMaxTokens) || 4096,
+            timeoutSeconds: parseInt(modelTimeoutSeconds) || 120,
+          },
+        ],
+        selectedModelForSettings.model_factory
+      );
+
+      // Update the model in the list with new max_tokens and timeout_seconds
       setProviderModels((prev) =>
         prev.map((model) =>
           model.id === selectedModelForSettings.id
-            ? { ...model, max_tokens: parseInt(modelMaxTokens) || 4096 }
+            ? {
+                ...model,
+                max_tokens: parseInt(modelMaxTokens) || 4096,
+                timeout_seconds: parseInt(modelTimeoutSeconds) || 120,
+              }
             : model
         )
       );
+
+      message.success(t("model.message.updateSuccess") || "Update successful");
+    } catch (error) {
+      console.error("Failed to update model settings:", error);
+      message.error(t("model.message.updateFailed") || "Failed to update settings");
+    } finally {
+      setSettingsModalVisible(false);
+      setSelectedModelForSettings(null);
     }
-    setSettingsModalVisible(false);
-    setSelectedModelForSettings(null);
   };
 
   // Handle embedding model click to open config modal
@@ -1540,6 +1573,18 @@ export const ModelDeleteDialog = ({
               value={modelMaxTokens}
               onChange={(e) => setModelMaxTokens(e.target.value)}
               placeholder={t("model.dialog.placeholder.maxTokens")}
+            />
+          </div>
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.timeoutSeconds")}
+            </label>
+            <Input
+              type="number"
+              min="1"
+              value={modelTimeoutSeconds}
+              onChange={(e) => setModelTimeoutSeconds(e.target.value)}
+              placeholder="120"
             />
           </div>
         </div>

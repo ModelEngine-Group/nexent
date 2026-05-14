@@ -39,6 +39,7 @@ export const ModelEditDialog = ({
     url: "",
     apiKey: "",
     maxTokens: "4096",
+    timeoutSeconds: "120",
     vectorDimension: "1024",
     chunkSizeRange: [
       DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -65,6 +66,7 @@ export const ModelEditDialog = ({
         url: model.apiUrl || "",
         apiKey: model.apiKey || "",
         maxTokens: model.maxTokens?.toString() || "4096",
+        timeoutSeconds: model.timeoutSeconds?.toString() || "120",
         vectorDimension: model.maxTokens?.toString() || "1024",
         chunkSizeRange: [
           model.expectedChunkSize || DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -78,7 +80,7 @@ export const ModelEditDialog = ({
   const handleFormChange = (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     // If the key configuration item changes, clear the verification status
-    if (["url", "apiKey", "maxTokens", "vectorDimension"].includes(field)) {
+    if (["url", "apiKey", "maxTokens", "timeoutSeconds", "vectorDimension"].includes(field)) {
       setConnectivityStatus({ status: null, message: "" });
     }
   };
@@ -176,6 +178,7 @@ export const ModelEditDialog = ({
           expectedChunkSize: isEmbeddingModel ? form.chunkSizeRange[0] : undefined,
           maximumChunkSize: isEmbeddingModel ? form.chunkSizeRange[1] : undefined,
           chunkingBatchSize: isEmbeddingModel ? parseInt(form.chunkingBatchSize) || 10 : undefined,
+          timeoutSeconds: !isEmbeddingModel && !isRerankModel ? parseInt(form.timeoutSeconds) || 120 : undefined,
         });
       } else {
         await modelService.updateSingleModel({
@@ -194,6 +197,12 @@ export const ModelEditDialog = ({
                 expectedChunkSize: form.chunkSizeRange[0],
                 maximumChunkSize: form.chunkSizeRange[1],
                 chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
+              }
+            : {}),
+          // Send timeout for non-embedding models
+          ...(!isEmbeddingModel && !isRerankModel
+            ? {
+                timeoutSeconds: parseInt(form.timeoutSeconds) || 120,
               }
             : {}),
         });
@@ -303,6 +312,12 @@ export const ModelEditDialog = ({
               value={form.maxTokens}
               onChange={(e) => handleFormChange("maxTokens", e.target.value)}
             />
+            <Input
+              type="number"
+              min="1"
+              value={form.timeoutSeconds}
+              onChange={(e) => handleFormChange("timeoutSeconds", e.target.value)}
+            />
           </div>
         )}
 
@@ -408,15 +423,17 @@ interface ProviderConfigEditDialogProps {
   isOpen: boolean
   initialApiKey?: string
   initialMaxTokens?: string
+  initialTimeoutSeconds?: string
   modelType?: ModelType
   onClose: () => void
-  onSave: (config: { apiKey: string; maxTokens: number }) => Promise<void> | void
+  onSave: (config: { apiKey: string; maxTokens: number; timeoutSeconds?: number }) => Promise<void> | void
 }
 
 export const ProviderConfigEditDialog = ({
   isOpen,
   initialApiKey = '',
   initialMaxTokens = '4096',
+  initialTimeoutSeconds = '120',
   modelType,
   onClose,
   onSave,
@@ -424,12 +441,14 @@ export const ProviderConfigEditDialog = ({
   const { t } = useTranslation()
   const [apiKey, setApiKey] = useState<string>(initialApiKey)
   const [maxTokens, setMaxTokens] = useState<string>(initialMaxTokens)
+  const [timeoutSeconds, setTimeoutSeconds] = useState<string>(initialTimeoutSeconds)
   const [saving, setSaving] = useState<boolean>(false)
 
   useEffect(() => {
     setApiKey(initialApiKey)
     setMaxTokens(initialMaxTokens)
-  }, [initialApiKey, initialMaxTokens])
+    setTimeoutSeconds(initialTimeoutSeconds)
+  }, [initialApiKey, initialMaxTokens, initialTimeoutSeconds])
 
   const valid = () => {
     const parsed = parseInt(maxTokens)
@@ -440,7 +459,13 @@ export const ProviderConfigEditDialog = ({
     if (!valid()) return
     try {
       setSaving(true)
-      await onSave({ apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey, maxTokens: parseInt(maxTokens) })
+      const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
+      const isRerankModel = modelType === MODEL_TYPES.RERANK
+      await onSave({
+        apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey,
+        maxTokens: parseInt(maxTokens),
+        ...(!isEmbeddingModel && !isRerankModel ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 } : {}),
+      })
       onClose()
     } finally {
       setSaving(false)
@@ -448,6 +473,7 @@ export const ProviderConfigEditDialog = ({
   }
 
   const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
+  const isRerankModel = modelType === MODEL_TYPES.RERANK
 
   return (
     <Modal
@@ -470,6 +496,19 @@ export const ProviderConfigEditDialog = ({
               {t('model.dialog.label.maxTokens')}
             </label>
             <Input value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
+          </div>
+        )}
+        {!isEmbeddingModel && !isRerankModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.timeoutSeconds")}
+            </label>
+            <Input
+              type="number"
+              min="1"
+              value={timeoutSeconds}
+              onChange={(e) => setTimeoutSeconds(e.target.value)}
+            />
           </div>
         )}
         <div className="flex justify-end space-x-3">

@@ -24,7 +24,8 @@ logger = logging.getLogger("openai_llm")
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
                  ssl_verify=True, model_factory: Optional[str] = None,
-                 display_name: Optional[str] = None, *args, **kwargs):
+                 display_name: Optional[str] = None, timeout_seconds: Optional[float] = None,
+                 *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
@@ -36,6 +37,7 @@ class OpenAIModel(OpenAIServerModel):
                        Set to False for local services without SSL support.
             model_factory: Provider identifier (e.g., openai, modelengine)
             display_name: Human-readable display name for monitoring
+            timeout_seconds: Request timeout in seconds. If None, uses httpx default.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -46,16 +48,30 @@ class OpenAIModel(OpenAIServerModel):
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
+        self.timeout_seconds = timeout_seconds
 
-        # Create http_client based on ssl_verify parameter
-        if not ssl_verify:
-            from openai import DefaultHttpxClient
-            http_client = DefaultHttpxClient(verify=False)
+        # Create http_client based on ssl_verify parameter and timeout_seconds
+        if not ssl_verify or timeout_seconds is not None:
+            import httpx
+            # Build timeout configuration
+            timeout = httpx.Timeout(timeout_seconds) if timeout_seconds is not None else httpx.Timeout(120.0)
+            http_client = httpx.Client(verify=ssl_verify, timeout=timeout)
             client_kwargs = kwargs.get('client_kwargs', {})
             client_kwargs['http_client'] = http_client
             kwargs['client_kwargs'] = client_kwargs
 
         super().__init__(*args, **kwargs)
+
+        # Apply custom timeout to client if specified (even when ssl_verify is True)
+        if timeout_seconds is not None and hasattr(self, 'client'):
+            import httpx
+            # Update client's timeout
+            new_timeout = httpx.Timeout(timeout_seconds)
+            if hasattr(self.client, '_client'):
+                # httpx client wrapped by openai
+                self.client._client.timeout = new_timeout
+            elif hasattr(self.client, 'timeout'):
+                self.client.timeout = new_timeout
 
         # Wrap the OpenAI client with monitoring interceptor
         model_type = _detect_model_type(self)
@@ -282,11 +298,16 @@ class OpenAIModel(OpenAIServerModel):
                 max_tokens=5,
             )
 
+            # Use custom timeout if specified
+            request_kwargs = {"stream": False, **completion_kwargs}
+            if self.timeout_seconds is not None:
+                import httpx
+                request_kwargs["timeout"] = httpx.Timeout(self.timeout_seconds)
+
             # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
             await asyncio.to_thread(
                 self.client.chat.completions.create,
-                stream=False,
-                **completion_kwargs,
+                **request_kwargs,
             )
 
             # If no exception is raised, the connection is successful

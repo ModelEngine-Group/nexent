@@ -30,6 +30,10 @@ class ModelConfig(BaseModel):
         description="Model provider identifier (e.g., openai, modelengine)",
         default=None
     )
+    timeout_seconds: Optional[float] = Field(
+        description="Request timeout in seconds. If None, uses provider default.",
+        default=None
+    )
 
 
 class ToolConfig(BaseModel):

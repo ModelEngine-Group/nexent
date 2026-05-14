@@ -745,6 +745,7 @@
   "model.dialog.label.modelAppid": "App ID",
   "model.dialog.label.accessToken": "Access Token",
   "model.dialog.label.maxTokens": "Max Tokens",
+  "model.dialog.label.timeoutSeconds": "Timeout (seconds)",
   "model.dialog.label.batchImport": "Batch Add",
   "model.dialog.label.provider": "Model Provider",
   "model.dialog.label.currentlySupported": "Currently supported:",

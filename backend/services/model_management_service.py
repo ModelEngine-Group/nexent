@@ -13,6 +13,7 @@ from database.model_management_db import (
     get_model_records,
     get_models_by_tenant_factory_type,
     update_model_record,
+    update_model_record_by_model_name,
 )
 from services.model_provider_service import (
     prepare_model_dict,
@@ -276,12 +277,31 @@ async def update_single_model_for_tenant(
 
 
 async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_list: List[Dict[str, Any]]):
-    """Batch update models for a tenant."""
+    """Batch update models for a tenant by model_id or model_name."""
     try:
         for model in model_list:
-            update_model_record(model["model_id"], model, user_id, tenant_id)
+            # Build update data excluding id fields
+            update_data = {k: v for k, v in model.items() if k not in ["model_id", "model_name"]}
 
-        logging.debug("Batch update models successfully")
+            model_id_or_name = model.get("model_id") or model.get("model_name")
+
+            # Check if model_id is a numeric string (primary key)
+            if model_id_or_name and model_id_or_name.isdigit():
+                # Use model_id (primary key) for update
+                logging.info(f"[DEBUG] Updating model by id: model_id={model_id_or_name}, tenant_id={tenant_id}, update_data={update_data}")
+                update_model_record(int(model_id_or_name), update_data, user_id, tenant_id)
+            else:
+                # Parse "model_repo/model_name" format from frontend's model_id field
+                if "/" in model_id_or_name:
+                    model_repo, model_name = model_id_or_name.split("/", 1)
+                else:
+                    model_repo = None
+                    model_name = model_id_or_name
+
+                logging.info(f"[DEBUG] Updating model by name: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}, update_data={update_data}")
+                update_model_record_by_model_name(model_name, update_data, user_id, tenant_id, model_repo)
+
+        logging.info("[DEBUG] Batch update models successfully")
     except Exception as e:
         logging.error(f"Failed to batch update models: {str(e)}")
         raise Exception(f"Failed to batch update models: {str(e)}")

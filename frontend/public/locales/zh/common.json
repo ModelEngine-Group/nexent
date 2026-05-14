@@ -736,6 +736,7 @@
   "model.dialog.label.maxTokens": "最大Token数",
   "model.dialog.label.modelAppid": "App ID",
   "model.dialog.label.accessToken": "Access Token",
+  "model.dialog.label.timeoutSeconds": "超时时间(秒)",
   "model.dialog.label.batchImport": "批量添加模型",
   "model.dialog.label.provider": "模型提供商",
   "model.dialog.label.currentlySupported": "当前已支持：",
