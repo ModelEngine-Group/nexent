@@ -90,9 +90,19 @@ export interface ToolParam {
   type: "string" | "number" | "boolean" | "array" | "object" | "Optional";
   required: boolean;
   value?: any;
-  default?: any;
-  description?: string;
+  description_en?: string;
   description_zh?: string;
+  depends_on?: string;
+}
+
+export interface SkillParam {
+  name: string;
+  type: "string" | "number" | "boolean" | "array" | "object" | "Optional";
+  required: boolean;
+  value?: any;
+  description_en?: string;
+  description_zh?: string;
+  depends_on?: string;
 }
 
 
@@ -127,6 +137,9 @@ export interface Skill {
   source: string;
   tags?: string[];
   content?: string;
+  config_schemas?: SkillParam[] | null;
+  config_values?: Record<string, any> | null;
+  tool_ids?: number[];
   update_time?: string;
   create_time?: string;
 }

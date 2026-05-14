@@ -510,7 +510,7 @@ export default function SkillList({
 
   const paramsEditorState = useMemo(() => {
     if (!paramsModalOpen || !editingSkill) return null;
-    const parsed = normalizeSkillParams(editingSkill.params);
+    const parsed = normalizeSkillParams(editingSkill.config_schemas);
     const meta = new Map<string, string>();
     const { initialValues } = buildFormStateFromParams(parsed, [], meta);
     return { parsed, initialValues, meta };

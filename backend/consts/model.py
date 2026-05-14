@@ -391,6 +391,7 @@ class SkillInstanceInfoRequest(BaseModel):
     agent_id: int
     enabled: bool = True
     version_no: int = 0
+    config_values: Optional[Dict[str, Any]] = None
 
 
 class ToolInstanceSearchRequest(BaseModel):
@@ -923,7 +924,8 @@ class SkillCreateRequest(BaseModel):
     tool_names: Optional[List[str]] = []
     tags: Optional[List[str]] = []
     source: Optional[str] = "custom"
-    params: Optional[Dict[str, Any]] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[Dict[str, str]]] = Field(
         default_factory=list,
         description="Additional skill files beyond SKILL.md. "
@@ -946,7 +948,8 @@ class SkillUpdateRequest(BaseModel):
     tool_names: Optional[List[str]] = None
     tags: Optional[List[str]] = None
     source: Optional[str] = None
-    params: Optional[Dict[str, Any]] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[SkillFileData]] = Field(
         default_factory=list,
         description="Updated skill files. Each entry has file_path and content. "
@@ -963,7 +966,8 @@ class SkillResponse(BaseModel):
     tool_ids: List[int]
     tags: List[str]
     source: str
-    params: Optional[Dict[str, Any]] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
     created_by: Optional[str] = None
     create_time: Optional[str] = None
     updated_by: Optional[str] = None

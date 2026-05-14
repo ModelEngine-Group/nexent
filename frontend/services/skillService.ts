@@ -37,7 +37,8 @@ export interface SkillListItem {
   description?: string;
   tags: string[];
   content?: string;
-  params: Record<string, unknown> | null;
+  config_values: Record<string, unknown> | null;
+  config_schemas: unknown[] | null;
   source: string;
   tool_ids: number[];
   created_by?: string | null;
@@ -149,7 +150,7 @@ export const processSkillStream = async (
 
 /**
  * Load skills for lists (tenant-resources table, etc.).
- * Maps API payload to {@link SkillListItem} including params for config editing.
+ * Maps API payload to {@link SkillListItem} including config_schemas for config editing.
  */
 export async function fetchSkillsList(): Promise<SkillListItem[]> {
   const res = await fetchSkills();
@@ -165,11 +166,18 @@ export async function fetchSkillsList(): Promise<SkillListItem[]> {
         : typeof rawId === "string"
           ? Number.parseInt(rawId, 10)
           : Number.NaN;
-    const rawParams = s.params;
-    let params: Record<string, unknown> | null = null;
-    if (rawParams !== undefined && rawParams !== null) {
-      if (typeof rawParams === "object" && !Array.isArray(rawParams)) {
-        params = { ...(rawParams as Record<string, unknown>) };
+    const rawConfigSchemas = s.config_schemas;
+    let config_schemas: unknown[] | null = null;
+    if (rawConfigSchemas !== undefined && rawConfigSchemas !== null) {
+      if (Array.isArray(rawConfigSchemas)) {
+        config_schemas = rawConfigSchemas;
+      }
+    }
+    const rawConfigValues = s.config_values;
+    let config_values: Record<string, unknown> | null = null;
+    if (rawConfigValues !== undefined && rawConfigValues !== null) {
+      if (typeof rawConfigValues === "object" && !Array.isArray(rawConfigValues)) {
+        config_values = { ...(rawConfigValues as Record<string, unknown>) };
       }
     }
     const rawToolIds = s.tool_ids;
@@ -182,7 +190,8 @@ export async function fetchSkillsList(): Promise<SkillListItem[]> {
       description: s.description !== undefined ? String(s.description) : undefined,
       tags: Array.isArray(s.tags) ? (s.tags as string[]) : [],
       content: s.content !== undefined ? String(s.content) : undefined,
-      params,
+      config_schemas,
+      config_values,
       source: String(s.source ?? "custom"),
       tool_ids: toolIds,
       created_by: s.created_by !== undefined ? (s.created_by as string | null) : undefined,

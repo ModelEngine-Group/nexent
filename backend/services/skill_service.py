@@ -1,11 +1,16 @@
 """Skill management service."""
 
+import argparse
+import ast
 import asyncio
-import uuid
+import inspect
 import io
 import json
 import logging
 import os
+import uuid
+import zipfile
+import re
 import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -253,6 +258,51 @@ def _commented_tree_to_plain(node: Any) -> Any:
     return node
 
 
+def _ruamel_tree_to_plain(node: Any) -> Any:
+    """Convert ruamel CommentedMap/Seq to plain dict/list with NO comment merging.
+
+    Used for parsing config.yaml into config_values where the value must be clean
+    (e.g. ``/mnt/nexent`` not ``/mnt/nexent # Initial workspace path``).
+    """
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    if isinstance(node, CommentedMap):
+        return {k: _ruamel_tree_to_plain(v) for k, v in node.items()}
+    if isinstance(node, CommentedSeq):
+        return [_ruamel_tree_to_plain(v) for v in node]
+    return node
+
+
+def _parse_yaml_ruamel_plain(text: str) -> Dict[str, Any]:
+    """Parse YAML with ruamel round-trip and return plain dict (no comment merging).
+
+    Used for ``config.yaml`` → ``config_values`` where scalar values must be clean.
+    """
+    from ruamel.yaml import YAML
+    from ruamel.yaml.comments import CommentedMap
+
+    y = YAML(typ="rt")
+    try:
+        root = y.load(text)
+    except Exception as exc:
+        raise SkillException(f"Invalid YAML in config/config.yaml: {exc}") from exc
+    if root is None:
+        return {}
+    if isinstance(root, CommentedMap):
+        plain = _ruamel_tree_to_plain(root)
+    elif isinstance(root, dict):
+        plain = root
+    else:
+        raise SkillException(
+            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
+        )
+    if not isinstance(plain, dict):
+        raise SkillException(
+            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
+        )
+    return _params_dict_to_storable(plain)
+
+
 def _parse_yaml_with_ruamel_merge_eol_comments(text: str) -> Dict[str, Any]:
     """Parse YAML with ruamel; merge ``#`` into scalar values only (``value # tip`` for the UI).
 
@@ -286,6 +336,189 @@ def _parse_yaml_with_ruamel_merge_eol_comments(text: str) -> Dict[str, Any]:
     return _params_dict_to_storable(plain)
 
 
+def _get_skill_inputs_from_code(scripts_dir: str) -> List[Dict[str, Any]]:
+    """Extract argparse parameters from skill scripts using AST analysis.
+
+    Walks every ``scripts/*.py`` file (skipping ``_*.py``) and uses AST to find
+    all ``parser.add_argument(...)`` calls anywhere in the file, including inside
+    function bodies and ``if __name__ == "__main__":`` blocks.
+
+    Mirrors ``get_local_tools()`` in tool_configuration_service.py.
+
+    Args:
+        scripts_dir: Absolute path to the skill's ``scripts/`` directory.
+
+    Returns:
+        List of input parameter dicts with name, type, required, description, default.
+    """
+    inputs: List[Dict[str, Any]] = []
+    seen_names: set = set()
+
+    if not os.path.isdir(scripts_dir):
+        return inputs
+
+    for filename in os.listdir(scripts_dir):
+        if not filename.endswith(".py") or filename.startswith("_"):
+            continue
+
+        script_path = os.path.join(scripts_dir, filename)
+        try:
+            source = open(script_path, "r", encoding="utf-8").read()
+        except (OSError, IOError):
+            continue
+
+        try:
+            tree = ast.parse(source, filename=filename)
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not _is_add_argument_call(node):
+                continue
+
+            parsed = _extract_arg_from_add_argument(node)
+            if not parsed:
+                continue
+
+            param_name = parsed["name"]
+            if param_name in ("help", "h") or param_name in seen_names:
+                continue
+            seen_names.add(param_name)
+
+            inputs.append({
+                "name": param_name,
+                "type": parsed["type"],
+                "required": parsed["required"],
+                "description_en": parsed["description"],
+            })
+
+    return inputs
+
+
+def _is_add_argument_call(node: ast.Call) -> bool:
+    """Return True if node is a call to ``<obj>.add_argument(...)``."""
+    if not isinstance(node.func, ast.Attribute):
+        return False
+    if node.func.attr != "add_argument":
+        return False
+    if isinstance(node.func.value, ast.Name) and node.func.value.id == "parser":
+        return True
+    if isinstance(node.func.value, ast.Attribute):
+        return True
+    return False
+
+
+def _extract_arg_from_add_argument(node: ast.Call) -> Optional[Dict[str, Any]]:
+    """Extract parameter metadata from an ``add_argument`` Call AST node."""
+    args = node.args
+    kwargs = {kw.arg: kw.value for kw in node.keywords}
+
+    # Positional arg 0 = name or first positional arg (--name / name)
+    name_node = args[0] if args else kwargs.get("name")
+    if name_node is None:
+        return None
+    param_name = _ast_literal_eval(name_node)
+    if not param_name or not isinstance(param_name, str):
+        return None
+
+    # --name style
+    if param_name.startswith("--"):
+        param_name = param_name[2:]
+    elif param_name.startswith("-"):
+        param_name = param_name[1:]
+
+    # Determine type
+    param_type = "string"
+    type_node = kwargs.get("type")
+    if type_node is not None:
+        type_name = _get_type_name(type_node)
+        if type_name in ("int", "integer"):
+            param_type = "number"
+        elif type_name in ("float",):
+            param_type = "number"
+        elif type_name in ("bool",):
+            param_type = "boolean"
+
+    # Description
+    help_node = kwargs.get("help")
+    description = ""
+    if help_node is not None:
+        val = _ast_literal_eval(help_node)
+        if isinstance(val, str):
+            description = val
+
+    # Required / default
+    required = False
+    default: Any = None
+
+    if kwargs.get("required") is not None:
+        req_val = _ast_literal_eval(kwargs["required"])
+        if req_val is True:
+            required = True
+
+    default_node = kwargs.get("default")
+    if default_node is not None:
+        default = _ast_literal_eval(default_node)
+        if default is None or (isinstance(default, str) and default == ""):
+            required = False
+        elif not required:
+            required = False
+
+    return {
+        "name": param_name,
+        "type": param_type,
+        "required": required,
+        "description_en": description,
+    }
+
+
+def _get_type_name(node: ast.AST) -> str:
+    """Get the type name string from a type-related AST node."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return ""
+
+
+def _ast_literal_eval(node: ast.AST) -> Any:
+    """Safely evaluate a literal AST node (Name, Constant, Str, Num, etc.) to a Python value."""
+    if isinstance(node, (ast.Constant, ast.Num)):
+        return getattr(node, "value", None)
+    if isinstance(node, ast.Str):  # Python < 3.8 compat
+        return node.s
+    if isinstance(node, ast.Name):
+        name = node.id
+        if name == "None":
+            return None
+        if name == "True":
+            return True
+        if name == "False":
+            return False
+        return name
+    if isinstance(node, (ast.List, ast.Tuple)):
+        elts = [_ast_literal_eval(e) for e in node.elts]
+        return list(elts) if isinstance(node, ast.List) else tuple(elts)
+    if isinstance(node, ast.Dict):
+        return {_ast_literal_eval(k): _ast_literal_eval(v) for k, v in node.keys}
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        val = _ast_literal_eval(node.operand)
+        if isinstance(val, (int, float)):
+            return -val if isinstance(node.op, ast.USub) else val
+    if isinstance(node, ast.BinOp):
+        left = _ast_literal_eval(node.left)
+        right = _ast_literal_eval(node.right)
+        if isinstance(left, str) and isinstance(right, str) and isinstance(node.op, ast.Add):
+            return left + right
+    return None
+
+
 def _parse_yaml_fallback_pyyaml(text: str) -> Dict[str, Any]:
     """Parse YAML with PyYAML (comments are dropped)."""
     try:
@@ -312,7 +545,7 @@ def _parse_skill_params_from_config_bytes(raw: bytes) -> Dict[str, Any]:
         data = json.loads(text)
     except json.JSONDecodeError:
         try:
-            return _parse_yaml_with_ruamel_merge_eol_comments(text)
+            return _parse_yaml_ruamel_plain(text)
         except ImportError:
             logger.warning("ruamel.yaml not installed; YAML comments will be dropped on parse")
             return _parse_yaml_fallback_pyyaml(text)
@@ -330,6 +563,66 @@ def _parse_skill_params_from_config_bytes(raw: bytes) -> Dict[str, Any]:
                 "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
             )
         return _params_dict_to_storable(data)
+
+
+def _parse_skill_schema_from_yaml_bytes(raw: bytes) -> List[Dict[str, Any]]:
+    """Parse config/schema.yaml bytes into List[SkillParam].
+
+    Expected YAML structure:
+        param_name:
+          type: string | number | boolean | array | object
+          required: true | false
+          description_en: "English description"
+          description_zh: "Chinese description"
+          depends_on: other_param_name
+
+    Returns a list of param dicts with name, type, required, description_en,
+    description_zh, depends_on — matching frontend SkillParam interface.
+    """
+    text = raw.decode("utf-8-sig").strip()
+    if not text:
+        logger.warning("[schema] Empty raw bytes for schema.yaml")
+        return []
+    data: Any = None
+    parse_method = "unknown"
+    try:
+        data = json.loads(text)
+        parse_method = "json"
+    except json.JSONDecodeError:
+        try:
+            data = _parse_yaml_with_ruamel_merge_eol_comments(text)
+            parse_method = "ruamel"
+        except ImportError:
+            data = _parse_yaml_fallback_pyyaml(text)
+            parse_method = "pyyaml"
+        except SkillException:
+            raise
+        except Exception:
+            try:
+                data = _parse_yaml_fallback_pyyaml(text)
+                parse_method = "pyyaml"
+            except Exception as exc:
+                logger.warning("[schema] All YAML parsers failed: %s", exc)
+                return []
+
+    if not isinstance(data, dict):
+        logger.warning("[schema] Parsed data is not a dict (type=%s, parse_method=%s)", type(data).__name__, parse_method)
+        return []
+
+    result: List[Dict[str, Any]] = []
+    for param_name, meta in data.items():
+        if not isinstance(meta, dict):
+            logger.debug("[schema] Skipping param '%s': meta is not a dict (%s)", param_name, type(meta).__name__)
+            continue
+        result.append({
+            "name": param_name,
+            "type": meta.get("type", "string"),
+            "required": bool(meta.get("required", False)),
+            "description_en": meta.get("description_en", meta.get("description", "")),
+            "description_zh": meta.get("description_zh", ""),
+            "depends_on": meta.get("depends_on"),
+        })
+    return result
 
 
 def _read_params_from_zip_config_yaml(
@@ -353,9 +646,127 @@ def _read_params_from_zip_config_yaml(
     return params
 
 
+def _find_zip_member_schema_yaml(
+    file_list: List[str],
+    preferred_skill_root: Optional[str] = None,
+) -> Optional[str]:
+    """Return the ZIP entry path for .../config/schema.yaml (any depth; case-insensitive)."""
+    for entry in file_list:
+        norm = _normalize_zip_entry_path(entry)
+        # Match .../config/schema.yaml at any depth
+        parts = norm.split("/")
+        if len(parts) >= 2 and parts[-2] == "config" and parts[-1] == "schema.yaml":
+            logger.debug("[schema] Found schema.yaml via config/ prefix match: %s", entry)
+            return entry
+        # Fallback: if preferred_root is given, also check <root>/config/schema.yaml
+        if preferred_skill_root and norm == f"{preferred_skill_root}/config/schema.yaml":
+            logger.debug("[schema] Found schema.yaml via preferred_root match: %s", entry)
+            return entry
+    logger.debug("[schema] No schema.yaml found in ZIP entries (preferred_root=%s, entry_count=%d)", preferred_skill_root, len(file_list))
+    return None
+
+
+def _read_schema_yaml_from_zip(
+    zip_bytes: bytes,
+    preferred_skill_root: Optional[str] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """If the archive contains config/schema.yaml, parse it into List[SkillParam]; else None."""
+    import zipfile
+
+    zip_stream = io.BytesIO(zip_bytes)
+    with zipfile.ZipFile(zip_stream, "r") as zf:
+        member = _find_zip_member_schema_yaml(
+            zf.namelist(),
+            preferred_skill_root=preferred_skill_root,
+        )
+        if not member:
+            logger.warning("[schema] No schema.yaml member found in ZIP (preferred_root=%s)", preferred_skill_root)
+            return None
+        raw = zf.read(member)
+    parsed = _parse_skill_schema_from_yaml_bytes(raw)
+    if not parsed:
+        logger.warning("[schema] Parsed result is empty from ZIP member %s", member)
+    return parsed
+
+
+def _get_skill_inputs_from_zip(
+    zip_bytes: bytes,
+    preferred_skill_root: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Extract argparse parameters from scripts/*.py inside a ZIP archive.
+
+    Mirrors ``_get_skill_inputs_from_code`` but reads from ZIP bytes instead of filesystem.
+
+    Args:
+        zip_bytes: ZIP archive content.
+        preferred_skill_root: Preferred folder name inside ZIP containing scripts/.
+
+    Returns:
+        List of input parameter dicts with name, type, required, description, default.
+    """
+    zip_stream = io.BytesIO(zip_bytes)
+    inputs: List[Dict[str, Any]] = []
+    seen_names: set = set()
+
+    try:
+        with zipfile.ZipFile(zip_stream, "r") as zf:
+            file_list = zf.namelist()
+    except zipfile.BadZipFile:
+        return inputs
+
+    scripts_root = preferred_skill_root or ""
+
+    for member in file_list:
+        normalized = member.replace("\\", "/").strip()
+        if not normalized.endswith(".py") or "/_" in normalized or normalized.endswith("/_"):
+            continue
+        if not normalized.startswith(scripts_root + "/scripts/"):
+            if scripts_root:
+                continue
+            parts = normalized.split("/")
+            if len(parts) < 2 or parts[-2] != "scripts":
+                continue
+
+        try:
+            source = zf.read(member).decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        try:
+            tree = ast.parse(source, filename=member)
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not _is_add_argument_call(node):
+                continue
+            parsed = _extract_arg_from_add_argument(node)
+            if not parsed:
+                continue
+            param_name = parsed["name"]
+            if param_name in ("help", "h") or param_name in seen_names:
+                continue
+            seen_names.add(param_name)
+            inputs.append({
+                "name": param_name,
+                "type": parsed["type"],
+                "required": parsed["required"],
+                "description_en": parsed["description"],
+            })
+
+    return inputs
+
+
 def _local_skill_config_yaml_path(skill_name: str, local_skills_dir: str) -> str:
     """Absolute path to <local_skills_dir>/<skill_name>/config/config.yaml."""
     return os.path.join(local_skills_dir, skill_name, "config", "config.yaml")
+
+
+def _local_skill_schema_yaml_path(skill_name: str, local_skills_dir: str) -> str:
+    """Absolute path to <local_skills_dir>/<skill_name>/config/schema.yaml."""
+    return os.path.join(local_skills_dir, skill_name, "config", "schema.yaml")
 
 
 def _write_skill_params_to_local_config_yaml(
@@ -417,12 +828,15 @@ class SkillService:
                 return candidate
         return None
 
-    def _overlay_params_from_local_config_yaml(self, skill: Dict[str, Any]) -> Dict[str, Any]:
-        """Prefer ``<skills_dir>/<name>/config/config.yaml`` for ``params`` in API responses.
+    def _enrich_configs_from_yaml(self, skill: Dict[str, Any]) -> Dict[str, Any]:
+        """Read local config files and overlay onto skill.
 
-        The database stores comment-free JSON (no legacy ``_comment`` keys, no `` # `` suffixes).
-        On-disk YAML may use ``#`` lines; when the file exists, parse with ruamel (inline tips
-        on scalars only) and use for ``params``; otherwise use DB.
+        config/config.yaml → config_values (runtime defaults dict)
+        config/schema.yaml → config_schemas (parameter metadata list)
+
+        If a file does not exist, the corresponding DB key is removed so the
+        response never contains stale data (e.g. {"configs": null} instead of
+        the old DB value).
         """
         out = dict(skill)
         local_dir = self._resolve_local_skills_dir_for_overlay()
@@ -431,20 +845,28 @@ class SkillService:
         name = out.get("name")
         if not name:
             return out
-        path = _local_skill_config_yaml_path(name, local_dir)
-        if not os.path.isfile(path):
-            return out
-        try:
-            with open(path, "rb") as f:
-                raw = f.read()
-            out["params"] = _parse_skill_params_from_config_bytes(raw)
-            logger.info("Using local config.yaml params (scalar inline comment tooltips) for skill %s", name)
-        except Exception as exc:
-            logger.warning(
-                "Could not use local config.yaml for skill %s params (using DB): %s",
-                name,
-                exc,
-            )
+        config_path = _local_skill_config_yaml_path(name, local_dir)
+        if os.path.isfile(config_path):
+            try:
+                with open(config_path, "rb") as f:
+                    raw = f.read()
+                out["config_values"] = _parse_skill_params_from_config_bytes(raw)
+            except Exception as exc:
+                logger.warning("Could not parse local config.yaml for skill %s: %s", name, exc)
+        else:
+            out.pop("config_values", None)
+        # schema.yaml takes precedence over DB config_schemas
+        schema_path = _local_skill_schema_yaml_path(name, local_dir)
+        if os.path.isfile(schema_path):
+            try:
+                with open(schema_path, "rb") as f:
+                    raw = f.read()
+                parsed = _parse_skill_schema_from_yaml_bytes(raw)
+                out["config_schemas"] = parsed
+            except Exception as exc:
+                logger.warning("Could not parse local schema.yaml for skill %s: %s", name, exc)
+        else:
+            out.pop("config_schemas", None)
         return out
 
     def list_skills(self, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -458,7 +880,8 @@ class SkillService:
         """
         try:
             skills = skill_db.list_skills()
-            return [self._overlay_params_from_local_config_yaml(s) for s in skills]
+            enriched = [self._enrich_configs_from_yaml(s) for s in skills]
+            return enriched
         except Exception as e:
             logger.error(f"Error listing skills: {e}")
             raise SkillException(f"Failed to list skills: {str(e)}") from e
@@ -476,7 +899,7 @@ class SkillService:
         try:
             skill = skill_db.get_skill_by_name(skill_name)
             if skill:
-                return self._overlay_params_from_local_config_yaml(skill)
+                return self._enrich_configs_from_yaml(skill)
             return None
         except Exception as e:
             logger.error(f"Error getting skill {skill_name}: {e}")
@@ -494,7 +917,7 @@ class SkillService:
         try:
             skill = skill_db.get_skill_by_id(skill_id)
             if skill:
-                return self._overlay_params_from_local_config_yaml(skill)
+                return self._enrich_configs_from_yaml(skill)
             return None
         except Exception as e:
             logger.error(f"Error getting skill by ID {skill_id}: {e}")
@@ -545,12 +968,12 @@ class SkillService:
             # Create local skill file (SKILL.md)
             self.skill_manager.save_skill(skill_data)
 
-            # Mirror DB params to config/config.yaml when present (same layout as ZIP uploads).
-            if self.skill_manager.local_skills_dir and skill_data.get("params") is not None:
+            # Mirror DB config_schemas to config/config.yaml when present (same layout as ZIP uploads).
+            if self.skill_manager.local_skills_dir and skill_data.get("config_schemas") is not None:
                 try:
                     _write_skill_params_to_local_config_yaml(
                         skill_name,
-                        _params_dict_to_storable(skill_data["params"]),
+                        _params_dict_to_storable(skill_data["config_schemas"]),
                         self.skill_manager.local_skills_dir,
                     )
                 except Exception as exc:
@@ -561,7 +984,7 @@ class SkillService:
                     )
 
             logger.info(f"Created skill '{skill_name}' with local files")
-            return self._overlay_params_from_local_config_yaml(result)
+            return self._enrich_configs_from_yaml(result)
         except SkillException:
             raise
         except Exception as e:
@@ -653,6 +1076,8 @@ class SkillService:
             "tool_ids": tool_ids,
             "allowed-tools": allowed_tools,  # Preserve for local file sync
         }
+        # Note: scripts/ reflection is only possible for ZIP uploads (scripts exist in ZIP bytes).
+        # For MD-only uploads there are no scripts to reflect at create time.
 
         # Set created_by and updated_by if user_id is provided
         if user_id:
@@ -664,7 +1089,7 @@ class SkillService:
         # Write SKILL.md to local storage
         self.skill_manager.save_skill(skill_dict)
 
-        return self._overlay_params_from_local_config_yaml(result)
+        return self._enrich_configs_from_yaml(result)
 
     def _create_skill_from_zip(
         self,
@@ -763,12 +1188,26 @@ class SkillService:
         }
 
         preferred_root = detected_skill_name or name
+
+        # Priority: schema.yaml (list metadata) > scripts AST (list) > config.yaml (dict defaults)
+        schema_from_zip = _read_schema_yaml_from_zip(zip_bytes, preferred_root)
+        inputs_from_scripts = _get_skill_inputs_from_zip(
+            zip_bytes,
+            preferred_skill_root=preferred_root,
+        )
         params_from_zip = _read_params_from_zip_config_yaml(
             zip_bytes,
             preferred_skill_root=preferred_root,
         )
+
+        if schema_from_zip:
+            skill_dict["config_schemas"] = schema_from_zip
+        elif inputs_from_scripts:
+            skill_dict["config_schemas"] = inputs_from_scripts
+
+        # config.yaml always goes into config_values (runtime defaults dict)
         if params_from_zip is not None:
-            skill_dict["params"] = params_from_zip
+            skill_dict["config_values"] = params_from_zip
 
         # Set created_by and updated_by if user_id is provided
         if user_id:
@@ -782,7 +1221,7 @@ class SkillService:
 
         self._upload_zip_files(zip_bytes, name, detected_skill_name)
 
-        return self._overlay_params_from_local_config_yaml(result)
+        return self._enrich_configs_from_yaml(result)
 
     def _delete_local_skill_files(self, skill_name: str) -> None:
         """Delete all files within a skill's local directory, preserving the directory itself.
@@ -971,7 +1410,7 @@ class SkillService:
         skill_dict["allowed-tools"] = allowed_tools
         self.skill_manager.save_skill(skill_dict)
 
-        return self._overlay_params_from_local_config_yaml(result)
+        return self._enrich_configs_from_yaml(result)
 
     def _update_skill_from_zip(
         self,
@@ -1037,7 +1476,7 @@ class SkillService:
                 logger.warning(f"Could not parse SKILL.md from ZIP: {e}")
 
         if params_from_zip is not None:
-            skill_dict["params"] = params_from_zip
+            skill_dict["config_values"] = params_from_zip
 
         result = skill_db.update_skill(
             skill_name, skill_dict, updated_by=user_id or None
@@ -1054,7 +1493,7 @@ class SkillService:
         # Update other files in local storage
         self._upload_zip_files(zip_bytes, skill_name, original_folder_name)
 
-        return self._overlay_params_from_local_config_yaml(result)
+        return self._enrich_configs_from_yaml(result)
 
     def update_skill(
         self,
@@ -1083,21 +1522,21 @@ class SkillService:
                 skill_name, skill_data, updated_by=user_id or None
             )
 
-            # Keep config/config.yaml in sync when params are updated (matches ZIP import path).
-            if CONTAINER_SKILLS_PATH and "params" in skill_data:
+            # Keep config/config.yaml in sync when config_values are updated (matches ZIP import path).
+            if CONTAINER_SKILLS_PATH and "config_values" in skill_data:
                 try:
-                    raw_params = skill_data["params"]
-                    if raw_params is None:
+                    raw_config_values = skill_data["config_values"]
+                    if raw_config_values is None:
                         _remove_local_skill_config_yaml(skill_name, CONTAINER_SKILLS_PATH)
                     else:
                         _write_skill_params_to_local_config_yaml(
                             skill_name,
-                            _params_dict_to_storable(raw_params),
+                            _params_dict_to_storable(raw_config_values),
                             CONTAINER_SKILLS_PATH,
                         )
                 except Exception as exc:
                     logger.warning(
-                        "Local config/config.yaml sync failed after params update for %s: %s",
+                        "Local config/config.yaml sync failed after config_values update for %s: %s",
                         skill_name,
                         exc,
                     )
@@ -1108,7 +1547,7 @@ class SkillService:
                     "SKILLS_PATH is not set; skipped local SKILL.md sync after DB update for %s",
                     skill_name,
                 )
-                return self._overlay_params_from_local_config_yaml(result)
+                return self._enrich_configs_from_yaml(result)
 
             try:
                 allowed_tools = skill_db.get_tool_names_by_skill_name(skill_name)
@@ -1128,7 +1567,7 @@ class SkillService:
                     exc,
                 )
 
-            return self._overlay_params_from_local_config_yaml(result)
+            return self._enrich_configs_from_yaml(result)
         except SkillException:
             raise
         except Exception as e:
@@ -1740,3 +2179,88 @@ def stream_skill_creation(
                 skill_creation_task_manager.unregister_task(task_id)
 
     return task_id, generate
+
+
+# ============== Skill List Initialization ==============
+
+
+async def init_skill_list_for_tenant(tenant_id: str, user_id: str):
+    """Initialize skill list for a new tenant by scanning local skill directories.
+
+    Mirrors init_tool_list_for_tenant() in tool_configuration_service.py.
+
+    Args:
+        tenant_id: Tenant ID for the new tenant
+        user_id: User ID for tracking who initiated the scan
+
+    Returns:
+        Dictionary containing initialization result
+    """
+    from database import skill_db as skill_db_module
+
+    if skill_db_module.check_skill_list_initialized(tenant_id):
+        logger.info(f"Skill list already initialized for tenant {tenant_id}, skipping")
+        return {"status": "already_initialized", "message": "Skill list already exists"}
+
+    logger.info(f"Initializing skill list for new tenant: {tenant_id}")
+    await update_skill_list(tenant_id=tenant_id, user_id=user_id)
+    return {"status": "success", "message": "Skill list initialized successfully"}
+
+
+async def update_skill_list(tenant_id: str, user_id: str):
+    """Scan local skill directories and update ag_skill_info_t.
+
+    Mirrors update_tool_list() in tool_configuration_service.py.
+
+    Args:
+        tenant_id: Tenant ID for the tenant
+        user_id: User ID for tracking who initiated the scan
+    """
+    from database import skill_db as skill_db_module
+    from nexent.skills import SkillManager
+
+    skill_manager = SkillManager(local_skills_dir=CONTAINER_SKILLS_PATH)
+    scanned_skills = skill_manager.list_skills()
+
+    skills_to_upsert = []
+    for skill_info in scanned_skills:
+        skill_name = skill_info.get("name")
+        if not skill_name:
+            continue
+
+        skill_data = {
+            "name": skill_name,
+            "description": skill_info.get("description", ""),
+            "tags": skill_info.get("tags", []),
+            "source": "official",
+        }
+
+        try:
+            full_skill = skill_manager.load_skill(skill_name)
+            if full_skill:
+                skill_data["content"] = full_skill.get("content", "")
+
+            # Try schema.yaml first; fall back to AST-parsed scripts
+            schema_path = _local_skill_schema_yaml_path(skill_name, CONTAINER_SKILLS_PATH)
+            if os.path.isfile(schema_path):
+                with open(schema_path, "rb") as f:
+                    raw = f.read()
+                parsed = _parse_skill_schema_from_yaml_bytes(raw)
+                skill_data["config_schemas"] = parsed
+                logger.debug("Loaded config_schemas from schema.yaml for skill %s", skill_name)
+            else:
+                scripts_dir = os.path.join(CONTAINER_SKILLS_PATH, skill_name, "scripts")
+                inputs = _get_skill_inputs_from_code(scripts_dir)
+                if inputs:
+                    skill_data["config_schemas"] = inputs
+        except Exception as e:
+            logger.warning(f"Could not load full skill content for {skill_name}: {e}")
+            skill_data["content"] = ""
+
+        skills_to_upsert.append(skill_data)
+
+    if skills_to_upsert:
+        skill_db_module.upsert_scanned_skills(skills_to_upsert, user_id)
+        logger.info(f"Upserted {len(skills_to_upsert)} skills for tenant {tenant_id}")
+    else:
+        logger.info(f"No skills found to upsert for tenant {tenant_id}")

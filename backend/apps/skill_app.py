@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Header
 from starlette.responses import JSONResponse, StreamingResponse
+from http import HTTPStatus
 from pydantic import BaseModel, Field
 
 from consts.const import APP_VERSION, STREAMABLE_CONTENT_TYPES
@@ -13,6 +14,7 @@ from services.skill_service import (
     SkillService,
     skill_creation_task_manager,
     stream_skill_creation,
+    update_skill_list,
 )
 from consts.model import SkillInstanceInfoRequest, SkillCreateRequest, SkillCreateInteractiveRequest, SkillUpdateRequest, SkillResponse
 from utils.auth_utils import get_current_user_id, get_current_user_info
@@ -62,7 +64,8 @@ async def create_skill(
             "tool_ids": tool_ids,
             "tags": request.tags,
             "source": request.source,
-            "params": request.params,
+            "config_schemas": request.config_schemas,
+            "config_values": request.config_values,
             "files": request.files if request.files else [],
         }
         skill = service.create_skill(skill_data, user_id=user_id)
@@ -92,7 +95,7 @@ async def create_skill_from_file(
     - Single SKILL.md file: Extracts metadata and saves directly
     - ZIP archive: Contains SKILL.md plus scripts/assets folders
     """
-    try:        
+    try:
         user_id, tenant_id = get_current_user_id(authorization)
         service = SkillService()
         content = await file.read()
@@ -241,13 +244,22 @@ async def get_skill_instance(
                 detail=f"Skill instance not found for agent {agent_id} and skill {skill_id}"
             )
 
-        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content, params)
+        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content, config_schemas, config_values)
+        # The instance's per-agent overrides are mapped to config_values for the frontend.
         skill = service.get_skill_by_id(skill_id)
         if skill:
             instance["skill_name"] = skill.get("name")
             instance["skill_description"] = skill.get("description", "")
             instance["skill_content"] = skill.get("content", "")
-            instance["skill_params"] = skill.get("params") or {}
+            # Template defaults from YAML-enriched skill
+            instance["config_schemas"] = skill.get("config_schemas") or []
+            instance["config_values"] = skill.get("config_values") or {}
+            # Per-agent overrides from SkillInstance.config_values override the template defaults
+            instance_params = instance.get("config_values") or {}
+            if instance_params:
+                merged = dict(instance.get("config_values") or {})
+                merged.update(instance_params)
+                instance["config_values"] = merged
 
         return JSONResponse(content=instance)
     except UnauthorizedError as e:
@@ -286,6 +298,18 @@ async def update_skill_instance(
             version_no=request.version_no
         )
 
+        # Enrich with template info so the frontend gets config_schemas and config_values
+        instance["skill_name"] = skill.get("name")
+        instance["skill_description"] = skill.get("description", "")
+        instance["skill_content"] = skill.get("content", "")
+        instance["config_schemas"] = skill.get("config_schemas") or []
+        instance["config_values"] = skill.get("config_values") or {}
+        instance_params = instance.get("config_values") or {}
+        if instance_params:
+            merged = dict(instance.get("config_values") or {})
+            merged.update(instance_params)
+            instance["config_values"] = merged
+
         return JSONResponse(content={"message": "Skill instance updated", "instance": instance})
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -316,14 +340,19 @@ async def list_skill_instances(
             version_no=version_no
         )
 
-        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content, params)
+        # Enrich with skill info from ag_skill_info_t (skill_name, skill_description, skill_content, config_values)
+        # Also include config_schemas and config_values from the template (via YAML enrichment).
+        # The instance's per-agent overrides (config_values) are used as-is for the frontend.
         for instance in instances:
             skill = service.get_skill_by_id(instance.get("skill_id"))
             if skill:
                 instance["skill_name"] = skill.get("name")
                 instance["skill_description"] = skill.get("description", "")
                 instance["skill_content"] = skill.get("content", "")
-                instance["skill_params"] = skill.get("params") or {}
+                # Template defaults from YAML-enriched skill
+                instance["config_schemas"] = skill.get("config_schemas") or []
+                # Per-agent config_values from SkillInstance override template defaults
+                instance["config_values"] = instance.get("config_values") or skill.get("config_values") or {}
 
         return JSONResponse(content={"instances": instances})
     except UnauthorizedError as e:
@@ -331,6 +360,21 @@ async def list_skill_instances(
     except Exception as e:
         logger.error(f"Error listing skill instances: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/scan_skill")
+async def scan_and_update_skill(authorization: Optional[str] = Header(None)):
+    """Scan local skill directories and update skill list in database."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        await update_skill_list(tenant_id=tenant_id, user_id=user_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "Successfully update skill", "status": "success"}
+        )
+    except Exception as e:
+        logger.error(f"Failed to update skill: {e}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to update skill")
 
 
 @router.get("/{skill_name}")
@@ -373,8 +417,10 @@ async def update_skill(
             update_data["tags"] = request.tags
         if request.source is not None:
             update_data["source"] = request.source
-        if request.params is not None:
-            update_data["params"] = request.params
+        if request.config_schemas is not None:
+            update_data["config_schemas"] = request.config_schemas
+        if request.config_values is not None:
+            update_data["config_values"] = request.config_values
         if request.files is not None:
             update_data["files"] = [f.model_dump() for f in request.files]
 

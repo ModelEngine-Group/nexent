@@ -30,6 +30,7 @@ from database.db_models import RolePermission
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
+from services.skill_service import init_skill_list_for_tenant
 
 
 
@@ -237,6 +238,7 @@ async def signup_user_with_invitation(email: EmailStr,
 
         # Initialize tool list for the new tenant (only once per tenant)
         await init_tool_list_for_tenant(tenant_id, user_id)
+        await init_skill_list_for_tenant(tenant_id, user_id)
 
         return await parse_supabase_response(False, response, user_role, auto_login)
     else:
@@ -488,7 +490,7 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
         permission_subtype = perm.get("permission_subtype", "")
 
         if permission_category == "RESOURCE" and permission_type and permission_subtype:
-            # Format as "permission_type:permission_subtype" 
+            # Format as "permission_type:permission_subtype"
             formatted_permissions.append(
                 f"{permission_type}:{permission_subtype}")
         elif permission_type == "LEFT_NAV_MENU" and permission_subtype:

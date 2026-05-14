@@ -295,6 +295,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
     instanceList: `${API_BASE_URL}/skills/instance/list`,
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
+    scan: `${API_BASE_URL}/skills/scan_skill`,
     create: `${API_BASE_URL}/skills`,
     createStream: `${API_BASE_URL}/skills/create`,
     stopCreate: (taskId: string) => `${API_BASE_URL}/skills/stop/${taskId}`,

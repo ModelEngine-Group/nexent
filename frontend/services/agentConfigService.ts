@@ -958,7 +958,8 @@ export const fetchSkills = async () => {
       source: skill.source || "custom",
       tags: skill.tags || [],
       content: skill.content || "",
-      params: skill.params ?? null,
+      config_schemas: skill.config_schemas ?? null,
+      config_values: skill.config_values ?? null,
       tool_ids: Array.isArray(skill.tool_ids) ? skill.tool_ids.map(Number) : [],
       update_time: skill.update_time,
       create_time: skill.create_time,
@@ -1004,6 +1005,7 @@ export const fetchSkillInstances = async (
     const formattedInstances = instances.map((instance: any) => ({
       skill_id: String(instance.skill_id),
       enabled: instance.enabled ?? true,
+      config_values: instance.config_values ?? null,
       skill_name: instance.skill_name,
       skill_description: instance.skill_description,
     }));
@@ -1035,15 +1037,19 @@ export const saveSkillInstance = async (
   skillId: number,
   agentId: number,
   enabled: boolean,
-  versionNo: number = 0
+  versionNo: number = 0,
+  params?: Record<string, any>
 ) => {
   try {
-    const requestBody = {
+    const requestBody: Record<string, any> = {
       skill_id: skillId,
       agent_id: agentId,
       enabled: enabled,
       version_no: versionNo,
     };
+    if (params !== undefined) {
+      requestBody.config_values = params;
+    }
 
     const response = await fetch(API_ENDPOINTS.skills.instanceUpdate, {
       method: "POST",
@@ -1072,6 +1078,24 @@ export const saveSkillInstance = async (
       data: null,
       message: "agentConfig.skills.saveFailed",
     };
+  }
+};
+
+/**
+ * Scan local skills and update the skill list in database
+ * @returns scan result
+ */
+export const scanSkills = async () => {
+  try {
+    const response = await fetch(API_ENDPOINTS.skills.scan, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error();
+    return { success: true, message: "Skill scan completed" };
+  } catch (error) {
+    log.error("Failed to scan skills:", error);
+    return { success: false, message: "Failed to scan skills" };
   }
 };
 
@@ -1154,7 +1178,7 @@ export const updateSkill = async (
     if (skillData.source !== undefined) requestBody.source = skillData.source;
     if (skillData.tags !== undefined) requestBody.tags = normalizeTags(skillData.tags);
     if (skillData.content !== undefined) requestBody.content = skillData.content;
-    if (skillData.params !== undefined) requestBody.params = skillData.params;
+    if (skillData.config_values !== undefined) requestBody.config_values = skillData.config_values;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const response = await fetch(API_ENDPOINTS.skills.update(skillName), {

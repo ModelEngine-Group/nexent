@@ -18,8 +18,7 @@ def _params_value_for_db(raw: Any) -> Any:
     """Strip UI/YAML comment metadata, then JSON round-trip for the DB JSON column."""
     if raw is None:
         return None
-    stripped = strip_params_comments_for_db(raw)
-    return json.loads(json.dumps(stripped, default=str))
+    return json.loads(json.dumps(strip_params_comments_for_db(raw), default=str))
 
 
 def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: str, version_no: int = 0):
@@ -174,7 +173,8 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "description": skill.skill_description,
         "tags": skill.skill_tags or [],
         "content": skill.skill_content or "",
-        "params": skill.params if skill.params is not None else {},
+        "config_schemas": skill.config_schemas,
+        "config_values": skill.config_values,
         "source": skill.source,
         "created_by": skill.created_by,
         "create_time": skill.create_time.isoformat() if skill.create_time else None,
@@ -233,7 +233,8 @@ def create_skill(skill_data: Dict[str, Any]) -> Dict[str, Any]:
             skill_description=skill_data.get("description", ""),
             skill_tags=skill_data.get("tags", []),
             skill_content=skill_data.get("content", ""),
-            params=_params_value_for_db(skill_data.get("params")),
+            config_schemas=_params_value_for_db(skill_data.get("config_schemas")),
+            config_values=_params_value_for_db(skill_data.get("config_values")),
             source=skill_data.get("source", "custom"),
             created_by=skill_data.get("created_by"),
             create_time=datetime.now(),
@@ -302,8 +303,10 @@ def update_skill(
             row_values["skill_tags"] = skill_data["tags"]
         if "source" in skill_data:
             row_values["source"] = skill_data["source"]
-        if "params" in skill_data:
-            row_values["params"] = _params_value_for_db(skill_data["params"])
+        if "config_schemas" in skill_data:
+            row_values["config_schemas"] = _params_value_for_db(skill_data["config_schemas"])
+        if "config_values" in skill_data:
+            row_values["config_values"] = _params_value_for_db(skill_data["config_values"])
 
         session.execute(
             sa_update(SkillInfo)
@@ -446,3 +449,70 @@ def get_skill_with_tool_names(skill_name: str) -> Optional[Dict[str, Any]]:
             result["allowed_tools"] = get_tool_names_by_ids(session, tool_ids)
             return result
         return None
+
+
+# ============== Skill Initialization Functions ==============
+
+
+def check_skill_list_initialized(tenant_id: str) -> bool:
+    """Check if skill list has been initialized for the tenant.
+
+    Args:
+        tenant_id: Tenant ID to check
+
+    Returns:
+        True if skills have been initialized, False otherwise
+    """
+    with get_db_session() as session:
+        count = session.query(SkillInfo).filter(
+            SkillInfo.delete_flag != 'Y',
+            SkillInfo.source != 'custom'
+        ).count()
+        return count > 0
+
+
+def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str):
+    """Scan local skill directories and upsert skill metadata to ag_skill_info_t.
+
+    Mirrors update_tool_table_from_scan_tool_list() in tool_db.py.
+    All fields are unconditionally overwritten on every scan (same as tools).
+
+    Args:
+        skills: List of skill dicts with name, description, tags, content, params, inputs, source
+        user_id: User ID for tracking who initiated the scan
+    """
+    with get_db_session() as session:
+        existing_skills = session.query(SkillInfo).filter(
+            SkillInfo.delete_flag != 'Y'
+        ).all()
+        existing_dict = {s.skill_name: s for s in existing_skills}
+
+        for skill_data in skills:
+            skill_name = skill_data.get("name")
+            if not skill_name:
+                continue
+
+            if skill_name in existing_dict:
+                existing = existing_dict[skill_name]
+                # Unconditionally overwrite all fields on every scan (same as tools)
+                existing.skill_description = skill_data.get("description", "")
+                existing.skill_tags = skill_data.get("tags", [])
+                existing.skill_content = skill_data.get("content", "")
+                existing.config_schemas = _params_value_for_db(skill_data.get("config_schemas"))
+                existing.config_values = _params_value_for_db(skill_data.get("config_values"))
+                existing.updated_by = user_id
+            else:
+                new_skill = SkillInfo(
+                    skill_name=skill_name,
+                    skill_description=skill_data.get("description", ""),
+                    skill_tags=skill_data.get("tags", []),
+                    skill_content=skill_data.get("content", ""),
+                    config_schemas=_params_value_for_db(skill_data.get("config_schemas")),
+                    config_values=_params_value_for_db(skill_data.get("config_values")),
+                    source=skill_data.get("source", "official"),
+                    created_by=user_id,
+                    updated_by=user_id,
+                    create_time=datetime.now(),
+                    update_time=datetime.now(),
+                )
+                session.add(new_skill)
