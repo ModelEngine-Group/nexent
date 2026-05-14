@@ -727,6 +727,7 @@ export const modelService = {
         maximum_chunk_size: params.maximumChunkSize,
         chunk_batch: params.chunkingBatchSize,
         timeout_seconds: params.timeoutSeconds,
+        concurrency_limit: params.concurrencyLimit,
       };
 
       // Add STT specific fields
