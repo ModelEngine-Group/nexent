@@ -79,7 +79,7 @@ class TestOpenPyxlProcessor:
         """Test successful workbook loading"""
         mock_wb = Mock()
         mock_load_workbook = mocker.patch(
-            "sdk.nexent.data_process.openpyxl_processor.openpyxl.load_workbook",
+            "openpyxl.load_workbook",
             return_value=mock_wb
         )
         mocker.patch(
@@ -96,7 +96,7 @@ class TestOpenPyxlProcessor:
     def test_load_workbook_failure(self, processor, mocker: MockFixture):
         """Test workbook loading failure"""
         mocker.patch(
-            "sdk.nexent.data_process.openpyxl_processor.openpyxl.load_workbook",
+            "openpyxl.load_workbook",
             side_effect=Exception("Load failed")
         )
 

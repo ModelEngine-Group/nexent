@@ -113,8 +113,8 @@ def test_split_pdf_by_size(monkeypatch):
         def write(self, buffer):
             buffer.write(b"x" * (50 * max(1, len(self.pages))))
 
-    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.PdfReader", FakeReader)
-    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.PdfWriter", FakeWriter)
+    monkeypatch.setattr("pypdf.PdfReader", FakeReader)
+    monkeypatch.setattr("pypdf.PdfWriter", FakeWriter)
     out = splitter.split_pdf_by_size(b"%PDF", max_size=60)
     assert len(out) >= 2
 
@@ -139,13 +139,13 @@ def test_split_epub_by_size(monkeypatch):
         def get_metadata(self, *_a):
             return [("title", {})]
 
-    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.epub.read_epub", lambda *_a, **_k: Book())
+    monkeypatch.setattr("ebooklib.epub.read_epub", lambda *_a, **_k: Book())
 
     def _write_epub(buffer, new_book):
         sz = max(10, len(getattr(new_book, "spine", [])) * 80)
         buffer.write(b"x" * sz)
 
-    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.epub.write_epub", _write_epub)
+    monkeypatch.setattr("ebooklib.epub.write_epub", _write_epub)
     out = splitter.split_epub_by_size(b"epub", max_size=100)
     assert len(out) >= 2
 
@@ -167,7 +167,7 @@ def test_copy_images_safe_branches(monkeypatch):
         def _data(self):
             return b"img"
 
-    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.Image", lambda bio: object())
+    monkeypatch.setattr("openpyxl.drawing.image.Image", lambda bio: object())
     splitter.copy_images_safe(WS([Img()]), WS([]))
     assert len(added) == 1
 
@@ -185,7 +185,7 @@ def test_split_excel_empty_sheet_returns_empty(monkeypatch):
         def __getitem__(self, k):
             return WS()
 
-    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.load_workbook", lambda *_a, **_k: WB())
+    monkeypatch.setattr("openpyxl.load_workbook", lambda *_a, **_k: WB())
     assert splitter.split_excel(b"x" * 100, max_size=10) == []
 
 
@@ -206,7 +206,7 @@ def test_split_markdown_recursive(monkeypatch):
                 return [Doc("p1", {"h2": "H2A"}), Doc("p2", {"h2": "H2B"})]
             return [Doc(content, {})]
 
-    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.MarkdownHeaderTextSplitter", Splitter)
+    monkeypatch.setattr("langchain_text_splitters.MarkdownHeaderTextSplitter", Splitter)
     out = splitter.split_markdown(b"## T\ntext\n## K\nbody", max_size=8)
     assert len(out) >= 2
 
@@ -268,8 +268,8 @@ def test_split_excel_grouping_and_rows(monkeypatch):
         def save(self, buffer):
             buffer.write(b"xlsx")
 
-    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.load_workbook", lambda *_a, **_k: WBIn())
-    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.Workbook", WBOut)
+    monkeypatch.setattr("openpyxl.load_workbook", lambda *_a, **_k: WBIn())
+    monkeypatch.setattr("openpyxl.Workbook", WBOut)
     monkeypatch.setattr(splitter, "copy_images_safe", lambda *_a, **_k: None)
     out = splitter.split_excel(b"x" * 100, max_size=30)
     assert len(out) >= 2
