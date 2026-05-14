@@ -17,7 +17,7 @@ ALTER TABLE IF EXISTS nexent.mcp_record_t
     ADD COLUMN IF NOT EXISTS container_port INTEGER;
 
 -- 2) Add comments for new columns
-COMMENT ON COLUMN nexent.mcp_record_t.source IS 'Source type: local/mcp_registry';
+COMMENT ON COLUMN nexent.mcp_record_t.source IS 'Source type: local/mcp_registry/community';
 COMMENT ON COLUMN nexent.mcp_record_t.registry_json IS 'Full MCP registry server.json snapshot';
 COMMENT ON COLUMN nexent.mcp_record_t.config_json IS 'MCP config data';
 COMMENT ON COLUMN nexent.mcp_record_t.enabled IS 'Enabled';
