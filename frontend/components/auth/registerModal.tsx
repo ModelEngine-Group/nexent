@@ -77,6 +77,69 @@ export function RegisterModal() {
     form.resetFields();
   };
 
+  const setInviteCodeError = (errorMsg: string, value?: string) => {
+    message.error(errorMsg);
+    form.setFields([
+      {
+        name: "inviteCode",
+        errors: [errorMsg],
+        value,
+      },
+    ]);
+  };
+
+  const setPasswordFieldError = (errorMsg: string, value?: string) => {
+    message.error(errorMsg);
+    setPasswordError({ target: "password", message: errorMsg });
+    form.setFields([
+      {
+        name: "password",
+        errors: [errorMsg],
+        value,
+      },
+    ]);
+  };
+
+  const setEmailFieldError = (errorMsg: string, value?: string) => {
+    message.error(errorMsg);
+    setEmailError(errorMsg);
+    form.setFields([
+      {
+        name: "email",
+        errors: [errorMsg],
+        value,
+      },
+    ]);
+  };
+
+  const handleOAuthCompleteError = (
+    errorKey: string,
+    values: AuthFormValues
+  ) => {
+    const errorMsg = t(errorKey);
+
+    if (errorKey === "auth.inviteCodeInvalid") {
+      setInviteCodeError(errorMsg, values.inviteCode);
+      return;
+    }
+
+    if (errorKey === "auth.passwordMinLength") {
+      setPasswordFieldError(errorMsg, values.password);
+      return;
+    }
+
+    if (
+      errorKey === "auth.invalidEmailFormat" ||
+      errorKey === "auth.emailRequired" ||
+      errorKey === "auth.oauthEmailAlreadyExists"
+    ) {
+      setEmailFieldError(errorMsg, values.email);
+      return;
+    }
+
+    message.error(errorMsg);
+  };
+
   useEffect(() => {
     if (!isRegisterModalOpen) return;
 
@@ -127,7 +190,12 @@ export function RegisterModal() {
         });
 
         if (result.error || !result.data) {
-          throw new Error(result.error || t("auth.oauthCompleteFailed"));
+          handleOAuthCompleteError(
+            result.errorKey || "auth.oauthCompleteFailed",
+            values
+          );
+          setIsLoading(false);
+          return;
         }
 
         const user = {
@@ -190,49 +258,10 @@ export function RegisterModal() {
       const httpStatusCode = error?.code;
       const errorType = error?.message;
 
-      if (isOAuthCompletion && typeof errorType === "string") {
-        const lowerError = errorType.toLowerCase();
-        if (lowerError.includes("invitation") || lowerError.includes("invite")) {
-          const errorMsg = t("auth.inviteCodeInvalid");
-          message.error(errorMsg);
-          form.setFields([
-            {
-              name: "inviteCode",
-              errors: [errorMsg],
-              value: values.inviteCode,
-            },
-          ]);
-          setIsLoading(false);
-          return;
-        }
-
-        if (lowerError.includes("email")) {
-          message.error(errorType);
-          setEmailError(errorType);
-          form.setFields([
-            {
-              name: "email",
-              errors: [errorType],
-              value: values.email,
-            },
-          ]);
-          setIsLoading(false);
-          return;
-        }
-
-        if (lowerError.includes("password")) {
-          message.error(errorType);
-          setPasswordError({ target: "password", message: errorType });
-          form.setFields([
-            {
-              name: "password",
-              errors: [errorType],
-              value: values.password,
-            },
-          ]);
-          setIsLoading(false);
-          return;
-        }
+      if (isOAuthCompletion) {
+        handleOAuthCompleteError("auth.oauthCompleteFailed", values);
+        setIsLoading(false);
+        return;
       }
 
       // HTTP 409 Conflict

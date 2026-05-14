@@ -41,6 +41,48 @@ export interface CompleteOAuthResponse {
   };
 }
 
+export type OAuthErrorKey =
+  | "auth.oauthPendingExpired"
+  | "auth.oauthEmailAlreadyExists"
+  | "auth.oauthAccountAlreadyBound"
+  | "auth.invalidEmailFormat"
+  | "auth.emailRequired"
+  | "auth.passwordMinLength"
+  | "auth.inviteCodeInvalid"
+  | "auth.oauthCompleteFailed";
+
+function getOAuthErrorKey(errorMessage: string, status?: number): OAuthErrorKey {
+  const normalized = errorMessage.toLowerCase();
+
+  if (
+    status === 401 ||
+    normalized.includes("completion session") ||
+    normalized.includes("pending")
+  ) {
+    return "auth.oauthPendingExpired";
+  }
+  if (normalized.includes("email already exists")) {
+    return "auth.oauthEmailAlreadyExists";
+  }
+  if (normalized.includes("already bound")) {
+    return "auth.oauthAccountAlreadyBound";
+  }
+  if (normalized.includes("invalid email")) {
+    return "auth.invalidEmailFormat";
+  }
+  if (normalized.includes("email is required")) {
+    return "auth.emailRequired";
+  }
+  if (normalized.includes("password")) {
+    return "auth.passwordMinLength";
+  }
+  if (normalized.includes("invitation") || normalized.includes("invite")) {
+    return "auth.inviteCodeInvalid";
+  }
+
+  return "auth.oauthCompleteFailed";
+}
+
 export const oauthService = {
   getEnabledProviders: async (): Promise<OAuthProvider[]> => {
     try {
@@ -82,7 +124,11 @@ export const oauthService = {
 
   completeOAuth: async (
     payload: CompleteOAuthRequest
-  ): Promise<{ data?: CompleteOAuthResponse; error?: string }> => {
+  ): Promise<{
+    data?: CompleteOAuthResponse;
+    error?: string;
+    errorKey?: OAuthErrorKey;
+  }> => {
     try {
       const response = await fetch(API_ENDPOINTS.oauth.complete, {
         method: "POST",
@@ -93,8 +139,11 @@ export const oauthService = {
       });
       const data = await response.json();
       if (!response.ok) {
+        const error =
+          data.detail || data.message || "Failed to complete OAuth account";
         return {
-          error: data.detail || data.message || "Failed to complete OAuth account",
+          error,
+          errorKey: getOAuthErrorKey(error, response.status),
         };
       }
       return { data: data.data };
@@ -105,6 +154,7 @@ export const oauthService = {
           error instanceof Error
             ? error.message
             : "Failed to complete OAuth account",
+        errorKey: "auth.oauthCompleteFailed",
       };
     }
   },

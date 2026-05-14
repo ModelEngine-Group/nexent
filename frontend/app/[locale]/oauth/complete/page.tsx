@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Spin } from "antd";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
@@ -10,6 +11,7 @@ import { oauthService } from "@/services/oauthService";
 export default function OAuthCompletePage() {
   const params = useParams<{ locale: string }>();
   const locale = params?.locale === "en" ? "en" : "zh";
+  const { t } = useTranslation("common");
   const { openRegisterModal } = useAuthenticationContext();
   const [status, setStatus] = useState<"loading" | "ready" | "expired">(
     "loading"
@@ -46,14 +48,10 @@ export default function OAuthCompletePage() {
           <Alert
             type="warning"
             showIcon
-            message={
-              locale === "en"
-                ? "OAuth setup session is invalid or expired."
-                : "OAuth 补充信息会话已失效，请重新登录。"
-            }
+            message={t("auth.oauthPendingExpired")}
           />
           <Button className="mt-6 w-full" type="primary" href={`/${locale}`}>
-            {locale === "en" ? "Back to home" : "返回首页"}
+            {t("auth.oauthBackHome")}
           </Button>
         </Card>
       </div>
