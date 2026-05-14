@@ -1470,7 +1470,7 @@ def test_list_published_agents_impl_no_group_overlap(monkeypatch):
                 "enabled": True,
                 "current_version_no": 1,
                 "group_ids": "5,6",  # Different groups
-                "created_by": "user1",
+                "created_by": "user2",  # Different creator to test group filtering
                 "name": "Test Agent",
             }
         ]
@@ -1480,6 +1480,11 @@ def test_list_published_agents_impl_no_group_overlap(monkeypatch):
         return_value={"user_role": "USER"}  # Not ADMIN
     )
     agent_service_mock.query_group_ids_by_user = MagicMock(return_value=[1, 2])  # Different groups
+
+    # Mock query_agent_snapshot - though it should not be called since agent is filtered by groups
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=({}, [], [])
+    )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
@@ -1625,7 +1630,7 @@ def test_list_published_agents_impl_group_ids_query_exception(monkeypatch):
                 "enabled": True,
                 "current_version_no": 1,
                 "group_ids": "",  # Empty group_ids - will be filtered by intersection check
-                "created_by": "user1",
+                "created_by": "user2",  # Different creator to test group filtering
                 "name": "Test Agent",
             }
         ]
@@ -1637,6 +1642,11 @@ def test_list_published_agents_impl_group_ids_query_exception(monkeypatch):
     # query_group_ids_by_user raises exception - triggers line 724-728
     agent_service_mock.query_group_ids_by_user = MagicMock(
         side_effect=RuntimeError("Database error")
+    )
+
+    # Mock query_agent_snapshot - though it should not be called since agent is filtered by groups
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=({}, [], [])
     )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
