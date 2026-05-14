@@ -23,7 +23,6 @@ dependencies = [
     "httpx[socks]>=0.28.1",
     "numpy>=1.26.4",
     "openai>=1.69.0",
-    "openpyxl>=3.1.5",
     "pydantic[email]>=2.11.1",
     "python-dotenv>=1.1.0",
     "PyYAML>=6.0.1",
@@ -71,6 +70,7 @@ quality = [
     "pytest>=8.1.0"
 ]
 data_process = [
+    "openpyxl>=3.1.5",
     "unstructured[all-docs]",
     "orjson==3.10",
     "pypdf==6.9.1",
