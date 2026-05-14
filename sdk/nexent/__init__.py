@@ -1,5 +1,4 @@
 from .core import *
-from .data_process import *
 from .datamate import *
 from .memory import *
 from .storage import *
@@ -8,4 +7,4 @@ from .container import *
 from .skills import *
 
 
-__all__ = ["core", "data_process", "memory", "storage", "vector_database", "container", "datamate", "skills"]
+__all__ = ["core", "memory", "storage", "vector_database", "container", "datamate", "skills"]

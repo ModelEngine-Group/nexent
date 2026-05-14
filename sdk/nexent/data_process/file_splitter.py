@@ -1,4 +1,4 @@
-﻿import csv
+import csv
 import json
 import math
 import os
@@ -8,14 +8,6 @@ import xml.etree.ElementTree as ET
 from copy import copy
 from io import BytesIO, StringIO, TextIOWrapper
 from typing import List
-
-import ijson
-import ebooklib
-from ebooklib import epub
-from langchain_text_splitters import MarkdownHeaderTextSplitter
-from openpyxl import Workbook, load_workbook
-from openpyxl.drawing.image import Image
-from pypdf import PdfReader, PdfWriter
 
 
 class FileSplitter:
@@ -70,6 +62,9 @@ class FileSplitter:
         return result
 
     def split_epub_by_size(self, epub_bytes, max_size):
+        import ebooklib
+        from ebooklib import epub
+
         book = epub.read_epub(BytesIO(epub_bytes))
         items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
 
@@ -124,6 +119,8 @@ class FileSplitter:
 
 
     def copy_images_safe(self, src_ws, dst_ws):
+        from openpyxl.drawing.image import Image
+
         if not hasattr(src_ws, "_images") or not src_ws._images:
             return
 
@@ -154,6 +151,8 @@ class FileSplitter:
                 continue
 
     def split_excel(self, excel_bytes, max_size):
+        from openpyxl import Workbook, load_workbook
+
         file_size = len(excel_bytes)
 
         if file_size <= max_size:
@@ -233,6 +232,8 @@ class FileSplitter:
 
 
     def split_json_stream(self, json_bytes, max_size):
+        import ijson
+
         buffer = BytesIO(json_bytes)
         items = ijson.items(buffer, "item")
 
@@ -271,10 +272,11 @@ class FileSplitter:
             return 1
 
         def split_by_level(content, level, parent_headers):
+            from langchain_text_splitters import MarkdownHeaderTextSplitter
             if len(content.encode("utf-8")) <= max_size or level > 6:
                 result.append(BytesIO(content.encode("utf-8")))
                 return
-
+            
             headers_to_split_on = [(f"{'#' * level}", f"h{level}")]
             splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
             docs = splitter.split_text(content)
@@ -305,6 +307,8 @@ class FileSplitter:
 
 
     def split_pdf_by_size(self, pdf_bytes, max_size):
+        from pypdf import PdfReader, PdfWriter
+
         reader = PdfReader(BytesIO(pdf_bytes))
         total_pages = len(reader.pages)
 

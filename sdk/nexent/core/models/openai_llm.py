@@ -118,7 +118,7 @@ class OpenAIModel(OpenAIServerModel):
             temperature=self.temperature, top_p=self.top_p,
             flatten_messages_as_text=self.model_factory == "modelengine", **kwargs,
         )
-        logger.info(f"[completion_kwargs]: {completion_kwargs}")
+
         completion_kwargs["stream_options"] = {"include_usage": True}
 
         current_request = self.client.chat.completions.create(
