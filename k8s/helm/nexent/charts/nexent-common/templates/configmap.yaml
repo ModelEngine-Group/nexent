@@ -24,6 +24,9 @@ data:
   MCP_MANAGEMENT_API: {{ .Values.config.services.mcpManagementServer | quote }}
   DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}
   NORTHBOUND_API_SERVER: {{ .Values.config.services.northboundServer | quote }}
+  
+  # Service URLs (external)
+  NORTHBOUND_EXTERNAL_URL: {{ .Values.config.services.northboundExternalUrl | quote }}
 
   # Postgres Config
   POSTGRES_HOST: {{ .Values.config.postgres.host | quote }}
