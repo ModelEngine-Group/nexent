@@ -755,18 +755,32 @@ export default function AgentGenerateDetail({
           // On same agent: proceed with updating form values and store
 
           // After generation completes, get all form values and update parent component state
-          // Use generatedContent state as fallback to ensure we get the streamed data
+          // CRITICAL: Read from localStorage cache FIRST as the primary source, because:
+          // 1. localStorage is written synchronously with each streaming update (always up-to-date)
+          // 2. generatedContent React state may have closure staleness issues
+          // 3. form.getFieldsValue() depends on React state updates which may lag
           const formValues = form.getFieldsValue();
+          
+          // Read cached values as primary source (always fresh due to sync writes)
+          const cached = getAgentGenerationCache(generationAgentId);
+          const cachedDutyPrompt = cached?.dutyPrompt || "";
+          const cachedConstraintPrompt = cached?.constraintPrompt || "";
+          const cachedFewShotsPrompt = cached?.fewShotsPrompt || "";
+          const cachedAgentName = cached?.agentName || "";
+          const cachedAgentDisplayName = cached?.agentDisplayName || "";
+          const cachedAgentDescription = cached?.agentDescription || "";
+          
           const profileUpdates: AgentProfileInfo = {
-            name: generatedContent.agentName || formValues.agentName,
-            display_name: generatedContent.agentDisplayName || formValues.agentDisplayName,
+            // Use cached values as primary source, fallback to form values
+            name: cachedAgentName || generatedContent.agentName || formValues.agentName,
+            display_name: cachedAgentDisplayName || generatedContent.agentDisplayName || formValues.agentDisplayName,
             author: formValues.agentAuthor,
             model: formValues.mainAgentModel,
             max_step: formValues.mainAgentMaxStep,
-            description: generatedContent.agentDescription || formValues.agentDescription,
-            duty_prompt: generatedContent.dutyPrompt || formValues.dutyPrompt,
-            constraint_prompt: generatedContent.constraintPrompt || formValues.constraintPrompt,
-            few_shots_prompt: generatedContent.fewShotsPrompt || formValues.fewShotsPrompt,
+            description: cachedAgentDescription || generatedContent.agentDescription || formValues.agentDescription,
+            duty_prompt: cachedDutyPrompt || generatedContent.dutyPrompt || formValues.dutyPrompt,
+            constraint_prompt: cachedConstraintPrompt || generatedContent.constraintPrompt || formValues.constraintPrompt,
+            few_shots_prompt: cachedFewShotsPrompt || generatedContent.fewShotsPrompt || formValues.fewShotsPrompt,
             ingroup_permission: formValues.ingroup_permission || "READ_ONLY",
             provide_run_summary: formValues.provideRunSummary || false,
           };
