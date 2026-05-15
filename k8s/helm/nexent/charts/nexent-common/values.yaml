@@ -116,6 +116,7 @@ config:
     otlpMetricsEnabled: "true"
     instrumentFastapi: "true"
     instrumentRequests: "false"
+    fastapiIncludedUrls: ""
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""

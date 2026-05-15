@@ -203,6 +203,35 @@ def _parse_headers(headers: Any) -> Dict[str, str]:
     return {}
 
 
+def _split_url_patterns(value: str) -> List[str]:
+    """Split comma-separated URL regex patterns and drop empty entries."""
+    return [
+        item.strip()
+        for item in (value or "").split(",")
+        if item.strip()
+    ]
+
+
+def _build_fastapi_excluded_urls(
+    included_urls: str,
+    excluded_urls: str,
+) -> str:
+    """Build FastAPI excluded URL regex from included/excluded settings.
+
+    Excluded URL patterns are always skipped. If included URLs are empty, every
+    non-excluded URL is monitored. If included URLs have entries, only matching
+    URLs are monitored and every non-matching URL is excluded.
+    """
+    excluded = _split_url_patterns(excluded_urls)
+    included = _split_url_patterns(included_urls)
+    if not included:
+        return ",".join(excluded)
+
+    allow_group = "|".join(f"(?:{pattern})" for pattern in included)
+    exclude_non_included = f"^(?!.*(?:{allow_group})).*$"
+    return ",".join([*excluded, exclude_non_included])
+
+
 def _derive_http_signal_endpoint(endpoint: str, signal_path: str) -> str:
     """
     Build a signal-specific OTLP HTTP endpoint from a base or signal endpoint.
@@ -246,6 +275,7 @@ class MonitoringConfig:
     export_metrics: bool = True
     instrument_fastapi: bool = True
     instrument_requests: bool = False
+    fastapi_included_urls: str = ""
     fastapi_excluded_urls: str = ""
     fastapi_exclude_spans: List[str] = field(default_factory=lambda: ["receive", "send"])
     project_name: Optional[str] = None
@@ -265,6 +295,8 @@ class MonitoringConfig:
         self.export_metrics = _as_bool(self.export_metrics, True)
         self.instrument_fastapi = _as_bool(self.instrument_fastapi, True)
         self.instrument_requests = _as_bool(self.instrument_requests, False)
+        self.fastapi_included_urls = str(self.fastapi_included_urls or "").strip()
+        self.fastapi_excluded_urls = str(self.fastapi_excluded_urls or "").strip()
         if isinstance(self.fastapi_exclude_spans, str):
             self.fastapi_exclude_spans = [
                 item.strip()
@@ -531,12 +563,18 @@ class MonitoringManager:
         try:
             if self.is_enabled and app and OPENTELEMETRY_AVAILABLE and self._config:
                 if not self._config.instrument_fastapi:
-                    logger.info("FastAPI auto instrumentation is disabled")
-                    return False
+                    logger.info(
+                        "MONITORING_INSTRUMENT_FASTAPI is deprecated and ignored; "
+                        "FastAPI auto instrumentation remains enabled"
+                    )
 
                 instrument_kwargs: Dict[str, Any] = {}
-                if self._config.fastapi_excluded_urls:
-                    instrument_kwargs["excluded_urls"] = self._config.fastapi_excluded_urls
+                excluded_urls = _build_fastapi_excluded_urls(
+                    self._config.fastapi_included_urls,
+                    self._config.fastapi_excluded_urls,
+                )
+                if excluded_urls:
+                    instrument_kwargs["excluded_urls"] = excluded_urls
 
                 signature = inspect.signature(FastAPIInstrumentor.instrument_app)
                 if "exclude_spans" in signature.parameters:

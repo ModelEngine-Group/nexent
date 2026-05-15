@@ -33,6 +33,7 @@ from sdk.nexent.monitor.monitoring import (
     _monitoring_display_name,
     set_monitoring_operation,
     _enqueue_client_monitoring_record,
+    _build_fastapi_excluded_urls,
     OPENINFERENCE_SPAN_KIND,
     OPENINFERENCE_SPAN_KIND_AGENT,
     OPENINFERENCE_SPAN_KIND_CHAIN,
@@ -81,6 +82,7 @@ class TestMonitoringConfig:
         assert config.export_metrics is True
         assert config.instrument_fastapi is True
         assert config.instrument_requests is False
+        assert config.fastapi_included_urls == ""
         assert config.fastapi_excluded_urls == ""
         assert config.fastapi_exclude_spans == ["receive", "send"]
         assert config.telemetry_sample_rate == 1.0
@@ -97,6 +99,7 @@ class TestMonitoringConfig:
             export_metrics=False,
             instrument_fastapi=False,
             instrument_requests=True,
+            fastapi_included_urls="/agent/run",
             fastapi_excluded_urls="/agent/run",
             fastapi_exclude_spans="send",
             project_name="nexent-test",
@@ -112,6 +115,7 @@ class TestMonitoringConfig:
         assert config.export_metrics is False
         assert config.instrument_fastapi is False
         assert config.instrument_requests is True
+        assert config.fastapi_included_urls == "/agent/run"
         assert config.fastapi_excluded_urls == "/agent/run"
         assert config.fastapi_exclude_spans == ["send"]
         assert config.project_name == "nexent-test"
@@ -161,6 +165,19 @@ class TestMonitoringConfig:
 
         assert config.get_trace_endpoint() == "https://collector.example.com/v1/traces"
         assert config.get_metric_endpoint() == "https://collector.example.com/v1/metrics"
+
+    def test_fastapi_excluded_urls_excluded_only(self):
+        assert _build_fastapi_excluded_urls("", "/health,/metrics") == "/health,/metrics"
+
+    def test_fastapi_excluded_urls_included_and_excluded(self):
+        excluded_urls = _build_fastapi_excluded_urls(
+            "/agent/run,/conversation",
+            "/health",
+        )
+
+        assert excluded_urls == (
+            "/health,^(?!.*(?:(?:/agent/run)|(?:/conversation))).*$"
+        )
 
 class TestMonitoringManager:
     """Test MonitoringManager singleton and core functionality."""
@@ -330,6 +347,7 @@ class TestMonitoringManager:
             manager = MonitoringManager()
             manager.configure(MonitoringConfig(
                 enable_telemetry=True,
+                fastapi_included_urls="/agent/run",
                 fastapi_excluded_urls="/health",
                 fastapi_exclude_spans=["receive", "send"],
             ))
@@ -349,8 +367,29 @@ class TestMonitoringManager:
 
             assert result is True
             assert calls["app"] is app
-            assert calls["excluded_urls"] == "/health"
+            assert calls["excluded_urls"] == (
+                "/health,^(?!.*(?:(?:/agent/run))).*$"
+            )
             assert calls["exclude_spans"] == ["receive", "send"]
+
+    def test_setup_fastapi_app_ignores_deprecated_disable_flag(self):
+        """FastAPI instrumentation remains enabled even when the old flag is false."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = MonitoringManager()
+            manager.configure(MonitoringConfig(
+                enable_telemetry=True,
+                instrument_fastapi=False,
+                fastapi_excluded_urls="/health",
+            ))
+            app = MagicMock()
+
+            with patch(
+                'sdk.nexent.monitor.monitoring.FastAPIInstrumentor.instrument_app',
+            ) as mock_instrument:
+                result = manager.setup_fastapi_app(app)
+
+            assert result is True
+            mock_instrument.assert_called_once()
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_trace_llm_request_openinference_attrs(self, mock_trace):
