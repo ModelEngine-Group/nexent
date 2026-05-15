@@ -68,7 +68,7 @@ class DashScopeModelProvider(AbstractModelProvider):
                 # Extract key fields for logical determination (lowercased for robustness)
                 m_id = model_obj.get('model', '').lower()
                 desc = model_obj.get('description', '')
-                metadata = model_obj.get('inference_metadata', {})
+                metadata = model_obj.get('inference_metadata') or {}
                 req_mod = metadata.get('request_modality', [])
                 res_mod = metadata.get('response_modality', [])
                 model_obj.setdefault("object", model_obj.get("object", "model"))
