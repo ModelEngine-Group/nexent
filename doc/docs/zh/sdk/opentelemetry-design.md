@@ -23,6 +23,51 @@
 
 三大支柱之间不是替代关系。Metrics 适合发现问题，例如某段时间 LLM 错误数上升；Traces 适合定位问题，例如找到某次 `agent.run` 卡在某个 tool；Logs 适合补充细节，例如错误堆栈、原始提示词摘要或工具返回内容。对于 LLM Agent 场景，单纯的 HTTP 接口指标不足以解释 Agent 行为，因此必须把 Agent、LLM、Tool 等业务语义写入 trace 层级中。
 
+## 智能体可观测性行业洞察
+
+截至当前，智能体可观测性正在从传统 APM 的“接口是否健康、服务是否变慢”，扩展到“智能体为什么这样决策、哪一步引入了错误上下文、工具或检索是否误导了模型、成本和质量是否可控”。这类系统的核心难点不是单次 LLM 调用本身，而是一次用户请求会跨越路由、记忆、规划、检索、工具调用、模型生成、最终答案和反馈评价等多个阶段，并且每个阶段都可能影响最终结果。
+
+智能体可观测性的接入路径通常有几类：
+
+| 接入路径 | 典型方式 | 适合场景 | 需要注意 |
+|----------|----------|----------|----------|
+| 平台 SDK 直连 | Langfuse SDK、LangSmith SDK、Datadog / New Relic SDK、框架 callback | 快速接入某个平台的专有能力，例如 prompt 管理、评分、评估、成本分析 | 平台绑定更强，后续迁移或双写到其他后端成本较高 |
+| OpenTelemetry SDK 直连平台 OTLP endpoint | 应用直接用 OTLP HTTP/gRPC exporter 写入 Phoenix、Langfuse、LangSmith、Datadog 等兼容入口 | 希望保留 OTel 埋点模型，同时减少本地组件 | 鉴权、脱敏、采样、多后端分发逻辑会落在应用配置或平台侧 |
+| OpenTelemetry Collector 中转 | 应用只写 Collector，由 Collector 转发到 Phoenix、Langfuse、LangSmith、Grafana Tempo、Zipkin 或企业 APM | 需要统一批处理、采样、脱敏、header 注入、多后端转发和私有化部署 | 多一个运行组件，需要维护 Collector 配置和部署可用性 |
+| 平台 agent / 网关中转 | Datadog Agent、New Relic agent 或企业内部 telemetry gateway | 企业已有 APM 基础设施、权限、网络出口和审计要求明确 | 数据模型可能会被平台转换，AI 语义字段需要确认兼容性 |
+
+从知名 Agent/LLM 应用框架的公开文档看，可观测性方案也呈现“框架内置 tracing + 平台集成 + OTel 标准化”并存的状态：
+
+| Agent / LLM 框架或平台 | 公开文档中的可观测性方式 | 技术特点 | 对 Nexent 的启示 |
+|------------------------|--------------------------|----------|------------------|
+| LangChain / LangGraph | LangSmith Observability，用于 tracing、调试和评估 LangGraph/LangChain 应用 | 与框架生态绑定紧密，能保留 graph、run、session、feedback 等高层语义 | Agent 平台需要 trace 之外的会话、反馈、评估维度；仅有通用 span 不够 |
+| LlamaIndex | LlamaTrace / Arize Phoenix、W&B Weave、Langtrace 等 observability integrations | 偏向 RAG、index、query engine、retriever 调试，强调检索和上下文质量 | Nexent 的知识库检索、工具输出和模型生成需要在同一 trace 中关联 |
+| OpenAI Agents SDK | SDK 内置 tracing，记录 LLM generation、tool call、handoff、guardrail、自定义事件，并支持 tracing provider 集成 | 框架直接定义 Agent 运行时事件模型，便于查看一次 agent run 的完整过程 | 对 Agent 关键事件要做一等公民建模，而不是只依赖 HTTP span |
+| Microsoft Semantic Kernel | 使用 `Microsoft.SemanticKernel` ActivitySource，并尽量遵循 OpenTelemetry Semantic Conventions | 企业应用框架倾向采用 OTel 语义，便于接入既有 APM 和治理体系 | Nexent 应保持标准 OTel 兼容，方便企业环境接入 |
+| CrewAI | AgentOps 等集成提供 agent workflow observability | 多智能体协作中更关注 agent、task、tool、crew 级别的执行轨迹 | 多 Agent 或多工具流程需要明确记录任务边界和协作关系 |
+| AutoGen | 支持 LLM agent observability，通过内置 logging 和 partner providers 接入 | 多 Agent 对话和协作更强调消息、角色、工具和回合结构 | 仅记录模型调用不足以解释多 Agent 协作，需要保留消息和角色上下文 |
+| Vercel AI SDK | AI SDK telemetry 使用 OpenTelemetry，Vercel tracing 也基于 OpenTelemetry | 前端/全栈 AI 应用倾向直接复用 OTel，与 Web 框架 telemetry 合流 | Nexent 前后端和服务端 Agent 监控应避免割裂，统一 trace 上下文更有价值 |
+| Haystack | Tracing 文档提供 OpenTelemetryTracer 和 ddtrace 选项 | RAG pipeline 框架同时支持开放标准和特定 APM 工具 | Pipeline/Agent 节点应保持可替换 exporter，而不是绑定单一后端 |
+
+从数据分层看，这些路径仍然服务于相似的目标：
+
+- 应用埋点层：在业务代码、Agent 框架、LLM SDK、HTTP 框架和工具调用处生成 trace、span、event、metric。常见方式包括 OpenTelemetry 自动/手动埋点、OpenInference 语义约定、平台 SDK，以及 LangChain、LlamaIndex、OpenAI、Anthropic 等生态集成。
+- 传输与治理层：可以是 OTLP 直连，也可以经过 OpenTelemetry Collector、平台 agent 或企业网关；这里负责鉴权、批处理、采样、脱敏、header 注入和多后端转发。Collector 是常见的中立组件，但不是唯一方式，也不是所有平台的必要前置条件。
+- 存储与查询层：通用 trace 后端如 Grafana Tempo、Zipkin、Jaeger 用于调用链查询；全栈 APM 平台如 Datadog、New Relic、Elastic、Honeycomb 用于把 trace、metrics、logs、infra 关联起来；AI 原生平台如 Arize Phoenix、Langfuse、LangSmith 更关注 prompt、completion、session、user、tool、retrieval 和 evaluation。
+- 分析与治理层：在 trace 基础上做 token 成本、延迟、TTFT、错误率、工具失败率、检索质量、幻觉/安全检测、用户反馈、A/B 实验和 LLM-as-judge 评估。这里通常已经超出传统 trace 存储，需要额外的语义属性、评估任务和业务维度。
+
+不同技术路线的取舍如下：
+
+| 技术路线 | 代表平台 / 技术 | 优势 | 局限 | 对 Nexent 的启示 |
+|----------|-----------------|------|------|------------------|
+| 传统 APM / 全栈可观测性 | Datadog、New Relic、Elastic、Honeycomb | 基础设施、服务、日志、指标、告警和权限体系成熟，适合生产运维统一视角 | 默认更懂 HTTP/RPC/数据库，对 Agent 推理、工具、检索、prompt 语义需要额外属性或平台扩展 | 保留标准 trace/metric/log 语义，避免只做 AI 平台私有埋点 |
+| 开源 trace 后端 | Grafana Tempo、Zipkin、Jaeger | 部署灵活，适合本地化、私有化和低成本 trace 查询；Grafana 生态适合 dashboard 组合 | 不直接理解 LLM/Agent 语义，质量分析、session、prompt 管理和 evaluation 需要自建 | 本地调试和私有化部署应优先支持 OTLP 到通用 trace 后端 |
+| AI / LLM 原生可观测性 | Arize Phoenix、Langfuse、LangSmith | 更贴近 LLM 应用，支持 prompt、completion、session、user、tool、retrieval、evaluation 等语义 | 平台语义和 SDK 差异较大，过度绑定会增加迁移成本 | 在标准 span 上补充 OpenInference、Langfuse 等兼容属性，而不是把核心链路绑定到单一平台 |
+| 评估与反馈平台 | Phoenix Evals、LangSmith Evaluation、Langfuse Scores、Datadog LLM evaluations | 能回答“答案是否好、检索是否准、是否安全”，弥补 trace 只能说明路径、不能判断质量的问题 | 评估成本、样本设计、标签质量和线上触发策略需要业务治理 | trace 必须包含输入、输出、上下文、工具结果和业务标签，后续才能做评估闭环 |
+| 标准化采集协议 | OpenTelemetry、OTLP、OpenInference 语义约定 | 统一 API、SDK、数据模型和传输协议，兼容多语言、多框架、多后端；可直连平台，也可经 Collector 中转 | AI 语义仍在快速演进，通用 OTel 语义无法覆盖全部 Agent 业务字段 | 以 OpenTelemetry 做主干，用 AI 语义属性作为扩展层 |
+
+因此，智能体可观测性的关键不是选择一个“唯一平台”，也不是强制所有链路都经过 Collector，而是先把遥测数据建模成可迁移、可组合、可扩展的结构：底层用标准 trace/metric/log 表达运行路径和性能，上层用 Agent/LLM/Tool/Retriever/Session/User/Evaluation 等语义补足业务解释能力。这样既能直连 Phoenix、Langfuse、LangSmith 等 AI 可观测平台，也能通过 Collector 接入 Grafana Tempo、Zipkin 或企业已有 APM，避免在产品早期把监控能力锁死在某个供应商或某套私有 SDK 中。
+
 ## 为什么使用 OpenTelemetry
 
 OpenTelemetry 是当前主流的可观测性开放标准，提供统一的 API、SDK、语义约定和 OTLP 传输协议。Nexent 选择 OpenTelemetry 作为监控主干，主要基于以下原因：
@@ -550,16 +595,37 @@ flowchart TB
   Detail --> Eval[反馈、评分和评估]
 ```
 
-与 Phoenix、Langfuse、LangSmith、Grafana Tempo、Zipkin 对比：
+监控平台之间不能只按“是否能收 trace”比较。对智能体场景，更关键的是是否理解 LLM/Agent 语义、是否支持评估和反馈、是否适合本地化部署、是否能与企业已有 APM 合流。下面按 Nexent 可能接入的平台做比较：
 
-| 方案 | 优点 | 不足 | Nexent 当前适配 |
-|------|------|------|----------------|
-| Phoenix | OpenInference 生态匹配好，适合 trace debug、实验、评估；`phoenix.otel` 可降低接入成本 | Nexent 的租户、权限、Agent 配置需要通过属性映射；HTTP 自动 span 容易产生 `unknown` 噪声 | 写入 `openinference.span.kind`、`input.value`、`output.value`、`metadata`、`session.id`、`user.id`，并支持 FastAPI 降噪 |
-| Langfuse | Trace、session、user、prompt、evaluation、dashboard 能力完整，适合 LLMOps 闭环 | 需要 `langfuse.*` 属性才能获得更好的 observation 类型、用户、会话和 metadata 聚合 | 写入 `langfuse.observation.type`、`langfuse.session.id`、`langfuse.user.id`、`langfuse.trace.metadata.*`、`langfuse.observation.input/output` |
-| LangSmith | LangChain 生态集成好，在线平台适合追踪、调试和评估 Agent 运行 | 当前仅配置 trace 转发；项目和鉴权通过 header 注入 | Collector 使用 `x-api-key` 和 `Langsmith-Project` 转发到在线 OTLP traces endpoint |
-| Grafana Tempo | TraceQL 查询灵活，Grafana 生态适合和 dashboard 聚合 | 本地形态不提供独立 metrics 存储；LLM/Agent 语义展示需要自建 dashboard | traces 转发到 Tempo，Grafana 预置 Tempo datasource 和 Nexent trace dashboard |
-| Zipkin | 部署轻量，适合本地 trace 查询和 OTLP 转发链路验证 | 不提供 LLM/Agent 专用语义展示；metrics 只进入 Collector debug pipeline | traces 通过 Collector Zipkin exporter 转发到 Zipkin v2 spans endpoint |
-| Nexent 自建页 | 可直接关联租户、会话、Agent 配置、权限、版本和业务动作，适合产品内闭环 | 需要自建 trace 存储、查询、聚合、瀑布图、权限隔离和成本统计 | 当前先通过 OTLP 对接外部平台，后续可基于同一批属性构建自有页面 |
+| 平台 | 类型 | 部署形态 | 主要接入方式 | AI / Agent 语义 | Metrics / Logs | 评估 / 反馈 | 适合场景 | Nexent 当前适配 |
+|------|------|----------|--------------|-----------------|----------------|-------------|----------|----------------|
+| Phoenix | AI 原生可观测性 / 实验分析 | 云服务或自托管 | OTLP、OpenInference、Phoenix SDK | OpenInference 生态匹配好，适合展示 LLM、retriever、agent、tool 等语义 | 重点在 trace 和实验分析，通用 infra 监控不是核心 | 支持 eval、dataset、实验分析 | 本地 trace debug、RAG/LLM 质量分析、OpenInference 语义验证 | 写入 OpenInference 属性；支持本地 Phoenix stack 和 OTLP 转发 |
+| Langfuse | LLMOps / Prompt 与 Trace 平台 | 云服务或自托管 | OTLP、Langfuse SDK、API | 对 trace、observation、session、user、prompt、metadata 支持完整 | 提供 LLM 应用维度 dashboard，通用 infra 监控不是重点 | 支持 score、feedback、eval、prompt 管理 | 需要 prompt 管理、用户会话、反馈和成本闭环的 LLM 应用 | 写入 `langfuse.*` 属性；支持本地 Langfuse stack 和 OTLP 转发 |
+| LangSmith | LangChain / LangGraph 生态观测与评估 | 云服务为主 | LangSmith SDK、OTLP endpoint | 与 LangChain/LangGraph run、thread、feedback、evaluation 生态贴合 | 重点在应用 trace 和评估，不替代通用 APM | 评估、dataset、反馈、回归测试能力强 | 使用 LangChain/LangGraph 或需要在线评估闭环 | 支持 Collector 注入 `x-api-key` 和 `Langsmith-Project` 转发 traces |
+| Grafana Tempo + Grafana | 通用 trace 后端 / Dashboard | 自托管或云服务 | OTLP、Jaeger、Zipkin 等，经 Collector 常见 | 不内置 LLM/Agent 专用语义，需要 dashboard 和属性约定补充 | Grafana 生态可接 Prometheus、Loki、Tempo 组合 | 不提供原生 LLM 评估，需要外部系统 | 私有化、本地化、已有 Grafana/Prometheus/Loki 体系 | 支持本地 Tempo + Grafana stack，预置 Tempo datasource 和 trace dashboard |
+| Zipkin | 轻量分布式 tracing | 自托管 | Zipkin API，通常由 Collector exporter 转发 | 只理解通用 trace/span，不理解 LLM/Agent 语义 | 不提供 metrics/logs 平台能力 | 不提供评估能力 | 最小本地 trace 查询、验证转发链路、低成本调试 | 支持本地 Zipkin stack，Collector 转发 traces |
+| Datadog LLM Observability | 全栈 APM + LLM Observability | 云服务 / Agent | Datadog SDK、Agent、OTel/OTLP 等 | 支持 LLM 应用 traces、prompt/completion、成本、质量和安全维度 | 全栈 metrics/logs/traces/APM/infra 能力强 | 支持 LLM evaluations、质量和安全监控 | 企业已有 Datadog，需把 AI 应用纳入统一生产监控 | 可通过标准 OTLP/Collector 或平台 SDK 接入，当前未内置本地 stack |
+| New Relic AI Monitoring | 全栈 APM + AI Monitoring | 云服务 / Agent | New Relic agent、OTel/OTLP 等 | 关注 LLM app 性能、错误、成本和模型交互 | 全栈 APM、infra、logs、browser/mobile 生态完整 | 提供 AI 应用监控与分析能力，评估深度依赖平台能力 | 企业已有 New Relic，关注生产运行和统一告警 | 可通过标准 OTLP/Collector 或平台 agent 接入，当前未内置本地 stack |
+| Elastic Observability | 全栈可观测性 / 搜索分析 | 云服务或自托管 | Elastic APM agent、OTel/OTLP、EDOT | 支持 LLM observability 和 OTel 语义，适合把 AI trace 与日志、指标、搜索分析合并 | logs、metrics、traces、搜索分析能力强 | 侧重监控、分析和 dashboard，业务评估闭环仍需额外设计 | 已有 Elastic Stack、重视日志检索、私有化和统一搜索分析 | 可通过 OTLP/Collector 对接，当前未内置本地 stack |
+| Honeycomb | 事件驱动可观测性 / 高基数分析 | 云服务 | OTLP、OpenTelemetry SDK、Events API / libhoney | 擅长高基数 trace/event 分析，AI 语义通过属性和 OTel GenAI 约定表达 | 强在 trace/event 和指标分析，日志通常通过事件化方式分析 | 不提供完整 LLMOps 评估闭环 | 需要按租户、用户、agent、tool 做高维切片分析 | 可通过 OTLP/Collector 对接，当前未内置本地 stack |
+| Nexent 自建页 | 产品内业务观测 | 自建 | 复用 OTel 属性和业务数据库 | 最能理解租户、会话、Agent 配置、权限、版本和业务动作 | 需要自建指标、查询、存储和告警 | 可与产品反馈、评分和评估闭环深度结合 | 产品内闭环、权限隔离、面向终端用户或运维角色的监控页 | 当前先通过 OTLP 对接外部平台，后续可基于同一批属性构建自有页面 |
+
+从选型上可以把平台分成三类：
+
+- AI 原生平台优先解决“Agent 为什么这样回答、prompt/tool/retrieval 是否有效、质量如何评估”的问题，适合研发调试和 LLMOps 闭环。
+- 通用 trace 后端优先解决“链路是否完整、哪一步慢、部署是否轻量和可私有化”的问题，适合本地调试和私有化基础能力。
+- 全栈 APM 优先解决“生产系统整体是否健康、AI 服务如何纳入企业统一监控、告警和审计”的问题，适合已有企业监控体系的团队。
+
+按使用场景选择时，可以简化成下面的矩阵：
+
+| 场景 | 优先平台 | 原因 | 代价 |
+|------|----------|------|------|
+| 本地开发和快速看 trace | Phoenix、Zipkin、Grafana Tempo | 自托管简单，能快速验证 span 层级、Collector 转发和属性是否正确 | 对质量评估、prompt 管理和业务闭环支持有限 |
+| RAG / Agent 质量分析 | Phoenix、Langfuse、LangSmith | 更理解 prompt、completion、retriever、tool、session、feedback 和 eval | 平台语义差异较大，需要保留可迁移的 OTel 属性 |
+| 企业生产统一监控 | Datadog、New Relic、Elastic、Honeycomb | 能和服务、基础设施、日志、指标、告警、权限体系合流 | AI 业务语义需要通过 OTel GenAI/OpenInference/自定义属性补齐 |
+| 产品内用户态监控页 | Nexent 自建页 + 外部 trace 后端 | 能结合租户、权限、Agent 配置、会话、反馈和产品操作 | 需要自建查询、聚合、权限隔离和可视化能力 |
+
+因此 Nexent 的策略不是只绑定一个平台，而是以 OpenTelemetry/OTLP 和兼容语义属性作为主干：本地默认支持 Phoenix、Langfuse、Grafana Tempo、Zipkin 等便于验证的形态；线上或企业环境可以把同一批 traces 转发到 LangSmith、Datadog、New Relic、Elastic、Honeycomb 或其他 OTLP 兼容后端。
 
 推荐路径：
 
@@ -609,6 +675,18 @@ MONITORING_INSTRUMENT_REQUESTS=true
 
 ## 参考
 
+- OpenTelemetry Collector: https://opentelemetry.io/docs/collector/
+- OpenTelemetry OTLP Specification: https://opentelemetry.io/docs/specs/otlp/
+- OpenTelemetry GenAI Semantic Conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
+- OpenInference Semantic Conventions: https://arize-ai.github.io/openinference/spec/semantic_conventions.html
+- LangGraph Observability: https://docs.langchain.com/langgraph-platform/langsmith-observability
+- LlamaIndex Observability: https://docs.llamaindex.ai/en/stable/module_guides/observability/
+- OpenAI Agents SDK Tracing: https://openai.github.io/openai-agents-python/tracing/
+- Semantic Kernel Telemetry: https://learn.microsoft.com/en-us/semantic-kernel/concepts/enterprise-readiness/observability/telemetry-with-console
+- AgentOps CrewAI Integration: https://docs.agentops.ai/v1/integrations/crewai
+- AutoGen Agent Observability: https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/agent-observability.html
+- Vercel AI SDK Telemetry: https://ai-sdk.dev/docs/ai-sdk-core/telemetry
+- Haystack Tracing: https://docs.haystack.deepset.ai/docs/tracing
 - Phoenix Setup Tracing: https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing
 - Phoenix Setup OTEL: https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-using-phoenix-otel
 - Phoenix Authentication: https://arize.com/docs/phoenix/deployment/authentication
@@ -619,5 +697,12 @@ MONITORING_INSTRUMENT_REQUESTS=true
 - Langfuse Docker Compose: https://langfuse.com/self-hosting/local
 - Langfuse Overview: https://langfuse.com/docs
 - LangSmith OpenTelemetry: https://docs.langchain.com/langsmith/otel-gateway-trace-redaction
+- Datadog LLM Observability: https://docs.datadoghq.com/llm_observability/
+- New Relic AI Monitoring: https://docs.newrelic.com/docs/ai-monitoring/intro-to-ai-monitoring/
+- Elastic OpenTelemetry: https://www.elastic.co/docs/solutions/observability/apm/opentelemetry/
+- Elastic EDOT data streams: https://www.elastic.co/docs/reference/opentelemetry/data-streams
+- Honeycomb Send Data: https://docs.honeycomb.io/send-data/
+- Honeycomb for LLMs: https://docs.honeycomb.io/send-data/llm/
+- Grafana Tempo: https://grafana.com/docs/tempo/latest/
 - Zipkin OpenTelemetry Collector exporter: https://opentelemetry.io/docs/collector/configuration/#exporters
 - Zipkin Docker image: https://hub.docker.com/r/openzipkin/zipkin
