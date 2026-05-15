@@ -1,8 +1,8 @@
 [run]
 branch = True
-source = 
-    ../../backend
-omit = 
+source =
+    ../../sdk
+omit =
     */test*
     */tests/*
     */__pycache__/*
@@ -10,13 +10,11 @@ omit =
     */env/*
     */.venv/*
     */__init__.py
-    backend/database/utils.py
-    backend/utils/user_utils.py
 
 [paths]
 source =
-    ../../backend
-    */backend
+    ../../sdk
+    */sdk
 
 [report]
 exclude_lines =

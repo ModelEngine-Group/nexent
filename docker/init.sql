@@ -175,6 +175,8 @@ CREATE TABLE IF NOT EXISTS "model_record_t" (
   "updated_by" varchar(100) COLLATE "pg_catalog"."default",
   "created_by" varchar(100) COLLATE "pg_catalog"."default",
   "tenant_id" varchar(100) COLLATE "pg_catalog"."default" DEFAULT 'tenant_id',
+  "model_appid" varchar(100) COLLATE "pg_catalog"."default" DEFAULT '',
+  "access_token" varchar(100) COLLATE "pg_catalog"."default" DEFAULT '',
   CONSTRAINT "nexent_models_t_pk" PRIMARY KEY ("model_id")
 );
 ALTER TABLE "model_record_t" OWNER TO "root";
@@ -198,6 +200,8 @@ COMMENT ON COLUMN "model_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "model_record_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "model_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON COLUMN "model_record_t"."tenant_id" IS 'Tenant ID for filtering';
+COMMENT ON COLUMN "model_record_t"."model_appid" IS 'Application ID for model authentication.';
+COMMENT ON COLUMN "model_record_t"."access_token" IS 'Access token for model authentication.';
 COMMENT ON TABLE "model_record_t" IS 'List of models defined by users in the configuration page';
 
 INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status") VALUES ('', 'volcano_tts', 'OpenAI-API-Compatible', 'tts', '', '', 0, 0, 'volcano_tts', 'unavailable');
@@ -211,6 +215,7 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "tenant_id" varchar(100) COLLATE "pg_catalog"."default",
   "knowledge_sources" varchar(100) COLLATE "pg_catalog"."default",
   "embedding_model_name" varchar(200) COLLATE "pg_catalog"."default",
+  "embedding_model_id" INTEGER,
   "group_ids" varchar,
   "ingroup_permission" varchar(30),
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
@@ -218,6 +223,9 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
   "updated_by" varchar(100) COLLATE "pg_catalog"."default",
   "created_by" varchar(100) COLLATE "pg_catalog"."default",
+  "summary_frequency" varchar(10) COLLATE "pg_catalog"."default",
+  "last_summary_time" timestamp(0),
+  "last_doc_update_time" timestamp(0),
   CONSTRAINT "knowledge_record_t_pk" PRIMARY KEY ("knowledge_id")
 );
 ALTER TABLE "knowledge_record_t" OWNER TO "root";
@@ -228,11 +236,17 @@ COMMENT ON COLUMN "knowledge_record_t"."knowledge_describe" IS 'Knowledge base d
 COMMENT ON COLUMN "knowledge_record_t"."tenant_id" IS 'Tenant ID';
 COMMENT ON COLUMN "knowledge_record_t"."knowledge_sources" IS 'Knowledge base sources';
 COMMENT ON COLUMN "knowledge_record_t"."embedding_model_name" IS 'Embedding model name, used to record the embedding model used by the knowledge base';
+COMMENT ON COLUMN "knowledge_record_t"."embedding_model_id" IS 'Embedding model ID, foreign key reference to model_record_t.model_id';
 COMMENT ON COLUMN "knowledge_record_t"."group_ids" IS 'Knowledge base group IDs list';
 COMMENT ON COLUMN "knowledge_record_t"."ingroup_permission" IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 COMMENT ON COLUMN "knowledge_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
+COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'User who last updated the record, audit field';
+COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'User who created the record, audit field';
+COMMENT ON COLUMN "knowledge_record_t"."summary_frequency" IS 'Auto-summary frequency: 1h, 3h, 6h, 1d, 1w, or NULL (disabled)';
+COMMENT ON COLUMN "knowledge_record_t"."last_summary_time" IS 'Timestamp of last summary generation';
+COMMENT ON COLUMN "knowledge_record_t"."last_doc_update_time" IS 'Timestamp of last document add/delete operation, used for auto-summary optimization to skip unnecessary summary regeneration';
 COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "knowledge_record_t" IS 'Records knowledge base description and status information';
@@ -1306,6 +1320,9 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_t (
     nacos_config_id VARCHAR(64),
     nacos_agent_name VARCHAR(255),
 
+    -- Base URL for infrastructure health checks
+    base_url VARCHAR(512),
+
     -- Tenant isolation
     tenant_id VARCHAR(100) NOT NULL,
     created_by VARCHAR(100) NOT NULL,
@@ -1352,6 +1369,7 @@ COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.last_check_result IS 'Last heal
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.create_time IS 'Record creation timestamp';
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.update_time IS 'Record last update timestamp';
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.delete_flag IS 'Soft delete flag: Y/N'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.base_url IS 'Base URL for health checks (service root address)';
 
 
 CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_relation_t (
@@ -1365,8 +1383,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_relation_t (
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     delete_flag VARCHAR(1) DEFAULT 'N',
-    CONSTRAINT uq_local_external_agent UNIQUE (local_agent_id, external_agent_id),
-    CONSTRAINT fk_external_agent FOREIGN KEY (external_agent_id) REFERENCES nexent.ag_a2a_external_agent_t(id)
+    CONSTRAINT uq_local_external_agent UNIQUE (local_agent_id, external_agent_id)
 );
 
 ALTER TABLE nexent.ag_a2a_external_agent_relation_t OWNER TO "root";
@@ -1476,9 +1493,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_message_t (
     extensions JSONB,                               -- Extension URI list
     reference_task_ids JSONB,                        -- Referenced task IDs array
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(task_id, message_index),
-    CONSTRAINT ag_a2a_message_t_task_id_fk FOREIGN KEY (task_id)
-        REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE
+    UNIQUE(task_id, message_index)
 );
 
 ALTER TABLE nexent.ag_a2a_message_t OWNER TO "root";
@@ -1504,8 +1519,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_artifact_t (
     meta_data JSONB,                                -- Metadata
     extensions JSONB,                                -- Extension URI list
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_artifact_task FOREIGN KEY (task_id)
-        REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE,
     UNIQUE(task_id, artifact_id)
 );
 

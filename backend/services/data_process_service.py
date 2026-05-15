@@ -148,8 +148,28 @@ class DataProcessService:
             logger.debug(
                 f"⏰ Inspector initialization took {time.time() - start_time}s")
 
-            # Collect task IDs from different sources
+            # Collect task IDs from different sources and keep runtime metadata
             task_ids = set()
+            runtime_task_meta: Dict[str, Dict[str, Any]] = {}
+
+            def _normalize_runtime_meta(task: Dict[str, Any]) -> Dict[str, Any]:
+                task_name_full = task.get('name', '') or ''
+                task_name = task_name_full.split('.')[-1] if task_name_full else ''
+                kwargs = task.get('kwargs') or {}
+                if isinstance(kwargs, str):
+                    try:
+                        import json as _json
+                        kwargs = _json.loads(kwargs)
+                    except Exception:
+                        kwargs = {}
+                if not isinstance(kwargs, dict):
+                    kwargs = {}
+                return {
+                    'task_name': task_name,
+                    'index_name': kwargs.get('index_name', ''),
+                    'path_or_url': kwargs.get('source', ''),
+                    'original_filename': kwargs.get('original_filename', ''),
+                }
 
             def get_active():
                 return inspector.active()
@@ -169,12 +189,15 @@ class DataProcessService:
                         task_id = task.get('id')
                         if task_id:
                             task_ids.add(task_id)
+                            runtime_task_meta[task_id] = _normalize_runtime_meta(task)
             if reserved_tasks_dict:
                 for worker, tasks in reserved_tasks_dict.items():
                     for task in tasks:
                         task_id = task.get('id')
                         if task_id:
                             task_ids.add(task_id)
+                            # Keep active metadata if already present
+                            runtime_task_meta.setdefault(task_id, _normalize_runtime_meta(task))
 
             # Currently, we don't have scheduled tasks, so skip getting scheduled tasks here
             start_time = time.time()
@@ -192,15 +215,33 @@ class DataProcessService:
                     f"Failed to query Redis for stored task IDs: {str(redis_error)}")
             logger.debug(
                 f"Total unique task IDs collected (inspector + Redis): {len(task_ids)}")
-            tasks = [get_task_info(task_id) for task_id in task_ids]
+            task_id_list = list(task_ids)
+            tasks = [get_task_info(task_id) for task_id in task_id_list]
             all_task_infos = await asyncio.gather(*tasks, return_exceptions=True)
-            for task_info in all_task_infos:
+            for idx, task_info in enumerate(all_task_infos):
                 if isinstance(task_info, Exception):
                     logger.warning(
                         f"Failed to get status for a task: {task_info}")
                     continue
+                task_id = task_id_list[idx]
+                runtime_meta = runtime_task_meta.get(task_id, {})
+                # Backfill runtime info for pending/reserved tasks that do not have result metadata yet
+                if runtime_meta:
+                    if not task_info.get('task_name') and runtime_meta.get('task_name'):
+                        task_info['task_name'] = runtime_meta.get('task_name')
+                    if not task_info.get('index_name') and runtime_meta.get('index_name'):
+                        task_info['index_name'] = runtime_meta.get('index_name')
+                    if not task_info.get('path_or_url') and runtime_meta.get('path_or_url'):
+                        task_info['path_or_url'] = runtime_meta.get('path_or_url')
+                    if not task_info.get('original_filename') and runtime_meta.get('original_filename'):
+                        task_info['original_filename'] = runtime_meta.get('original_filename')
+
                 if filter and not (task_info.get('index_name') and task_info.get('task_name')):
-                    continue
+                    # Keep user-visible queued tasks even before worker updates task meta.
+                    if task_info.get('task_name') not in {'process', 'forward', 'process_and_forward'}:
+                        continue
+                    if not task_info.get('index_name'):
+                        continue
                 all_tasks.append(task_info)
             logger.debug(f"Retrieved {len(all_tasks)} tasks.")
         except Exception as e:

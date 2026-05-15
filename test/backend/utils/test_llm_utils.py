@@ -16,6 +16,10 @@ nexent_module = types.ModuleType("nexent")
 nexent_module.__path__ = []
 sys.modules['nexent'] = nexent_module
 
+sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
+sys.modules['nexent.monitor'].set_monitoring_context = MagicMock()
+sys.modules['nexent.monitor'].set_monitoring_operation = MagicMock()
+
 storage_pkg = types.ModuleType("nexent.storage")
 storage_pkg.__path__ = []
 sys.modules['nexent.storage'] = storage_pkg

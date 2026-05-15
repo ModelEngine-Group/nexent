@@ -261,7 +261,7 @@ class A2AAgentAdapter:
             A2A Message response dict wrapped in {"message": {...}}.
         """
         if not message_id:
-            message_id = f"msg_{uuid4().hex[:16]}"
+            message_id = f"msg_{uuid4().hex}"
 
         if parts:
             message_parts = parts

@@ -158,7 +158,7 @@ export function ChatInput({
   const { t } = useTranslation("common");
 
   // Use the configuration hook to get the application avatar
-  const { appConfig, getAppAvatarUrl } = useConfig();
+  const { appConfig, getAppAvatarUrl, modelConfig } = useConfig();
   const avatarUrl = getAppAvatarUrl(40); // Avatar size is 40 in initial mode
 
   // When the recording status changes, notify the parent component
@@ -407,6 +407,31 @@ export function ChatInput({
         ws.onopen = () => {
           setIsRecording(true);
           setRecordingStatus("recording");
+
+          // Send STT config to backend
+          const sttConfig: Record<string, string> = {
+            language: "zh",
+          };
+
+          // Check if using Volcano Engine STT
+          const isVolcSTT = modelConfig?.stt?.modelFactory === "volcengine";
+
+          if (isVolcSTT) {
+            // Volcano Engine STT requires modelFactory, modelAppid, and accessToken
+            sttConfig.model_factory = "volcengine";
+            sttConfig.model_appid = modelConfig?.stt?.modelAppid || "";
+            sttConfig.access_token = modelConfig?.stt?.accessToken || "";
+            sttConfig.base_url = modelConfig?.stt?.apiConfig?.modelUrl || "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
+          } else {
+            // Ali/DashScope STT uses api_key and model name
+            sttConfig.api_key = modelConfig?.stt?.apiConfig?.apiKey || "sk-no-api-key";
+            sttConfig.model = modelConfig?.stt?.modelName || "qwen3-asr-flash-realtime";
+            sttConfig.base_url = modelConfig?.stt?.apiConfig?.modelUrl || "";
+          }
+
+          const configJson = JSON.stringify(sttConfig);
+          ws.send(configJson);
+
           try {
             mediaRecorder.start(250);
           } catch (error) {
@@ -421,16 +446,27 @@ export function ChatInput({
           try {
             const response = JSON.parse(event.data);
 
+            // Handle server ready signal
+            if (response.status === "ready") {
+              return;
+            }
+
+            // Handle transcription results - display all results for real-time feedback
             if (response.result && response.result.text) {
+              // Ali STT format with nested result
               onInputChange(response.result.text);
             } else if (response.text) {
+              // Direct text format (阿里/火山)
               onInputChange(response.text);
-            } else if (response.status === "ready") {
             } else if (response.error) {
               log.error("❌ STT service error:", response.error);
               setRecordingStatus("error");
               setIsRecording(false);
               cleanup();
+            } else if (response.vad === "started") {
+              // VAD detected speech start
+            } else if (response.vad === "stopped") {
+              // VAD detected speech stop
             }
           } catch (error) {
             log.error("⚠️ Failed to parse STT response:", error);

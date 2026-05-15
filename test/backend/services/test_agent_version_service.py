@@ -601,6 +601,17 @@ def test_rollback_version_impl_success(monkeypatch):
     }
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
+
+    # Mock query_agent_snapshot
+    mock_agent_snapshot = {"agent_id": 1, "name": "test"}
+    mock_tools_snapshot = []
+    mock_relations_snapshot = []
+    mock_query_snapshot = MagicMock(return_value=(mock_agent_snapshot, mock_tools_snapshot, mock_relations_snapshot))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+
+    # Mock restore_agent_draft
+    mock_restore = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, "restore_agent_draft", mock_restore)
     mock_query_snapshot = MagicMock(return_value=({"agent_id": 1}, [], []))
     monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
     monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
@@ -615,7 +626,11 @@ def test_rollback_version_impl_success(monkeypatch):
     )
 
     assert result["version_no"] == 1
+    assert result["version_name"] == "v1.0"
     assert "Successfully rolled back" in result["message"]
+    mock_search.assert_called_once_with(1, "tenant1", 1)
+    mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
+    mock_restore.assert_called_once()
 
 
 def test_rollback_version_impl_version_not_found(monkeypatch):
@@ -636,6 +651,10 @@ def test_rollback_version_impl_draft_not_found(monkeypatch):
     mock_version = {"version_no": 1}
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
+    mock_query_snapshot = MagicMock(return_value=(None, [], []))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+
+    # Mock query_agent_snapshot to return empty agent (falsy)
     mock_query_snapshot = MagicMock(return_value=(None, [], []))
     monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
 
@@ -1451,7 +1470,7 @@ def test_list_published_agents_impl_no_group_overlap(monkeypatch):
                 "enabled": True,
                 "current_version_no": 1,
                 "group_ids": "5,6",  # Different groups
-                "created_by": "user1",
+                "created_by": "user2",  # Different creator to test group filtering
                 "name": "Test Agent",
             }
         ]
@@ -1461,6 +1480,11 @@ def test_list_published_agents_impl_no_group_overlap(monkeypatch):
         return_value={"user_role": "USER"}  # Not ADMIN
     )
     agent_service_mock.query_group_ids_by_user = MagicMock(return_value=[1, 2])  # Different groups
+
+    # Mock query_agent_snapshot - though it should not be called since agent is filtered by groups
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=({}, [], [])
+    )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
@@ -1606,7 +1630,7 @@ def test_list_published_agents_impl_group_ids_query_exception(monkeypatch):
                 "enabled": True,
                 "current_version_no": 1,
                 "group_ids": "",  # Empty group_ids - will be filtered by intersection check
-                "created_by": "user1",
+                "created_by": "user2",  # Different creator to test group filtering
                 "name": "Test Agent",
             }
         ]
@@ -1618,6 +1642,11 @@ def test_list_published_agents_impl_group_ids_query_exception(monkeypatch):
     # query_group_ids_by_user raises exception - triggers line 724-728
     agent_service_mock.query_group_ids_by_user = MagicMock(
         side_effect=RuntimeError("Database error")
+    )
+
+    # Mock query_agent_snapshot - though it should not be called since agent is filtered by groups
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=({}, [], [])
     )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))

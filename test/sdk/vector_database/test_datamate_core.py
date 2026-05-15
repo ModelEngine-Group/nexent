@@ -144,6 +144,8 @@ def test_not_implemented_methods_raise(mock_client_cls):
     with pytest.raises(NotImplementedError):
         core.vectorize_documents("i", None, [])
     with pytest.raises(NotImplementedError):
+        core.vectorize_documents("i", None, [], large_mode=True)
+    with pytest.raises(NotImplementedError):
         core.delete_documents("i", "path")
     with pytest.raises(NotImplementedError):
         core.create_chunk("i", {})
