@@ -112,6 +112,10 @@ export const useSaveGuard = () => {
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
+      const relatedExternalAgentIds = (currentEditedAgent.external_sub_agent_id_list || [])
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+
       const groupIds = (currentEditedAgent.group_ids || [])
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
@@ -141,6 +145,7 @@ export const useSaveGuard = () => {
         enabled_tool_ids: enabledToolIds,
         enabled_skill_ids: enabledSkillIds,
         related_agent_ids: relatedAgentIds,
+        related_external_agent_ids: relatedExternalAgentIds,
         ingroup_permission: currentEditedAgent.ingroup_permission ?? "READ_ONLY",
       });
 
@@ -152,13 +157,13 @@ export const useSaveGuard = () => {
         );
 
         // Get the final agent ID (from result for new agents, existing currentAgentId for updates)
-        const isCreatingMode = useAgentConfigStore.getState().isCreatingMode;
         const finalAgentId = result.data?.agent_id || currentAgentId;
         if (!finalAgentId) {
           throw new Error("Failed to get agent ID after save operation");
         }
 
         // Handle create mode: exit create mode and select the newly created agent
+        const isCreatingMode = useAgentConfigStore.getState().isCreatingMode;
         if (isCreatingMode) {
           try {
             // Load the full agent details

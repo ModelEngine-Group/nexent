@@ -817,7 +817,8 @@ async def list_published_agents_impl(
             # Apply visibility filter for DEV/USER based on group overlap
             if not can_edit_all:
                 agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
-                if len(user_group_ids.intersection(agent_group_ids)) == 0:
+                is_creator = str(agent.get("created_by)) == str(user_id)"))
+                if not is_creator and len(user_group_ids.intersection(agent_group_ids)) == 0:
                     continue
 
             agent_id = agent.get("agent_id")

@@ -346,6 +346,7 @@ class AgentInfoRequest(BaseModel):
     enabled_tool_ids: Optional[List[int]] = None
     enabled_skill_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
+    related_external_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
