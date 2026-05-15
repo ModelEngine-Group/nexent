@@ -183,8 +183,19 @@ def insert_version(
         # If is_a2a column doesn't exist, retry without it using native SQL
         if "is_a2a" in str(e) and ("does not exist" in error_str or "undefinedcolumn" in error_str):
             logger.info("is_a2a column not found, using native SQL to insert")
-            # Build column list and parameter placeholders
-            columns = [k for k in version_data.keys() if k != 'is_a2a']
+            # Build column list and parameter placeholders from a fixed allowlist
+            allowed_columns = [
+                "tenant_id",
+                "agent_id",
+                "version_no",
+                "version_name",
+                "release_note",
+                "source_type",
+                "source_version_no",
+                "status",
+                "created_by",
+            ]
+            columns = [c for c in allowed_columns if c in version_data]
             col_list = ', '.join(columns)
             placeholders = ', '.join([f':{c}' for c in columns])
             insert_sql = text(f"""
@@ -192,8 +203,8 @@ def insert_version(
                 VALUES (nextval('nexent.ag_tenant_agent_version_t_id_seq'), {placeholders})
                 RETURNING id
             """)
-            # Build params without is_a2a
-            params = {k: v for k, v in version_data.items() if k != 'is_a2a'}
+            # Build params from validated columns only
+            params = {c: version_data[c] for c in columns}
             with get_db_session() as session:
                 result = session.execute(insert_sql, params)
                 return result.scalar_one()
