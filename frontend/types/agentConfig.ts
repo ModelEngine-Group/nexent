@@ -407,7 +407,7 @@ export interface McpContainer {
 export interface GeneratePromptParams {
   agent_id: number;
   task_description: string;
-  model_id: string;
+  model_id: number;
   tool_ids?: number[]; // Optional: tool IDs selected in frontend (takes precedence over database query)
   sub_agent_ids?: number[]; // Optional: sub-agent IDs selected in frontend (takes precedence over database query)
   /**

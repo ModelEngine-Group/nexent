@@ -103,12 +103,13 @@ def call_llm_for_system_prompt(
         reasoning_content_seen = False
         content_tokens_seen = 0
         for chunk in current_request:
-            if not hasattr(chunk, "choices"):
-                logger.warning("Received non-standard chunk without choices during prompt generation.")
-                continue
 
             if not chunk.choices:
                 logger.debug("Received empty choices chunk during prompt generation; skipping.")
+            # Safety check: skip non-standard chunks that lack expected attributes
+            if not hasattr(chunk, 'choices'):
+                if hasattr(chunk, '__str__'):
+                    logger.warning(f"Received non-standard chunk (no 'choices'): {str(chunk)[:200]}")
                 continue
 
             delta = chunk.choices[0].delta

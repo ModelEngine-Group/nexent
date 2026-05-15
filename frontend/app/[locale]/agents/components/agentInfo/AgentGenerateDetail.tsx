@@ -281,6 +281,21 @@ export default function AgentGenerateDetail({
       delete initialAgentInfo.group_ids;
     }
 
+    // Check if the agent's model is still available
+    const agentModelAvailable = availableLlmModels.some(
+      (m) => m.name === editedAgent.model || m.displayName === editedAgent.model
+    );
+    let effectiveMainAgentModel = initialAgentInfo.mainAgentModel;
+    let effectiveMainAgentModelId = editedAgent.model_id || 0;
+
+    if (!agentModelAvailable && defaultLlmModel) {
+      // Agent's original model is no longer available, switch to default model
+      effectiveMainAgentModel = defaultLlmModel.displayName || "";
+      effectiveMainAgentModelId = defaultLlmModel.id || 0;
+      // Update the initialAgentInfo with the new model
+      initialAgentInfo.mainAgentModel = effectiveMainAgentModel;
+    }
+
     const initialBusinessInfo = {
       businessDescription: editedAgent.business_description || "",
       businessLogicModelName:
@@ -294,11 +309,17 @@ export default function AgentGenerateDetail({
     setBusinessInfo(initialBusinessInfo);
 
     form.setFieldsValue(initialAgentInfo);
-    // Sync model to store if not already set (e.g., in create mode with default model)
+    // Sync model to store (use default model if original is unavailable)
     if (isCreatingMode && defaultLlmModel) {
       updateProfileInfo({
         model: defaultLlmModel.displayName || "",
         model_id: defaultLlmModel.id || 0,
+      });
+    } else if (!agentModelAvailable && defaultLlmModel) {
+      // Update model in store when original model is no longer available
+      updateProfileInfo({
+        model: effectiveMainAgentModel,
+        model_id: effectiveMainAgentModelId,
       });
     }
     // Sync max_step to store in create mode (default to 5)
@@ -313,7 +334,7 @@ export default function AgentGenerateDetail({
       });
     }
 
-  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode, forceRefreshKey]);
+  }, [currentAgentId, defaultLlmModel, isCreatingMode, forceRefreshKey, availableLlmModels]);
 
   // Default to selecting all groups when creating a new agent.
   // Only applies when groups are loaded and no group is selected yet.
@@ -755,7 +776,7 @@ export default function AgentGenerateDetail({
         {
           agent_id: effectiveAgentId,
           task_description: businessInfo.businessDescription,
-          model_id: businessInfo.businessLogicModelId.toString(),
+          model_id: businessInfo.businessLogicModelId,
           sub_agent_ids: editedAgent.sub_agent_id_list,
           tool_ids: Array.isArray(editedAgent.tools)
             ? editedAgent.tools.map((tool: any) =>
