@@ -43,6 +43,7 @@ model-assets/
 openspec/
 logs/
 
+.agents/
 .devspace/
 devspace.yaml
 k8s/helm/**/*.tgz
