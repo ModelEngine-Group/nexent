@@ -193,6 +193,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/summary/${indexName}/summary`,
     getSummary: (indexName: string) =>
       `${API_BASE_URL}/summary/${indexName}/summary`,
+    updateSummaryFrequency: (indexName: string) =>
+      `${API_BASE_URL}/indices/${indexName}/summary_frequency`,
 
     // File upload service
     upload: `${API_BASE_URL}/file/upload`,
@@ -202,6 +204,11 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/indices/${indexName}/documents/${encodeURIComponent(
         pathOrUrl
       )}/error-info`,
+    // Embedding model status and configuration
+    embeddingModelStatus: (indexName: string) =>
+      `${API_BASE_URL}/indices/${indexName}/embedding-model-status`,
+    updateEmbeddingModel: (indexName: string) =>
+      `${API_BASE_URL}/indices/${indexName}/embedding-model`,
   },
   dify: {
     datasets: `${API_BASE_URL}/dify/datasets`,
@@ -265,6 +272,7 @@ export const API_ENDPOINTS = {
     // Nacos config management
     nacosConfigs: `${API_BASE_URL}/a2a/client/nacos-configs`,
     nacosConfig: (configId: string) => `${API_BASE_URL}/a2a/client/nacos-configs/${configId}`,
+    nacosTestConnection: `${API_BASE_URL}/a2a/client/nacos-configs/test-connection`,
     // A2A Server management
     serverAgents: `${API_BASE_URL}/a2a/management/agents`,
     serverAgent: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}`,

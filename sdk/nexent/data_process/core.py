@@ -1,8 +1,10 @@
 import logging
 import os
+from io import BytesIO
 from typing import Dict, List, Optional
 
 from .base import FileProcessor
+from .file_splitter import FileSplitter
 from .openpyxl_processor import OpenPyxlProcessor
 from .unstructured_processor import UnstructuredProcessor
 
@@ -17,7 +19,7 @@ class DataProcessCore:
 
     Supported file types:
     - Excel files: .xlsx, .xls
-    - Generic files: .txt, .pdf, .docx, .doc, .html, .htm, .md, .rtf, .odt, .pptx, .ppt
+    - Generic files: .txt, .pdf, .docx, .doc, .html, .htm, .md, .rtf, .odt, .pptx, .ppt, .epub, .xml, .csv, .json
 
     Supported input methods:
     - In-memory byte data
@@ -32,6 +34,21 @@ class DataProcessCore:
     # Supported processors
     PROCESSORS = {"Unstructured", "OpenPyxl"}
 
+    # Supported split extensions (exclude ppt/pptx/html)
+    SPLIT_EXTENSIONS = {
+        ".csv",
+        ".epub",
+        ".xlsx",
+        ".xls",
+        ".json",
+        ".md",
+        ".pdf",
+        ".txt",
+        ".xml",
+        ".doc",
+        ".docx",
+    }
+
     def __init__(self):
         """
         Initialize the core data processing component
@@ -39,6 +56,7 @@ class DataProcessCore:
         self.processors: Dict[str, FileProcessor] = {
             "Unstructured": UnstructuredProcessor(),
             "OpenPyxl": OpenPyxlProcessor(),
+            "FileSplitter": FileSplitter(),
         }
         logger.debug("DataProcessCore initialization completed")
 
@@ -91,6 +109,52 @@ class DataProcessCore:
         except Exception as e:
             logger.error(f"File processing failed for {filename}: {str(e)}")
             raise
+
+    def file_split(
+        self,
+        file_data: bytes,
+        filename: str,
+        splitter: Optional[str] = None,
+        **params,
+    ) -> List[BytesIO]:
+        """
+        Split file into smaller parts using the unified splitter
+
+        Args:
+            file_data: File content byte data
+            filename: Filename
+            splitter: Optional splitter name (reserved for future use)
+            **params: Additional splitter parameters (e.g., max_size, encoding, libreoffice_path)
+
+        Returns:
+            List of BytesIO parts
+
+        Raises:
+            ValueError: Invalid parameters
+            RuntimeError: Split failed
+        """
+        _, ext = os.path.splitext(filename.lower())
+        if ext not in self.SPLIT_EXTENSIONS:
+            return [BytesIO(file_data)]
+
+        splitter_name = splitter or "FileSplitter"
+        splitter_instance = self.processors.get(splitter_name)
+        if not splitter_instance:
+            logger.error(f"Splitter not found: {splitter_name}")
+            return [BytesIO(file_data)]
+
+        max_size = params.pop("max_size", 5 * 1024 * 1024)
+
+        try:
+            parts = splitter_instance.file_process(file_data, filename, max_size=max_size, **params)
+            if not isinstance(parts, list) or not all(isinstance(p, BytesIO) for p in parts):
+                logger.error("Invalid split result format: expected List[BytesIO]")
+                return [BytesIO(file_data)]
+            logger.info(f"Successfully split file: {filename}")
+            return parts
+        except Exception as e:
+            logger.error(f"File split failed for {filename}: {str(e)}")
+            return [BytesIO(file_data)]
 
     def _validate_parameters(self, chunking_strategy: str, processor: Optional[str]) -> None:
         """Validate input parameters"""
@@ -147,6 +211,10 @@ class DataProcessCore:
                 ".odt",
                 ".pptx",
                 ".ppt",
+                ".epub",
+                ".json",
+                ".xml",
+                ".csv",
             ]
 
         return {"excel": list(self.EXCEL_EXTENSIONS), "generic": generic_formats}

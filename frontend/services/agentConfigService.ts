@@ -403,6 +403,7 @@ export interface UpdateAgentInfoPayload {
   enabled_tool_ids?: number[];
   enabled_skill_ids?: number[];
   related_agent_ids?: number[];
+  related_external_agent_ids?: number[];
   ingroup_permission?: string;
 }
 
