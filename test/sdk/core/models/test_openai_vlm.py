@@ -62,7 +62,13 @@ with patch.dict("sys.modules", module_mocks):
         """Return an OpenAIVLModel instance with minimal viable attributes for tests."""
 
         observer = MagicMock()
-        model = ImportedOpenAIVLModel(observer=observer, ssl_verify=True)
+        model = ImportedOpenAIVLModel(
+            observer=observer,
+            model_id="dummy-model",
+            api_key="dummy-key",
+            api_base="https://example.test",
+            ssl_verify=True,
+        )
 
         # Inject dummy attributes required by the method under test
         model.model_id = "dummy-model"
@@ -321,3 +327,55 @@ def test_analyze_image_calls_prepare_image_message(vl_model_instance, tmp_path):
 
         # Verify prepare_image_message was called with correct arguments
         mock_prepare.assert_called_once_with(str(test_image), custom_prompt)
+
+
+def test_prepare_media_message_audio(vl_model_instance):
+    audio_stream = MagicMock()
+    audio_stream.read.return_value = b"audio bytes"
+
+    messages = vl_model_instance.prepare_media_message(
+        audio_stream,
+        media_type="audio",
+        content_type="audio/mpeg",
+        system_prompt="Listen carefully",
+    )
+
+    assert messages[0]["content"][0]["type"] == "audio_url"
+    assert messages[0]["content"][0]["audio_url"]["url"].startswith("data:audio/mpeg;base64,")
+    assert messages[0]["content"][1] == {"type": "text", "text": "Listen carefully"}
+
+
+def test_prepare_media_message_video(vl_model_instance):
+    video_stream = MagicMock()
+    video_stream.read.return_value = b"video bytes"
+
+    messages = vl_model_instance.prepare_media_message(
+        video_stream,
+        media_type="video",
+        content_type="video/mp4",
+        system_prompt="Watch carefully",
+    )
+
+    assert messages[0]["content"][0]["type"] == "video_url"
+    assert messages[0]["content"][0]["video_url"]["url"].startswith("data:video/mp4;base64,")
+    assert messages[0]["content"][0]["video_url"]["max_frames"] == 16
+    assert messages[0]["content"][0]["video_url"]["fps"] == 1
+    assert messages[0]["content"][1] == {"type": "text", "text": "Watch carefully"}
+
+
+def test_analyze_audio_calls_prepare_media_message(vl_model_instance):
+    with patch.object(vl_model_instance, "prepare_media_message", return_value=[{"role": "user", "content": "test"}]) as mock_prepare:
+        vl_model_instance.__call__ = MagicMock(return_value=MagicMock())
+
+        vl_model_instance.analyze_audio("audio.mp3", system_prompt="Analyze", content_type="audio/mpeg")
+
+        mock_prepare.assert_called_once_with("audio.mp3", "audio", "audio/mpeg", "Analyze")
+
+
+def test_analyze_video_calls_prepare_media_message(vl_model_instance):
+    with patch.object(vl_model_instance, "prepare_media_message", return_value=[{"role": "user", "content": "test"}]) as mock_prepare:
+        vl_model_instance.__call__ = MagicMock(return_value=MagicMock())
+
+        vl_model_instance.analyze_video("video.mp4", system_prompt="Analyze", content_type="video/mp4")
+
+        mock_prepare.assert_called_once_with("video.mp4", "video", "video/mp4", "Analyze")

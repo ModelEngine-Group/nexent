@@ -87,6 +87,10 @@ export const ModelEditDialog = ({
     form.type === MODEL_TYPES.EMBEDDING ||
     form.type === MODEL_TYPES.MULTI_EMBEDDING;
   const isRerankModel = form.type === MODEL_TYPES.RERANK;
+  const connectivityModelType =
+    form.type === MODEL_TYPES.VLM2 || form.type === MODEL_TYPES.VLM3
+      ? (MODEL_TYPES.VLM as ModelType)
+      : form.type;
 
   const isFormValid = () => {
     return form.name.trim() !== "" && form.url.trim() !== "";
@@ -106,11 +110,9 @@ export const ModelEditDialog = ({
     });
 
     try {
-      const modelType = form.type as ModelType;
-
       const config = {
         modelName: form.name,
-        modelType: modelType,
+        modelType: connectivityModelType,
         baseUrl: form.url,
         apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
         maxTokens:
@@ -205,6 +207,8 @@ export const ModelEditDialog = ({
         embedding: MODEL_TYPES.EMBEDDING,
         multi_embedding: MODEL_TYPES.MULTI_EMBEDDING,
         vlm: MODEL_TYPES.VLM,
+        vlm2: MODEL_TYPES.VLM2,
+        vlm3: MODEL_TYPES.VLM3,
         rerank: MODEL_TYPES.RERANK,
         tts: MODEL_TYPES.TTS,
         stt: MODEL_TYPES.STT,
@@ -481,4 +485,4 @@ export const ProviderConfigEditDialog = ({
       </div>
     </Modal>
   )
-} 
+}

@@ -31,6 +31,8 @@ export type ModelType =
   | "stt"
   | "tts"
   | "vlm"
+  | "vlm2"
+  | "vlm3"
   | "multi_embedding";
 
 // Model option interface
@@ -99,6 +101,8 @@ export interface ModelConfig {
   multiEmbedding: SingleModelConfig;
   rerank: SingleModelConfig;
   vlm: SingleModelConfig;
+  vlm2: SingleModelConfig;
+  vlm3: SingleModelConfig;
   stt: STTModelConfig;
   tts: TTSModelConfig;
 }

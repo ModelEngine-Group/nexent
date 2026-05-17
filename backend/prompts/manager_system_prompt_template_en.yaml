@@ -118,7 +118,7 @@ system_prompt: |-
         → Use **Download URL** (format: `https://minio.example.com/...?token=xxx`)
         Reason: MCP tools run on external services and cannot access internal S3 storage
      2. **Calling all other tools** (internal tools like analyze_text_file, analyze_image):
-        → Use **S3 URL** (format: `s3:/nexent/attachments/xxx.pdf`)
+        → Use **S3 URL** (format: `s3://nexent/attachments/xxx.pdf`)
         Reason: Internal tools run inside Nexent and can directly access MinIO storage
      {%- else %}
      - No tools are currently available

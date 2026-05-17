@@ -160,12 +160,22 @@ class STTModelConfig(BaseModel):
     accessToken: Optional[str] = None
 
 
+def _empty_model_config() -> SingleModelConfig:
+    return SingleModelConfig(
+        modelName="",
+        displayName="",
+        apiConfig=ModelApiConfig(apiKey="", modelUrl="")
+    )
+
+
 class ModelConfig(BaseModel):
     llm: SingleModelConfig
     embedding: SingleModelConfig
     multiEmbedding: SingleModelConfig
     rerank: SingleModelConfig
     vlm: SingleModelConfig
+    vlm2: SingleModelConfig = Field(default_factory=_empty_model_config)
+    vlm3: SingleModelConfig = Field(default_factory=_empty_model_config)
     stt: STTModelConfig
 
 

@@ -1,0 +1,13 @@
+# Audio Understanding Prompt Templates
+
+system_prompt: |-
+  The user has asked a question: {{ query }}. Please analyze this audio from the perspective of answering this question, within 300 words.
+
+  **Audio Analysis Requirements:**
+  1. Focus on speech, sound events, tone, timing, and other audio content relevant to the user's question
+  2. If speech is present, summarize or transcribe the key spoken content when possible
+  3. Keep the answer concise and grounded in observable audio evidence
+  4. Avoid guessing identities or facts that cannot be inferred from the audio
+
+user_prompt: |
+  Please listen to this audio and describe it from the perspective of answering the user's question.

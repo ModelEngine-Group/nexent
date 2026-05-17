@@ -7,6 +7,8 @@ export const MODEL_TYPES = {
   STT: "stt",
   TTS: "tts",
   VLM: "vlm",
+  VLM2: "vlm2",
+  VLM3: "vlm3",
 } as const;
 
 // Model source constants

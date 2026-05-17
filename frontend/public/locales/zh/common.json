@@ -1,4 +1,4 @@
-{
+﻿{
   "assistant.name": "Nexent",
 
   "mainPage.layout.title": "Nexent | 智能问答",
@@ -811,6 +811,9 @@
   "model.type.llm": "大语言模型",
   "model.type.embedding": "向量模型",
   "model.type.vlm": "视觉语言模型",
+  "model.type.imageUnderstanding": "图片理解模型",
+  "model.type.imageGeneration": "图片生成模型",
+  "model.type.videoUnderstanding": "视频理解模型",
   "model.type.rerank": "重排模型",
   "model.type.stt": "语音识别模型",
   "model.type.tts": "语音合成模型",
@@ -880,6 +883,9 @@
   "modelConfig.option.multiEmbeddingModel": "多模态向量模型",
   "modelConfig.option.rerankerModel": "重排模型",
   "modelConfig.option.vlmModel": "视觉语言模型",
+  "modelConfig.option.imageUnderstandingModel": "图片理解模型",
+  "modelConfig.option.imageGenerationModel": "图片生成模型",
+  "modelConfig.option.videoUnderstandingModel": "视频理解模型",
   "modelConfig.option.ttsModel": "语音合成模型",
   "modelConfig.option.sttModel": "语音识别模型",
   "modelConfig.error.loadList": "加载模型列表失败:",

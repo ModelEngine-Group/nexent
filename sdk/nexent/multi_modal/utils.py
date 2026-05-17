@@ -34,10 +34,10 @@ def is_url(url: str) -> Optional[UrlType]:
     if url.startswith("https://"):
         return "https"
 
-    if url.startswith("s3://"):
-        bucket_path = url.replace("s3://", "", 1)
+    if url.startswith("s3://") or url.startswith("s3:/"):
+        bucket_path = url.replace("s3://", "", 1) if url.startswith("s3://") else url.replace("s3:/", "", 1).lstrip("/")
         bucket_object = bucket_path.split("/", 1)
-        if len(bucket_object) == 2 and all(bucket_object):
+        if len(bucket_object) == 2 and all(bucket_object) and ":" not in bucket_object[0]:
             return "s3"
         return None
 
@@ -321,6 +321,7 @@ def parse_s3_url(s3_url: str) -> Tuple[str, str]:
 
     Supports formats:
     - s3://bucket/key
+    - s3:/bucket/key
     - /bucket/key (MinIO path format)
 
     Args:
@@ -335,11 +336,16 @@ def parse_s3_url(s3_url: str) -> Tuple[str, str]:
     if not s3_url:
         raise ValueError("S3 URL cannot be empty")
 
-    if s3_url.startswith('s3://'):
-        parts = s3_url.replace('s3://', '').split('/', 1)
+    if s3_url.startswith('s3://') or s3_url.startswith('s3:/'):
+        normalized_url = (
+            s3_url.replace('s3://', '', 1)
+            if s3_url.startswith('s3://')
+            else s3_url.replace('s3:/', '', 1).lstrip('/')
+        )
+        parts = normalized_url.split('/', 1)
         if len(parts) == 2:
             bucket, object_name = parts
-            if not bucket or not object_name:
+            if not bucket or not object_name or ":" in bucket:
                 raise ValueError(f"Invalid s3:// URL format: {s3_url}")
             return bucket, object_name
         raise ValueError(f"Invalid s3:// URL format: {s3_url}")

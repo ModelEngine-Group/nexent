@@ -660,17 +660,11 @@ async def test_batch_create_models_for_tenant_flow():
 
     existing = [
         {"model_id": "del-id", "model_repo": "silicon", "model_name": "delete"},
-        {"model_id": "keep-id", "model_repo": "silicon", "model_name": "keep"},
+        {"model_id": "keep-id", "model_repo": "silicon", "model_name": "keep", "max_tokens": 1024},
     ]
-
-    def get_by_display(display_name, tenant_id):
-        if display_name == "silicon/keep":
-            return {"model_id": "keep-id", "max_tokens": 1024}
-        return None
 
     with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing) as mock_get_existing, \
             mock.patch.object(svc, "delete_model_record") as mock_delete, \
-            mock.patch.object(svc, "get_model_by_display_name", side_effect=get_by_display) as mock_get_by_display, \
             mock.patch.object(svc, "update_model_record") as mock_update, \
             mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"prepared": True})) as mock_prep, \
             mock.patch.object(svc, "create_model_record") as mock_create:
@@ -679,11 +673,33 @@ async def test_batch_create_models_for_tenant_flow():
 
         mock_get_existing.assert_called_once_with("t1", "silicon", "llm")
         mock_delete.assert_called_once_with("del-id", "u1", "t1")
-        mock_get_by_display.assert_any_call("silicon/keep", "t1")
         mock_update.assert_called_once_with(
             "keep-id", {"max_tokens": 4096}, "u1")
         mock_prep.assert_awaited()
         mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_uses_requested_type_for_each_model():
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "silicon",
+        "type": "vlm",
+        "models": [
+            {"id": "Qwen/Qwen2.5-VL-72B-Instruct", "model_type": "llm", "max_tokens": 4096},
+        ],
+        "api_key": "k",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"prepared": True})) as mock_prep, \
+            mock.patch.object(svc, "create_model_record"):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        prepared_model = mock_prep.call_args.kwargs["model"]
+        assert prepared_model["model_type"] == "vlm"
 
 
 @pytest.mark.asyncio
@@ -702,22 +718,16 @@ async def test_batch_create_models_max_tokens_update():
         "api_key": "k",
     }
 
-    def get_by_display(display_name, tenant_id):
-        if display_name == "silicon/model1":
-            # Different from new value
-            return {"model_id": "id1", "max_tokens": 4096}
-        elif display_name == "silicon/model2":
-            return {"model_id": "id2", "max_tokens": 4096}  # Same as new value
-        elif display_name == "silicon/model3":
-            # Existing has value, new is None
-            return {"model_id": "id3", "max_tokens": 2048}
-        return None
+    existing = [
+        {"model_id": "id1", "model_repo": "silicon", "model_name": "model1", "max_tokens": 4096},
+        {"model_id": "id2", "model_repo": "silicon", "model_name": "model2", "max_tokens": 4096},
+        {"model_id": "id3", "model_repo": "silicon", "model_name": "model3", "max_tokens": 2048},
+    ]
 
-    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing), \
             mock.patch.object(svc, "delete_model_record"), \
             mock.patch.object(svc, "split_repo_name", side_effect=lambda x: ("silicon", x.split("/")[1] if "/" in x else x)), \
             mock.patch.object(svc, "add_repo_to_name", side_effect=lambda r, n: f"{r}/{n}"), \
-            mock.patch.object(svc, "get_model_by_display_name", side_effect=get_by_display) as mock_get_by_display, \
             mock.patch.object(svc, "update_model_record") as mock_update, \
             mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
             mock.patch.object(svc, "create_model_record", return_value=True):

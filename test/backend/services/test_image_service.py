@@ -13,10 +13,17 @@ from test.common.test_mocks import bootstrap_test_env
 helpers_env = bootstrap_test_env()
 
 helpers_env["mock_const"].DATA_PROCESS_SERVICE = "http://mock-data-process-service"
-helpers_env["mock_const"].MODEL_CONFIG_MAPPING = {"vlm": "vlm_model_config"}
+helpers_env["mock_const"].MODEL_CONFIG_MAPPING = {
+    "vlm": "vlm_model_config",
+    "vlm3": "video_model_config",
+}
 mock_const = helpers_env["mock_const"]
 
-from services.image_service import get_vlm_model, proxy_image_impl
+from services.image_service import get_image_understanding_model, get_video_understanding_model, get_vlm_model, proxy_image_impl
+
+image_service_module = sys.modules[get_vlm_model.__module__]
+if "services" in sys.modules:
+    setattr(sys.modules["services"], "image_service", image_service_module)
 
 # Sample test data
 test_url = "https://example.com/image.jpg"
@@ -50,7 +57,7 @@ async def test_proxy_image_impl_success():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch('services.image_service.aiohttp.ClientSession') as mock_session_class:
+    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function
@@ -85,7 +92,7 @@ async def test_proxy_image_impl_remote_error():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch('services.image_service.aiohttp.ClientSession') as mock_session_class:
+    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function
@@ -118,7 +125,7 @@ async def test_proxy_image_impl_500_error():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch('services.image_service.aiohttp.ClientSession') as mock_session_class:
+    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function
@@ -146,7 +153,7 @@ async def test_proxy_image_impl_connection_exception():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch('services.image_service.aiohttp.ClientSession') as mock_session_class:
+    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function - should raise the exception
@@ -178,7 +185,7 @@ async def test_proxy_image_impl_with_special_chars():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch('services.image_service.aiohttp.ClientSession') as mock_session_class:
+    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function
@@ -213,7 +220,7 @@ async def test_proxy_image_impl_json_parse_error():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch('services.image_service.aiohttp.ClientSession') as mock_session_class:
+    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function - should raise the exception
@@ -253,7 +260,7 @@ async def test_proxy_image_impl_different_status_codes():
         mock_client_session.__aenter__.return_value = mock_session
 
         # Patch the ClientSession
-        with patch('services.image_service.aiohttp.ClientSession') as mock_session_class:
+        with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
             mock_session_class.return_value = mock_client_session
 
             # Test the function
@@ -289,7 +296,7 @@ async def test_proxy_image_impl_url_encoding():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch('services.image_service.aiohttp.ClientSession') as mock_session_class:
+    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function with encoded URL
@@ -305,10 +312,10 @@ async def test_proxy_image_impl_url_encoding():
         assert f"url={encoded_url}" in called_url
 
 
-@patch('services.image_service.OpenAIVLModel')
-@patch('services.image_service.MessageObserver')
-@patch('services.image_service.get_model_name_from_config')
-@patch('services.image_service.tenant_config_manager')
+@patch.object(image_service_module, 'OpenAIVLModel')
+@patch.object(image_service_module, 'MessageObserver')
+@patch.object(image_service_module, 'get_model_name_from_config')
+@patch.object(image_service_module, 'tenant_config_manager')
 def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
     """Ensure get_vlm_model builds OpenAIVLModel with tenant config."""
     mock_config = {
@@ -324,7 +331,7 @@ def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, 
     result = get_vlm_model("tenant-1")
 
     mock_tenant_config_manager.get_model_config.assert_called_once_with(
-        key=mock_const.MODEL_CONFIG_MAPPING["vlm"],
+        key="vlm_model_config",
         tenant_id="tenant-1"
     )
     mock_message_observer.assert_called_once_with()
@@ -342,10 +349,10 @@ def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, 
     assert result == mock_model_instance
 
 
-@patch('services.image_service.OpenAIVLModel')
-@patch('services.image_service.MessageObserver')
-@patch('services.image_service.get_model_name_from_config')
-@patch('services.image_service.tenant_config_manager')
+@patch.object(image_service_module, 'OpenAIVLModel')
+@patch.object(image_service_module, 'MessageObserver')
+@patch.object(image_service_module, 'get_model_name_from_config')
+@patch.object(image_service_module, 'tenant_config_manager')
 def test_get_vlm_model_with_none_config(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
     """Return None when tenant config is None."""
     mock_tenant_config_manager.get_model_config.return_value = None
@@ -359,3 +366,40 @@ def test_get_vlm_model_with_none_config(mock_tenant_config_manager, mock_get_mod
     # OpenAIVLModel should not be called when config is None
     mock_openai_vl_model.assert_not_called()
     assert result is None
+
+
+@patch.object(image_service_module, 'get_vlm_model')
+def test_get_image_understanding_model_uses_first_multimodal_slot(mock_get_vlm_model):
+    """Ensure the image understanding alias keeps using the first multimodal slot."""
+    mock_get_vlm_model.return_value = "image-understanding-model"
+
+    result = get_image_understanding_model("tenant-1")
+
+    mock_get_vlm_model.assert_called_once_with(tenant_id="tenant-1")
+    assert result == "image-understanding-model"
+
+
+@patch.object(image_service_module, 'OpenAIVLModel')
+@patch.object(image_service_module, 'MessageObserver')
+@patch.object(image_service_module, 'get_model_name_from_config')
+@patch.object(image_service_module, 'tenant_config_manager')
+def test_get_video_understanding_model_success(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
+    """Ensure video understanding tools use the third multimodal model slot."""
+    mock_config = {
+        "base_url": "https://mock-video-api",
+        "api_key": "secret",
+        "model_name": "video-model"
+    }
+    mock_tenant_config_manager.get_model_config.return_value = mock_config
+    mock_get_model_name.return_value = "video-model"
+    mock_model_instance = MagicMock()
+    mock_openai_vl_model.return_value = mock_model_instance
+
+    result = get_video_understanding_model("tenant-1")
+
+    mock_tenant_config_manager.get_model_config.assert_called_once_with(
+        key="video_model_config",
+        tenant_id="tenant-1"
+    )
+    mock_openai_vl_model.assert_called_once()
+    assert result == mock_model_instance

@@ -2429,6 +2429,52 @@ class TestCreateLocalToolAnalyze:
         assert call_kwargs["param1"] == "value1"
         assert result == mock_tool_instance
 
+    @pytest.mark.parametrize(
+        "class_name,tool_name",
+        [
+            ("AnalyzeAudioTool", "analyze_audio"),
+            ("AnalyzeVideoTool", "analyze_video"),
+        ],
+    )
+    def test_create_local_tool_analyze_audio_video(self, nexent_agent_instance, class_name, tool_name):
+        """Test successful audio/video analysis tool creation."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name=class_name,
+            name=tool_name,
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"param1": "value1"},
+            source="local",
+            metadata={
+                "vlm_model": ["video-understanding-model"],
+                "storage_client": "storage"
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get(class_name)
+        nexent_agent.__dict__[class_name] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__[class_name] = original_value
+            elif class_name in nexent_agent.__dict__:
+                del nexent_agent.__dict__[class_name]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["observer"] == nexent_agent_instance.observer
+        assert call_kwargs["vlm_model"] == ["video-understanding-model"]
+        assert call_kwargs["storage_client"] == "storage"
+        assert call_kwargs["param1"] == "value1"
+        assert result == mock_tool_instance
+
     def test_create_local_tool_analyze_text_file_with_validate_url_access_none(self, nexent_agent_instance):
         """Test AnalyzeTextFileTool creation with validate_url_access not in metadata (None)."""
         mock_tool_class = MagicMock()

@@ -153,6 +153,13 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             tenant_id, provider, model_type)
         model_list_ids = {model.get("id")
                           for model in model_list} if model_list else set()
+        existing_model_map = {
+            add_repo_to_name(
+                model_repo=model["model_repo"],
+                model_name=model["model_name"],
+            ): model
+            for model in existing_model_list
+        }
 
         # Delete existing models not present
         for model in existing_model_list:
@@ -162,21 +169,20 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
 
         # Create or update new models
         for model in model_list:
+            model["model_type"] = model_type
             _, model_name = split_repo_name(
                 model["id"]) if model.get("id") else ("", "")
             model_repo, model_name_only = split_repo_name(
                 model.get("id", "")) if model.get("id") else ("", "")
             model_display_name = add_repo_to_name(model_repo, model_name_only)
             if model_name:
-                existing_model_by_display = get_model_by_display_name(
-                    model_display_name, tenant_id)
-                if existing_model_by_display:
+                existing_model = existing_model_map.get(model_display_name)
+                if existing_model:
                     # Check if max_tokens has changed
-                    existing_max_tokens = existing_model_by_display.get(
-                        "max_tokens")
+                    existing_max_tokens = existing_model.get("max_tokens")
                     new_max_tokens = model.get("max_tokens")
                     if new_max_tokens is not None and existing_max_tokens != new_max_tokens:
-                        update_model_record(existing_model_by_display["model_id"], {
+                        update_model_record(existing_model["model_id"], {
                                             "max_tokens": new_max_tokens}, user_id)
                     continue
 

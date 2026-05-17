@@ -101,6 +101,8 @@ export const ModelDeleteDialog = ({
           border: "border-purple-100",
         };
       case MODEL_TYPES.VLM:
+      case MODEL_TYPES.VLM2:
+      case MODEL_TYPES.VLM3:
         return {
           bg: "bg-yellow-50",
           text: "text-yellow-600",
@@ -143,6 +145,8 @@ export const ModelDeleteDialog = ({
       case MODEL_TYPES.TTS:
         return "🔊";
       case MODEL_TYPES.VLM:
+      case MODEL_TYPES.VLM2:
+      case MODEL_TYPES.VLM3:
         return "👁️";
       default:
         return "⚙️";
@@ -167,6 +171,10 @@ export const ModelDeleteDialog = ({
         return t("model.type.tts");
       case MODEL_TYPES.VLM:
         return t("model.type.vlm");
+      case MODEL_TYPES.VLM2:
+        return `${t("model.type.vlm")}2`;
+      case MODEL_TYPES.VLM3:
+        return `${t("model.type.vlm")}3`;
       default:
         return t("model.type.unknown");
     }
@@ -346,7 +354,10 @@ export const ModelDeleteDialog = ({
         if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
       }
       if (type === MODEL_TYPES.VLM) {
-        const cfgUrl = modelConfig?.vlm?.apiConfig?.modelUrl;
+        const cfgUrl =
+          modelConfig?.vlm?.apiConfig?.modelUrl ||
+          modelConfig?.vlm2?.apiConfig?.modelUrl ||
+          modelConfig?.vlm3?.apiConfig?.modelUrl;
         if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
       }
       if (type === MODEL_TYPES.LLM) {
@@ -497,6 +508,22 @@ export const ModelDeleteDialog = ({
 
       if (modelConfig.vlm.displayName === displayName) {
         configUpdates.vlm = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
+      if (modelConfig.vlm2?.displayName === displayName) {
+        configUpdates.vlm2 = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
+      if (modelConfig.vlm3?.displayName === displayName) {
+        configUpdates.vlm3 = {
           modelName: "",
           displayName: "",
           apiConfig: { apiKey: "", modelUrl: "" },
@@ -1028,6 +1055,8 @@ export const ModelDeleteDialog = ({
                 MODEL_TYPES.MULTI_EMBEDDING,
                 MODEL_TYPES.RERANK,
                 MODEL_TYPES.VLM,
+                MODEL_TYPES.VLM2,
+                MODEL_TYPES.VLM3,
                 MODEL_TYPES.STT,
                 MODEL_TYPES.TTS,
               ] as ModelType[]
