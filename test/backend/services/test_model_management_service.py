@@ -315,6 +315,11 @@ def _add_repo_to_name(model_repo, model_name):
 def import_svc():
     """Import service under MinioClient patch to avoid real initialization."""
     minio_client_mock = mock.MagicMock()
+    sys.modules["database"] = database_mod
+    sys.modules["database.model_management_db"] = db_mm_mod
+    setattr(database_mod, "model_management_db", db_mm_mod)
+    sys.modules.pop("backend.services.model_management_service", None)
+    sys.modules.pop("services.model_management_service", None)
     with mock.patch("backend.database.client.MinioClient", return_value=minio_client_mock):
         from backend.services import model_management_service as svc  # type: ignore
     return svc
@@ -727,7 +732,7 @@ async def test_batch_create_models_max_tokens_update():
     with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing), \
             mock.patch.object(svc, "delete_model_record"), \
             mock.patch.object(svc, "split_repo_name", side_effect=lambda x: ("silicon", x.split("/")[1] if "/" in x else x)), \
-            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda r, n: f"{r}/{n}"), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda *args, **kwargs: f"{kwargs.get('model_repo', args[0] if args else '')}/{kwargs.get('model_name', args[1] if len(args) > 1 else '')}"), \
             mock.patch.object(svc, "update_model_record") as mock_update, \
             mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
             mock.patch.object(svc, "create_model_record", return_value=True):
