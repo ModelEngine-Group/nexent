@@ -109,9 +109,9 @@ get_nexent_images() {
 
   local nexent_images=(
     "nexent/nexent:${version_tag}"
-#    "nexent/nexent-web:${version_tag}"
-#    "nexent/nexent-data-process:${version_tag}"
-#    "nexent/nexent-mcp:${version_tag}"
+    "nexent/nexent-web:${version_tag}"
+    "nexent/nexent-data-process:${version_tag}"
+    "nexent/nexent-mcp:${version_tag}"
   )
 
   for img in "${nexent_images[@]}"; do
@@ -121,12 +121,12 @@ get_nexent_images() {
 
 get_third_party_images() {
   local third_party_images=(
-#    "docker.elastic.co/elasticsearch/elasticsearch:8.17.4"
-#    "docker.io/library/postgres:15-alpine"
-#    "docker.io/library/redis:alpine"
-#    "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z"
-#    "docker.io/library/kong:2.8.1"
-#    "docker.io/supabase/gotrue:v2.170.0"
+    "docker.elastic.co/elasticsearch/elasticsearch:8.17.4"
+    "docker.io/library/postgres:15-alpine"
+    "docker.io/library/redis:alpine"
+    "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z"
+    "docker.io/library/kong:2.8.1"
+    "docker.io/supabase/gotrue:v2.170.0"
     "docker.io/supabase/postgres:15.8.1.060"
   )
 
