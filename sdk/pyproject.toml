@@ -87,7 +87,7 @@ performance = [
     "opentelemetry-semantic-conventions==0.41b0",
     # OpenTelemetry Instrumentation
     "opentelemetry-instrumentation==0.41b0",
-    "opentelemetry-instrumentation-fastapi==0.41b0",
+    "opentelemetry-instrumentation-fastapi==0.62b1",
     "opentelemetry-instrumentation-requests==0.41b0",
     # OpenTelemetry Exporters
     "opentelemetry-exporter-jaeger",
