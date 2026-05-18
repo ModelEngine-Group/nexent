@@ -334,7 +334,7 @@ export default function AgentGenerateDetail({
       });
     }
 
-  }, [currentAgentId, defaultLlmModel, isCreatingMode, forceRefreshKey, availableLlmModels]);
+  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode, forceRefreshKey, availableLlmModels.length]);
 
   // Default to selecting all groups when creating a new agent.
   // Only applies when groups are loaded and no group is selected yet.
