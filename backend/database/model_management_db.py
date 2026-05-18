@@ -92,7 +92,8 @@ def update_model_record_by_model_name(
         update_data: Dict[str, Any],
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
-        model_repo: Optional[str] = None
+        model_repo: Optional[str] = None,
+        model_factory: Optional[str] = None
 ) -> bool:
     """
     Update a model record by model_name and tenant_id.
@@ -103,6 +104,7 @@ def update_model_record_by_model_name(
         user_id: Reserved parameter for filling updated_by field
         tenant_id: Tenant ID for filtering
         model_repo: Optional model repo for more precise matching
+        model_factory: Optional model vendor for more precise matching
 
     Returns:
         bool: Whether the operation was successful
@@ -119,7 +121,9 @@ def update_model_record_by_model_name(
         if user_id:
             cleaned_data = add_update_tracking(cleaned_data, user_id)
 
-        db_logger.debug(f"update_model_record_by_model_name: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}, cleaned_data={cleaned_data}")
+        db_logger.debug(f"update_model_record_by_model_name: model_name={model_name}, "
+                        f"model_repo={model_repo}, model_factory={model_factory}, "
+                        f"tenant_id={tenant_id}, cleaned_data={cleaned_data}")
 
         # Build conditions list
         conditions = [
@@ -128,6 +132,8 @@ def update_model_record_by_model_name(
         ]
         if model_repo:
             conditions.append(ModelRecord.model_repo == model_repo)
+        if model_factory:
+            conditions.append(ModelRecord.model_factory == model_factory)
 
         # Build the update statement
         stmt = update(ModelRecord).where(*conditions).values(cleaned_data)

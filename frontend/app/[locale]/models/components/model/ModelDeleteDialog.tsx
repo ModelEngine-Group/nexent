@@ -590,7 +590,7 @@ export const ModelDeleteDialog = ({
     timeoutSeconds,
     concurrencyLimit,
   }: {
-    apiKey: string;
+    apiKey?: string;
     maxTokens: number;
     timeoutSeconds?: number;
     concurrencyLimit?: number;
@@ -624,7 +624,7 @@ export const ModelDeleteDialog = ({
           )
           .map((m) => ({
             model_id: String(m.id),
-            apiKey: apiKey || m.apiKey,
+            apiKey: apiKey ?? m.apiKey,
             maxTokens: maxTokens || m.maxTokens,
             ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
             ...(concurrencyLimit !== undefined ? { concurrencyLimit } : {}),

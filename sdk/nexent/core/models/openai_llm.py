@@ -37,7 +37,7 @@ class OpenAIModel(OpenAIServerModel):
                        Set to False for local services without SSL support.
             model_factory: Provider identifier (e.g., openai, modelengine)
             display_name: Human-readable display name for monitoring
-            timeout_seconds: Request timeout in seconds. If None, uses httpx default.
+            timeout_seconds: Request timeout in seconds. If None, defaults to 120 seconds.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -59,17 +59,6 @@ class OpenAIModel(OpenAIServerModel):
         kwargs['client_kwargs'] = client_kwargs
 
         super().__init__(*args, **kwargs)
-
-        # Apply custom timeout to client if specified (even when ssl_verify is True)
-        if timeout_seconds is not None and hasattr(self, 'client'):
-            import httpx
-            # Update client's timeout
-            new_timeout = httpx.Timeout(timeout_seconds)
-            if hasattr(self.client, '_client'):
-                # httpx client wrapped by openai
-                self.client._client.timeout = new_timeout
-            elif hasattr(self.client, 'timeout'):
-                self.client.timeout = new_timeout
 
         # Wrap the OpenAI client with monitoring interceptor
         model_type = _detect_model_type(self)

@@ -302,8 +302,6 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
 
             # Check if model_id is a numeric string (primary key)
             if model_id_or_name and model_id_or_name.isdigit():
-                # Use model_id (primary key) for update
-                logging.info(f"[DEBUG] Updating model by id: model_id={model_id_or_name}, tenant_id={tenant_id}, update_data={update_data}")
                 update_model_record(int(model_id_or_name), update_data, user_id, tenant_id)
             else:
                 # Parse "model_repo/model_name" format from frontend's model_id field

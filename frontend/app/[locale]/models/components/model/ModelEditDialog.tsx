@@ -460,7 +460,7 @@ interface ProviderConfigEditDialogProps {
   modelType?: ModelType
   showApiKeyField?: boolean  // Whether to show API Key field (default: true)
   onClose: () => void
-  onSave: (config: { apiKey: string; maxTokens: number; timeoutSeconds?: number; concurrencyLimit?: number }) => Promise<void> | void
+  onSave: (config: { apiKey?: string; maxTokens: number; timeoutSeconds?: number; concurrencyLimit?: number }) => Promise<void> | void
 }
 
 export const ProviderConfigEditDialog = ({
@@ -500,7 +500,7 @@ export const ProviderConfigEditDialog = ({
       const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
       const isRerankModel = modelType === MODEL_TYPES.RERANK
       await onSave({
-        apiKey: showApiKeyField ? (apiKey.trim() === '' ? 'sk-no-api-key' : apiKey) : '',
+        ...(showApiKeyField ? { apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey } : {}),
         maxTokens: parseInt(maxTokens),
         ...(!isEmbeddingModel && !isRerankModel ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 } : {}),
         ...(!isEmbeddingModel && !isRerankModel ? { concurrencyLimit: concurrencyLimit ? parseInt(concurrencyLimit) : undefined } : {}),

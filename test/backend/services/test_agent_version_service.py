@@ -22,6 +22,27 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 
+# Mock consts.agent_unavailable_reasons
+agent_unavailable_reasons_mock = MagicMock()
+agent_unavailable_reasons_mock.AgentUnavailableReason = type('AgentUnavailableReason', (), {
+    'DUPLICATE_NAME': 'duplicate_name',
+    'DUPLICATE_DISPLAY_NAME': 'duplicate_display_name',
+    'MODEL_NOT_CONFIGURED': 'model_not_configured',
+    'MODEL_UNAVAILABLE': 'model_unavailable',
+    'TOOL_UNAVAILABLE': 'tool_unavailable',
+    'ALL_TOOLS_DISABLED': 'all_tools_disabled',
+    'AGENT_NOT_FOUND': 'agent_not_found',
+    'all_reasons': classmethod(lambda cls: [
+        'duplicate_name', 'duplicate_display_name', 'model_not_configured',
+        'model_unavailable', 'tool_unavailable', 'all_tools_disabled', 'agent_not_found'
+    ]),
+    'is_valid_reason': classmethod(lambda cls, reason: reason in [
+        'duplicate_name', 'duplicate_display_name', 'model_not_configured',
+        'model_unavailable', 'tool_unavailable', 'all_tools_disabled', 'agent_not_found'
+    ]),
+})()
+sys.modules['consts.agent_unavailable_reasons'] = agent_unavailable_reasons_mock
+
 # Mock utils module
 utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
