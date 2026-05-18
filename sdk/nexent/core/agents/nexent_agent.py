@@ -15,6 +15,17 @@ from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
 from .agent_context import ContextManager
 
+# Safe base imports for Python interpreter - excludes file modification and system access modules
+SAFE_PYTHON_INTERPRETER_IMPORTS = [
+    "math", "cmath", "statistics", "decimal", "fractions", "random",
+    "collections", "itertools", "functools", "heapq", "bisect", "array", "copy",
+    "re", "string", "textwrap", "unicodedata",
+    "datetime", "time", "calendar",
+    "base64", "hashlib", "hmac",
+    "json", "csv",
+    "uuid", "pprint", "operator", "typing",
+]
+
 
 class NexentAgent:
     def __init__(self, observer: MessageObserver,
@@ -279,7 +290,7 @@ class NexentAgent:
                 prompt_templates=prompt_templates,
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
-                additional_authorized_imports=["*"],
+                additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
             )
             agent.stop_event = self.stop_event
