@@ -721,6 +721,15 @@ You have been provided with these additional arguments, that you can access usin
             metric["compression_ratio"] = 0.0
 
         self.step_metrics.append(metric)
+        token_threshold = (
+            self.context_manager.config.token_threshold
+            if self.context_manager and self.context_manager.config.enabled
+            else None
+        )
+        get_monitoring_manager().record_agent_step_metrics(
+            metric,
+            token_threshold=token_threshold,
+        )
 
     def _handle_max_steps_reached(self, task: str) -> Any:
         """Handle the case when max steps is reached by generating final answer with streaming.

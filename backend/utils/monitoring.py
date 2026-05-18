@@ -33,6 +33,9 @@ try:
         MONITORING_FASTAPI_INCLUDED_URLS,
         MONITORING_FASTAPI_EXCLUDED_URLS,
         MONITORING_FASTAPI_EXCLUDE_SPANS,
+        MONITORING_TRACE_CONTENT_MODE,
+        MONITORING_TRACE_MAX_CHARS,
+        MONITORING_TRACE_MAX_ITEMS,
         OTLP_HEADERS,
         TELEMETRY_SAMPLE_RATE
     )
@@ -52,6 +55,9 @@ except ImportError:
         MONITORING_FASTAPI_INCLUDED_URLS,
         MONITORING_FASTAPI_EXCLUDED_URLS,
         MONITORING_FASTAPI_EXCLUDE_SPANS,
+        MONITORING_TRACE_CONTENT_MODE,
+        MONITORING_TRACE_MAX_CHARS,
+        MONITORING_TRACE_MAX_ITEMS,
         OTLP_HEADERS,
         TELEMETRY_SAMPLE_RATE
     )
@@ -81,7 +87,10 @@ def _initialize_monitoring():
         fastapi_excluded_urls=MONITORING_FASTAPI_EXCLUDED_URLS,
         fastapi_exclude_spans=MONITORING_FASTAPI_EXCLUDE_SPANS,
         project_name=MONITORING_PROJECT_NAME or None,
-        telemetry_sample_rate=TELEMETRY_SAMPLE_RATE
+        telemetry_sample_rate=TELEMETRY_SAMPLE_RATE,
+        trace_content_mode=MONITORING_TRACE_CONTENT_MODE,
+        trace_max_chars=MONITORING_TRACE_MAX_CHARS,
+        trace_max_items=MONITORING_TRACE_MAX_ITEMS
     )
 
     monitoring_manager.configure(config)

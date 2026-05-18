@@ -230,6 +230,9 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
 | `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
+| `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload 记录模式：`summary` 写入有界预览和结构元数据，`metrics` 只写结构/大小元数据，`full` 在 `MONITORING_TRACE_MAX_CHARS` 限制内保留完整 payload |
+| `MONITORING_TRACE_MAX_CHARS` | `4000` | 每个 payload 预览最多写入的字符数 |
+| `MONITORING_TRACE_MAX_ITEMS` | `20` | dict/list 预览最多写入的 key 或 item 数 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | 服务标识 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint，SDK 会派生 `/v1/traces` 和 `/v1/metrics` |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | （空） | 可选 trace 专用 endpoint |
@@ -286,6 +289,12 @@ monitoring_manager.bind_agent_context(AgentRunMetadata(
 ```
 
 `monitor_endpoint` 仍保留为兼容 API 和低层 escape hatch，不建议业务层新增常规埋点时继续使用。
+
+### Trace Payload 策略
+
+工具输入输出、检索输出，以及 Langfuse 兼容的 `input.value` / `output.value` 属性统一使用同一套 payload 策略。默认写入有界预览，并额外写入 `type`、`size_chars`、`item_count`、`truncated`、`keys` 等结构化属性。记忆检索 span 只记录结果摘要和统计信息，不写完整 memory 正文。
+
+Agent 上下文指标由 SDK 生命周期自动写入。每个 action step 会产生 `agent.step.metrics` event，包含上下文 token 估算、压缩调用数、缓存命中、压缩率和 token 阈值。Agent 结束时还会在顶层 span 写入聚合 step 数、最大上下文 token、平均压缩率、压缩调用总数和缓存命中总数。
 
 ### LLM 调用监控
 
@@ -385,11 +394,24 @@ Phoenix 左侧的 `agent`、`chain`、`llm`、`retriever`、`tool` 标签来自 
 | `agent.step.name` | 步骤名称（如 `web_search`） |
 | `agent.step.type` | 步骤类型：`tool_call`、`reasoning`、`action_selection` |
 | `agent.tool.name` | 工具名称 |
-| `agent.tool.input` | 工具输入（JSON） |
-| `agent.tool.output` | 工具输出（JSON） |
+| `agent.tool.input` | 按 trace payload 策略处理后的工具输入预览 |
+| `agent.tool.input.*` | 工具输入结构化元数据：类型、大小、item 数、截断状态、keys |
+| `agent.tool.output` | 按 trace payload 策略处理后的工具输出预览 |
+| `agent.tool.output.*` | 工具输出结构化元数据：类型、大小、item 数、截断状态、keys |
+| `agent.tool.success` | 工具调用是否成功 |
+| `agent.tool.duration_ms` | 工具调用耗时 |
 | `retriever.name` | 检索器名称 |
 | `retrieval.query` | 检索查询 |
-| `retriever.output` | 检索输出 |
+| `retrieval.results.count` | 检索结果数量 |
+| `retrieval.top_score` | 可用时记录最高检索分数 |
+| `retriever.input.*` | 检索输入结构化元数据 |
+| `retriever.output` | 按 trace payload 策略处理后的检索输出预览 |
+| `retriever.output.*` | 检索输出结构化元数据 |
+| `context.tokens.estimated_input` | 每个 Agent step event 的上下文输入 token 估算 |
+| `context.tokens.uncompressed_estimated` | 每个 Agent step event 的未压缩上下文 token 估算 |
+| `context.compression.calls` | 每个 Agent step event 的压缩调用数 |
+| `context.compression.cache_hits` | 每个 Agent step event 的压缩缓存命中数 |
+| `context.compression.ratio` | 每个 Agent step event 的压缩率 |
 
 ## 指标
 

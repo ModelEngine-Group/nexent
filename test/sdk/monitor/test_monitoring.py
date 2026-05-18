@@ -90,6 +90,9 @@ class TestMonitoringConfig:
         assert config.fastapi_excluded_urls == ""
         assert config.fastapi_exclude_spans == ["receive", "send"]
         assert config.telemetry_sample_rate == 1.0
+        assert config.trace_content_mode == "summary"
+        assert config.trace_max_chars == 4000
+        assert config.trace_max_items == 20
 
     def test_custom_config(self):
         """Test configuration with custom OTLP values."""
@@ -107,7 +110,10 @@ class TestMonitoringConfig:
             fastapi_excluded_urls="/agent/run",
             fastapi_exclude_spans="send",
             project_name="nexent-test",
-            telemetry_sample_rate=0.5
+            telemetry_sample_rate=0.5,
+            trace_content_mode="metrics",
+            trace_max_chars="256",
+            trace_max_items="5",
         )
 
         assert config.enable_telemetry is True
@@ -124,6 +130,15 @@ class TestMonitoringConfig:
         assert config.fastapi_exclude_spans == ["send"]
         assert config.project_name == "nexent-test"
         assert config.telemetry_sample_rate == 0.5
+        assert config.trace_content_mode == "metrics"
+        assert config.trace_max_chars == 256
+        assert config.trace_max_items == 5
+
+    def test_invalid_trace_content_mode_defaults_to_summary(self):
+        """Invalid trace payload mode falls back to safe summary mode."""
+        config = MonitoringConfig(trace_content_mode="invalid")
+
+        assert config.trace_content_mode == "summary"
 
     def test_invalid_protocol_defaults_to_http(self):
         """Test that invalid protocol defaults to http."""
@@ -495,6 +510,52 @@ class TestToolCallTracing:
         MonitoringManager._instance = None
         MonitoringManager._initialized = False
 
+    def test_trace_payload_summary_for_dict_list_and_string(self):
+        """Payload summaries include previews and structured metadata."""
+        manager = MonitoringManager()
+        manager.configure(MonitoringConfig(trace_max_items=1))
+
+        dict_summary = manager._trace_payload_summary({"query": "hello", "limit": 10})
+        assert json.loads(dict_summary["preview"]) == {"query": "hello"}
+        assert dict_summary["type"] == "dict"
+        assert dict_summary["item_count"] == 2
+        assert dict_summary["keys"] == ["query"]
+        assert dict_summary["truncated"] is True
+
+        list_summary = manager._trace_payload_summary(["a", "b"])
+        assert json.loads(list_summary["preview"]) == ["a"]
+        assert list_summary["type"] == "list"
+        assert list_summary["item_count"] == 2
+        assert list_summary["truncated"] is True
+
+        string_summary = manager._trace_payload_summary("hello")
+        assert string_summary["preview"] == "hello"
+        assert string_summary["type"] == "str"
+        assert string_summary["size_chars"] == 5
+
+    def test_trace_payload_summary_truncates_long_preview(self):
+        """Long payload previews are bounded by MONITORING_TRACE_MAX_CHARS."""
+        manager = MonitoringManager()
+        manager.configure(MonitoringConfig(trace_max_chars=8))
+
+        summary = manager._trace_payload_summary({"text": "x" * 100})
+
+        assert summary["truncated"] is True
+        assert summary["preview"].endswith("...[truncated]")
+        assert summary["size_chars"] > len(summary["preview"])
+
+    def test_trace_payload_metrics_mode_omits_preview(self):
+        """Metrics mode records only structure/size metadata."""
+        manager = MonitoringManager()
+        manager.configure(MonitoringConfig(trace_content_mode="metrics"))
+
+        attrs = manager._trace_payload_attributes("agent.tool.output", {"answer": "ok"})
+
+        assert "agent.tool.output.preview" not in attrs
+        assert attrs["agent.tool.output.type"] == "dict"
+        assert attrs["agent.tool.output.item_count"] == 1
+        assert attrs["agent.tool.output.truncated"] is True
+
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_trace_tool_call_with_input_output(self, mock_trace):
         """Test tracing tool call with input and output."""
@@ -522,6 +583,10 @@ class TestToolCallTracing:
             assert attributes["agent.tool.name"] == "web_search"
             assert "agent.tool.input" in attributes
             assert "query" in attributes["agent.tool.input"]
+            assert attributes["agent.tool.input.type"] == "dict"
+            assert attributes["agent.tool.input.item_count"] == 2
+            assert attributes["agent.tool.input.truncated"] is False
+            assert json.loads(attributes["agent.tool.input.keys"]) == ["query", "limit"]
             assert attributes[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_TOOL
             assert attributes["tool.name"] == "web_search"
             assert "query" in attributes["tool.parameters"]
@@ -529,9 +594,17 @@ class TestToolCallTracing:
             assert attributes[LANGFUSE_OBSERVATION_TYPE] == "tool"
             assert "query" in attributes[LANGFUSE_OBSERVATION_INPUT]
 
-            mock_span.set_attribute.assert_called()
-            mock_span.set_attribute.assert_any_call(OPENINFERENCE_OUTPUT_VALUE, '{"results": ["item1", "item2"]}')
-            mock_span.set_attribute.assert_any_call(LANGFUSE_OBSERVATION_OUTPUT, '{"results": ["item1", "item2"]}')
+            output_attrs = mock_span.set_attributes.call_args.args[0]
+            assert json.loads(output_attrs[OPENINFERENCE_OUTPUT_VALUE]) == {"results": ["item1", "item2"]}
+            assert json.loads(output_attrs[LANGFUSE_OBSERVATION_OUTPUT]) == {"results": ["item1", "item2"]}
+            assert output_attrs["agent.tool.output.type"] == "dict"
+            assert output_attrs["agent.tool.output.item_count"] == 1
+            assert output_attrs["agent.tool.success"] is True
+            mock_span.set_attribute.assert_any_call("agent.tool.success", True)
+            assert any(
+                call_args.args[0] == "agent.tool.duration_ms"
+                for call_args in mock_span.set_attribute.call_args_list
+            )
 
     def test_trace_tool_call_disabled(self):
         """Test tool call tracing when disabled."""
@@ -541,6 +614,28 @@ class TestToolCallTracing:
 
         with manager.trace_tool_call("test_tool", "test_agent", {"input": "data"}) as span:
             assert span is None
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_trace_tool_call_exception_marks_failure(self, mock_trace):
+        """Tool exceptions record failure and error attributes."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = MonitoringManager()
+            manager.configure(MonitoringConfig(enable_telemetry=True))
+            manager._tracer = MagicMock()
+
+            mock_span = MagicMock()
+            manager._tracer.start_as_current_span.return_value.__enter__ = Mock(return_value=mock_span)
+            manager._tracer.start_as_current_span.return_value.__exit__ = Mock(return_value=None)
+            mock_span.is_recording.return_value = True
+            mock_trace.get_current_span.return_value = mock_span
+
+            with pytest.raises(RuntimeError, match="tool failed"):
+                with manager.trace_tool_call("bad_tool", "test_agent", {"input": "data"}):
+                    raise RuntimeError("tool failed")
+
+            mock_span.set_attribute.assert_any_call("agent.tool.success", False)
+            mock_span.set_attribute.assert_any_call("error.type", "RuntimeError")
+            mock_span.set_attribute.assert_any_call("error.message", "tool failed")
 
 
 class TestAgentObservability:
@@ -700,7 +795,12 @@ class TestAgentObservability:
                     "researcher",
                     {"query": "sdk monitoring"},
                 ):
-                    manager.set_retriever_output({"documents": 2})
+                    manager.set_retriever_output({
+                        "documents": [
+                            {"id": "doc-1", "score": 0.82},
+                            {"id": "doc-2", "score": 0.61},
+                        ]
+                    })
 
             attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
             assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_RETRIEVER
@@ -711,6 +811,14 @@ class TestAgentObservability:
             assert attrs["retriever.name"] == "knowledge_base_search"
             assert attrs["retrieval.query"] == "sdk monitoring"
             assert "sdk monitoring" in attrs[OPENINFERENCE_INPUT_VALUE]
+            assert attrs["retriever.input.type"] == "dict"
+            assert attrs["retriever.input.item_count"] == 1
+
+            output_attrs = retriever_span.set_attributes.call_args.args[0]
+            assert output_attrs["retriever.success"] is True
+            assert output_attrs["retriever.output.type"] == "dict"
+            assert output_attrs["retrieval.results.count"] == 2
+            assert output_attrs["retrieval.top_score"] == 0.82
 
     @pytest.mark.asyncio
     async def test_agent_context_survives_delayed_async_stream_iteration(self):
@@ -750,6 +858,73 @@ class TestAgentObservability:
             assert span is None
             with manager.trace_agent_step("agent.run.loop", metadata) as step_span:
                 assert step_span is None
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_record_agent_step_metrics_adds_context_event(self, mock_trace):
+        """Action step metrics are written as context/compression span events."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = self._enabled_manager()
+            mock_span = MagicMock()
+            mock_trace.get_current_span.return_value = mock_span
+
+            manager.record_agent_step_metrics(
+                {
+                    "step_number": 2,
+                    "main_llm": {"input_tokens": 100, "output_tokens": 12},
+                    "compression": {
+                        "calls": 1,
+                        "input_tokens": 80,
+                        "output_tokens": 40,
+                        "cache_hits": 1,
+                    },
+                    "memory_state": {
+                        "estimated_input_tokens": 55,
+                        "estimated_output_tokens": 8,
+                    },
+                    "uncompressed_mem_est_input": 110,
+                    "compression_ratio": 50.0,
+                    "cache_hit": True,
+                },
+                token_threshold=4096,
+            )
+
+            event_name, event_attrs = mock_span.add_event.call_args.args
+            assert event_name == "agent.step.metrics"
+            assert event_attrs["agent.step.number"] == 2
+            assert event_attrs["context.tokens.estimated_input"] == 55
+            assert event_attrs["context.tokens.uncompressed_estimated"] == 110
+            assert event_attrs["context.compression.calls"] == 1
+            assert event_attrs["context.compression.cache_hits"] == 1
+            assert event_attrs["context.compression.ratio"] == 50.0
+            assert event_attrs["context.token_threshold"] == 4096
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_set_agent_context_metrics_adds_aggregate_attributes(self, mock_trace):
+        """Agent run spans receive aggregate context/compression metrics."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = self._enabled_manager()
+            mock_span = MagicMock()
+            mock_trace.get_current_span.return_value = mock_span
+
+            manager.set_agent_context_metrics([
+                {
+                    "memory_state": {"estimated_input_tokens": 50},
+                    "compression": {"calls": 1, "cache_hits": 0},
+                    "compression_ratio": 40.0,
+                },
+                {
+                    "memory_state": {"estimated_input_tokens": 80},
+                    "compression": {"calls": 2, "cache_hits": 1},
+                    "compression_ratio": 60.0,
+                },
+            ])
+
+            attrs = mock_span.set_attributes.call_args.args[0]
+            assert attrs["agent.steps.count"] == 2
+            assert attrs["context.tokens.max_estimated_input"] == 80
+            assert attrs["context.compression.avg_ratio"] == 50.0
+            assert attrs["context.compression.calls.total"] == 3
+            assert attrs["context.compression.cache_hits.total"] == 1
 
 
 class TestLLMTokenTracker:
@@ -1014,6 +1189,8 @@ class TestErrorHandling:
 
         manager.add_span_event("test_event")
         manager.set_span_attributes(key="value")
+        manager.record_agent_step_metrics({"step_number": 1})
+        manager.set_agent_context_metrics([{"memory_state": {"estimated_input_tokens": 1}}])
         manager.record_llm_metrics("ttft", 0.5, {})
 
         with manager.trace_llm_request("test", "model") as span:

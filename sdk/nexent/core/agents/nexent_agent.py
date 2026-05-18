@@ -1,6 +1,7 @@
 import json
 import functools
 import inspect
+import logging
 import re
 import time
 from dataclasses import replace
@@ -19,6 +20,8 @@ from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
 from .agent_context import ContextManager
+
+logger = logging.getLogger(__name__)
 
 
 def _tool_name(tool_obj: Any) -> str:
@@ -465,7 +468,6 @@ class NexentAgent:
                     step_log = None
                     for step_log in self.agent.run(query, stream=True, reset=reset):
                         # Add content to observer
-                        print(f"DEBUG step_log type: {type(step_log)}")
                         if not isinstance(step_log, ActionStep):
                             continue
                         # Emit token stats after each action step
@@ -500,7 +502,6 @@ class NexentAgent:
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
                         }
-                        print(f"Step {step_log.step_number} token data: {token_data}")
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
                         if hasattr(step_log, "error") and step_log.error is not None:
@@ -539,6 +540,8 @@ class NexentAgent:
                     self._log_step_metrics()
 
             if final_answer_for_trace is not None:
+                if hasattr(self.agent, "step_metrics"):
+                    monitoring_manager.set_agent_context_metrics(self.agent.step_metrics)
                 monitoring_manager.set_openinference_output(final_answer_for_trace)
 
     def set_agent(self, agent: CoreAgent):
@@ -629,7 +632,7 @@ class NexentAgent:
         lines.append(
             "-----"
         )
-        print("\n".join(lines))
+        logger.debug("\n".join(lines))
 
         # Optional: write to local file
         with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:

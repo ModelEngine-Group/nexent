@@ -1702,6 +1702,50 @@ class TestRunStreamRealExecution:
         assert len(handle_calls) == 1
         assert handle_calls[0] == "test task"
 
+    def test_collect_step_metrics_records_monitoring_event(self):
+        """_collect_step_metrics forwards context/compression metrics to monitoring."""
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+        module.msg_token_count = MagicMock(side_effect=[55, 8])
+
+        fake_monitoring_manager = MagicMock()
+        module.get_monitoring_manager = MagicMock(return_value=fake_monitoring_manager)
+
+        agent = object.__new__(CoreAgent)
+        agent.step_metrics = []
+        agent._last_uncompressed_est = 110
+        agent.context_manager = MagicMock()
+        agent.context_manager.config.enabled = True
+        agent.context_manager.config.token_threshold = 4096
+        agent.context_manager.config.chars_per_token = 1.5
+        agent.context_manager.get_step_compression_stats.return_value = {
+            "calls": 1,
+            "input_tokens": 80,
+            "output_tokens": 40,
+            "cache_hits": 1,
+            "cache_types": ["exact"],
+        }
+
+        action_step = MagicMock()
+        action_step.step_number = 3
+        action_step.token_usage.input_tokens = 100
+        action_step.token_usage.output_tokens = 12
+        action_step.model_input_messages = [{"role": "user", "content": "hello"}]
+        action_step.model_output_message = {"role": "assistant", "content": "ok"}
+
+        agent._collect_step_metrics(action_step)
+
+        metric = agent.step_metrics[0]
+        assert metric["step_number"] == 3
+        assert metric["main_llm"]["input_tokens"] == 100
+        assert metric["memory_state"]["estimated_input_tokens"] == 55
+        assert metric["compression"]["calls"] == 1
+        assert metric["compression_ratio"] == 50.0
+        fake_monitoring_manager.record_agent_step_metrics.assert_called_once_with(
+            metric,
+            token_threshold=4096,
+        )
+
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""
         import threading

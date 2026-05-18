@@ -140,6 +140,9 @@ MONITORING_DASHBOARD_URL=http://localhost:9411
 | `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
 | `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
+| `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
+| `MONITORING_TRACE_MAX_CHARS` | `4000` | Maximum characters for each payload preview written to trace attributes |
+| `MONITORING_TRACE_MAX_ITEMS` | `20` | Maximum dict keys/list items included in payload previews |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint; SDK derives `/v1/traces` and `/v1/metrics` |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | (empty) | Optional trace-specific endpoint |
@@ -176,6 +179,12 @@ monitoring_manager.bind_agent_context(AgentRunMetadata(
 ```
 
 `monitor_endpoint` is still kept as a compatibility API and low-level escape hatch, but it is no longer the recommended way to add normal Agent observability.
+
+### Trace Payload Policy
+
+Tool input/output, retriever output, and Langfuse-compatible `input.value` / `output.value` attributes share the same payload policy. By default Nexent writes a bounded preview plus structured metadata such as `type`, `size_chars`, `item_count`, `truncated`, and `keys`. Memory search spans intentionally record only result summaries and statistics, not full memory text bodies.
+
+Agent context metrics are emitted from the SDK lifecycle. Each action step records an `agent.step.metrics` event with estimated context tokens, compression calls, cache hits, compression ratio, and token threshold. The final Agent span also receives aggregate step count, max context size, average compression ratio, total compression calls, and cache hit totals.
 
 ### LLM Call Monitoring
 
@@ -234,11 +243,24 @@ The system uses OpenInference semantic conventions for AI-specific observability
 | `agent.step.name` | Step name (e.g., `web_search`) |
 | `agent.step.type` | Step type: `tool_call`, `reasoning`, `action_selection` |
 | `agent.tool.name` | Tool name |
-| `agent.tool.input` | Tool input (JSON) |
-| `agent.tool.output` | Tool output (JSON) |
+| `agent.tool.input` | Tool input preview using the configured trace payload policy |
+| `agent.tool.input.*` | Structured tool input metadata: type, size, item count, truncation, keys |
+| `agent.tool.output` | Tool output preview using the configured trace payload policy |
+| `agent.tool.output.*` | Structured tool output metadata: type, size, item count, truncation, keys |
+| `agent.tool.success` | Whether the tool call completed successfully |
+| `agent.tool.duration_ms` | Tool call duration |
 | `retriever.name` | Retriever name |
 | `retrieval.query` | Retriever query |
-| `retriever.output` | Retriever output |
+| `retrieval.results.count` | Retriever result count |
+| `retrieval.top_score` | Highest numeric result score when available |
+| `retriever.input.*` | Structured retriever input metadata |
+| `retriever.output` | Retriever output preview using the configured trace payload policy |
+| `retriever.output.*` | Structured retriever output metadata |
+| `context.tokens.estimated_input` | Estimated context input tokens per Agent step event |
+| `context.tokens.uncompressed_estimated` | Estimated uncompressed context tokens per Agent step event |
+| `context.compression.calls` | Compression calls per Agent step event |
+| `context.compression.cache_hits` | Compression cache hits per Agent step event |
+| `context.compression.ratio` | Compression ratio per Agent step event |
 
 ## Metrics
 

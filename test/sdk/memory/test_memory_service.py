@@ -1,5 +1,6 @@
 import sys
 import types
+from contextlib import contextmanager
 from typing import Any, Dict, List
 
 import pytest
@@ -301,6 +302,79 @@ async def test_search_memory_in_levels_aggregates_and_order(monkeypatch):
     # Ensure each level contributes one result and order preserved
     got_levels = [r["memory_level"] for r in out["results"]]
     assert got_levels == levels
+
+
+@pytest.mark.asyncio
+async def test_search_memory_in_levels_traces_parent_and_level_spans(monkeypatch):
+    async def _fake_search(query_text, memory_level, memory_config, tenant_id, user_id, agent_id, top_k, threshold):  # noqa: ARG001
+        return {"results": [
+            {
+                "id": f"{memory_level}-1",
+                "memory": f"secret memory body {memory_level}",
+                "score": 0.9,
+            },
+        ]}
+
+    class FakeMonitoringManager:
+        def __init__(self):
+            self.spans = []
+            self._active = []
+
+        @contextmanager
+        def trace_retriever_call(self, retriever_name, agent_name=None, retrieval_input=None, **attrs):  # noqa: ANN001
+            span = {
+                "name": retriever_name,
+                "agent_name": agent_name,
+                "input": retrieval_input,
+                "attrs": attrs,
+                "set_attrs": {},
+                "output": None,
+            }
+            self.spans.append(span)
+            self._active.append(span)
+            try:
+                yield span
+            finally:
+                self._active.pop()
+
+        def set_retriever_output(self, output):  # noqa: ANN001
+            self._active[-1]["output"] = output
+
+        def set_span_attributes(self, **attrs):  # noqa: ANN003
+            self._active[-1]["set_attrs"].update(attrs)
+
+    fake_manager = FakeMonitoringManager()
+    monkeypatch.setattr(memory_service, "search_memory", _fake_search)
+    monkeypatch.setattr(memory_service, "get_monitoring_manager", lambda: fake_manager)
+
+    out = await memory_service.search_memory_in_levels(
+        query_text="q",
+        memory_config={},
+        tenant_id="t1",
+        user_id="u1",
+        agent_id="a1",
+        top_k=2,
+        threshold=0.6,
+        memory_levels=["tenant", "user"],
+    )
+
+    assert [r["memory_level"] for r in out["results"]] == ["tenant", "user"]
+
+    parent_span = fake_manager.spans[0]
+    level_spans = fake_manager.spans[1:]
+    assert parent_span["name"] == "memory.search"
+    assert parent_span["input"]["query"] == "q"
+    assert parent_span["attrs"]["memory.search.top_k"] == 2
+    assert parent_span["attrs"]["memory.search.threshold"] == 0.6
+    assert parent_span["set_attrs"]["memory.search.error_count"] == 0
+    assert parent_span["output"]["results"][0]["score"] == 0.9
+    assert "memory" not in parent_span["output"]["results"][0]
+    assert "memory" in parent_span["output"]["results"][0]["keys"]
+
+    assert [span["name"] for span in level_spans] == ["memory.search.tenant", "memory.search.user"]
+    assert level_spans[0]["attrs"]["memory.level"] == "tenant"
+    assert level_spans[0]["attrs"]["memory.search.top_k"] == 2
+    assert level_spans[0]["output"]["results"][0]["memory_level"] == "tenant"
 
 
 # ---------------------------------------------------------------------------

@@ -116,6 +116,9 @@ F = TypeVar('F', bound=Callable[..., Any])
 DEFAULT_OTLP_ENDPOINT = "http://localhost:4318"
 TRACE_PATH = "/v1/traces"
 METRIC_PATH = "/v1/metrics"
+DEFAULT_TRACE_CONTENT_MODE = "summary"
+DEFAULT_TRACE_MAX_CHARS = 4000
+DEFAULT_TRACE_MAX_ITEMS = 20
 
 OPENINFERENCE_SPAN_KIND = "openinference.span.kind"
 OPENINFERENCE_SPAN_KIND_AGENT = "AGENT"
@@ -281,6 +284,14 @@ def _as_float(value: Any, default: float) -> float:
         return default
 
 
+def _as_int(value: Any, default: int) -> int:
+    """Convert common configuration values to int."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _normalize_header_value(value: Any) -> str:
     """Normalize header values from config files or environment variables."""
     if isinstance(value, (list, tuple)):
@@ -388,6 +399,9 @@ class MonitoringConfig:
     fastapi_exclude_spans: List[str] = field(default_factory=lambda: ["receive", "send"])
     project_name: Optional[str] = None
     telemetry_sample_rate: float = 1.0
+    trace_content_mode: str = DEFAULT_TRACE_CONTENT_MODE
+    trace_max_chars: int = DEFAULT_TRACE_MAX_CHARS
+    trace_max_items: int = DEFAULT_TRACE_MAX_ITEMS
 
     def __post_init__(self):
         """Validate configuration and adjust based on OpenTelemetry availability."""
@@ -418,6 +432,22 @@ class MonitoringConfig:
                 if str(item).strip()
             ]
         self.telemetry_sample_rate = _as_float(self.telemetry_sample_rate, 1.0)
+        self.trace_content_mode = str(
+            self.trace_content_mode or DEFAULT_TRACE_CONTENT_MODE
+        ).strip().lower()
+        if self.trace_content_mode not in {"summary", "metrics", "full"}:
+            logger.warning(
+                f"Unknown trace content mode '{self.trace_content_mode}'. Using 'summary'."
+            )
+            self.trace_content_mode = DEFAULT_TRACE_CONTENT_MODE
+        self.trace_max_chars = max(
+            0,
+            _as_int(self.trace_max_chars, DEFAULT_TRACE_MAX_CHARS),
+        )
+        self.trace_max_items = max(
+            0,
+            _as_int(self.trace_max_items, DEFAULT_TRACE_MAX_ITEMS),
+        )
         self.otlp_headers = _parse_headers(self.otlp_headers)
 
         if self.enable_telemetry and not OPENTELEMETRY_AVAILABLE:
@@ -1228,6 +1258,209 @@ class MonitoringManager:
                         duration, {"llm.model_name": model_name, "llm.operation.name": operation_name}
                     )
 
+    def _trace_payload_config(self) -> tuple[str, int, int]:
+        config = self._config
+        if config is None:
+            return (
+                DEFAULT_TRACE_CONTENT_MODE,
+                DEFAULT_TRACE_MAX_CHARS,
+                DEFAULT_TRACE_MAX_ITEMS,
+            )
+        return (
+            config.trace_content_mode,
+            config.trace_max_chars,
+            config.trace_max_items,
+        )
+
+    def _limited_payload(self, value: Any, max_items: int) -> Any:
+        if max_items <= 0:
+            if isinstance(value, dict):
+                return {}
+            if isinstance(value, (list, tuple, set)):
+                return []
+            return value
+
+        if isinstance(value, dict):
+            return {
+                key: value[key]
+                for key in list(value.keys())[:max_items]
+            }
+        if isinstance(value, (list, tuple)):
+            return list(value[:max_items])
+        if isinstance(value, set):
+            return list(value)[:max_items]
+        return value
+
+    def _trace_payload_summary(self, value: Any) -> Dict[str, Any]:
+        """Create a bounded trace-safe payload summary."""
+        mode, max_chars, max_items = self._trace_payload_config()
+        payload_type = type(value).__name__
+        item_count: Optional[int] = None
+        keys: List[str] = []
+
+        if isinstance(value, dict):
+            item_count = len(value)
+            keys = [str(key) for key in list(value.keys())[:max_items]]
+        elif isinstance(value, (list, tuple, set)):
+            item_count = len(value)
+        elif isinstance(value, str):
+            item_count = 1
+
+        full_value = self._to_openinference_json_value(value)
+        full_size = len(full_value)
+        truncated = False
+
+        if mode == "metrics":
+            preview = ""
+            truncated = full_size > 0
+        else:
+            preview_value = value if mode == "full" else self._limited_payload(value, max_items)
+            preview = self._to_openinference_json_value(preview_value)
+            if mode != "full" and item_count is not None and item_count > max_items:
+                truncated = True
+            if max_chars and len(preview) > max_chars:
+                preview = preview[:max_chars] + "...[truncated]"
+                truncated = True
+            elif mode != "full" and preview != full_value:
+                truncated = True
+
+        return {
+            "preview": preview,
+            "type": payload_type,
+            "size_chars": full_size,
+            "item_count": item_count,
+            "truncated": truncated,
+            "keys": keys,
+        }
+
+    def _trace_payload_attributes(self, prefix: str, value: Any) -> Dict[str, Any]:
+        summary = self._trace_payload_summary(value)
+        attrs: Dict[str, Any] = {
+            f"{prefix}.type": summary["type"],
+            f"{prefix}.size_chars": summary["size_chars"],
+            f"{prefix}.truncated": summary["truncated"],
+        }
+        if summary["preview"] != "":
+            attrs[f"{prefix}.preview"] = summary["preview"]
+        if summary["item_count"] is not None:
+            attrs[f"{prefix}.item_count"] = summary["item_count"]
+        if summary["keys"]:
+            attrs[f"{prefix}.keys"] = json.dumps(
+                summary["keys"],
+                ensure_ascii=False,
+            )
+        return attrs
+
+    def _trace_payload_preview(self, value: Any) -> str:
+        return str(self._trace_payload_summary(value)["preview"])
+
+    @staticmethod
+    def _coerce_results_payload(value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return value
+        return value
+
+    def _retrieval_result_attributes(self, value: Any) -> Dict[str, Any]:
+        payload = self._coerce_results_payload(value)
+        results: Optional[List[Any]] = None
+        if isinstance(payload, list):
+            results = payload
+        elif isinstance(payload, dict):
+            for key in ("results", "documents", "items"):
+                candidate = payload.get(key)
+                if isinstance(candidate, list):
+                    results = candidate
+                    break
+
+        if results is None:
+            return {}
+
+        attrs: Dict[str, Any] = {
+            "retrieval.results.count": len(results),
+        }
+        scores: List[float] = []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            score = item.get("score", item.get("relevance_score"))
+            if isinstance(score, (int, float)):
+                scores.append(float(score))
+        if scores:
+            attrs["retrieval.top_score"] = max(scores)
+        return attrs
+
+    def record_agent_step_metrics(
+        self,
+        metric: Dict[str, Any],
+        token_threshold: Optional[int] = None,
+    ) -> None:
+        """Record context/compression metrics for one Agent step on the current span."""
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
+            return
+
+        compression = metric.get("compression", {}) or {}
+        memory_state = metric.get("memory_state", {}) or {}
+        attrs = {
+            "agent.step.number": metric.get("step_number", 0),
+            "llm.token_count.prompt": metric.get("main_llm", {}).get("input_tokens", 0),
+            "llm.token_count.completion": metric.get("main_llm", {}).get("output_tokens", 0),
+            "context.tokens.estimated_input": memory_state.get("estimated_input_tokens", 0),
+            "context.tokens.estimated_output": memory_state.get("estimated_output_tokens", 0),
+            "context.tokens.uncompressed_estimated": metric.get("uncompressed_mem_est_input", 0),
+            "context.compression.calls": compression.get("calls", 0),
+            "context.compression.input_tokens": compression.get("input_tokens", 0),
+            "context.compression.output_tokens": compression.get("output_tokens", 0),
+            "context.compression.cache_hits": compression.get("cache_hits", 0),
+            "context.compression.ratio": metric.get("compression_ratio", 0.0),
+            "context.compression.cache_hit": metric.get("cache_hit", False),
+        }
+        if token_threshold is not None:
+            attrs["context.token_threshold"] = token_threshold
+        cache_types = metric.get("cache_types") or compression.get("cache_types") or []
+        if cache_types:
+            attrs["context.compression.cache_types"] = json.dumps(
+                cache_types,
+                ensure_ascii=False,
+            )
+        self.add_span_event("agent.step.metrics", attrs)
+
+    def set_agent_context_metrics(self, metrics: List[Dict[str, Any]]) -> None:
+        """Attach aggregate context/compression metrics to the current Agent span."""
+        if not metrics:
+            return
+
+        estimated_inputs = [
+            (metric.get("memory_state") or {}).get("estimated_input_tokens", 0)
+            for metric in metrics
+        ]
+        compression_ratios = [
+            metric.get("compression_ratio", 0.0)
+            for metric in metrics
+        ]
+        compression_calls = sum(
+            (metric.get("compression") or {}).get("calls", 0)
+            for metric in metrics
+        )
+        compression_cache_hits = sum(
+            (metric.get("compression") or {}).get("cache_hits", 0)
+            for metric in metrics
+        )
+        attrs = {
+            "agent.steps.count": len(metrics),
+            "context.tokens.max_estimated_input": max(estimated_inputs or [0]),
+            "context.compression.avg_ratio": (
+                round(sum(compression_ratios) / len(compression_ratios), 2)
+                if compression_ratios
+                else 0.0
+            ),
+            "context.compression.calls.total": compression_calls,
+            "context.compression.cache_hits.total": compression_cache_hits,
+        }
+        self.set_span_attributes(**attrs)
+
     @contextmanager
     def trace_tool_call(
         self,
@@ -1281,18 +1514,15 @@ class MonitoringManager:
             })
 
         # Add tool input as JSON string
-        if tool_input:
-            try:
-                tool_input_json = json.dumps(tool_input, ensure_ascii=False)
-                openinference_attrs["agent.tool.input"] = tool_input_json
-                openinference_attrs["tool.parameters"] = tool_input_json
-                openinference_attrs[OPENINFERENCE_INPUT_VALUE] = tool_input_json
-                openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = tool_input_json
-            except (TypeError, ValueError):
-                openinference_attrs["agent.tool.input"] = str(tool_input)
-                openinference_attrs["tool.parameters"] = str(tool_input)
-                openinference_attrs[OPENINFERENCE_INPUT_VALUE] = str(tool_input)
-                openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = str(tool_input)
+        if tool_input is not None:
+            tool_input_preview = self._trace_payload_preview(tool_input)
+            openinference_attrs["agent.tool.input"] = tool_input_preview
+            openinference_attrs["tool.parameters"] = tool_input_preview
+            openinference_attrs[OPENINFERENCE_INPUT_VALUE] = tool_input_preview
+            openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = tool_input_preview
+            openinference_attrs.update(
+                self._trace_payload_attributes("agent.tool.input", tool_input)
+            )
 
         openinference_attrs.update(attributes)
 
@@ -1303,12 +1533,15 @@ class MonitoringManager:
             attributes=openinference_attrs
         ) as span:
             start_time = time.time()
+            success = True
             try:
                 yield span
             except Exception as e:
+                success = False
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 span.set_attribute("error.type", type(e).__name__)
                 span.set_attribute("error.message", str(e))
+                span.set_attribute("agent.tool.success", False)
                 if self._agent_error_count:
                     self._agent_error_count.add(
                         1, {"agent.name": agent_name, "error.type": type(e).__name__, "agent.tool.name": tool_name}
@@ -1318,6 +1551,8 @@ class MonitoringManager:
                 duration = time.time() - start_time
                 duration_ms = duration * 1000
                 span.set_attribute("agent.tool.duration_ms", duration_ms)
+                if success:
+                    span.set_attribute("agent.tool.success", True)
                 if self._agent_step_count:
                     self._agent_step_count.add(
                         1, {"agent.name": agent_name, "agent.step.type": "tool_call", "agent.tool.name": tool_name}
@@ -1363,15 +1598,14 @@ class MonitoringManager:
             if agent_name:
                 openinference_attrs["agent.name"] = agent_name
 
-        if retrieval_input:
-            try:
-                retrieval_input_json = json.dumps(
-                    retrieval_input, ensure_ascii=False)
-            except (TypeError, ValueError):
-                retrieval_input_json = str(retrieval_input)
+        if retrieval_input is not None:
+            retrieval_input_json = self._trace_payload_preview(retrieval_input)
             openinference_attrs["retriever.input"] = retrieval_input_json
             openinference_attrs[OPENINFERENCE_INPUT_VALUE] = retrieval_input_json
             openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = retrieval_input_json
+            openinference_attrs.update(
+                self._trace_payload_attributes("retriever.input", retrieval_input)
+            )
             query = retrieval_input.get("query") if isinstance(
                 retrieval_input, dict) else None
             if query is not None:
@@ -1385,12 +1619,15 @@ class MonitoringManager:
             attributes=openinference_attrs,
         ) as span:
             start_time = time.time()
+            success = True
             try:
                 yield span
             except Exception as e:
+                success = False
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 span.set_attribute("error.type", type(e).__name__)
                 span.set_attribute("error.message", str(e))
+                span.set_attribute("retriever.success", False)
                 if self._agent_error_count:
                     self._agent_error_count.add(
                         1,
@@ -1404,6 +1641,8 @@ class MonitoringManager:
             finally:
                 duration_ms = (time.time() - start_time) * 1000
                 span.set_attribute("retriever.duration_ms", duration_ms)
+                if success:
+                    span.set_attribute("retriever.success", True)
                 if self._agent_step_count:
                     self._agent_step_count.add(
                         1,
@@ -1427,20 +1666,15 @@ class MonitoringManager:
 
         span = trace.get_current_span()
         if span and span.is_recording():
-            try:
-                if isinstance(output, str):
-                    span.set_attribute("agent.tool.output", output)
-                    span.set_attribute(OPENINFERENCE_OUTPUT_VALUE, output)
-                    span.set_attribute(LANGFUSE_OBSERVATION_OUTPUT, output)
-                else:
-                    output_json = json.dumps(output, ensure_ascii=False)
-                    span.set_attribute("agent.tool.output", output_json)
-                    span.set_attribute(OPENINFERENCE_OUTPUT_VALUE, output_json)
-                    span.set_attribute(LANGFUSE_OBSERVATION_OUTPUT, output_json)
-            except (TypeError, ValueError):
-                span.set_attribute("agent.tool.output", str(output))
-                span.set_attribute(OPENINFERENCE_OUTPUT_VALUE, str(output))
-                span.set_attribute(LANGFUSE_OBSERVATION_OUTPUT, str(output))
+            output_value = self._trace_payload_preview(output)
+            attrs = {
+                "agent.tool.output": output_value,
+                OPENINFERENCE_OUTPUT_VALUE: output_value,
+                LANGFUSE_OBSERVATION_OUTPUT: output_value,
+                "agent.tool.success": True,
+            }
+            attrs.update(self._trace_payload_attributes("agent.tool.output", output))
+            span.set_attributes(attrs)
 
     def set_retriever_output(self, output: Any) -> None:
         """Set the output of a retriever call on the current span."""
@@ -1449,17 +1683,16 @@ class MonitoringManager:
 
         span = trace.get_current_span()
         if span and span.is_recording():
-            try:
-                if isinstance(output, str):
-                    output_value = output
-                else:
-                    output_value = json.dumps(output, ensure_ascii=False)
-            except (TypeError, ValueError):
-                output_value = str(output)
-
-            span.set_attribute("retriever.output", output_value)
-            span.set_attribute(OPENINFERENCE_OUTPUT_VALUE, output_value)
-            span.set_attribute(LANGFUSE_OBSERVATION_OUTPUT, output_value)
+            output_value = self._trace_payload_preview(output)
+            attrs = {
+                "retriever.output": output_value,
+                OPENINFERENCE_OUTPUT_VALUE: output_value,
+                LANGFUSE_OBSERVATION_OUTPUT: output_value,
+                "retriever.success": True,
+            }
+            attrs.update(self._trace_payload_attributes("retriever.output", output))
+            attrs.update(self._retrieval_result_attributes(output))
+            span.set_attributes(attrs)
 
     def get_current_span(self) -> Optional[Any]:
         """Get the current active span."""
