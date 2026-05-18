@@ -412,10 +412,10 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
         # Get user tenant relationship
         user_tenant = get_user_tenant_by_user_id(user_id)
         if not user_tenant:
-            # User exists in Supabase but not in local database - this is an inconsistent state
-            # Delete the orphaned Supabase account and return None to trigger 401
+            # User exists in Supabase but not in local database - this is an inconsistent state.
+            # Delete the orphaned Supabase account and return None to trigger 401.
             logging.warning(
-                f"User {user_id} not found in local database, deleting orphaned Supabase account"
+                f"User {user_id} not found in local database, cleaning up orphaned Supabase account"
             )
             try:
                 admin_client = get_supabase_admin_client()
@@ -423,7 +423,9 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                     admin_client.auth.admin.delete_user(user_id)
                     logging.info(f"Deleted orphaned Supabase user {user_id}")
                 else:
-                    logging.warning(f"Could not get Supabase admin client to delete user {user_id}")
+                    logging.warning(
+                        f"Could not get Supabase admin client to delete user {user_id}"
+                    )
             except Exception as delete_err:
                 logging.error(
                     f"Failed to delete orphaned Supabase user {user_id}: {str(delete_err)}"
