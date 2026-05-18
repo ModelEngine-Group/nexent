@@ -837,7 +837,11 @@ export default function AgentGenerateDetail({
                   agentName: data.content,
                 }));
               }
-              saveGeneratedField(generationAgentId, 'agentName', data.content);
+              // Only save to cache if user hasn't filled in agent name themselves
+              // This preserves user's input even if backend generates different values
+              if (!editedAgent.name && !form.getFieldValue("agentName")?.trim()) {
+                saveGeneratedField(generationAgentId, 'agentName', data.content);
+              }
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DESCRIPTION:
               if (isSameAgent) {
@@ -847,7 +851,11 @@ export default function AgentGenerateDetail({
                   agentDescription: data.content,
                 }));
               }
-              saveGeneratedField(generationAgentId, 'agentDescription', data.content);
+              // Only save to cache if user hasn't filled in agent description themselves
+              // This preserves user's input even if backend generates different values
+              if (!editedAgent.description && !form.getFieldValue("agentDescription")?.trim()) {
+                saveGeneratedField(generationAgentId, 'agentDescription', data.content);
+              }
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DISPLAY_NAME:
               if (isSameAgent) {
@@ -860,7 +868,11 @@ export default function AgentGenerateDetail({
                   agentDisplayName: data.content,
                 }));
               }
-              saveGeneratedField(generationAgentId, 'agentDisplayName', data.content);
+              // Only save to cache if user hasn't filled in agent display name themselves
+              // This preserves user's input even if backend generates different values
+              if (!editedAgent.display_name && !form.getFieldValue("agentDisplayName")?.trim()) {
+                saveGeneratedField(generationAgentId, 'agentDisplayName', data.content);
+              }
               break;
           }
         },
