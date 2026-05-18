@@ -437,12 +437,6 @@ export const fetchWithErrorHandling = async (
         throw new ApiError(errorCode, errorMessage);
       }
 
-      // Handle HTTP 401 - trigger session expired modal for all unauthorized errors
-      if (response.status === 401) {
-        handleSessionExpired();
-        throw new ApiError(errorCode, errorMessage);
-      }
-
       // Handle custom 499 error code (client closed connection)
       if (response.status === 499) {
         handleSessionExpired();
