@@ -3,6 +3,8 @@ import importlib.machinery
 import types
 import unittest
 from unittest.mock import patch, MagicMock
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 
 # Mock boto3 and minio client before importing the module under test
 import sys
@@ -41,7 +43,9 @@ from backend.services.prompt_service import (
     generate_and_save_system_prompt_impl,
     gen_system_prompt_streamable,
     generate_system_prompt,
-    join_info_for_generate_system_prompt
+    join_info_for_generate_system_prompt,
+    join_info_for_optimize_prompt_section,
+    optimize_prompt_section_impl,
 )
 
 
@@ -51,6 +55,98 @@ class TestPromptService(unittest.TestCase):
         # Reset all mocks before each test
         minio_client_mock.reset_mock()
         self.test_model_id = 1
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_optimize_prompt_template')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_optimize_prompt_section_impl_success(
+        self,
+        mock_search_agent_info,
+        mock_query_tools,
+        mock_get_prompt_template,
+        mock_call_llm,
+    ):
+        mock_query_tools.return_value = [
+            {"name": "tool1", "description": "Tool 1", "inputs": "{}", "output_type": "text"}
+        ]
+        mock_search_agent_info.return_value = {"name": "assistant1", "description": "Assistant 1"}
+        mock_get_prompt_template.return_value = {
+            "OPTIMIZE_SYSTEM_PROMPT": "Optimize section",
+            "OPTIMIZE_USER_PROMPT": "Section {{ section_type }} {{ current_content }} {{ feedback }}"
+        }
+        mock_call_llm.return_value = "Optimized content"
+
+        result = optimize_prompt_section_impl(
+            agent_id=1,
+            model_id=2,
+            task_description="Build an agent",
+            tenant_id="tenant-1",
+            language="en",
+            section_type="duty",
+            section_title="Agent Role",
+            current_content="Original duty",
+            feedback="Make it more specific",
+            tool_ids=[10],
+            sub_agent_ids=[20],
+            knowledge_base_display_names=["kb-a"],
+        )
+
+        self.assertEqual(result["section_type"], "duty")
+        self.assertEqual(result["original_content"], "Original duty")
+        self.assertEqual(result["optimized_content"], "Optimized content")
+        mock_query_tools.assert_called_once_with([10])
+        mock_search_agent_info.assert_called_once_with(agent_id=20, tenant_id="tenant-1")
+        mock_call_llm.assert_called_once()
+
+    def test_optimize_prompt_section_impl_requires_feedback(self):
+        with self.assertRaises(AppException) as context:
+            optimize_prompt_section_impl(
+                agent_id=1,
+                model_id=2,
+                task_description="Build an agent",
+                tenant_id="tenant-1",
+                language="en",
+                section_type="duty",
+                section_title="Agent Role",
+                current_content="Original duty",
+                feedback="",
+            )
+
+        self.assertEqual(
+            context.exception.error_code,
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD
+        )
+
+    @patch('backend.services.prompt_service.Template')
+    def test_join_info_for_optimize_prompt_section(self, mock_template):
+        mock_template_instance = MagicMock()
+        mock_template.return_value = mock_template_instance
+        mock_template_instance.render.return_value = "Rendered optimize content"
+
+        result = join_info_for_optimize_prompt_section(
+            prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "Template"},
+            section_type="constraint",
+            section_title="Usage Requirements",
+            task_description="Task description",
+            current_content="Original content",
+            feedback="Be clearer",
+            tool_info_list=[
+                {"name": "tool1", "description": "Tool 1", "inputs": "{}", "output_type": "text"}
+            ],
+            sub_agent_info_list=[
+                {"name": "assistant1", "description": "Assistant 1"}
+            ],
+            language="en",
+            knowledge_base_display_names=["kb-a", "kb-b"],
+        )
+
+        self.assertEqual(result, "Rendered optimize content")
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertEqual(template_vars["section_type"], "constraint")
+        self.assertEqual(template_vars["current_content"], "Original content")
+        self.assertEqual(template_vars["feedback"], "Be clearer")
+        self.assertEqual(template_vars["knowledge_base_names"], '"kb-a", "kb-b"')
 
     @patch('backend.services.prompt_service.generate_system_prompt')
     @patch('backend.services.prompt_service.query_tools_by_ids')

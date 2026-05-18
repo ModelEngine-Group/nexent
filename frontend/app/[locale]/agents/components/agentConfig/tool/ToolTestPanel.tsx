@@ -573,9 +573,8 @@ export default function ToolTestPanel({
               </Form.Item>
               ) : (
                 // Parsed parameters mode
-                Object.keys(parameterValues).length > 0 && (
-                  <>
-                    {Object.keys(parameterValues).map((paramName) => {
+                <>
+                  {Object.keys(parameterValues).map((paramName) => {
                       const paramInfo = parsedInputs[paramName];
                       const description =
                         paramInfo &&
@@ -681,7 +680,6 @@ export default function ToolTestPanel({
                       );
                     })}
                   </>
-                )
               )}
             </Form>
           </>

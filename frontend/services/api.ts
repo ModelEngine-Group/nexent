@@ -85,6 +85,7 @@ export const API_ENDPOINTS = {
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
+    optimize: `${API_BASE_URL}/prompt/optimize`,
   },
   stt: {
     ws: `/api/voice/stt/ws`,
@@ -272,6 +273,7 @@ export const API_ENDPOINTS = {
     // Nacos config management
     nacosConfigs: `${API_BASE_URL}/a2a/client/nacos-configs`,
     nacosConfig: (configId: string) => `${API_BASE_URL}/a2a/client/nacos-configs/${configId}`,
+    nacosTestConnection: `${API_BASE_URL}/a2a/client/nacos-configs/test-connection`,
     // A2A Server management
     serverAgents: `${API_BASE_URL}/a2a/management/agents`,
     serverAgent: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}`,

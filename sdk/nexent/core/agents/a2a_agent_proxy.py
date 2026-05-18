@@ -6,6 +6,7 @@ It provides a unified interface for invoking remote A2A endpoints.
 """
 import json
 import logging
+import uuid
 from typing import Any, AsyncIterator, Dict, List, Optional
 from dataclasses import dataclass
 from threading import Event
@@ -115,6 +116,7 @@ class ExternalA2AAgentProxy:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
+            "A2A-Version": "1.0",
         }
         if self.agent_info.api_key:
             headers["Authorization"] = f"Bearer {self.agent_info.api_key}"
@@ -137,6 +139,7 @@ class ExternalA2AAgentProxy:
             A2A message payload dict.
         """
         message = {
+            "message_id": f"msg_{uuid.uuid4().hex}",
             "role": "ROLE_USER",
             "parts": [{"text": query}]
         }
