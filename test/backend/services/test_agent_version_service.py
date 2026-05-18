@@ -648,7 +648,7 @@ def test_rollback_version_impl_success(monkeypatch):
     # Now these variables are defined
     mock_search.assert_called_once_with(1, "tenant1", 1)
     mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
-    mock_restore_draft.assert_called_once()
+    mock_restore.assert_called_once()
 
 
 def test_rollback_version_impl_version_not_found(monkeypatch):
