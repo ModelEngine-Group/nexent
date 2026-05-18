@@ -3,23 +3,23 @@ name: Build Offline Deployment Package
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Nexent image version (e.g. v1.0.0 or latest)'
+      ref_type:
+        description: 'Reference type: tag, main, or branch'
         required: true
-        default: 'latest'
-      include_source:
-        description: 'Include source code in the package'
+        default: 'main'
+        type: choice
+        options:
+          - tag
+          - main
+          - branch
+      ref_name:
+        description: 'Tag name (e.g. v1.0.0) or branch name (e.g. feature/xyz). Leave empty if ref_type is main.'
         required: false
-        default: true
-        type: boolean
-      runner_label_json:
-        description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
-        required: true
-        default: '["ubuntu-latest"]'
+        default: ''
 
 jobs:
   build-offline-package:
-    runs-on: ${{ fromJson(inputs.runner_label_json) }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         platform: [amd64, arm64]
@@ -27,31 +27,49 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.set-vars.outputs.git-ref }}
       
       - name: Set version and platform variables
         id: set-vars
         run: |
-          VERSION="${{ inputs.version }}"
+          REF_TYPE="${{ inputs.ref_type }}"
+          REF_NAME="${{ inputs.ref_name }}"
           PLATFORM="${{ matrix.platform }}"
-          OUTPUT_VERSION="${VERSION}"
           
-          if [ "$VERSION" = "latest" ]; then
-            OUTPUT_VERSION="latest"
-          fi
+          # Set image version and git ref based on ref_type
+          case "$REF_TYPE" in
+            tag)
+              IMAGE_VERSION="${REF_NAME}"
+              GIT_REF="refs/tags/${REF_NAME}"
+              ;;
+            main)
+              IMAGE_VERSION="latest"
+              GIT_REF="main"
+              ;;
+            branch)
+              IMAGE_VERSION="${REF_NAME}"
+              GIT_REF="${REF_NAME}"
+              ;;
+          esac
           
-          echo "version=$OUTPUT_VERSION" >> $GITHUB_OUTPUT
-          echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
-          echo "package-name=nexent-offline-${PLATFORM}-${OUTPUT_VERSION}" >> $GITHUB_OUTPUT
+          # Sanitize branch name for package name (replace / with -)
+          SAFE_NAME=$(echo "${IMAGE_VERSION}" | sed 's/\//-/g')
+          
+          echo "image-version=${IMAGE_VERSION}" >> $GITHUB_OUTPUT
+          echo "git-ref=${GIT_REF}" >> $GITHUB_OUTPUT
+          echo "platform=${PLATFORM}" >> $GITHUB_OUTPUT
+          echo "package-name=nexent-offline-${PLATFORM}-${SAFE_NAME}" >> $GITHUB_OUTPUT
       
       - name: Build offline package
         run: |
           chmod +x scripts/offline/build_offline_package.sh
           
           ./scripts/offline/build_offline_package.sh \
-            --version "${{ steps.set-vars.outputs.version }}" \
+            --version "${{ steps.set-vars.outputs.image-version }}" \
             --platform "${{ matrix.platform }}" \
             --output-dir ./offline-output \
-            --include-source "${{ inputs.include_source }}"
+            --include-source "true"
       
       
       
@@ -80,10 +98,12 @@ jobs:
           echo "========================================"
           echo "Offline Package Build Summary"
           echo "========================================"
-          echo "Version: ${{ steps.set-vars.outputs.version }}"
+          echo "Reference Type: ${{ inputs.ref_type }}"
+          echo "Reference Name: ${{ inputs.ref_name }}"
+          echo "Image Version: ${{ steps.set-vars.outputs.image-version }}"
+          echo "Git Ref: ${{ steps.set-vars.outputs.git-ref }}"
           echo "Platform: ${{ matrix.platform }}"
           echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
-          echo "Include Source: ${{ inputs.include_source }}"
           echo "========================================"
           echo ""
           echo "Package contents:"
