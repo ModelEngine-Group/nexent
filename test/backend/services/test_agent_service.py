@@ -8780,18 +8780,22 @@ async def test_update_agent_info_impl_skill_update_exception(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.set_monitoring_context")
+@patch("backend.services.agent_service.AgentRunMetadata")
 @patch("backend.services.agent_service._resolve_user_tenant_language")
 @patch("backend.services.agent_service.build_memory_context")
 @patch('backend.services.agent_service.save_messages')
 @patch("backend.services.agent_service.generate_stream_with_memory")
-async def test_run_agent_stream_sets_monitoring_context(
+async def test_run_agent_stream_binds_agent_monitoring_context(
         mock_generate_stream, mock_save_messages, mock_build_mem_ctx,
-        mock_resolve, mock_set_ctx, mock_agent_request, mock_http_request):
-    """run_agent_stream calls set_monitoring_context with resolved identity."""
+        mock_resolve, mock_agent_metadata_cls, mock_agent_request, mock_http_request):
+    """run_agent_stream binds AgentRunMetadata with resolved identity."""
     mock_resolve.return_value = ("resolved-uid", "resolved-tid", "en")
     mock_agent_request.agent_id = 42
     mock_agent_request.conversation_id = 99
+    mock_agent_metadata = MagicMock()
+    mock_agent_metadata_cls.return_value = mock_agent_metadata
+    monitoring_manager_mock.bind_agent_context.reset_mock()
+    monitoring_manager_mock.bind_agent_context.side_effect = lambda metadata: metadata
 
     async def fake_stream():
         yield "chunk"
@@ -8801,12 +8805,14 @@ async def test_run_agent_stream_sets_monitoring_context(
     await run_agent_stream(
         mock_agent_request, mock_http_request, "Bearer token")
 
-    mock_set_ctx.assert_called_once_with(
-        tenant_id="resolved-tid",
-        user_id="resolved-uid",
-        agent_id=42,
-        conversation_id=99,
-    )
+    monitoring_manager_mock.bind_agent_context.assert_called_once()
+    monitoring_manager_mock.bind_agent_context.assert_called_once_with(mock_agent_metadata)
+    metadata_kwargs = mock_agent_metadata_cls.call_args.kwargs
+    assert metadata_kwargs["tenant_id"] == "resolved-tid"
+    assert metadata_kwargs["user_id"] == "resolved-uid"
+    assert metadata_kwargs["agent_id"] == 42
+    assert metadata_kwargs["conversation_id"] == 99
+    assert metadata_kwargs["language"] == "en"
 
 
 def test_generate_stream_with_memory_decorated():
