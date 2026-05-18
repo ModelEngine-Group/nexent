@@ -59,6 +59,10 @@ _monitoring_agent_id: ContextVar[Optional[int]] = ContextVar(
     "_monitoring_agent_id", default=None)
 _monitoring_conversation_id: ContextVar[Optional[int]] = ContextVar(
     "_monitoring_conversation_id", default=None)
+_monitoring_agent_run_metadata: ContextVar[Optional["AgentRunMetadata"]] = ContextVar(
+    "_monitoring_agent_run_metadata", default=None)
+_monitoring_agent_run_active: ContextVar[bool] = ContextVar(
+    "_monitoring_agent_run_active", default=False)
 
 # Operation tag to identify which business scenario triggered the model call.
 # Set at the service/call-site layer; read by the client-level monitoring wrapper.
@@ -150,6 +154,110 @@ SUPPORTED_PROVIDERS = {
     "grafana",
     "zipkin",
 }
+
+
+@dataclass
+class AgentRunMetadata:
+    """Request-scoped Agent observability metadata owned by the SDK."""
+    tenant_id: Optional[str] = None
+    user_id: Optional[str] = None
+    agent_id: Optional[int] = None
+    conversation_id: Optional[int] = None
+    agent_name: Optional[str] = None
+    query: Optional[str] = None
+    is_debug: Optional[bool] = None
+    language: Optional[str] = None
+    model_name: Optional[str] = None
+    memory_enabled: Optional[bool] = None
+    history_count: Optional[int] = None
+    minio_files_count: Optional[int] = None
+    extra_metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def metadata(self) -> Dict[str, Any]:
+        """Return compact metadata for OpenInference/Langfuse attributes."""
+        metadata: Dict[str, Any] = {
+            "agent_id": self.agent_id,
+            "agent_name": self.agent_name,
+            "tenant_id": self.tenant_id,
+            "conversation_id": self.conversation_id,
+            "is_debug": self.is_debug,
+            "language": self.language,
+            "model_name": self.model_name,
+            "memory_enabled": self.memory_enabled,
+            "history_count": self.history_count,
+            "minio_files_count": self.minio_files_count,
+        }
+        metadata.update(self.extra_metadata or {})
+        return {key: value for key, value in metadata.items() if value is not None}
+
+    def tags(self) -> List[str]:
+        """Return stable tags shared by Agent, LLM and Tool spans."""
+        tags = ["nexent", "agent"]
+        if self.agent_id is not None:
+            tags.append(f"agent_id:{self.agent_id}")
+        if self.tenant_id:
+            tags.append(f"tenant_id:{self.tenant_id}")
+        if self.is_debug is True:
+            tags.append("debug")
+        if self.memory_enabled is True:
+            tags.append("memory_enabled")
+        elif self.memory_enabled is False:
+            tags.append("memory_disabled")
+        return tags
+
+
+AgentMonitoringContext = AgentRunMetadata
+
+
+def _coerce_agent_run_metadata(
+    metadata: Optional[AgentRunMetadata | Dict[str, Any]] = None,
+) -> AgentRunMetadata:
+    if metadata is None:
+        current = _monitoring_agent_run_metadata.get()
+        return current or AgentRunMetadata()
+    if isinstance(metadata, AgentRunMetadata):
+        return metadata
+    if isinstance(metadata, dict):
+        return AgentRunMetadata(**metadata)
+    raise TypeError("metadata must be AgentRunMetadata, dict, or None")
+
+
+def set_agent_monitoring_context(
+    metadata: AgentRunMetadata | Dict[str, Any],
+) -> AgentRunMetadata:
+    """Bind Agent run metadata to the current request/task scope."""
+    agent_metadata = _coerce_agent_run_metadata(metadata)
+    _monitoring_agent_run_metadata.set(agent_metadata)
+    _monitoring_tenant_id.set(agent_metadata.tenant_id)
+    _monitoring_user_id.set(agent_metadata.user_id)
+    _monitoring_agent_id.set(agent_metadata.agent_id)
+    _monitoring_conversation_id.set(agent_metadata.conversation_id)
+    return agent_metadata
+
+
+def get_agent_monitoring_context() -> Optional[AgentRunMetadata]:
+    """Return the current Agent run metadata, if any."""
+    return _monitoring_agent_run_metadata.get()
+
+
+@contextmanager
+def agent_monitoring_context(
+    metadata: AgentRunMetadata | Dict[str, Any],
+) -> Iterator[AgentRunMetadata]:
+    """Temporarily bind Agent run metadata and restore previous values."""
+    agent_metadata = _coerce_agent_run_metadata(metadata)
+    tokens = [
+        (_monitoring_agent_run_metadata, _monitoring_agent_run_metadata.set(agent_metadata)),
+        (_monitoring_tenant_id, _monitoring_tenant_id.set(agent_metadata.tenant_id)),
+        (_monitoring_user_id, _monitoring_user_id.set(agent_metadata.user_id)),
+        (_monitoring_agent_id, _monitoring_agent_id.set(agent_metadata.agent_id)),
+        (_monitoring_conversation_id, _monitoring_conversation_id.set(agent_metadata.conversation_id)),
+    ]
+    try:
+        yield agent_metadata
+    finally:
+        for context_var, token in reversed(tokens):
+            context_var.reset(token)
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -726,6 +834,127 @@ class MonitoringManager:
             attrs.update(attributes)
         return attrs
 
+    def build_agent_run_attributes(
+        self,
+        metadata: Optional[AgentRunMetadata | Dict[str, Any]] = None,
+        span_kind: str = OPENINFERENCE_SPAN_KIND_AGENT,
+        include_query: bool = True,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build SDK-owned Agent observability attributes for any span."""
+        agent_metadata = _coerce_agent_run_metadata(metadata)
+        plain_attrs: Dict[str, Any] = {
+            "tenant.id": agent_metadata.tenant_id,
+            "agent.id": agent_metadata.agent_id,
+            "agent.name": agent_metadata.agent_name,
+            "conversation.id": agent_metadata.conversation_id,
+            "agent.debug": agent_metadata.is_debug,
+            "agent.language": agent_metadata.language,
+            "agent.memory.enabled": agent_metadata.memory_enabled,
+            "agent.history.count": agent_metadata.history_count,
+            "agent.minio_files.count": agent_metadata.minio_files_count,
+            "llm.model_name": agent_metadata.model_name,
+        }
+        plain_attrs = {
+            key: value for key, value in plain_attrs.items() if value is not None
+        }
+        if agent_metadata.agent_name and span_kind == OPENINFERENCE_SPAN_KIND_AGENT:
+            plain_attrs[LANGFUSE_TRACE_NAME] = agent_metadata.agent_name
+        if attributes:
+            plain_attrs.update(attributes)
+
+        return self.build_openinference_attributes(
+            span_kind=span_kind,
+            input_value=agent_metadata.query if include_query else None,
+            metadata=agent_metadata.metadata(),
+            tags=agent_metadata.tags(),
+            session_id=agent_metadata.conversation_id,
+            user_id=agent_metadata.user_id,
+            attributes=plain_attrs,
+        )
+
+    def bind_agent_context(
+        self,
+        metadata: AgentRunMetadata | Dict[str, Any],
+    ) -> AgentRunMetadata:
+        """Bind Agent metadata once at the application boundary."""
+        return set_agent_monitoring_context(metadata)
+
+    @contextmanager
+    def start_agent_run(
+        self,
+        metadata: Optional[AgentRunMetadata | Dict[str, Any]] = None,
+        operation_name: str = "agent.run",
+    ) -> Iterator[Optional[Any]]:
+        """Create the SDK-owned top-level Agent span."""
+        agent_metadata = _coerce_agent_run_metadata(metadata)
+        with agent_monitoring_context(agent_metadata):
+            if _monitoring_agent_run_active.get():
+                yield self.get_current_span()
+                return
+
+            active_token = _monitoring_agent_run_active.set(True)
+            attributes = self.build_agent_run_attributes(
+                agent_metadata,
+                span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
+                include_query=True,
+            )
+            try:
+                with self.trace_operation(
+                    operation_name,
+                    OPENINFERENCE_SPAN_KIND_AGENT,
+                    **attributes,
+                ) as span:
+                    self.add_span_event(f"{operation_name}.started")
+                    try:
+                        yield span
+                        self.add_span_event(f"{operation_name}.completed")
+                    except Exception as error:
+                        self.add_span_event(f"{operation_name}.error", {
+                            "error.type": type(error).__name__,
+                            "error.message": str(error),
+                        })
+                        raise
+            finally:
+                _monitoring_agent_run_active.reset(active_token)
+
+    @contextmanager
+    def with_agent_monitoring(
+        self,
+        metadata: Optional[AgentRunMetadata | Dict[str, Any]] = None,
+        operation_name: str = "agent.run",
+    ) -> Iterator[Optional[Any]]:
+        """Alias for the SDK-owned top-level Agent span."""
+        with self.start_agent_run(metadata, operation_name) as span:
+            yield span
+
+    @contextmanager
+    def trace_agent_step(
+        self,
+        operation_name: str,
+        metadata: Optional[AgentRunMetadata | Dict[str, Any]] = None,
+        step_type: str = "chain",
+        **attributes: Any,
+    ) -> Iterator[Optional[Any]]:
+        """Trace an Agent lifecycle step without requiring business decorators."""
+        agent_metadata = _coerce_agent_run_metadata(metadata)
+        step_attrs = self.build_agent_run_attributes(
+            agent_metadata,
+            span_kind=OPENINFERENCE_SPAN_KIND_CHAIN,
+            include_query=False,
+            attributes={
+                "agent.step.name": operation_name,
+                "agent.step.type": step_type,
+                **attributes,
+            },
+        )
+        with self.trace_operation(
+            operation_name,
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+            **step_attrs,
+        ) as span:
+            yield span
+
     @contextmanager
     def trace_operation(
         self,
@@ -856,6 +1085,16 @@ class MonitoringManager:
         span_kind: Optional[str] = None,
     ) -> None:
         """Attach request-scoped OpenInference context to the current span."""
+        agent_metadata = get_agent_monitoring_context()
+        if agent_metadata is not None:
+            attrs = self.build_agent_run_attributes(
+                agent_metadata,
+                span_kind=span_kind or OPENINFERENCE_SPAN_KIND_CHAIN,
+                include_query=span_kind == OPENINFERENCE_SPAN_KIND_AGENT,
+            )
+            self.set_span_attributes(**attrs)
+            return
+
         context = get_monitoring_context()
         agent_id = context.get("agent_id")
         conversation_id = context.get("conversation_id")
@@ -931,8 +1170,21 @@ class MonitoringManager:
             "llm.operation.name": operation_name,
             "gen_ai.request.model": model_name,
         }
+        agent_metadata = get_agent_monitoring_context()
+        if agent_metadata is not None:
+            openinference_attrs.update(self.build_agent_run_attributes(
+                agent_metadata,
+                span_kind=OPENINFERENCE_SPAN_KIND_LLM,
+                include_query=False,
+            ))
         # Add user-provided attributes
         openinference_attrs.update(attributes)
+        openinference_attrs[OPENINFERENCE_SPAN_KIND] = OPENINFERENCE_SPAN_KIND_LLM
+        openinference_attrs[LANGFUSE_OBSERVATION_TYPE] = "generation"
+        openinference_attrs[LANGFUSE_OBSERVATION_MODEL_NAME] = model_name
+        openinference_attrs["llm.model_name"] = model_name
+        openinference_attrs["llm.operation.name"] = operation_name
+        openinference_attrs["gen_ai.request.model"] = model_name
         if (
             OPENINFERENCE_INPUT_VALUE in openinference_attrs
             and LANGFUSE_OBSERVATION_INPUT not in openinference_attrs
@@ -1011,6 +1263,22 @@ class MonitoringManager:
             "agent.tool.name": tool_name,
             "tool.name": tool_name,
         }
+        agent_metadata = get_agent_monitoring_context()
+        if agent_metadata is not None:
+            openinference_attrs.update(self.build_agent_run_attributes(
+                agent_metadata,
+                span_kind=OPENINFERENCE_SPAN_KIND_TOOL,
+                include_query=False,
+            ))
+            openinference_attrs.update({
+                OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_TOOL,
+                LANGFUSE_OBSERVATION_TYPE: "tool",
+                "agent.name": agent_name,
+                "agent.step.name": tool_name,
+                "agent.step.type": "tool_call",
+                "agent.tool.name": tool_name,
+                "tool.name": tool_name,
+            })
 
         # Add tool input as JSON string
         if tool_input:
@@ -1055,6 +1323,97 @@ class MonitoringManager:
                         1, {"agent.name": agent_name, "agent.step.type": "tool_call", "agent.tool.name": tool_name}
                     )
 
+    @contextmanager
+    def trace_retriever_call(
+        self,
+        retriever_name: str,
+        agent_name: Optional[str] = None,
+        retrieval_input: Optional[Dict] = None,
+        **attributes: Any,
+    ) -> Iterator[Optional[Any]]:
+        """Trace SDK-owned memory/retriever calls with OpenInference semantics."""
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE or not self._tracer:
+            yield None
+            return
+
+        openinference_attrs = {
+            OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_RETRIEVER,
+            LANGFUSE_OBSERVATION_TYPE: "retriever",
+            "retriever.name": retriever_name,
+            "agent.step.name": retriever_name,
+            "agent.step.type": "retriever",
+        }
+        if agent_name:
+            openinference_attrs["agent.name"] = agent_name
+
+        agent_metadata = get_agent_monitoring_context()
+        if agent_metadata is not None:
+            openinference_attrs.update(self.build_agent_run_attributes(
+                agent_metadata,
+                span_kind=OPENINFERENCE_SPAN_KIND_RETRIEVER,
+                include_query=False,
+            ))
+            openinference_attrs.update({
+                OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_RETRIEVER,
+                LANGFUSE_OBSERVATION_TYPE: "retriever",
+                "retriever.name": retriever_name,
+                "agent.step.name": retriever_name,
+                "agent.step.type": "retriever",
+            })
+            if agent_name:
+                openinference_attrs["agent.name"] = agent_name
+
+        if retrieval_input:
+            try:
+                retrieval_input_json = json.dumps(
+                    retrieval_input, ensure_ascii=False)
+            except (TypeError, ValueError):
+                retrieval_input_json = str(retrieval_input)
+            openinference_attrs["retriever.input"] = retrieval_input_json
+            openinference_attrs[OPENINFERENCE_INPUT_VALUE] = retrieval_input_json
+            openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = retrieval_input_json
+            query = retrieval_input.get("query") if isinstance(
+                retrieval_input, dict) else None
+            if query is not None:
+                openinference_attrs["retrieval.query"] = str(query)
+
+        openinference_attrs.update(attributes)
+
+        span_name = f"agent.retriever.{retriever_name}"
+        with self._tracer.start_as_current_span(
+            span_name,
+            attributes=openinference_attrs,
+        ) as span:
+            start_time = time.time()
+            try:
+                yield span
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.set_attribute("error.type", type(e).__name__)
+                span.set_attribute("error.message", str(e))
+                if self._agent_error_count:
+                    self._agent_error_count.add(
+                        1,
+                        {
+                            "agent.name": agent_name or "",
+                            "error.type": type(e).__name__,
+                            "retriever.name": retriever_name,
+                        },
+                    )
+                raise
+            finally:
+                duration_ms = (time.time() - start_time) * 1000
+                span.set_attribute("retriever.duration_ms", duration_ms)
+                if self._agent_step_count:
+                    self._agent_step_count.add(
+                        1,
+                        {
+                            "agent.name": agent_name or "",
+                            "agent.step.type": "retriever",
+                            "retriever.name": retriever_name,
+                        },
+                    )
+
     def set_tool_output(self, output: Any) -> None:
         """
         Set the output of a tool call on the current span.
@@ -1082,6 +1441,25 @@ class MonitoringManager:
                 span.set_attribute("agent.tool.output", str(output))
                 span.set_attribute(OPENINFERENCE_OUTPUT_VALUE, str(output))
                 span.set_attribute(LANGFUSE_OBSERVATION_OUTPUT, str(output))
+
+    def set_retriever_output(self, output: Any) -> None:
+        """Set the output of a retriever call on the current span."""
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
+            return
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            try:
+                if isinstance(output, str):
+                    output_value = output
+                else:
+                    output_value = json.dumps(output, ensure_ascii=False)
+            except (TypeError, ValueError):
+                output_value = str(output)
+
+            span.set_attribute("retriever.output", output_value)
+            span.set_attribute(OPENINFERENCE_OUTPUT_VALUE, output_value)
+            span.set_attribute(LANGFUSE_OBSERVATION_OUTPUT, output_value)
 
     def get_current_span(self) -> Optional[Any]:
         """Get the current active span."""
@@ -2049,6 +2427,8 @@ def get_monitoring_manager() -> MonitoringManager:
 __all__ = [
     'MonitoringConfig',
     'MonitoringManager',
+    'AgentMonitoringContext',
+    'AgentRunMetadata',
     'LLMTokenTracker',
     'MonitoringRecordBuffer',
     'RecordModelCallContext',
@@ -2057,6 +2437,9 @@ __all__ = [
     'is_opentelemetry_available',
     'set_monitoring_context',
     'get_monitoring_context',
+    'set_agent_monitoring_context',
+    'get_agent_monitoring_context',
+    'agent_monitoring_context',
     'set_monitoring_operation',
     'record_model_call',
     'OPENINFERENCE_SPAN_KIND',

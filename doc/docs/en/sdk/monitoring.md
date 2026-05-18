@@ -156,15 +156,26 @@ MONITORING_DASHBOARD_URL=http://localhost:9411
 
 ## Code Integration
 
-### Endpoint Monitoring
+### Agent Boundary Context
+
+At the request boundary, business code only binds the resolved user and Agent metadata once. The SDK then creates Agent, LLM, and Tool spans from the runtime lifecycle:
 
 ```python
+from nexent.monitor.agent_observability import AgentRunMetadata
 from utils.monitoring import monitoring_manager
 
-@monitoring_manager.monitor_endpoint("my_service.my_function")
-async def my_api_function():
-    return {"status": "ok"}
+monitoring_manager.bind_agent_context(AgentRunMetadata(
+    tenant_id=tenant_id,
+    user_id=user_id,
+    agent_id=agent_request.agent_id,
+    conversation_id=agent_request.conversation_id,
+    query=agent_request.query,
+    is_debug=agent_request.is_debug,
+    language=language,
+))
 ```
+
+`monitor_endpoint` is still kept as a compatibility API and low-level escape hatch, but it is no longer the recommended way to add normal Agent observability.
 
 ### LLM Call Monitoring
 
@@ -177,7 +188,7 @@ def call_llm(messages):
 ### Agent Step Tracing
 
 ```python
-with monitoring_manager.trace_agent_step("web_search", "research_agent", "tool_call") as span:
+with monitoring_manager.trace_agent_step("agent.run.loop", step_type="agent_loop") as span:
     result = execute_tool()
     monitoring_manager.set_tool_output(result)
 ```
@@ -188,6 +199,16 @@ with monitoring_manager.trace_agent_step("web_search", "research_agent", "tool_c
 with monitoring_manager.trace_tool_call("web_search", "agent_name", {"query": "test"}) as span:
     results = search_web("test")
     monitoring_manager.set_tool_output({"results": results})
+```
+
+### Retriever Call Tracing
+
+Knowledge-base search tools are classified as retriever spans automatically by the SDK. Custom retriever integrations can use the same semantics directly:
+
+```python
+with monitoring_manager.trace_retriever_call("knowledge_base_search", "agent_name", {"query": "test"}) as span:
+    documents = search_knowledge_base("test")
+    monitoring_manager.set_retriever_output(documents)
 ```
 
 ## OpenInference Semantic Attributes
@@ -215,6 +236,9 @@ The system uses OpenInference semantic conventions for AI-specific observability
 | `agent.tool.name` | Tool name |
 | `agent.tool.input` | Tool input (JSON) |
 | `agent.tool.output` | Tool output (JSON) |
+| `retriever.name` | Retriever name |
+| `retrieval.query` | Retriever query |
+| `retriever.output` | Retriever output |
 
 ## Metrics
 

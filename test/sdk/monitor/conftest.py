@@ -102,6 +102,11 @@ def pytest_configure(config):
     sys.modules["sdk.nexent"].monitor = sys.modules["sdk.nexent.monitor"]
 
     repo_root = Path(__file__).resolve().parents[3]
+    sys.modules["sdk"].__path__ = [str(repo_root / "sdk")]
+    sys.modules["sdk.nexent"].__path__ = [str(repo_root / "sdk" / "nexent")]
+    sys.modules["sdk.nexent.monitor"].__path__ = [
+        str(repo_root / "sdk" / "nexent" / "monitor")
+    ]
     monitoring_path = repo_root / "sdk" / "nexent" / "monitor" / "monitoring.py"
     spec = importlib.util.spec_from_file_location(
         "sdk.nexent.monitor.monitoring",

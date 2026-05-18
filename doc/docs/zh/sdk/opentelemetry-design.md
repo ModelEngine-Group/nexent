@@ -36,39 +36,45 @@
 | OpenTelemetry Collector 中转 | 应用只写 Collector，由 Collector 转发到 Phoenix、Langfuse、LangSmith、Grafana Tempo、Zipkin 或企业 APM | 需要统一批处理、采样、脱敏、header 注入、多后端转发和私有化部署 | 多一个运行组件，需要维护 Collector 配置和部署可用性 |
 | 平台 agent / 网关中转 | Datadog Agent、New Relic agent 或企业内部 telemetry gateway | 企业已有 APM 基础设施、权限、网络出口和审计要求明确 | 数据模型可能会被平台转换，AI 语义字段需要确认兼容性 |
 
-从知名 Agent/LLM 应用框架的公开文档看，可观测性方案也呈现“框架内置 tracing + 平台集成 + OTel 标准化”并存的状态：
+从知名 Agent/LLM 框架和平台的公开文档看，可观测性方案已经明显分成两层：框架或平台负责表达 Agent/LLM 运行时语义，OpenTelemetry/OTLP 负责把 trace、metric、log 导出到后端。差异主要在于：有些框架原生使用 OTel，有些通过 OpenInference/OpenLIT/OpenLLMetry 等 instrumentation 转成 OTel span，有些则先进入自有 tracing SDK，再通过 processor、callback 或平台集成转发。
 
-| Agent / LLM 框架或平台 | 公开文档中的可观测性方式 | 技术特点 | 对 Nexent 的启示 |
-|------------------------|--------------------------|----------|------------------|
-| LangChain / LangGraph | LangSmith Observability，用于 tracing、调试和评估 LangGraph/LangChain 应用 | 与框架生态绑定紧密，能保留 graph、run、session、feedback 等高层语义 | Agent 平台需要 trace 之外的会话、反馈、评估维度；仅有通用 span 不够 |
-| LlamaIndex | LlamaTrace / Arize Phoenix、W&B Weave、Langtrace 等 observability integrations | 偏向 RAG、index、query engine、retriever 调试，强调检索和上下文质量 | Nexent 的知识库检索、工具输出和模型生成需要在同一 trace 中关联 |
-| OpenAI Agents SDK | SDK 内置 tracing，记录 LLM generation、tool call、handoff、guardrail、自定义事件，并支持 tracing provider 集成 | 框架直接定义 Agent 运行时事件模型，便于查看一次 agent run 的完整过程 | 对 Agent 关键事件要做一等公民建模，而不是只依赖 HTTP span |
-| Microsoft Semantic Kernel | 使用 `Microsoft.SemanticKernel` ActivitySource，并尽量遵循 OpenTelemetry Semantic Conventions | 企业应用框架倾向采用 OTel 语义，便于接入既有 APM 和治理体系 | Nexent 应保持标准 OTel 兼容，方便企业环境接入 |
-| CrewAI | AgentOps 等集成提供 agent workflow observability | 多智能体协作中更关注 agent、task、tool、crew 级别的执行轨迹 | 多 Agent 或多工具流程需要明确记录任务边界和协作关系 |
-| AutoGen | 支持 LLM agent observability，通过内置 logging 和 partner providers 接入 | 多 Agent 对话和协作更强调消息、角色、工具和回合结构 | 仅记录模型调用不足以解释多 Agent 协作，需要保留消息和角色上下文 |
-| Vercel AI SDK | AI SDK telemetry 使用 OpenTelemetry，Vercel tracing 也基于 OpenTelemetry | 前端/全栈 AI 应用倾向直接复用 OTel，与 Web 框架 telemetry 合流 | Nexent 前后端和服务端 Agent 监控应避免割裂，统一 trace 上下文更有价值 |
-| Haystack | Tracing 文档提供 OpenTelemetryTracer 和 ddtrace 选项 | RAG pipeline 框架同时支持开放标准和特定 APM 工具 | Pipeline/Agent 节点应保持可替换 exporter，而不是绑定单一后端 |
+| Agent / 平台 | 原生可观测性能力 | 常用观测框架 / SDK | OTel / OTLP 路径 | 语义覆盖重点 | 局限与注意 |
+|--------------|------------------|--------------------|------------------|--------------|------------|
+| LangChain / LangGraph | LangSmith tracing、thread、feedback、evaluation，面向 chain、graph、run 的调试和评估 | LangSmith SDK、LangSmith OTel、OpenTelemetry SDK、Collector | `LANGSMITH_OTEL_ENABLED=true` 后可生成 OTel spans；LangSmith 提供 OTLP traces endpoint；也支持经 Collector fan-out 到多后端 | chain、graph node、LLM、tool、retriever、thread、feedback、eval | LangSmith 语义最完整；若只使用通用 OTel 后端，需要自行补齐 graph/thread/eval 维度 |
+| LlamaIndex | 内置 instrumentation/callback 体系，官方观测页覆盖 LlamaTrace、Phoenix、SigNoz、MLflow、Langfuse、OpenLLMetry、OpenLIT、AgentOps 等 | OpenInference LlamaIndex instrumentation、LlamaTrace/Phoenix、Langfuse、OpenLLMetry、OpenLIT、MLflow | Phoenix/LlamaTrace、SigNoz、Langfuse、OpenLIT 等路径都可通过 OTel/OTLP 导出；常见方式是 `openinference-instrumentation-llama-index` + OTLP exporter | RAG query engine、retriever、index、agent workflow、LLM、tool、token、latency | RAG 语义强，但不同集成对属性映射和评估能力不完全一致 |
+| OpenAI Agents SDK | SDK 内置 tracing，默认记录 runner、agent、generation、function tool、guardrail、handoff、speech 等 span | OpenAI Traces dashboard、custom trace processor、外部 tracing processors（Phoenix、MLflow、LangSmith、Langfuse、AgentOps、Datadog 等） | 默认不是 OTel span，而是 OpenAI Agents tracing 模型；要进入 OTLP 通常需要外部 tracing processor 或自定义 processor 做 OTel/OTLP 适配 | agent run、LLM generation、function tool、handoff、guardrail、自定义事件、会话分组 | Agent 语义完整，但与标准 OTel 数据模型之间需要转换层；敏感输入输出默认可能被采集，需显式配置 |
+| AutoGen | 新版 AutoGen 内置 tracing/observability，运行时支持 OpenTelemetry，并遵循 agent/tool 与 GenAI 语义约定；旧版 0.2 主要是 logging 和 partner providers | OpenTelemetry SDK、OTLP exporter、Jaeger/Zipkin、OpenAI instrumentor、AgentOps 等 | 可直接配置 OTel `TracerProvider` 和 OTLP exporter，把 AgentChat/GroupChat 运行时事件发到 OTel 兼容后端 | 多 Agent 消息、agent runtime、tool、LLM 调用、group chat、消息元数据 | 版本差异明显；需确认使用的是新版 AgentChat/Core 还是旧版 0.2 logging 集成 |
+| Dify | 产品内置 Monitoring Dashboard 和 Run History，可查看应用指标、workflow/node tracing；外部监控支持 Langfuse、LangSmith | Dify 内置监控、Langfuse integration、LangSmith integration | 官方文档主要体现为平台到 Langfuse/LangSmith 的集成和字段映射 | app、workflow/chatflow、node、message、dataset retrieval、tool、moderation、token、user/session | 产品语义强，适合低代码应用监控；开放 OTLP 可迁移性弱于原生 OTel instrumentation |
+| CrewAI | CrewAI AMP 内置 tracing，可通过 `tracing=True` 或 `CREWAI_TRACING_ENABLED=true` 追踪 crew/flow；官方观测页列出多种外部平台 | CrewAI AMP、OpenLIT、Langfuse、LangSmith OTel、Langtrace、Arize Phoenix、MLflow、Opik、Weave、Portkey 等 | OpenLIT 是 OTel-native，可配置 `OTEL_EXPORTER_OTLP_ENDPOINT`；LangSmith/CrewAI 集成使用 `opentelemetry-instrumentation-crewai`；Langfuse 可通过 OpenInference CrewAI instrumentation 产生 OTel spans | agent、task、crew、flow、tool、LLM、任务序列、成本、延迟 | 集成选择多但语义不完全统一；CrewAI AMP 与第三方 OTel 路径需要明确数据归属和脱敏策略 |
+| smolagents | 官方“Inspecting runs with OpenTelemetry”明确采用 OpenTelemetry 标准记录 agent runs | `smolagents[telemetry]`、OpenInference `SmolagentsInstrumentor`、Phoenix、Langfuse、OpenTelemetry SDK | 使用 `SmolagentsInstrumentor` 生成 OTel spans，可通过 `OTLPSpanExporter` 写 Phoenix，也可通过 Langfuse/其他 OTel 兼容平台接收 | CodeAgent、ToolCallingAgent、managed agents、工具调用、LLM 交互、多步执行 | 轻量、OTel 路径清晰；复杂评估、反馈和产品内权限仍依赖后端平台补齐 |
 
-从数据分层看，这些路径仍然服务于相似的目标：
+从对比结果看，行业并不是简单地“统一使用某一个观测平台”，而是在向三种形态收敛：
 
-- 应用埋点层：在业务代码、Agent 框架、LLM SDK、HTTP 框架和工具调用处生成 trace、span、event、metric。常见方式包括 OpenTelemetry 自动/手动埋点、OpenInference 语义约定、平台 SDK，以及 LangChain、LlamaIndex、OpenAI、Anthropic 等生态集成。
-- 传输与治理层：可以是 OTLP 直连，也可以经过 OpenTelemetry Collector、平台 agent 或企业网关；这里负责鉴权、批处理、采样、脱敏、header 注入和多后端转发。Collector 是常见的中立组件，但不是唯一方式，也不是所有平台的必要前置条件。
-- 存储与查询层：通用 trace 后端如 Grafana Tempo、Zipkin、Jaeger 用于调用链查询；全栈 APM 平台如 Datadog、New Relic、Elastic、Honeycomb 用于把 trace、metrics、logs、infra 关联起来；AI 原生平台如 Arize Phoenix、Langfuse、LangSmith 更关注 prompt、completion、session、user、tool、retrieval 和 evaluation。
-- 分析与治理层：在 trace 基础上做 token 成本、延迟、TTFT、错误率、工具失败率、检索质量、幻觉/安全检测、用户反馈、A/B 实验和 LLM-as-judge 评估。这里通常已经超出传统 trace 存储，需要额外的语义属性、评估任务和业务维度。
+- 框架原生 OTel：AutoGen 新版、smolagents、Vercel AI SDK、Semantic Kernel 这类更容易直接进入 OTLP/Collector/企业 APM。
+- OTel instrumentation 桥接：LlamaIndex、CrewAI、LangChain/LangGraph 常通过 OpenInference、OpenLIT、OpenLLMetry、LangSmith OTel 等层把框架语义转成 OTel span。
+- 平台私有 tracing 再导出：OpenAI Agents SDK、Dify、CrewAI AMP 这类先保留自有产品语义，再通过 processor、callback、外部平台集成或字段映射与 OTel/LLMOps 平台互通。
 
-不同技术路线的取舍如下：
-
-| 技术路线 | 代表平台 / 技术 | 优势 | 局限 | 对 Nexent 的启示 |
-|----------|-----------------|------|------|------------------|
-| 传统 APM / 全栈可观测性 | Datadog、New Relic、Elastic、Honeycomb | 基础设施、服务、日志、指标、告警和权限体系成熟，适合生产运维统一视角 | 默认更懂 HTTP/RPC/数据库，对 Agent 推理、工具、检索、prompt 语义需要额外属性或平台扩展 | 保留标准 trace/metric/log 语义，避免只做 AI 平台私有埋点 |
-| 开源 trace 后端 | Grafana Tempo、Zipkin、Jaeger | 部署灵活，适合本地化、私有化和低成本 trace 查询；Grafana 生态适合 dashboard 组合 | 不直接理解 LLM/Agent 语义，质量分析、session、prompt 管理和 evaluation 需要自建 | 本地调试和私有化部署应优先支持 OTLP 到通用 trace 后端 |
-| AI / LLM 原生可观测性 | Arize Phoenix、Langfuse、LangSmith | 更贴近 LLM 应用，支持 prompt、completion、session、user、tool、retrieval、evaluation 等语义 | 平台语义和 SDK 差异较大，过度绑定会增加迁移成本 | 在标准 span 上补充 OpenInference、Langfuse 等兼容属性，而不是把核心链路绑定到单一平台 |
-| 评估与反馈平台 | Phoenix Evals、LangSmith Evaluation、Langfuse Scores、Datadog LLM evaluations | 能回答“答案是否好、检索是否准、是否安全”，弥补 trace 只能说明路径、不能判断质量的问题 | 评估成本、样本设计、标签质量和线上触发策略需要业务治理 | trace 必须包含输入、输出、上下文、工具结果和业务标签，后续才能做评估闭环 |
-| 标准化采集协议 | OpenTelemetry、OTLP、OpenInference 语义约定 | 统一 API、SDK、数据模型和传输协议，兼容多语言、多框架、多后端；可直连平台，也可经 Collector 中转 | AI 语义仍在快速演进，通用 OTel 语义无法覆盖全部 Agent 业务字段 | 以 OpenTelemetry 做主干，用 AI 语义属性作为扩展层 |
+对 Nexent 来说，比较稳妥的策略是：核心埋点直接生成 OpenTelemetry span，并在 span 属性上兼容 OpenInference、OpenTelemetry GenAI、Langfuse/LangSmith 等主流语义；对外只承诺 OTLP 可导出，不把业务链路绑定到某一个平台 SDK。这样既能接入 Phoenix/Langfuse/LangSmith 这类 LLMOps 平台，也能接入 Grafana Tempo、Zipkin、Datadog、New Relic、Elastic、Honeycomb 等通用或企业级观测后端。
 
 因此，智能体可观测性的关键不是选择一个“唯一平台”，也不是强制所有链路都经过 Collector，而是先把遥测数据建模成可迁移、可组合、可扩展的结构：底层用标准 trace/metric/log 表达运行路径和性能，上层用 Agent/LLM/Tool/Retriever/Session/User/Evaluation 等语义补足业务解释能力。这样既能直连 Phoenix、Langfuse、LangSmith 等 AI 可观测平台，也能通过 Collector 接入 Grafana Tempo、Zipkin 或企业已有 APM，避免在产品早期把监控能力锁死在某个供应商或某套私有 SDK 中。
 
 ## 为什么使用 OpenTelemetry
+
+```mermaid
+timeline
+    title 可观测性框架与协议演进时间线
+    2010 : Google 发表 Dapper 论文
+    2012 : Prometheus 在 SoundCloud 起步
+    2015 : Jaeger 在 Uber 内部形成并发展
+    2016 : OpenTracing 进入 CNCF
+    2017 : OpenCensus 推广 tracing + stats/metrics + tags
+    2019 : OpenTracing 与 OpenCensus 合并为 OpenTelemetry
+    2021 : OpenTelemetry 晋升 CNCF Incubating
+    2022 : OpenTracing 被归档；OpenTelemetry Metrics 发布 RC 并进入 GA 周期
+    2023 : OpenCensus 于 7 月 31 日后停止维护
+    2024 : Prometheus 持续增强对 OpenTelemetry/OTLP 的互操作
+    2026 : OpenTelemetry 于 5 月 11 日 Graduated；OpenTracing compatibility 于 3 月被 deprecated
+```
 
 OpenTelemetry 是当前主流的可观测性开放标准，提供统一的 API、SDK、语义约定和 OTLP 传输协议。Nexent 选择 OpenTelemetry 作为监控主干，主要基于以下原因：
 
@@ -148,9 +154,10 @@ OTel 的 Context 是执行范围内的不可变上下文容器，用于承载当
 
 Nexent 的关键处理包括：
 
-- 在 `monitor_endpoint` 中覆盖 async coroutine 和 async generator，保证流式响应真正被消费时 span 仍然处于活动状态。
-- 通过 context variable 保存 tenant、user、agent、conversation 等请求级元数据，避免把监控参数侵入业务函数签名。
-- 在 Agent、LLM、Tool span 上写入 OpenInference、Langfuse 和 Nexent 自定义属性，保证不同平台都能基于同一 trace 做展示和过滤。
+- 业务入口只绑定一次 `AgentRunMetadata`，保存 tenant、user、agent、conversation、query、language、memory 等请求级元数据。
+- SDK 在 `NexentAgent.agent_run_with_observer` 中创建顶层 `agent.run` span，并在 Agent loop、LLM、Tool 等生命周期中自动继承上下文。
+- `monitor_endpoint` 保留为兼容 API 和低层 escape hatch，不再作为业务层新增埋点的推荐方式。
+- Agent、LLM、Tool span 统一写入 OpenInference、Langfuse 和 Nexent 自定义属性，保证不同平台都能基于同一 trace 做展示和过滤。
 
 ### Semantic Conventions
 
@@ -478,37 +485,22 @@ Collector trace pipeline 使用 `zipkin` exporter 转发到 `http://zipkin:9411/
 | FastAPI 自动 span | `MonitoringManager.setup_fastapi_app` | HTTP server | route、method、status、duration | API 入口耗时和错误定位 |
 | FastAPI `receive/send` 排除 | `fastapi_exclude_spans` | 降噪配置 | 默认 `receive,send` | 避免 SSE 流式接口生成大量 `unknown POST /agent/run http ...` |
 | requests 自动 span | `MonitoringConfig.instrument_requests` | HTTP client | 外部请求 URL、method、status | 默认关闭；需要分析外部 HTTP 依赖时开启 |
-| `agent.run` | `backend/apps/agent_app.py` | AGENT | `/agent/run` 请求入口 | 作为一次 Agent 运行的顶层业务 trace |
-| `agent_service.run_agent_stream` | `backend/services/agent_service.py` | CHAIN | `agent_id`、`conversation_id`、debug、文件数、记忆开关、策略、准备耗时 | 分析 SSE 创建前的准备阶段 |
-| `set_openinference_agent_context` | `run_agent_stream` | 当前 span 上下文 | session、user、tenant、agent、metadata、tags | 给 Phoenix/Langfuse 建立 Agent、用户、会话维度 |
-| `user_resolution.*` | `run_agent_stream` | event | 用户、租户、语言和耗时 | 鉴权与租户解析定位 |
-| `user_message_save.*` | `run_agent_stream` | event | 保存或跳过原因、耗时 | 判断会话写入是否正常 |
-| `memory_context_build.*` | `run_agent_stream` | event | 记忆开关、共享策略、耗时 | 定位记忆上下文瓶颈 |
-| `streaming_strategy.*` | `run_agent_stream` | event | `with_memory` 或 `no_memory` | 判断实际执行分支 |
-| `generate_stream_with_memory` | `backend/services/agent_service.py` | CHAIN | memory token、预处理任务、fallback 分支 | 追踪带记忆路径的流式执行 |
-| `generate_stream_no_memory` | `backend/services/agent_service.py` | CHAIN | 准备与流式输出事件 | 追踪无记忆流式执行 |
-| `agent_run` | `sdk/nexent/core/agents/run_agent.py` | CHAIN | 线程启动、缓存读取、消息 yield | 追踪 Agent 异步 generator 消费过程 |
-| `agent_run_thread` | `sdk/nexent/core/agents/run_agent.py` | CHAIN | Agent 创建、MCP 工具装载、执行错误 | 追踪实际 Agent 执行线程 |
+| `AgentRunMetadata` | `run_agent_stream` 边界 | context | tenant、user、agent、conversation、query、language、memory、文件数 | 业务层只绑定一次请求上下文，后续 span 由 SDK 自动继承 |
+| `agent.run` | `NexentAgent.agent_run_with_observer` | AGENT | query、session、user、tenant、agent、metadata、tags | 作为一次 Agent 运行的顶层业务 trace |
+| `agent.run.loop` | `NexentAgent.agent_run_with_observer` | CHAIN | Agent loop、step、最终输出 | 追踪实际 Agent 执行生命周期 |
 | `{display_name or model_id}.generate` | `sdk/nexent/core/models/openai_llm.py` | LLM / generation | 模型、温度、top_p、消息、输入输出、token、TTFT、chunk 数 | LLM 性能、成本、输出和异常分析 |
 | `python_interpreter` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 生成代码、step number、执行输出、日志、是否最终答案 | 观测 CodeAgent 解释器执行 |
 | 真实工具名 | `sdk/nexent/core/agents/nexent_agent.py` | TOOL | local/MCP/langchain/builtin 工具输入输出 | 观测真实工具可用性、延迟、错误和输入输出 |
 | `FinalAnswerTool` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 最终答案输出 | 让 Phoenix/Langfuse 中能明确看到最终答案节点 |
-| `trace_agent` / `trace_chain` / `trace_retriever` | SDK 公共 API | AGENT / CHAIN / RETRIEVER | 自定义输入输出、metadata、tags、session、user | SDK 用户自定义层级埋点 |
+| `monitor_endpoint` | SDK 兼容 API | AGENT / CHAIN | 自定义 operation、参数、错误 | 低层 escape hatch；不推荐业务层新增常规埋点 |
+| `start_agent_run` / `trace_agent_step` / `trace_retriever_call` | SDK 公共 API | AGENT / CHAIN / RETRIEVER | Agent metadata、输入输出、session、user | SDK 生命周期埋点和少量自定义层级埋点 |
 | `trace_tool_call` | SDK 公共 API | TOOL | 工具名、输入、输出、耗时、错误 | SDK 用户自定义工具埋点 |
 
 ### 事件清单
 
 | Span / 位置 | Event | 主要属性 | 目的 |
 |-------------|-------|----------|------|
-| `monitor_endpoint` 通用装饰器 | `<operation>.started` / `<operation>.completed` / `<operation>.error` | `param.*`、`duration`、`error.*` | 统一记录接口和服务函数的开始、结束、异常 |
-| `agent_service.run_agent_stream` | `user_resolution.started` / `user_resolution.completed` | `duration`、`user_id`、`tenant_id`、`language` | 定位用户、租户、语言解析耗时和结果 |
-| `agent_service.run_agent_stream` | `user_message_save.started` / `user_message_save.completed` / `user_message_save.skipped` | `duration`、`reason` | 判断用户消息是否写入，以及跳过原因 |
-| `agent_service.run_agent_stream` | `memory_context_build.started` / `memory_context_build.completed` | `duration`、`memory_enabled`、`agent_share_option`、`debug_mode` | 观测记忆上下文构建耗时和开关状态 |
-| `agent_service.run_agent_stream` | `streaming_strategy.selected` / `streaming_strategy.completed` | `strategy`、`selected_strategy`、`duration` | 识别实际流式分支与选择耗时 |
-| `agent_service.run_agent_stream` | `stream_generator.memory_stream.creating` / `stream_generator.no_memory_stream.creating` | 无 | 标记 generator 创建分支 |
-| `agent_service.run_agent_stream` | `streaming_response.creating` / `streaming_response.created` / `run_agent_stream.preparation_completed` | `duration`、`media_type`、`total_preparation_time` | 观测 SSE 响应创建和整体准备耗时 |
-| `generate_stream_no_memory` | `generate_stream_no_memory.started` / `generate_stream_no_memory.completed` / `generate_stream_no_memory.streaming.started` / `generate_stream_no_memory.streaming.completed` | 无 | 观测无记忆路径的准备和流式消费边界 |
-| `agent_run` | `agent_run.started` / `agent_run.thread_started` / `agent_run.get_cached_message` / `agent_run.get_cached_message_completed` / `agent_run.yield_message` | 无 | 观测 Agent 线程启动、缓存轮询和消息 yield |
+| `agent.run` | `agent.run.started` / `agent.run.completed` / `agent.run.error` | `error.*` | 观测一次 Agent 运行的开始、结束和异常 |
 | LLM span | `completion_started` / `first_token_received` / `token_generated` / `completion_finished` / `model_stopped` / `error_occurred` | `model_id`、`temperature`、`top_p`、`message_count`、`total_duration`、`output_length`、`chunk_count`、`error.*` | 分析模型参数、流式输出耗时、停止和异常 |
 | Tool span | span 属性 `agent.tool.input` / `agent.tool.output` | JSON 字符串、`agent.tool.duration_ms`、`error.*` | 分析工具输入输出、耗时和异常 |
 
@@ -533,19 +525,17 @@ flowchart TD
   U[用户] --> FE[前端 Chat]
   FE --> API[POST /agent/run]
   API --> HTTP[FastAPI HTTP span: 可配置隐藏]
-  HTTP --> A0[agent.run span: AGENT]
-  A0 --> S1[agent_service.run_agent_stream: CHAIN]
-  S1 --> R[user_resolution events]
-  S1 --> Save[user_message_save events]
-  S1 --> Mem[memory_context_build events]
-  Mem --> Strategy{streaming_strategy}
-  Strategy -->|with_memory| G1[generate_stream_with_memory: CHAIN]
-  Strategy -->|no_memory| G2[generate_stream_no_memory: CHAIN]
-  G1 --> AR[agent_run async generator: CHAIN]
+  API --> Bind[绑定 AgentRunMetadata]
+  Bind --> Mem[解析 memory 开关]
+  Mem --> Strategy{with_memory / no_memory}
+  Strategy -->|with_memory| G1[generate_stream_with_memory]
+  Strategy -->|no_memory| G2[generate_stream_no_memory]
+  G1 --> AR[agent_run async generator]
   G2 --> AR
-  AR --> Thread[agent_run_thread: CHAIN]
+  AR --> Thread[agent_run_thread]
   Thread --> NX[NexentAgent / CoreAgent]
-  NX --> Step[Agent step / code action]
+  NX --> A0[agent.run span: AGENT]
+  A0 --> Step[agent.run.loop: CHAIN]
   Step --> LLM[Model.generate: LLM / generation]
   Step --> PY[python_interpreter: TOOL]
   PY --> Tool[Real local / MCP / langchain / builtin tool: TOOL]
@@ -566,14 +556,11 @@ flowchart TD
 
 ```text
 agent.run                         agent
-└─ agent_service.run_agent_stream chain
-   └─ agent_service.generate_*    chain
-      └─ agent_run                chain
-         └─ agent_run_thread      chain
-            ├─ Model.generate     llm / generation
-            ├─ python_interpreter tool
-            │  └─ RealTool        tool
-            └─ FinalAnswerTool    tool
+└─ agent.run.loop                  chain
+   ├─ Model.generate               llm / generation
+   ├─ python_interpreter           tool
+   │  └─ RealTool                  tool
+   └─ FinalAnswerTool              tool
 ```
 
 FastAPI HTTP span 可以保留在最上层用于接口视角，也可以通过 `MONITORING_FASTAPI_EXCLUDED_URLS=/agent/run` 在 AI trace 视图中隐藏。
@@ -637,15 +624,15 @@ flowchart TB
 
 | 风险 | 修复 |
 |------|------|
-| async generator span 提前结束 | `monitor_endpoint` 使用 `inspect.isasyncgenfunction`，在 `async for` 消费期间保持 span 打开 |
+| 业务层埋点耦合过高 | 业务入口只绑定 `AgentRunMetadata`，Agent/LLM/Tool 语义 span 下沉到 SDK 生命周期 |
 | `/v1/traces` 路径重复拼接 | SDK 支持 base endpoint 和 signal endpoint 自动归一化 |
 | Collector header 无法兼容平台 | Collector 默认只 debug；平台转发配置拆分 `Authorization`、`x-api-key`、`x-langfuse-ingestion-version` |
-| Phoenix 只看到接口看不到 Agent | 顶层 `agent.run` 标记为 AGENT，内部服务、线程、generator 标记为 CHAIN |
+| Phoenix 只看到接口看不到 Agent | SDK 顶层 `agent.run` 标记为 AGENT，内部 `agent.run.loop` 标记为 CHAIN |
 | Phoenix/Langfuse 中出现大量 `unknown POST /agent/run http ...` | 默认排除 FastAPI ASGI `receive/send` span；requests 自动埋点默认关闭；可配置隐藏 `/agent/run` HTTP span |
 | Langfuse 无法识别 observation 类型 | 增加 `langfuse.observation.type` 和 trace/session/user/metadata/input/output 属性 |
 | LLM span 不明显或缺输出 | LLM span 命名为 `{display_name or model_id}.generate`，并写入 `output.value` 和 `langfuse.observation.output` |
 | 工具 span 缺失 | 在 `NexentAgent.create_single_agent` 统一包装 local/MCP/langchain/builtin 工具，并在 `CoreAgent` 增加 `python_interpreter` 和 `FinalAnswerTool` span |
-| 单测漏掉流式函数 | 增加 async generator 装饰器测试和 OpenInference/Langfuse 属性测试 |
+| 单测漏掉 SDK 生命周期路径 | 增加 AgentRunMetadata、Agent/chain、LLM/Tool 继承上下文测试 |
 
 ## 使用建议
 
@@ -679,12 +666,24 @@ MONITORING_INSTRUMENT_REQUESTS=true
 - OpenTelemetry OTLP Specification: https://opentelemetry.io/docs/specs/otlp/
 - OpenTelemetry GenAI Semantic Conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
 - OpenInference Semantic Conventions: https://arize-ai.github.io/openinference/spec/semantic_conventions.html
+- LangSmith Trace with OpenTelemetry: https://docs.langchain.com/langsmith/trace-with-opentelemetry
 - LangGraph Observability: https://docs.langchain.com/langgraph-platform/langsmith-observability
 - LlamaIndex Observability: https://docs.llamaindex.ai/en/stable/module_guides/observability/
+- LlamaIndex OpenTelemetry Integration: https://docs.llamaindex.ai/en/stable/api_reference/observability/otel/
 - OpenAI Agents SDK Tracing: https://openai.github.io/openai-agents-python/tracing/
 - Semantic Kernel Telemetry: https://learn.microsoft.com/en-us/semantic-kernel/concepts/enterprise-readiness/observability/telemetry-with-console
+- CrewAI Tracing: https://docs.crewai.com/en/observability/tracing
+- CrewAI OpenTelemetry Export: https://docs.crewai.com/en/enterprise/guides/capture_telemetry_logs
+- CrewAI OpenLIT Integration: https://docs.crewai.com/en/observability/openlit
 - AgentOps CrewAI Integration: https://docs.agentops.ai/v1/integrations/crewai
 - AutoGen Agent Observability: https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/agent-observability.html
+- AutoGen Tracing and Observability: https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tracing.html
+- Dify Monitoring Dashboard: https://docs.dify.ai/en/use-dify/monitor/analysis
+- Dify Langfuse Integration: https://docs.dify.ai/en/use-dify/monitor/integrations/integrate-langfuse
+- Dify LangSmith Integration: https://docs.dify.ai/en/use-dify/monitor/integrations/integrate-langsmith
+- Dify Agent Node: https://docs.dify.ai/en/guides/workflow/node/agent
+- smolagents Inspecting runs with OpenTelemetry: https://huggingface.co/docs/smolagents/en/tutorials/inspect_runs
+- smolagents Phoenix tracing guide: https://huggingface.co/blog/smolagents-phoenix
 - Vercel AI SDK Telemetry: https://ai-sdk.dev/docs/ai-sdk-core/telemetry
 - Haystack Tracing: https://docs.haystack.deepset.ai/docs/tracing
 - Phoenix Setup Tracing: https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing

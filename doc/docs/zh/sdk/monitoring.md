@@ -266,15 +266,26 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 
 ## 代码集成
 
-### 端点监控
+### Agent 边界上下文
+
+业务层只需要在请求入口解析出用户和 Agent 信息后绑定一次上下文，后续 Agent、LLM、Tool span 由 SDK 生命周期自动生成：
 
 ```python
+from nexent.monitor.agent_observability import AgentRunMetadata
 from utils.monitoring import monitoring_manager
 
-@monitoring_manager.monitor_endpoint("my_service.my_function")
-async def my_api_function():
-    return {"status": "ok"}
+monitoring_manager.bind_agent_context(AgentRunMetadata(
+    tenant_id=tenant_id,
+    user_id=user_id,
+    agent_id=agent_request.agent_id,
+    conversation_id=agent_request.conversation_id,
+    query=agent_request.query,
+    is_debug=agent_request.is_debug,
+    language=language,
+))
 ```
+
+`monitor_endpoint` 仍保留为兼容 API 和低层 escape hatch，不建议业务层新增常规埋点时继续使用。
 
 ### LLM 调用监控
 
@@ -287,7 +298,7 @@ def call_llm(messages):
 ### Agent 步骤追踪
 
 ```python
-with monitoring_manager.trace_agent_step("web_search", "research_agent", "tool_call") as span:
+with monitoring_manager.trace_agent_step("web_search", step_type="tool_call") as span:
     result = execute_tool()
     monitoring_manager.set_tool_output(result)
 ```
@@ -302,43 +313,52 @@ with monitoring_manager.trace_tool_call("web_search", "agent_name", {"query": "t
 
 ### Phoenix 自定义层级埋点
 
-如果希望 Phoenix 展示 `agent -> chain -> llm/tool` 的层级结构，使用 OpenInference span kind 封装方法：
+如果希望 Phoenix 展示 `agent -> chain -> llm/retriever/tool` 的层级结构，使用 SDK Agent 生命周期入口和 OpenInference span kind 封装方法：
 
 ```python
-from nexent.monitor import get_monitoring_manager
+from nexent.monitor.agent_observability import AgentRunMetadata, get_monitoring_manager
 
 monitoring_manager = get_monitoring_manager()
 
-with monitoring_manager.trace_agent(
-    "TestAgent.run",
-    input_value={"query": "你好"},
-    metadata={"agent_id": 1, "tenant_id": "tenant_id"},
-    tags=["nexent", "agent", "agent_id:1"],
-    session_id=1001,
+metadata = AgentRunMetadata(
+    tenant_id="tenant_id",
     user_id="user_id",
-):
-    with monitoring_manager.trace_chain("Step 0"):
-        with monitoring_manager.trace_chain("Step 1"):
-            with monitoring_manager.trace_llm_request("OpenAIModel.generate", "gpt-4"):
-                result = call_llm()
+    agent_id=1,
+    conversation_id=1001,
+    agent_name="TestAgent",
+    query="你好",
+)
 
-            with monitoring_manager.trace_tool_call("FinalAnswerTool", "TestAgent", {"query": "你好"}):
-                monitoring_manager.set_tool_output({"answer": result})
+with monitoring_manager.start_agent_run(metadata):
+    with monitoring_manager.trace_agent_step("Step 0", metadata, step_type="agent_loop"):
+        with monitoring_manager.trace_llm_request("OpenAIModel.generate", "gpt-4"):
+            result = call_llm()
 
-    monitoring_manager.set_openinference_output({"answer": result})
+        with monitoring_manager.trace_retriever_call(
+            "knowledge_base_search",
+            "TestAgent",
+            {"query": "你好"},
+        ):
+            documents = search_knowledge_base("你好")
+            monitoring_manager.set_retriever_output(documents)
+
+        with monitoring_manager.trace_tool_call("FinalAnswerTool", "TestAgent", {"query": "你好"}):
+            monitoring_manager.set_tool_output({"answer": result})
+
+        monitoring_manager.set_openinference_output({"answer": result})
 ```
 
-Phoenix 左侧的 `agent`、`chain`、`llm`、`tool` 标签来自 `openinference.span.kind`。span 必须通过嵌套 `with` 创建，Phoenix 才会显示成树形结构。
+Phoenix 左侧的 `agent`、`chain`、`llm`、`retriever`、`tool` 标签来自 `openinference.span.kind`。span 必须通过嵌套 `with` 创建，Phoenix 才会显示成树形结构。
 
 同一套方法也会写入 Langfuse 识别的 OTel 属性：
 
 | Nexent 方法 | Phoenix 属性 | Langfuse observation type |
 |-------------|--------------|---------------------------|
-| `trace_agent` | `openinference.span.kind=AGENT` | `langfuse.observation.type=agent` |
-| `trace_chain` | `openinference.span.kind=CHAIN` | `langfuse.observation.type=chain` |
+| `start_agent_run` | `openinference.span.kind=AGENT` | `langfuse.observation.type=agent` |
+| `trace_agent_step` | `openinference.span.kind=CHAIN` | `langfuse.observation.type=chain` |
 | `trace_llm_request` | `openinference.span.kind=LLM` | `langfuse.observation.type=generation` |
+| `trace_retriever_call` | `openinference.span.kind=RETRIEVER` | `langfuse.observation.type=retriever` |
 | `trace_tool_call` | `openinference.span.kind=TOOL` | `langfuse.observation.type=tool` |
-| `trace_retriever` | `openinference.span.kind=RETRIEVER` | `langfuse.observation.type=retriever` |
 
 `session_id`、`user_id`、`tags` 和 `metadata` 会同步写入 `langfuse.session.id`、`langfuse.user.id`、`langfuse.trace.tags`、`langfuse.trace.metadata.*`，可在 Langfuse 中按会话、用户和业务字段过滤。`input_value`、`output_value` 会同步写入 `langfuse.observation.input` 和 `langfuse.observation.output`。
 
@@ -367,6 +387,9 @@ Phoenix 左侧的 `agent`、`chain`、`llm`、`tool` 标签来自 `openinference
 | `agent.tool.name` | 工具名称 |
 | `agent.tool.input` | 工具输入（JSON） |
 | `agent.tool.output` | 工具输出（JSON） |
+| `retriever.name` | 检索器名称 |
+| `retrieval.query` | 检索查询 |
+| `retriever.output` | 检索输出 |
 
 ## 指标
 

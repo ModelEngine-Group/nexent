@@ -15,6 +15,7 @@ Tests cover:
 from sdk.nexent.monitor.monitoring import (
     MonitoringConfig,
     MonitoringManager,
+    AgentRunMetadata,
     LLMTokenTracker,
     get_monitoring_manager,
     is_opentelemetry_available,
@@ -25,6 +26,8 @@ from sdk.nexent.monitor.monitoring import (
     get_monitoring_buffer,
     set_monitoring_context,
     get_monitoring_context,
+    get_agent_monitoring_context,
+    agent_monitoring_context,
     _monitoring_buffer,
     _MonitoredClient,
     _MonitoredChatCompletions,
@@ -39,6 +42,7 @@ from sdk.nexent.monitor.monitoring import (
     OPENINFERENCE_SPAN_KIND_CHAIN,
     OPENINFERENCE_SPAN_KIND_LLM,
     OPENINFERENCE_SPAN_KIND_TOOL,
+    OPENINFERENCE_SPAN_KIND_RETRIEVER,
     OPENINFERENCE_SESSION_ID,
     OPENINFERENCE_USER_ID,
     OPENINFERENCE_METADATA,
@@ -537,6 +541,216 @@ class TestToolCallTracing:
 
         with manager.trace_tool_call("test_tool", "test_agent", {"input": "data"}) as span:
             assert span is None
+
+
+class TestAgentObservability:
+    """Test SDK-owned Agent observability lifecycle helpers."""
+
+    def setup_method(self):
+        """Reset singleton state before each test."""
+        MonitoringManager._instance = None
+        MonitoringManager._initialized = False
+
+    def _enabled_manager(self):
+        manager = MonitoringManager()
+        manager.configure(MonitoringConfig(enable_telemetry=True))
+        manager._tracer = MagicMock()
+        return manager
+
+    @staticmethod
+    def _span_context(span):
+        ctx = MagicMock()
+        ctx.__enter__.return_value = span
+        ctx.__exit__.return_value = None
+        return ctx
+
+    def test_agent_observability_entrypoint_imports(self):
+        """Agent observability APIs are available from the stable SDK entrypoint."""
+        from sdk.nexent.monitor.agent_observability import (
+            AgentRunMetadata as EntrypointMetadata,
+            agent_monitoring_context as entrypoint_context,
+            get_monitoring_manager as entrypoint_manager,
+        )
+
+        assert EntrypointMetadata is AgentRunMetadata
+        assert entrypoint_context is agent_monitoring_context
+        assert entrypoint_manager is get_monitoring_manager
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_agent_run_and_step_spans_without_business_decorator(self, mock_trace):
+        """Agent lifecycle spans are produced by SDK helpers, not endpoint decorators."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = self._enabled_manager()
+            agent_span = MagicMock()
+            chain_span = MagicMock()
+            manager._tracer.start_as_current_span.side_effect = [
+                self._span_context(agent_span),
+                self._span_context(chain_span),
+            ]
+
+            metadata = AgentRunMetadata(
+                tenant_id="tenant-1",
+                user_id="user-1",
+                agent_id=11,
+                conversation_id=22,
+                agent_name="assistant",
+                query="hello",
+                is_debug=False,
+                language="zh",
+                memory_enabled=True,
+            )
+
+            with manager.start_agent_run(metadata):
+                assert get_agent_monitoring_context() == metadata
+                with manager.trace_agent_step("agent.run.loop", metadata, step_type="agent_loop"):
+                    pass
+
+            calls = manager._tracer.start_as_current_span.call_args_list
+            assert calls[0].args[0] == "agent.run"
+            agent_attrs = calls[0].kwargs["attributes"]
+            assert agent_attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_AGENT
+            assert agent_attrs[OPENINFERENCE_SESSION_ID] == "22"
+            assert agent_attrs[OPENINFERENCE_USER_ID] == "user-1"
+            assert agent_attrs[OPENINFERENCE_INPUT_VALUE] == "hello"
+            assert agent_attrs["tenant.id"] == "tenant-1"
+            assert agent_attrs["agent.id"] == 11
+            assert agent_attrs[LANGFUSE_OBSERVATION_TYPE] == "agent"
+            assert agent_attrs[LANGFUSE_SESSION_ID] == "22"
+
+            assert calls[1].args[0] == "agent.run.loop"
+            chain_attrs = calls[1].kwargs["attributes"]
+            assert chain_attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_CHAIN
+            assert chain_attrs["agent.step.type"] == "agent_loop"
+            assert chain_attrs["conversation.id"] == 22
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_llm_and_tool_spans_inherit_bound_agent_context(self, mock_trace):
+        """LLM and tool spans inherit Agent metadata after a single boundary bind."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = self._enabled_manager()
+            llm_span = MagicMock()
+            tool_span = MagicMock()
+            manager._tracer.start_as_current_span.side_effect = [
+                self._span_context(llm_span),
+                self._span_context(tool_span),
+            ]
+            mock_trace.get_current_span.return_value = tool_span
+            tool_span.is_recording.return_value = True
+
+            metadata = AgentRunMetadata(
+                tenant_id="tenant-2",
+                user_id="user-2",
+                agent_id=33,
+                conversation_id=44,
+                agent_name="researcher",
+                query="find docs",
+            )
+
+            with agent_monitoring_context(metadata):
+                with manager.trace_llm_request(
+                    "gpt.generate",
+                    "gpt-4",
+                    **{OPENINFERENCE_INPUT_VALUE: "prompt"},
+                ):
+                    pass
+                with manager.trace_tool_call("web_search", "researcher", {"query": "docs"}):
+                    manager.set_tool_output("ok")
+
+            calls = manager._tracer.start_as_current_span.call_args_list
+            llm_attrs = calls[0].kwargs["attributes"]
+            assert llm_attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_LLM
+            assert llm_attrs[OPENINFERENCE_SESSION_ID] == "44"
+            assert llm_attrs[OPENINFERENCE_USER_ID] == "user-2"
+            assert llm_attrs[OPENINFERENCE_INPUT_VALUE] == "prompt"
+            assert llm_attrs["tenant.id"] == "tenant-2"
+            assert llm_attrs["agent.id"] == 33
+            assert llm_attrs[LANGFUSE_OBSERVATION_TYPE] == "generation"
+
+            tool_attrs = calls[1].kwargs["attributes"]
+            assert tool_attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_TOOL
+            assert tool_attrs[OPENINFERENCE_SESSION_ID] == "44"
+            assert tool_attrs[OPENINFERENCE_USER_ID] == "user-2"
+            assert tool_attrs["tenant.id"] == "tenant-2"
+            assert tool_attrs["agent.tool.name"] == "web_search"
+            assert "query" in tool_attrs[OPENINFERENCE_INPUT_VALUE]
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_retriever_span_inherits_bound_agent_context(self, mock_trace):
+        """Retriever spans use OpenInference RETRIEVER semantics with Agent metadata."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = self._enabled_manager()
+            retriever_span = MagicMock()
+            manager._tracer.start_as_current_span.side_effect = [
+                self._span_context(retriever_span),
+            ]
+            mock_trace.get_current_span.return_value = retriever_span
+            retriever_span.is_recording.return_value = True
+
+            metadata = AgentRunMetadata(
+                tenant_id="tenant-r",
+                user_id="user-r",
+                agent_id=77,
+                conversation_id=88,
+                agent_name="researcher",
+            )
+
+            with agent_monitoring_context(metadata):
+                with manager.trace_retriever_call(
+                    "knowledge_base_search",
+                    "researcher",
+                    {"query": "sdk monitoring"},
+                ):
+                    manager.set_retriever_output({"documents": 2})
+
+            attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
+            assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_RETRIEVER
+            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "retriever"
+            assert attrs[OPENINFERENCE_SESSION_ID] == "88"
+            assert attrs[OPENINFERENCE_USER_ID] == "user-r"
+            assert attrs["tenant.id"] == "tenant-r"
+            assert attrs["retriever.name"] == "knowledge_base_search"
+            assert attrs["retrieval.query"] == "sdk monitoring"
+            assert "sdk monitoring" in attrs[OPENINFERENCE_INPUT_VALUE]
+
+    @pytest.mark.asyncio
+    async def test_agent_context_survives_delayed_async_stream_iteration(self):
+        """StreamingResponse-style delayed async iteration keeps Agent metadata bound."""
+        metadata = AgentRunMetadata(
+            tenant_id="tenant-stream",
+            user_id="user-stream",
+            agent_id=55,
+            conversation_id=66,
+            query="stream query",
+        )
+        observed_contexts = []
+
+        async def source_stream():
+            await asyncio.sleep(0)
+            observed_contexts.append(get_agent_monitoring_context())
+            yield "data: chunk\n\n"
+
+        async def stream_with_agent_context():
+            with agent_monitoring_context(metadata):
+                async for item in source_stream():
+                    yield item
+
+        chunks = [item async for item in stream_with_agent_context()]
+
+        assert chunks == ["data: chunk\n\n"]
+        assert observed_contexts == [metadata]
+        assert get_agent_monitoring_context() is None
+
+    def test_agent_observability_disabled_is_noop(self):
+        """SDK Agent observability is a no-op when telemetry is disabled."""
+        manager = MonitoringManager()
+        manager.configure(MonitoringConfig(enable_telemetry=False))
+
+        metadata = AgentRunMetadata(tenant_id="tenant", agent_id=1)
+        with manager.start_agent_run(metadata) as span:
+            assert span is None
+            with manager.trace_agent_step("agent.run.loop", metadata) as step_span:
+                assert step_span is None
+
 
 class TestLLMTokenTracker:
     """Test LLMTokenTracker with OpenInference semantics."""

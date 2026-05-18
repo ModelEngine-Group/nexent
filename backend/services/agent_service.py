@@ -73,8 +73,8 @@ from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
 
-# Monitoring utilities: expose monitoring context for downstream observers
-from nexent.monitor import OPENINFERENCE_SPAN_KIND_CHAIN, set_monitoring_context
+# Monitoring utilities: bind Agent metadata once at the request boundary.
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 
 # Import monitoring utilities
 from utils.monitoring import monitoring_manager
@@ -1674,9 +1674,6 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
 
 
 # Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
-@monitoring_manager.monitor_endpoint(
-    "agent_service.generate_stream_with_memory", exclude_params=["authorization"]
-)
 async def generate_stream_with_memory(
     agent_request: AgentRequest,
     user_id: str,
@@ -1780,7 +1777,6 @@ async def generate_stream_with_memory(
 
 
 # Helper function for run_agent_stream, used when user memory is disabled (no memory tokens)
-@monitoring_manager.monitor_endpoint("agent_service.generate_stream_no_memory", exclude_params=["authorization"])
 async def generate_stream_no_memory(
     agent_request: AgentRequest,
     user_id: str,
@@ -1790,7 +1786,6 @@ async def generate_stream_no_memory(
     """Stream agent responses without any memory preprocessing tokens or fallback logic."""
 
     # Prepare run info respecting memory disabled (honor provided user_id/tenant_id)
-    monitoring_manager.add_span_event("generate_stream_no_memory.started")
     agent_run_info, memory_context = await prepare_agent_run(
         agent_request=agent_request,
         user_id=user_id,
@@ -1798,10 +1793,7 @@ async def generate_stream_no_memory(
         language=language,
         allow_memory_search=False,
     )
-    monitoring_manager.add_span_event("generate_stream_no_memory.completed")
 
-    monitoring_manager.add_span_event(
-        "generate_stream_no_memory.streaming.started")
     async for data_chunk in _stream_agent_chunks(
         agent_request=agent_request,
         user_id=user_id,
@@ -1810,11 +1802,8 @@ async def generate_stream_no_memory(
         memory_ctx=memory_context,
     ):
         yield data_chunk
-    monitoring_manager.add_span_event(
-        "generate_stream_no_memory.streaming.completed")
 
 
-@monitoring_manager.monitor_endpoint("agent_service.run_agent_stream", exclude_params=["authorization"])
 async def run_agent_stream(
     agent_request: AgentRequest,
     http_request: Request,
@@ -1827,27 +1816,6 @@ async def run_agent_stream(
     Start an agent run and stream responses.
     If user_id or tenant_id is provided, authorization will be overridden. (Useful in northbound apis)
     """
-    import time
-
-    # Add initial span attributes for tracking
-    monitoring_manager.set_span_attributes(
-        agent_id=agent_request.agent_id,
-        conversation_id=agent_request.conversation_id,
-        is_debug=agent_request.is_debug,
-        skip_user_save=skip_user_save,
-        has_override_user_id=user_id is not None,
-        has_override_tenant_id=tenant_id is not None,
-        query_length=len(agent_request.query) if agent_request.query else 0,
-        history_count=len(
-            agent_request.history) if agent_request.history else 0,
-        minio_files_count=len(
-            agent_request.minio_files) if agent_request.minio_files else 0
-    )
-
-    # Step 1: Resolve user tenant language
-    resolve_start_time = time.time()
-    monitoring_manager.add_span_event("user_resolution.started")
-
     resolved_user_id, resolved_tenant_id, language = _resolve_user_tenant_language(
         authorization=authorization,
         http_request=http_request,
@@ -1855,46 +1823,7 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
 
-    resolve_duration = time.time() - resolve_start_time
-    monitoring_manager.add_span_event("user_resolution.completed", {
-        "duration": resolve_duration,
-        "user_id": resolved_user_id,
-        "tenant_id": resolved_tenant_id,
-        "language": language
-    })
-    monitoring_manager.set_span_attributes(
-        resolved_user_id=resolved_user_id,
-        resolved_tenant_id=resolved_tenant_id,
-        language=language,
-        user_resolution_duration=resolve_duration
-    )
-    # Expose resolved identity to downstream monitoring (LLM-level record writing)
-    set_monitoring_context(
-        tenant_id=resolved_tenant_id,
-        user_id=resolved_user_id,
-        agent_id=agent_request.agent_id,
-        conversation_id=agent_request.conversation_id,
-    )
-    monitoring_manager.set_openinference_agent_context(
-        agent_id=agent_request.agent_id,
-        conversation_id=agent_request.conversation_id,
-        user_id=resolved_user_id,
-        tenant_id=resolved_tenant_id,
-        query=agent_request.query,
-        is_debug=agent_request.is_debug,
-        extra_metadata={
-            "language": language,
-            "history_count": len(agent_request.history) if agent_request.history else 0,
-            "minio_files_count": len(agent_request.minio_files) if agent_request.minio_files else 0,
-        },
-        span_kind=OPENINFERENCE_SPAN_KIND_CHAIN,
-    )
-
-    # Step 2: Save user message (if needed)
     if not agent_request.is_debug and not skip_user_save:
-        save_start_time = time.time()
-        monitoring_manager.add_span_event("user_message_save.started")
-
         save_messages(
             agent_request,
             target=MESSAGE_ROLE["USER"],
@@ -1902,70 +1831,37 @@ async def run_agent_stream(
             tenant_id=resolved_tenant_id,
         )
 
-        save_duration = time.time() - save_start_time
-        monitoring_manager.add_span_event("user_message_save.completed", {
-            "duration": save_duration
-        })
-        monitoring_manager.set_span_attributes(
-            user_message_saved=True,
-            user_message_save_duration=save_duration
-        )
-    else:
-        monitoring_manager.add_span_event("user_message_save.skipped", {
-            "reason": "debug_mode" if agent_request.is_debug else "skip_user_save_flag"
-        })
-        monitoring_manager.set_span_attributes(user_message_saved=False)
-
-    # Step 3: Build memory context (skip for debug mode)
-    memory_start_time = time.time()
-    monitoring_manager.add_span_event("memory_context_build.started")
-
     memory_ctx_preview = build_memory_context(
         resolved_user_id, resolved_tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
     )
-
-    memory_duration = time.time() - memory_start_time
     memory_enabled = memory_ctx_preview.user_config.memory_switch
-    monitoring_manager.set_openinference_agent_context(
+
+    agent_metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(
         agent_id=agent_request.agent_id,
         conversation_id=agent_request.conversation_id,
         user_id=resolved_user_id,
         tenant_id=resolved_tenant_id,
         query=agent_request.query,
         is_debug=agent_request.is_debug,
+        language=language,
         memory_enabled=memory_enabled,
+        history_count=len(agent_request.history) if agent_request.history else 0,
+        minio_files_count=len(agent_request.minio_files) if agent_request.minio_files else 0,
         extra_metadata={
-            "language": language,
-            "agent_share_option": getattr(memory_ctx_preview.user_config, "agent_share_option", "unknown"),
+            "agent_share_option": getattr(
+                memory_ctx_preview.user_config,
+                "agent_share_option",
+                "unknown",
+            ),
+            "skip_user_save": skip_user_save,
+            "has_override_user_id": user_id is not None,
+            "has_override_tenant_id": tenant_id is not None,
         },
-        span_kind=OPENINFERENCE_SPAN_KIND_CHAIN,
-    )
-    monitoring_manager.add_span_event("memory_context_build.completed", {
-        "duration": memory_duration,
-        "memory_enabled": memory_enabled,
-        "agent_share_option": getattr(memory_ctx_preview.user_config, "agent_share_option", "unknown"),
-        "debug_mode": agent_request.is_debug
-    })
-    monitoring_manager.set_span_attributes(
-        memory_enabled=memory_enabled,
-        memory_context_build_duration=memory_duration,
-        agent_share_option=getattr(
-            memory_ctx_preview.user_config, "agent_share_option", "unknown")
-    )
+    ))
 
-    # Step 4: Choose streaming strategy
-    strategy_start_time = time.time()
     use_memory_stream = memory_enabled and not agent_request.is_debug
 
-    monitoring_manager.add_span_event("streaming_strategy.selected", {
-        "strategy": "with_memory" if use_memory_stream else "no_memory",
-        "memory_enabled": memory_enabled,
-        "is_debug": agent_request.is_debug
-    })
-
     if use_memory_stream:
-        monitoring_manager.add_span_event(
-            "stream_generator.memory_stream.creating")
         stream_gen = generate_stream_with_memory(
             agent_request,
             user_id=resolved_user_id,
@@ -1973,8 +1869,6 @@ async def run_agent_stream(
             language=language,
         )
     else:
-        monitoring_manager.add_span_event(
-            "stream_generator.no_memory_stream.creating")
         stream_gen = generate_stream_no_memory(
             agent_request,
             user_id=resolved_user_id,
@@ -1982,42 +1876,16 @@ async def run_agent_stream(
             language=language,
         )
 
-    strategy_duration = time.time() - strategy_start_time
-    monitoring_manager.add_span_event("streaming_strategy.completed", {
-        "duration": strategy_duration,
-        "selected_strategy": "with_memory" if use_memory_stream else "no_memory"
-    })
-    monitoring_manager.set_span_attributes(
-        streaming_strategy=(
-            "with_memory" if use_memory_stream else "no_memory"),
-        strategy_selection_duration=strategy_duration
-    )
+    async def stream_with_agent_context():
+        with agent_monitoring_context(agent_metadata):
+            async for data_chunk in stream_gen:
+                yield data_chunk
 
-    # Step 5: Create streaming response
-    response_start_time = time.time()
-    monitoring_manager.add_span_event("streaming_response.creating")
-
-    response = StreamingResponse(
-        stream_gen,
+    return StreamingResponse(
+        stream_with_agent_context(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
-
-    response_duration = time.time() - response_start_time
-    monitoring_manager.add_span_event("streaming_response.created", {
-        "duration": response_duration,
-        "media_type": "text/event-stream"
-    })
-    monitoring_manager.set_span_attributes(
-        response_creation_duration=response_duration,
-        total_preparation_duration=(time.time() - resolve_start_time)
-    )
-
-    monitoring_manager.add_span_event("run_agent_stream.preparation_completed", {
-        "total_preparation_time": time.time() - resolve_start_time
-    })
-
-    return response
 
 
 def stop_agent_tasks(conversation_id: int, user_id: str):
