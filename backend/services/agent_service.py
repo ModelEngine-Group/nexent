@@ -80,11 +80,21 @@ from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
+SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 
 
 # -------------------------------------------------------------
 # Internal helper functions
 # -------------------------------------------------------------
+
+
+def _safe_agent_stream_error_chunk() -> str:
+    """Return a sanitized SSE error chunk without internal exception details."""
+    error_payload = json.dumps(
+        {"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE},
+        ensure_ascii=False,
+    )
+    return f"data: {error_payload}\n\n"
 
 
 def _resolve_user_tenant_language(
@@ -618,11 +628,8 @@ async def _stream_agent_chunks(
                 pass
             yield f"data: {chunk}\n\n"
     except Exception as run_exc:
-        logger.error(f"Agent run error: {str(run_exc)}")
-        # Emit an error chunk and terminate the stream immediately
-        error_payload = json.dumps(
-            {"type": "error", "content": str(run_exc)}, ensure_ascii=False)
-        yield f"data: {error_payload}\n\n"
+        logger.error("Agent run error: %r", run_exc, exc_info=True)
+        yield _safe_agent_stream_error_chunk()
     finally:
         # Persist assistant messages for non-debug runs
         if not agent_request.is_debug:
@@ -1758,18 +1765,19 @@ async def generate_stream_with_memory(
                 yield data_chunk
         except Exception as run_exc:
             logger.error(
-                f"Agent run error after memory failure: {str(run_exc)}")
-            # Emit an error chunk and terminate the stream immediately
-            error_payload = json.dumps(
-                {"type": "error", "content": str(run_exc)}, ensure_ascii=False)
-            yield f"data: {error_payload}\n\n"
+                "Agent run error after memory failure: %r",
+                run_exc,
+                exc_info=True,
+            )
+            yield _safe_agent_stream_error_chunk()
             return
-    except Exception as e:
-        logger.error(f"Generate stream with memory error: {str(e)}")
-        # Emit an error chunk and terminate the stream immediately
-        error_payload = json.dumps(
-            {"type": "error", "content": str(e)}, ensure_ascii=False)
-        yield f"data: {error_payload}\n\n"
+    except Exception as stream_exc:
+        logger.error(
+            "Generate stream with memory error: %r",
+            stream_exc,
+            exc_info=True,
+        )
+        yield _safe_agent_stream_error_chunk()
         return
     finally:
         # Always unregister preprocess task
@@ -1877,9 +1885,17 @@ async def run_agent_stream(
         )
 
     async def stream_with_agent_context():
-        with agent_monitoring_context(agent_metadata):
-            async for data_chunk in stream_gen:
-                yield data_chunk
+        try:
+            with agent_monitoring_context(agent_metadata):
+                async for data_chunk in stream_gen:
+                    yield data_chunk
+        except Exception as stream_exc:
+            logger.error(
+                "Agent stream response error: %r",
+                stream_exc,
+                exc_info=True,
+            )
+            yield _safe_agent_stream_error_chunk()
 
     return StreamingResponse(
         stream_with_agent_context(),

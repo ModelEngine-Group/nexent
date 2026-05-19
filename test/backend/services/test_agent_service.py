@@ -3661,6 +3661,45 @@ async def test_run_agent_stream(
     )
 
 
+@pytest.mark.asyncio
+@patch(
+    "backend.services.agent_service._resolve_user_tenant_language",
+    return_value=("u", "t", "en"),
+)
+@patch("backend.services.agent_service.build_memory_context")
+@patch("backend.services.agent_service.save_messages")
+@patch("backend.services.agent_service.generate_stream_with_memory")
+async def test_run_agent_stream_sanitizes_uncaught_stream_exception(
+    mock_generate_stream,
+    mock_save_messages,
+    mock_build_mem_ctx,
+    mock_resolve,
+    mock_agent_request,
+    mock_http_request,
+    caplog,
+):
+    """StreamingResponse wrapper must not expose internal exception details."""
+    async def failing_stream():
+        raise RuntimeError("secret traceback detail")
+        yield "unreachable"
+
+    mock_generate_stream.return_value = failing_stream()
+    mock_build_mem_ctx.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=True)
+    )
+
+    response = await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+
+    assert chunks == [agent_service._safe_agent_stream_error_chunk()]
+    assert "secret traceback detail" not in chunks[0]
+    assert "Agent stream response error: RuntimeError('secret traceback detail')" in caplog.text
+    assert "Traceback" in caplog.text
+
+
 @patch('backend.services.agent_service.agent_run_manager')
 @patch('backend.services.agent_service.preprocess_manager')
 def test_stop_agent_tasks(mock_preprocess_manager, mock_agent_run_manager):
@@ -4108,7 +4147,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch):
+async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch, caplog):
     """When agent_run raises, an error SSE chunk should be emitted and run unregistered."""
     agent_request = AgentRequest(
         agent_id=1,
@@ -4148,6 +4187,10 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
     # Expect a single error payload chunk and unregister called
     assert collected and collected[0].startswith(
         "data: {") and "\"type\": \"error\"" in collected[0]
+    assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[0]
+    assert "oops" not in collected[0]
+    assert "Agent run error: Exception('oops')" in caplog.text
+    assert "Traceback" in caplog.text
     assert called["unregistered"] == 1001
     assert called["user_id"] == "u"
 
@@ -4383,7 +4426,7 @@ def test_insert_related_agent_impl_failure_returns_400():
 
 
 @pytest.mark.asyncio
-async def test_generate_stream_with_memory_unexpected_exception_emits_error(monkeypatch):
+async def test_generate_stream_with_memory_unexpected_exception_emits_error(monkeypatch, caplog):
     """Generic exceptions should emit an error SSE chunk and stop."""
     agent_request = AgentRequest(
         agent_id=9,
@@ -4409,6 +4452,10 @@ async def test_generate_stream_with_memory_unexpected_exception_emits_error(monk
 
     assert out and out[0].startswith(
         "data: {") and "\"type\": \"error\"" in out[0]
+    assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in out[0]
+    assert "unexpected" not in out[0]
+    assert "Generate stream with memory error: Exception('unexpected')" in caplog.text
+    assert "Traceback" in caplog.text
 
 
 async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
