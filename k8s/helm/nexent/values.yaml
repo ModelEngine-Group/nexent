@@ -6,7 +6,7 @@ global:
   monitoring:
     enabled: false
     provider: otlp
-    projectName: ""
+    projectName: "nexent"
     serviceName: nexent-backend
     otlpEndpoint: http://nexent-otel-collector:4318
     otlpTracesEndpoint: ""
@@ -17,15 +17,18 @@ global:
     otlpApiKey: ""
     otlpLangfuseIngestionVersion: ""
     langsmithApiKey: ""
-    langsmithProject: ""
+    langsmithProject: "nexent"
     otlpMetricsEnabled: true
     instrumentFastapi: true
     instrumentRequests: false
-    fastapiIncludedUrls: ""
+    fastapiIncludedUrls: "/agent/run"
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
     telemetrySampleRate: "1.0"
+    traceContentMode: "full"
+    traceMaxChars: "4000"
+    traceMaxItems: "20"
 
 # Optional monitoring stack. Set provider to one of:
 # otlp, phoenix, langfuse, langsmith, grafana, zipkin.

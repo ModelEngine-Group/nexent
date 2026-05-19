@@ -129,6 +129,9 @@ data:
   MONITORING_FASTAPI_EXCLUDE_SPANS: {{ default .Values.config.telemetry.fastapiExcludeSpans $monitoring.fastapiExcludeSpans | quote }}
   MONITORING_DASHBOARD_URL: {{ default .Values.config.telemetry.dashboardUrl $monitoring.dashboardUrl | quote }}
   TELEMETRY_SAMPLE_RATE: {{ default .Values.config.telemetry.telemetrySampleRate $monitoring.telemetrySampleRate | quote }}
+  MONITORING_TRACE_CONTENT_MODE: {{ default .Values.config.telemetry.traceContentMode $monitoring.traceContentMode | quote }}
+  MONITORING_TRACE_MAX_CHARS: {{ default .Values.config.telemetry.traceMaxChars $monitoring.traceMaxChars | quote }}
+  MONITORING_TRACE_MAX_ITEMS: {{ default .Values.config.telemetry.traceMaxItems $monitoring.traceMaxItems | quote }}
 
   # Market Backend Address
   MARKET_BACKEND: {{ .Values.config.marketBackend | quote }}

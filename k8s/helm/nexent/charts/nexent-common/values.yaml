@@ -123,6 +123,9 @@ config:
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
     telemetrySampleRate: "1.0"
+    traceContentMode: "full"
+    traceMaxChars: "4000"
+    traceMaxItems: "20"
   oauth:
     githubClientId: ""
     githubClientSecret: ""
