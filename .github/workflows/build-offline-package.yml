@@ -3,23 +3,15 @@ name: Build Offline Deployment Package
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Nexent image version (e.g. v1.0.0 or latest)'
-        required: true
-        default: 'latest'
       include_source:
         description: 'Include source code in the package'
         required: false
         default: true
         type: boolean
-      runner_label_json:
-        description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
-        required: true
-        default: '["ubuntu-latest"]'
 
 jobs:
   build-offline-package:
-    runs-on: ${{ fromJson(inputs.runner_label_json) }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         platform: [amd64, arm64]
@@ -31,17 +23,25 @@ jobs:
       - name: Set version and platform variables
         id: set-vars
         run: |
-          VERSION="${{ inputs.version }}"
           PLATFORM="${{ matrix.platform }}"
-          OUTPUT_VERSION="${VERSION}"
+          REF_TYPE="${{ github.ref_type }}"
+          REF_NAME="${{ github.ref_name }}"
           
-          if [ "$VERSION" = "latest" ]; then
-            OUTPUT_VERSION="latest"
+          if [ "$REF_TYPE" = "tag" ]; then
+            VERSION="$REF_NAME"
+          elif [ "$REF_TYPE" = "branch" ]; then
+            if [ "$REF_NAME" = "main" ]; then
+              VERSION="latest"
+            else
+              VERSION="${REF_NAME//\//-}"
+            fi
+          else
+            VERSION="latest"
           fi
           
-          echo "version=$OUTPUT_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
-          echo "package-name=nexent-offline-${PLATFORM}-${OUTPUT_VERSION}" >> $GITHUB_OUTPUT
+          echo "package-name=nexent-offline-${PLATFORM}-${VERSION}" >> $GITHUB_OUTPUT
       
       - name: Build offline package
         run: |
@@ -83,7 +83,8 @@ jobs:
           echo "Version: ${{ steps.set-vars.outputs.version }}"
           echo "Platform: ${{ matrix.platform }}"
           echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
-          echo "Include Source: ${{ inputs.include_source }}"
+          echo "Ref Type: ${{ github.ref_type }}"
+          echo "Ref Name: ${{ github.ref_name }}"
           echo "========================================"
           echo ""
           echo "Package contents:"
