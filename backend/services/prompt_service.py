@@ -12,6 +12,7 @@ from consts.error_message import ErrorMessage
 from consts.exceptions import AppException
 from database.agent_db import search_agent_info_by_agent_id, query_all_agent_info_by_tenant_id, \
     query_sub_agents_id_list
+from database.model_management_db import get_model_by_model_id
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.tool_db import query_tools_by_ids, query_tool_instances_by_id
 from services.agent_service import (
@@ -360,7 +361,6 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
     # Get model concurrency limit to control the number of concurrent LLM calls
     # If None or >= 6, no limit (all 6 calls run concurrently)
     # If < 6, use semaphore to limit concurrent calls
-    from database.model_management_db import get_model_by_model_id
     model_config = get_model_by_model_id(model_id, tenant_id)
     concurrency_limit = model_config.get("concurrency_limit") if model_config else None
 

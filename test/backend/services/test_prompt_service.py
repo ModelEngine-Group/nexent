@@ -749,7 +749,7 @@ class TestPromptService(unittest.TestCase):
             expected_data = f"data: {json.dumps({'success': True, 'data': test_data[i]}, ensure_ascii=False)}\n\n"
             self.assertEqual(result, expected_data)
 
-    @patch('database.model_management_db.get_model_by_model_id')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
@@ -869,7 +869,7 @@ class TestPromptService(unittest.TestCase):
             self.assertIsInstance(result["is_complete"], bool)
             self.assertIsInstance(result["content"], str)
 
-    @patch('database.model_management_db.get_model_by_model_id')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
@@ -1169,7 +1169,7 @@ class TestPromptService(unittest.TestCase):
 
         self.assertIn("Failed to generate prompt content", str(context.exception))
 
-    @patch('database.model_management_db.get_model_by_model_id')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
@@ -1222,7 +1222,7 @@ class TestPromptService(unittest.TestCase):
 
         self.assertIn("LLM connection error", str(context.exception))
 
-    @patch('database.model_management_db.get_model_by_model_id')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
