@@ -607,7 +607,6 @@ def test_rollback_version_impl_success(monkeypatch):
     }
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
-<<<<<<< HEAD
     mock_query_snapshot = MagicMock(
         return_value=(
             {"agent_id": 1, "version_no": 1, "name": "Test Agent"},
@@ -618,10 +617,6 @@ def test_rollback_version_impl_success(monkeypatch):
     monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
     mock_query_draft = MagicMock(return_value=({"agent_id": 1, "version_no": 0}, [], []))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
-=======
-    mock_query_snapshot = MagicMock(return_value=(mock_agent_snapshot, [], []))
-    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
->>>>>>> cc8c5745f8f2986aeb4bd9a4038d7543e48a6024
     mock_restore_draft = MagicMock()
     monkeypatch.setattr(agent_version_service_module, "restore_agent_draft", mock_restore_draft)
     monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
@@ -668,11 +663,7 @@ def test_rollback_version_impl_draft_not_found(monkeypatch):
     mock_query_draft = MagicMock(return_value=(None, [], []))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
 
-<<<<<<< HEAD
     with pytest.raises(ValueError, match="Agent draft not found"):
-=======
-    with pytest.raises(ValueError, match="Agent snapshot for version 1 not found"):
->>>>>>> cc8c5745f8f2986aeb4bd9a4038d7543e48a6024
         rollback_version_impl(
             agent_id=1,
             tenant_id="tenant1",
