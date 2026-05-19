@@ -175,6 +175,8 @@ CREATE TABLE IF NOT EXISTS "model_record_t" (
   "updated_by" varchar(100) COLLATE "pg_catalog"."default",
   "created_by" varchar(100) COLLATE "pg_catalog"."default",
   "tenant_id" varchar(100) COLLATE "pg_catalog"."default" DEFAULT 'tenant_id',
+  "model_appid" varchar(100) COLLATE "pg_catalog"."default" DEFAULT '',
+  "access_token" varchar(100) COLLATE "pg_catalog"."default" DEFAULT '',
   CONSTRAINT "nexent_models_t_pk" PRIMARY KEY ("model_id")
 );
 ALTER TABLE "model_record_t" OWNER TO "root";
@@ -198,6 +200,8 @@ COMMENT ON COLUMN "model_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "model_record_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "model_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON COLUMN "model_record_t"."tenant_id" IS 'Tenant ID for filtering';
+COMMENT ON COLUMN "model_record_t"."model_appid" IS 'Application ID for model authentication.';
+COMMENT ON COLUMN "model_record_t"."access_token" IS 'Access token for model authentication.';
 COMMENT ON TABLE "model_record_t" IS 'List of models defined by users in the configuration page';
 
 INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status") VALUES ('', 'volcano_tts', 'OpenAI-API-Compatible', 'tts', '', '', 0, 0, 'volcano_tts', 'unavailable');

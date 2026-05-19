@@ -20,6 +20,7 @@ config:
     mcpManagementServer: "http://nexent-mcp:5015"
     dataProcessService: "http://nexent-data-process:5012/api"
     northboundServer: "http://nexent-northbound:5013/api"
+    northboundExternalUrl: "" # Set this to the public-facing URL for external A2A clients. Example: https://api.yourdomain.com/api or http://your-public-ip:5013/api
   postgres:
     host: "nexent-postgresql"
     user: "root"

@@ -1,0 +1,105 @@
+name: Build Offline Deployment Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_source:
+        description: 'Include source code in the package'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build-offline-package:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [amd64, arm64]
+    
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false
+          swap-storage: true
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      
+      - name: Set version and platform variables
+        id: set-vars
+        run: |
+          PLATFORM="${{ matrix.platform }}"
+          REF_TYPE="${{ github.ref_type }}"
+          REF_NAME="${{ github.ref_name }}"
+          
+          if [ "$REF_TYPE" = "tag" ]; then
+            VERSION="$REF_NAME"
+          elif [ "$REF_TYPE" = "branch" ]; then
+            if [ "$REF_NAME" = "main" ]; then
+              VERSION="latest"
+            else
+              VERSION="${REF_NAME//\//-}"
+            fi
+          else
+            VERSION="latest"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
+          echo "package-name=nexent-offline-${PLATFORM}-${VERSION}" >> $GITHUB_OUTPUT
+      
+      - name: Build offline package
+        run: |
+          chmod +x scripts/offline/build_offline_package.sh
+          
+          ./scripts/offline/build_offline_package.sh \
+            --version "${{ steps.set-vars.outputs.version }}" \
+            --platform "${{ matrix.platform }}" \
+            --output-dir ./offline-output \
+            --include-source "${{ inputs.include_source }}"
+      
+      
+      
+      - name: Create ZIP package
+        run: |
+          PACKAGE_NAME="${{ steps.set-vars.outputs.package-name }}"
+          
+          cd offline-output
+          zip -r "../${PACKAGE_NAME}.zip" .
+          cd ..
+          
+          echo "Package created: ${PACKAGE_NAME}.zip"
+          
+          ls -lh "${PACKAGE_NAME}.zip"
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.set-vars.outputs.package-name }}
+          path: ${{ steps.set-vars.outputs.package-name }}.zip
+          retention-days: 30
+      
+      - name: Summary
+        run: |
+          echo ""
+          echo "========================================"
+          echo "Offline Package Build Summary"
+          echo "========================================"
+          echo "Version: ${{ steps.set-vars.outputs.version }}"
+          echo "Platform: ${{ matrix.platform }}"
+          echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
+          echo "Ref Type: ${{ github.ref_type }}"
+          echo "Ref Name: ${{ github.ref_name }}"
+          echo "========================================"
+          echo ""
+          echo "Package contents:"
+          unzip -l "${{ steps.set-vars.outputs.package-name }}.zip" | head -50

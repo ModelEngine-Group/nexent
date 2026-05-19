@@ -85,6 +85,7 @@ export const API_ENDPOINTS = {
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
+    optimize: `${API_BASE_URL}/prompt/optimize`,
   },
   stt: {
     ws: `/api/voice/stt/ws`,
@@ -433,6 +434,12 @@ export const fetchWithErrorHandling = async (
         errorCodeStr === ErrorCode.TOKEN_EXPIRED ||
         errorCodeStr === ErrorCode.TOKEN_INVALID
       ) {
+        handleSessionExpired();
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      // Handle HTTP 401 - trigger session expired modal for all unauthorized errors
+      if (response.status === 401) {
         handleSessionExpired();
         throw new ApiError(errorCode, errorMessage);
       }
