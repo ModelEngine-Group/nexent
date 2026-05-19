@@ -674,11 +674,10 @@ class TestPromptService(unittest.TestCase):
             expected_data = f"data: {json.dumps({'success': True, 'data': test_data[i]}, ensure_ascii=False)}\n\n"
             self.assertEqual(result, expected_data)
 
-    @patch('backend.utils.llm_utils.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
-    def test_generate_system_prompt(self, mock_get_prompt_template, mock_join_info, mock_call_llm, mock_get_model):
+    def test_generate_system_prompt(self, mock_get_prompt_template, mock_join_info, mock_call_llm):
         # Setup
         mock_prompt_config = {
             "USER_PROMPT": "Test user prompt template",
@@ -692,9 +691,6 @@ class TestPromptService(unittest.TestCase):
         mock_get_prompt_template.return_value = mock_prompt_config
 
         mock_join_info.return_value = "Joined template content"
-
-        # Mock model config to avoid database call
-        mock_get_model.return_value = {"concurrency_limit": None}
 
         # Mock call_llm_for_system_prompt to simulate streaming responses
         def mock_llm_call(model_id, content, sys_prompt, callback, tenant_id):
@@ -795,11 +791,10 @@ class TestPromptService(unittest.TestCase):
             self.assertIsInstance(result["is_complete"], bool)
             self.assertIsInstance(result["content"], str)
 
-    @patch('backend.utils.llm_utils.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
-    def test_generate_system_prompt_with_exception(self, mock_get_prompt_template, mock_join_info, mock_call_llm, mock_get_model):
+    def test_generate_system_prompt_with_exception(self, mock_get_prompt_template, mock_join_info, mock_call_llm):
         # Setup
         mock_prompt_config = {
             "USER_PROMPT": "Test user prompt template",
@@ -812,7 +807,6 @@ class TestPromptService(unittest.TestCase):
         }
         mock_get_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
-        mock_get_model.return_value = {"concurrency_limit": None}
 
         # Mock call_llm_for_system_prompt to raise exception for one prompt type
         def mock_llm_call_with_exception(model_id, content, sys_prompt, callback, tenant_id):
