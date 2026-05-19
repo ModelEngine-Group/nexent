@@ -29,6 +29,7 @@ show_help() {
   echo "                           Default: $DEFAULT_OUTPUT_DIR"
   echo "  --include-source BOOL   Include source code (true or false)"
   echo "                           Default: $DEFAULT_INCLUDE_SOURCE"
+  echo "  --dry-run               Show execution plan without actual operations"
   echo "  --help                  Show this help message"
   echo ""
   echo "Examples:"
@@ -102,10 +103,6 @@ parse_args() {
 
 get_nexent_images() {
   local version_tag="$VERSION"
-
-  if [[ "$VERSION" == "latest" ]]; then
-    version_tag="latest"
-  fi
 
   local nexent_images=(
     "nexent/nexent:${version_tag}"
@@ -225,7 +222,9 @@ save_all_images() {
   while IFS= read -r image; do
     local image_name
     image_name=$(echo "$image" | sed 's/.*\///' | sed 's/:.*//')
-    local tar_file="$images_dir/${image_name}.tar"
+    local image_tag
+    image_tag=$(echo "$image" | sed 's/.*://' | sed 's/\./-/g')
+    local tar_file="$images_dir/${image_name}-${image_tag}.tar"
 
     save_image_to_tar "$image" "$tar_file" || return 1
   done <<< "$nexent_images_str"
@@ -271,11 +270,20 @@ copy_source_code() {
     echo "⚠️  Warning: Project root is not a git repository"
     echo "   Falling back to copying all files (excluding .git and .github)"
 
-    cp -r "$PROJECT_ROOT"/* "$source_dir/" 2>&1 || {
+    local cp_result=0
+    if command -v rsync >/dev/null 2>&1; then
+      rsync -a --exclude='.git' --exclude='.github' "$PROJECT_ROOT/" "$source_dir/" || cp_result=$?
+    else
+      shopt -s dotglob nullglob
+      cp -r "$PROJECT_ROOT"/* "$source_dir/" 2>&1 || cp_result=$?
+      shopt -u dotglob nullglob
+      rm -rf "$source_dir/.git" "$source_dir/.github"
+    fi
+
+    if [ $cp_result -ne 0 ]; then
       echo "❌ Failed to copy source code"
       return 1
-    }
-    rm -rf "$source_dir/.git" "$source_dir/.github"
+    fi
 
     echo "✅ Source code copied to: $source_dir"
     return 0
