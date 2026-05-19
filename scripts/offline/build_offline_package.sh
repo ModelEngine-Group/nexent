@@ -141,7 +141,7 @@ pull_with_retry() {
 
   echo "Pulling image: $image (platform: $platform)"
 
-  while [ $retry -lt $max_retries ]; do
+  while [[ $retry -lt $max_retries ]]; do
     if docker pull --platform "linux/$platform" "$image"; then
       echo "✅ Successfully pulled: $image"
       return 0
@@ -280,7 +280,7 @@ copy_source_code() {
       rm -rf "$source_dir/.git" "$source_dir/.github"
     fi
 
-    if [ $cp_result -ne 0 ]; then
+    if [[ $cp_result -ne 0 ]]; then
       echo "❌ Failed to copy source code"
       return 1
     fi
@@ -294,7 +294,7 @@ copy_source_code() {
   local git_files
   git_files=$(git -C "$PROJECT_ROOT" ls-files)
 
-  if [ -z "$git_files" ]; then
+  if [[ -z "$git_files" ]]; then
     echo "❌ No git-managed files found"
     return 1
   fi
@@ -311,7 +311,7 @@ copy_source_code() {
 
     dst_dir=$(dirname "$dst_file")
 
-    if [ -f "$src_file" ]; then
+    if [[ -f "$src_file" ]]; then
       mkdir -p "$dst_dir"
       cp "$src_file" "$dst_file"
     fi
@@ -345,7 +345,7 @@ IMAGES_DIR="$SCRIPT_DIR/images"
 echo "Loading Docker images from $IMAGES_DIR..."
 
 for tar_file in "$IMAGES_DIR"/*.tar; do
-  if [ -f "$tar_file" ]; then
+  if [[ -f "$tar_file" ]]; then
     echo "Loading: $tar_file"
     docker load -i "$tar_file"
   fi
