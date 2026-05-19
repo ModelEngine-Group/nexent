@@ -291,7 +291,7 @@ monitoring_manager.bind_agent_context(AgentRunMetadata(
 
 ### Trace Payload 策略
 
-工具输入输出、检索输出，以及 Langfuse 兼容的 `input.value` / `output.value` 属性统一使用同一套 payload 策略。默认写入有界预览，并额外写入 `type`、`size_chars`、`item_count`、`truncated`、`keys` 等结构化属性。记忆检索 span 只记录结果摘要和统计信息，不写完整 memory 正文。
+工具输入输出、检索输出，以及 OpenInference 的 `input.value` / `output.value` 属性统一使用同一套 payload 策略。默认写入有界预览，并额外写入 `type`、`size_chars`、`item_count`、`truncated`、`keys` 等结构化属性。记忆检索 span 只记录结果摘要和统计信息，不写完整 memory 正文。
 
 Agent 上下文指标由 SDK 生命周期自动写入。每个 action step 会产生 `agent.step.metrics` event，包含上下文 token 估算、压缩调用数、缓存命中、压缩率和 token 阈值。Agent 结束时还会在顶层 span 写入聚合 step 数、最大上下文 token、平均压缩率、压缩调用总数和缓存命中总数。
 
@@ -358,17 +358,7 @@ with monitoring_manager.start_agent_run(metadata):
 
 Phoenix 左侧的 `agent`、`chain`、`llm`、`retriever`、`tool` 标签来自 `openinference.span.kind`。span 必须通过嵌套 `with` 创建，Phoenix 才会显示成树形结构。
 
-同一套方法也会写入 Langfuse 识别的 OTel 属性：
-
-| Nexent 方法 | Phoenix 属性 | Langfuse observation type |
-|-------------|--------------|---------------------------|
-| `start_agent_run` | `openinference.span.kind=AGENT` | `langfuse.observation.type=agent` |
-| `trace_agent_step` | `openinference.span.kind=CHAIN` | `langfuse.observation.type=chain` |
-| `trace_llm_request` | `openinference.span.kind=LLM` | `langfuse.observation.type=generation` |
-| `trace_retriever_call` | `openinference.span.kind=RETRIEVER` | `langfuse.observation.type=retriever` |
-| `trace_tool_call` | `openinference.span.kind=TOOL` | `langfuse.observation.type=tool` |
-
-`session_id`、`user_id`、`tags` 和 `metadata` 会同步写入 `langfuse.session.id`、`langfuse.user.id`、`langfuse.trace.tags`、`langfuse.trace.metadata.*`，可在 Langfuse 中按会话、用户和业务字段过滤。`input_value`、`output_value` 会同步写入 `langfuse.observation.input` 和 `langfuse.observation.output`。
+同一套方法只写入通用 OpenInference / Nexent 属性，不再写入 Langfuse 专用 span 字段。Langfuse provider 仍通过 OTLP endpoint 接收 trace，但展示和过滤以通用 OTLP/OpenInference 属性为准。
 
 ## OpenInference 语义属性
 

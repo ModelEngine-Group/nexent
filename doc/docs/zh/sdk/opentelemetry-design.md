@@ -157,7 +157,7 @@ Nexent 的关键处理包括：
 - 业务入口只绑定一次 `AgentRunMetadata`，保存 tenant、user、agent、conversation、query、language、memory 等请求级元数据。
 - SDK 在 `NexentAgent.agent_run_with_observer` 中创建顶层 `agent.run` span，并在 Agent loop、LLM、Tool 等生命周期中自动继承上下文。
 - `monitor_endpoint` 保留为兼容 API 和低层 escape hatch，不再作为业务层新增埋点的推荐方式。
-- Agent、LLM、Tool span 统一写入 OpenInference、Langfuse 和 Nexent 自定义属性，保证不同平台都能基于同一 trace 做展示和过滤。
+- Agent、LLM、Tool span 统一写入 OpenInference 和 Nexent 自定义属性，避免业务 trace 绑定到单一平台字段。
 
 ### Semantic Conventions
 
@@ -167,9 +167,8 @@ Nexent 采用三层语义：
 
 - OTel 通用语义：用于 service、resource、HTTP 自动埋点、metric instrument 等基础字段。
 - OpenInference 语义：用于 AI span 类型，例如 `openinference.span.kind=AGENT|CHAIN|LLM|TOOL|RETRIEVER`，适配 Phoenix 等 AI observability 平台。
-- Langfuse OTel 语义：用于 `langfuse.observation.type`、`langfuse.session.id`、`langfuse.user.id`、`langfuse.observation.input/output` 等展示和过滤字段。
 
-当三者存在差异时，Nexent 不把业务 span 绑定到某个平台，而是在同一个 span 上补充多套兼容属性。
+当平台展示存在差异时，Nexent 优先保持业务 span 的通用 OpenTelemetry / OpenInference 语义，不写入平台专用字段。
 
 ### OTLP 与 Collector Pipeline
 
@@ -196,7 +195,7 @@ Nexent 的监控能力以 OpenTelemetry 为主干，SDK 和后端只负责生成
 核心目标：
 
 - Agent 流式运行期间保持 trace 上下文，覆盖 API、服务准备、Agent 异步 generator、Agent 线程、LLM 流式输出、Python 解释器执行、真实工具调用和最终答案。
-- 通过 OpenInference 属性适配 Phoenix，通过 `langfuse.*` 属性适配 Langfuse，同一套业务埋点可同时服务多个监控平台。
+- 通过 OpenInference 属性描述 Agent/LLM/Tool/Retriever 语义，同一套业务埋点可服务多个 OTLP 后端。
 - 支持 `otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` provider profile。
 - 通过环境变量统一控制后端导出配置、本地部署形态和前端监控入口。
 - 支持 base endpoint 和 signal-specific endpoint，避免 `/v1/traces`、`/v1/metrics` 路径重复拼接。
@@ -332,7 +331,7 @@ OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION=4
 OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 ```
 
-当前实现会同时写入 `langfuse.observation.type`、`langfuse.session.id`、`langfuse.user.id`、`langfuse.trace.tags`、`langfuse.trace.metadata.*`、`langfuse.observation.input`、`langfuse.observation.output` 等属性，以便 Langfuse 正确展示 generation/tool/agent 并支持过滤聚合。
+当前实现不写入 `langfuse.*` 专用 span 属性，Langfuse 通过 OTLP 接收通用 OpenTelemetry / OpenInference span。
 
 ### LangSmith
 
@@ -456,13 +455,13 @@ Collector trace pipeline 使用 `zipkin` exporter 转发到 `http://zipkin:9411/
 
 ## Span 语义映射
 
-| Nexent 场景 | Phoenix / OpenInference | Langfuse |
-|-------------|-------------------------|----------|
-| Agent 入口 | `openinference.span.kind=AGENT` | `langfuse.observation.type=agent` |
-| 服务准备、流式生成、线程执行、普通步骤 | `openinference.span.kind=CHAIN` | `langfuse.observation.type=chain` |
-| LLM 调用 | `openinference.span.kind=LLM` | `langfuse.observation.type=generation` |
-| 工具调用 | `openinference.span.kind=TOOL` | `langfuse.observation.type=tool` |
-| 检索类调用 | `openinference.span.kind=RETRIEVER` | `langfuse.observation.type=retriever` |
+| Nexent 场景 | OpenInference |
+|-------------|---------------|
+| Agent 入口 | `openinference.span.kind=AGENT` |
+| 服务准备、流式生成、线程执行、普通步骤 | `openinference.span.kind=CHAIN` |
+| LLM 调用 | `openinference.span.kind=LLM` |
+| 工具调用 | `openinference.span.kind=TOOL` |
+| 检索类调用 | `openinference.span.kind=RETRIEVER` |
 
 上下文属性：
 
@@ -472,10 +471,6 @@ Collector trace pipeline 使用 `zipkin` exporter 转发到 `http://zipkin:9411/
 | `metadata` | OpenInference JSON metadata |
 | `session.id` / `user.id` | OpenInference 会话和用户 |
 | `tag.tags` | OpenInference tags |
-| `langfuse.observation.input` / `langfuse.observation.output` | Langfuse observation 输入输出 |
-| `langfuse.session.id` / `langfuse.user.id` | Langfuse 会话和用户 |
-| `langfuse.trace.tags` | Langfuse trace tags |
-| `langfuse.trace.metadata.*` / `langfuse.observation.metadata.*` | Langfuse 可过滤业务 metadata |
 
 ## 埋点信息
 
@@ -586,7 +581,7 @@ flowchart TB
 | 平台 | 类型 | 部署形态 | 主要接入方式 | AI / Agent 语义 | Metrics / Logs | 评估 / 反馈 | 适合场景 | Nexent 当前适配 |
 |------|------|----------|--------------|-----------------|----------------|-------------|----------|----------------|
 | Phoenix | AI 原生可观测性 / 实验分析 | 云服务或自托管 | OTLP、OpenInference、Phoenix SDK | OpenInference 生态匹配好，适合展示 LLM、retriever、agent、tool 等语义 | 重点在 trace 和实验分析，通用 infra 监控不是核心 | 支持 eval、dataset、实验分析 | 本地 trace debug、RAG/LLM 质量分析、OpenInference 语义验证 | 写入 OpenInference 属性；支持本地 Phoenix stack 和 OTLP 转发 |
-| Langfuse | LLMOps / Prompt 与 Trace 平台 | 云服务或自托管 | OTLP、Langfuse SDK、API | 对 trace、observation、session、user、prompt、metadata 支持完整 | 提供 LLM 应用维度 dashboard，通用 infra 监控不是重点 | 支持 score、feedback、eval、prompt 管理 | 需要 prompt 管理、用户会话、反馈和成本闭环的 LLM 应用 | 写入 `langfuse.*` 属性；支持本地 Langfuse stack 和 OTLP 转发 |
+| Langfuse | LLMOps / Prompt 与 Trace 平台 | 云服务或自托管 | OTLP、Langfuse SDK、API | 对 trace、observation、session、user、prompt、metadata 支持完整 | 提供 LLM 应用维度 dashboard，通用 infra 监控不是重点 | 支持 score、feedback、eval、prompt 管理 | 需要 prompt 管理、用户会话、反馈和成本闭环的 LLM 应用 | 支持本地 Langfuse stack 和 OTLP 转发；业务 span 不写入 `langfuse.*` 专用属性 |
 | LangSmith | LangChain / LangGraph 生态观测与评估 | 云服务为主 | LangSmith SDK、OTLP endpoint | 与 LangChain/LangGraph run、thread、feedback、evaluation 生态贴合 | 重点在应用 trace 和评估，不替代通用 APM | 评估、dataset、反馈、回归测试能力强 | 使用 LangChain/LangGraph 或需要在线评估闭环 | 支持 Collector 注入 `x-api-key` 和 `Langsmith-Project` 转发 traces |
 | Grafana Tempo + Grafana | 通用 trace 后端 / Dashboard | 自托管或云服务 | OTLP、Jaeger、Zipkin 等，经 Collector 常见 | 不内置 LLM/Agent 专用语义，需要 dashboard 和属性约定补充 | Grafana 生态可接 Prometheus、Loki、Tempo 组合 | 不提供原生 LLM 评估，需要外部系统 | 私有化、本地化、已有 Grafana/Prometheus/Loki 体系 | 支持本地 Tempo + Grafana stack，预置 Tempo datasource 和 trace dashboard |
 | Zipkin | 轻量分布式 tracing | 自托管 | Zipkin API，通常由 Collector exporter 转发 | 只理解通用 trace/span，不理解 LLM/Agent 语义 | 不提供 metrics/logs 平台能力 | 不提供评估能力 | 最小本地 trace 查询、验证转发链路、低成本调试 | 支持本地 Zipkin stack，Collector 转发 traces |
@@ -628,8 +623,8 @@ flowchart TB
 | Collector header 无法兼容平台 | Collector 默认只 debug；平台转发配置拆分 `Authorization`、`x-api-key`、`x-langfuse-ingestion-version` |
 | Phoenix 只看到接口看不到 Agent | SDK 顶层 `agent.run` 标记为 AGENT，内部 `agent.run.loop` 标记为 CHAIN |
 | Phoenix/Langfuse 中出现大量 `unknown POST /agent/run http ...` | 默认排除 FastAPI ASGI `receive/send` span；requests 自动埋点默认关闭；可配置隐藏 `/agent/run` HTTP span |
-| Langfuse 无法识别 observation 类型 | 增加 `langfuse.observation.type` 和 trace/session/user/metadata/input/output 属性 |
-| LLM span 不明显或缺输出 | LLM span 命名为 `{display_name or model_id}.generate`，并写入 `output.value` 和 `langfuse.observation.output` |
+| Langfuse 字段耦合过重 | 不写入 `langfuse.*` 专用 span 属性，仅保留 OTLP 转发和 OpenInference 语义 |
+| LLM span 不明显或缺输出 | LLM span 命名为 `{display_name or model_id}.generate`，并写入 `output.value` |
 | 工具 span 缺失 | 在 `NexentAgent.create_single_agent` 统一包装 local/MCP/langchain/builtin 工具，并在 `CoreAgent` 增加 `python_interpreter` 和 `FinalAnswerTool` span |
 | 单测漏掉 SDK 生命周期路径 | 增加 AgentRunMetadata、Agent/chain、LLM/Tool 继承上下文测试 |
 

@@ -49,14 +49,6 @@ from sdk.nexent.monitor.monitoring import (
     OPENINFERENCE_TAG_TAGS,
     OPENINFERENCE_INPUT_VALUE,
     OPENINFERENCE_OUTPUT_VALUE,
-    LANGFUSE_OBSERVATION_TYPE,
-    LANGFUSE_OBSERVATION_INPUT,
-    LANGFUSE_OBSERVATION_OUTPUT,
-    LANGFUSE_OBSERVATION_MODEL_NAME,
-    LANGFUSE_TRACE_INPUT,
-    LANGFUSE_TRACE_TAGS,
-    LANGFUSE_SESSION_ID,
-    LANGFUSE_USER_ID,
 )
 import pytest
 import asyncio
@@ -430,8 +422,6 @@ class TestMonitoringManager:
             assert "llm.operation.name" in attributes
             assert attributes["llm.operation.name"] == "test_op"
             assert attributes[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_LLM
-            assert attributes[LANGFUSE_OBSERVATION_TYPE] == "generation"
-            assert attributes[LANGFUSE_OBSERVATION_MODEL_NAME] == "gpt-4"
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_trace_llm_request_summarizes_input_payload(self, mock_trace):
@@ -492,13 +482,6 @@ class TestMonitoringManager:
             assert attrs[OPENINFERENCE_SESSION_ID] == "2"
             assert attrs[OPENINFERENCE_USER_ID] == "user-1"
             assert attrs[OPENINFERENCE_INPUT_VALUE] == "hello"
-            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "agent"
-            assert attrs[LANGFUSE_SESSION_ID] == "2"
-            assert attrs[LANGFUSE_USER_ID] == "user-1"
-            assert attrs[LANGFUSE_OBSERVATION_INPUT] == "hello"
-            assert attrs[LANGFUSE_TRACE_INPUT] == "hello"
-            assert "agent_id:1" in attrs[LANGFUSE_TRACE_TAGS]
-            assert attrs["langfuse.trace.metadata.agent_id"] == 1
             assert "agent_id:1" in json.loads(attrs[OPENINFERENCE_TAG_TAGS])
             metadata = json.loads(attrs[OPENINFERENCE_METADATA])
             assert metadata["agent_id"] == 1
@@ -513,7 +496,6 @@ class TestMonitoringManager:
             )
             attrs = mock_span.set_attributes.call_args.args[0]
             assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_CHAIN
-            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "chain"
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_set_openinference_output_attrs(self, mock_trace):
@@ -528,7 +510,6 @@ class TestMonitoringManager:
             manager.set_openinference_output({"answer": "ok"})
             output_attrs = mock_span.set_attributes.call_args.args[0]
             assert json.loads(output_attrs[OPENINFERENCE_OUTPUT_VALUE]) == {"answer": "ok"}
-            assert json.loads(output_attrs[LANGFUSE_OBSERVATION_OUTPUT]) == {"answer": "ok"}
             assert output_attrs["output.type"] == "dict"
             assert output_attrs["output.item_count"] == 1
 
@@ -548,8 +529,6 @@ class TestMonitoringManager:
 
         assert OPENINFERENCE_INPUT_VALUE not in attrs
         assert OPENINFERENCE_OUTPUT_VALUE not in attrs
-        assert LANGFUSE_OBSERVATION_INPUT not in attrs
-        assert LANGFUSE_OBSERVATION_OUTPUT not in attrs
         assert attrs["input.type"] == "dict"
         assert attrs["input.size_chars"] > 0
         assert attrs["output.type"] == "dict"
@@ -645,12 +624,9 @@ class TestToolCallTracing:
             assert attributes["tool.name"] == "web_search"
             assert "query" in attributes["tool.parameters"]
             assert "query" in attributes[OPENINFERENCE_INPUT_VALUE]
-            assert attributes[LANGFUSE_OBSERVATION_TYPE] == "tool"
-            assert "query" in attributes[LANGFUSE_OBSERVATION_INPUT]
 
             output_attrs = mock_span.set_attributes.call_args.args[0]
             assert json.loads(output_attrs[OPENINFERENCE_OUTPUT_VALUE]) == {"results": ["item1", "item2"]}
-            assert json.loads(output_attrs[LANGFUSE_OBSERVATION_OUTPUT]) == {"results": ["item1", "item2"]}
             assert output_attrs["agent.tool.output.type"] == "dict"
             assert output_attrs["agent.tool.output.item_count"] == 1
             assert output_attrs["agent.tool.success"] is True
@@ -763,8 +739,6 @@ class TestAgentObservability:
             assert agent_attrs[OPENINFERENCE_INPUT_VALUE] == "hello"
             assert agent_attrs["tenant.id"] == "tenant-1"
             assert agent_attrs["agent.id"] == 11
-            assert agent_attrs[LANGFUSE_OBSERVATION_TYPE] == "agent"
-            assert agent_attrs[LANGFUSE_SESSION_ID] == "22"
 
             assert calls[1].args[0] == "agent.run.loop"
             chain_attrs = calls[1].kwargs["attributes"]
@@ -813,7 +787,6 @@ class TestAgentObservability:
             assert llm_attrs[OPENINFERENCE_INPUT_VALUE] == "prompt"
             assert llm_attrs["tenant.id"] == "tenant-2"
             assert llm_attrs["agent.id"] == 33
-            assert llm_attrs[LANGFUSE_OBSERVATION_TYPE] == "generation"
 
             tool_attrs = calls[1].kwargs["attributes"]
             assert tool_attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_TOOL
@@ -858,7 +831,6 @@ class TestAgentObservability:
 
             attrs = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
             assert attrs[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_RETRIEVER
-            assert attrs[LANGFUSE_OBSERVATION_TYPE] == "retriever"
             assert attrs[OPENINFERENCE_SESSION_ID] == "88"
             assert attrs[OPENINFERENCE_USER_ID] == "user-r"
             assert attrs["tenant.id"] == "tenant-r"
@@ -1005,7 +977,7 @@ class TestLLMTokenTracker:
                 "llm.token_count.prompt": 20,
                 "llm.token_count.completion": 30,
                 "llm.token_count.total": 50,
-                "langfuse.observation.usage_details": '{"input": 20, "output": 30, "total": 50}',
+                "llm.usage_details": '{"input": 20, "output": 30, "total": 50}',
                 "llm.generation_rate": 5.0,
                 "llm.duration.total": 2.0,
                 "llm.time_to_first_token": 0.5

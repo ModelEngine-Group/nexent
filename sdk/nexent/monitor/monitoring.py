@@ -133,19 +133,6 @@ OPENINFERENCE_SESSION_ID = "session.id"
 OPENINFERENCE_USER_ID = "user.id"
 OPENINFERENCE_TAG_TAGS = "tag.tags"
 
-LANGFUSE_OBSERVATION_TYPE = "langfuse.observation.type"
-LANGFUSE_OBSERVATION_INPUT = "langfuse.observation.input"
-LANGFUSE_OBSERVATION_OUTPUT = "langfuse.observation.output"
-LANGFUSE_OBSERVATION_MODEL_NAME = "langfuse.observation.model.name"
-LANGFUSE_OBSERVATION_MODEL_PARAMETERS = "langfuse.observation.model.parameters"
-LANGFUSE_OBSERVATION_USAGE_DETAILS = "langfuse.observation.usage_details"
-LANGFUSE_TRACE_NAME = "langfuse.trace.name"
-LANGFUSE_TRACE_INPUT = "langfuse.trace.input"
-LANGFUSE_TRACE_OUTPUT = "langfuse.trace.output"
-LANGFUSE_TRACE_TAGS = "langfuse.trace.tags"
-LANGFUSE_SESSION_ID = "langfuse.session.id"
-LANGFUSE_USER_ID = "langfuse.user.id"
-
 AGENT_OPERATION_NAMES = {
     "agent.run",
 }
@@ -752,66 +739,6 @@ class MonitoringManager:
         except (TypeError, ValueError):
             return str(value)
 
-    @staticmethod
-    def _to_langfuse_observation_type(span_kind: str) -> str:
-        """Map OpenInference span kind to Langfuse observation type."""
-        return {
-            OPENINFERENCE_SPAN_KIND_AGENT: "agent",
-            OPENINFERENCE_SPAN_KIND_CHAIN: "chain",
-            OPENINFERENCE_SPAN_KIND_LLM: "generation",
-            OPENINFERENCE_SPAN_KIND_TOOL: "tool",
-            OPENINFERENCE_SPAN_KIND_RETRIEVER: "retriever",
-        }.get(span_kind, "span")
-
-    def build_langfuse_attributes(
-        self,
-        span_kind: str,
-        input_value: Any = None,
-        output_value: Any = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
-        session_id: Optional[Any] = None,
-        user_id: Optional[Any] = None,
-        trace_name: Optional[str] = None,
-        trace_level: bool = False,
-    ) -> Dict[str, Any]:
-        """Build Langfuse OTel attributes for trace and observation mapping."""
-        attrs: Dict[str, Any] = {
-            LANGFUSE_OBSERVATION_TYPE: self._to_langfuse_observation_type(
-                span_kind),
-        }
-        if input_value is not None:
-            input_json = self._trace_payload_preview(input_value)
-            if input_json != "":
-                attrs[LANGFUSE_OBSERVATION_INPUT] = input_json
-                if trace_level:
-                    attrs[LANGFUSE_TRACE_INPUT] = input_json
-        if output_value is not None:
-            output_json = self._trace_payload_preview(output_value)
-            if output_json != "":
-                attrs[LANGFUSE_OBSERVATION_OUTPUT] = output_json
-                if trace_level:
-                    attrs[LANGFUSE_TRACE_OUTPUT] = output_json
-        if metadata:
-            for key, value in metadata.items():
-                if value is not None:
-                    attrs[f"langfuse.observation.metadata.{key}"] = (
-                        self._to_langfuse_attribute_value(value)
-                    )
-                    if trace_level:
-                        attrs[f"langfuse.trace.metadata.{key}"] = (
-                            self._to_langfuse_attribute_value(value)
-                        )
-        if tags is not None:
-            attrs[LANGFUSE_TRACE_TAGS] = tags
-        if session_id is not None:
-            attrs[LANGFUSE_SESSION_ID] = str(session_id)
-        if user_id is not None:
-            attrs[LANGFUSE_USER_ID] = str(user_id)
-        if trace_name:
-            attrs[LANGFUSE_TRACE_NAME] = trace_name
-        return attrs
-
     def build_openinference_attributes(
         self,
         span_kind: str,
@@ -847,17 +774,6 @@ class MonitoringManager:
             attrs[OPENINFERENCE_SESSION_ID] = str(session_id)
         if user_id is not None:
             attrs[OPENINFERENCE_USER_ID] = str(user_id)
-        attrs.update(self.build_langfuse_attributes(
-            span_kind=span_kind,
-            input_value=input_value,
-            output_value=output_value,
-            metadata=metadata,
-            tags=tags,
-            session_id=session_id,
-            user_id=user_id,
-            trace_name=attributes.get(LANGFUSE_TRACE_NAME) if attributes else None,
-            trace_level=span_kind == OPENINFERENCE_SPAN_KIND_AGENT,
-        ))
         if attributes:
             attrs.update(attributes)
         return attrs
@@ -886,8 +802,6 @@ class MonitoringManager:
         plain_attrs = {
             key: value for key, value in plain_attrs.items() if value is not None
         }
-        if agent_metadata.agent_name and span_kind == OPENINFERENCE_SPAN_KIND_AGENT:
-            plain_attrs[LANGFUSE_TRACE_NAME] = agent_metadata.agent_name
         if attributes:
             plain_attrs.update(attributes)
 
@@ -997,8 +911,6 @@ class MonitoringManager:
 
         span_attrs = {
             OPENINFERENCE_SPAN_KIND: span_kind,
-            LANGFUSE_OBSERVATION_TYPE: self._to_langfuse_observation_type(
-                span_kind),
         }
         span_attrs.update(attributes)
 
@@ -1028,7 +940,6 @@ class MonitoringManager:
             tags=tags,
         )
         attrs.pop(OPENINFERENCE_SPAN_KIND, None)
-        attrs.pop(LANGFUSE_OBSERVATION_TYPE, None)
         self.set_span_attributes(**attrs)
 
     def set_openinference_agent_context(
@@ -1069,45 +980,28 @@ class MonitoringManager:
         elif memory_enabled is False:
             tags.append("memory_disabled")
 
-        effective_span_kind = span_kind or ""
         attrs: Dict[str, Any] = {
             OPENINFERENCE_METADATA: json.dumps(metadata, ensure_ascii=False),
             OPENINFERENCE_TAG_TAGS: json.dumps(tags, ensure_ascii=False),
-            LANGFUSE_TRACE_TAGS: tags,
         }
         if span_kind:
             attrs[OPENINFERENCE_SPAN_KIND] = span_kind
-            attrs[LANGFUSE_OBSERVATION_TYPE] = self._to_langfuse_observation_type(
-                effective_span_kind)
         if query is not None:
             query_preview = self._trace_payload_preview(query)
             if query_preview != "":
                 attrs[OPENINFERENCE_INPUT_VALUE] = query_preview
-                attrs[LANGFUSE_OBSERVATION_INPUT] = query_preview
-                attrs[LANGFUSE_TRACE_INPUT] = query_preview
             attrs.update(self._trace_payload_attributes("input", query))
         if conversation_id is not None:
             attrs[OPENINFERENCE_SESSION_ID] = str(conversation_id)
-            attrs[LANGFUSE_SESSION_ID] = str(conversation_id)
             attrs["conversation.id"] = conversation_id
         if user_id:
             attrs[OPENINFERENCE_USER_ID] = str(user_id)
-            attrs[LANGFUSE_USER_ID] = str(user_id)
         if tenant_id:
             attrs["tenant.id"] = str(tenant_id)
         if agent_id is not None:
             attrs["agent.id"] = agent_id
         if agent_name:
             attrs["agent.name"] = agent_name
-            attrs[LANGFUSE_TRACE_NAME] = agent_name
-
-        for key, value in metadata.items():
-            attrs[f"langfuse.trace.metadata.{key}"] = (
-                self._to_langfuse_attribute_value(value)
-            )
-            attrs[f"langfuse.observation.metadata.{key}"] = (
-                self._to_langfuse_attribute_value(value)
-            )
 
         self.set_span_attributes(**attrs)
 
@@ -1152,30 +1046,18 @@ class MonitoringManager:
         attrs: Dict[str, Any] = {
             OPENINFERENCE_METADATA: json.dumps(metadata, ensure_ascii=False),
             OPENINFERENCE_TAG_TAGS: json.dumps(tags, ensure_ascii=False),
-            LANGFUSE_TRACE_TAGS: tags,
         }
         if span_kind:
             attrs[OPENINFERENCE_SPAN_KIND] = span_kind
-            attrs[LANGFUSE_OBSERVATION_TYPE] = self._to_langfuse_observation_type(
-                span_kind)
         if conversation_id is not None:
             attrs[OPENINFERENCE_SESSION_ID] = str(conversation_id)
-            attrs[LANGFUSE_SESSION_ID] = str(conversation_id)
             attrs["conversation.id"] = conversation_id
         if user_id:
             attrs[OPENINFERENCE_USER_ID] = str(user_id)
-            attrs[LANGFUSE_USER_ID] = str(user_id)
         if tenant_id:
             attrs["tenant.id"] = str(tenant_id)
         if agent_id is not None:
             attrs["agent.id"] = agent_id
-        for key, value in metadata.items():
-            attrs[f"langfuse.trace.metadata.{key}"] = (
-                self._to_langfuse_attribute_value(value)
-            )
-            attrs[f"langfuse.observation.metadata.{key}"] = (
-                self._to_langfuse_attribute_value(value)
-            )
 
         self.set_span_attributes(**attrs)
 
@@ -1195,8 +1077,6 @@ class MonitoringManager:
                 OPENINFERENCE_SPAN_KIND,
                 OPENINFERENCE_SPAN_KIND_LLM,
             ),
-            LANGFUSE_OBSERVATION_TYPE: "generation",
-            LANGFUSE_OBSERVATION_MODEL_NAME: model_name,
             "llm.model_name": model_name,
             "llm.operation.name": operation_name,
             "gen_ai.request.model": model_name,
@@ -1209,24 +1089,11 @@ class MonitoringManager:
                 include_query=False,
             ))
         input_value = attributes.pop(OPENINFERENCE_INPUT_VALUE, None)
-        langfuse_input_value = attributes.pop(LANGFUSE_OBSERVATION_INPUT, None)
-        langfuse_trace_input_value = attributes.pop(LANGFUSE_TRACE_INPUT, None)
-        if input_value is None:
-            input_value = langfuse_input_value
-        if input_value is None:
-            input_value = langfuse_trace_input_value
         output_value = attributes.pop(OPENINFERENCE_OUTPUT_VALUE, None)
-        langfuse_output_value = attributes.pop(LANGFUSE_OBSERVATION_OUTPUT, None)
-        langfuse_trace_output_value = attributes.pop(LANGFUSE_TRACE_OUTPUT, None)
-        if output_value is None:
-            output_value = langfuse_output_value
-        if output_value is None:
-            output_value = langfuse_trace_output_value
         if input_value is not None:
             input_preview = self._trace_payload_preview(input_value)
             if input_preview != "":
                 openinference_attrs[OPENINFERENCE_INPUT_VALUE] = input_preview
-                openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = input_preview
             openinference_attrs.update(
                 self._trace_payload_attributes("input", input_value)
             )
@@ -1234,7 +1101,6 @@ class MonitoringManager:
             output_preview = self._trace_payload_preview(output_value)
             if output_preview != "":
                 openinference_attrs[OPENINFERENCE_OUTPUT_VALUE] = output_preview
-                openinference_attrs[LANGFUSE_OBSERVATION_OUTPUT] = output_preview
             openinference_attrs.update(
                 self._trace_payload_attributes("output", output_value)
             )
@@ -1242,32 +1108,9 @@ class MonitoringManager:
         # Add user-provided attributes
         openinference_attrs.update(attributes)
         openinference_attrs[OPENINFERENCE_SPAN_KIND] = OPENINFERENCE_SPAN_KIND_LLM
-        openinference_attrs[LANGFUSE_OBSERVATION_TYPE] = "generation"
-        openinference_attrs[LANGFUSE_OBSERVATION_MODEL_NAME] = model_name
         openinference_attrs["llm.model_name"] = model_name
         openinference_attrs["llm.operation.name"] = operation_name
         openinference_attrs["gen_ai.request.model"] = model_name
-        if (
-            OPENINFERENCE_INPUT_VALUE in openinference_attrs
-            and LANGFUSE_OBSERVATION_INPUT not in openinference_attrs
-        ):
-            openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = (
-                openinference_attrs[OPENINFERENCE_INPUT_VALUE]
-            )
-        if (
-            OPENINFERENCE_OUTPUT_VALUE in openinference_attrs
-            and LANGFUSE_OBSERVATION_OUTPUT not in openinference_attrs
-        ):
-            openinference_attrs[LANGFUSE_OBSERVATION_OUTPUT] = (
-                openinference_attrs[OPENINFERENCE_OUTPUT_VALUE]
-            )
-        if (
-            "llm.invocation_parameters" in openinference_attrs
-            and LANGFUSE_OBSERVATION_MODEL_PARAMETERS not in openinference_attrs
-        ):
-            openinference_attrs[LANGFUSE_OBSERVATION_MODEL_PARAMETERS] = (
-                openinference_attrs["llm.invocation_parameters"]
-            )
 
         with self._tracer.start_as_current_span(
             operation_name,
@@ -1521,7 +1364,6 @@ class MonitoringManager:
                 OPENINFERENCE_SPAN_KIND,
                 OPENINFERENCE_SPAN_KIND_TOOL,
             ),
-            LANGFUSE_OBSERVATION_TYPE: "tool",
             "agent.name": agent_name,
             "agent.step.name": tool_name,
             "agent.step.type": "tool_call",
@@ -1537,7 +1379,6 @@ class MonitoringManager:
             ))
             openinference_attrs.update({
                 OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_TOOL,
-                LANGFUSE_OBSERVATION_TYPE: "tool",
                 "agent.name": agent_name,
                 "agent.step.name": tool_name,
                 "agent.step.type": "tool_call",
@@ -1551,7 +1392,6 @@ class MonitoringManager:
             openinference_attrs["agent.tool.input"] = tool_input_preview
             openinference_attrs["tool.parameters"] = tool_input_preview
             openinference_attrs[OPENINFERENCE_INPUT_VALUE] = tool_input_preview
-            openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = tool_input_preview
             openinference_attrs.update(
                 self._trace_payload_attributes("agent.tool.input", tool_input)
             )
@@ -1605,7 +1445,6 @@ class MonitoringManager:
 
         openinference_attrs = {
             OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_RETRIEVER,
-            LANGFUSE_OBSERVATION_TYPE: "retriever",
             "retriever.name": retriever_name,
             "agent.step.name": retriever_name,
             "agent.step.type": "retriever",
@@ -1622,7 +1461,6 @@ class MonitoringManager:
             ))
             openinference_attrs.update({
                 OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_RETRIEVER,
-                LANGFUSE_OBSERVATION_TYPE: "retriever",
                 "retriever.name": retriever_name,
                 "agent.step.name": retriever_name,
                 "agent.step.type": "retriever",
@@ -1634,7 +1472,6 @@ class MonitoringManager:
             retrieval_input_json = self._trace_payload_preview(retrieval_input)
             openinference_attrs["retriever.input"] = retrieval_input_json
             openinference_attrs[OPENINFERENCE_INPUT_VALUE] = retrieval_input_json
-            openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = retrieval_input_json
             openinference_attrs.update(
                 self._trace_payload_attributes("retriever.input", retrieval_input)
             )
@@ -1702,7 +1539,6 @@ class MonitoringManager:
             attrs = {
                 "agent.tool.output": output_value,
                 OPENINFERENCE_OUTPUT_VALUE: output_value,
-                LANGFUSE_OBSERVATION_OUTPUT: output_value,
                 "agent.tool.success": True,
             }
             attrs.update(self._trace_payload_attributes("agent.tool.output", output))
@@ -1719,7 +1555,6 @@ class MonitoringManager:
             attrs = {
                 "retriever.output": output_value,
                 OPENINFERENCE_OUTPUT_VALUE: output_value,
-                LANGFUSE_OBSERVATION_OUTPUT: output_value,
                 "retriever.success": True,
             }
             attrs.update(self._trace_payload_attributes("retriever.output", output))
@@ -2045,7 +1880,7 @@ class LLMTokenTracker:
                 "llm.token_count.prompt": input_tokens,
                 "llm.token_count.completion": output_tokens,
                 "llm.token_count.total": input_tokens + output_tokens,
-                LANGFUSE_OBSERVATION_USAGE_DETAILS: json.dumps(
+                "llm.usage_details": json.dumps(
                     usage_details, ensure_ascii=False),
                 "llm.generation_rate": generation_rate,
                 "llm.duration.total": total_duration,
@@ -2719,18 +2554,6 @@ __all__ = [
     'OPENINFERENCE_SESSION_ID',
     'OPENINFERENCE_USER_ID',
     'OPENINFERENCE_TAG_TAGS',
-    'LANGFUSE_OBSERVATION_TYPE',
-    'LANGFUSE_OBSERVATION_INPUT',
-    'LANGFUSE_OBSERVATION_OUTPUT',
-    'LANGFUSE_OBSERVATION_MODEL_NAME',
-    'LANGFUSE_OBSERVATION_MODEL_PARAMETERS',
-    'LANGFUSE_OBSERVATION_USAGE_DETAILS',
-    'LANGFUSE_TRACE_NAME',
-    'LANGFUSE_TRACE_INPUT',
-    'LANGFUSE_TRACE_OUTPUT',
-    'LANGFUSE_TRACE_TAGS',
-    'LANGFUSE_SESSION_ID',
-    'LANGFUSE_USER_ID',
     '_detect_model_type',
     '_MonitoredClient',
     '_MonitoredChatCompletions',
