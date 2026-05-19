@@ -429,6 +429,26 @@ export interface GeneratePromptParams {
   knowledge_base_display_names?: string[];
 }
 
+export interface OptimizePromptSectionParams {
+  agent_id: number;
+  task_description: string;
+  model_id: string;
+  section_type: "duty" | "constraint" | "few_shots";
+  section_title: string;
+  current_content: string;
+  feedback: string;
+  tool_ids?: number[];
+  sub_agent_ids?: number[];
+  knowledge_base_display_names?: string[];
+}
+
+export interface OptimizePromptSectionResponse {
+  section_type: "duty" | "constraint" | "few_shots";
+  section_title: string;
+  original_content: string;
+  optimized_content: string;
+}
+
 /**
  * Stream Response Data Structure
  */

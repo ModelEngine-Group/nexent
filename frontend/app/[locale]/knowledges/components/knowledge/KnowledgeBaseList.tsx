@@ -27,6 +27,7 @@ import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
@@ -569,7 +570,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}
                             ></div>
 
-                            {/* Model tag - only show when model is not "unknown" */}
+{/* Model tag - only show when model is not "unknown" */}
                             {kb.embeddingModel !== "unknown" && (
                               <span
                                 className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.model} mr-1`}

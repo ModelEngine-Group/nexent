@@ -100,16 +100,19 @@ def call_llm_for_system_prompt(
         reasoning_content_seen = False
         content_tokens_seen = 0
         for chunk in current_request:
-            choices = getattr(chunk, "choices", None) or []
-            if len(choices) == 0:
-                logger.debug("Skipping LLM stream chunk without choices")
-                continue
+            choices = getattr(chunk, "choices", None)
+            if choices is None:
+               logger.warning("Received non-standard chunk without choices during prompt generation.")
+               continue
+            if not choices:
+               logger.debug("Received empty choices chunk during prompt generation; skipping.")
+               continue
 
             delta = getattr(choices[0], "delta", None)
             if delta is None:
                 logger.debug("Skipping LLM stream chunk without delta")
                 continue
-
+ 
             reasoning_content = getattr(delta, "reasoning_content", None)
             new_token = getattr(delta, "content", None)
 

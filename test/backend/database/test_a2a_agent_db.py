@@ -125,7 +125,7 @@ def _make_ext_agent_cls():
     return _make_cls('A2AExternalAgent', [
         'id', 'source_url', 'name', 'description', 'version', 'agent_url',
         'protocol_type', 'streaming', 'supported_interfaces', 'source_type',
-        'nacos_config_id', 'nacos_agent_name', 'raw_card', 'is_available',
+        'nacos_config_id', 'nacos_agent_name', 'base_url', 'raw_card', 'is_available',
         'last_check_at', 'last_check_result', 'cached_at', 'cache_expires_at',
         'create_time', 'update_time', 'delete_flag', 'tenant_id',
     ])
