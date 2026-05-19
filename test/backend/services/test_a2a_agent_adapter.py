@@ -702,14 +702,14 @@ class TestContentToArtifactParts:
 
         content = {"type": "text", "text": "Hello from content"}
         result = adapter._content_to_artifact_parts(content, None)
-        assert result == [{"type": "text", "text": "Hello from content"}]
+        assert result == [{"text": "Hello from content", "mediaType": "text/plain"}]
 
     def test_converts_non_text_content_to_string(self):
         """Test converts non-dict or non-text content to string."""
         adapter = A2AAgentAdapter()
 
         result = adapter._content_to_artifact_parts("Plain string", None)
-        assert result == [{"type": "text", "text": "Plain string"}]
+        assert result == [{"text": "Plain string", "mediaType": "text/plain"}]
 
     def test_converts_non_text_dict_to_string(self):
         """Test converts dict content without text type to string."""
@@ -717,7 +717,7 @@ class TestContentToArtifactParts:
 
         content = {"type": "image", "data": "base64..."}
         result = adapter._content_to_artifact_parts(content, None)
-        assert result == [{"type": "text", "text": str(content)}]
+        assert result == [{"text": str(content), "mediaType": "text/plain"}]
 
 
 class TestMessageToPartsFormat:
@@ -744,7 +744,6 @@ class TestMessageToPartsFormat:
         }
         result = adapter._message_to_parts_format(message)
         assert result["role"] == "user"
-        assert result["parts"][0]["type"] == "text"
         assert result["parts"][0]["text"] == "User message content"
 
     def test_converts_message_with_non_text_content(self):
@@ -804,7 +803,6 @@ class TestBuildA2ATaskResponseWithMessage:
         )
 
         assert result["task"]["status"]["message"]["role"] == "agent"
-        assert result["task"]["status"]["message"]["parts"][0]["type"] == "text"
         assert result["task"]["status"]["message"]["parts"][0]["text"] == "Agent response text"
         assert result["task"]["status"]["message"]["parts"][0]["mediaType"] == "text/plain"
 
