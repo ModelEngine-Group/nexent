@@ -19,7 +19,6 @@ global:
     langsmithApiKey: ""
     langsmithProject: "nexent"
     otlpMetricsEnabled: true
-    instrumentFastapi: true
     instrumentRequests: false
     fastapiIncludedUrls: "/agent/run"
     fastapiExcludedUrls: ""

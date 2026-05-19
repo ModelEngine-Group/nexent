@@ -94,10 +94,7 @@ class OpenAIModel(OpenAIServerModel):
                 if isinstance(OPENINFERENCE_INPUT_VALUE, str)
                 else "input.value"
             )
-            try:
-                trace_attributes[input_attr_key] = json.dumps(messages or [], ensure_ascii=False)
-            except (TypeError, ValueError):
-                trace_attributes[input_attr_key] = str(messages)
+            trace_attributes[input_attr_key] = messages or []
 
             with self._monitoring.trace_llm_request(
                 f"{self.display_name or self.model_id}.generate",

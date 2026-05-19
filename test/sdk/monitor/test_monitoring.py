@@ -84,7 +84,6 @@ class TestMonitoringConfig:
         assert config.otlp_headers == {}
         assert config.export_traces is True
         assert config.export_metrics is True
-        assert config.instrument_fastapi is True
         assert config.instrument_requests is False
         assert config.fastapi_included_urls == ""
         assert config.fastapi_excluded_urls == ""
@@ -104,7 +103,6 @@ class TestMonitoringConfig:
             otlp_protocol="grpc",
             otlp_headers={"Authorization": "Bearer test-key"},
             export_metrics=False,
-            instrument_fastapi=False,
             instrument_requests=True,
             fastapi_included_urls="/agent/run",
             fastapi_excluded_urls="/agent/run",
@@ -123,7 +121,6 @@ class TestMonitoringConfig:
         assert config.otlp_protocol == "http"
         assert config.otlp_headers == {"Authorization": "Bearer test-key"}
         assert config.export_metrics is False
-        assert config.instrument_fastapi is False
         assert config.instrument_requests is True
         assert config.fastapi_included_urls == "/agent/run"
         assert config.fastapi_excluded_urls == "/agent/run"
@@ -391,13 +388,12 @@ class TestMonitoringManager:
             )
             assert calls["exclude_spans"] == ["receive", "send"]
 
-    def test_setup_fastapi_app_ignores_deprecated_disable_flag(self):
-        """FastAPI instrumentation remains enabled even when the old flag is false."""
+    def test_setup_fastapi_app_uses_excluded_url_filters(self):
+        """FastAPI instrumentation is controlled by URL filters."""
         with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
             manager = MonitoringManager()
             manager.configure(MonitoringConfig(
                 enable_telemetry=True,
-                instrument_fastapi=False,
                 fastapi_excluded_urls="/health",
             ))
             app = MagicMock()
@@ -436,6 +432,39 @@ class TestMonitoringManager:
             assert attributes[OPENINFERENCE_SPAN_KIND] == OPENINFERENCE_SPAN_KIND_LLM
             assert attributes[LANGFUSE_OBSERVATION_TYPE] == "generation"
             assert attributes[LANGFUSE_OBSERVATION_MODEL_NAME] == "gpt-4"
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_trace_llm_request_summarizes_input_payload(self, mock_trace):
+        """LLM input.value uses the same bounded payload policy as other spans."""
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = MonitoringManager()
+            manager.configure(MonitoringConfig(
+                enable_telemetry=True,
+                trace_max_items=1,
+            ))
+            manager._tracer = MagicMock()
+            mock_span = MagicMock()
+            manager._tracer.start_as_current_span.return_value.__enter__ = Mock(return_value=mock_span)
+            manager._tracer.start_as_current_span.return_value.__exit__ = Mock(return_value=None)
+
+            with manager.trace_llm_request(
+                "test_op",
+                "gpt-4",
+                **{
+                    OPENINFERENCE_INPUT_VALUE: [
+                        {"role": "system", "content": "secret-system"},
+                        {"role": "user", "content": "secret-user"},
+                    ]
+                },
+            ):
+                pass
+
+            attributes = manager._tracer.start_as_current_span.call_args.kwargs["attributes"]
+            input_preview = json.loads(attributes[OPENINFERENCE_INPUT_VALUE])
+            assert input_preview == [{"role": "system", "content": "secret-system"}]
+            assert attributes["input.item_count"] == 2
+            assert attributes["input.truncated"] is True
+            assert "secret-user" not in attributes[OPENINFERENCE_INPUT_VALUE]
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_set_openinference_agent_context_attrs(self, mock_trace):
@@ -500,6 +529,31 @@ class TestMonitoringManager:
             output_attrs = mock_span.set_attributes.call_args.args[0]
             assert json.loads(output_attrs[OPENINFERENCE_OUTPUT_VALUE]) == {"answer": "ok"}
             assert json.loads(output_attrs[LANGFUSE_OBSERVATION_OUTPUT]) == {"answer": "ok"}
+            assert output_attrs["output.type"] == "dict"
+            assert output_attrs["output.item_count"] == 1
+
+    def test_openinference_input_output_respect_metrics_mode(self):
+        """Generic OpenInference input/output fields omit payload content in metrics mode."""
+        manager = MonitoringManager()
+        manager.configure(MonitoringConfig(
+            enable_telemetry=False,
+            trace_content_mode="metrics",
+        ))
+
+        attrs = manager.build_openinference_attributes(
+            span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
+            input_value={"prompt": "secret"},
+            output_value={"answer": "secret"},
+        )
+
+        assert OPENINFERENCE_INPUT_VALUE not in attrs
+        assert OPENINFERENCE_OUTPUT_VALUE not in attrs
+        assert LANGFUSE_OBSERVATION_INPUT not in attrs
+        assert LANGFUSE_OBSERVATION_OUTPUT not in attrs
+        assert attrs["input.type"] == "dict"
+        assert attrs["input.size_chars"] > 0
+        assert attrs["output.type"] == "dict"
+        assert attrs["output.size_chars"] > 0
 
 
 class TestToolCallTracing:

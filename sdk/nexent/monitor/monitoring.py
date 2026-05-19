@@ -392,7 +392,6 @@ class MonitoringConfig:
     otlp_headers: Dict[str, str] = field(default_factory=dict)
     export_traces: bool = True
     export_metrics: bool = True
-    instrument_fastapi: bool = True
     instrument_requests: bool = False
     fastapi_included_urls: str = ""
     fastapi_excluded_urls: str = ""
@@ -415,7 +414,6 @@ class MonitoringConfig:
         self.enable_telemetry = _as_bool(self.enable_telemetry)
         self.export_traces = _as_bool(self.export_traces, True)
         self.export_metrics = _as_bool(self.export_metrics, True)
-        self.instrument_fastapi = _as_bool(self.instrument_fastapi, True)
         self.instrument_requests = _as_bool(self.instrument_requests, False)
         self.fastapi_included_urls = str(self.fastapi_included_urls or "").strip()
         self.fastapi_excluded_urls = str(self.fastapi_excluded_urls or "").strip()
@@ -700,12 +698,6 @@ class MonitoringManager:
         """Setup monitoring for a FastAPI application."""
         try:
             if self.is_enabled and app and OPENTELEMETRY_AVAILABLE and self._config:
-                if not self._config.instrument_fastapi:
-                    logger.info(
-                        "MONITORING_INSTRUMENT_FASTAPI is deprecated and ignored; "
-                        "FastAPI auto instrumentation remains enabled"
-                    )
-
                 instrument_kwargs: Dict[str, Any] = {}
                 excluded_urls = _build_fastapi_excluded_urls(
                     self._config.fastapi_included_urls,
@@ -789,15 +781,17 @@ class MonitoringManager:
                 span_kind),
         }
         if input_value is not None:
-            input_json = self._to_openinference_json_value(input_value)
-            attrs[LANGFUSE_OBSERVATION_INPUT] = input_json
-            if trace_level:
-                attrs[LANGFUSE_TRACE_INPUT] = input_json
+            input_json = self._trace_payload_preview(input_value)
+            if input_json != "":
+                attrs[LANGFUSE_OBSERVATION_INPUT] = input_json
+                if trace_level:
+                    attrs[LANGFUSE_TRACE_INPUT] = input_json
         if output_value is not None:
-            output_json = self._to_openinference_json_value(output_value)
-            attrs[LANGFUSE_OBSERVATION_OUTPUT] = output_json
-            if trace_level:
-                attrs[LANGFUSE_TRACE_OUTPUT] = output_json
+            output_json = self._trace_payload_preview(output_value)
+            if output_json != "":
+                attrs[LANGFUSE_OBSERVATION_OUTPUT] = output_json
+                if trace_level:
+                    attrs[LANGFUSE_TRACE_OUTPUT] = output_json
         if metadata:
             for key, value in metadata.items():
                 if value is not None:
@@ -834,11 +828,15 @@ class MonitoringManager:
             OPENINFERENCE_SPAN_KIND: span_kind,
         }
         if input_value is not None:
-            attrs[OPENINFERENCE_INPUT_VALUE] = self._to_openinference_json_value(
-                input_value)
+            input_preview = self._trace_payload_preview(input_value)
+            if input_preview != "":
+                attrs[OPENINFERENCE_INPUT_VALUE] = input_preview
+            attrs.update(self._trace_payload_attributes("input", input_value))
         if output_value is not None:
-            attrs[OPENINFERENCE_OUTPUT_VALUE] = self._to_openinference_json_value(
-                output_value)
+            output_preview = self._trace_payload_preview(output_value)
+            if output_preview != "":
+                attrs[OPENINFERENCE_OUTPUT_VALUE] = output_preview
+            attrs.update(self._trace_payload_attributes("output", output_value))
         if metadata is not None:
             attrs[OPENINFERENCE_METADATA] = self._to_openinference_json_value(
                 metadata)
@@ -1082,9 +1080,12 @@ class MonitoringManager:
             attrs[LANGFUSE_OBSERVATION_TYPE] = self._to_langfuse_observation_type(
                 effective_span_kind)
         if query is not None:
-            attrs[OPENINFERENCE_INPUT_VALUE] = query
-            attrs[LANGFUSE_OBSERVATION_INPUT] = query
-            attrs[LANGFUSE_TRACE_INPUT] = query
+            query_preview = self._trace_payload_preview(query)
+            if query_preview != "":
+                attrs[OPENINFERENCE_INPUT_VALUE] = query_preview
+                attrs[LANGFUSE_OBSERVATION_INPUT] = query_preview
+                attrs[LANGFUSE_TRACE_INPUT] = query_preview
+            attrs.update(self._trace_payload_attributes("input", query))
         if conversation_id is not None:
             attrs[OPENINFERENCE_SESSION_ID] = str(conversation_id)
             attrs[LANGFUSE_SESSION_ID] = str(conversation_id)
@@ -1207,6 +1208,37 @@ class MonitoringManager:
                 span_kind=OPENINFERENCE_SPAN_KIND_LLM,
                 include_query=False,
             ))
+        input_value = attributes.pop(OPENINFERENCE_INPUT_VALUE, None)
+        langfuse_input_value = attributes.pop(LANGFUSE_OBSERVATION_INPUT, None)
+        langfuse_trace_input_value = attributes.pop(LANGFUSE_TRACE_INPUT, None)
+        if input_value is None:
+            input_value = langfuse_input_value
+        if input_value is None:
+            input_value = langfuse_trace_input_value
+        output_value = attributes.pop(OPENINFERENCE_OUTPUT_VALUE, None)
+        langfuse_output_value = attributes.pop(LANGFUSE_OBSERVATION_OUTPUT, None)
+        langfuse_trace_output_value = attributes.pop(LANGFUSE_TRACE_OUTPUT, None)
+        if output_value is None:
+            output_value = langfuse_output_value
+        if output_value is None:
+            output_value = langfuse_trace_output_value
+        if input_value is not None:
+            input_preview = self._trace_payload_preview(input_value)
+            if input_preview != "":
+                openinference_attrs[OPENINFERENCE_INPUT_VALUE] = input_preview
+                openinference_attrs[LANGFUSE_OBSERVATION_INPUT] = input_preview
+            openinference_attrs.update(
+                self._trace_payload_attributes("input", input_value)
+            )
+        if output_value is not None:
+            output_preview = self._trace_payload_preview(output_value)
+            if output_preview != "":
+                openinference_attrs[OPENINFERENCE_OUTPUT_VALUE] = output_preview
+                openinference_attrs[LANGFUSE_OBSERVATION_OUTPUT] = output_preview
+            openinference_attrs.update(
+                self._trace_payload_attributes("output", output_value)
+            )
+
         # Add user-provided attributes
         openinference_attrs.update(attributes)
         openinference_attrs[OPENINFERENCE_SPAN_KIND] = OPENINFERENCE_SPAN_KIND_LLM

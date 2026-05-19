@@ -122,7 +122,6 @@ data:
   LANGSMITH_API_KEY: {{ default .Values.config.telemetry.langsmithApiKey $monitoring.langsmithApiKey | quote }}
   LANGSMITH_PROJECT: {{ default .Values.config.telemetry.langsmithProject $monitoring.langsmithProject | quote }}
   OTEL_EXPORTER_OTLP_METRICS_ENABLED: {{ ternary (get $monitoring "otlpMetricsEnabled") .Values.config.telemetry.otlpMetricsEnabled (hasKey $monitoring "otlpMetricsEnabled") | quote }}
-  MONITORING_INSTRUMENT_FASTAPI: {{ ternary (get $monitoring "instrumentFastapi") .Values.config.telemetry.instrumentFastapi (hasKey $monitoring "instrumentFastapi") | quote }}
   MONITORING_INSTRUMENT_REQUESTS: {{ ternary (get $monitoring "instrumentRequests") .Values.config.telemetry.instrumentRequests (hasKey $monitoring "instrumentRequests") | quote }}
   MONITORING_FASTAPI_INCLUDED_URLS: {{ default .Values.config.telemetry.fastapiIncludedUrls $monitoring.fastapiIncludedUrls | quote }}
   MONITORING_FASTAPI_EXCLUDED_URLS: {{ default .Values.config.telemetry.fastapiExcludedUrls $monitoring.fastapiExcludedUrls | quote }}

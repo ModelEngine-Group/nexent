@@ -258,7 +258,6 @@ flowchart LR
 | `LANGSMITH_PROJECT` | 空 | 可选 LangSmith project header |
 | `LANGSMITH_OTLP_TRACES_ENDPOINT` | `https://api.smith.langchain.com/otel/v1/traces` | Collector 转发到在线 LangSmith 的 trace endpoint |
 | `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | `true` | 是否导出 metric |
-| `MONITORING_INSTRUMENT_FASTAPI` | `true` | 是否启用 FastAPI 自动 HTTP server span |
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | 空 | FastAPI 自动埋点排除 URL，逗号分隔正则 |
 | `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span，流式接口建议保持默认 |
@@ -639,7 +638,6 @@ flowchart TB
 只看 Agent 业务链路时：
 
 ```bash
-MONITORING_INSTRUMENT_FASTAPI=true
 MONITORING_FASTAPI_EXCLUDE_SPANS=receive,send
 MONITORING_FASTAPI_EXCLUDED_URLS=/agent/run
 MONITORING_INSTRUMENT_REQUESTS=false
@@ -648,7 +646,6 @@ MONITORING_INSTRUMENT_REQUESTS=false
 同时看接口入口和 Agent 业务链路时：
 
 ```bash
-MONITORING_INSTRUMENT_FASTAPI=true
 MONITORING_FASTAPI_EXCLUDE_SPANS=receive,send
 MONITORING_FASTAPI_EXCLUDED_URLS=
 MONITORING_INSTRUMENT_REQUESTS=false

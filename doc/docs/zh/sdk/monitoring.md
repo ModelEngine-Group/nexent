@@ -246,7 +246,6 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `LANGSMITH_API_KEY` | （空） | LangSmith API Key，会映射为 OTLP `x-api-key` header |
 | `LANGSMITH_PROJECT` | （空） | 可选 LangSmith project header |
 | `LANGSMITH_OTLP_TRACES_ENDPOINT` | `https://api.smith.langchain.com/otel/v1/traces` | Collector 转发到在线 LangSmith 的 trace endpoint |
-| `MONITORING_INSTRUMENT_FASTAPI` | `true` | 是否启用 FastAPI 自动 HTTP server span |
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span；默认关闭，避免 AI trace 被普通 HTTP 请求刷屏 |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | （空） | FastAPI 自动埋点排除 URL，逗号分隔正则；例如只看 agent 业务 span 时可设为 `/agent/run` |
 | `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span；流式接口建议保持默认值 |
