@@ -1,11 +1,11 @@
 import logging
 from typing import List, Dict, Any, Optional
 
-from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
-from consts.model import ModelConnectStatusEnum
-from consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, TOKENPONY_BASE_URL
+from backend.consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
+from backend.consts.model import ModelConnectStatusEnum
+from backend.consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, TOKENPONY_BASE_URL
 
-from database.model_management_db import (
+from backend.database.model_management_db import (
     create_model_record,
     delete_model_record,
     get_model_by_display_name,
@@ -13,22 +13,21 @@ from database.model_management_db import (
     get_model_records,
     get_models_by_tenant_factory_type,
     update_model_record,
-    update_model_record_by_model_name,
 )
-from services.model_provider_service import (
+from backend.services.model_provider_service import (
     prepare_model_dict,
     merge_existing_model_attributes,
     get_provider_models,
 )
-from services.model_health_service import embedding_dimension_check
-from utils.model_name_utils import (
+from backend.services.model_health_service import embedding_dimension_check
+from backend.utils.model_name_utils import (
     add_repo_to_name,
     split_repo_name,
     sort_models_by_id,
 )
-from utils.memory_utils import build_memory_config as build_memory_config_for_tenant
-from services.vectordatabase_service import get_vector_db_core
-from nexent.memory.memory_service import clear_model_memories
+from backend.utils.memory_utils import build_memory_config as build_memory_config_for_tenant
+from backend.services.vectordatabase_service import get_vector_db_core
+from backend.nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")
 
@@ -293,6 +292,8 @@ async def update_single_model_for_tenant(
 
 async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_list: List[Dict[str, Any]]):
     """Batch update models for a tenant by model_id or model_name."""
+    from backend.database.model_management_db import get_model_by_name_factory
+
     try:
         for model in model_list:
             # Build update data excluding id fields
@@ -311,8 +312,15 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
                     model_repo = None
                     model_name = model_id_or_name
 
-                logging.info(f"[DEBUG] Updating model by name: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}, update_data={update_data}")
-                update_model_record_by_model_name(model_name, update_data, user_id, tenant_id, model_repo)
+                logging.info(f"[DEBUG] Updating model by name: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}")
+
+                # Query to get model_id first, then update by primary key
+                model_record = get_model_by_name_factory(model_name, model_repo, tenant_id)
+                if not model_record:
+                    logging.warning(f"Model not found: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}")
+                    continue
+
+                update_model_record(model_record["model_id"], update_data, user_id, tenant_id)
 
         logging.info("[DEBUG] Batch update models successfully")
     except Exception as e:

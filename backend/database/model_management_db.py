@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, desc, func, insert, select, update
 
-from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
+from backend.consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
 from .client import as_dict, db_client, get_db_session
 from .db_models import ModelRecord
 from .utils import add_creation_tracking, add_update_tracking
@@ -83,64 +83,6 @@ def update_model_record(
 
         # Execute the update statement
         result = session.execute(stmt)
-
-        return result.rowcount > 0
-
-
-def update_model_record_by_model_name(
-        model_name: str,
-        update_data: Dict[str, Any],
-        user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        model_repo: Optional[str] = None,
-        model_factory: Optional[str] = None
-) -> bool:
-    """
-    Update a model record by model_name and tenant_id.
-
-    Args:
-        model_name: Model name (display name, not the primary key)
-        update_data: Dictionary containing update data
-        user_id: Reserved parameter for filling updated_by field
-        tenant_id: Tenant ID for filtering
-        model_repo: Optional model repo for more precise matching
-        model_factory: Optional model vendor for more precise matching
-
-    Returns:
-        bool: Whether the operation was successful
-    """
-    import logging
-    db_logger = logging.getLogger("database.client")
-
-    with get_db_session() as session:
-        # Data cleaning
-        cleaned_data = db_client.clean_string_values(update_data)
-
-        # Add update timestamp
-        cleaned_data["update_time"] = func.current_timestamp()
-        if user_id:
-            cleaned_data = add_update_tracking(cleaned_data, user_id)
-
-        db_logger.debug(f"update_model_record_by_model_name: model_name={model_name}, "
-                        f"model_repo={model_repo}, model_factory={model_factory}, "
-                        f"tenant_id={tenant_id}, cleaned_data={cleaned_data}")
-
-        # Build conditions list
-        conditions = [
-            ModelRecord.model_name == model_name,
-            ModelRecord.tenant_id == tenant_id
-        ]
-        if model_repo:
-            conditions.append(ModelRecord.model_repo == model_repo)
-        if model_factory:
-            conditions.append(ModelRecord.model_factory == model_factory)
-
-        # Build the update statement
-        stmt = update(ModelRecord).where(*conditions).values(cleaned_data)
-
-        # Execute the update statement
-        result = session.execute(stmt)
-        db_logger.info(f"update_model_record_by_model_name: rowcount={result.rowcount}")
 
         return result.rowcount > 0
 
