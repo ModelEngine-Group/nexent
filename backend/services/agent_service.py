@@ -46,6 +46,7 @@ from database.agent_db import (
     update_related_agents,
     clear_agent_new_mark
 )
+from database import a2a_agent_db
 from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
@@ -966,6 +967,49 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
     except Exception as e:
         logger.error(f"Failed to update related agents: {str(e)}")
         raise ValueError(f"Failed to update related agents: {str(e)}")
+
+    # Handle related external agents saving when provided
+    try:
+        if request.related_external_agent_ids is not None and agent_id is not None:
+            related_external_agent_ids = request.related_external_agent_ids
+            # Query current relations
+            current_relations = a2a_agent_db.list_external_relations_by_local_agent(
+                local_agent_id=agent_id,
+                tenant_id=tenant_id
+            )
+            current_external_ids = {
+                rel["external_agent_id"] for rel in current_relations
+            }
+            new_external_ids = set(related_external_agent_ids) if related_external_agent_ids else set()
+
+            # Find IDs to delete (in current but not in new)
+            ids_to_delete = current_external_ids - new_external_ids
+            # Find IDs to add (in new but not in current)
+            ids_to_add = new_external_ids - current_external_ids
+
+            # Soft delete removed relations
+            for ext_agent_id in ids_to_delete:
+                a2a_agent_db.remove_external_agent_relation(
+                    local_agent_id=agent_id,
+                    external_agent_id=ext_agent_id,
+                    tenant_id=tenant_id
+                )
+
+            # Add new relations
+            for ext_agent_id in ids_to_add:
+                try:
+                    a2a_agent_db.add_external_agent_relation(
+                        local_agent_id=agent_id,
+                        external_agent_id=ext_agent_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id
+                    )
+                except ValueError:
+                    # Relation already exists, skip
+                    pass
+    except Exception as e:
+        logger.error(f"Failed to update related external agents: {str(e)}")
+        raise ValueError(f"Failed to update related external agents: {str(e)}")
 
     return {"agent_id": agent_id}
 

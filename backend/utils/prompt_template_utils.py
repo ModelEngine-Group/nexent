@@ -16,6 +16,7 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
     Args:
         template_type: Template type, supports the following values:
             - 'prompt_generate': Prompt generation template
+            - 'prompt_optimize': Prompt section optimization template
             - 'agent': Agent template including manager and managed agents
             - 'generate_title': Title generation template
             - 'document_summary': Document summary template (Map stage)
@@ -32,6 +33,10 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'prompt_generate': {
             LANGUAGE["ZH"]: 'backend/prompts/utils/prompt_generate_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/utils/prompt_generate_en.yaml'
+        },
+        'prompt_optimize': {
+            LANGUAGE["ZH"]: 'backend/prompts/utils/prompt_optimize_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/utils/prompt_optimize_en.yaml'
         },
         'agent': {
             LANGUAGE["ZH"]: {
@@ -99,6 +104,19 @@ def get_prompt_generate_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[
         dict: Loaded prompt template configuration
     """
     return get_prompt_template('prompt_generate', language)
+
+
+def get_prompt_optimize_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
+    """
+    Get prompt optimization template.
+
+    Args:
+        language: Language code ('zh' or 'en')
+
+    Returns:
+        dict: Loaded prompt optimization template configuration
+    """
+    return get_prompt_template('prompt_optimize', language)
 
 
 def get_agent_prompt_template(is_manager: bool, language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:

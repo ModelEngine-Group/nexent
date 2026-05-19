@@ -379,11 +379,11 @@ def _extract_error_code_from_es_response(
 def _send_chunks_to_es(
     chunks: List[Dict[str, Any]],
     index_name: str,
-    authorization: Optional[str],
-    task_id: Optional[str],
-    source: Optional[str],
-    original_filename: Optional[str],
-    large_mode: Optional[bool] = None,
+    authorization: str | None,
+    task_id: Optional[str] = None,
+    source: str = "",
+    original_filename: str = "",
+    large_mode: bool = False,
 ) -> Dict[str, Any]:
     async def _post():
         elasticsearch_url = ELASTICSEARCH_SERVICE
@@ -405,12 +405,10 @@ def _send_chunks_to_es(
             connector = aiohttp.TCPConnector(verify_ssl=False)
             timeout = aiohttp.ClientTimeout(total=600)
             
-            large_mode_value = "true" if large_mode else "false" if large_mode is not None else None
-            request_params = (
-                {
-                    "large_mode": large_mode_value
-                }
-            )
+            request_params: Dict[str, str] = {}
+
+            if large_mode:
+                request_params["large_mode"] = "true"
 
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.post(
@@ -761,7 +759,7 @@ def forward_part(
         original_filename: Optional[str] = None,
         batch_index: Optional[int] = None,
         total_batches: Optional[int] = None,
-        large_mode: Optional[bool] = None,
+        large_mode: Optional[bool] = False,
 ) -> Dict[str, Any]:
     """
     Forward sub-task that indexes a chunk batch.
@@ -1645,7 +1643,7 @@ def forward(
                 task_id=task_id,
                 source=original_source,
                 original_filename=original_filename,
-                large_mode=None,
+                large_mode=False,
             )
         else:
             batches = _build_balanced_batches(
