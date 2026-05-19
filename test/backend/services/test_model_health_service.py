@@ -577,7 +577,7 @@ async def test_verify_model_config_connectivity_success():
 
         mock_connectivity_check.assert_called_once_with(
             "gpt-4", "llm", "https://api.openai.com", "test-key", True,
-            None, None, None, "GPT-4"
+            None, None, None, "GPT-4",
             timeout_seconds=None,
         )
 
