@@ -169,7 +169,6 @@ async def test_perform_connectivity_check_embedding():
             api_key="test-key",
             embedding_dim=0,
             ssl_verify=True,
-            timeout_seconds=None,
         )
         mock_embedding_instance.dimension_check.assert_called_once()
 
@@ -199,7 +198,6 @@ async def test_perform_connectivity_check_multi_embedding():
             api_key="test-key",
             embedding_dim=0,
             ssl_verify=True,
-            timeout_seconds=None,
         )
         mock_embedding_instance.dimension_check.assert_called_once()
 
