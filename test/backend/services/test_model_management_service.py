@@ -932,10 +932,9 @@ async def test_batch_update_models_for_tenant_success():
     svc = import_svc()
 
     models = [{"model_id": "a"}, {"model_id": "b"}]
-    # Mock get_model_by_name_factory to return valid model records
     mock_model_record = {"model_id": 1}
     with mock.patch.object(svc, "update_model_record") as mock_update, \
-            mock.patch("backend.database.model_management_db.get_model_by_name_factory", return_value=mock_model_record):
+            mock.patch.object(svc, "get_model_by_name_factory", return_value=mock_model_record):
         await svc.batch_update_models_for_tenant("u1", "t1", models)
         assert mock_update.call_count == 2
         # update_data is models[i] with model_id/model_name excluded -> {}
@@ -948,7 +947,7 @@ async def test_batch_update_models_for_tenant_exception():
     models = [{"model_id": "a"}]
     mock_model_record = {"model_id": 1}
     with mock.patch.object(svc, "update_model_record", side_effect=Exception("oops")), \
-            mock.patch("backend.database.model_management_db.get_model_by_name_factory", return_value=mock_model_record):
+            mock.patch.object(svc, "get_model_by_name_factory", return_value=mock_model_record):
         with pytest.raises(Exception) as exc:
             await svc.batch_update_models_for_tenant("u1", "t1", models)
         assert "Failed to batch update models" in str(exc.value)

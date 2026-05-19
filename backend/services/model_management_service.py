@@ -12,6 +12,7 @@ from backend.database.model_management_db import (
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
+    get_model_by_name_factory,
     update_model_record,
 )
 from backend.services.model_provider_service import (
@@ -292,8 +293,6 @@ async def update_single_model_for_tenant(
 
 async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_list: List[Dict[str, Any]]):
     """Batch update models for a tenant by model_id or model_name."""
-    from backend.database.model_management_db import get_model_by_name_factory
-
     try:
         for model in model_list:
             # Build update data excluding id fields
