@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -46,48 +46,92 @@ export function usePublishedServiceDetailEdit(
   const queryClient = useQueryClient();
 
   const [draft, setDraft] = useState<PublishedServiceEditDraft | null>(null);
+  const draftRef = useRef<PublishedServiceEditDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [tagSaving, setTagSaving] = useState(false);
 
   useEffect(() => {
     if (!open || !service?.communityId) {
       setDraft(null);
+      draftRef.current = null;
       return;
     }
-    setDraft(draftFromItem(service));
+    const newDraft = draftFromItem(service);
+    setDraft(newDraft);
+    draftRef.current = newDraft;
   }, [open, service]);
 
   const updateDraft = useCallback((patch: Partial<PublishedServiceEditDraft>) => {
-    setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+    setDraft((prev) => {
+      const updated = prev ? { ...prev, ...patch } : prev;
+      draftRef.current = updated;
+      return updated;
+    });
   }, []);
+
+  const updateTagsToServer = useCallback(async (newTags: string[]) => {
+    const currentDraft = draftRef.current;
+    if (!currentDraft) return;
+    setTagSaving(true);
+    try {
+      await updateCommunityMcpTool({
+        community_id: currentDraft.communityId,
+        name: currentDraft.name.trim(),
+        description: currentDraft.description.trim(),
+        version: currentDraft.version.trim(),
+        tags: newTags,
+      });
+      // Update local state
+      setDraft((prev) => {
+        const updated = prev ? { ...prev, tags: newTags } : prev;
+        draftRef.current = updated;
+        return updated;
+      });
+      queryClient.invalidateQueries({
+        queryKey: MCP_TOOLS_QUERY_KEYS.myCommunity,
+      });
+    } catch (error) {
+      log.error("[usePublishedServiceDetailEdit] Update tags failed", { error });
+      message.error(t("mcpTools.service.saveFailed"));
+      // Revert local state on error
+      setDraft((prev) => {
+        const reverted = prev ? { ...prev, tags: currentDraft.tags } : prev;
+        draftRef.current = reverted;
+        return reverted;
+      });
+    } finally {
+      setTagSaving(false);
+    }
+  }, [message, queryClient, t]);
 
   const addDraftTag = useCallback((tag: string) => {
     const next = tag.trim();
     if (!next) return;
-    setDraft((prev) => {
-      if (!prev || prev.tags.includes(next)) return prev;
-      return { ...prev, tags: [...prev.tags, next] };
-    });
-  }, []);
+    const currentDraft = draftRef.current;
+    if (!currentDraft) return;
+    if (currentDraft.tags.includes(next)) return;
+    updateTagsToServer([...currentDraft.tags, next]);
+  }, [updateTagsToServer]);
 
   const removeDraftTag = useCallback((index: number) => {
-    setDraft((prev) =>
-      prev
-        ? { ...prev, tags: prev.tags.filter((_, idx) => idx !== index) }
-        : prev
-    );
-  }, []);
+    const currentDraft = draftRef.current;
+    if (!currentDraft) return;
+    const newTags = currentDraft.tags.filter((_, idx) => idx !== index);
+    updateTagsToServer(newTags);
+  }, [updateTagsToServer]);
 
   const save = useCallback(async () => {
-    if (!draft) return false;
+    const currentDraft = draftRef.current;
+    if (!currentDraft) return false;
     setSaving(true);
     try {
       await updateCommunityMcpTool({
-        community_id: draft.communityId,
-        name: draft.name.trim(),
-        description: draft.description.trim(),
-        version: draft.version.trim(),
-        tags: draft.tags,
+        community_id: currentDraft.communityId,
+        name: currentDraft.name.trim(),
+        description: currentDraft.description.trim(),
+        version: currentDraft.version.trim(),
+        tags: currentDraft.tags,
       });
       message.success(t("mcpTools.service.saveSuccess"));
       queryClient.invalidateQueries({
@@ -101,7 +145,7 @@ export function usePublishedServiceDetailEdit(
     } finally {
       setSaving(false);
     }
-  }, [draft, message, queryClient, t]);
+  }, [message, queryClient, t]);
 
   const remove = useCallback(
     async (communityId: number): Promise<boolean> => {
@@ -128,6 +172,7 @@ export function usePublishedServiceDetailEdit(
     draft,
     saving,
     deleting,
+    tagSaving,
     updateDraft,
     addDraftTag,
     removeDraftTag,

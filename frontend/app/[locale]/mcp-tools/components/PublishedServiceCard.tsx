@@ -28,7 +28,7 @@ export default function PublishedServiceCard({
       className={MCP_GRID_CARD_OUTER}
       style={MCP_GRID_CARD_OUTER_STYLE}
     >
-      <div className="flex shrink-0 items-start gap-3">
+      <div className="flex shrink-0 items-center gap-3">
         <TransportIcon
           transportType={service.transportType}
           label={transportLabel}

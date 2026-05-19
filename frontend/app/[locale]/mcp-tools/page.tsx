@@ -127,7 +127,7 @@ export default function McpToolsPage() {
                   {
                     value: McpToolsServicesTab.IMPORTED,
                     label: (
-                      <span className="inline-flex items-center gap-1.5 px-0.5 py-px text-sm">
+                      <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
                         <InboxOutlined className="text-sm" aria-hidden />
                         <span>{t("mcpTools.page.tab.imported")}</span>
                       </span>
@@ -136,14 +136,14 @@ export default function McpToolsPage() {
                   {
                     value: McpToolsServicesTab.PUBLISHED,
                     label: (
-                      <span className="inline-flex items-center gap-1.5 px-0.5 py-px text-sm">
+                      <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
                         <CloudUploadOutlined className="text-sm" aria-hidden />
                         <span>{t("mcpTools.page.tab.published")}</span>
                       </span>
                     ),
                   },
                 ]}
-                className="h-9 w-full max-w-xs rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm shadow-sm sm:w-auto [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:flex [&_.ant-segmented-item-label]:items-center [&_.ant-segmented-item-label]:px-3 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
+                className="h-9 w-full max-w-xs rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm shadow-sm sm:w-auto [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:flex [&_.ant-segmented-item-label]:h-full [&_.ant-segmented-item-label]:items-center [&_.ant-segmented-item-label]:px-3 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
               />
               <span className="pb-0.5 text-xs text-slate-400 sm:shrink-0 sm:text-right">
                 {t("mcpTools.page.resultCount", { count: resultCount })}
@@ -304,7 +304,7 @@ function SearchAndFilterRow({
         placeholder={searchPlaceholder}
         size="middle"
         allowClear
-        className="w-full rounded-md lg:flex-1"
+        className="w-full rounded-md text-sm lg:flex-1"
       />
       {filters ? (
         <div className="w-full lg:w-auto lg:shrink-0">{filters}</div>

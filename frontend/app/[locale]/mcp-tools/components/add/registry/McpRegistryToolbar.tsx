@@ -94,16 +94,15 @@ export default function McpRegistryToolbar({
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t("mcpTools.registry.searchPlaceholder")}
-          size="large"
           allowClear
-          className="w-full rounded-md lg:flex-1"
+          className="h-9 rounded-md border border-slate-200 text-sm lg:flex-1"
         />
         <div className="flex flex-wrap gap-2 lg:flex-none">
           <Select
-            size="large"
             value={versionMode}
             onChange={handleVersionModeChange}
-            className="min-w-[120px] flex-1 lg:flex-none lg:w-32"
+            className="h-9 min-w-[120px] flex-1 rounded-md border border-slate-200 text-sm lg:flex-none lg:w-32"
+            popupMatchSelectWidth={false}
             options={[
               {
                 label: t("mcpTools.registry.versionAll"),
@@ -116,13 +115,12 @@ export default function McpRegistryToolbar({
             ]}
           />
           <DatePicker
-            size="large"
             value={updatedSinceDateValue}
             onChange={(value) =>
               onUpdatedSinceChange(value ? value.toISOString() : "")
             }
             allowClear
-            className="min-w-[160px] flex-1 lg:flex-none lg:w-44"
+            className="h-9 min-w-[160px] flex-1 rounded-md border border-slate-200 text-sm lg:flex-none lg:w-44"
             placeholder={t("mcpTools.registry.updatedSincePlaceholder")}
           />
           <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5">

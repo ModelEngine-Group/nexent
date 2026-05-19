@@ -15,6 +15,8 @@ interface TagEditorProps {
   onRemoveTag: (index: number) => void;
   removeAriaKey?: string;
   placeholderKey?: string;
+  /** Disable interactions while saving. */
+  loading?: boolean;
 }
 
 /**
@@ -32,6 +34,7 @@ export default function TagEditor({
   onRemoveTag,
   removeAriaKey = "mcpTools.addModal.removeTagAria",
   placeholderKey = "mcpTools.addModal.tagInputPlaceholder",
+  loading = false,
 }: TagEditorProps) {
   const { t } = useTranslation("common");
   const isControlled = tagInput !== undefined;
@@ -49,6 +52,7 @@ export default function TagEditor({
   }, [editing]);
 
   const commit = () => {
+    if (loading) return;
     const next = value.trim();
     if (next) onAddTag(next);
     setValue("");
@@ -58,17 +62,17 @@ export default function TagEditor({
   return (
     <div>
       {title ? (
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <p className="mb-1 block text-sm font-normal text-slate-500">
           {title}
         </p>
       ) : null}
       <div
-        className={`${title ? "mt-2 " : ""}flex flex-wrap items-center gap-2`}
+        className={`flex flex-wrap items-center gap-2 ${loading ? "opacity-60 pointer-events-none" : ""}`}
       >
         {tags.map((tag, index) => (
           <Tag
             key={`${tag}-${index}`}
-            closable
+            closable={!loading}
             closeIcon
             onClose={(event) => {
               event.preventDefault();
@@ -93,10 +97,10 @@ export default function TagEditor({
           />
         ) : (
           <Tag
-            onClick={() => setEditing(true)}
-            className="m-0 cursor-pointer border-dashed bg-transparent"
+            onClick={() => !loading && setEditing(true)}
+            className={`m-0 cursor-pointer border-dashed bg-transparent ${loading ? "" : ""}`}
           >
-            <PlusOutlined /> {t("common.add")}
+            <PlusOutlined /> {loading ? t("mcpTools.detail.saving") : t("common.add")}
           </Tag>
         )}
       </div>

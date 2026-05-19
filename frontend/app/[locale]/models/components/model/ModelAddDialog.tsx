@@ -13,7 +13,7 @@ import {
 import { useConfig } from "@/hooks/useConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import { modelService } from "@/services/modelService";
-import { ModelType, SingleModelConfig, STTModelConfig } from "@/types/modelConfig";
+import { ModelType, SingleModelConfig } from "@/types/modelConfig";
 import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
 import { useDashscopeModelList } from "@/hooks/model/useDashscopeModelList";
@@ -60,10 +60,6 @@ const DEFAULT_FORM_STATE = {
     number,
   ],
   chunkingBatchSize: "10",
-  // STT specific fields
-  sttProvider: "dashscope", // dashscope or volcengine
-  modelAppid: "",
-  accessToken: "",
 };
 
 // Connectivity status type comes from utils
@@ -318,13 +314,6 @@ export const ModelAddDialog = ({
     }));
   }, [isOpen, defaultProvider, defaultIsBatchImport]);
 
-  // Switch to LLM when batch import is enabled while STT/TTS is selected
-  useEffect(() => {
-    if (form.isBatchImport && (form.type === MODEL_TYPES.STT || form.type === MODEL_TYPES.TTS)) {
-      handleFormChange("type", MODEL_TYPES.LLM);
-    }
-  }, [form.isBatchImport]);
-
   const parseModelName = (name: string): string => {
     if (!name) return "";
     const parts = name.split("/");
@@ -432,24 +421,7 @@ export const ModelAddDialog = ({
       );
     }
     if (form.type === MODEL_TYPES.RERANK) {
-      return (
-        form.name.trim() !== "" &&
-        form.url.trim() !== "" &&
-        form.apiKey.trim() !== ""
-      );
-    }
-    if (form.type === MODEL_TYPES.STT) {
-      // For STT models, validate based on provider type
-      if (form.sttProvider === "volcengine") {
-        // Volcano Engine requires appid and access_token
-        return (
-          form.modelAppid.trim() !== "" &&
-          form.accessToken.trim() !== ""
-        );
-      } else {
-        // DashScope requires API Key and model name
-        return form.apiKey.trim() !== "" && form.name.trim() !== "";
-      }
+      return form.name.trim() !== "" && form.url.trim() !== "";
     }
     return (
       form.name.trim() !== "" &&
@@ -477,66 +449,49 @@ export const ModelAddDialog = ({
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
           : form.type;
 
-      let connectivity = false;
+      const config = {
+        modelName: form.name,
+        modelType: modelType,
+        baseUrl: form.url,
+        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+        maxTokens:
+          form.type === MODEL_TYPES.EMBEDDING
+            ? parseInt(form.vectorDimension)
+            : form.type === MODEL_TYPES.RERANK
+              ? 0
+              : parseInt(form.maxTokens),
+        embeddingDim:
+          form.type === MODEL_TYPES.EMBEDDING
+            ? parseInt(form.vectorDimension)
+            : undefined,
+      };
 
-      // Use manage interface if tenantId is provided
-      if (tenantId) {
-        connectivity = await modelService.checkManageTenantModelConnectivity(
-          tenantId,
-          form.displayName || form.name
-        );
-      } else {
-        // For STT models, build the appropriate config based on provider
-        if (form.type === MODEL_TYPES.STT) {
-          const sttConfig: any = {
-            modelType: modelType,
-          };
-
-          if (form.sttProvider === "volcengine") {
-            sttConfig.modelFactory = "volcengine";
-            sttConfig.modelAppid = form.modelAppid.trim();
-            sttConfig.accessToken = form.accessToken.trim();
-          } else {
-            sttConfig.apiKey = form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
-            sttConfig.modelFactory = "dashscope";
-            sttConfig.modelName = form.name;
-            sttConfig.baseUrl = form.url;
-          }
-
-          const result = await modelService.verifyModelConfigConnectivity(sttConfig);
-          connectivity = result.connectivity;
-        } else {
-          const config = {
-            modelName: form.name,
-            modelType: modelType,
-            baseUrl: form.url,
-            apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-            maxTokens:
-              form.type === MODEL_TYPES.EMBEDDING
-                ? parseInt(form.vectorDimension)
-                : parseInt(form.maxTokens),
-            embeddingDim:
-              form.type === MODEL_TYPES.EMBEDDING
-                ? parseInt(form.vectorDimension)
-                : undefined,
-          };
-
-          const result = await modelService.verifyModelConfigConnectivity(config);
-          connectivity = result.connectivity;
-        }
-      }
+      const result = await modelService.verifyModelConfigConnectivity(config);
 
       // Set connectivity status
-      if (connectivity) {
+      if (result.connectivity) {
         setConnectivityStatus({
           status: "available",
           message: t("model.dialog.connectivity.status.available"),
         });
       } else {
+        // Set status to unavailable
         setConnectivityStatus({
           status: "unavailable",
           message: t("model.dialog.connectivity.status.unavailable"),
         });
+        // Show detailed error message using internationalized component (same as add failure)
+        if (result.error) {
+          const translatedError = translateError(result.error, t);
+          // Ensure translatedError is a valid string, fallback to original error if needed
+          const errorText =
+            translatedError && translatedError.length > 0
+              ? translatedError
+              : result.error || "Unknown error";
+          message.error(
+            t("model.dialog.error.connectivityFailed", { error: errorText })
+          );
+        }
       }
     } catch (error) {
       const errorMessage =
@@ -545,11 +500,15 @@ export const ModelAddDialog = ({
         status: "unavailable",
         message: t("model.dialog.connectivity.status.unavailable"),
       });
-      const translatedError = translateError(errorMessage, t);
-      const errorText =
-        translatedError && translatedError.length > 0
-          ? translatedError
-          : errorMessage;
+      // Show error message using internationalized component (same as add failure)
+      const translatedError = translateError(
+        errorMessage || t("model.dialog.connectivity.status.unavailable"),
+        t
+      );
+      // Ensure translatedError is a valid string
+      const errorText = translatedError
+        ? translatedError
+        : errorMessage || t("model.dialog.connectivity.status.unavailable");
       message.error(
         t("model.dialog.error.connectivityFailed", { error: errorText })
       );
@@ -682,15 +641,16 @@ export const ModelAddDialog = ({
       let maxTokensValue = parseInt(form.maxTokens);
       if (
         form.type === MODEL_TYPES.EMBEDDING ||
-        form.type === MODEL_TYPES.MULTI_EMBEDDING
+        form.type === MODEL_TYPES.MULTI_EMBEDDING ||
+        form.type === MODEL_TYPES.RERANK
       ) {
-        // For embedding models, use the vector dimension as maxTokens
+        // For embedding/rerank models, the backend does not rely on max_tokens in the same way as LLM.
         maxTokensValue = 0;
       }
 
       // Add to the backend service - use manage interface if tenantId is provided
       if (tenantId) {
-        const modelParams: any = {
+        await modelService.createManageTenantModel({
           tenantId,
           name: form.name,
           type: modelType,
@@ -698,56 +658,37 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
-        };
-
-        // Add STT specific fields
-        if (form.type === MODEL_TYPES.STT) {
-          modelParams.modelFactory = form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
-          if (form.sttProvider === "volcengine") {
-            modelParams.modelAppid = form.modelAppid;
-            modelParams.accessToken = form.accessToken;
-          }
-        }
-
-        // Add embedding specific fields
-        if (isEmbeddingModel) {
-          modelParams.expectedChunkSize = form.chunkSizeRange[0];
-          modelParams.maximumChunkSize = form.chunkSizeRange[1];
-          modelParams.chunkingBatchSize = parseInt(form.chunkingBatchSize) || 10;
-        }
-
-        await modelService.createManageTenantModel(modelParams);
+          expectedChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[0]
+            : undefined,
+          maximumChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[1]
+            : undefined,
+          chunkingBatchSize: isEmbeddingModel
+            ? parseInt(form.chunkingBatchSize) || 10
+            : undefined,
+        });
       } else {
-        const modelParams: any = {
+        await modelService.addCustomModel({
           name: form.name,
           type: modelType,
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
-        };
-
-        // Add STT specific fields
-        if (form.type === MODEL_TYPES.STT) {
-          modelParams.modelFactory = form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
-          if (form.sttProvider === "volcengine") {
-            modelParams.modelAppid = form.modelAppid;
-            modelParams.accessToken = form.accessToken;
-          }
-        }
-
-        // Add embedding specific fields
-        if (isEmbeddingModel) {
-          modelParams.expectedChunkSize = form.chunkSizeRange[0];
-          modelParams.maximumChunkSize = form.chunkSizeRange[1];
-          modelParams.chunkingBatchSize = parseInt(form.chunkingBatchSize) || 10;
-        }
-
-        await modelService.addCustomModel(modelParams);
+          // Send chunk size range for embedding models
+          ...(isEmbeddingModel
+            ? {
+                expectedChunkSize: form.chunkSizeRange[0],
+                maximumChunkSize: form.chunkSizeRange[1],
+                chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
+              }
+            : {}),
+        });
       }
 
       // Create the model configuration object
-      let modelConfig: SingleModelConfig | STTModelConfig = {
+      const modelConfig: SingleModelConfig = {
         modelName: form.name,
         displayName: form.displayName || form.name,
         apiConfig: {
@@ -755,15 +696,6 @@ export const ModelAddDialog = ({
           modelUrl: form.url,
         },
       };
-
-      // Add STT specific fields to config
-      if (form.type === MODEL_TYPES.STT) {
-        (modelConfig as STTModelConfig).modelFactory = form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
-        if (form.sttProvider === "volcengine") {
-          (modelConfig as STTModelConfig).modelAppid = form.modelAppid;
-          (modelConfig as STTModelConfig).accessToken = form.accessToken;
-        }
-      }
 
       // Add the dimension field for embedding models
       if (form.type === MODEL_TYPES.EMBEDDING) {
@@ -829,7 +761,7 @@ export const ModelAddDialog = ({
   };
 
   const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
-  const isSTTModel = form.type === MODEL_TYPES.STT;
+  const isRerankModel = form.type === MODEL_TYPES.RERANK;
 
   return (
     <Modal
@@ -895,22 +827,6 @@ export const ModelAddDialog = ({
           </div>
         )}
 
-        {/* API Key (shown only when batch import is enabled) */}
-        {form.isBatchImport && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.apiKey")}
-              <span className="text-red-500">*</span>
-            </label>
-            <Input.Password
-              placeholder={t("model.dialog.placeholder.apiKey")}
-              value={form.apiKey}
-              onChange={(e) => handleFormChange("apiKey", e.target.value)}
-              autoComplete="new-password"
-            />
-          </div>
-        )}
-
         {/* Model Type */}
         <div>
           <label className="block mb-1 text-sm font-medium text-gray-700">
@@ -930,7 +846,7 @@ export const ModelAddDialog = ({
             <Option value={MODEL_TYPES.RERANK}>
               {t("model.type.rerank")}
             </Option>
-            <Option value={MODEL_TYPES.STT} disabled={form.isBatchImport}>
+            <Option value={MODEL_TYPES.STT} disabled>
               {t("model.type.stt")}
             </Option>
             <Option value={MODEL_TYPES.TTS} disabled>
@@ -999,7 +915,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* Model URL */}
-        {!form.isBatchImport   && (
+        {!form.isBatchImport && (
           <div>
             <label
               htmlFor="url"
@@ -1013,11 +929,7 @@ export const ModelAddDialog = ({
               placeholder={
                 form.type === MODEL_TYPES.EMBEDDING
                   ? t("model.dialog.placeholder.url.embedding")
-                  : form.type === MODEL_TYPES.STT
-                    ? t("model.dialog.placeholder.url.stt")
-                    : form.type === MODEL_TYPES.TTS
-                      ? t("model.dialog.placeholder.url.tts")
-                      : t("model.dialog.placeholder.url")
+                  : t("model.dialog.placeholder.url")
               }
               value={form.url}
               onChange={(e) => handleFormChange("url", e.target.value)}
@@ -1025,102 +937,23 @@ export const ModelAddDialog = ({
           </div>
         )}
 
-
-        {/* STT Provider Selection */}
-        {!form.isBatchImport && isSTTModel && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.sttProvider")}
-              <span className="text-red-500">*</span>
-            </label>
-            <Select
-              style={{ width: "100%" }}
-              value={form.sttProvider}
-              onChange={(value) => handleFormChange("sttProvider", value)}
-            >
-              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
-              <Option value="volcengine">{t("model.provider.volcengine")}</Option>
-            </Select>
-          </div>
-        )}
-
-        {/* STT Fields for Volcano Engine */}
-        {!form.isBatchImport && isSTTModel && form.sttProvider === "volcengine" && (
-          <>
-            <div>
-              <label
-                htmlFor="modelAppid"
-                className="block mb-1 text-sm font-medium text-gray-700"
-              >
-                {t("model.dialog.label.modelAppid")}
-                <span className="text-red-500">*</span>
-              </label>
-              <Input
-                id="modelAppid"
-                placeholder={t("model.dialog.placeholder.modelAppid")}
-                value={form.modelAppid}
-                onChange={(e) => handleFormChange("modelAppid", e.target.value)}
-                autoComplete="new-password"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="accessToken"
-                className="block mb-1 text-sm font-medium text-gray-700"
-              >
-                {t("model.dialog.label.accessToken")}
-                <span className="text-red-500">*</span>
-              </label>
-              <Input.Password
-                id="accessToken"
-                placeholder={t("model.dialog.placeholder.accessToken")}
-                value={form.accessToken}
-                onChange={(e) => handleFormChange("accessToken", e.target.value)}
-                autoComplete="new-password"
-              />
-            </div>
-          </>
-        )}
-
-        {/* API Key (for DashScope STT) */}
-        {!form.isBatchImport && isSTTModel && form.sttProvider === "dashscope" && (
-          <div>
-            <label
-              htmlFor="apiKey"
-              className="block mb-1 text-sm font-medium text-gray-700"
-            >
-              {t("model.dialog.label.apiKey")}{" "}
-              <span className="text-red-500">*</span>
-            </label>
-            <Input.Password
-              id="apiKey"
-              placeholder={t("model.dialog.placeholder.apiKey")}
-              value={form.apiKey}
-              onChange={(e) => handleFormChange("apiKey", e.target.value)}
-              autoComplete="new-password"
-            />
-          </div>
-        )}
-
-        {/* API Key (for non-STT, non-TTS models) */}
-        {!form.isBatchImport && !isSTTModel && (
-          <div>
-            <label
-              htmlFor="apiKey"
-              className="block mb-1 text-sm font-medium text-gray-700"
-            >
-              {t("model.dialog.label.apiKey")}{" "}
-              {form.isBatchImport && <span className="text-red-500">*</span>}
-            </label>
-            <Input.Password
-              id="apiKey"
-              placeholder={t("model.dialog.placeholder.apiKey")}
-              value={form.apiKey}
-              onChange={(e) => handleFormChange("apiKey", e.target.value)}
-              autoComplete="new-password"
-            />
-          </div>
-        )}
+        {/* API Key */}
+        <div>
+          <label
+            htmlFor="apiKey"
+            className="block mb-1 text-sm font-medium text-gray-700"
+          >
+            {t("model.dialog.label.apiKey")}{" "}
+            {form.isBatchImport && <span className="text-red-500">*</span>}
+          </label>
+          <Input.Password
+            id="apiKey"
+            placeholder={t("model.dialog.placeholder.apiKey")}
+            value={form.apiKey}
+            onChange={(e) => handleFormChange("apiKey", e.target.value)}
+            autoComplete="new-password"
+          />
+        </div>
 
         {/* Chunk Size Slider (Embedding model only) */}
         {isEmbeddingModel && (
@@ -1173,7 +1006,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* Max Tokens */}
-        {!isEmbeddingModel && !form.isBatchImport && !isSTTModel && (
+        {!isEmbeddingModel && !isRerankModel && !form.isBatchImport && (
           <div>
             <label
               htmlFor="maxTokens"
@@ -1383,9 +1216,7 @@ export const ModelAddDialog = ({
             <div className="mt-0.5 ml-6">
               {(form.isBatchImport
                 ? t("model.dialog.help.content.batchImport")
-                : isSTTModel
-                  ? t("model.dialog.help.content.voice")
-                  : t("model.dialog.help.content")
+                : t("model.dialog.help.content")
               )
                 .split("\n")
                 .map((line, index) => {
@@ -1489,36 +1320,6 @@ export const ModelAddDialog = ({
                       <img
                         src="/tokenpony.png"
                         alt="TokenPony"
-                        className="h-4 ml-1.5 cursor-pointer"
-                      />
-                    </a>
-                  </Tooltip>
-                </>
-              )}
-              {isSTTModel && (
-                <>
-                  <Tooltip title={t("model.provider.volengine")}>
-                    <a
-                      href={PROVIDER_LINKS.volcengine}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <img
-                        src="/volcengine.png"
-                        alt="VolcEngine"
-                        className="h-4 ml-1.5 cursor-pointer"
-                      />
-                    </a>
-                  </Tooltip>
-                  <Tooltip title={t("model.provider.dashscope")}>
-                    <a
-                      href={PROVIDER_LINKS.dashscope}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <img
-                        src="/aliyuncs.png"
-                        alt="AlibabaCloud"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
                     </a>

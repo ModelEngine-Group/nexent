@@ -42,7 +42,7 @@ export default function McpServicesFilterBar({
           size="middle"
           value={source}
           onChange={onSourceChange}
-          className="min-w-[140px] flex-1 lg:flex-none lg:w-36"
+          className="min-w-[140px] flex-1 text-sm lg:flex-none lg:w-36"
           options={[
             { value: FILTER_ALL, label: t("mcpTools.page.sourceFilter.all") },
             { value: McpSource.LOCAL, label: t("mcpTools.source.local") },
@@ -58,7 +58,7 @@ export default function McpServicesFilterBar({
         size="middle"
         value={transport}
         onChange={onTransportChange}
-        className="min-w-[140px] flex-1 lg:flex-none lg:w-36"
+        className="min-w-[140px] flex-1 text-sm lg:flex-none lg:w-36"
         options={[
           { value: FILTER_ALL, label: t("mcpTools.page.transportFilter.all") },
           {
@@ -75,7 +75,7 @@ export default function McpServicesFilterBar({
         size="middle"
         value={tag}
         onChange={onTagChange}
-        className="min-w-[140px] flex-1 lg:flex-none lg:w-40"
+        className="min-w-[140px] flex-1 text-sm lg:flex-none lg:w-40"
         options={[
           { value: FILTER_ALL, label: t("mcpTools.page.tagFilter.all") },
           ...tagStats.map((item) => ({

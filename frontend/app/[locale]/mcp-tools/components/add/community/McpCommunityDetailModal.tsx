@@ -1,6 +1,14 @@
 import { useState } from "react";
-import { Button, Modal, Tag } from "antd";
+import { Button, Modal } from "antd";
 import { useTranslation } from "react-i18next";
+import {
+  Activity,
+  Globe,
+  GitBranch,
+  Server,
+  Tag as TagIcon,
+  FileText,
+} from "lucide-react";
 import {
   MCP_TOOLS_MODAL_WRAP_CLASS,
   mcpToolsModalChromeStyles,
@@ -15,9 +23,7 @@ import {
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import RegistryStatusBadge from "../../shared/StatusBadge";
 import JsonPreviewModal from "../../shared/JsonPreviewModal";
-
-const sectionCard =
-  "rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm";
+import TransportIcon from "../../shared/TransportIcon";
 
 interface McpCommunityDetailModalProps {
   service: CommunityMcpCard;
@@ -58,177 +64,172 @@ export default function McpCommunityDetailModal({
         footer={null}
         closable
         centered
-        width={560}
+        width={620}
+        style={{ top: 20 }}
         onCancel={onClose}
-        wrapClassName={MCP_TOOLS_MODAL_WRAP_CLASS}
+        wrapClassName={`${MCP_TOOLS_MODAL_WRAP_CLASS} h-[calc(100dvh-80px)]`}
         styles={mcpToolsModalChromeStyles()}
       >
-        <div>
-          <div className="border-b border-slate-100 bg-white px-5 py-4">
-            <h2 className="text-lg font-semibold tracking-tight text-slate-900">
-              {t("mcpTools.detail.title")}
-            </h2>
+        <div className="bg-gradient-to-b from-slate-50 to-white">
+          {/* Header */}
+          <div className="border-b border-slate-200/60 bg-white px-6 py-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-3">
+                  <TransportIcon
+                    transportType={service.transportType}
+                    label={service.transportType}
+                    className="!h-10 !w-10"
+                  />
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h2 className="text-xl font-semibold tracking-tight text-slate-900 truncate">
+                      {service.name}
+                    </h2>
+                  </div>
+                </div>
+                <p className="mt-1.5 text-sm text-slate-500 truncate">
+                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 mr-1">
+                    {service.version ? formatRegistryVersion(service.version) : "v1.0.0"}
+                  </span>
+                  {service.description || t("mcpTools.detail.noDescription")}
+                </p>
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-4 px-5 py-5">
-            <div className={sectionCard}>
-              <div className="grid gap-4">
-                <div>
-                  <p className="text-sm text-slate-500">
-                    {t("mcpTools.detail.name")}
-                  </p>
-                  <p className="mt-1 break-all rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
-                    {service.name || "-"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">
-                    {t("mcpTools.detail.description")}
-                  </p>
-                  <p className="mt-1 whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
-                    {service.description || "-"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">
-                    {t("mcpTools.detail.serverUrl")}
-                  </p>
-                  <p className="mt-1 break-all rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800">
-                    {service.serverUrl || "-"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className={sectionCard}>
-              <div className="grid gap-3 text-sm text-slate-700">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">
-                    {t("mcpTools.detail.source")}
-                  </span>
-                  <span className="font-medium text-slate-800">{sourceText}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">
-                    {t("mcpTools.detail.serverType")}
-                  </span>
-                  <span className="font-medium text-slate-800">
-                    {serverTypeText}
-                  </span>
-                </div>
-                {service.version ? (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">
-                      {t("mcpTools.detail.version")}
-                    </span>
-                    <span className="font-medium text-slate-800">
-                      {formatRegistryVersion(service.version)}
-                    </span>
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">
-                    {t("mcpTools.detail.status")}
-                  </span>
-                  <RegistryStatusBadge status={service.status} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">
-                    {t("mcpTools.community.publishedAt")}
-                  </span>
-                  <span className="font-medium text-slate-800">
-                    {formatRegistryDate(service.createdAt)}
-                  </span>
-                </div>
+          {/* Content */}
+          <div className="px-6 py-5 space-y-5">
+            {/* Service Info Section */}
+            <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
+              <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
+                <Activity className="h-4 w-4 text-slate-400" />
+                {t("mcpTools.detail.serviceStatus")}
+              </h3>
+              <div className="space-y-3">
+                <InfoRow
+                  icon={<Server className="h-3.5 w-3.5" />}
+                  label={t("mcpTools.detail.serverType")}
+                  value={serverTypeText}
+                />
+                <InfoRow
+                  icon={<Globe className="h-3.5 w-3.5" />}
+                  label={t("mcpTools.detail.source")}
+                  value={sourceText}
+                />
+                <InfoRow
+                  icon={<FileText className="h-3.5 w-3.5" />}
+                  label={t("mcpTools.community.publishedAt")}
+                  value={formatRegistryDate(service.createdAt)}
+                />
                 {service.updatedAt ? (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">
-                      {t("mcpTools.detail.updatedAt")}
-                    </span>
-                    <span className="font-medium text-slate-800">
-                      {formatRegistryDate(service.updatedAt)}
-                    </span>
-                  </div>
+                  <InfoRow
+                    icon={<FileText className="h-3.5 w-3.5" />}
+                    label={t("mcpTools.detail.updatedAt")}
+                    value={formatRegistryDate(service.updatedAt)}
+                  />
                 ) : null}
-                {websiteUrl ? (
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-slate-500">
-                      {t("mcpTools.detail.website")}
-                    </span>
-                    <a
-                      href={websiteUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="max-w-[70%] truncate font-medium text-sky-700 hover:text-sky-800"
-                    >
-                      {websiteUrl}
-                    </a>
-                  </div>
-                ) : null}
-                {repositoryUrl ? (
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-slate-500">
-                      {t("mcpTools.detail.repository")}
-                    </span>
-                    <a
-                      href={repositoryUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="max-w-[70%] truncate font-medium text-sky-700 hover:text-sky-800"
-                    >
-                      {repositoryUrl}
-                    </a>
-                  </div>
-                ) : null}
+                <InfoRow
+                  icon={<Activity className="h-3.5 w-3.5" />}
+                  label={t("mcpTools.detail.status")}
+                  customValue={<RegistryStatusBadge status={service.status} />}
+                />
               </div>
-            </div>
+            </section>
 
-            {(service.tags || []).length > 0 ? (
-              <div className={sectionCard}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            {/* Server URL Section */}
+            {!service.configJson && (
+              <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
+                <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
+                  <Server className="h-4 w-4 text-slate-400" />
+                  {t("mcpTools.detail.serverUrl")}
+                </h3>
+                <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg break-all">
+                  {service.serverUrl || "-"}
+                </div>
+              </section>
+            )}
+
+            {/* Links Section */}
+            {(websiteUrl || repositoryUrl) && (
+              <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
+                <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
+                  <Globe className="h-4 w-4 text-slate-400" />
+                  {t("mcpTools.detail.links")}
+                </h3>
+                <div className="space-y-2">
+                  {websiteUrl && (
+                    <LinkRow
+                      icon={<Globe className="h-3.5 w-3.5" />}
+                      label={t("mcpTools.detail.website")}
+                      href={websiteUrl}
+                    />
+                  )}
+                  {repositoryUrl && (
+                    <LinkRow
+                      icon={<GitBranch className="h-3.5 w-3.5" />}
+                      label={t("mcpTools.detail.repository")}
+                      href={repositoryUrl}
+                    />
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* Tools Section */}
+            {(hasServerJson || hasConfigJson) && (
+              <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
+                <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
+                  <Server className="h-4 w-4 text-slate-400" />
+                  {t("mcpTools.detail.tools")}
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {hasServerJson && (
+                    <Button
+                      size="small"
+                      autoInsertSpace={false}
+                      onClick={() => setShowServerJsonModal(true)}
+                      icon={<FileText className="h-3.5 w-3.5" />}
+                    >
+                      {t("mcpTools.community.viewServerJson")}
+                    </Button>
+                  )}
+                  {hasConfigJson && (
+                    <Button
+                      size="small"
+                      autoInsertSpace={false}
+                      onClick={() => setShowConfigJsonModal(true)}
+                      icon={<FileText className="h-3.5 w-3.5" />}
+                    >
+                      {t("mcpTools.detail.viewConfigJson")}
+                    </Button>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* Tags Section */}
+            {(service.tags || []).length > 0 && (
+              <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
+                <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
+                  <TagIcon className="h-4 w-4 text-slate-400" />
                   {t("mcpTools.detail.tags")}
-                </p>
-                <div className="mt-2 flex min-h-0 shrink-0 flex-wrap gap-1">
+                </h3>
+                <div className="flex min-h-0 shrink-0 flex-wrap gap-1.5">
                   {(service.tags || []).map((tag) => (
-                    <Tag key={`${service.name}-${tag}`} className="m-0">
+                    <span
+                      key={`${service.name}-${tag}`}
+                      className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700"
+                    >
                       {tag}
-                    </Tag>
+                    </span>
                   ))}
                 </div>
-              </div>
-            ) : null}
-       
-
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/90 bg-white px-4 py-3 shadow-sm">
-              <span className="text-sm text-slate-500">
-                {t("mcpTools.detail.tools")}
-              </span>
-              <div className="flex items-center gap-2">
-                {hasServerJson ? (
-                  <Button
-                    size="small"
-                    className="rounded-md"
-                    autoInsertSpace={false}
-                    onClick={() => setShowServerJsonModal(true)}
-                  >
-                    {t("mcpTools.community.viewServerJson")}
-                  </Button>
-                ) : null}
-                {hasConfigJson ? (
-                  <Button
-                    size="small"
-                    className="rounded-md"
-                    autoInsertSpace={false}
-                    onClick={() => setShowConfigJsonModal(true)}
-                  >
-                    {t("mcpTools.detail.viewConfigJson")}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
+              </section>
+            )}
           </div>
 
-          <div className="flex items-center justify-end gap-3 border-t border-slate-200/80 bg-white px-5 py-3.5">
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-3 border-t border-slate-200/60 bg-white px-6 py-4">
             <Button
               type="primary"
               className="rounded-md"
@@ -254,5 +255,71 @@ export default function McpCommunityDetailModal({
         onCancel={() => setShowConfigJsonModal(false)}
       />
     </>
+  );
+}
+
+interface InfoRowProps {
+  icon: React.ReactNode;
+  label: string;
+  value?: string;
+  customValue?: React.ReactNode;
+}
+
+function InfoRow({ icon, label, value, customValue }: InfoRowProps) {
+  return (
+    <div className="flex items-center justify-between py-1.5">
+      <div className="flex items-center gap-2 text-slate-500">
+        {icon}
+        <span className="text-sm">{label}</span>
+      </div>
+      {customValue ? (
+        customValue
+      ) : (
+        <span className="text-sm font-medium text-slate-700">
+          {value}
+        </span>
+      )}
+    </div>
+  );
+}
+
+interface LinkRowProps {
+  icon: React.ReactNode;
+  label: string;
+  href: string;
+}
+
+function LinkRow({ icon, label, href }: LinkRowProps) {
+  return (
+    <div className="flex items-center justify-between py-1.5">
+      <div className="flex items-center gap-2 text-slate-500">
+        {icon}
+        <span className="text-sm">{label}</span>
+      </div>
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="flex items-center gap-1 text-sm font-medium text-sky-600 hover:text-sky-700"
+      >
+        <span className="max-w-[200px] truncate">{href.replace(/^https?:\/\//, "")}</span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="shrink-0"
+        >
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      </a>
+    </div>
   );
 }

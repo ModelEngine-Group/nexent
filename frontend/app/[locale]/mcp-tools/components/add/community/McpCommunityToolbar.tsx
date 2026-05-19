@@ -39,16 +39,15 @@ export default function McpCommunityToolbar({
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t("mcpTools.community.searchPlaceholder")}
-          size="large"
           allowClear
-          className="w-full rounded-md lg:basis-2/3"
+          className="h-9 rounded-md border border-slate-200 text-sm lg:basis-2/3"
         />
         <div className="flex flex-wrap gap-2 lg:basis-1/3">
           <Select
-            size="large"
             value={transport}
             onChange={onTransportChange}
-            className="min-w-[120px] flex-1"
+            className="h-9 min-w-[120px] flex-1 rounded-md border border-slate-200 text-sm"
+            popupMatchSelectWidth={false}
             options={[
               {
                 value: FILTER_ALL,
@@ -65,10 +64,10 @@ export default function McpCommunityToolbar({
             ]}
           />
           <Select
-            size="large"
             value={tag}
             onChange={onTagChange}
-            className="min-w-[140px] flex-1"
+            className="h-9 min-w-[140px] flex-1 rounded-md border border-slate-200 text-sm"
+            popupMatchSelectWidth={false}
             options={[
               { value: FILTER_ALL, label: t("mcpTools.page.tagFilter.all") },
               ...tagStats.map((item) => ({

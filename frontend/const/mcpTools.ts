@@ -89,6 +89,8 @@ export const MCP_TOOLS_MODAL_BODY_CHROME = {
   padding: 0,
   maxHeight: "none",
   overflow: "visible",
+  height: "100%",
+  overflowY: "auto",
 } as const;
 
 export const MCP_TOOLS_MODAL_BODY_SCROLL_UNLOCK = {

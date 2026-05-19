@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -44,6 +44,7 @@ export function useMcpServiceDetail({
   const queryClient = useQueryClient();
 
   const [draft, setDraft] = useState<McpServiceItem | null>(null);
+  const draftRef = useRef<McpServiceItem | null>(null);
   const [healthChecking, setHealthChecking] = useState(false);
   const [toolsState, setToolsState] = useState<ToolsModalState>({
     visible: false,
@@ -53,29 +54,72 @@ export function useMcpServiceDetail({
   const [publishing, setPublishing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [tagSaving, setTagSaving] = useState(false);
 
   useEffect(() => {
-    setDraft(selectedService ? { ...selectedService } : null);
+    if (selectedService) {
+      const newDraft = { ...selectedService };
+      setDraft(newDraft);
+      draftRef.current = newDraft;
+    } else {
+      setDraft(null);
+      draftRef.current = null;
+    }
   }, [selectedService]);
 
   const invalidateServices = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
   }, [queryClient]);
 
+  const updateTagsToServer = useCallback(async (newTags: string[]) => {
+    const currentDraft = draftRef.current;
+    if (!currentDraft) return;
+    setTagSaving(true);
+    try {
+      await updateMcpToolService({
+        mcp_id: currentDraft.mcpId,
+        name: currentDraft.name.trim(),
+        description: currentDraft.description,
+        server_url: currentDraft.serverUrl.trim(),
+        tags: newTags,
+        authorization_token: (currentDraft.authorizationToken ?? "").trim() || undefined,
+      });
+      // Update local state
+      setDraft((prev) => {
+        const updated = prev ? { ...prev, tags: newTags } : prev;
+        draftRef.current = updated;
+        return updated;
+      });
+      invalidateServices();
+    } catch (error) {
+      log.error("[useMcpServiceDetail] Update tags failed", { error });
+      message.error(t("mcpTools.service.saveFailed"));
+      // Revert local state on error
+      setDraft((prev) => {
+        const reverted = prev ? { ...prev, tags: currentDraft.tags } : prev;
+        draftRef.current = reverted;
+        return reverted;
+      });
+    } finally {
+      setTagSaving(false);
+    }
+  }, [invalidateServices, message, t]);
+
   const addTag = useCallback((tag: string) => {
     const next = tag.trim();
     if (!next) return;
-    setDraft((prev) => {
-      if (!prev || prev.tags.includes(next)) return prev;
-      return { ...prev, tags: [...prev.tags, next] };
-    });
-  }, []);
+    const currentDraft = draftRef.current;
+    if (!currentDraft) return;
+    if (currentDraft.tags.includes(next)) return;
+    updateTagsToServer([...currentDraft.tags, next]);
+  }, [updateTagsToServer]);
 
   const removeTag = useCallback((index: number) => {
-    setDraft((prev) =>
-      prev ? { ...prev, tags: prev.tags.filter((_, i) => i !== index) } : prev
-    );
-  }, []);
+    const currentDraft = draftRef.current;
+    if (!currentDraft) return;
+    const newTags = currentDraft.tags.filter((_, i) => i !== index);
+    updateTagsToServer(newTags);
+  }, [updateTagsToServer]);
 
   const runHealthCheck = useCallback(async () => {
     if (!draft || draft.mcpId < 0) return;
@@ -144,17 +188,19 @@ export function useMcpServiceDetail({
   }, [draft, selectedService]);
 
   const save = useCallback(async () => {
-    if (!draft || !selectedService) return;
-    const nextName = draft.name.trim();
-    const nextUrl = draft.serverUrl.trim();
-    const nextToken = (draft.authorizationToken ?? "").trim();
-    const nextTags = draft.tags;
+    const currentDraft = draftRef.current;
+    const currentSelected = selectedService;
+    if (!currentDraft || !currentSelected) return;
+    const nextName = currentDraft.name.trim();
+    const nextUrl = currentDraft.serverUrl.trim();
+    const nextToken = (currentDraft.authorizationToken ?? "").trim();
+    const nextTags = currentDraft.tags;
 
     if (!nextName) {
       message.warning(t("mcpTools.add.validate.nameRequired"));
       return;
     }
-    if (draft.transportType === McpTransportType.URL && !isHttpUrl(nextUrl)
+    if (currentDraft.transportType === McpTransportType.URL && !isHttpUrl(nextUrl)
     ) {
       message.warning(t("mcpTools.add.validate.httpUrlFormat"));
       return;
@@ -163,9 +209,9 @@ export function useMcpServiceDetail({
     setSaving(true);
     try {
       await updateMcpToolService({
-        mcp_id: draft.mcpId,
+        mcp_id: currentDraft.mcpId,
         name: nextName,
-        description: draft.description,
+        description: currentDraft.description,
         server_url: nextUrl,
         tags: nextTags,
         authorization_token: nextToken || undefined,
@@ -183,7 +229,7 @@ export function useMcpServiceDetail({
     } finally {
       setSaving(false);
     }
-  }, [draft, invalidateServices, message, selectedService, t]);
+  }, [invalidateServices, message, selectedService, t]);
 
   const remove = useCallback(async () => {
     if (!selectedService || selectedService.mcpId < 0) return;
@@ -275,9 +321,16 @@ export function useMcpServiceDetail({
 
   return {
     draft,
-    setDraft,
+    setDraft: ((updater: React.SetStateAction<McpServiceItem | null>) => {
+      setDraft((prev) => {
+        const next = typeof updater === "function" ? (updater as (prev: McpServiceItem | null) => McpServiceItem | null)(prev) : updater;
+        draftRef.current = next;
+        return next;
+      });
+    }) as typeof setDraft,
     addTag,
     removeTag,
+    tagSaving,
     hasUnsavedChanges,
     healthChecking,
     runHealthCheck,

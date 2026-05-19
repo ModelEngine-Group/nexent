@@ -3,7 +3,6 @@ import { Modal, Segmented } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   McpSource,
-  MCP_ADD_SERVICE_MODAL_WIDTH_LOCAL,
   MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS,
 } from "@/const/mcpTools";
 import AddMcpServiceLocalSection from "./local/AddMcpServiceLocalSection";
@@ -31,10 +30,7 @@ export default function AddMcpServiceModal({
   /** Fixed body height + inner scroll: avoids size jump on tab/transport change and prevents overflow. */
   const bodyFrame = "min(90vh, 700px)";
 
-  const modalWidth =
-    tab === McpSource.LOCAL
-      ? MCP_ADD_SERVICE_MODAL_WIDTH_LOCAL
-      : MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS;
+  const modalWidth = MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS;
 
   return (
     <Modal
@@ -58,7 +54,7 @@ export default function AddMcpServiceModal({
       }}
     >
       <div className="flex h-full min-h-0 min-w-0 flex-col">
-        <div className="shrink-0 border-b border-slate-100 px-6 py-1">
+        <div className="shrink-0 border-b border-slate-100 px-6 py-4">
           <h2 className="text-2xl font-semibold text-slate-900">
             {t("mcpTools.addModal.title")}
           </h2>
