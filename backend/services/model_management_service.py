@@ -27,7 +27,7 @@ from backend.utils.model_name_utils import (
 )
 from backend.utils.memory_utils import build_memory_config as build_memory_config_for_tenant
 from backend.services.vectordatabase_service import get_vector_db_core
-from backend.nexent.memory.memory_service import clear_model_memories
+from nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")
 
