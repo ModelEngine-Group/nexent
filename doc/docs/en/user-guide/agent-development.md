@@ -55,7 +55,7 @@ Nexent supports communication with third-party agents through the A2A protocol. 
 If you know the Agent Card address of the target agent, you can use the URL discovery method:
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/agent-development/a2a-url-discovery.jpg" style="width: 50%; height: auto;" />
+  <img src="./assets/agent-development/a2a-url-discovery.jpg" style="width: 80%; height: auto;" />
 </div>
 
 1. In the External A2A Agent list, click the "Add External Agent" button
@@ -72,7 +72,7 @@ If you know the Agent Card address of the target agent, you can use the URL disc
 If your agent is registered with the Nacos service discovery platform, you can use the Nacos discovery method:
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/agent-development/a2a-nacos-discovery.jpg" style="width: 50%; height: auto;" />
+  <img src="./assets/agent-development/a2a-nacos-discovery.jpg" style="width: 80%; height: auto;" />
 </div>
 
 1. In the External A2A Agent list, click the "Add External Agent" button
@@ -94,7 +94,7 @@ If your agent is registered with the Nacos service discovery platform, you can u
 In the External A2A Agent list, you can view and manage all discovered external agents:
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/agent-development/a2a-discovery-list.jpg" style="width: 50%; height: auto;" />
+  <img src="./assets/agent-development/a2a-discovery-list.jpg" style="width: 80%; height: auto;" />
 </div>
 
 1. **View Agent Details**: Click on the agent card to view its complete information, including name, description, URL, capability list, etc.
