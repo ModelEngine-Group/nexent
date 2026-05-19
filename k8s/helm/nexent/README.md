@@ -204,6 +204,11 @@ helm upgrade --install nexent nexent \
   --set global.monitoring.langsmithApiKey=lsv2_xxx
 ```
 
+The monitoring subchart passes `global.monitoring.langsmithApiKey`,
+`global.monitoring.langsmithProject`, and the LangSmith OTLP trace endpoint to
+the Collector. If needed, override them directly with
+`nexent-monitoring.collector.env.*`.
+
 The backend receives OTLP settings through the shared `nexent-config`
 ConfigMap, with `OTEL_EXPORTER_OTLP_ENDPOINT` defaulting to
 `http://nexent-otel-collector:4318`. The frontend monitoring entry uses

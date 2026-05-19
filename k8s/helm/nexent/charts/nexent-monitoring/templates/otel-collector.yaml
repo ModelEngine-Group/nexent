@@ -26,11 +26,11 @@ spec:
             - name: LANGFUSE_OTLP_AUTH_HEADER
               value: {{ include "nexent-monitoring.langfuseAuthHeader" . | quote }}
             - name: LANGSMITH_API_KEY
-              value: {{ .Values.collector.env.langsmithApiKey | quote }}
+              value: {{ include "nexent-monitoring.langsmithApiKey" . | quote }}
             - name: LANGSMITH_PROJECT
-              value: {{ .Values.collector.env.langsmithProject | quote }}
+              value: {{ include "nexent-monitoring.langsmithProject" . | quote }}
             - name: LANGSMITH_OTLP_TRACES_ENDPOINT
-              value: {{ .Values.collector.env.langsmithOtlpTracesEndpoint | quote }}
+              value: {{ include "nexent-monitoring.langsmithOtlpTracesEndpoint" . | quote }}
           ports:
             - containerPort: 4317
               name: otlp-grpc

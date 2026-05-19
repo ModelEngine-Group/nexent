@@ -136,6 +136,7 @@ data:
   # Skip proxy
   skip_proxy: {{ .Values.config.skipProxy | quote }}
   UMASK: {{ .Values.config.umask | quote }}
+  SKILLS_PATH: {{ .Values.config.skillsPath | quote }}
 
   # MCP Container Image
   NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}

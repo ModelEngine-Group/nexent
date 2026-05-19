@@ -47,6 +47,21 @@ Basic {{ printf "%s:%s" .Values.langfuse.init.projectPublicKey .Values.langfuse.
 {{- end -}}
 {{- end -}}
 
+{{- define "nexent-monitoring.langsmithApiKey" -}}
+{{- $globalMonitoring := default dict .Values.global.monitoring -}}
+{{- default (default "" $globalMonitoring.langsmithApiKey) .Values.collector.env.langsmithApiKey -}}
+{{- end -}}
+
+{{- define "nexent-monitoring.langsmithProject" -}}
+{{- $globalMonitoring := default dict .Values.global.monitoring -}}
+{{- default (default (default "nexent" $globalMonitoring.projectName) $globalMonitoring.langsmithProject) .Values.collector.env.langsmithProject -}}
+{{- end -}}
+
+{{- define "nexent-monitoring.langsmithOtlpTracesEndpoint" -}}
+{{- $globalMonitoring := default dict .Values.global.monitoring -}}
+{{- default (default "" $globalMonitoring.langsmithOtlpTracesEndpoint) .Values.collector.env.langsmithOtlpTracesEndpoint -}}
+{{- end -}}
+
 {{- define "nexent-monitoring.langfuseEnv" -}}
 - name: NEXTAUTH_URL
   value: {{ .Values.langfuse.nextauthUrl | quote }}
