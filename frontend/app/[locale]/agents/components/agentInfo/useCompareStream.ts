@@ -17,6 +17,7 @@ import { ChatMessageType } from "@/types/chat";
 
 type CompareSide = "left" | "right";
 type CompareHistoryItem = { role: string; content: string };
+type CompareHistoryMap = { left: CompareHistoryItem[]; right: CompareHistoryItem[] };
 type RunAgentParams = Parameters<typeof conversationService.runAgent>[0];
 
 interface UseCompareStreamOptions {
@@ -55,6 +56,11 @@ export function useCompareStream({
     left: number | null;
     right: number | null;
   }>({ left: null, right: null });
+  const compareHistoriesRef = useRef<CompareHistoryMap>({
+    left: [],
+    right: [],
+  });
+  const compareSessionIdRef = useRef(0);
   const compareStepIdCountersRef = useRef<{
     left: { current: number };
     right: { current: number };
@@ -89,7 +95,49 @@ export function useCompareStream({
     [translate]
   );
 
+  const cloneHistory = useCallback(
+    (history: CompareHistoryItem[]) => history.map((item) => ({ ...item })),
+    []
+  );
+
+  const ensureCompareConversationIds = useCallback(() => {
+    if (
+      compareConversationIdsRef.current.left !== null &&
+      compareConversationIdsRef.current.right !== null
+    ) {
+      return {
+        left: compareConversationIdsRef.current.left,
+        right: compareConversationIdsRef.current.right,
+      };
+    }
+
+    const baseId = -Math.abs(Date.now() + compareSessionIdRef.current);
+    const nextConversationIds = {
+      left: baseId,
+      right: baseId - 1,
+    };
+    compareConversationIdsRef.current = nextConversationIds;
+
+    return nextConversationIds;
+  }, []);
+
+  const appendCompareHistoryTurn = useCallback(
+    (side: CompareSide, question: string, answer: string) => {
+      compareHistoriesRef.current[side] = [
+        ...compareHistoriesRef.current[side],
+        { role: MESSAGE_ROLES.USER, content: question },
+        { role: MESSAGE_ROLES.ASSISTANT, content: answer },
+      ];
+    },
+    []
+  );
+
   const stopCompare = useCallback(async () => {
+    const hadActiveController =
+      compareAbortControllersRef.current.left !== null ||
+      compareAbortControllersRef.current.right !== null;
+    const hadInFlight = compareInFlightRef.current > 0;
+
     if (compareAbortControllersRef.current.left) {
       try {
         compareAbortControllersRef.current.left.abort(translate("agent.debug.userStop"));
@@ -112,14 +160,12 @@ export function useCompareStream({
       compareTimeoutRef.current = null;
     }
 
-    setIsCompareStreaming(false);
     setCompareStreamingLeft(false);
     setCompareStreamingRight(false);
     markCompareStopped(setLeftMessages);
     markCompareStopped(setRightMessages);
 
     const { left, right } = compareConversationIdsRef.current;
-    compareConversationIdsRef.current = { left: null, right: null };
 
     if (left != null) {
       try {
@@ -135,13 +181,26 @@ export function useCompareStream({
         log.error(translate("agent.debug.stopError"), error);
       }
     }
+
+    if (!hadActiveController && !hadInFlight) {
+      setIsCompareStreaming(false);
+    }
   }, [markCompareStopped, translate]);
 
   const resetCompareState = useCallback(() => {
+    compareSessionIdRef.current += 1;
     setLeftMessages([]);
     setRightMessages([]);
+    compareHistoriesRef.current = { left: [], right: [] };
+    compareConversationIdsRef.current = { left: null, right: null };
     compareStepIdCountersRef.current.left.current = 0;
     compareStepIdCountersRef.current.right.current = 0;
+    compareInFlightRef.current = 0;
+    compareAbortControllersRef.current = { left: null, right: null };
+    if (compareTimeoutRef.current) {
+      clearTimeout(compareTimeoutRef.current);
+      compareTimeoutRef.current = null;
+    }
     setIsCompareStreaming(false);
     setCompareStreamingLeft(false);
     setCompareStreamingRight(false);
@@ -154,17 +213,24 @@ export function useCompareStream({
       controller: AbortController;
       setSideMessages: Dispatch<SetStateAction<ChatMessageType[]>>;
       stepIdCounterRef: { current: number };
-      history: CompareHistoryItem[];
       question: string;
       onStreamEnd: () => void;
     }) => {
+      const sessionId = compareSessionIdRef.current;
+      const sideHistory = cloneHistory(compareHistoriesRef.current[params.side]);
+
       try {
         const requestParams = buildRunParams({
           side: params.side,
           question: params.question,
           conversationId: params.conversationId,
-          history: params.history,
+          history: sideHistory,
         });
+
+        const guardedSetSideMessages: Dispatch<SetStateAction<ChatMessageType[]>> = (value) => {
+          if (compareSessionIdRef.current !== sessionId) return;
+          params.setSideMessages(value);
+        };
 
         const reader = await conversationService.runAgent(
           requestParams,
@@ -173,9 +239,9 @@ export function useCompareStream({
 
         if (!reader) throw new Error(translate("agent.debug.nullResponse"));
 
-        await handleStreamResponse(
+        const streamResult = await handleStreamResponse(
           reader,
-          params.setSideMessages,
+          guardedSetSideMessages,
           resetCompareTimeout,
           params.stepIdCounterRef,
           () => {},
@@ -187,43 +253,81 @@ export function useCompareStream({
           true,
           t
         );
+
+        if (compareSessionIdRef.current === sessionId) {
+          appendCompareHistoryTurn(
+            params.side,
+            params.question,
+            streamResult.finalAnswer?.trim() || ""
+          );
+        }
       } catch (error) {
         const err = error as Error;
         const isUserStop =
           err.name === "AbortError" ||
           err.message === translate("agent.debug.userStop");
+
         if (isUserStop) {
-          markCompareStopped(params.setSideMessages);
+          if (compareSessionIdRef.current === sessionId) {
+            markCompareStopped(params.setSideMessages);
+          }
         } else {
           log.error(translate("agent.debug.streamError"), error);
           const errorMessage =
             error instanceof Error
               ? error.message
               : translate("agent.debug.processError");
-          params.setSideMessages((prev) => {
-            const newMessages = [...prev];
-            const lastMsg = newMessages[newMessages.length - 1];
-            if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
-              lastMsg.content = errorMessage;
-              lastMsg.isComplete = true;
-              lastMsg.error = errorMessage;
-            }
-            return newMessages;
-          });
+          if (compareSessionIdRef.current === sessionId) {
+            params.setSideMessages((prev) => {
+              const newMessages = [...prev];
+              const lastMsg = newMessages[newMessages.length - 1];
+              if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+                lastMsg.content = errorMessage;
+                lastMsg.isComplete = true;
+                lastMsg.error = errorMessage;
+              }
+              return newMessages;
+            });
+          }
         }
       } finally {
-        compareInFlightRef.current -= 1;
-        if (compareInFlightRef.current <= 0) {
-          setIsCompareStreaming(false);
+        if (compareSessionIdRef.current === sessionId) {
+          compareAbortControllersRef.current[params.side] = null;
+          compareInFlightRef.current -= 1;
+          if (compareInFlightRef.current <= 0) {
+            setIsCompareStreaming(false);
+          }
+          params.onStreamEnd();
         }
-        params.onStreamEnd();
       }
     },
-    [buildRunParams, markCompareStopped, resetCompareTimeout, t, translate]
+    [
+      appendCompareHistoryTurn,
+      buildRunParams,
+      cloneHistory,
+      markCompareStopped,
+      resetCompareTimeout,
+      t,
+      translate,
+    ]
   );
 
   const runCompare = useCallback(
     async (question: string) => {
+      const conversationIds = ensureCompareConversationIds();
+      if (
+        compareHistoriesRef.current.left.length === 0 &&
+        compareHistoriesRef.current.right.length === 0 &&
+        getHistory
+      ) {
+        const baseHistory = getHistory() || [];
+        const clonedBaseHistory = cloneHistory(baseHistory);
+        compareHistoriesRef.current = {
+          left: clonedBaseHistory,
+          right: cloneHistory(baseHistory),
+        };
+      }
+
       setIsCompareStreaming(true);
       setCompareStreamingLeft(true);
       setCompareStreamingRight(true);
@@ -260,18 +364,9 @@ export function useCompareStream({
         isComplete: false,
       };
 
-      setLeftMessages([leftUserMessage, leftAssistantMessage]);
-      setRightMessages([rightUserMessage, rightAssistantMessage]);
+      setLeftMessages((prev) => [...prev, leftUserMessage, leftAssistantMessage]);
+      setRightMessages((prev) => [...prev, rightUserMessage, rightAssistantMessage]);
 
-      const baseId = -Math.abs(Date.now());
-      const leftConversationId = baseId;
-      const rightConversationId = baseId - 1;
-      compareConversationIdsRef.current = {
-        left: leftConversationId,
-        right: rightConversationId,
-      };
-
-      const history = getHistory ? getHistory() : [];
       const leftController = new AbortController();
       const rightController = new AbortController();
       compareAbortControllersRef.current = {
@@ -282,21 +377,19 @@ export function useCompareStream({
       await Promise.allSettled([
         runCompareStream({
           side: "left",
-          conversationId: leftConversationId,
+          conversationId: conversationIds.left,
           controller: leftController,
           setSideMessages: setLeftMessages,
           stepIdCounterRef: compareStepIdCountersRef.current.left,
-          history,
           question,
           onStreamEnd: () => setCompareStreamingLeft(false),
         }),
         runCompareStream({
           side: "right",
-          conversationId: rightConversationId,
+          conversationId: conversationIds.right,
           controller: rightController,
           setSideMessages: setRightMessages,
           stepIdCounterRef: compareStepIdCountersRef.current.right,
-          history,
           question,
           onStreamEnd: () => setCompareStreamingRight(false),
         }),
@@ -308,7 +401,7 @@ export function useCompareStream({
         compareTimeoutRef.current = null;
       }
     },
-    [getHistory, runCompareStream]
+    [cloneHistory, ensureCompareConversationIds, getHistory, runCompareStream]
   );
 
   return {

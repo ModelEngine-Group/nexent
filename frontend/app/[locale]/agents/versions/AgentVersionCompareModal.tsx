@@ -155,6 +155,13 @@ export default function AgentVersionCompareModal({
     setCompareQuestion("");
   }, [selectedVersionNoA, selectedVersionNoB, resetCompareState, stopCompare]);
 
+  const handleClose = () => {
+    stopCompare();
+    resetCompareState();
+    setCompareQuestion("");
+    onCancel();
+  };
+
   const resolveVersionLabel = (versionNo: number | null | undefined) => {
     if (versionNo === null || versionNo === undefined) return "-";
     const matched = versionList?.find((v) => v.version_no === versionNo);
@@ -183,6 +190,7 @@ export default function AgentVersionCompareModal({
     if (versionNoA === null || versionNoA === undefined) return;
     if (versionNoB === null || versionNoB === undefined) return;
     if (versionNoA === versionNoB) return;
+    setCompareQuestion("");
     await runCompare(question);
   };
 
@@ -199,7 +207,7 @@ export default function AgentVersionCompareModal({
         </Flex>
       }
       open={open}
-      onCancel={onCancel}
+      onCancel={handleClose}
       footer={footer}
       width={800}
       centered
