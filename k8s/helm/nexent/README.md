@@ -114,6 +114,10 @@ After successful deployment:
 |---------|-----------------|
 | Web Application | http://localhost:30000 |
 | SSH Terminal | localhost:30022 (if enabled) |
+| Langfuse | http://localhost:30001 |
+| Grafana | http://localhost:30002 |
+| Phoenix | http://localhost:30006 |
+| Zipkin | http://localhost:30011 |
 
 ## Data Persistence
 
@@ -191,7 +195,7 @@ helm upgrade --install nexent nexent \
   --set nexent-monitoring.enabled=true \
   --set global.monitoring.enabled=true \
   --set global.monitoring.provider=grafana \
-  --set 'global.monitoring.dashboardUrl=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
+  --set 'global.monitoring.dashboardUrl=http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
 ```
 
 For LangSmith, also provide an API key:
@@ -213,6 +217,9 @@ The backend receives OTLP settings through the shared `nexent-config`
 ConfigMap, with `OTEL_EXPORTER_OTLP_ENDPOINT` defaulting to
 `http://nexent-otel-collector:4318`. The frontend monitoring entry uses
 `global.monitoring.dashboardUrl`; leave it empty to hide the entry.
+Monitoring UI Services default to NodePort and can be overridden with
+`nexent-monitoring.<provider>.service.type` and
+`nexent-monitoring.<provider>.service.nodePort`.
 
 ## Configuration
 

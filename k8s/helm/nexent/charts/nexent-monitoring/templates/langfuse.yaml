@@ -310,6 +310,9 @@ spec:
     - port: {{ .Values.langfuse.service.port }}
       targetPort: 3000
       name: http
+      {{- if and (eq .Values.langfuse.service.type "NodePort") .Values.langfuse.service.nodePort }}
+      nodePort: {{ .Values.langfuse.service.nodePort }}
+      {{- end }}
   selector:
     app: nexent-langfuse-web
 ---

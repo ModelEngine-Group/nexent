@@ -53,6 +53,9 @@ spec:
     - port: {{ .Values.phoenix.service.port }}
       targetPort: 6006
       name: http
+      {{- if and (eq .Values.phoenix.service.type "NodePort") .Values.phoenix.service.nodePort }}
+      nodePort: {{ .Values.phoenix.service.nodePort }}
+      {{- end }}
     - port: {{ .Values.phoenix.service.grpcPort }}
       targetPort: 4317
       name: otlp-grpc

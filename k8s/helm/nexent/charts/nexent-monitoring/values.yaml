@@ -77,8 +77,9 @@ collector:
 phoenix:
   enabled: false
   service:
-    type: ClusterIP
+    type: NodePort
     port: 6006
+    nodePort: 30006
     grpcPort: 4317
   storage:
     size: 10Gi
@@ -90,8 +91,9 @@ grafana:
   adminPassword: nexent-grafana-admin
   defaultLanguage: zh-Hans
   service:
-    type: ClusterIP
+    type: NodePort
     port: 3002
+    nodePort: 30002
   storage:
     size: 5Gi
     hostPath: /var/lib/nexent-data/nexent-grafana
@@ -110,12 +112,13 @@ tempo:
 zipkin:
   enabled: false
   service:
-    type: ClusterIP
+    type: NodePort
     port: 9411
+    nodePort: 30011
 
 langfuse:
   enabled: false
-  nextauthUrl: http://localhost:3001
+  nextauthUrl: http://localhost:30001
   nextauthSecret: nexent-langfuse-secret
   salt: nexent-langfuse-salt
   encryptionKey: "0000000000000000000000000000000000000000000000000000000000000000"
@@ -124,16 +127,17 @@ langfuse:
   init:
     orgId: nexent
     orgName: Nexent
-    projectId: nexent-local
-    projectName: Nexent Local
+    projectId: nexent
+    projectName: Nexent
     projectPublicKey: pk-lf-nexent-local
     projectSecretKey: sk-lf-nexent-local
-    userEmail: admin@nexent.local
-    userName: Nexent Admin
-    userPassword: nexent-langfuse-admin
+    userEmail: admin@nexent.com
+    userName: admin
+    userPassword: nexent@4321
   service:
-    type: ClusterIP
-    port: 3001
+    type: NodePort
+    port: 3000
+    nodePort: 30001
   postgres:
     user: postgres
     password: postgres
