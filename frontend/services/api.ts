@@ -87,6 +87,13 @@ export const API_ENDPOINTS = {
     generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
   },
+  promptTemplates: {
+    list: `${API_BASE_URL}/prompt_templates`,
+    detail: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    create: `${API_BASE_URL}/prompt_templates`,
+    update: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    delete: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+  },
   stt: {
     ws: `/api/voice/stt/ws`,
   },
@@ -433,6 +440,12 @@ export const fetchWithErrorHandling = async (
         errorCodeStr === ErrorCode.TOKEN_EXPIRED ||
         errorCodeStr === ErrorCode.TOKEN_INVALID
       ) {
+        handleSessionExpired();
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      // Handle HTTP 401 - trigger session expired modal for all unauthorized errors
+      if (response.status === 401) {
         handleSessionExpired();
         throw new ApiError(errorCode, errorMessage);
       }

@@ -16,6 +16,7 @@ from agents.agent_run_manager import agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
 from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
+from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
 from consts.exceptions import MemoryPreparationException
@@ -64,6 +65,11 @@ from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids
+from services.prompt_template_service import (
+    SYSTEM_PROMPT_TEMPLATE_ID,
+    SYSTEM_PROMPT_TEMPLATE_NAME,
+    get_prompt_template_summary,
+)
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import save_conversation_assistant, save_conversation_user
 from services.memory_config_service import build_memory_context
@@ -312,12 +318,25 @@ def _regenerate_agent_value_with_llm(
     user_prompt_key: str,
     default_system_prompt: str,
     default_user_prompt_builder: Callable[[dict], str],
-    fallback_fn: Callable[[str], str]
+    fallback_fn: Callable[[str], str],
+    prompt_template_id: Optional[int] = None,
+    user_id: Optional[str] = None,
 ) -> str:
     """
     Shared helper to regenerate agent-related values with an LLM.
     """
-    prompt_template = get_prompt_generate_prompt_template(language)
+    if user_id is not None:
+        from services.prompt_template_service import resolve_prompt_generate_template
+        prompt_template = resolve_prompt_generate_template(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            language=language,
+            prompt_template_id=prompt_template_id,
+        )
+    else:
+        prompt_template = normalize_prompt_generate_template_content(
+            get_prompt_generate_prompt_template(language)
+        )
     system_prompt = _render_prompt_template(
         prompt_template.get(system_prompt_key, ""),
         original_value=original_value
@@ -374,7 +393,9 @@ def _regenerate_agent_name_with_llm(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
     agents_cache: list[dict] | None = None,
-    exclude_agent_id: int | None = None
+    exclude_agent_id: int | None = None,
+    prompt_template_id: Optional[int] = None,
+    user_id: Optional[str] = None,
 ) -> str:
     return _regenerate_agent_value_with_llm(
         original_value=original_name,
@@ -383,8 +404,8 @@ def _regenerate_agent_name_with_llm(
         model_id=model_id,
         tenant_id=tenant_id,
         language=language,
-        system_prompt_key="AGENT_NAME_REGENERATE_SYSTEM_PROMPT",
-        user_prompt_key="AGENT_NAME_REGENERATE_USER_PROMPT",
+        system_prompt_key="agent_name_regenerate_system_prompt",
+        user_prompt_key="agent_name_regenerate_user_prompt",
         default_system_prompt=(
             "You refine agent variable names so that they stay close to the "
             "original meaning and remain unique within the tenant."
@@ -402,7 +423,9 @@ def _regenerate_agent_name_with_llm(
             tenant_id=tenant_id,
             agents_cache=agents_cache,
             exclude_agent_id=exclude_agent_id
-        )
+        ),
+        prompt_template_id=prompt_template_id,
+        user_id=user_id,
     )
 
 
@@ -415,7 +438,9 @@ def _regenerate_agent_display_name_with_llm(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
     agents_cache: list[dict] | None = None,
-    exclude_agent_id: int | None = None
+    exclude_agent_id: int | None = None,
+    prompt_template_id: Optional[int] = None,
+    user_id: Optional[str] = None,
 ) -> str:
     return _regenerate_agent_value_with_llm(
         original_value=original_display_name,
@@ -424,8 +449,8 @@ def _regenerate_agent_display_name_with_llm(
         model_id=model_id,
         tenant_id=tenant_id,
         language=language,
-        system_prompt_key="AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT",
-        user_prompt_key="AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT",
+        system_prompt_key="agent_display_name_regenerate_system_prompt",
+        user_prompt_key="agent_display_name_regenerate_user_prompt",
         default_system_prompt=(
             "You refine agent display names so they remain unique, concise, "
             "and aligned with the agent's capability."
@@ -442,7 +467,9 @@ def _regenerate_agent_display_name_with_llm(
             tenant_id=tenant_id,
             agents_cache=agents_cache,
             exclude_agent_id=exclude_agent_id
-        )
+        ),
+        prompt_template_id=prompt_template_id,
+        user_id=user_id,
     )
 
 
@@ -749,6 +776,11 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     elif "business_logic_model_name" not in agent_info:
         agent_info["business_logic_model_name"] = None
 
+    if not agent_info.get("prompt_template_id"):
+        agent_info["prompt_template_id"] = SYSTEM_PROMPT_TEMPLATE_ID
+    if not agent_info.get("prompt_template_name"):
+        agent_info["prompt_template_name"] = SYSTEM_PROMPT_TEMPLATE_NAME
+
     if agent_info.get("group_ids") is not None:
         agent_info["group_ids"] = convert_string_to_list(agent_info.get("group_ids"))
 
@@ -805,6 +837,11 @@ async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
 
 async def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Header(None)):
     user_id, tenant_id, _ = get_current_user_info(authorization)
+    prompt_template_id, prompt_template_name = get_prompt_template_summary(
+        template_id=request.prompt_template_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
     # If agent_id is None, create a new agent; otherwise, update existing
     agent_id: Optional[int] = request.agent_id
@@ -822,6 +859,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "model_name": request.model_name,
                 "business_logic_model_id": request.business_logic_model_id,
                 "business_logic_model_name": request.business_logic_model_name,
+                "prompt_template_id": prompt_template_id,
+                "prompt_template_name": prompt_template_name,
                 "max_steps": request.max_steps,
                 "provide_run_summary": request.provide_run_summary,
                 "duty_prompt": request.duty_prompt,
@@ -834,6 +873,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             agent_id = created["agent_id"]
         else:
             # Update agent
+            request.prompt_template_id = prompt_template_id
+            request.prompt_template_name = prompt_template_name
             update_agent(agent_id, request, user_id)
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
@@ -1189,7 +1230,9 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
                                           model_id=model_id,
                                           model_name=model_display_name,
                                           business_logic_model_id=business_logic_model_id,
-                                          business_logic_model_name=business_logic_model_display_name)
+                                          business_logic_model_name=business_logic_model_display_name,
+                                          prompt_template_id=agent_info.get("prompt_template_id"),
+                                          prompt_template_name=agent_info.get("prompt_template_name"))
     return agent_info
 
 
@@ -1322,6 +1365,8 @@ async def import_agent_by_agent_id(
                                          "model_name": import_agent_info.model_name,
                                          "business_logic_model_id": business_logic_model_id,
                                          "business_logic_model_name": import_agent_info.business_logic_model_name,
+                                         "prompt_template_id": import_agent_info.prompt_template_id or SYSTEM_PROMPT_TEMPLATE_ID,
+                                         "prompt_template_name": import_agent_info.prompt_template_name or SYSTEM_PROMPT_TEMPLATE_NAME,
                                          "max_steps": import_agent_info.max_steps,
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "duty_prompt": import_agent_info.duty_prompt,

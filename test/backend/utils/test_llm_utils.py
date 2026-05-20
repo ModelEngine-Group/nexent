@@ -502,6 +502,30 @@ class AdditionalLLMUtilsTests:
         res = call_llm_for_system_prompt(2, "u2", "s2")
         assert res == "ABC"
 
+    def test_call_llm_for_system_prompt_skips_chunk_without_choices(self, mocker: MockFixture):
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
+        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://y", "api_key": "k2"}
+        mock_get_model_name.return_value = "gpt-6"
+
+        mock_instance = mock_openai.return_value
+
+        empty_chunk = MagicMock()
+        empty_chunk.choices = []
+
+        valid_chunk = MagicMock()
+        valid_chunk.choices = [MagicMock()]
+        valid_chunk.choices[0].delta.content = "OK"
+
+        mock_instance.client = MagicMock()
+        mock_instance.client.chat.completions.create.return_value = [empty_chunk, valid_chunk]
+        mock_instance._prepare_completion_kwargs.return_value = {}
+
+        res = call_llm_for_system_prompt(2, "u2", "s2")
+        assert res == "OK"
+
     def test_call_llm_for_system_prompt_with_callback(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with callback"""
         mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')

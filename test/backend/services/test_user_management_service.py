@@ -1319,18 +1319,24 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
             {"permission_type": "LEFT_NAV_MENU", "permission_subtype": "chat"}
         ])
 
+    @patch('backend.services.user_management_service.get_supabase_admin_client')
     @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
-    async def test_get_user_info_user_not_found(self, mock_get_user_tenant):
-        """Test getting user information when user doesn't exist"""
+    async def test_get_user_info_user_not_found(self, mock_get_user_tenant, mock_get_admin_client):
+        """Test getting user information when user doesn't exist - orphan cleanup is triggered"""
         # Setup mocks
         mock_get_user_tenant.return_value = None
+        mock_admin_client = MagicMock()
+        mock_admin_client.auth.admin.delete_user = MagicMock()
+        mock_get_admin_client.return_value = mock_admin_client
 
         # Execute
-        result = await get_user_info("nonexistent_user")
+        result = await get_user_info("orphan_user")
 
         # Assert
         assert result is None
-        mock_get_user_tenant.assert_called_once_with("nonexistent_user")
+        mock_get_user_tenant.assert_called_once_with("orphan_user")
+        mock_get_admin_client.assert_called_once()
+        mock_admin_client.auth.admin.delete_user.assert_called_once_with("orphan_user")
 
     @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.user_management_service.query_group_ids_by_user')
