@@ -173,6 +173,34 @@ class TestCallLLMForSystemPrompt:
         # Verify AppException is raised with correct error code for unmapped errors
         assert exc_info.value.error_code == ErrorCode.MODEL_PROMPT_GENERATION_FAILED
 
+    def test_call_llm_for_system_prompt_skips_empty_choices_chunks(self, mocker: MockFixture):
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
+        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+
+        mock_get_model_by_id.return_value = {"base_url": "https://example.com", "api_key": "k"}
+        mock_get_model_name.return_value = "deepseek-ai/DeepSeek-V4-Flash"
+
+        empty_choices_chunk = MagicMock()
+        empty_choices_chunk.choices = []
+
+        content_chunk = MagicMock()
+        content_chunk.choices = [MagicMock()]
+        content_chunk.choices[0].delta.content = "Generated prompt"
+
+        mock_instance = mock_openai.return_value
+        mock_instance.client = MagicMock()
+        mock_instance.client.chat.completions.create.return_value = [
+            empty_choices_chunk,
+            content_chunk,
+        ]
+        mock_instance._prepare_completion_kwargs.return_value = {}
+
+        res = call_llm_for_system_prompt(1, "u", "s")
+
+        assert res == "Generated prompt"
+
+
 
 class TestProcessThinkingTokens:
     def test_process_thinking_tokens_normal_token(self):
