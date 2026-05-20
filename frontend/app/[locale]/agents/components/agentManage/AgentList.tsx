@@ -259,6 +259,8 @@ export default function AgentList({
         few_shots_prompt: detail.few_shots_prompt,
         business_logic_model_name: detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
+        prompt_template_id: detail.prompt_template_id ?? 0,
+        prompt_template_name: detail.prompt_template_name ?? "system_default",
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: subAgentIds,
       });

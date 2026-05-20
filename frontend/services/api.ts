@@ -87,6 +87,13 @@ export const API_ENDPOINTS = {
     generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
   },
+  promptTemplates: {
+    list: `${API_BASE_URL}/prompt_templates`,
+    detail: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    create: `${API_BASE_URL}/prompt_templates`,
+    update: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    delete: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+  },
   stt: {
     ws: `/api/voice/stt/ws`,
   },
