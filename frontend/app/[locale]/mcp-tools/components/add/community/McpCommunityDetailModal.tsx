@@ -2,9 +2,12 @@ import { useState } from "react";
 import { Button, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import {
-  Activity,
+  Zap,
   Globe,
-  GitBranch,
+  GitFork,
+  Link,
+  Wrench,
+  Calendar,
   Server,
   Tag as TagIcon,
   FileText,
@@ -67,7 +70,7 @@ export default function McpCommunityDetailModal({
         width={620}
         style={{ top: 20 }}
         onCancel={onClose}
-        wrapClassName={`${MCP_TOOLS_MODAL_WRAP_CLASS} h-[calc(100dvh-80px)]`}
+        wrapClassName={`${MCP_TOOLS_MODAL_WRAP_CLASS}`}
         styles={mcpToolsModalChromeStyles()}
       >
         <div className="bg-gradient-to-b from-slate-50 to-white">
@@ -102,12 +105,12 @@ export default function McpCommunityDetailModal({
             {/* Service Info Section */}
             <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
               <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                <Activity className="h-4 w-4 text-slate-400" />
+                <Zap className="h-4 w-4 text-slate-400" />
                 {t("mcpTools.detail.serviceStatus")}
               </h3>
               <div className="space-y-3">
                 <InfoRow
-                  icon={<Server className="h-3.5 w-3.5" />}
+                  icon={<GitFork className="h-3.5 w-3.5" />}
                   label={t("mcpTools.detail.serverType")}
                   value={serverTypeText}
                 />
@@ -117,19 +120,19 @@ export default function McpCommunityDetailModal({
                   value={sourceText}
                 />
                 <InfoRow
-                  icon={<FileText className="h-3.5 w-3.5" />}
+                  icon={<Calendar className="h-3.5 w-3.5" />}
                   label={t("mcpTools.community.publishedAt")}
                   value={formatRegistryDate(service.createdAt)}
                 />
                 {service.updatedAt ? (
                   <InfoRow
-                    icon={<FileText className="h-3.5 w-3.5" />}
+                    icon={<Calendar className="h-3.5 w-3.5" />}
                     label={t("mcpTools.detail.updatedAt")}
                     value={formatRegistryDate(service.updatedAt)}
                   />
                 ) : null}
                 <InfoRow
-                  icon={<Activity className="h-3.5 w-3.5" />}
+                  icon={<Zap className="h-3.5 w-3.5" />}
                   label={t("mcpTools.detail.status")}
                   customValue={<RegistryStatusBadge status={service.status} />}
                 />
@@ -140,7 +143,7 @@ export default function McpCommunityDetailModal({
             {!service.configJson && (
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                  <Server className="h-4 w-4 text-slate-400" />
+                  <Link className="h-4 w-4 text-slate-400" />
                   {t("mcpTools.detail.serverUrl")}
                 </h3>
                 <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg break-all">
@@ -153,7 +156,7 @@ export default function McpCommunityDetailModal({
             {(websiteUrl || repositoryUrl) && (
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                  <Globe className="h-4 w-4 text-slate-400" />
+                  <Link className="h-4 w-4 text-slate-400" />
                   {t("mcpTools.detail.links")}
                 </h3>
                 <div className="space-y-2">
@@ -166,7 +169,7 @@ export default function McpCommunityDetailModal({
                   )}
                   {repositoryUrl && (
                     <LinkRow
-                      icon={<GitBranch className="h-3.5 w-3.5" />}
+                      icon={<GitFork className="h-3.5 w-3.5" />}
                       label={t("mcpTools.detail.repository")}
                       href={repositoryUrl}
                     />
@@ -179,7 +182,7 @@ export default function McpCommunityDetailModal({
             {(hasServerJson || hasConfigJson) && (
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                  <Server className="h-4 w-4 text-slate-400" />
+                  <Wrench className="h-4 w-4 text-slate-400" />
                   {t("mcpTools.detail.tools")}
                 </h3>
                 <div className="flex flex-wrap gap-2">

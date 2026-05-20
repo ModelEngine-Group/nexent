@@ -3,7 +3,11 @@ import { App, Button, Form, Input, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   Globe,
-  GitBranch,
+  GitFork,
+  Link,
+  Zap,
+  Wrench,
+  Calendar,
   Activity,
   Server,
   Tag as TagIcon,
@@ -269,12 +273,12 @@ export default function PublishedServiceDetailModal({
             {/* Service Info Section */}
             <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
               <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                <Activity className="h-4 w-4 text-slate-400" />
+                <Zap className="h-4 w-4 text-slate-400" />
                 {t("mcpTools.detail.serviceStatus")}
               </h3>
               <div className="space-y-3">
                 <InfoRow
-                  icon={<Server className="h-3.5 w-3.5" />}
+                  icon={<GitFork className="h-3.5 w-3.5" />}
                   label={t("mcpTools.detail.serverType")}
                   value={t(getTransportLabelKey(service.transportType))}
                 />
@@ -284,13 +288,13 @@ export default function PublishedServiceDetailModal({
                   value={t("mcpTools.source.community")}
                 />
                 <InfoRow
-                  icon={<FileText className="h-3.5 w-3.5" />}
+                  icon={<Calendar className="h-3.5 w-3.5" />}
                   label={t("mcpTools.detail.createdAt")}
                   value={formatRegistryDate(service.createdAt)}
                 />
                 {service.updatedAt ? (
                   <InfoRow
-                    icon={<FileText className="h-3.5 w-3.5" />}
+                    icon={<Calendar className="h-3.5 w-3.5" />}
                     label={t("mcpTools.detail.updatedAt")}
                     value={formatRegistryDate(service.updatedAt)}
                   />
@@ -302,7 +306,7 @@ export default function PublishedServiceDetailModal({
             {!service.configJson && (
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                  <Server className="h-4 w-4 text-slate-400" />
+                  <Link className="h-4 w-4 text-slate-400" />
                   {t("mcpTools.detail.serverUrl")}
                 </h3>
                 <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg break-all">
@@ -315,7 +319,7 @@ export default function PublishedServiceDetailModal({
             {(websiteUrl || repositoryUrl) && (
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                  <Globe className="h-4 w-4 text-slate-400" />
+                  <Link className="h-4 w-4 text-slate-400" />
                   {t("mcpTools.detail.links")}
                 </h3>
                 <div className="space-y-2">
@@ -328,7 +332,7 @@ export default function PublishedServiceDetailModal({
                   )}
                   {repositoryUrl && (
                     <LinkRow
-                      icon={<GitBranch className="h-3.5 w-3.5" />}
+                      icon={<GitFork className="h-3.5 w-3.5" />}
                       label={t("mcpTools.detail.repository")}
                       href={repositoryUrl}
                     />
@@ -341,7 +345,7 @@ export default function PublishedServiceDetailModal({
             {(hasServerJson || hasConfigJson) && (
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                  <Server className="h-4 w-4 text-slate-400" />
+                  <Wrench className="h-4 w-4 text-slate-400" />
                   {t("mcpTools.detail.tools")}
                 </h3>
                 <div className="flex flex-wrap gap-2">

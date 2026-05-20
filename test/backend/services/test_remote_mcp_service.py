@@ -788,6 +788,7 @@ class TestUpdateMcpServiceEnabled(unittest.IsolatedAsyncioTestCase):
     async def test_container_disable_success(self, mock_get, mock_mgr_cls, mock_cont_fields, mock_enabled):
         mock_get.return_value = self._make_record(
             container_id="old-cid", container_port=8080, mcp_server="http://old/mcp",
+            config_json={"mcpServers": {"test": {"command": "echo test"}}},
         )
         mock_mgr = MagicMock()
         mock_mgr.stop_mcp_container = AsyncMock(return_value=True)

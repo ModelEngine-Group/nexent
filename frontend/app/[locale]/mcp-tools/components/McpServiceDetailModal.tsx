@@ -2,9 +2,13 @@ import { useEffect, useState } from "react";
 import { App, Modal, Input, Button, Form, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 import {
-  GitBranch,
+  GitFork,
   Globe,
+  Link,
   Package,
+  Zap,
+  Wrench,
+  Calendar,
   Activity,
   Server,
   Tag as TagIcon,
@@ -170,7 +174,7 @@ export default function McpServiceDetailModal({
         width={620}
         style={{ top: 20 }}
         onCancel={onClose}
-        wrapClassName={`${MCP_TOOLS_MODAL_WRAP_CLASS} h-[calc(100dvh-80px)]`}
+        wrapClassName={`${MCP_TOOLS_MODAL_WRAP_CLASS}`}
         styles={mcpToolsModalChromeStyles()}
       >
         <Form
@@ -319,7 +323,7 @@ export default function McpServiceDetailModal({
             {/* Service Status Section - First */}
             <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
               <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                <Activity className="h-4 w-4 text-slate-400" />
+                <Zap className="h-4 w-4 text-slate-400" />
                 {t("mcpTools.detail.serviceStatus")}
               </h3>
               <div className="space-y-3">
@@ -329,7 +333,7 @@ export default function McpServiceDetailModal({
                   value={t(getSourceLabelKey(draft.source))}
                 />
                 <InfoRow
-                  icon={<GitBranch className="h-3.5 w-3.5" />}
+                  icon={<GitFork className="h-3.5 w-3.5" />}
                   label={t("mcpTools.detail.serverType")}
                   value={t(getTransportLabelKey(draft.transportType))}
                 />
@@ -421,7 +425,7 @@ export default function McpServiceDetailModal({
             {(websiteUrl || repositoryUrl) && (
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                  <Globe className="h-4 w-4 text-slate-400" />
+                  <Link className="h-4 w-4 text-slate-400" />
                   {t("mcpTools.detail.links")}
                 </h3>
                 <div className="space-y-2">
@@ -434,7 +438,7 @@ export default function McpServiceDetailModal({
                   )}
                   {repositoryUrl && (
                     <LinkRow
-                      icon={<GitBranch className="h-3.5 w-3.5" />}
+                      icon={<GitFork className="h-3.5 w-3.5" />}
                       label={t("mcpTools.detail.repository")}
                       href={repositoryUrl}
                     />
@@ -446,7 +450,7 @@ export default function McpServiceDetailModal({
             {/* Tools Section */}
             <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
               <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
-                <Server className="h-4 w-4 text-slate-400" />
+                <Wrench className="h-4 w-4 text-slate-400" />
                 {t("mcpTools.detail.tools")}
               </h3>
               <div className="flex flex-wrap gap-2">

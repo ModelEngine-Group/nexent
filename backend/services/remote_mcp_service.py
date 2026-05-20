@@ -165,6 +165,8 @@ async def add_remote_mcp_server_list(
     remote_mcp_server_name: str,
     container_id: str | None = None,
     authorization_token: str | None = None,
+    source: str | None = "local",
+    container_port: int | None = None,
 ):
     """Add a remote MCP server to the list.
 
@@ -193,6 +195,8 @@ async def add_remote_mcp_server_list(
         "status": True,
         "container_id": container_id,
         "authorization_token": authorization_token,
+        "source": source,
+        "container_port": container_port,
     }
     create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
 
@@ -611,7 +615,7 @@ async def update_mcp_service_enabled(
             )
         else:
             current_container_id = current_record.get("container_id")
-            if current_container_id:
+            if current_container_id and current_record.get("config_json"):
                 try:
                     manager = MCPContainerManager()
                     await manager.stop_mcp_container(current_container_id)
@@ -1084,6 +1088,7 @@ async def upload_and_start_mcp_image(
         remote_mcp_server_name=final_service_name,
         container_id=container_info["container_id"],
         authorization_token=authorization_token,
+        container_port=port
     )
 
     return {
