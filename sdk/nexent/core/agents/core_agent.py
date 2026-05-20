@@ -465,8 +465,16 @@ Additional Args:
 You have been provided with these additional arguments, that you can access using the keys as variables in your python code:
 {str(additional_args)}."""
 
+        system_prompt_content = self.system_prompt
+        if self.context_manager and self.context_manager.get_registered_components():
+            component_messages = self.context_manager.build_system_prompt()
+            if component_messages:
+                system_prompt_content = "\n\n".join(
+                    msg.get("content", "") for msg in component_messages if msg.get("role") == "system"
+                )
+
         self.memory.system_prompt = SystemPromptStep(
-            system_prompt=self.system_prompt)
+            system_prompt=system_prompt_content)
         if reset:
             self.memory.reset()
             self.monitor.reset()

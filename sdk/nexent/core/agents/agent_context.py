@@ -2,6 +2,11 @@
 
 Provides ContextManager for token-aware compression of agent memory,
 supporting incremental summarization with cache-based optimization.
+
+Also provides ContextManager as the single source of truth for:
+- Context component registration and lifecycle
+- System prompt assembly from components
+- Strategy-based component selection
 """
 
 import hashlib
@@ -10,13 +15,16 @@ import logging
 import re
 import threading
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
+
+if TYPE_CHECKING:
+    from .agent_model import ContextComponent, ContextStrategy
 
 from smolagents.memory import ActionStep, AgentMemory, MemoryStep, TaskStep
 from smolagents.models import ChatMessage, MessageRole
 
 from .summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
-from .summary_config import ContextManagerConfig
+from .summary_config import ContextManagerConfig, StrategyType
 
 logger = logging.getLogger("agent_context")
 
@@ -47,9 +55,6 @@ class ContextManager:
         self._previous_summary_cache: Optional[PreviousSummaryCache] = None
         self._current_summary_cache: Optional[CurrentSummaryCache] = None
 
-        # Run boundary self-detection. The current cache fingerprint is only reused
-        # within the current run and must be explicitly cleared at the start of a new run.
-        # The previous cache is managed and updated across runs.
         self._last_run_start_idx: Optional[int] = None
 
         if max_steps is not None and self.config.keep_recent_steps >= max_steps:
@@ -63,6 +68,8 @@ class ContextManager:
             self.config.max_summary_input_tokens = int(self.config.token_threshold * 1.2)
         if self.config.max_summary_reduce_tokens <= 0:
             self.config.max_summary_reduce_tokens = int(self.config.token_threshold * 0.2)
+
+        self._components: List = []
 
     # ============================================================
     #  Cache validation
@@ -934,3 +941,101 @@ class ContextManager:
                 "total_output_tokens": sum(r.output_tokens for r in real_calls),
                 "total_cache_hits": sum(1 for r in self.compression_calls_log if r.cache_hit),
             }
+
+    # ============================================================
+    #  Context Component Management
+    # ============================================================
+
+    def register_component(self, component) -> None:
+        """Register a context component for system prompt assembly.
+        
+        Components are accumulated and used by build_system_prompt().
+        
+        Args:
+            component: A ContextComponent instance (e.g., ToolsComponent,
+                       MemoryComponent, KnowledgeBaseComponent).
+        """
+        with self._lock:
+            if component.token_estimate == 0:
+                component.token_estimate = component.estimate_tokens(
+                    self.config.chars_per_token
+                )
+            self._components.append(component)
+
+    def clear_components(self) -> None:
+        """Clear all registered context components.
+        
+        Typically called at the start of a new agent run.
+        """
+        with self._lock:
+            self._components.clear()
+
+    def get_registered_components(self) -> List:
+        """Return copy of registered components."""
+        with self._lock:
+            return list(self._components)
+
+    def _get_strategy(self):
+        """Factory method to get strategy instance based on config."""
+        from .agent_model import (
+            FullStrategy, TokenBudgetStrategy, BufferedStrategy, PriorityWeightedStrategy
+        )
+        strategy_map = {
+            "full": FullStrategy,
+            "token_budget": TokenBudgetStrategy,
+            "buffered": BufferedStrategy,
+            "priority": PriorityWeightedStrategy,
+        }
+        strategy_class = strategy_map.get(self.config.strategy, TokenBudgetStrategy)
+        
+        if self.config.strategy == "buffered":
+            return strategy_class(buffer_size=self.config.buffer_size_per_component)
+        elif self.config.strategy == "priority":
+            return strategy_class(relevance_threshold=0.5)
+        return strategy_class()
+
+    def build_system_prompt(self, token_budget: Optional[int] = None) -> List:
+        """Build system prompt messages from registered components.
+        
+        Uses configured strategy to select components within token budget,
+        then converts each to message format.
+        
+        Args:
+            token_budget: Maximum tokens for all components. Defaults to
+                          config.component_budgets total minus conversation_history.
+        
+        Returns:
+            List of message dicts with 'role' and 'content' keys.
+        """
+        if not self._components:
+            return []
+        
+        from .agent_model import SystemPromptComponent
+        
+        budget = token_budget or self._calculate_component_budget()
+        strategy = self._get_strategy()
+        selected = strategy.select_components(
+            self._components, budget, self.config.component_budgets
+        )
+        
+        messages = []
+        for comp in selected:
+            comp_messages = comp.to_messages()
+            for msg in comp_messages:
+                if not self._message_already_present(messages, msg):
+                    messages.append(msg)
+        
+        return messages
+
+    def _calculate_component_budget(self) -> int:
+        """Calculate total token budget for components (excluding conversation_history)."""
+        budgets = self.config.component_budgets
+        excluded = ["conversation_history"]
+        return sum(v for k, v in budgets.items() if k not in excluded)
+
+    def _message_already_present(self, messages: List, new_msg: dict) -> bool:
+        """Check if identical message already exists."""
+        for existing in messages:
+            if existing.get("role") == new_msg.get("role") and existing.get("content") == new_msg.get("content"):
+                return True
+        return False

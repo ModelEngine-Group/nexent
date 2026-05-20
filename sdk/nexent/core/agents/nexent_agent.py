@@ -302,6 +302,10 @@ class NexentAgent:
                     config=ctx_config,
                     max_steps=agent_config.max_steps
                 )
+                context_components = getattr(agent_config, 'context_components', None)
+                if context_components:
+                    for component in context_components:
+                        agent.context_manager.register_component(component)
 
             return agent
         except Exception as e:

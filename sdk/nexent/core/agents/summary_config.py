@@ -1,12 +1,22 @@
-"""Configuration for agent context compression."""
+"""Configuration for agent context management and compression."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Literal
+
+
+StrategyType = Literal["full", "token_budget", "buffered", "priority"]
 
 
 @dataclass
 class ContextManagerConfig:
-    """Configuration for ContextManager compression behavior."""
+    """Configuration for ContextManager - handles ALL context building.
+    
+    Extends existing compression config with:
+    - Strategy selection for component selection algorithms
+    - Injection flags to enable/disable individual context components
+    - Per-component token budgets for fine-grained control
+    """
+    # === Compression Settings (existing) ===
     enabled: bool = False
     token_threshold: int = 10000
     keep_recent_steps: int = 4
@@ -33,3 +43,57 @@ class ContextManagerConfig:
     max_summary_reduce_tokens: int = 0
     estimated_chunk_summary_tokens: int = 400
     chars_per_token: float = 1.5
+
+    # === NEW: Strategy Selection ===
+    strategy: StrategyType = "token_budget"
+    """Context component selection strategy.
+    
+    Options:
+    - 'full': Keep all components (for unlimited context models)
+    - 'token_budget': Select components within token budget by priority
+    - 'buffered': Keep last N components per type
+    - 'priority': Weight by importance + relevance scores
+    """
+
+    # === NEW: Component Injection Flags ===
+    inject_system_prompt: bool = True
+    """Whether to inject system prompt into context."""
+    
+    inject_tools: bool = True
+    """Whether to inject tool descriptions into system prompt."""
+    
+    inject_skills: bool = True
+    """Whether to inject skill summaries into system prompt."""
+    
+    inject_memory: bool = True
+    """Whether to search and inject long-term memory (mem0) into system prompt."""
+    
+    inject_knowledge_base: bool = True
+    """Whether to inject knowledge base summaries into system prompt."""
+    
+    inject_agent_definitions: bool = True
+    """Whether to inject sub-agent (managed_agents + external_a2a_agents) definitions."""
+    
+    inject_app_context: bool = True
+    """Whether to inject APP_NAME, APP_DESCRIPTION, time, user_id."""
+
+    # === NEW: Per-Component Token Budgets ===
+    component_budgets: Dict[str, int] = field(default_factory=lambda: {
+        "system_prompt": 4000,
+        "tools": 3000,
+        "skills": 1000,
+        "memory": 2000,
+        "knowledge_base": 1500,
+        "managed_agents": 500,
+        "external_a2a_agents": 500,
+        "conversation_history": 4000,  # Reserved for conversation compression
+    })
+    """Token budget for each context component type.
+    
+    Used by token_budget strategy to allocate tokens across components.
+    Total of all budgets should not exceed token_threshold.
+    """
+
+    # === NEW: Buffered Strategy Settings ===
+    buffer_size_per_component: int = 10
+    """Number of items to keep per component type for 'buffered' strategy."""

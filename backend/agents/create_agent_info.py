@@ -31,6 +31,7 @@ from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.context_utils import build_context_components
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE
 from consts.exceptions import ValidationError
 
@@ -400,6 +401,19 @@ async def create_agent_config(
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
+    context_components = build_context_components(
+        tools=render_kwargs["tools"],
+        skills=skills,
+        managed_agents=render_kwargs["managed_agents"],
+        external_a2a_agents=render_kwargs["external_a2a_agents"],
+        memory_list=memory_list,
+        memory_search_query=last_user_query,
+        knowledge_base_summary=knowledge_base_summary,
+        app_name=app_name,
+        app_description=app_description,
+        user_id=user_id,
+    )
+
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_max_tokens = 10000
     if model_id_to_use is not None:
@@ -430,7 +444,8 @@ async def create_agent_config(
         provide_run_summary=agent_info.get("provide_run_summary", False),
         managed_agents=managed_agents,
         external_a2a_agents=external_a2a_agents,
-        context_manager_config=cm_config
+        context_manager_config=cm_config,
+        context_components=context_components,
     )
     return agent_config
 
