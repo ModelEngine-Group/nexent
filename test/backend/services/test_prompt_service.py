@@ -755,8 +755,8 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
-    def test_generate_system_prompt(self, mock_get_prompt_template, mock_join_info, mock_call_llm, mock_get_model):
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    def test_generate_system_prompt(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm, mock_get_model):
         # Mock model config to avoid concurrency limit issue
         mock_get_model.return_value = {"concurrency_limit": None}
         # Setup
@@ -881,8 +881,8 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
-    def test_generate_system_prompt_with_exception(self, mock_get_prompt_template, mock_join_info, mock_call_llm, mock_get_model):
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    def test_generate_system_prompt_with_exception(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm, mock_get_model):
         # Mock model config to avoid concurrency limit issue
         mock_get_model.return_value = {"concurrency_limit": None}
         # Setup
