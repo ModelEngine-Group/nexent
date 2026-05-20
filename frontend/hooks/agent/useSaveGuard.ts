@@ -142,6 +142,8 @@ export const useSaveGuard = () => {
         few_shots_prompt: currentEditedAgent.few_shots_prompt,
         business_logic_model_name: currentEditedAgent.business_logic_model_name ?? undefined,
         business_logic_model_id: currentEditedAgent.business_logic_model_id ?? undefined,
+        prompt_template_id: currentEditedAgent.prompt_template_id ?? 0,
+        prompt_template_name: currentEditedAgent.prompt_template_name ?? "system_default",
         enabled_tool_ids: enabledToolIds,
         enabled_skill_ids: enabledSkillIds,
         related_agent_ids: relatedAgentIds,

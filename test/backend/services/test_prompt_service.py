@@ -343,9 +343,11 @@ class TestPromptService(unittest.TestCase):
             "Test task",
             enabled_tools,  # tool_info_list from helper
             "tenant456",
+            "user123",
             self.test_model_id,
             "zh",
-            None  # knowledge_base_display_names
+            None,
+            None,
         )
 
     @patch('backend.services.prompt_service._regenerate_agent_display_name_with_llm')
@@ -738,6 +740,7 @@ class TestPromptService(unittest.TestCase):
             user_id="user123",
             tenant_id="tenant456",
             language="zh",
+            prompt_template_id=None,
             tool_ids=None,
             sub_agent_ids=None,
             knowledge_base_display_names=None,
@@ -758,15 +761,15 @@ class TestPromptService(unittest.TestCase):
         mock_get_model.return_value = {"concurrency_limit": None}
         # Setup
         mock_prompt_config = {
-            "USER_PROMPT": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": "Generate agent var name",
-            "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
-            "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
+            "user_prompt": "Test user prompt template",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
+            "agent_variable_name_system_prompt": "Generate agent var name",
+            "agent_display_name_system_prompt": "Generate agent display name",
+            "agent_description_system_prompt": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
 
         mock_join_info.return_value = "Joined template content"
 
@@ -818,6 +821,7 @@ class TestPromptService(unittest.TestCase):
             mock_task_description,
             mock_tools,
             mock_tenant_id,
+            "test_user",
             self.test_model_id,
             mock_language
         ):
@@ -825,7 +829,12 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         # Verify template loading
-        mock_get_prompt_template.assert_called_once_with(mock_language)
+        mock_resolve_prompt_template.assert_called_once_with(
+            tenant_id=mock_tenant_id,
+            user_id="test_user",
+            language=mock_language,
+            prompt_template_id=None,
+        )
 
         # Verify template joining - now includes knowledge_base_display_names parameter
         mock_join_info.assert_called_once_with(
@@ -878,15 +887,15 @@ class TestPromptService(unittest.TestCase):
         mock_get_model.return_value = {"concurrency_limit": None}
         # Setup
         mock_prompt_config = {
-            "USER_PROMPT": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": "Generate agent var name",
-            "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
-            "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
+            "user_prompt": "Test user prompt template",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
+            "agent_variable_name_system_prompt": "Generate agent var name",
+            "agent_display_name_system_prompt": "Generate agent display name",
+            "agent_description_system_prompt": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
 
         # Mock call_llm_for_system_prompt to raise exception for one prompt type
@@ -918,6 +927,7 @@ class TestPromptService(unittest.TestCase):
                 mock_task_description,
                 mock_tools,
                 mock_tenant_id,
+                "test_user",
                 self.test_model_id,
                 mock_language
             ):
@@ -929,7 +939,7 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.Template')
     def test_join_info_for_generate_system_prompt(self, mock_template):
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = [
             {"name": "agent1", "description": "Agent 1 desc"},
             {"name": "agent2", "description": "Agent 2 desc"}
@@ -954,7 +964,7 @@ class TestPromptService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "Rendered content")
         mock_template.assert_called_once_with(
-            mock_prompt_for_generate["USER_PROMPT"], undefined=StrictUndefined)
+            mock_prompt_for_generate["user_prompt"], undefined=StrictUndefined)
         mock_template_instance.render.assert_called_once()
         # Check template variables
         template_vars = mock_template_instance.render.call_args[0][0]
@@ -1172,10 +1182,10 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
     def test_generate_system_prompt_error_before_streaming(
         self,
-        mock_get_prompt_template,
+        mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
         mock_get_model,
@@ -1185,15 +1195,15 @@ class TestPromptService(unittest.TestCase):
         """Test generate_system_prompt handles error that occurs before streaming (line 307-311)"""
         # Setup
         mock_prompt_config = {
-            "USER_PROMPT": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": "Generate agent var name",
-            "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
-            "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
+            "user_prompt": "Test user prompt template",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
+            "agent_variable_name_system_prompt": "Generate agent var name",
+            "agent_display_name_system_prompt": "Generate agent display name",
+            "agent_description_system_prompt": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
 
         # Mock call_llm_for_system_prompt to raise exception immediately
@@ -1215,6 +1225,7 @@ class TestPromptService(unittest.TestCase):
                 "Test task",
                 [{"name": "tool1"}],
                 "tenant123",
+                "test_user",
                 self.test_model_id,
                 "zh"
             ):
@@ -1225,10 +1236,10 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
     def test_generate_system_prompt_error_during_streaming(
         self,
-        mock_get_prompt_template,
+        mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
         mock_get_model,
@@ -1238,15 +1249,15 @@ class TestPromptService(unittest.TestCase):
         """Test generate_system_prompt handles error that occurs during streaming (line 330-331)"""
         # Setup
         mock_prompt_config = {
-            "USER_PROMPT": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": "Generate agent var name",
-            "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
-            "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
+            "user_prompt": "Test user prompt template",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
+            "agent_variable_name_system_prompt": "Generate agent var name",
+            "agent_display_name_system_prompt": "Generate agent display name",
+            "agent_description_system_prompt": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
 
         # Track which call we're on
@@ -1277,6 +1288,7 @@ class TestPromptService(unittest.TestCase):
                 "Test task",
                 [{"name": "tool1"}],
                 "tenant123",
+                "test_user",
                 self.test_model_id,
                 "zh"
             ):
@@ -1331,7 +1343,7 @@ class TestPromptService(unittest.TestCase):
     def test_join_info_for_generate_system_prompt_english(self, mock_template):
         """Test join_info_for_generate_system_prompt with English language"""
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = [
             {"name": "agent1", "description": "Agent 1 desc"}
         ]
@@ -1361,7 +1373,7 @@ class TestPromptService(unittest.TestCase):
     def test_join_info_for_generate_system_prompt_empty_tools_and_agents(self, mock_template):
         """Test join_info_for_generate_system_prompt with empty tools and sub-agents"""
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = []
         mock_task_description = "Test task"
         mock_tools = []
@@ -1382,7 +1394,7 @@ class TestPromptService(unittest.TestCase):
     def test_join_info_for_generate_system_prompt_with_knowledge_base_names(self, mock_template):
         """Test join_info_for_generate_system_prompt with knowledge_base_display_names"""
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = []
         mock_task_description = "Test task"
         mock_tools = [
@@ -1411,7 +1423,7 @@ class TestPromptService(unittest.TestCase):
     def test_join_info_for_generate_system_prompt_without_knowledge_base_names(self, mock_template):
         """Test join_info_for_generate_system_prompt without knowledge_base_display_names"""
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = []
         mock_task_description = "Test task"
         mock_tools = [

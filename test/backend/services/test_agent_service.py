@@ -1,6 +1,7 @@
 import sys
 import asyncio
 import json
+import types
 from contextlib import contextmanager
 from unittest.mock import patch, MagicMock, mock_open, call, Mock, AsyncMock
 import os
@@ -62,10 +63,23 @@ sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.a2a_agent_db'] = MagicMock()
 
 # Mock services submodules
-sys.modules['services'] = MagicMock()
-sys.modules['services.conversation_management_service'] = MagicMock()
-sys.modules['services.memory_config_service'] = MagicMock()
-sys.modules['services.agent_version_service'] = MagicMock()
+services_module = types.ModuleType("services")
+services_module.__path__ = []
+sys.modules['services'] = services_module
+
+conversation_management_service_mock = MagicMock()
+memory_config_service_mock = MagicMock()
+agent_version_service_mock = MagicMock()
+prompt_template_service_mock = MagicMock()
+prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_ID = 0
+prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_NAME = "system_default"
+prompt_template_service_mock.get_prompt_template_summary = MagicMock(return_value=(None, None))
+prompt_template_service_mock.resolve_prompt_generate_template = MagicMock(return_value={})
+
+sys.modules['services.conversation_management_service'] = conversation_management_service_mock
+sys.modules['services.memory_config_service'] = memory_config_service_mock
+sys.modules['services.agent_version_service'] = agent_version_service_mock
+sys.modules['services.prompt_template_service'] = prompt_template_service_mock
 
 # Mock agents submodules
 sys.modules['agents'] = MagicMock()
@@ -282,6 +296,18 @@ def reset_mocks():
     yield
 
 
+def apply_default_prompt_template_request_fields(request, prompt_template_id=None):
+    """Populate default request fields needed by prompt template aware service logic."""
+    request.prompt_template_id = prompt_template_id
+    request.prompt_template_name = None
+    request.enabled_skill_ids = None
+    if not hasattr(request, "related_agent_ids"):
+        request.related_agent_ids = None
+    if not hasattr(request, "enabled_tool_ids"):
+        request.enabled_tool_ids = None
+    return request
+
+
 @pytest.mark.asyncio
 async def test_get_enable_tool_id_by_agent_id():
     """
@@ -421,6 +447,8 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": None,
         "business_logic_model_name": None,
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
         "is_available": True,
         "unavailable_reasons": []
     }
@@ -479,6 +507,8 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": None,
         "business_logic_model_name": None,
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
         "is_available": True,
         "unavailable_reasons": []
     }
@@ -584,6 +614,7 @@ async def test_update_agent_info_impl_success(mock_get_current_user_info, mock_u
     request.business_description = "Updated agent"
     request.display_name = "Updated Display Name"
     request.enabled_tool_ids = None  # Explicitly set to None to avoid tool handling path
+    apply_default_prompt_template_request_fields(request)
 
     # Execute
     await update_agent_info_impl(request, authorization="Bearer token")
@@ -662,6 +693,7 @@ async def test_update_agent_info_impl_exception_handling(mock_get_current_user_i
     request.display_name = "Test Display Name"
     request.enabled_tool_ids = None
     request.related_agent_ids = None
+    apply_default_prompt_template_request_fields(request)
 
     # Execute & Assert
     with pytest.raises(ValueError) as context:
@@ -701,6 +733,7 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     request.agent_id = 123
     request.enabled_tool_ids = [1, 2]  # Enable tools 1 and 2
     request.related_agent_ids = None
+    apply_default_prompt_template_request_fields(request)
 
     # Execute
     result = await update_agent_info_impl(request, authorization="Bearer token")
@@ -758,6 +791,7 @@ async def test_update_agent_info_impl_with_enabled_tool_ids_instance_having_null
     request.agent_id = 123
     request.enabled_tool_ids = [1]  # Enable only tool 1
     request.related_agent_ids = None
+    apply_default_prompt_template_request_fields(request)
 
     # Execute
     result = await update_agent_info_impl(request, authorization="Bearer token")
@@ -805,6 +839,7 @@ async def test_update_agent_info_impl_with_enabled_tool_ids_disabled_existing_to
     request.enabled_tool_ids = [2]  # Only enable tool 2 (new tool)
     # Tool 1 exists but is NOT in enabled_tool_ids, so it should be disabled
     request.related_agent_ids = None
+    apply_default_prompt_template_request_fields(request)
 
     # Execute
     result = await update_agent_info_impl(request, authorization="Bearer token")
@@ -858,6 +893,7 @@ async def test_update_agent_info_impl_with_related_agent_ids(
     request.agent_id = 123
     request.enabled_tool_ids = None
     request.related_agent_ids = [456, 789]
+    apply_default_prompt_template_request_fields(request)
 
     # Execute
     result = await update_agent_info_impl(request, authorization="Bearer token")
@@ -896,6 +932,7 @@ async def test_update_agent_info_impl_circular_dependency_detection(
     request.agent_id = 123
     request.enabled_tool_ids = None
     request.related_agent_ids = [123]  # Agent tries to relate to itself
+    apply_default_prompt_template_request_fields(request)
 
     # Execute & Assert - self-reference should raise ValueError
     with pytest.raises(ValueError, match="Circular dependency detected"):
@@ -941,6 +978,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     request.agent_id = 123
     request.enabled_tool_ids = [1]
     request.related_agent_ids = [456]
+    apply_default_prompt_template_request_fields(request)
 
     # Execute
     result = await update_agent_info_impl(request, authorization="Bearer token")
@@ -983,6 +1021,7 @@ async def test_update_agent_info_impl_tool_update_exception(
     request.agent_id = 123
     request.enabled_tool_ids = [1]
     request.related_agent_ids = None
+    apply_default_prompt_template_request_fields(request)
 
     # Execute & Assert
     with pytest.raises(ValueError, match="Failed to update agent tools"):
@@ -1015,6 +1054,7 @@ async def test_update_agent_info_impl_related_agent_update_exception(
     request.agent_id = 123
     request.enabled_tool_ids = None
     request.related_agent_ids = [456]
+    apply_default_prompt_template_request_fields(request)
 
     # Execute & Assert
     with pytest.raises(ValueError, match="Failed to update related agents"):
@@ -1216,6 +1256,7 @@ async def test_update_agent_info_impl_create_agent_auto_group_ids(mock_get_curre
     request.enabled_tool_ids = None
     request.related_agent_ids = None
     request.group_ids = None
+    apply_default_prompt_template_request_fields(request)
 
     # Execute
     result = await update_agent_info_impl(request, authorization="Bearer token")
@@ -1563,6 +1604,8 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": "GPT-4",
         "business_logic_model_name": None,
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
         "is_available": True,
         "unavailable_reasons": []
     }
@@ -1651,6 +1694,8 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": None,
         "business_logic_model_name": None,
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
         "is_available": True,
         "unavailable_reasons": []
     }
@@ -1702,6 +1747,8 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": None,
         "business_logic_model_name": None,
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
         "is_available": True,
         "unavailable_reasons": []
     }
@@ -1777,6 +1824,8 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": "GPT-4",
         "business_logic_model_name": "Claude-3.5",
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
         "is_available": True,
         "unavailable_reasons": []
     }
@@ -1848,6 +1897,8 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": "GPT-4",
         "business_logic_model_name": None,  # Should be None when model info is not found
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
         "is_available": True,
         "unavailable_reasons": []
     }
@@ -1926,6 +1977,8 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": "GPT-4",
         "business_logic_model_name": None,  # Should be None when display_name is not in model_info
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
         "is_available": True,
         "unavailable_reasons": []
     }
@@ -8015,6 +8068,7 @@ async def test_update_agent_info_impl_create_agent_with_ingroup_permission(
     request.related_agent_ids = None
     request.group_ids = [1, 2]
     request.ingroup_permission = PERMISSION_READ
+    apply_default_prompt_template_request_fields(request)
 
     result = await update_agent_info_impl(request, authorization="Bearer token")
 
@@ -8065,6 +8119,7 @@ async def test_update_agent_info_impl_create_agent_with_ingroup_permission_none(
     request.related_agent_ids = None
     request.group_ids = None
     request.ingroup_permission = None
+    apply_default_prompt_template_request_fields(request)
 
     result = await update_agent_info_impl(request, authorization="Bearer token")
 
@@ -8766,6 +8821,8 @@ async def test_update_agent_info_impl_skill_update_exception(
     mock_request.related_agent_ids = None
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
+    mock_request.prompt_template_id = None
+    mock_request.prompt_template_name = None
 
     mock_query_skills.return_value = []
     mock_create_skill.side_effect = Exception("Skill update failed")
