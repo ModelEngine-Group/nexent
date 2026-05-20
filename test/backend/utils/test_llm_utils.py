@@ -178,7 +178,7 @@ class TestCallLLMForSystemPrompt:
         mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
         mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
 
-        mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
+        mock_get_model_by_id.return_value = {"base_url": "https://example.com", "api_key": "k"}
         mock_get_model_name.return_value = "deepseek-ai/DeepSeek-V4-Flash"
 
         empty_choices_chunk = MagicMock()
