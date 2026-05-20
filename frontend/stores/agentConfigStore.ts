@@ -35,6 +35,8 @@ export type EditableAgent = Pick<
   | "business_description"
   | "business_logic_model_name"
   | "business_logic_model_id"
+  | "prompt_template_id"
+  | "prompt_template_name"
   | "sub_agent_id_list"
   | "group_ids"
   | "ingroup_permission"
@@ -159,6 +161,8 @@ const emptyEditableAgent: EditableAgent = {
   business_description: "",
   business_logic_model_name: "",
   business_logic_model_id: 0,
+  prompt_template_id: 0,
+  prompt_template_name: "system_default",
   sub_agent_id_list: [],
   group_ids: [],
   ingroup_permission: "READ_ONLY",
@@ -183,6 +187,8 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         business_description: agent.business_description || "",
         business_logic_model_name: agent.business_logic_model_name || "",
         business_logic_model_id: agent.business_logic_model_id || 0,
+        prompt_template_id: agent.prompt_template_id ?? 0,
+        prompt_template_name: agent.prompt_template_name || "system_default",
         sub_agent_id_list: agent.sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
         ingroup_permission: agent.ingroup_permission || "READ_ONLY",
@@ -200,13 +206,17 @@ const isBusinessInfoDirty = (baselineAgent: EditableAgent | null, editedAgent: E
     return (
       editedAgent.business_description !== "" ||
       editedAgent.business_logic_model_name !== "" ||
-      editedAgent.business_logic_model_id !== 0
+      editedAgent.business_logic_model_id !== 0 ||
+      (editedAgent.prompt_template_id ?? 0) !== 0 ||
+      (editedAgent.prompt_template_name || "system_default") !== "system_default"
     );
   }
   return (
     baselineAgent.business_description !== editedAgent.business_description ||
     baselineAgent.business_logic_model_name !== editedAgent.business_logic_model_name ||
-    baselineAgent.business_logic_model_id !== editedAgent.business_logic_model_id
+    baselineAgent.business_logic_model_id !== editedAgent.business_logic_model_id ||
+    (baselineAgent.prompt_template_id ?? 0) !== (editedAgent.prompt_template_id ?? 0) ||
+    (baselineAgent.prompt_template_name || "system_default") !== (editedAgent.prompt_template_name || "system_default")
   );
 };
 
