@@ -680,8 +680,10 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    def test_generate_system_prompt(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
+    @patch('backend.services.prompt_service.get_model_by_model_id')
+    def test_generate_system_prompt(self, mock_get_model, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
+        mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
             "duty_system_prompt": "Generate duty prompt",
@@ -803,8 +805,10 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    def test_generate_system_prompt_with_exception(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
+    @patch('backend.services.prompt_service.get_model_by_model_id')
+    def test_generate_system_prompt_with_exception(self, mock_get_model, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
+        mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
             "duty_system_prompt": "Generate duty prompt",
@@ -1101,14 +1105,17 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     def test_generate_system_prompt_error_before_streaming(
         self,
+        mock_get_model,
         mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
     ):
         """Test generate_system_prompt handles error that occurs before streaming (line 307-311)"""
         # Setup
+        mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
             "duty_system_prompt": "Generate duty prompt",
@@ -1151,14 +1158,17 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     def test_generate_system_prompt_error_during_streaming(
         self,
+        mock_get_model,
         mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
     ):
         """Test generate_system_prompt handles error that occurs during streaming (line 330-331)"""
         # Setup
+        mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
             "duty_system_prompt": "Generate duty prompt",
