@@ -8,11 +8,9 @@ from smolagents import ToolCollection
 
 from .agent_model import AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType
-from ...monitor import get_monitoring_manager
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
-monitoring_manager = get_monitoring_manager()
 
 
 def _detect_transport(url: str) -> str:
@@ -76,7 +74,6 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
         raise ValueError(f"Invalid MCP host item type: {type(mcp_host_item)}. Must be str or dict")
 
 
-@monitoring_manager.monitor_endpoint("agent_run_thread", "agent_run_thread")
 def agent_run_thread(agent_run_info: AgentRunInfo):
     try:
         mcp_host = agent_run_info.mcp_host
@@ -128,24 +125,17 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         raise ValueError(f"Error in agent_run_thread: {e}")
 
 
-@monitoring_manager.monitor_endpoint("agent_run", "agent_run")
 async def agent_run(agent_run_info: AgentRunInfo):
     observer = agent_run_info.observer
 
-    monitoring_manager.add_span_event("agent_run.started")
     ctx = copy_context()
     thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
     thread_agent.start()
-    monitoring_manager.add_span_event("agent_run.thread_started")
 
     while thread_agent.is_alive():
-        monitoring_manager.add_span_event("agent_run.get_cached_message")
         cached_message = observer.get_cached_message()
-        monitoring_manager.add_span_event(
-            "agent_run.get_cached_message_completed")
         for message in cached_message:
             yield message
-            monitoring_manager.add_span_event("agent_run.yield_message")
             if len(cached_message) < 8:
                 await asyncio.sleep(0.05)
         await asyncio.sleep(0.1)

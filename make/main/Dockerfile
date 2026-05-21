@@ -26,7 +26,7 @@ RUN uv sync --no-cache-dir $(test -n "$MIRROR" && echo "-i $MIRROR") && \
     uv cache clean
 # Layer 1: install sdk in link mode
 COPY sdk /opt/sdk
-RUN uv pip install --no-cache-dir /opt/sdk $(test -n "$MIRROR" && echo "-i $MIRROR") && \
+RUN uv pip install --no-cache-dir "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR") && \
     uv cache clean
 
 # Pre-download tiktoken cl100k_base model to avoid network issues during runtime

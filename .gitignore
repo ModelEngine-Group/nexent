@@ -19,6 +19,7 @@ docker/uploads
 docker/openssh-server
 docker/volumes/db/data
 docker/.env
+docker/monitoring/monitoring.env
 docker/.run
 docker/deploy.options
 k8s/helm/.deploy.options

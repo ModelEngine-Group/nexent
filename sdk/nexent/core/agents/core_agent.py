@@ -17,6 +17,8 @@ from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
 from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content, AgentMaxStepsError, \
     extract_code_from_text
 
+from ...monitor import get_monitoring_manager
+
 from ..utils.observer import MessageObserver, ProcessType
 from jinja2 import Template, StrictUndefined
 
@@ -390,7 +392,25 @@ Additional Args:
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
         try:
-            code_output = self.python_executor(code_action)
+            monitoring_manager = get_monitoring_manager()
+            with monitoring_manager.trace_tool_call(
+                "python_interpreter",
+                self.name,
+                {"code": code_action, "step_number": memory_step.step_number},
+            ):
+                code_output = self.python_executor(code_action)
+                monitoring_manager.set_tool_output({
+                    "output": getattr(code_output, "output", None),
+                    "is_final_answer": getattr(code_output, "is_final_answer", False),
+                    "logs": getattr(code_output, "logs", ""),
+                })
+            if getattr(code_output, "is_final_answer", False):
+                with monitoring_manager.trace_tool_call(
+                    "FinalAnswerTool",
+                    self.name,
+                    {"step_number": memory_step.step_number},
+                ):
+                    monitoring_manager.set_tool_output(code_output.output)
             execution_outputs_console = []
             if len(code_output.logs) > 0:
                 # Record execution results
@@ -701,6 +721,15 @@ You have been provided with these additional arguments, that you can access usin
             metric["compression_ratio"] = 0.0
 
         self.step_metrics.append(metric)
+        token_threshold = (
+            self.context_manager.config.token_threshold
+            if self.context_manager and self.context_manager.config.enabled
+            else None
+        )
+        get_monitoring_manager().record_agent_step_metrics(
+            metric,
+            token_threshold=token_threshold,
+        )
 
     def _handle_max_steps_reached(self, task: str) -> Any:
         """Handle the case when max steps is reached by generating final answer with streaming.
@@ -773,4 +802,3 @@ You have been provided with these additional arguments, that you can access usin
         self.memory.steps.append(final_memory_step)
 
         return model_output
-

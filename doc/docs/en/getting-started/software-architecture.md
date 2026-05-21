@@ -274,7 +274,7 @@ Real-time Input → Streaming Endpoint → Async Processing
 - **High Availability**: Multi-service redundancy, health checks, auto-restart
 - **High Performance**: Async processing, Redis caching, vector search optimization
 - **High Concurrency**: Distributed architecture, load balancing
-- **Monitoring Friendly**: Prometheus metrics, Jaeger tracing, structured logging
+- **Monitoring Friendly**: OpenTelemetry observability, Grafana Tempo tracing, structured logging
 
 ### 🔧 Developer Friendly
 - **Modular Development**: Clean layered architecture (App → Service → Database)

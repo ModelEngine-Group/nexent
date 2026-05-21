@@ -1760,6 +1760,7 @@
   "monitoring.comingSoon.feature2": "View and filter Agent logs and run history",
   "monitoring.comingSoon.feature3": "Configure alerts and operational actions for critical events",
   "monitoring.comingSoon.badge": "Coming Soon",
+  "monitoring.topbar.openDashboard": "Open monitoring dashboard",
 
   "market.title": "Agent Market",
   "market.description": "Discover and download pre-built intelligent Agents",
@@ -2380,5 +2381,6 @@
   "monitoring.comingSoon.description": "Stay tuned for real-time monitoring features across your agents.",
   "monitoring.comingSoon.feature1": "Health checks and uptime monitoring",
   "monitoring.comingSoon.feature2": "Real-time logs and alerts",
-  "monitoring.comingSoon.feature3": "Performance metrics and dashboards"
+  "monitoring.comingSoon.feature3": "Performance metrics and dashboards",
+  "monitoring.topbar.openDashboard": "Open monitoring dashboard"
 }
