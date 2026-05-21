@@ -77,7 +77,7 @@ async def fetch_haotian_knowledge_sets_impl(
         )
 
     headers = {"Authorization": external_authorization}
-    async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True, trust_env=False) as client:
         resp = await client.get(list_url, headers=headers)
         if resp.status_code >= 400:
             raise RuntimeError(

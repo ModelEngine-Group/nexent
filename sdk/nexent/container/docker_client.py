@@ -7,7 +7,6 @@ import logging
 import socket
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-import uuid
 
 import docker
 from docker.errors import APIError, DockerException, NotFound
@@ -184,8 +183,7 @@ class DockerContainerClient(ContainerClient):
                             "-" else "-" for c in service_name)
         tenant_part = (tenant_id or "")[:8]
         user_part = (user_id or "")[:8]
-        uuid_part = uuid.uuid4().hex[:8]
-        return f"mcp-{safe_name}-{tenant_part}-{user_part}-{uuid_part}"
+        return f"mcp-{safe_name}-{tenant_part}-{user_part}"
 
     async def start_container(
         self,
