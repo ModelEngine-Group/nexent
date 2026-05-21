@@ -116,6 +116,7 @@ services:
       - "5014:5014" # Runtime service port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ${ROOT_DIR}/skills:/mnt/nexent-data/skills:ro
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]
@@ -173,6 +174,7 @@ services:
       - "5013:5013" # Northbound service port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ${ROOT_DIR}/skills:/mnt/nexent-data/skills:ro
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]

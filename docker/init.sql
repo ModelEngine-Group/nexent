@@ -1090,6 +1090,7 @@ COMMENT ON COLUMN nexent.user_token_usage_log_t.delete_flag IS 'Soft delete flag
 CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
     skill_id SERIAL4 PRIMARY KEY NOT NULL,
     skill_name VARCHAR(100) NOT NULL,
+    tenant_id VARCHAR(100),
     skill_description VARCHAR(1000),
     skill_tags JSON,
     skill_content TEXT,
@@ -1110,7 +1111,8 @@ COMMENT ON TABLE nexent.ag_skill_info_t IS 'Skill information table for managing
 
 -- Add comments to the columns
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_id IS 'Skill ID, unique primary key';
-COMMENT ON COLUMN nexent.ag_skill_info_t.skill_name IS 'Skill name, globally unique';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_name IS 'Skill name, unique within tenant';
+COMMENT ON COLUMN nexent.ag_skill_info_t.tenant_id IS 'Tenant ID for multi-tenancy. NULL for pre-existing skills.';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_description IS 'Skill description text';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_tags IS 'Skill tags stored as JSON array';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_content IS 'Skill content or prompt text';
