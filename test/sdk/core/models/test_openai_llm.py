@@ -887,33 +887,29 @@ def test_init_with_ssl_verify_false():
 
     observer = MagicMock()
 
-    # Mock httpx.Client directly (it's imported inside __init__)
-    with patch("httpx.Client") as mock_httpx_client:
+    # Mock DefaultHttpxClient from openai module
+    with patch("openai.DefaultHttpxClient") as mock_httpx_client:
         mock_httpx_client.return_value = MagicMock()
 
         # Create model with ssl_verify=False
         model = ImportedOpenAIModel(observer=observer, ssl_verify=False)
 
-        # Verify httpx.Client was called with verify=False
-        mock_httpx_client.assert_called_once()
-        call_kwargs = mock_httpx_client.call_args
-        assert call_kwargs.kwargs.get("verify") is False
+        # Verify DefaultHttpxClient was called with verify=False
+        mock_httpx_client.assert_called_once_with(verify=False)
 
 
 def test_init_with_ssl_verify_true():
-    """Test __init__ method creates http_client when ssl_verify=True (default)"""
+    """Test __init__ method doesn't create http_client when ssl_verify=True (default)"""
 
     observer = MagicMock()
 
-    # Mock httpx.Client directly (it's imported inside __init__)
-    with patch("httpx.Client") as mock_httpx_client:
+    # Mock DefaultHttpxClient from openai module
+    with patch("openai.DefaultHttpxClient") as mock_httpx_client:
         # Create model with ssl_verify=True (default)
         model = ImportedOpenAIModel(observer=observer, ssl_verify=True)
 
-        # Verify httpx.Client was called (it's always created, the verify param differs)
-        assert mock_httpx_client.call_count == 1
-        call_kwargs = mock_httpx_client.call_args
-        assert call_kwargs.kwargs.get("verify") is True
+        # Verify DefaultHttpxClient was NOT called
+        mock_httpx_client.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

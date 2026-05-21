@@ -1,86 +1,11 @@
 import json
-import os
-import sys
 import unittest
-from importlib.machinery import ModuleSpec
 from unittest.mock import patch, MagicMock
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 
-
-def _make_package_mock(module_name: str, module_dir: str) -> MagicMock:
-    """Create a MagicMock that behaves like a Python package with proper __path__."""
-    mock = MagicMock()
-    mock.__path__ = [module_dir]
-    mock.__package__ = module_name
-    mock.__spec__ = ModuleSpec(module_name, None)
-    mock.__loader__ = None
-    return mock
-
-
-# Setup paths for real modules
-backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
-database_dir = os.path.join(backend_dir, "database")
-services_dir = os.path.join(backend_dir, "services")
-utils_dir = os.path.join(backend_dir, "utils")
-agents_dir = os.path.join(backend_dir, "agents")
-
-# Mock backend package and its sub-packages as proper packages
-backend_mock = _make_package_mock("backend", backend_dir)
-sys.modules['backend'] = backend_mock
-
-database_mock = _make_package_mock("database", database_dir)
-sys.modules['database'] = database_mock
-backend_mock.database = database_mock
-
-services_mock = _make_package_mock("services", services_dir)
-sys.modules['services'] = services_mock
-
-utils_mock = _make_package_mock("utils", utils_dir)
-sys.modules['utils'] = utils_mock
-backend_mock.utils = utils_mock
-
-agents_mock = _make_package_mock("agents", agents_dir)
-sys.modules['agents'] = agents_mock
-backend_mock.agents = agents_mock
-
-# Mock backend.database submodules for patching
-sys.modules['backend.database'] = database_mock
-sys.modules['backend.database.model_management_db'] = MagicMock()
-sys.modules['backend.database.agent_db'] = MagicMock()
-sys.modules['backend.database.tool_db'] = MagicMock()
-sys.modules['backend.database.knowledge_db'] = MagicMock()
-sys.modules['backend.database.client'] = MagicMock()
-sys.modules['backend.database.attachment_db'] = MagicMock()
-sys.modules['backend.database.group_db'] = MagicMock()
-sys.modules['backend.database.user_tenant_db'] = MagicMock()
-sys.modules['backend.database.remote_mcp_db'] = MagicMock()
-sys.modules['backend.database.agent_version_db'] = MagicMock()
-sys.modules['backend.database.a2a_agent_db'] = MagicMock()
-
-# Mock services submodules (NOT backend.services which blocks import of prompt_service)
-sys.modules['services.agent_service'] = MagicMock()
-sys.modules['services.file_management_service'] = MagicMock()
-sys.modules['services.conversation_management_service'] = MagicMock()
-sys.modules['services.memory_config_service'] = MagicMock()
-sys.modules['services.agent_version_service'] = MagicMock()
-
-# Mock agents submodules
-sys.modules['agents.create_agent_info'] = MagicMock()
-sys.modules['backend.agents.create_agent_info'] = MagicMock()
-
-# Mock utils submodules to avoid llm_utils import triggering database connection
-sys.modules['utils.llm_utils'] = MagicMock()
-sys.modules['utils.prompt_template_utils'] = MagicMock()
-sys.modules['utils.config_utils'] = MagicMock()
-sys.modules['utils.auth_utils'] = MagicMock()
-sys.modules['utils.str_utils'] = MagicMock()
-sys.modules['backend.utils.llm_utils'] = MagicMock()
-sys.modules['backend.utils.prompt_template_utils'] = MagicMock()
-sys.modules['backend.utils.config_utils'] = MagicMock()
-sys.modules['backend.utils.auth_utils'] = MagicMock()
-
 # Mock boto3 and minio client before importing the module under test
+import sys
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
@@ -752,13 +677,10 @@ class TestPromptService(unittest.TestCase):
             expected_data = f"data: {json.dumps({'success': True, 'data': test_data[i]}, ensure_ascii=False)}\n\n"
             self.assertEqual(result, expected_data)
 
-    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    def test_generate_system_prompt(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm, mock_get_model):
-        # Mock model config to avoid concurrency limit issue
-        mock_get_model.return_value = {"concurrency_limit": None}
+    def test_generate_system_prompt(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
@@ -878,13 +800,10 @@ class TestPromptService(unittest.TestCase):
             self.assertIsInstance(result["is_complete"], bool)
             self.assertIsInstance(result["content"], str)
 
-    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    def test_generate_system_prompt_with_exception(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm, mock_get_model):
-        # Mock model config to avoid concurrency limit issue
-        mock_get_model.return_value = {"concurrency_limit": None}
+    def test_generate_system_prompt_with_exception(self, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
@@ -1179,7 +1098,6 @@ class TestPromptService(unittest.TestCase):
 
         self.assertIn("Failed to generate prompt content", str(context.exception))
 
-    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.resolve_prompt_generate_template')
@@ -1188,10 +1106,7 @@ class TestPromptService(unittest.TestCase):
         mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
-        mock_get_model,
     ):
-        # Mock model config to avoid concurrency limit issue
-        mock_get_model.return_value = {"concurrency_limit": None}
         """Test generate_system_prompt handles error that occurs before streaming (line 307-311)"""
         # Setup
         mock_prompt_config = {
@@ -1233,7 +1148,6 @@ class TestPromptService(unittest.TestCase):
 
         self.assertIn("LLM connection error", str(context.exception))
 
-    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.resolve_prompt_generate_template')
@@ -1242,10 +1156,7 @@ class TestPromptService(unittest.TestCase):
         mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
-        mock_get_model,
     ):
-        # Mock model config to avoid concurrency limit issue
-        mock_get_model.return_value = {"concurrency_limit": None}
         """Test generate_system_prompt handles error that occurs during streaming (line 330-331)"""
         # Setup
         mock_prompt_config = {

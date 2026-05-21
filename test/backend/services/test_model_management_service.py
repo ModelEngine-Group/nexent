@@ -14,48 +14,12 @@ if backend_dir not in sys.path:
 
 
 # Stub external modules required by consts.model before importing services
-# Use namespace packages that delegate to the real nexent package for proper submodule traversal
-_real_nexent_base = os.path.abspath(os.path.join(current_dir, "../../../sdk/nexent"))
-
-nexent_pkg = types.ModuleType("nexent")
-nexent_pkg.__path__ = [_real_nexent_base]
-nexent_pkg.__name__ = "nexent"
-sys.modules["nexent"] = nexent_pkg
-
-nexent_core_pkg = types.ModuleType("nexent.core")
-nexent_core_pkg.__path__ = [os.path.join(_real_nexent_base, "core")]
-nexent_core_pkg.__name__ = "nexent.core"
-nexent_pkg.core = nexent_core_pkg
-
-# Add MessageObserver stub - it's imported from nexent.core
-nexent_core_pkg.MessageObserver = type("MessageObserver", (), {})
-
-sys.modules["nexent.core"] = nexent_core_pkg
-
-nexent_core_models_pkg = types.ModuleType("nexent.core.models")
-nexent_core_models_pkg.__path__ = [os.path.join(_real_nexent_base, "core/models")]
-nexent_core_models_pkg.__name__ = "nexent.core.models"
-nexent_core_pkg.models = nexent_core_models_pkg
-
-# Import real models from the actual module and expose them
-try:
-    from nexent.core.models import OpenAIModel, OpenAIVLModel
-    nexent_core_models_pkg.OpenAIModel = OpenAIModel
-    nexent_core_models_pkg.OpenAIVLModel = OpenAIVLModel
-except ImportError:
-    # Fallback to stub classes if import fails
-    nexent_core_models_pkg.OpenAIModel = type("OpenAIModel", (), {})
-    nexent_core_models_pkg.OpenAIVLModel = type("OpenAIVLModel", (), {})
-
-sys.modules["nexent.core.models"] = nexent_core_models_pkg
-
-nexent_core_agents_pkg = types.ModuleType("nexent.core.agents")
-nexent_core_agents_pkg.__path__ = [os.path.join(_real_nexent_base, "core/agents")]
-nexent_core_agents_pkg.__name__ = "nexent.core.agents"
-nexent_core_pkg.agents = nexent_core_agents_pkg
-sys.modules["nexent.core.agents"] = nexent_core_agents_pkg
-
-# Stub nexent.core.agents.agent_model
+if "nexent" not in sys.modules:
+    sys.modules["nexent"] = mock.MagicMock()
+if "nexent.core" not in sys.modules:
+    sys.modules["nexent.core"] = mock.MagicMock()
+if "nexent.core.agents" not in sys.modules:
+    sys.modules["nexent.core.agents"] = mock.MagicMock()
 if "nexent.core.agents.agent_model" not in sys.modules:
     agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 
@@ -64,7 +28,6 @@ if "nexent.core.agents.agent_model" not in sys.modules:
 
     agent_model_mod.ToolConfig = ToolConfig
     sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
-    nexent_core_agents_pkg.agent_model = agent_model_mod
 
 # Stub boto3 used by backend.database.client
 if "boto3" not in sys.modules:
@@ -79,32 +42,7 @@ class _MinioClient:  # minimal stub
     pass
 
 
-def _as_dict(*args, **kwargs):
-    return {}
-
-
-def _get_db_session(*args, **kwargs):
-    class _MockSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def execute(self, *args, **kwargs):
-            class _Result:
-                rowcount = 0
-
-            return _Result()
-
-    return _MockSession()
-
-
 backend_db_client_mod.MinioClient = _MinioClient
-backend_db_client_mod.as_dict = _as_dict
-backend_db_client_mod.get_db_session = _get_db_session
-backend_db_client_mod.db_client = mock.MagicMock()
-backend_db_client_mod.minio_client = mock.MagicMock()
 sys.modules["backend.database.client"] = backend_db_client_mod
 
 # Ensure parent package exposes the submodule attribute for import machinery
@@ -120,67 +58,76 @@ except Exception:
 # Also stub database.client.MinioClient in case modules import without the 'backend.' prefix
 database_client_mod = types.ModuleType("database.client")
 database_client_mod.MinioClient = _MinioClient
-database_client_mod.as_dict = _as_dict
-database_client_mod.get_db_session = _get_db_session
-database_client_mod.db_client = mock.MagicMock()
-database_client_mod.minio_client = mock.MagicMock()
 sys.modules["database.client"] = database_client_mod
 
 if "database" in sys.modules:
     setattr(sys.modules["database"], "client", database_client_mod)
 
-# Make consts a namespace package that can delegate to real backend/consts
-_real_consts_path = os.path.abspath(os.path.join(current_dir, "../../../backend/consts"))
-consts_pkg = types.ModuleType("consts")
-consts_pkg.__path__ = [_real_consts_path]
-consts_pkg.__name__ = "consts"
-sys.modules["consts"] = consts_pkg
+# Stub consts.model to avoid deep dependencies
+consts_model_mod = types.ModuleType("consts.model")
 
-# Import real consts.const from backend and register it
-import importlib.util
-_real_consts_spec = importlib.util.spec_from_file_location(
-    "consts.const", os.path.join(_real_consts_path, "const.py")
-)
-_real_consts_mod = importlib.util.module_from_spec(_real_consts_spec)
-sys.modules["consts.const"] = _real_consts_mod
-_real_consts_spec.loader.exec_module(_real_consts_mod)
 
-# Import real consts.model from backend and register it
-_real_model_spec = importlib.util.spec_from_file_location(
-    "consts.model", os.path.join(_real_consts_path, "model.py")
-)
-_real_model_mod = importlib.util.module_from_spec(_real_model_spec)
-sys.modules["consts.model"] = _real_model_mod
-_real_model_spec.loader.exec_module(_real_model_mod)
+class _EnumItem:
+    def __init__(self, value: str):
+        self.value = value
+
+
+class _ModelConnectStatusEnum:
+    OPERATIONAL = _EnumItem("operational")
+    NOT_DETECTED = _EnumItem("not_detected")
+    DETECTING = _EnumItem("detecting")
+    UNAVAILABLE = _EnumItem("unavailable")
+
+    @staticmethod
+    def get_value(status):
+        return status or _ModelConnectStatusEnum.NOT_DETECTED.value
+
+
+consts_model_mod.ModelConnectStatusEnum = _ModelConnectStatusEnum
+sys.modules["consts.model"] = consts_model_mod
+if "consts" not in sys.modules:
+    sys.modules["consts"] = types.ModuleType("consts")
+
+# Stub consts.const required by service
+consts_const_mod = types.ModuleType("consts.const")
+consts_const_mod.LOCALHOST_IP = "127.0.0.1"
+consts_const_mod.LOCALHOST_NAME = "localhost"
+consts_const_mod.DOCKER_INTERNAL_HOST = "host.docker.internal"
+# Fields required by utils.memory_utils and services.vectordatabase_service
+consts_const_mod.MODEL_CONFIG_MAPPING = {
+    "llm": "LLM_ID", "embedding": "EMBEDDING_ID"}
+consts_const_mod.ES_HOST = "http://localhost:9200"
+consts_const_mod.ES_API_KEY = ""
+consts_const_mod.ES_USERNAME = ""
+consts_const_mod.ES_PASSWORD = ""
+sys.modules["consts.const"] = consts_const_mod
 
 # Stub sqlalchemy.sql.func used by utils.config_utils
-# Import the real module first to preserve SQLAlchemy's internal imports,
-# then add the func attribute if it doesn't exist
-import sqlalchemy.sql as _real_sql
+sqlalchemy_sql_mod = types.ModuleType("sqlalchemy.sql")
 
-if not hasattr(_real_sql, "func") or _real_sql.func is None:
-    _real_sql.func = types.ModuleType("sqlalchemy.sql.func")
-sys.modules["sqlalchemy.sql"] = _real_sql
-sys.modules["sqlalchemy.sql.func"] = _real_sql.func
+
+class _Func:
+    pass
+
+
+sqlalchemy_sql_mod.func = _Func()
+sys.modules["sqlalchemy.sql"] = sqlalchemy_sql_mod
 
 # Stub consts.provider used by service
 consts_provider_mod = types.ModuleType("consts.provider")
 
 
 class _ProviderEnum:
-    SILICON = "silicon"
-    MODELENGINE = "modelengine"
-    DASHSCOPE = "dashscope"
-    TOKENPONY = "tokenpony"
+    SILICON = _EnumItem("silicon")
+    MODELENGINE = _EnumItem("modelengine")
+    DASHSCOPE = _EnumItem("dashscope")
+    TOKENPONY = _EnumItem("tokenpony")
 
 
 consts_provider_mod.ProviderEnum = _ProviderEnum
 consts_provider_mod.SILICON_BASE_URL = "http://silicon.test"
-consts_provider_mod.SILICON_GET_URL = "http://silicon.test/models"
 consts_provider_mod.DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
-consts_provider_mod.DASHSCOPE_GET_URL = "https://dashscope.aliyuncs.com/api/v1/models"
 consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
-consts_provider_mod.TOKENPONY_GET_URL = "https://api.tokenpony.cn/v1/models"
 sys.modules["consts.provider"] = consts_provider_mod
 
 # Stub services.model_provider_service used by service
@@ -242,10 +189,7 @@ utils_name_mod.sort_models_by_id = _sort_models_by_id
 sys.modules["utils.model_name_utils"] = utils_name_mod
 
 # Stub database.model_management_db to avoid importing heavy DB client
-_real_database_path = os.path.abspath(os.path.join(current_dir, "../../../backend/database"))
 database_mod = types.ModuleType("database")
-database_mod.__path__ = [_real_database_path]
-database_mod.__name__ = "database"
 db_mm_mod = types.ModuleType("database.model_management_db")
 
 
@@ -266,12 +210,6 @@ def _get_models_by_display_name(*args, **kwargs):
     return []
 
 
-def _get_model_by_name_factory(*args, **kwargs):
-    """Return None for model name factory lookups in tests."""
-    return None
-
-
-db_mm_mod.get_model_by_name_factory = _get_model_by_name_factory
 db_mm_mod.create_model_record = _noop
 db_mm_mod.delete_model_record = _noop
 db_mm_mod.get_model_by_display_name = _noop
@@ -294,10 +232,8 @@ def _get_model_by_model_id(model_id: int, tenant_id: str):
 
 db_mm_mod.get_model_by_model_id = _get_model_by_model_id
 db_mm_mod.update_model_record = _noop
-db_mm_mod.model_management_db = db_mm_mod
 sys.modules["database"] = database_mod
 sys.modules["database.model_management_db"] = db_mm_mod
-sys.modules["backend.database.model_management_db"] = db_mm_mod
 
 # Stub database.tenant_config_db required by utils.config_utils
 db_tenant_cfg_mod = types.ModuleType("database.tenant_config_db")
@@ -484,8 +420,7 @@ async def test_create_model_for_tenant_multi_embedding_creates_two_records():
 
     with mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
-            mock.patch.object(svc, "split_repo_name", return_value=("openai", "clip")), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=1536)):
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "clip")):
 
         user_id = "u1"
         tenant_id = "t1"
@@ -601,7 +536,7 @@ async def test_create_provider_models_for_tenant_success():
     models = [{"id": "silicon/a"}, {"id": "silicon/b"}]
 
     with mock.patch.object(svc, "get_provider_models", new=mock.AsyncMock(return_value=models)) as mock_get, \
-            mock.patch.object(svc, "merge_existing_model_attributes", return_value=models) as mock_merge, \
+            mock.patch.object(svc, "merge_existing_model_tokens", return_value=models) as mock_merge, \
             mock.patch.object(svc, "sort_models_by_id", side_effect=lambda m: m) as mock_sort:
 
         out = await svc.create_provider_models_for_tenant("t1", req)
@@ -932,22 +867,18 @@ async def test_batch_update_models_for_tenant_success():
     svc = import_svc()
 
     models = [{"model_id": "a"}, {"model_id": "b"}]
-    mock_model_record = {"model_id": 1}
-    with mock.patch.object(svc, "update_model_record") as mock_update, \
-            mock.patch.object(svc, "get_model_by_name_factory", return_value=mock_model_record):
+    with mock.patch.object(svc, "update_model_record") as mock_update:
         await svc.batch_update_models_for_tenant("u1", "t1", models)
         assert mock_update.call_count == 2
-        # update_data is models[i] with model_id/model_name excluded -> {}
-        mock_update.assert_any_call(1, {}, "u1", "t1")
+        mock_update.assert_any_call("a", models[0], "u1", "t1")
+        mock_update.assert_any_call("b", models[1], "u1", "t1")
 
 
 async def test_batch_update_models_for_tenant_exception():
     svc = import_svc()
 
     models = [{"model_id": "a"}]
-    mock_model_record = {"model_id": 1}
-    with mock.patch.object(svc, "update_model_record", side_effect=Exception("oops")), \
-            mock.patch.object(svc, "get_model_by_name_factory", return_value=mock_model_record):
+    with mock.patch.object(svc, "update_model_record", side_effect=Exception("oops")):
         with pytest.raises(Exception) as exc:
             await svc.batch_update_models_for_tenant("u1", "t1", models)
         assert "Failed to batch update models" in str(exc.value)
