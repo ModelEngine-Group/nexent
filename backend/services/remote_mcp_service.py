@@ -4,9 +4,11 @@ import tempfile
 import asyncio
 import socket
 import random
+import httpx
 
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
+from httpx import AsyncClient
 
 from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
 from consts.exceptions import (
@@ -42,6 +44,18 @@ from services.tool_configuration_service import get_tool_from_remote_mcp_server
 
 logger = logging.getLogger("remote_mcp_service")
 
+def create_httpx_client(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> AsyncClient:
+    return AsyncClient(
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        trust_env=False,
+        verify=False, 
+    )
 
 # ---------------------------------------------------------------------------
 # Health Check
@@ -58,11 +72,24 @@ async def mcp_server_health(remote_mcp_server: str, authorization_token: str | N
             headers.update(custom_headers)
 
         if url_stripped.endswith("/sse"):
-            transport = SSETransport(url=url_stripped, headers=headers)
+            transport = SSETransport(
+                url=url_stripped,
+                headers=headers,
+                httpx_client_factory=create_httpx_client
+            )
         elif url_stripped.endswith("/mcp"):
-            transport = StreamableHttpTransport(url=url_stripped, headers=headers)
+            transport = StreamableHttpTransport(
+                url=url_stripped,
+                headers=headers,
+                httpx_client_factory=create_httpx_client
+            )
         else:
-            transport = StreamableHttpTransport(url=url_stripped, headers=headers)
+            # Default to StreamableHttpTransport for unrecognized formats
+            transport = StreamableHttpTransport(
+                url=url_stripped,
+                headers=headers,
+                httpx_client_factory=create_httpx_client
+            )
 
         client = Client(transport=transport)
         async with client:
