@@ -397,6 +397,7 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.enable_context_manager IS 'Whether to
 -- Create index for is_new queries
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
 ON nexent.ag_tenant_agent_t (tenant_id, is_new)
+WHERE delete_flag = 'N';
 
 CREATE TABLE IF NOT EXISTS nexent.ag_prompt_template_t (
     template_id SERIAL PRIMARY KEY,
