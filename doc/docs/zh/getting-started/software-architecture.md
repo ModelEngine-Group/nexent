@@ -274,7 +274,7 @@ Docker Compose 编排：
 - **高可用性**：多服务冗余、健康检查、自动重启
 - **高性能**：异步处理、Redis 缓存、向量搜索优化
 - **高并发**：分布式架构、负载均衡
-- **监控友好**：Prometheus 指标、Jaeger 追踪、结构化日志
+- **监控友好**：OpenTelemetry 可观测性、Grafana Tempo 追踪、结构化日志
 
 ### 🔧 开发友好
 - **模块化开发**：清晰的分层架构（App → Service → Database）

@@ -4,12 +4,14 @@ from ...monitor.monitoring import (
     _monitoring_operation,
     _monitoring_display_name,
     _detect_model_type,
+    OPENINFERENCE_INPUT_VALUE,
 )
 from ..utils.token_estimation import estimate_tokens_text
 import logging
 import threading
 import asyncio
 import time
+import json
 from typing import List, Optional, Dict, Any
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -76,6 +78,39 @@ class OpenAIModel(OpenAIServerModel):
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, _token_tracker=None, **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
+
+        if _token_tracker is None:
+            invocation_parameters = {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                **{k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))},
+            }
+            trace_attributes = {
+                "llm.invocation_parameters": json.dumps(invocation_parameters, ensure_ascii=False),
+                "model_id": self.model_id,
+            }
+            input_attr_key = (
+                OPENINFERENCE_INPUT_VALUE
+                if isinstance(OPENINFERENCE_INPUT_VALUE, str)
+                else "input.value"
+            )
+            trace_attributes[input_attr_key] = messages or []
+
+            with self._monitoring.trace_llm_request(
+                f"{self.display_name or self.model_id}.generate",
+                self.model_id,
+                **trace_attributes,
+            ) as span:
+                token_tracker = self._monitoring.create_token_tracker(
+                    self.model_id, span)
+                return self.__call__(
+                    messages=messages,
+                    stop_sequences=stop_sequences,
+                    response_format=response_format,
+                    tools_to_call_from=tools_to_call_from,
+                    _token_tracker=token_tracker,
+                    **kwargs,
+                )
 
         token_tracker = _token_tracker or self._monitoring.create_token_tracker(
             self.model_id)
@@ -234,6 +269,7 @@ class OpenAIModel(OpenAIServerModel):
 
             if token_tracker:
                 total_duration = time.time() - stream_start_time
+                self._monitoring.set_openinference_output(model_output)
                 self._monitoring.add_span_event("completion_finished", {
                     "total_duration": total_duration,
                     "output_length": len(model_output),

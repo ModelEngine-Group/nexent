@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -10,7 +10,6 @@ import {
   Button,
   Typography,
   Space,
-  Switch,
   App,
   Popover,
 } from "antd";
@@ -19,15 +18,16 @@ import {
   LockKeyhole,
   ShieldCheck,
   KeyRound,
-  BookMarked,
   HelpCircle,
   Users,
 } from "lucide-react";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { AuthFormValues } from "@/types/auth";
+import type { AuthFormValues } from "@/types/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import { authEventUtils } from "@/lib/authEvents";
+import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
 
 const { Text } = Typography;
@@ -35,6 +35,7 @@ const { Text } = Typography;
 export function RegisterModal() {
   const {
     isRegisterModalOpen,
+    registerModalOptions,
     isAuthenticated,
     closeRegisterModal,
     openLoginModal,
@@ -54,6 +55,7 @@ export function RegisterModal() {
   }>({ target: "", message: "" });
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const isOAuthCompletion = registerModalOptions?.mode === "oauth_complete";
 
   const validateEmail = (email: string): boolean => {
     if (!email) return false;
@@ -73,6 +75,82 @@ export function RegisterModal() {
     setPasswordError({ target: "", message: "" });
     form.resetFields();
   };
+
+  const setInviteCodeError = (errorMsg: string, value?: string) => {
+    message.error(errorMsg);
+    form.setFields([
+      {
+        name: "inviteCode",
+        errors: [errorMsg],
+        value,
+      },
+    ]);
+  };
+
+  const setPasswordFieldError = (errorMsg: string, value?: string) => {
+    message.error(errorMsg);
+    setPasswordError({ target: "password", message: errorMsg });
+    form.setFields([
+      {
+        name: "password",
+        errors: [errorMsg],
+        value,
+      },
+    ]);
+  };
+
+  const setEmailFieldError = (errorMsg: string, value?: string) => {
+    message.error(errorMsg);
+    setEmailError(errorMsg);
+    form.setFields([
+      {
+        name: "email",
+        errors: [errorMsg],
+        value,
+      },
+    ]);
+  };
+
+  const handleOAuthCompleteError = (
+    errorKey: string,
+    values: AuthFormValues
+  ) => {
+    const errorMsg = t(errorKey);
+
+    if (errorKey === "auth.inviteCodeInvalid") {
+      setInviteCodeError(errorMsg, values.inviteCode);
+      return;
+    }
+
+    if (errorKey === "auth.passwordMinLength") {
+      setPasswordFieldError(errorMsg, values.password);
+      return;
+    }
+
+    if (
+      errorKey === "auth.invalidEmailFormat" ||
+      errorKey === "auth.emailRequired" ||
+      errorKey === "auth.oauthEmailAlreadyExists"
+    ) {
+      setEmailFieldError(errorMsg, values.email);
+      return;
+    }
+
+    message.error(errorMsg);
+  };
+
+  useEffect(() => {
+    if (!isRegisterModalOpen) return;
+
+    setEmailError("");
+    setPasswordError({ target: "", message: "" });
+    form.resetFields();
+    if (registerModalOptions?.email) {
+      form.setFieldsValue({ email: registerModalOptions.email });
+    } else if (isOAuthCompletion) {
+      form.setFieldsValue({ email: "" });
+    }
+  }, [form, isOAuthCompletion, isRegisterModalOpen, registerModalOptions]);
 
   const handleSubmit = async (values: AuthFormValues) => {
     setIsLoading(true);
@@ -103,6 +181,32 @@ export function RegisterModal() {
     }
 
     try {
+      if (isOAuthCompletion) {
+        const result = await oauthService.completeOAuth({
+          email: registerModalOptions?.emailReadOnly ? undefined : values.email,
+          invite_code: values.inviteCode || "",
+          password: values.password,
+        });
+
+        if (result.error || !result.data) {
+          handleOAuthCompleteError(
+            result.errorKey || "auth.oauthCompleteFailed",
+            values
+          );
+          setIsLoading(false);
+          return;
+        }
+
+        resetForm();
+        message.success(t("auth.oauthCompleteSuccess"));
+        authEventUtils.emitRegisterSuccess();
+        authEventUtils.emitLoginSuccess();
+
+        const locale = pathname.split("/").find(Boolean) || "zh";
+        window.location.href = `/${locale}`;
+        return;
+      }
+
       await register(
         values.email,
         values.password,
@@ -144,6 +248,12 @@ export function RegisterModal() {
       // process the specific error type returned by the backend (based on HTTP status code and error_type)
       const httpStatusCode = error?.code;
       const errorType = error?.message;
+
+      if (isOAuthCompletion) {
+        handleOAuthCompleteError("auth.oauthCompleteFailed", values);
+        setIsLoading(false);
+        return;
+      }
 
       // HTTP 409 Conflict
       if (httpStatusCode === 409 || errorType === "EMAIL_ALREADY_EXISTS") {
@@ -263,6 +373,12 @@ export function RegisterModal() {
     setPasswordError({ target: "", message: "" });
     closeRegisterModal();
 
+    if (isOAuthCompletion) {
+      const locale = pathname.split("/").find(Boolean) || "zh";
+      router.push(`/${locale}`);
+      return;
+    }
+
     // If user manually cancels registration from a protected page,
     // redirect back to home instead of keeping them on the restricted page
     if (!isAuthenticated && !isSpeedMode) {
@@ -340,7 +456,9 @@ export function RegisterModal() {
     <Modal
       title={
         <div className="text-center text-xl font-bold mt-3">
-          {t("auth.registerTitle")}
+          {isOAuthCompletion
+            ? t("auth.oauthCompleteTitle")
+            : t("auth.registerTitle")}
         </div>
       }
       open={isRegisterModalOpen}
@@ -383,6 +501,7 @@ export function RegisterModal() {
               prefix={<UserRound className="text-gray-400" size={16} />}
               placeholder="your@email.com"
               size="large"
+              disabled={isOAuthCompletion && registerModalOptions?.emailReadOnly}
               onChange={handleEmailInputChange}
             />
           </Form.Item>
@@ -576,20 +695,28 @@ export function RegisterModal() {
               block
               size="large"
               className="mt-2"
-              disabled={authServiceUnavailable}
+              disabled={!isOAuthCompletion && authServiceUnavailable}
             >
-              {isLoading? t("auth.registering"): t("auth.register")}
+              {isLoading
+                ? isOAuthCompletion
+                  ? t("auth.oauthCompleting")
+                  : t("auth.registering")
+                : isOAuthCompletion
+                  ? t("auth.oauthCompleteSubmit")
+                  : t("auth.register")}
             </Button>
           </Form.Item>
 
-          <div className="text-center">
-            <Space>
-              <Text type="secondary">{t("auth.hasAccount")}</Text>
-              <Button type="link" onClick={handleLoginClick} className="p-0">
-                {t("auth.loginNow")}
-              </Button>
-            </Space>
-          </div>
+          {!isOAuthCompletion && (
+            <div className="text-center">
+              <Space>
+                <Text type="secondary">{t("auth.hasAccount")}</Text>
+                <Button type="link" onClick={handleLoginClick} className="p-0">
+                  {t("auth.loginNow")}
+                </Button>
+              </Space>
+            </div>
+          )}
         </Form>
       </div>
     </Modal>
