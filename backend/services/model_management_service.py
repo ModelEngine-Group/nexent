@@ -12,8 +12,7 @@ from database.model_management_db import (
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
-    update_model_record,
-    update_model_record_by_model_name,
+    update_model_record
 )
 from services.model_provider_service import (
     prepare_model_dict,
