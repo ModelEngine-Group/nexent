@@ -9,14 +9,15 @@ from database.model_management_db import (
     create_model_record,
     delete_model_record,
     get_model_by_display_name,
+    get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
-    update_model_record,
+    update_model_record
 )
 from services.model_provider_service import (
     prepare_model_dict,
-    merge_existing_model_tokens,
+    merge_existing_model_attributes,
     get_provider_models,
 )
 from services.model_health_service import embedding_dimension_check
@@ -45,9 +46,15 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                 model_base_url.replace(LOCALHOST_NAME, DOCKER_INTERNAL_HOST)
                 .replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
             )
-        model_data['ssl_verify'] = True
-        if "open/router" in model_base_url:
-            model_data['ssl_verify'] = False
+        # Auto-set ssl_verify based on api_key:
+        # - Empty api_key (local/LAN services) -> ssl_verify=False
+        # - "open/router" URL -> ssl_verify=False
+        # - Otherwise -> ssl_verify=True
+        model_api_key = model_data.get("api_key", "")
+        if not model_api_key or "open/router" in model_base_url:
+            model_data["ssl_verify"] = False
+        else:
+            model_data["ssl_verify"] = True
         # Split model_name into repo and name
         model_repo, model_name = split_repo_name(
             model_data["model_name"]) if model_data.get("model_name") else ("", "")
@@ -114,8 +121,8 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
         # Get provider model list
         model_list = await get_provider_models(provider_request)
 
-        # Merge existing model's max_tokens attribute
-        model_list = merge_existing_model_tokens(
+        # Merge existing model's attributes (max_tokens, api_key, timeout_seconds, concurrency_limit)
+        model_list = merge_existing_model_attributes(
             model_list, tenant_id, provider_request["provider"], provider_request["model_type"])
 
         # Sort model list by ID
@@ -251,6 +258,15 @@ async def update_single_model_for_tenant(
             m.get("model_type") == "multi_embedding" for m in existing_models
         )
 
+        # Auto-set ssl_verify based on api_key if provided:
+        # - Empty api_key -> ssl_verify=False
+        # - Otherwise -> ssl_verify=True
+        if "api_key" in model_data:
+            if not model_data["api_key"]:
+                model_data["ssl_verify"] = False
+            else:
+                model_data["ssl_verify"] = True
+
         if has_multi_embedding:
             # Update both embedding and multi_embedding records
             for model in existing_models:
@@ -276,12 +292,36 @@ async def update_single_model_for_tenant(
 
 
 async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_list: List[Dict[str, Any]]):
-    """Batch update models for a tenant."""
+    """Batch update models for a tenant by model_id or model_name."""
     try:
         for model in model_list:
-            update_model_record(model["model_id"], model, user_id, tenant_id)
+            # Build update data excluding id fields
+            update_data = {k: v for k, v in model.items() if k not in ["model_id", "model_name"]}
 
-        logging.debug("Batch update models successfully")
+            model_id_or_name = model.get("model_id") or model.get("model_name")
+
+            # Check if model_id is a numeric string (primary key)
+            if model_id_or_name and model_id_or_name.isdigit():
+                update_model_record(int(model_id_or_name), update_data, user_id, tenant_id)
+            else:
+                # Parse "model_repo/model_name" format from frontend's model_id field
+                if "/" in model_id_or_name:
+                    model_repo, model_name = model_id_or_name.split("/", 1)
+                else:
+                    model_repo = None
+                    model_name = model_id_or_name
+
+                logging.info(f"[DEBUG] Updating model by name: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}")
+
+                # Query to get model_id first, then update by primary key
+                model_record = get_model_by_name_factory(model_name, model_repo, tenant_id)
+                if not model_record:
+                    logging.warning(f"Model not found: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}")
+                    continue
+
+                update_model_record(model_record["model_id"], update_data, user_id, tenant_id)
+
+        logging.info("[DEBUG] Batch update models successfully")
     except Exception as e:
         logging.error(f"Failed to batch update models: {str(e)}")
         raise Exception(f"Failed to batch update models: {str(e)}")

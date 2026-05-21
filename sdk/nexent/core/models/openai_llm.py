@@ -25,7 +25,7 @@ logger = logging.getLogger("openai_llm")
 
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-                 ssl_verify=True, model_factory: Optional[str] = None,
+                 ssl_verify=True, timeout_seconds: Optional[float] = None, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -36,6 +36,7 @@ class OpenAIModel(OpenAIServerModel):
             top_p: Top-p sampling parameter (default: 0.95)
             ssl_verify: Whether to verify SSL certificates (default: True).
                        Set to False for local services without SSL support.
+            timeout_seconds: Timeout in seconds for HTTP requests (default: None, uses client default).
             model_factory: Provider identifier (e.g., openai, modelengine)
             display_name: Human-readable display name for monitoring
             *args: Additional positional arguments for OpenAIServerModel
@@ -49,10 +50,13 @@ class OpenAIModel(OpenAIServerModel):
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
 
-        # Create http_client based on ssl_verify parameter
-        if not ssl_verify:
+        # Create http_client based on ssl_verify parameter and timeout
+        if not ssl_verify or timeout_seconds is not None:
             from openai import DefaultHttpxClient
-            http_client = DefaultHttpxClient(verify=False)
+            client_config = {"verify": ssl_verify}
+            if timeout_seconds is not None:
+                client_config["timeout"] = timeout_seconds
+            http_client = DefaultHttpxClient(**client_config)
             client_kwargs = kwargs.get('client_kwargs', {})
             client_kwargs['http_client'] = http_client
             kwargs['client_kwargs'] = client_kwargs

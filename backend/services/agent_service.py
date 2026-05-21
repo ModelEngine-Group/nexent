@@ -20,6 +20,7 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
 from consts.exceptions import MemoryPreparationException
+from consts.agent_unavailable_reasons import AgentUnavailableReason
 from consts.model import (
     AgentInfoRequest,
     AgentRequest,
@@ -1585,8 +1586,8 @@ def _apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> Non
             for duplicate_entry in sorted_entries[1:]:
                 duplicate_entry["unavailable_reasons"].append(reason_key)
 
-    _mark_duplicates(name_groups, "duplicate_name")
-    _mark_duplicates(display_name_groups, "duplicate_display_name")
+    _mark_duplicates(name_groups, AgentUnavailableReason.DUPLICATE_NAME)
+    _mark_duplicates(display_name_groups, AgentUnavailableReason.DUPLICATE_DISPLAY_NAME)
 
 
 def _collect_model_availability_reasons(agent: dict, tenant_id: str, model_cache: Dict[int, Optional[dict]]) -> list[str]:
@@ -1598,7 +1599,7 @@ def _collect_model_availability_reasons(agent: dict, tenant_id: str, model_cache
         model_id=agent.get("model_id"),
         tenant_id=tenant_id,
         model_cache=model_cache,
-        reason_key="model_unavailable"
+        reason_key=AgentUnavailableReason.MODEL_UNAVAILABLE
     ))
 
     return reasons
@@ -1656,7 +1657,7 @@ def check_agent_availability(
         agent_info = search_agent_info_by_agent_id(agent_id, tenant_id)
 
     if not agent_info:
-        return False, ["agent_not_found"]
+        return False, [AgentUnavailableReason.AGENT_NOT_FOUND]
 
     # Check tool availability
     tool_info = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
@@ -1664,7 +1665,7 @@ def check_agent_availability(
     if tool_id_list:
         tool_statuses = check_tool_is_available(tool_id_list)
         if not all(tool_statuses):
-            unavailable_reasons.append("tool_unavailable")
+            unavailable_reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
 
     # Check model availability
     model_reasons = _collect_model_availability_reasons(
