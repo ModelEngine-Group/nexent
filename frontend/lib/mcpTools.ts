@@ -69,7 +69,7 @@ export const filterServiceCards = (
   return services.filter((item) => {
     return (
       item.name.toLowerCase().includes(keyword) ||
-      item.description.toLowerCase().includes(keyword) ||
+      (item.description ?? "").toLowerCase().includes(keyword) ||
       item.tags.some((tag) => tag.toLowerCase().includes(keyword))
     );
   });

@@ -115,11 +115,6 @@ export default function McpCommunityDetailModal({
                   value={serverTypeText}
                 />
                 <InfoRow
-                  icon={<Globe className="h-3.5 w-3.5" />}
-                  label={t("mcpTools.detail.source")}
-                  value={sourceText}
-                />
-                <InfoRow
                   icon={<Calendar className="h-3.5 w-3.5" />}
                   label={t("mcpTools.community.publishedAt")}
                   value={formatRegistryDate(service.createdAt)}

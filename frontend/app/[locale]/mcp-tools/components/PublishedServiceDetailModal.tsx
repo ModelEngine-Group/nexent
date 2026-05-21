@@ -283,11 +283,6 @@ export default function PublishedServiceDetailModal({
                   value={t(getTransportLabelKey(service.transportType))}
                 />
                 <InfoRow
-                  icon={<Globe className="h-3.5 w-3.5" />}
-                  label={t("mcpTools.detail.source")}
-                  value={t("mcpTools.source.community")}
-                />
-                <InfoRow
                   icon={<Calendar className="h-3.5 w-3.5" />}
                   label={t("mcpTools.detail.createdAt")}
                   value={formatRegistryDate(service.createdAt)}
