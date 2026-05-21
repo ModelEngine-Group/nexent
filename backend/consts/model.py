@@ -42,6 +42,13 @@ class UserSignInRequest(BaseModel):
     password: str
 
 
+class OAuthCompleteRequest(BaseModel):
+    """Complete a pending OAuth signup."""
+    email: Optional[EmailStr] = None
+    password: str = Field(..., min_length=6)
+    invite_code: str = Field(..., min_length=1)
+
+
 class UserUpdateRequest(BaseModel):
     """User update request model"""
     username: Optional[str] = Field(None, min_length=1, max_length=50)
@@ -123,6 +130,8 @@ class ModelRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = None
     access_token: Optional[str] = None
+    timeout_seconds: Optional[int] = None
+    concurrency_limit: Optional[int] = None
 
 
 class ProviderModelRequest(BaseModel):
@@ -824,6 +833,8 @@ class ManageTenantModelCreateRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = Field(None, description="Application ID for STT models (e.g., Volcano Engine)")
     access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
+    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
+    concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
 
 
 class ManageTenantModelUpdateRequest(BaseModel):
@@ -844,6 +855,8 @@ class ManageTenantModelUpdateRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = Field(None, description="Application ID for STT models")
     access_token: Optional[str] = Field(None, description="Access token for STT models")
+    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
+    concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):

@@ -1565,10 +1565,21 @@ export default function ToolConfigModal({
         case TOOL_PARAM_TYPES.ARRAY:
         case TOOL_PARAM_TYPES.OBJECT:
         default:
-          // Check if parameter name contains "password" for secure input
-          const isPasswordType = param.name.toLowerCase().includes("password");
+          // Check if parameter name indicates a secure/sensitive field
+          const sensitivePatterns = [
+            "password",
+            "authorization",
+            "api_key",
+            "apikey",
+            "api-key",
+            "secret",
+            "token",
+          ];
+          const isSecureField = sensitivePatterns.some((pattern) =>
+            param.name.toLowerCase().includes(pattern)
+          );
 
-          if (isPasswordType) {
+          if (isSecureField) {
             return (
               <Input.Password
                 placeholder={t("toolConfig.input.string.placeholder", {

@@ -3183,7 +3183,8 @@ class TestGetLlmModel:
             api_base="http://api.example.com",
             api_key="test_api_key",
             max_context_tokens=4096,
-            ssl_verify=True
+            ssl_verify=True,
+            timeout_seconds=None
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})

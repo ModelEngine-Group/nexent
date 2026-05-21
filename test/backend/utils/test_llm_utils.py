@@ -147,6 +147,7 @@ class TestCallLLMForSystemPrompt:
             top_p=0.95,
             ssl_verify=True,
             display_name=None,
+            timeout_seconds=None,
         )
 
     def test_call_llm_for_system_prompt_exception(self, mocker: MockFixture):

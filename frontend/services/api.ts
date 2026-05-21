@@ -24,6 +24,8 @@ export const API_ENDPOINTS = {
     providers: `${API_BASE_URL}/user/oauth/providers`,
     authorize: `${API_BASE_URL}/user/oauth/authorize`,
     link: `${API_BASE_URL}/user/oauth/link`,
+    pending: `${API_BASE_URL}/user/oauth/pending`,
+    complete: `${API_BASE_URL}/user/oauth/complete`,
     accounts: `${API_BASE_URL}/user/oauth/accounts`,
     unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
   },
@@ -389,6 +391,7 @@ export const API_ENDPOINTS = {
   },
   monitoring: {
     models: `${API_BASE_URL}/monitoring/models`,
+    status: `${API_BASE_URL}/monitoring/status`,
   },
 };
 

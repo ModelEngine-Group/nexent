@@ -1,0 +1,172 @@
+enabled: true
+
+global:
+  namespace: nexent
+
+# Matches docker/start-monitoring.sh stack names:
+# otlp, collector, phoenix, langfuse, langsmith, grafana, zipkin.
+provider: otlp
+
+images:
+  otelCollector:
+    repository: otel/opentelemetry-collector-contrib
+    tag: "0.151.0"
+    pullPolicy: IfNotPresent
+  phoenix:
+    repository: arizephoenix/phoenix
+    tag: "15"
+    pullPolicy: IfNotPresent
+  tempo:
+    repository: grafana/tempo
+    tag: "2.10.5"
+    pullPolicy: IfNotPresent
+  grafana:
+    repository: grafana/grafana
+    tag: "12.4"
+    pullPolicy: IfNotPresent
+  zipkin:
+    repository: openzipkin/zipkin
+    tag: latest
+    pullPolicy: IfNotPresent
+  langfuseWeb:
+    repository: docker.io/langfuse/langfuse
+    tag: "3"
+    pullPolicy: IfNotPresent
+  langfuseWorker:
+    repository: docker.io/langfuse/langfuse-worker
+    tag: "3"
+    pullPolicy: IfNotPresent
+  clickhouse:
+    repository: docker.io/clickhouse/clickhouse-server
+    tag: "26.3-alpine"
+    pullPolicy: IfNotPresent
+  minio:
+    repository: docker.io/minio/minio
+    tag: "RELEASE.2023-12-20T01-00-02Z"
+    pullPolicy: IfNotPresent
+  redis:
+    repository: docker.io/redis
+    tag: alpine
+    pullPolicy: IfNotPresent
+  postgres:
+    repository: docker.io/postgres
+    tag: 15-alpine
+    pullPolicy: IfNotPresent
+
+collector:
+  replicaCount: 1
+  # Empty means derive from provider. Set to a config key below to override.
+  configFile: ""
+  service:
+    type: ClusterIP
+    grpcPort: 4317
+    httpPort: 4318
+  env:
+    langsmithApiKey: ""
+    langsmithProject: nexent
+    langsmithOtlpTracesEndpoint: https://api.smith.langchain.com/otel/v1/traces
+    langfuseOtlpAuthHeader: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+phoenix:
+  enabled: false
+  service:
+    type: NodePort
+    port: 6006
+    nodePort: 30006
+    grpcPort: 4317
+  storage:
+    size: 10Gi
+    hostPath: /var/lib/nexent-data/nexent-phoenix
+
+grafana:
+  enabled: false
+  adminUser: admin
+  adminPassword: nexent-grafana-admin
+  defaultLanguage: zh-Hans
+  service:
+    type: NodePort
+    port: 3002
+    nodePort: 30002
+  storage:
+    size: 5Gi
+    hostPath: /var/lib/nexent-data/nexent-grafana
+
+tempo:
+  enabled: false
+  service:
+    type: ClusterIP
+    port: 3200
+    otlpGrpcPort: 4317
+    otlpHttpPort: 4318
+  storage:
+    size: 10Gi
+    hostPath: /var/lib/nexent-data/nexent-tempo
+
+zipkin:
+  enabled: false
+  service:
+    type: NodePort
+    port: 9411
+    nodePort: 30011
+
+langfuse:
+  enabled: false
+  nextauthUrl: http://localhost:30001
+  nextauthSecret: nexent-langfuse-secret
+  salt: nexent-langfuse-salt
+  encryptionKey: "0000000000000000000000000000000000000000000000000000000000000000"
+  telemetryEnabled: "false"
+  enableExperimentalFeatures: "false"
+  init:
+    orgId: nexent
+    orgName: Nexent
+    projectId: nexent
+    projectName: Nexent
+    projectPublicKey: pk-lf-nexent-local
+    projectSecretKey: sk-lf-nexent-local
+    userEmail: admin@nexent.com
+    userName: admin
+    userPassword: nexent@4321
+  service:
+    type: NodePort
+    port: 3000
+    nodePort: 30001
+  postgres:
+    user: postgres
+    password: postgres
+    database: postgres
+    storage:
+      size: 10Gi
+      hostPath: /var/lib/nexent-data/nexent-langfuse-postgres
+  clickhouse:
+    user: clickhouse
+    password: clickhouse
+    storage:
+      dataSize: 20Gi
+      dataHostPath: /var/lib/nexent-data/nexent-langfuse-clickhouse
+      logSize: 5Gi
+      logHostPath: /var/lib/nexent-data/nexent-langfuse-clickhouse-logs
+  minio:
+    rootUser: minio
+    rootPassword: miniosecret
+    bucket: langfuse
+    storage:
+      size: 10Gi
+      hostPath: /var/lib/nexent-data/nexent-langfuse-minio
+  redis:
+    auth: myredissecret
+    storage:
+      size: 5Gi
+      hostPath: /var/lib/nexent-data/nexent-langfuse-redis
+
+persistence:
+  enabled: true
+  createPv: true
+  storageClassName: hostpath

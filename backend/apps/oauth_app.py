@@ -1,27 +1,36 @@
 import logging
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from http import HTTPStatus
 from typing import Optional
 
+from pydantic import ValidationError as PydanticValidationError
+
+from consts.model import OAuthCompleteRequest
 from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedError
 from consts.oauth_providers import get_all_provider_definitions
 from database.oauth_account_db import get_oauth_account_by_provider
 from services.oauth_service import (
+    complete_pending_oauth_account,
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
     exchange_code_for_provider_token,
+    find_supabase_user_id_by_email,
+    generate_pending_oauth_token,
     get_authorize_url,
     get_enabled_providers,
+    get_pending_oauth_info,
     get_provider_user_info,
     list_linked_accounts,
-    unlink_account, parse_state,
+    parse_state,
+    unlink_account,
 )
 from utils.auth_utils import (
     calculate_expires_at,
     generate_session_jwt,
-    get_current_user_id, get_supabase_admin_client,
+    get_current_user_id,
+    get_supabase_admin_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,44 +151,37 @@ async def callback(
             if existing_binding:
                 supabase_user_id = existing_binding["user_id"]
             else:
-                # No binding found, search/create user by email in Supabase
-                admin_client = get_supabase_admin_client()
-                if not admin_client:
-                    raise RuntimeError("Supabase admin client not available")
-
                 supabase_user_id = None
-                page = 1
-                while True:
-                    users_resp = admin_client.auth.admin.list_users(
-                        page=page, per_page=100
+                if email:
+                    admin_client = get_supabase_admin_client()
+                    if not admin_client:
+                        raise RuntimeError("Supabase admin client not available")
+                    supabase_user_id = find_supabase_user_id_by_email(
+                        admin_client,
+                        email,
                     )
-                    users = users_resp if len(users_resp) > 0 else []
-                    if not users:
-                        break
-                    for u in users:
-                        if u.email and u.email.lower() == email.lower():
-                            supabase_user_id = u.id
-                            break
-                    if supabase_user_id:
-                        break
-                    if len(users) < 100:
-                        break
-                    page += 1
 
                 if not supabase_user_id:
-                    if not email:
-                        email = f"{provider}_{provider_user_id}@oauth.nexent"
-                    create_resp = admin_client.auth.admin.create_user(
-                        {
-                            "email": email,
-                            "email_confirm": True,
-                            "user_metadata": {
-                                "full_name": username,
-                                "provider": provider,
-                            },
-                        }
+                    pending_token = generate_pending_oauth_token(
+                        provider=provider,
+                        provider_user_id=provider_user_id,
+                        provider_email=email,
+                        provider_username=username,
                     )
-                    supabase_user_id = create_resp.user.id
+                    return JSONResponse(
+                        status_code=HTTPStatus.OK,
+                        content={
+                            "message": "OAuth account information required",
+                            "data": {
+                                "requires_account_completion": True,
+                                "pending_token": pending_token,
+                                "provider": provider,
+                                "provider_username": username,
+                                "provider_email": email,
+                                "email_required": not bool(email),
+                            },
+                        },
+                    )
 
         ensure_user_tenant_exists(user_id=supabase_user_id, email=email)
 
@@ -214,6 +216,18 @@ async def callback(
             },
         )
 
+    except OAuthLinkError as e:
+        logger.warning(f"OAuth callback link failed for provider={provider}: {e}")
+        return JSONResponse(
+            status_code=HTTPStatus.BAD_REQUEST,
+            content={
+                "message": "OAuth account link failed",
+                "data": {
+                    "oauth_error": "oauth_account_already_bound",
+                    "oauth_error_description": "OAuth account is already bound to another user",
+                },
+            },
+        )
     except Exception as e:
         logger.error(f"OAuth callback failed for provider={provider}: {e}")
         return JSONResponse(
@@ -225,6 +239,67 @@ async def callback(
                     "oauth_error_description": "OAuth login failed",
                 },
             },
+        )
+
+
+@router.get("/pending")
+async def get_pending(
+    pending_token: Optional[str] = Header(None, alias="X-OAuth-Pending-Token"),
+):
+    try:
+        pending = get_pending_oauth_info(pending_token or "")
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "success", "data": pending},
+        )
+    except OAuthLinkError as e:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except OAuthProviderError as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to get pending OAuth info: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to get pending OAuth info",
+        )
+
+
+@router.post("/complete")
+async def complete(
+    request: Request,
+    pending_token: Optional[str] = Header(None, alias="X-OAuth-Pending-Token"),
+):
+    try:
+        request_data = OAuthCompleteRequest(**(await request.json()))
+        result = await complete_pending_oauth_account(
+            pending_token=pending_token or "",
+            email=str(request_data.email) if request_data.email else None,
+            password=request_data.password,
+            invite_code=request_data.invite_code,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "OAuth account completed", "data": result},
+        )
+    except OAuthLinkError as e:
+        status_code = (
+            HTTPStatus.CONFLICT
+            if "Email already exists" in str(e)
+            else HTTPStatus.BAD_REQUEST
+        )
+        raise HTTPException(status_code=status_code, detail=str(e))
+    except PydanticValidationError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=e.errors(),
+        )
+    except OAuthProviderError as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to complete OAuth account: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to complete OAuth account",
         )
 
 
@@ -257,20 +332,7 @@ async def delete_account(provider: str, authorization: Optional[str] = Header(No
 
     try:
         user_id, _ = get_current_user_id(authorization)
-
-        has_password_auth = False
-
-        admin_client = get_supabase_admin_client()
-        if admin_client:
-            try:
-                user_resp = admin_client.auth.admin.get_user_by_id(user_id)
-                user_metadata = getattr(user_resp.user, "user_metadata", {}) or {}
-                signup_provider = user_metadata.get("provider", "email")
-                has_password_auth = signup_provider == "email"
-            except Exception as e:
-                logger.warning(f"Failed to check user identities for {user_id}: {e}")
-
-        unlink_account(user_id, provider, has_password_auth=has_password_auth)
+        unlink_account(user_id, provider)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

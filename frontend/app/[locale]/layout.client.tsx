@@ -32,7 +32,9 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   const isChatPage = pathname?.includes("/chat");
 
   // Home page does not require authorization
-  const isHomePage = getEffectiveRoutePath(pathname) === "/";
+  const effectivePath = getEffectiveRoutePath(pathname);
+  const isHomePage = effectivePath === "/";
+  const isOAuthCompletePage = effectivePath === "/oauth/complete";
 
   // Sidebar collapse state
   const [collapsed, setCollapsed] = useState(false);
@@ -146,7 +148,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
         {/* Don't render children until authorization is complete (except home page) */}
         <Content style={contentStyle}>
-          {isHomePage || isAuthorized ? (
+          {isHomePage || isOAuthCompletePage || isAuthorized ? (
             children
           ) : (
             <div className="flex items-center justify-center h-full w-full">

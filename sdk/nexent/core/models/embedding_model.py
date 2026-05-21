@@ -176,6 +176,10 @@ class JinaEmbedding(MultimodalEmbedding):
         self.embedding_dim = embedding_dim
         self.ssl_verify = ssl_verify
         self.model_type = model_type
+        
+        # Create a session with trust_env=False to ignore proxy environment variables
+        self.session = requests.Session()
+        self.session.trust_env = False
 
         self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 
@@ -194,7 +198,7 @@ class JinaEmbedding(MultimodalEmbedding):
         Returns:
             Dict[str, Any]: API response
         """
-        response = requests.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
+        response = self.session.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
         response.raise_for_status()
         return response.json()
 
@@ -338,6 +342,10 @@ class OpenAICompatibleEmbedding(TextEmbedding):
 
         self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 
+        # Create a session with trust_env=False to ignore proxy environment variables
+        self.session = requests.Session()
+        self.session.trust_env = False
+
     def _prepare_input(self, inputs: Union[str, List[str]]) -> Dict[str, Any]:
         """Prepare the input data for the API request."""
         if isinstance(inputs, str):
@@ -355,7 +363,7 @@ class OpenAICompatibleEmbedding(TextEmbedding):
         Returns:
             Dict[str, Any]: API response
         """
-        response = requests.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
+        response = self.session.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
         response.raise_for_status()
         return response.json()
 

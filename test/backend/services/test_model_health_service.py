@@ -120,7 +120,7 @@ async def test_perform_connectivity_check_embedding():
             base_url="https://api.openai.com",
             api_key="test-key",
             embedding_dim=0,
-            ssl_verify=True
+            ssl_verify=True,
         )
         mock_embedding_instance.dimension_check.assert_called_once()
 
@@ -149,7 +149,7 @@ async def test_perform_connectivity_check_multi_embedding():
             base_url="https://api.jina.ai",
             api_key="test-key",
             embedding_dim=0,
-            ssl_verify=True
+            ssl_verify=True,
         )
         mock_embedding_instance.dimension_check.assert_called_once()
 
@@ -182,7 +182,8 @@ async def test_perform_connectivity_check_llm():
             model_id="gpt-4",
             api_base="https://api.openai.com",
             api_key="test-key",
-            ssl_verify=True
+            ssl_verify=True,
+            timeout_seconds=None,
         )
         mock_model_instance.check_connectivity.assert_called_once()
 
@@ -308,7 +309,8 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
             model_id="gpt-4",
             api_base="http://host.docker.internal:8080",
             api_key="test-key",
-            ssl_verify=True
+            ssl_verify=True,
+            timeout_seconds=None,
         )
 
 
@@ -341,7 +343,8 @@ async def test_perform_connectivity_check_base_url_normalization_127001():
             model_id="gpt-4",
             api_base="http://host.docker.internal:8000",
             api_key="test-key",
-            ssl_verify=True
+            ssl_verify=True,
+            timeout_seconds=None,
         )
 
 
@@ -395,8 +398,7 @@ async def test_check_model_connectivity_success():
             "model123", {"connect_status": "available"})
         mock_connectivity_check.assert_called_once_with(
             "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True,
-            None, None, None,
-            display_name="GPT-4"
+            None, None, None, "GPT-4", None,
         )
 
 
@@ -429,7 +431,8 @@ async def test_check_model_connectivity_failure():
             "model_name": "gpt-4",
             "model_type": "llm",
             "base_url": "https://api.openai.com",
-            "api_key": "test-key"
+            "api_key": "test-key",
+            "ssl_verify": False,  # Explicitly set to False to avoid fallback
         }
         mock_connectivity_check.return_value = False
 
@@ -522,7 +525,7 @@ async def test_verify_model_config_connectivity_success():
 
         mock_connectivity_check.assert_called_once_with(
             "gpt-4", "llm", "https://api.openai.com", "test-key", True,
-            None, None, None
+            None, None, None, None, None,
         )
 
 
@@ -626,7 +629,8 @@ async def test_embedding_dimension_check_embedding_success():
             base_url="http://test.com",
             api_key="test-key",
             embedding_dim=0,
-            ssl_verify=True
+            ssl_verify=True,
+            timeout_seconds=None,
         )
 
 
@@ -647,7 +651,8 @@ async def test_embedding_dimension_check_multi_embedding_success():
             base_url="http://test.com",
             api_key="test-key",
             embedding_dim=0,
-            ssl_verify=True
+            ssl_verify=True,
+            timeout_seconds=None,
         )
 
 
@@ -690,7 +695,7 @@ async def test_embedding_dimension_check_wrapper_success():
         assert dimension == 1536
         mock_get_name.assert_called_once_with(model_config)
         mock_internal_check.assert_called_once_with(
-            "openai/text-embedding-ada-002", "embedding", "https://api.openai.com", "test-key", True
+            "openai/text-embedding-ada-002", "embedding", "https://api.openai.com", "test-key", True, timeout_seconds=None
         )
 
 
@@ -734,7 +739,8 @@ async def test_embedding_dimension_check_multi_embedding_empty_response():
             base_url="http://test.com",
             api_key="test-key",
             embedding_dim=0,
-            ssl_verify=True
+            ssl_verify=True,
+            timeout_seconds=None,
         )
         # Verify warning was logged
         mock_logging.warning.assert_called_once_with(
@@ -763,12 +769,117 @@ async def test_embedding_dimension_check_wrapper_value_error():
         assert dimension == 0
         mock_get_name.assert_called_once_with(model_config)
         mock_internal_check.assert_called_once_with(
-            "test-model", "unsupported", "https://api.test.com", "test-key", True
+            "test-model", "unsupported", "https://api.test.com", "test-key", True, timeout_seconds=None
         )
         # Verify error was logged with the specific ValueError message
         mock_logger.error.assert_called_once_with(
             "Error checking embedding dimension: Unsupported model type"
         )
+
+
+@pytest.mark.asyncio
+async def test_embedding_dimension_check_ssl_verify_fallback():
+    """Test that embedding_dimension_check falls back to ssl_verify=False when first check returns 0"""
+    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_get_name:
+        mock_internal_check.side_effect = [0, 1536]  # First call returns 0, second returns valid dimension
+        mock_get_name.return_value = "openai/text-embedding-ada-002"
+        model_config = {
+            "model_repo": "openai",
+            "model_name": "text-embedding-ada-002",
+            "model_type": "embedding",
+            "base_url": "https://api.openai.com",
+            "api_key": "test-key",
+            "ssl_verify": True,
+        }
+        dimension = await embedding_dimension_check(model_config)
+
+        assert dimension == 1536
+        mock_get_name.assert_called_once_with(model_config)
+        # Should call twice: first with ssl_verify=True, then with ssl_verify=False
+        assert mock_internal_check.call_count == 2
+        mock_internal_check.assert_any_call(
+            "openai/text-embedding-ada-002", "embedding", "https://api.openai.com", "test-key", True, timeout_seconds=None
+        )
+        mock_internal_check.assert_any_call(
+            "openai/text-embedding-ada-002", "embedding", "https://api.openai.com", "test-key", False, timeout_seconds=None
+        )
+
+
+@pytest.mark.asyncio
+async def test_embedding_dimension_check_ssl_verify_fallback_with_timeout():
+    """Test that embedding_dimension_check passes timeout_seconds to fallback check"""
+    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_get_name:
+        mock_internal_check.side_effect = [0, 768]  # First call fails, second returns valid dimension
+        mock_get_name.return_value = "jina/jina-embeddings-v2-base-en"
+        model_config = {
+            "model_repo": "jina",
+            "model_name": "jina-embeddings-v2-base-en",
+            "model_type": "embedding",
+            "base_url": "https://api.jina.ai",
+            "api_key": "test-key",
+            "ssl_verify": True,
+            "timeout_seconds": 30.0,
+        }
+        dimension = await embedding_dimension_check(model_config)
+
+        assert dimension == 768
+        # Should call twice with timeout_seconds passed to both
+        assert mock_internal_check.call_count == 2
+        mock_internal_check.assert_any_call(
+            "jina/jina-embeddings-v2-base-en", "embedding", "https://api.jina.ai", "test-key", True, timeout_seconds=30.0
+        )
+        mock_internal_check.assert_any_call(
+            "jina/jina-embeddings-v2-base-en", "embedding", "https://api.jina.ai", "test-key", False, timeout_seconds=30.0
+        )
+
+
+@pytest.mark.asyncio
+async def test_embedding_dimension_check_no_fallback_when_ssl_verify_false():
+    """Test that no fallback occurs when ssl_verify is already False"""
+    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_get_name:
+        mock_internal_check.return_value = 1024  # Returns valid dimension directly
+        mock_get_name.return_value = "local/embedding-model"
+        model_config = {
+            "model_repo": "local",
+            "model_name": "embedding-model",
+            "model_type": "embedding",
+            "base_url": "http://localhost:8080",
+            "api_key": "",
+            "ssl_verify": False,
+        }
+        dimension = await embedding_dimension_check(model_config)
+
+        assert dimension == 1024
+        # Should only call once since ssl_verify is already False
+        assert mock_internal_check.call_count == 1
+        mock_internal_check.assert_called_once_with(
+            "local/embedding-model", "embedding", "http://localhost:8080", "", False, timeout_seconds=None
+        )
+
+
+@pytest.mark.asyncio
+async def test_embedding_dimension_check_fallback_still_fails():
+    """Test that dimension returns 0 when both ssl_verify=True and ssl_verify=False fail"""
+    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_get_name:
+        mock_internal_check.return_value = 0  # Both calls return 0
+        mock_get_name.return_value = "unreachable/embedding-model"
+        model_config = {
+            "model_repo": "unreachable",
+            "model_name": "embedding-model",
+            "model_type": "embedding",
+            "base_url": "https://unreachable.example.com",
+            "api_key": "test-key",
+            "ssl_verify": True,
+        }
+        dimension = await embedding_dimension_check(model_config)
+
+        assert dimension == 0
+        # Should call twice (fallback) but still return 0
+        assert mock_internal_check.call_count == 2
 
 
 @pytest.mark.asyncio

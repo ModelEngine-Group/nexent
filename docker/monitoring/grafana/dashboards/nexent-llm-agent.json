@@ -1,0 +1,150 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Nexent Agent traces backed by Grafana Tempo.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Open Tempo Explore",
+      "tooltip": "Open Grafana Explore with the Tempo datasource",
+      "type": "link",
+      "url": "/explore?left=%7B%22datasource%22:%22Tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7B%20resource.service.name%20%3D%20%5C%22nexent-backend%5C%22%20%7D%22,%22queryType%22:%22traceql%22%7D%5D%7D"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "Tempo"
+      },
+      "description": "Recent traces for Nexent backend. Open a trace row to inspect the agent, chain, LLM, and tool span waterfall.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "Tempo"
+          },
+          "limit": 100,
+          "query": "{ resource.service.name = \"nexent-backend\" }",
+          "queryType": "traceql",
+          "refId": "A",
+          "tableType": "traces"
+        }
+      ],
+      "title": "Recent Agent Traces",
+      "type": "table"
+    },
+    {
+      "description": "TraceQL shortcuts for common Nexent views.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 2,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "Service traces:\n{ resource.service.name = \"nexent-backend\" }\n\nAgent spans:\n{ resource.service.name = \"nexent-backend\" && span.openinference.span.kind = \"AGENT\" }\n\nLLM spans:\n{ resource.service.name = \"nexent-backend\" && span.openinference.span.kind = \"LLM\" }\n\nTool spans:\n{ resource.service.name = \"nexent-backend\" && span.openinference.span.kind = \"TOOL\" }\n\nError traces:\n{ resource.service.name = \"nexent-backend\" && status = error }",
+        "mode": "markdown"
+      },
+      "pluginVersion": "11.0.0",
+      "title": "TraceQL Examples",
+      "type": "text"
+    }
+  ],
+  "preload": false,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "nexent",
+    "agent",
+    "tempo"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Nexent Agent Trace Monitoring",
+  "uid": "nexent-llm-agent",
+  "version": 1,
+  "weekStart": ""
+}
