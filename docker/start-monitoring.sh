@@ -458,11 +458,11 @@ start_stack() {
 
     resolve_compose_cmd
 
-    if ! docker network ls --format '{{.Name}}' | grep -qx nexent_nexent; then
-        echo "🔗 Creating nexent_nexent..."
-        docker network create nexent_nexent
+    if ! docker network ls --format '{{.Name}}' | grep -qx nexent_network; then
+        echo "🔗 Creating nexent_network..."
+        docker network create nexent_network
     else
-        echo "✅ nexent_nexent already exists"
+        echo "✅ nexent_network already exists"
     fi
 
     load_env_for_start
@@ -530,7 +530,7 @@ stop_or_uninstall_stack() {
     fi
 
     echo ""
-    echo "ℹ️  The shared Docker network 'nexent_nexent' is kept because it is also used by Nexent services."
+    echo "ℹ️  The shared Docker network 'nexent_network' is kept because it is also used by Nexent services."
 }
 
 case "$ACTION" in
