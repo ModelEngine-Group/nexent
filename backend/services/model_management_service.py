@@ -9,6 +9,7 @@ from database.model_management_db import (
     create_model_record,
     delete_model_record,
     get_model_by_display_name,
+    get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
