@@ -9,11 +9,13 @@ handlers, CLI scripts, etc.).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
 from .memory_core import get_memory_instance
 from .memory_utils import build_memory_identifiers
+from ..monitor import get_monitoring_manager
 
 
 logger = logging.getLogger("memory_service")
@@ -21,6 +23,20 @@ logger = logging.getLogger("memory_service")
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _build_memory_trace_output(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build a trace-safe memory result summary without memory text bodies."""
+    trace_results = []
+    for item in results:
+        trace_item = {
+            key: item[key]
+            for key in ("id", "score", "relevance_score", "memory_level", "agent_id")
+            if key in item
+        }
+        trace_item["keys"] = list(item.keys())
+        trace_results.append(trace_item)
+    return {"results": trace_results}
+
 
 def _filter_by_memory_level(memory_level: str, raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -193,33 +209,75 @@ async def search_memory_in_levels(
         ]}
     """
     result_list = []
+    error_count = 0
+    monitoring_manager = get_monitoring_manager()
 
     logger.info(f"Searching memory in levels: {memory_levels}")
 
     async def _search_level(level: str):
         try:
-            res = await search_memory(
-                query_text,
-                level,
-                memory_config,
-                tenant_id,
-                user_id,
-                agent_id,
-                top_k,
-                threshold,
-            )
-            raw = res.get("results", [])
-            return [{**item, "memory_level": level} for item in raw]
+            with monitoring_manager.trace_retriever_call(
+                f"memory.search.{level}",
+                retrieval_input={
+                    "query": query_text,
+                    "memory_level": level,
+                    "top_k": top_k,
+                    "threshold": threshold,
+                },
+                **{
+                    "memory.level": level,
+                    "memory.search.top_k": top_k,
+                    "memory.search.threshold": threshold,
+                },
+            ):
+                res = await search_memory(
+                    query_text,
+                    level,
+                    memory_config,
+                    tenant_id,
+                    user_id,
+                    agent_id,
+                    top_k,
+                    threshold,
+                )
+                raw = res.get("results", [])
+                level_results = [{**item, "memory_level": level} for item in raw]
+                monitoring_manager.set_retriever_output(
+                    _build_memory_trace_output(level_results)
+                )
+                return level_results, False
         except Exception as e:
             logger.error(f"search_memory failed on level '{level}': {e}")
-            return []
+            return [], True
 
-    # Run searches concurrently and preserve order of memory_levels
-    tasks = [asyncio.create_task(_search_level(level)) for level in memory_levels]
-    all_level_results = await asyncio.gather(*tasks)
+    with monitoring_manager.trace_retriever_call(
+        "memory.search",
+        retrieval_input={
+            "query": query_text,
+            "memory_levels": memory_levels,
+            "top_k": top_k,
+            "threshold": threshold,
+        },
+        **{
+            "memory.levels": json.dumps(memory_levels, ensure_ascii=False),
+            "memory.search.level_count": len(memory_levels),
+            "memory.search.top_k": top_k,
+            "memory.search.threshold": threshold,
+        },
+    ):
+        # Run searches concurrently and preserve order of memory_levels
+        tasks = [asyncio.create_task(_search_level(level)) for level in memory_levels]
+        all_level_results = await asyncio.gather(*tasks)
 
-    for level_results in all_level_results:
-        result_list.extend(level_results)
+        for level_results, level_failed in all_level_results:
+            if level_failed:
+                error_count += 1
+            result_list.extend(level_results)
+
+        monitoring_manager.set_span_attributes(
+            **{"memory.search.error_count": error_count}
+        )
+        monitoring_manager.set_retriever_output(_build_memory_trace_output(result_list))
 
     return {"results": result_list}
 
