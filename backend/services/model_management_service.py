@@ -1,33 +1,33 @@
 import logging
 from typing import List, Dict, Any, Optional
 
-from backend.consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
-from backend.consts.model import ModelConnectStatusEnum
-from backend.consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, TOKENPONY_BASE_URL
+from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
+from consts.model import ModelConnectStatusEnum
+from consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, TOKENPONY_BASE_URL
 
-from backend.database.model_management_db import (
+from database.model_management_db import (
     create_model_record,
     delete_model_record,
     get_model_by_display_name,
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
-    get_model_by_name_factory,
     update_model_record,
+    update_model_record_by_model_name,
 )
-from backend.services.model_provider_service import (
+from services.model_provider_service import (
     prepare_model_dict,
     merge_existing_model_attributes,
     get_provider_models,
 )
-from backend.services.model_health_service import embedding_dimension_check
-from backend.utils.model_name_utils import (
+from services.model_health_service import embedding_dimension_check
+from utils.model_name_utils import (
     add_repo_to_name,
     split_repo_name,
     sort_models_by_id,
 )
-from backend.utils.memory_utils import build_memory_config as build_memory_config_for_tenant
-from backend.services.vectordatabase_service import get_vector_db_core
+from utils.memory_utils import build_memory_config as build_memory_config_for_tenant
+from services.vectordatabase_service import get_vector_db_core
 from nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")
