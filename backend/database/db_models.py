@@ -648,6 +648,7 @@ class SkillInfo(TableBase):
     skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
     skill_name = Column(String(100), nullable=False, unique=True, doc="Unique skill name")
+    tenant_id = Column(String(100), nullable=True, doc="Tenant ID for multi-tenancy. NULL for pre-existing skills.")
     skill_description = Column(String(1000), doc="Skill description")
     skill_tags = Column(JSON, doc="Skill tags as JSON array")
     skill_content = Column(Text, doc="Skill content in markdown format")

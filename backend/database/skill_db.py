@@ -154,6 +154,31 @@ def delete_skill_instances_by_skill_id(skill_id: int, user_id: str):
         })
 
 
+def delete_skill_instances_by_tenant(tenant_id: str, user_id: str) -> int:
+    """Soft delete all skill instances for a tenant.
+
+    This is called when a tenant is deleted to clean up all skill instances.
+
+    Args:
+        tenant_id: Tenant ID to delete skill instances for
+        user_id: User ID for the updated_by field
+
+    Returns:
+        Number of skill instances soft-deleted
+    """
+    with get_db_session() as session:
+        count = session.query(SkillInstance).filter(
+            SkillInstance.tenant_id == tenant_id,
+            SkillInstance.delete_flag != 'Y'
+        ).update({
+            SkillInstance.delete_flag: 'Y',
+            'updated_by': user_id
+        })
+        session.commit()
+        return count
+
+
+
 # ============== SkillInfo Repository Functions ==============
 
 
@@ -170,6 +195,7 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
     return {
         "skill_id": skill.skill_id,
         "name": skill.skill_name,
+        "tenant_id": skill.tenant_id,
         "description": skill.skill_description,
         "tags": skill.skill_tags or [],
         "content": skill.skill_content or "",
@@ -183,10 +209,15 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
     }
 
 
-def list_skills() -> List[Dict[str, Any]]:
-    """List all skills from database."""
+def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
+    """List all skills for a tenant from database.
+
+    Args:
+        tenant_id: Tenant ID for filtering skills
+    """
     with get_db_session() as session:
         skills = session.query(SkillInfo).filter(
+            SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
         ).all()
         results = []
@@ -197,11 +228,17 @@ def list_skills() -> List[Dict[str, Any]]:
         return results
 
 
-def get_skill_by_name(skill_name: str) -> Optional[Dict[str, Any]]:
-    """Get skill by name."""
+def get_skill_by_name(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    """Get skill by name within a tenant.
+
+    Args:
+        skill_name: Skill name
+        tenant_id: Tenant ID for filtering
+    """
     with get_db_session() as session:
         skill = session.query(SkillInfo).filter(
             SkillInfo.skill_name == skill_name,
+            SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
         ).first()
         if skill:
@@ -211,8 +248,35 @@ def get_skill_by_name(skill_name: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_skill_by_id(skill_id: int) -> Optional[Dict[str, Any]]:
-    """Get skill by ID."""
+def get_skill_by_id(skill_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
+    """Get skill by ID within a tenant.
+
+    Args:
+        skill_id: Skill ID
+        tenant_id: Tenant ID for filtering
+    """
+    with get_db_session() as session:
+        skill = session.query(SkillInfo).filter(
+            SkillInfo.skill_id == skill_id,
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != 'Y'
+        ).first()
+        if skill:
+            result = _to_dict(skill)
+            result["tool_ids"] = _get_tool_ids(session, skill.skill_id)
+            return result
+        return None
+
+
+def get_skill_by_id_global(skill_id: int) -> Optional[Dict[str, Any]]:
+    """Get skill by ID without tenant filter (global lookup for template skills).
+
+    Args:
+        skill_id: Skill ID
+
+    Returns:
+        Skill dict or None if not found.
+    """
     with get_db_session() as session:
         skill = session.query(SkillInfo).filter(
             SkillInfo.skill_id == skill_id,
@@ -225,11 +289,37 @@ def get_skill_by_id(skill_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def create_skill(skill_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a new skill."""
+def list_global_official_skills() -> List[Dict[str, Any]]:
+    """List all global official skills (tenant_id IS NULL) for installation.
+
+    Returns:
+        List of skill dicts with skill_id, name, description, source.
+    """
+    with get_db_session() as session:
+        skills = session.query(SkillInfo).filter(
+            SkillInfo.tenant_id.is_(None),
+            SkillInfo.delete_flag != 'Y',
+            SkillInfo.source == 'official'
+        ).all()
+        return [_to_dict(s) for s in skills]
+        if skill:
+            result = _to_dict(skill)
+            result["tool_ids"] = _get_tool_ids(session, skill.skill_id)
+            return result
+        return None
+
+
+def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+    """Create a new skill for a tenant.
+
+    Args:
+        skill_data: Skill data dict
+        tenant_id: Tenant ID for the skill
+    """
     with get_db_session() as session:
         skill = SkillInfo(
             skill_name=skill_data["name"],
+            tenant_id=tenant_id,
             skill_description=skill_data.get("description", ""),
             skill_tags=skill_data.get("tags", []),
             skill_content=skill_data.get("content", ""),
@@ -266,13 +356,15 @@ def create_skill(skill_data: Dict[str, Any]) -> Dict[str, Any]:
 def update_skill(
     skill_name: str,
     skill_data: Dict[str, Any],
+    tenant_id: str,
     updated_by: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Update an existing skill.
+    """Update an existing skill for a tenant.
 
     Args:
-        skill_name: Skill name (unique key).
+        skill_name: Skill name (unique key within tenant).
         skill_data: Business fields to update (description, content, tags, source, params, tool_ids).
+        tenant_id: Tenant ID for filtering.
         updated_by: Actor user id from server-side auth; never taken from the HTTP request body.
 
     Notes:
@@ -283,6 +375,7 @@ def update_skill(
     with get_db_session() as session:
         skill = session.query(SkillInfo).filter(
             SkillInfo.skill_name == skill_name,
+            SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != "Y",
         ).first()
 
@@ -334,6 +427,7 @@ def update_skill(
 
         refreshed = session.query(SkillInfo).filter(
             SkillInfo.skill_id == skill_id,
+            SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != "Y",
         ).first()
         if not refreshed:
@@ -347,11 +441,12 @@ def update_skill(
         return result
 
 
-def delete_skill(skill_name: str, updated_by: Optional[str] = None) -> bool:
-    """Soft delete a skill (mark as deleted).
+def delete_skill(skill_name: str, tenant_id: str, updated_by: Optional[str] = None) -> bool:
+    """Soft delete a skill for a tenant (mark as deleted).
 
     Args:
         skill_name: Name of the skill to delete
+        tenant_id: Tenant ID for filtering
         updated_by: User ID of the user performing the delete
 
     Returns:
@@ -360,6 +455,7 @@ def delete_skill(skill_name: str, updated_by: Optional[str] = None) -> bool:
     with get_db_session() as session:
         skill = session.query(SkillInfo).filter(
             SkillInfo.skill_name == skill_name,
+            SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
         ).first()
 
@@ -415,11 +511,12 @@ def get_tool_ids_by_names(tool_names: List[str], tenant_id: str) -> List[int]:
         return [t.tool_id for t in tools]
 
 
-def get_tool_names_by_skill_name(skill_name: str) -> List[str]:
-    """Get tool names for a skill by skill name.
+def get_tool_names_by_skill_name(skill_name: str, tenant_id: str) -> List[str]:
+    """Get tool names for a skill by skill name within a tenant.
 
     Args:
         skill_name: Name of the skill
+        tenant_id: Tenant ID for filtering
 
     Returns:
         List of tool names
@@ -427,6 +524,7 @@ def get_tool_names_by_skill_name(skill_name: str) -> List[str]:
     with get_db_session() as session:
         skill = session.query(SkillInfo).filter(
             SkillInfo.skill_name == skill_name,
+            SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
         ).first()
         if not skill:
@@ -435,11 +533,12 @@ def get_tool_names_by_skill_name(skill_name: str) -> List[str]:
         return get_tool_names_by_ids(session, tool_ids)
 
 
-def get_skill_with_tool_names(skill_name: str) -> Optional[Dict[str, Any]]:
-    """Get skill with tool names included."""
+def get_skill_with_tool_names(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    """Get skill with tool names included for a tenant."""
     with get_db_session() as session:
         skill = session.query(SkillInfo).filter(
             SkillInfo.skill_name == skill_name,
+            SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
         ).first()
         if skill:
@@ -465,13 +564,14 @@ def check_skill_list_initialized(tenant_id: str) -> bool:
     """
     with get_db_session() as session:
         count = session.query(SkillInfo).filter(
+            SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y',
             SkillInfo.source != 'custom'
         ).count()
         return count > 0
 
 
-def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str):
+def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id: str):
     """Scan local skill directories and upsert skill metadata to ag_skill_info_t.
 
     Mirrors update_tool_table_from_scan_tool_list() in tool_db.py.
@@ -480,9 +580,11 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str):
     Args:
         skills: List of skill dicts with name, description, tags, content, params, inputs, source
         user_id: User ID for tracking who initiated the scan
+        tenant_id: Tenant ID for the skills
     """
     with get_db_session() as session:
         existing_skills = session.query(SkillInfo).filter(
+            SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
         ).all()
         existing_dict = {s.skill_name: s for s in existing_skills}
@@ -504,6 +606,7 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str):
             else:
                 new_skill = SkillInfo(
                     skill_name=skill_name,
+                    tenant_id=tenant_id,
                     skill_description=skill_data.get("description", ""),
                     skill_tags=skill_data.get("tags", []),
                     skill_content=skill_data.get("content", ""),

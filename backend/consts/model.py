@@ -318,6 +318,8 @@ class GeneratePromptRequest(BaseModel):
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
     knowledge_base_display_names: Optional[List[str]] = Field(
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+    has_selected_resources: bool = Field(
+        True, description="Whether tools or sub-agents are selected; when False, skips generating constraint and few_shots sections")
 
 
 class OptimizePromptSectionRequest(BaseModel):
@@ -590,6 +592,22 @@ class TenantCreateRequest(BaseModel):
     """Request model for creating a tenant"""
     tenant_name: str = Field(..., min_length=1,
                              description="Tenant display name")
+    skill_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Skill IDs to install for the new tenant (legacy, use skill_names instead)"
+    )
+    skill_names: Optional[List[str]] = Field(
+        default=None,
+        description="Skill names to install for the new tenant. "
+                    "Each name is used to derive a .zip filename from "
+                    "OFFICIAL_SKILLS_ZIP_PATH and installed via upload."
+    )
+    locale: Optional[str] = Field(
+        default=None,
+        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en'). "
+                    "Determines the source label for auto-installed skills: "
+                    "'zh' → '官方', other locales → 'official'."
+    )
 
 
 class TenantUpdateRequest(BaseModel):

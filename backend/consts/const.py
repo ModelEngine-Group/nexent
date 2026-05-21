@@ -47,6 +47,9 @@ MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 
+# Container-internal official skills ZIP directory
+OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
+
 
 # Preview Configuration
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB

@@ -20,7 +20,7 @@ from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import ModelConfig
-from consts.const import CONTAINER_SKILLS_PATH, ROOT_DIR
+from consts.const import CONTAINER_SKILLS_PATH, OFFICIAL_SKILLS_ZIP_PATH, ROOT_DIR
 from consts.exceptions import SkillException
 from database import skill_db
 from agents.skill_creation_agent import create_skill_from_request
@@ -391,7 +391,7 @@ def _get_skill_inputs_from_code(scripts_dir: str) -> List[Dict[str, Any]]:
                 "name": param_name,
                 "type": parsed["type"],
                 "required": parsed["required"],
-                "description_en": parsed["description"],
+                "description_en": parsed.get("description_en", ""),
             })
 
     return inputs
@@ -680,12 +680,11 @@ def _read_schema_yaml_from_zip(
             preferred_skill_root=preferred_skill_root,
         )
         if not member:
-            logger.warning("[schema] No schema.yaml member found in ZIP (preferred_root=%s)", preferred_skill_root)
             return None
         raw = zf.read(member)
     parsed = _parse_skill_schema_from_yaml_bytes(raw)
     if not parsed:
-        logger.warning("[schema] Parsed result is empty from ZIP member %s", member)
+        logger.debug("[schema] Parsed result is empty from ZIP member %s", member)
     return parsed
 
 
@@ -711,50 +710,49 @@ def _get_skill_inputs_from_zip(
     try:
         with zipfile.ZipFile(zip_stream, "r") as zf:
             file_list = zf.namelist()
+            scripts_root = preferred_skill_root or ""
+
+            for member in file_list:
+                normalized = member.replace("\\", "/").strip()
+                if not normalized.endswith(".py") or "/_" in normalized or normalized.endswith("/_"):
+                    continue
+                if not normalized.startswith(scripts_root + "/scripts/"):
+                    if scripts_root:
+                        continue
+                    parts = normalized.split("/")
+                    if len(parts) < 2 or parts[-2] != "scripts":
+                        continue
+
+                try:
+                    source = zf.read(member).decode("utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+
+                try:
+                    tree = ast.parse(source, filename=member)
+                except SyntaxError:
+                    continue
+
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    if not _is_add_argument_call(node):
+                        continue
+                    parsed = _extract_arg_from_add_argument(node)
+                    if not parsed:
+                        continue
+                    param_name = parsed["name"]
+                    if param_name in ("help", "h") or param_name in seen_names:
+                        continue
+                    seen_names.add(param_name)
+                    inputs.append({
+                        "name": param_name,
+                        "type": parsed["type"],
+                        "required": parsed["required"],
+                        "description_en": parsed.get("description_en", ""),
+                    })
     except zipfile.BadZipFile:
         return inputs
-
-    scripts_root = preferred_skill_root or ""
-
-    for member in file_list:
-        normalized = member.replace("\\", "/").strip()
-        if not normalized.endswith(".py") or "/_" in normalized or normalized.endswith("/_"):
-            continue
-        if not normalized.startswith(scripts_root + "/scripts/"):
-            if scripts_root:
-                continue
-            parts = normalized.split("/")
-            if len(parts) < 2 or parts[-2] != "scripts":
-                continue
-
-        try:
-            source = zf.read(member).decode("utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-
-        try:
-            tree = ast.parse(source, filename=member)
-        except SyntaxError:
-            continue
-
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if not _is_add_argument_call(node):
-                continue
-            parsed = _extract_arg_from_add_argument(node)
-            if not parsed:
-                continue
-            param_name = parsed["name"]
-            if param_name in ("help", "h") or param_name in seen_names:
-                continue
-            seen_names.add(param_name)
-            inputs.append({
-                "name": param_name,
-                "type": parsed["type"],
-                "required": parsed["required"],
-                "description_en": parsed["description"],
-            })
 
     return inputs
 
@@ -798,24 +796,28 @@ def _remove_local_skill_config_yaml(skill_name: str, local_skills_dir: str) -> N
         logger.info("Removed %s (params cleared in DB)", path)
 
 
-def get_skill_manager() -> SkillManager:
-    """Get or create the global SkillManager instance."""
-    global _skill_manager
-    if _skill_manager is None:
-        _skill_manager = SkillManager(CONTAINER_SKILLS_PATH)
-    return _skill_manager
+def get_skill_manager(tenant_id: Optional[str] = None) -> SkillManager:
+    """Create a SkillManager instance with optional tenant-based directory isolation.
+
+    Args:
+        tenant_id: Tenant ID for directory isolation. When provided, skills
+            are stored under CONTAINER_SKILLS_PATH / tenant_id /
+    """
+    return SkillManager(base_skills_dir=CONTAINER_SKILLS_PATH, tenant_id=tenant_id)
 
 
 class SkillService:
     """Skill management service for backend operations."""
 
-    def __init__(self, skill_manager: Optional[SkillManager] = None):
+    def __init__(self, skill_manager: Optional[SkillManager] = None, tenant_id: Optional[str] = None):
         """Initialize SkillService.
 
         Args:
-            skill_manager: Optional SkillManager instance, uses global if not provided
+            skill_manager: Optional SkillManager instance, uses tenant-aware global if not provided
+            tenant_id: Tenant ID for skill isolation. Required when no skill_manager is provided.
         """
-        self.skill_manager = skill_manager or get_skill_manager()
+        self.tenant_id = tenant_id
+        self.skill_manager = skill_manager or get_skill_manager(tenant_id)
 
     def _resolve_local_skills_dir_for_overlay(self) -> Optional[str]:
         """Directory where skill folders live: ``SKILLS_PATH``, else ``ROOT_DIR/skills`` if present."""
@@ -870,16 +872,19 @@ class SkillService:
         return out
 
     def list_skills(self, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """List all skills for tenant.
+        """List all skills for a tenant.
 
         Args:
-            tenant_id: Tenant ID (reserved for future multi-tenant support)
+            tenant_id: Tenant ID for filtering skills. Uses instance tenant_id if not provided.
 
         Returns:
             List of skill info dicts
         """
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
         try:
-            skills = skill_db.list_skills()
+            skills = skill_db.list_skills(effective_tenant_id)
             enriched = [self._enrich_configs_from_yaml(s) for s in skills]
             return enriched
         except Exception as e:
@@ -887,17 +892,20 @@ class SkillService:
             raise SkillException(f"Failed to list skills: {str(e)}") from e
 
     def get_skill(self, skill_name: str, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Get a specific skill.
+        """Get a specific skill within a tenant.
 
         Args:
             skill_name: Name of the skill
-            tenant_id: Tenant ID (reserved for future multi-tenant support)
+            tenant_id: Tenant ID for filtering. Uses instance tenant_id if not provided.
 
         Returns:
             Skill dict or None if not found
         """
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
         try:
-            skill = skill_db.get_skill_by_name(skill_name)
+            skill = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
             if skill:
                 return self._enrich_configs_from_yaml(skill)
             return None
@@ -905,17 +913,21 @@ class SkillService:
             logger.error(f"Error getting skill {skill_name}: {e}")
             raise SkillException(f"Failed to get skill: {str(e)}") from e
 
-    def get_skill_by_id(self, skill_id: int) -> Optional[Dict[str, Any]]:
-        """Get a specific skill by ID.
+    def get_skill_by_id(self, skill_id: int, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get a specific skill by ID within a tenant.
 
         Args:
             skill_id: ID of the skill
+            tenant_id: Tenant ID for filtering. Uses instance tenant_id if not provided.
 
         Returns:
             Skill dict or None if not found
         """
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
         try:
-            skill = skill_db.get_skill_by_id(skill_id)
+            skill = skill_db.get_skill_by_id(skill_id, effective_tenant_id)
             if skill:
                 return self._enrich_configs_from_yaml(skill)
             return None
@@ -929,11 +941,11 @@ class SkillService:
         tenant_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Create a new skill.
+        """Create a new skill for a tenant.
 
         Args:
             skill_data: Skill data including name, description, content, etc.
-            tenant_id: Tenant ID (reserved for future multi-tenant support)
+            tenant_id: Tenant ID for skill isolation. Uses instance tenant_id if not provided.
             user_id: User ID of the creator
 
         Returns:
@@ -942,12 +954,16 @@ class SkillService:
         Raises:
             SkillException: If skill already exists locally or in database (409)
         """
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
+
         skill_name = skill_data.get("name")
         if not skill_name:
             raise SkillException("Skill name is required")
 
         # Check if skill already exists in database
-        existing = skill_db.get_skill_by_name(skill_name)
+        existing = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
         if existing:
             raise SkillException(f"Skill '{skill_name}' already exists")
 
@@ -963,13 +979,13 @@ class SkillService:
 
         try:
             # Create database record first
-            result = skill_db.create_skill(skill_data)
+            result = skill_db.create_skill(skill_data, effective_tenant_id)
 
             # Create local skill file (SKILL.md)
             self.skill_manager.save_skill(skill_data)
 
             # Mirror DB config_schemas to config/config.yaml when present (same layout as ZIP uploads).
-            if self.skill_manager.local_skills_dir and skill_data.get("config_schemas") is not None:
+            if self.skill_manager.base_skills_dir and skill_data.get("config_schemas") is not None:
                 try:
                     _write_skill_params_to_local_config_yaml(
                         skill_name,
@@ -1011,12 +1027,13 @@ class SkillService:
             skill_name: Optional skill name (extracted from ZIP if not provided)
             file_type: File type hint - "md", "zip", or "auto" (detect)
             source: Source identifier for the skill (e.g., "自定义", "官方", "导入")
-            tenant_id: Tenant ID (reserved for future multi-tenant support)
+            tenant_id: Tenant ID for skill isolation. Uses instance tenant_id if not provided.
             user_id: User ID of the creator
 
         Returns:
             Created skill dict
         """
+        effective_tenant_id = tenant_id or self.tenant_id
         content_bytes: bytes
         if isinstance(file_content, str):
             content_bytes = file_content.encode("utf-8")
@@ -1032,9 +1049,9 @@ class SkillService:
                 file_type = "md"
 
         if file_type == "zip":
-            return self._create_skill_from_zip(content_bytes, skill_name, source, user_id, tenant_id)
+            return self._create_skill_from_zip(content_bytes, skill_name, source, user_id, effective_tenant_id)
         else:
-            return self._create_skill_from_md(content_bytes, skill_name, source, user_id, tenant_id)
+            return self._create_skill_from_md(content_bytes, skill_name, source, user_id, effective_tenant_id)
 
     def _create_skill_from_md(
         self,
@@ -1057,7 +1074,7 @@ class SkillService:
             raise SkillException("Skill name is required")
 
         # Check if skill already exists in database
-        existing = skill_db.get_skill_by_name(name)
+        existing = skill_db.get_skill_by_name(name, tenant_id)
         if existing:
             raise SkillException(f"Skill '{name}' already exists")
 
@@ -1084,7 +1101,7 @@ class SkillService:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
 
-        result = skill_db.create_skill(skill_dict)
+        result = skill_db.create_skill(skill_dict, tenant_id)
 
         # Write SKILL.md to local storage
         self.skill_manager.save_skill(skill_dict)
@@ -1152,7 +1169,7 @@ class SkillService:
             raise SkillException("Skill name is required")
 
         # Check if skill already exists in database
-        existing = skill_db.get_skill_by_name(name)
+        existing = skill_db.get_skill_by_name(name, tenant_id)
         if existing:
             raise SkillException(f"Skill '{name}' already exists")
 
@@ -1214,7 +1231,7 @@ class SkillService:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
 
-        result = skill_db.create_skill(skill_dict)
+        result = skill_db.create_skill(skill_dict, tenant_id)
 
         # Save SKILL.md to local storage
         self.skill_manager.save_skill(skill_dict)
@@ -1347,7 +1364,10 @@ class SkillService:
         Returns:
             Updated skill dict
         """
-        existing = skill_db.get_skill_by_name(skill_name)
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
+        existing = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
         if not existing:
             raise SkillException(f"Skill not found: {skill_name}")
 
@@ -1366,9 +1386,9 @@ class SkillService:
                 file_type = "md"
 
         if file_type == "zip":
-            return self._update_skill_from_zip(content_bytes, skill_name, user_id, tenant_id)
+            return self._update_skill_from_zip(content_bytes, skill_name, user_id, effective_tenant_id)
         else:
-            return self._update_skill_from_md(content_bytes, skill_name, user_id, tenant_id)
+            return self._update_skill_from_md(content_bytes, skill_name, user_id, effective_tenant_id)
 
     def _update_skill_from_md(
         self,
@@ -1399,7 +1419,7 @@ class SkillService:
         }
 
         result = skill_db.update_skill(
-            skill_name, skill_dict, updated_by=user_id or None
+            skill_name, skill_dict, tenant_id, updated_by=user_id or None
         )
 
         # Clean up existing local files before writing new ones
@@ -1420,7 +1440,7 @@ class SkillService:
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Update skill from ZIP archive."""
-        existing = skill_db.get_skill_by_name(skill_name)
+        existing = skill_db.get_skill_by_name(skill_name, tenant_id)
         if not existing:
             raise SkillException(f"Skill not found: {skill_name}")
 
@@ -1479,7 +1499,7 @@ class SkillService:
             skill_dict["config_values"] = params_from_zip
 
         result = skill_db.update_skill(
-            skill_name, skill_dict, updated_by=user_id or None
+            skill_name, skill_dict, tenant_id, updated_by=user_id or None
         )
 
         # Clean up existing local files before writing new ones
@@ -1502,37 +1522,41 @@ class SkillService:
         tenant_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Update an existing skill.
+        """Update an existing skill for a tenant.
 
         Args:
             skill_name: Name of the skill to update
             skill_data: Business fields from the application layer (no audit fields).
-            tenant_id: Tenant ID (reserved for future multi-tenant support)
+            tenant_id: Tenant ID for skill isolation. Uses instance tenant_id if not provided.
             user_id: Updater id from server-side auth (JWT / session); sets DB updated_by.
 
         Returns:
             Updated skill dict
         """
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
         try:
-            existing = skill_db.get_skill_by_name(skill_name)
+            existing = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
             if not existing:
                 raise SkillException(f"Skill not found: {skill_name}")
 
             result = skill_db.update_skill(
-                skill_name, skill_data, updated_by=user_id or None
+                skill_name, skill_data, effective_tenant_id, updated_by=user_id or None
             )
 
             # Keep config/config.yaml in sync when config_values are updated (matches ZIP import path).
-            if CONTAINER_SKILLS_PATH and "config_values" in skill_data:
+            local_dir = self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH
+            if local_dir and "config_values" in skill_data:
                 try:
                     raw_config_values = skill_data["config_values"]
                     if raw_config_values is None:
-                        _remove_local_skill_config_yaml(skill_name, CONTAINER_SKILLS_PATH)
+                        _remove_local_skill_config_yaml(skill_name, local_dir)
                     else:
                         _write_skill_params_to_local_config_yaml(
                             skill_name,
                             _params_dict_to_storable(raw_config_values),
-                            CONTAINER_SKILLS_PATH,
+                            local_dir,
                         )
                 except Exception as exc:
                     logger.warning(
@@ -1542,7 +1566,7 @@ class SkillService:
                     )
 
             # Optional: sync SKILL.md on disk when SKILLS_PATH is configured (DB is source of truth).
-            if not CONTAINER_SKILLS_PATH:
+            if not local_dir:
                 logger.warning(
                     "SKILLS_PATH is not set; skipped local SKILL.md sync after DB update for %s",
                     skill_name,
@@ -1550,7 +1574,7 @@ class SkillService:
                 return self._enrich_configs_from_yaml(result)
 
             try:
-                allowed_tools = skill_db.get_tool_names_by_skill_name(skill_name)
+                allowed_tools = skill_db.get_tool_names_by_skill_name(skill_name, effective_tenant_id)
                 local_skill_dict = {
                     "name": skill_name,
                     "description": skill_data.get("description", existing.get("description", "")),
@@ -1577,18 +1601,22 @@ class SkillService:
     def delete_skill(
         self,
         skill_name: str,
+        tenant_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> bool:
-        """Delete a skill.
+        """Delete a skill for a tenant.
 
         Args:
             skill_name: Name of the skill to delete
-            tenant_id: Tenant ID (reserved for future multi-tenant support)
+            tenant_id: Tenant ID for skill isolation. Uses instance tenant_id if not provided.
             user_id: User ID of the user performing the delete
 
         Returns:
             True if deleted successfully
         """
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
         try:
             # Delete local skill files from filesystem
             skill_dir = os.path.join(self.skill_manager.local_skills_dir, skill_name)
@@ -1598,7 +1626,7 @@ class SkillService:
                 logger.info(f"Deleted skill directory: {skill_dir}")
 
             # Delete from database (soft delete with updated_by)
-            return skill_db.delete_skill(skill_name, updated_by=user_id)
+            return skill_db.delete_skill(skill_name, effective_tenant_id, updated_by=user_id)
         except Exception as e:
             logger.error(f"Error deleting skill {skill_name}: {e}")
             raise SkillException(f"Failed to delete skill: {str(e)}") from e
@@ -1630,7 +1658,7 @@ class SkillService:
             result = []
             for skill_instance in enabled_skills:
                 skill_id = skill_instance.get("skill_id")
-                skill = skill_db.get_skill_by_id(skill_id)
+                skill = skill_db.get_skill_by_id(skill_id, tenant_id)
                 if skill:
                     # Get skill info from ag_skill_info_t (repository returns keys: name, description, content)
                     merged = {
@@ -1710,7 +1738,7 @@ class SkillService:
 
                 for skill_instance in agent_skills:
                     skill_id = skill_instance.get("skill_id")
-                    skill = skill_db.get_skill_by_id(skill_id)
+                    skill = skill_db.get_skill_by_id(skill_id, tenant_id)
                     if skill:
                         if available_skills is not None and skill.get("name") not in available_skills:
                             continue
@@ -1720,8 +1748,12 @@ class SkillService:
                             "description": skill.get("description", ""),
                         })
             else:
-                # Fallback: use all skills
-                all_skills = skill_db.list_skills()
+                # Fallback: use all skills from the current tenant
+                effective_tenant_id = tenant_id or self.tenant_id
+                if effective_tenant_id:
+                    all_skills = skill_db.list_skills(effective_tenant_id)
+                else:
+                    all_skills = []
                 skills_to_include = all_skills
                 if available_skills is not None:
                     available_set = set(available_skills)
@@ -1757,13 +1789,16 @@ class SkillService:
 
         Args:
             skill_name: Name of the skill to load
-            tenant_id: Tenant ID (reserved for future multi-tenant support)
+            tenant_id: Tenant ID for filtering. Uses instance tenant_id if not provided.
 
         Returns:
             Skill content in markdown format
         """
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            return ""
         try:
-            skill = skill_db.get_skill_by_name(skill_name)
+            skill = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
             return skill.get("content", "") if skill else ""
         except Exception as e:
             logger.error(f"Error getting skill content {skill_name}: {e}")
@@ -2219,7 +2254,9 @@ async def update_skill_list(tenant_id: str, user_id: str):
     from database import skill_db as skill_db_module
     from nexent.skills import SkillManager
 
-    skill_manager = SkillManager(local_skills_dir=CONTAINER_SKILLS_PATH)
+    skill_manager = SkillManager(base_skills_dir=CONTAINER_SKILLS_PATH, tenant_id=tenant_id)
+    # Use the resolved tenant-scoped local path for schema/config file reading
+    local_base = skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH
     scanned_skills = skill_manager.list_skills()
 
     skills_to_upsert = []
@@ -2241,7 +2278,7 @@ async def update_skill_list(tenant_id: str, user_id: str):
                 skill_data["content"] = full_skill.get("content", "")
 
             # Try schema.yaml first; fall back to AST-parsed scripts
-            schema_path = _local_skill_schema_yaml_path(skill_name, CONTAINER_SKILLS_PATH)
+            schema_path = _local_skill_schema_yaml_path(skill_name, local_base)
             if os.path.isfile(schema_path):
                 with open(schema_path, "rb") as f:
                     raw = f.read()
@@ -2249,7 +2286,7 @@ async def update_skill_list(tenant_id: str, user_id: str):
                 skill_data["config_schemas"] = parsed
                 logger.debug("Loaded config_schemas from schema.yaml for skill %s", skill_name)
             else:
-                scripts_dir = os.path.join(CONTAINER_SKILLS_PATH, skill_name, "scripts")
+                scripts_dir = os.path.join(local_base, skill_name, "scripts")
                 inputs = _get_skill_inputs_from_code(scripts_dir)
                 if inputs:
                     skill_data["config_schemas"] = inputs
@@ -2260,7 +2297,262 @@ async def update_skill_list(tenant_id: str, user_id: str):
         skills_to_upsert.append(skill_data)
 
     if skills_to_upsert:
-        skill_db_module.upsert_scanned_skills(skills_to_upsert, user_id)
+        skill_db_module.upsert_scanned_skills(skills_to_upsert, user_id, tenant_id)
         logger.info(f"Upserted {len(skills_to_upsert)} skills for tenant {tenant_id}")
     else:
         logger.info(f"No skills found to upsert for tenant {tenant_id}")
+
+
+def install_skills_for_tenant(
+    skill_ids: List[int],
+    tenant_id: str,
+    user_id: Optional[str] = None
+) -> List[int]:
+    """Install specified official skills into a new tenant by copying their records.
+
+    For each skill_id provided, finds the global template skill (official skill with
+    NULL tenant_id) and creates a copy in ag_skill_info_t for the target tenant.
+    Skills that cannot be found as global templates are skipped with a warning.
+
+    Args:
+        skill_ids: List of skill IDs to install for the tenant.
+        tenant_id: Target tenant ID to install skills into.
+        user_id: User ID for created_by/updated_by audit fields.
+
+    Returns:
+        List of skill IDs that were successfully installed.
+    """
+    from database import skill_db as skill_db_module
+
+    if not skill_ids:
+        return []
+
+    installed_ids: List[int] = []
+    for skill_id in skill_ids:
+        try:
+            template = skill_db_module.get_skill_by_id_global(skill_id)
+            if not template:
+                logger.warning(
+                    f"Skill template with ID {skill_id} not found for installation "
+                    f"into tenant {tenant_id}"
+                )
+                continue
+
+            skill_name = template.get("name", "")
+            if not skill_name:
+                logger.warning(
+                    f"Skill template {skill_id} has no name, skipping installation "
+                    f"for tenant {tenant_id}"
+                )
+                continue
+
+            existing = skill_db_module.get_skill_by_name(skill_name, tenant_id)
+            if existing:
+                logger.info(
+                    f"Skill '{skill_name}' already exists for tenant {tenant_id}, skipping"
+                )
+                installed_ids.append(existing.get("skill_id"))
+                continue
+
+            skill_data = {
+                "name": skill_name,
+                "description": template.get("description", ""),
+                "tags": template.get("tags", []),
+                "content": template.get("content", ""),
+                "config_schemas": template.get("config_schemas"),
+                "config_values": template.get("config_values"),
+                "source": template.get("source", "official"),
+                "created_by": user_id,
+                "updated_by": user_id,
+            }
+            result = skill_db_module.create_skill(skill_data, tenant_id)
+            new_skill_id = result.get("skill_id")
+            if new_skill_id:
+                installed_ids.append(new_skill_id)
+                logger.info(
+                    f"Installed skill '{skill_name}' (ID {new_skill_id}) for tenant {tenant_id}"
+                )
+            else:
+                logger.warning(
+                    f"create_skill returned no skill_id for '{skill_name}', "
+                    f"tenant {tenant_id}"
+                )
+        except Exception as e:
+            logger.error(
+                f"Failed to install skill ID {skill_id} into tenant {tenant_id}: {e}"
+            )
+
+    return installed_ids
+
+
+def install_skills_from_zip_for_tenant(
+    skill_names: List[str],
+    tenant_id: str,
+    user_id: Optional[str] = None,
+    locale: Optional[str] = None
+) -> List[str]:
+    """Install official skills into a new tenant by reading ZIP files from OFFICIAL_SKILLS_ZIP_PATH.
+
+    For each skill_name provided, derives the ZIP filename as <skill_name>.zip,
+    reads the file from OFFICIAL_SKILLS_ZIP_PATH, and creates the skill via
+    create_skill_from_file (which handles ZIP extraction, SKILL.md parsing,
+    and database record creation).
+
+    Skills that cannot be found as ZIP files are skipped with a warning.
+    Skills that already exist for the tenant are skipped (not reinstalled).
+
+    Args:
+        skill_names: List of skill names to install (e.g. ["search-knowledge-base"]).
+        tenant_id: Target tenant ID to install skills into.
+        user_id: User ID for created_by/updated_by audit fields.
+        locale: Frontend locale (e.g. "zh" or "en"). Determines the source label:
+            "zh" → "官方", other locales → "official".
+
+    Returns:
+        List of skill names that were successfully installed.
+    """
+    if not skill_names:
+        return []
+
+    zip_dir = OFFICIAL_SKILLS_ZIP_PATH
+    if not os.path.isdir(zip_dir):
+        logger.warning(f"Official skills zip directory not found: {zip_dir}")
+        return []
+
+    # Derive source label from locale: zh → "官方", otherwise "official"
+    source = "官方" if locale == "zh" else "official"
+
+    installed: List[str] = []
+    service = SkillService(tenant_id=tenant_id)
+
+    for skill_name in skill_names:
+        zip_filename = f"{skill_name}.zip"
+        zip_path = os.path.join(zip_dir, zip_filename)
+
+        if not os.path.isfile(zip_path):
+            logger.warning(
+                f"ZIP file not found for skill '{skill_name}': {zip_path}"
+            )
+            continue
+
+        try:
+            existing = skill_db.get_skill_by_name(skill_name, tenant_id)
+            if existing:
+                logger.info(
+                    f"Skill '{skill_name}' already exists for tenant {tenant_id}, skipping"
+                )
+                installed.append(skill_name)
+                continue
+
+            with open(zip_path, "rb") as f:
+                zip_content = f.read()
+
+            result = service.create_skill_from_file(
+                file_content=zip_content,
+                skill_name=skill_name,
+                file_type="zip",
+                source=source,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            installed_name = result.get("name", skill_name)
+            installed.append(installed_name)
+            logger.info(
+                f"Installed skill '{installed_name}' for tenant {tenant_id} "
+                f"from ZIP {zip_filename}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to install skill '{skill_name}' from ZIP for tenant {tenant_id}: {e}"
+            )
+
+    return installed
+
+
+def get_official_skills_with_status(
+    tenant_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Return all official skills with their installation status for a tenant.
+
+    Scans the official-skills-zip directory for available official skills
+    (filename without .zip = skill name). For each skill, checks whether
+    it is already installed for the target tenant and whether local resource
+    files exist.
+
+    Args:
+        tenant_id: Tenant ID to check installation status for.
+
+    Returns:
+        List of dicts with skill_id, name, description, source, and status
+        ("installable" | "installed" | "resource_missing").
+    """
+    from database import skill_db as skill_db_module
+
+    result: List[Dict[str, Any]] = []
+
+    zip_dir = OFFICIAL_SKILLS_ZIP_PATH
+    if not os.path.isdir(zip_dir):
+        logger.warning(f"Official skills zip directory not found: {zip_dir}")
+        return result
+
+    try:
+        zip_files = [f for f in os.listdir(zip_dir) if f.lower().endswith(".zip")]
+    except OSError as e:
+        logger.warning(f"Failed to list official skills zip directory: {e}")
+        return result
+
+    for zip_file in sorted(zip_files):
+        skill_name = zip_file[:-4]
+        if not skill_name:
+            continue
+
+        skill_id: Optional[int] = None
+        is_installed = False
+        has_resources = True
+
+        if tenant_id:
+            existing = skill_db_module.get_skill_by_name(skill_name, tenant_id)
+            if existing:
+                skill_id = existing.get("skill_id")
+                is_installed = True
+                skill_manager = SkillManager(
+                    base_skills_dir=CONTAINER_SKILLS_PATH,
+                    tenant_id=tenant_id
+                )
+                skill_dir = os.path.join(
+                    skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH or "",
+                    skill_name
+                )
+                has_resources = os.path.isdir(skill_dir)
+
+        if skill_id is None:
+            global_skill = skill_db_module.get_skill_by_name(skill_name, None)
+            if global_skill:
+                skill_id = global_skill.get("skill_id")
+
+        if is_installed and not has_resources:
+            status = "resource_missing"
+        elif is_installed:
+            status = "installed"
+        else:
+            status = "installable"
+
+        description = ""
+        if skill_id:
+            db_skill = skill_db_module.get_skill_by_id(skill_id, tenant_id) if tenant_id else None
+            if db_skill:
+                description = db_skill.get("description", "")
+        if not description:
+            db_global = skill_db_module.get_skill_by_name(skill_name, None)
+            if db_global:
+                description = db_global.get("description", "")
+
+        result.append({
+            "skill_id": skill_id if skill_id is not None else 0,
+            "name": skill_name,
+            "description": description,
+            "source": "official",
+            "status": status,
+        })
+
+    return result
