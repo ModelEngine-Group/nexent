@@ -24,10 +24,9 @@ import {
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import type { AuthFormValues, UserRole } from "@/types/auth";
-import { generateAvatarUrl, getEffectiveRoutePath } from "@/lib/auth";
+import type { AuthFormValues } from "@/types/auth";
+import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEventUtils } from "@/lib/authEvents";
-import { saveUserToStorage } from "@/lib/session";
 import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
 
@@ -198,14 +197,6 @@ export function RegisterModal() {
           return;
         }
 
-        const user = {
-          id: result.data.user.id,
-          email: result.data.user.email,
-          role: result.data.user.role as UserRole,
-          avatarUrl: generateAvatarUrl(result.data.user.email),
-        };
-
-        saveUserToStorage(user);
         resetForm();
         message.success(t("auth.oauthCompleteSuccess"));
         authEventUtils.emitRegisterSuccess();

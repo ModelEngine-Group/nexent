@@ -30,11 +30,6 @@ export interface CompleteOAuthRequest {
 }
 
 export interface CompleteOAuthResponse {
-  user: {
-    id: string;
-    email: string;
-    role: string;
-  };
   session: {
     expires_at: number;
     expires_in_seconds?: number;
@@ -146,7 +141,11 @@ export const oauthService = {
           errorKey: getOAuthErrorKey(error, response.status),
         };
       }
-      return { data: data.data };
+      return {
+        data: {
+          session: data.data.session,
+        },
+      };
     } catch (error) {
       log.error("Failed to complete OAuth account:", error);
       return {
