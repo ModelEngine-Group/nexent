@@ -132,6 +132,7 @@ export interface ToolSubGroup {
 // Skill interface for skill management
 export interface Skill {
   skill_id: string;
+  tenant_id?: string;
   name: string;
   description: string;
   source: string;
@@ -149,6 +150,17 @@ export interface SkillGroup {
   key: string;
   label: string;
   skills: Skill[];
+}
+
+// Skill with installation status for tenant creation flow
+export type SkillInstallStatus = "installable" | "installed" | "resource_missing";
+
+export interface InstallableSkill {
+  skill_id: number;
+  name: string;
+  description: string;
+  source: string;
+  status: SkillInstallStatus;
 }
 
 // Tree structure node type
@@ -430,6 +442,11 @@ export interface GeneratePromptParams {
    * without waiting for tool config to be saved first.
    */
   knowledge_base_display_names?: string[];
+  /**
+   * Whether tools or sub-agents are selected.
+   * When false, the backend skips generating constraint and few_shots sections.
+   */
+  has_selected_resources?: boolean;
 }
 
 export interface OptimizePromptSectionParams {

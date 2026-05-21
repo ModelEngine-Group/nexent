@@ -13,7 +13,6 @@ import {
   Tag,
   Skeleton,
 } from "antd";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Settings } from "lucide-react";
 import { CloseOutlined } from "@ant-design/icons";
 
@@ -22,7 +21,13 @@ import { KnowledgeBase } from "@/types/knowledgeBase";
 import { Tooltip } from "@/components/ui/tooltip";
 import { saveSkillInstance } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
-import knowledgeBaseService from "@/services/knowledgeBaseService";
+import {
+  getToolTypeForSkill,
+  skillRequiresKbSelection as checkSkillRequiresKb,
+  getKbParamNameForSkill,
+  ToolKbType,
+} from "@/components/tool-config";
+import { useKnowledgeBasesForToolConfig, useSyncKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import log from "@/lib/logger";
 import { isZhLocale } from "@/lib/utils";
 
@@ -69,12 +74,21 @@ export default function SkillConfigModal({
   const [currentParams, setCurrentParams] = useState<SkillParam[]>([]);
   const { t } = useTranslation("common");
   const isZh = isZhLocale();
-  const queryClient = useQueryClient();
 
-  // Check if this skill requires knowledge base selection (has index_names param)
+  // Check if this skill requires knowledge base selection (has index_names or dataset_ids param)
   const skillRequiresKbSelection = useMemo(() => {
-    return initialParams?.some((p) => p.name === "index_names") ?? false;
+    return checkSkillRequiresKb(initialParams || []);
   }, [initialParams]);
+
+  // Derive the correct toolType based on skill name
+  const skillToolType = useMemo((): ToolKbType => {
+    return getToolTypeForSkill(skill?.name || "");
+  }, [skill?.name]);
+
+  // Get the KB param name for the current skill (index_names or dataset_ids)
+  const kbParamName = useMemo(() => {
+    return getKbParamNameForSkill(skill?.name || "");
+  }, [skill?.name]);
 
   // Compute the set of param indices that should be visible, based on depends_on.
   // A param is hidden when its dependency's current value is falsy.
@@ -103,36 +117,15 @@ export default function SkillConfigModal({
   const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<string[]>([]);
   const [hasSubmitted, setHasSubmitted] = useState(false);
 
-  // Fetch knowledge bases for skill configuration
+  // Fetch knowledge bases based on skill tool type
   const {
     data: knowledgeBases = [],
     isLoading: kbLoading,
     refetch: refetchKnowledgeBases,
-  } = useQuery({
-    queryKey: ["knowledgeBases", "list", "skill", skill.skill_id],
-    queryFn: async () => {
-      const result = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
-      return result.knowledgeBases.sort((a, b) => {
-        const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-        return dateB - dateA;
-      });
-    },
-    enabled: !!skillRequiresKbSelection,
-    staleTime: 30_000,
-    gcTime: 5 * 60_000,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    retry: 0,
-  });
+  } = useKnowledgeBasesForToolConfig(skillToolType);
 
-  // Clear knowledge bases cache
-  const clearKnowledgeBases = useCallback(() => {
-    queryClient.setQueryData(
-      ["knowledgeBases", "list", "skill", skill.skill_id],
-      []
-    );
-  }, [queryClient, skill.skill_id]);
+  // Sync knowledge bases based on skill tool type
+  const { syncKnowledgeBases, isSyncing } = useSyncKnowledgeBases();
 
   // Sync selectedKbDisplayNames when knowledgeBases or selectedKbIds changes
   useEffect(() => {
@@ -204,9 +197,9 @@ export default function SkillConfigModal({
     });
     form.setFieldsValue(formValues);
 
-    // Parse initial index_names value for knowledge base selection
-    if (skillRequiresKbSelection) {
-      const kbParam = merged.find((p) => p.name === "index_names");
+    // Parse initial knowledge base IDs from the relevant param (index_names or dataset_ids)
+    if (skillRequiresKbSelection && kbParamName) {
+      const kbParam = merged.find((p) => p.name === kbParamName);
       if (kbParam?.value) {
         let ids: string[] = [];
         if (Array.isArray(kbParam.value)) {
@@ -226,7 +219,7 @@ export default function SkillConfigModal({
         }
       }
     }
-  }, [isOpen, initialParams, skill.config_values, form, skillRequiresKbSelection]);
+  }, [isOpen, initialParams, skill.config_values, form, skillRequiresKbSelection, kbParamName]);
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
@@ -237,7 +230,7 @@ export default function SkillConfigModal({
       const index = parseInt(fieldName.replace("param_", ""));
       if (!isNaN(index) && newParams[index]) {
         // Skip knowledge base selector field (controlled by selectedKbIds)
-        if (newParams[index].name === "index_names") {
+        if (newParams[index].name === kbParamName) {
           return;
         }
         newParams[index] = { ...newParams[index], value };
@@ -271,7 +264,7 @@ export default function SkillConfigModal({
       // Check if knowledge base selector has valid selection
       if (skillRequiresKbSelection && selectedKbIds.length === 0) {
         const kbParam = currentParams.find(
-          (p) => p.required && p.name === "index_names"
+          (p) => p.required && p.name === kbParamName
         );
         if (kbParam) {
           message.error(t("toolConfig.validation.selectKb"));
@@ -351,10 +344,11 @@ export default function SkillConfigModal({
         const formFieldName = `param_${currentKbParamIndex}`;
         form.setFieldValue(formFieldName, ids);
 
-        // Also update currentParams directly since Form.Item has no name for index_names
+        // Also update currentParams directly since Form.Item has no name for KB param
         const updatedParams = [...currentParams];
         updatedParams[currentKbParamIndex] = {
           ...updatedParams[currentKbParamIndex],
+          name: param.name,
           value: ids,
         };
         setCurrentParams(updatedParams);
@@ -382,11 +376,13 @@ export default function SkillConfigModal({
 
     // Also update currentParams directly
     const updatedParams = [...currentParams];
-    updatedParams[paramIndex] = {
-      ...updatedParams[paramIndex],
-      value: newIds,
-    };
-    setCurrentParams(updatedParams);
+    if (updatedParams[paramIndex]) {
+      updatedParams[paramIndex] = {
+        ...updatedParams[paramIndex],
+        value: newIds,
+      };
+      setCurrentParams(updatedParams);
+    }
   };
 
   // Render knowledge base selector input (clickable input that opens selector modal)
@@ -515,6 +511,7 @@ export default function SkillConfigModal({
       removeKbFromSelection,
       getLocalizedDescription,
       t,
+      kbParamName,
     ]
   );
 
@@ -522,7 +519,7 @@ export default function SkillConfigModal({
     const inputStyle = { width: "100%" };
 
     // For knowledge base selector, use custom input
-    if (skillRequiresKbSelection && param.name === "index_names") {
+    if (skillRequiresKbSelection && param.name === kbParamName) {
       return renderKbSelectorInput(param, index);
     }
 
@@ -618,11 +615,11 @@ export default function SkillConfigModal({
                   });
                 }
 
-                // Add custom validator for knowledge base selector field (index_names)
+                // Add custom validator for knowledge base selector field (index_names/dataset_ids)
                 // Since this field uses custom display without form control, we need custom validation
                 if (
                   skillRequiresKbSelection &&
-                  param.name === "index_names"
+                  param.name === kbParamName
                 ) {
                   rules.push({
                     validator: async () => {
@@ -648,7 +645,7 @@ export default function SkillConfigModal({
                       </Tooltip>
                     }
                     name={
-                      skillRequiresKbSelection && param.name === "index_names"
+                      skillRequiresKbSelection && param.name === kbParamName
                         ? undefined
                         : fieldName
                     }
@@ -679,27 +676,20 @@ export default function SkillConfigModal({
         onClose={() => setKbSelectorVisible(false)}
         onConfirm={handleKbConfirm}
         selectedIds={selectedKbIds}
-        toolType="knowledge_base_search"
+        toolType={skillToolType}
         knowledgeBases={knowledgeBases}
         isLoading={kbLoading}
         showCheckbox={true}
         onSync={async () => {
           try {
-            const result = await refetchKnowledgeBases();
-            if (result.isError || result.error) {
-              log.error("Failed to sync knowledge bases:", result.error);
-              clearKnowledgeBases();
-              message.error(t("knowledgeBase.message.syncError"));
-              return;
-            }
+            await syncKnowledgeBases(skillToolType);
             message.success(t("knowledgeBase.message.syncSuccess"));
           } catch (error) {
             log.error("Failed to sync knowledge bases:", error);
-            clearKnowledgeBases();
             message.error(t("knowledgeBase.message.syncError"));
           }
         }}
-        syncLoading={kbLoading}
+        syncLoading={!!kbLoading || !!isSyncing}
       />
     </Modal>
   );

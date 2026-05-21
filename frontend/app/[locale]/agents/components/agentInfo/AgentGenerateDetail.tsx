@@ -750,6 +750,17 @@ export default function AgentGenerateDetail({
       }
     }
 
+    // Determine if tools or sub-agents are selected
+    const toolIds = Array.isArray(editedAgent.tools)
+      ? editedAgent.tools.map((tool: any) =>
+          typeof tool === "object" && tool.id !== undefined
+            ? tool.id
+            : tool
+        )
+      : [];
+    const subAgentIds = editedAgent.sub_agent_id_list || [];
+    const hasSelectedResources = toolIds.length > 0 || subAgentIds.length > 0;
+
     try {
       await generatePromptStream(
         {
@@ -757,15 +768,10 @@ export default function AgentGenerateDetail({
           task_description: businessInfo.businessDescription,
           model_id: businessInfo.businessLogicModelId.toString(),
           sub_agent_ids: editedAgent.sub_agent_id_list,
-          tool_ids: Array.isArray(editedAgent.tools)
-            ? editedAgent.tools.map((tool: any) =>
-              typeof tool === "object" && tool.id !== undefined
-                ? tool.id
-                : tool
-            )
-            : [],
+          tool_ids: toolIds,
           // Pass knowledge base display names from frontend-configured tools
           knowledge_base_display_names: knowledgeBaseDisplayNames.length > 0 ? knowledgeBaseDisplayNames : undefined,
+          has_selected_resources: hasSelectedResources,
         },
         (data) => {
           // Track the agent this generation was for

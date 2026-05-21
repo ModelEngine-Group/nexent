@@ -10,13 +10,13 @@ import {
   App,
   Modal,
   Input,
-  Tooltip,
   Form,
   Switch,
   InputNumber,
 } from "antd";
 import { ColumnsType } from "antd/es/table";
-import { Settings } from "lucide-react";
+import { Download } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 
 import {
   fetchSkillsList,
@@ -24,6 +24,7 @@ import {
   type SkillListItem,
 } from "@/services/skillService";
 import log from "@/lib/logger";
+import { InstallOfficialSkillsModal } from "@/components/skill/InstallOfficialSkillsModal";
 
 function pathToKey(path: (string | number)[]): string {
   return path.map(String).join(".");
@@ -504,6 +505,7 @@ export default function SkillList({
   const [paramsModalOpen, setParamsModalOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<SkillListItem | null>(null);
   const [savingParams, setSavingParams] = useState(false);
+  const [installModalOpen, setInstallModalOpen] = useState(false);
 
   const snapshotRef = useRef<Record<string, unknown>>({});
   const metaRef = useRef<Map<string, string>>(new Map());
@@ -577,7 +579,7 @@ export default function SkillList({
         return;
       }
 
-      await updateSkill(editingSkill.name, { params: merged });
+      await updateSkill(editingSkill.name, { config_values: merged });
       message.success(t("tenantResources.skills.updateSuccess"));
       // Wait for list refetch so the next "edit config" opens with server params, not stale row data.
       await refetch();
@@ -598,13 +600,34 @@ export default function SkillList({
       title: t("tenantResources.skills.column.name"),
       dataIndex: "name",
       key: "name",
+      width: 100,
       ellipsis: true,
+    },
+    {
+      title: t("tenantResources.skills.column.description"),
+      dataIndex: "description",
+      key: "description",
+      width: 500,
+      render: (description: string) => {
+        if (!description) return "—";
+        const truncated = description.length > 120;
+        return (
+          <Tooltip title={description}>
+            <span
+              className="line-clamp-1 text-neutral-600 dark:text-neutral-400 cursor-default"
+              style={{ wordBreak: "break-word" }}
+            >
+              {description}
+            </span>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t("tenantResources.skills.column.source"),
       dataIndex: "source",
       key: "source",
-      width: 110,
+      width: 100,
       render: (source: string) => (
         <Tag color={source === "official" ? "blue" : "default"}>{source}</Tag>
       ),
@@ -626,27 +649,10 @@ export default function SkillList({
         ),
     },
     {
-      title: t("tenantResources.skills.column.config"),
-      key: "params",
-      width: 72,
-      align: "center",
-      render: (_: unknown, record: SkillListItem) => (
-        <Tooltip title={t("tenantResources.skills.editParams")}>
-          <Button
-            type="text"
-            size="small"
-            icon={<Settings className="h-4 w-4" />}
-            onClick={() => openParamsEditor(record)}
-            aria-label={t("tenantResources.skills.editParams")}
-          />
-        </Tooltip>
-      ),
-    },
-    {
       title: t("tenantResources.skills.column.updatedAt"),
       dataIndex: "update_time",
       key: "update_time",
-      width: 148,
+      width: 100,
       render: (v: string | null | undefined) =>
         v ? (
           <Tooltip title={v}>
@@ -662,6 +668,15 @@ export default function SkillList({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex justify-end mb-2">
+        <Button
+          type="primary"
+          icon={<Download className="h-4 w-4" />}
+          onClick={() => setInstallModalOpen(true)}
+        >
+          {t("tenantResources.skills.installOfficialSkills")}
+        </Button>
+      </div>
       <Table<SkillListItem>
         columns={columns}
         dataSource={skills}
@@ -728,6 +743,11 @@ export default function SkillList({
           )}
         </Form>
       </Modal>
+      <InstallOfficialSkillsModal
+        open={installModalOpen}
+        onClose={() => setInstallModalOpen(false)}
+        onInstalled={refetch}
+      />
     </div>
   );
 }

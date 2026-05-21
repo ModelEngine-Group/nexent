@@ -1,5 +1,6 @@
 import { message } from "antd";
 import log from "@/lib/logger";
+import { fetchWithAuth } from "@/lib/auth";
 import {
   createSkill,
   updateSkill,
@@ -8,6 +9,8 @@ import {
   fetchSkills,
   deleteSkill,
 } from "@/services/agentConfigService";
+import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
+import { InstallableSkill } from "@/types/agentConfig";
 import {
   THINKING_STEPS_ZH,
   type CreateSkillStreamRequest,
@@ -332,11 +335,6 @@ export const skillNameExists = (
 };
 
 export { updateSkill };
-
-/**
- * Call the /skills/create-simple backend API to generate a skill.
- */
-import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 
 /**
  * Interactive skill creation via backend API (SDK-backed).
@@ -823,3 +821,49 @@ export const stopSkillCreation = async (taskId: string): Promise<boolean> => {
     return false;
   }
 };
+
+/**
+ * Fetch official skills with installation status for a tenant.
+ * Used in the tenant creation flow to show which skills are installable.
+ */
+export async function fetchOfficialSkillsWithStatus(): Promise<InstallableSkill[]> {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.skills.official);
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    const rawSkills: unknown[] = data.skills || [];
+    return (rawSkills as Record<string, unknown>[]).map((s) => ({
+      skill_id: Number(s.skill_id),
+      name: String(s.name ?? ""),
+      description: s.description !== undefined ? String(s.description) : "",
+      source: String(s.source ?? "official"),
+      status: (s.status as InstallableSkill["status"]) ?? "installable",
+    }));
+  } catch (error) {
+    log.error("Failed to fetch official skills with status:", error);
+    throw error;
+  }
+}
+
+export async function installOfficialSkills(
+  skillNames: string[],
+  locale: string = "en"
+): Promise<{ installed: string[]; total: number }> {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.skills.install, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skill_names: skillNames, locale }),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return { installed: data.installed || [], total: data.total || 0 };
+  } catch (error) {
+    log.error("Failed to install official skills:", error);
+    throw error;
+  }
+}

@@ -1168,7 +1168,7 @@ export const updateSkill = async (
     source?: string;
     tags?: string[];
     content?: string;
-    params?: Record<string, unknown>;
+    config_values?: Record<string, unknown>;
     files?: Array<{ path: string; content: string }>;
   }
 ) => {

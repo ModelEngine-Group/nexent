@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   Row,
@@ -18,7 +19,7 @@ import {
   Alert,
   Space,
 } from "antd";
-import { Users, Plus, Edit, Edit2, Building2, Trash2, AlertTriangle } from "lucide-react";
+import { Users, Plus, Edit, Edit2, Building2, Trash2, AlertTriangle, CircleCheckBig, CircleOff, CircleDot, LoaderCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
@@ -32,6 +33,8 @@ import {
 } from "@/services/tenantService";
 import { createInvitation, deleteInvitation } from "@/services/invitationService";
 import { authService } from "@/services/authService";
+import { fetchOfficialSkillsWithStatus } from "@/services/skillService";
+import { InstallableSkill } from "@/types/agentConfig";
 import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
@@ -44,6 +47,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
+import { Tooltip } from "@/components/ui/tooltip";
 
 // Default page size for pagination
 const DEFAULT_PAGE_SIZE = 20;
@@ -64,6 +68,7 @@ function TenantList({
   t,
   onUserListRefresh,
   onInvitationListRefresh,
+  locale,
 }: {
   selected: string | null;
   onSelect: (id: string) => void;
@@ -78,6 +83,7 @@ function TenantList({
   t: (key: string, options?: any) => string;
     onUserListRefresh?: () => void;
     onInvitationListRefresh?: () => void;
+    locale?: string;
 }) {
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -92,11 +98,56 @@ function TenantList({
   const [tenantUsers, setTenantUsers] = useState<any[]>([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Handle scroll event for infinite loading
+  // State for auto-install official skills feature
+  const [installOfficialSkills, setInstallOfficialSkills] = useState(false);
+  const [installableSkills, setInstallableSkills] = useState<InstallableSkill[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  // Tracks which skills are currently being installed (per-skill async flow)
+  const [installingSkills, setInstallingSkills] = useState<Set<string>>(new Set());
+  // Tracks which skills have completed installation in the current session
+  const [installedSkills, setInstalledSkills] = useState<Set<string>>(new Set());
+
+  // Fetch official skills when install switch is toggled on
+  useEffect(() => {
+    if (!installOfficialSkills) return;
+
+    let cancelled = false;
+    setSkillsLoading(true);
+    fetchOfficialSkillsWithStatus()
+      .then((skills) => {
+        if (cancelled) return;
+        setInstallableSkills(skills);
+        // Pre-select all installable skills by default
+        const installableNames = new Set<string>();
+        skills.forEach((s) => {
+          if (s.status === "installable") {
+            installableNames.add(s.name);
+          }
+        });
+        setSelectedSkillIds(installableNames);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          message.error("Failed to load official skills");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSkillsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [installOfficialSkills]);
+
   const openCreate = () => {
     setEditingTenant(null);
     form.resetFields();
     setGenerateAdminAccount(false);
+    setInstallOfficialSkills(false);
+    setInstallableSkills([]);
+    setSelectedSkillIds(new Set<string>());
+    setInstallingSkills(new Set<string>());
+    setInstalledSkills(new Set<string>());
     setModalVisible(true);
   };
 
@@ -176,12 +227,46 @@ function TenantList({
         await onTenantsRefetch();
         message.success(t("tenantResources.tenants.updated"));
       } else {
-        // Create tenant first
-        const newTenant = await createTenant({ tenant_name: values.name });
+        // Build skill_names list from selected skill names for backend ZIP-based installation
+        const skillNamesToInstall = installOfficialSkills && selectedSkillIds.size > 0
+          ? Array.from(selectedSkillIds)
+          : undefined;
+
+        // Create tenant (skills are installed via ZIP upload inside the backend)
+        const newTenant = await createTenant({
+          tenant_name: values.name,
+          skill_names: skillNamesToInstall,
+          locale,
+        });
         // Refresh the tenant list to include the new tenant
         await onTenantsRefetch();
         onSelect(newTenant.tenant_id);
         message.success(t("tenantResources.tenants.created"));
+
+        // Trigger per-skill async tracking: mark all selected skills as "installing"
+        // so the UI shows the loader-circle immediately. As each skill resolves
+        // (already installed by backend or tracked here), it moves to "installed".
+        if (installOfficialSkills && selectedSkillIds.size > 0) {
+          const selectedNames = Array.from(selectedSkillIds);
+          setInstallingSkills(new Set(selectedNames));
+          // The backend has already installed the skills synchronously.
+          // For UX, transition each skill to "installed" after a short delay
+          // so the user sees the full flow: installable -> installing -> installed.
+          selectedNames.forEach((name) => {
+            setTimeout(() => {
+              setInstallingSkills((prev) => {
+                const next = new Set(prev);
+                next.delete(name);
+                return next;
+              });
+              setInstalledSkills((prev) => {
+                const next = new Set(prev);
+                next.add(name);
+                return next;
+              });
+            }, 300 + Math.random() * 500);
+          });
+        }
 
         // If generate admin account is enabled, create invitation and register admin
         if (generateAdminAccount && values.adminEmail && values.adminPassword) {
@@ -455,6 +540,146 @@ function TenantList({
               )}
             </>
           )}
+
+          {/* Auto-Install Official Skills Switch - Only show in create mode */}
+          {!editingTenant && (
+            <>
+              <Form.Item
+                labelCol={{ span: 24 }}
+                wrapperCol={{ span: 24 }}
+              >
+                <div className="flex items-center justify-between">
+                  <span>{t("tenantResources.tenants.installOfficialSkills")}</span>
+                  <Switch
+                    checked={installOfficialSkills}
+                    onChange={(checked) => {
+                      setInstallOfficialSkills(checked);
+                      if (!checked) {
+                        setSelectedSkillIds(new Set<string>());
+                        setInstallingSkills(new Set<string>());
+                        setInstalledSkills(new Set<string>());
+                      }
+                    }}
+                  />
+                </div>
+              </Form.Item>
+
+              {/* Skill selector - show when switch is enabled */}
+              {installOfficialSkills && (
+                <div className="mb-4">
+                  <div className="text-sm font-medium text-gray-700 mb-2">
+                    {t("tenantResources.tenants.selectSkills")}
+                  </div>
+
+                  {skillsLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <Spin size="small" />
+                      <span className="ml-2 text-gray-500 text-sm">
+                        {t("tenantResources.tenants.skillsLoading")}
+                      </span>
+                    </div>
+                  ) : installableSkills.length === 0 ? (
+                    <div className="text-gray-500 text-sm py-2">
+                      {t("tenantResources.tenants.noSkillsAvailable")}
+                    </div>
+                  ) : (
+                    <div
+                      className="border border-gray-200 rounded-md max-h-60 overflow-y-auto"
+                      style={{ maxHeight: "240px" }}
+                    >
+                      {/* Select all */}
+                      <div className="flex items-center px-3 py-2 border-b border-gray-200 bg-gray-50">
+                        <input
+                          type="checkbox"
+                          checked={installableSkills.every((s) => selectedSkillIds.has(s.name))}
+                          onChange={() => {
+                            if (installableSkills.every((s) => selectedSkillIds.has(s.name))) {
+                              setSelectedSkillIds(new Set<string>());
+                            } else {
+                              setSelectedSkillIds(new Set(installableSkills.map((s) => s.name)));
+                            }
+                          }}
+                          className="mr-3 w-4 h-4 accent-blue-500 cursor-pointer shrink-0"
+                        />
+                        <span className="flex-1 text-sm font-medium text-gray-700">
+                          {t("common.selectAll") || "Select all"}
+                        </span>
+                      </div>
+
+                      {installableSkills.map((skill) => {
+                        // Determine effective status: installing > installed > original status
+                        const isInstalling = installingSkills.has(skill.name);
+                        const isInstalledSession = installedSkills.has(skill.name);
+                        const isAlreadyInstalled = skill.status === "installed" || isInstalledSession;
+                        const isResourceMissing = skill.status === "resource_missing";
+
+                        let iconElement: React.ReactNode;
+                        let tooltipText: string;
+
+                        if (isInstalling) {
+                          iconElement = (
+                            <LoaderCircle className="h-4 w-4 text-gray-400 shrink-0 animate-spin" />
+                          );
+                          tooltipText = t("tenantResources.tenants.skillStatus.installing");
+                        } else if (isAlreadyInstalled) {
+                          iconElement = (
+                            <CircleCheckBig className="h-4 w-4 text-green-500 shrink-0" />
+                          );
+                          tooltipText = t("tenantResources.tenants.skillStatus.installed");
+                        } else if (isResourceMissing) {
+                          iconElement = (
+                            <CircleOff className="h-4 w-4 text-red-400 shrink-0" />
+                          );
+                          tooltipText = t("tenantResources.tenants.skillStatus.resourceMissing");
+                        } else {
+                          iconElement = (
+                            <CircleDot className="h-4 w-4 text-green-500 shrink-0" />
+                          );
+                          tooltipText = t("tenantResources.tenants.skillStatus.installable");
+                        }
+
+                        const isDisabled = isAlreadyInstalled || isResourceMissing;
+
+                        return (
+                          <div
+                            key={skill.skill_id}
+                            className={`flex items-center px-3 py-2 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors ${
+                              isDisabled ? "opacity-50" : ""
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedSkillIds.has(skill.name)}
+                              onChange={() => {
+                                if (isInstalling) return;
+                                const newSet = new Set(selectedSkillIds);
+                                if (newSet.has(skill.name)) {
+                                  newSet.delete(skill.name);
+                                } else {
+                                  newSet.add(skill.name);
+                                }
+                                setSelectedSkillIds(newSet);
+                              }}
+                              disabled={isInstalling || isAlreadyInstalled || isResourceMissing}
+                              className="mr-3 w-4 h-4 accent-blue-500 cursor-pointer shrink-0"
+                            />
+                            <span className="flex-1 text-sm text-gray-800 truncate">
+                              {skill.name}
+                            </span>
+                            <span className="ml-2 shrink-0">
+                              <Tooltip title={tooltipText}>
+                                {iconElement}
+                              </Tooltip>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </Form>
       </Modal>
 
@@ -553,6 +778,8 @@ export default function UserManageComp() {
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
+  const params = useParams();
+  const locale = (params.locale as string) || "en";
 
   // Check if user is super admin (speed mode or admin role)
   const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
@@ -735,6 +962,7 @@ export default function UserManageComp() {
                     t={t}
                     onUserListRefresh={() => setUserListRefreshKey((prev) => prev + 1)}
                     onInvitationListRefresh={() => setInvitationListRefreshKey((prev) => prev + 1)}
+                    locale={locale}
                   />
                 </div>
               </div>
