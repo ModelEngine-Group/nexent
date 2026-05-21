@@ -1314,6 +1314,50 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "test_agent", ProcessType.FINAL_ANSWER, " content")
 
 
+def test_agent_run_with_observer_writes_aggregate_context_metrics(nexent_agent_instance, mock_core_agent):
+    """Agent run completion writes aggregate context metrics to the top-level span."""
+    class _SpanContext:
+        def __enter__(self):
+            return MagicMock()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monitoring_manager = MagicMock()
+    monitoring_manager.start_agent_run.side_effect = lambda metadata: _SpanContext()
+    monitoring_manager.trace_agent_step.side_effect = lambda *args, **kwargs: _SpanContext()
+
+    nexent_agent_instance.agent = mock_core_agent
+    nexent_agent_instance._log_step_metrics = MagicMock()
+    mock_core_agent.stop_event.is_set.return_value = False
+    mock_core_agent.step_metrics = [
+        {
+            "main_llm": {"input_tokens": 100, "output_tokens": 12},
+            "compression": {"calls": 1, "input_tokens": 80, "output_tokens": 40, "cache_hits": 1},
+            "memory_state": {"estimated_input_tokens": 55, "estimated_output_tokens": 8},
+            "uncompressed_mem_est_input": 110,
+            "compression_ratio": 50.0,
+            "cache_hit": True,
+        }
+    ]
+
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.5
+    mock_action_step.step_number = 1
+    mock_action_step.error = None
+    mock_action_step.output = "Final answer"
+    mock_core_agent.run.return_value = [mock_action_step]
+
+    with patch.object(nexent_agent, "get_monitoring_manager", return_value=monitoring_manager), \
+            patch("builtins.print") as mock_print:
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+    monitoring_manager.set_agent_context_metrics.assert_called_once_with(mock_core_agent.step_metrics)
+    monitoring_manager.set_openinference_output.assert_any_call("Final answer")
+    mock_print.assert_not_called()
+
+
 def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_instance, mock_core_agent):
     """Test successful agent_run_with_observer with string final answer."""
     # Setup

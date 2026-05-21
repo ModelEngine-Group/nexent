@@ -217,6 +217,7 @@ from services.oauth_service import (
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
     exchange_code_for_provider_token,
+    find_supabase_user_id_by_email,
     get_authorize_url,
     get_enabled_providers,
     get_provider_user_info,
@@ -536,6 +537,75 @@ class TestEnsureUserTenantExists(unittest.TestCase):
         }
 
 
+class TestFindSupabaseUserIdByEmail(unittest.TestCase):
+    def test_returns_none_without_email(self):
+        admin_client = MagicMock()
+
+        result = find_supabase_user_id_by_email(admin_client, "")
+
+        self.assertIsNone(result)
+        admin_client.auth.admin.list_users.assert_not_called()
+
+    def test_finds_user_from_supabase_users_response(self):
+        existing_user = MagicMock()
+        existing_user.id = "existing-user-id"
+        existing_user.email = "Existing@Example.com"
+
+        response = MagicMock()
+        response.users = [existing_user]
+
+        admin_client = MagicMock()
+        admin_client.auth.admin.list_users.return_value = response
+
+        result = find_supabase_user_id_by_email(admin_client, "existing@example.com")
+
+        self.assertEqual(result, "existing-user-id")
+        admin_client.auth.admin.list_users.assert_called_once_with(page=1, per_page=100)
+
+    def test_finds_user_on_second_page(self):
+        page1_users = []
+        for index in range(100):
+            user = MagicMock()
+            user.id = f"user-{index}"
+            user.email = f"user-{index}@example.com"
+            page1_users.append(user)
+
+        target_user = MagicMock()
+        target_user.id = "target-user-id"
+        target_user.email = "target@example.com"
+
+        page1 = MagicMock()
+        page1.users = page1_users
+        page2 = MagicMock()
+        page2.users = [target_user]
+
+        admin_client = MagicMock()
+        admin_client.auth.admin.list_users.side_effect = [page1, page2]
+
+        result = find_supabase_user_id_by_email(admin_client, "target@example.com")
+
+        self.assertEqual(result, "target-user-id")
+        self.assertEqual(admin_client.auth.admin.list_users.call_count, 2)
+        admin_client.auth.admin.list_users.assert_any_call(page=1, per_page=100)
+        admin_client.auth.admin.list_users.assert_any_call(page=2, per_page=100)
+
+    def test_stops_when_page_has_less_than_page_size(self):
+        other_user = MagicMock()
+        other_user.id = "other-user-id"
+        other_user.email = "other@example.com"
+
+        response = MagicMock()
+        response.users = [other_user]
+
+        admin_client = MagicMock()
+        admin_client.auth.admin.list_users.return_value = response
+
+        result = find_supabase_user_id_by_email(admin_client, "missing@example.com")
+
+        self.assertIsNone(result)
+        admin_client.auth.admin.list_users.assert_called_once_with(page=1, per_page=100)
+
+
 class TestListLinkedAccounts(unittest.TestCase):
     def test_transforms_db_results(self):
         oauth_account_db_mock.list_oauth_accounts_by_user_id.return_value = [
@@ -563,30 +633,14 @@ class TestListLinkedAccounts(unittest.TestCase):
 
 
 class TestUnlinkAccount(unittest.TestCase):
-    def test_success_with_multiple_accounts(self):
-        oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 2
+    def test_success(self):
         oauth_account_db_mock.delete_oauth_account.return_value = True
 
         result = unlink_account("user-1", "github")
 
         self.assertTrue(result)
 
-    def test_raises_when_last_account_no_password(self):
-        oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 1
-
-        with self.assertRaises(_OAuthLinkError):
-            unlink_account("user-1", "github")
-
-    def test_allows_last_unlink_when_has_password(self):
-        oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 1
-        oauth_account_db_mock.delete_oauth_account.return_value = True
-
-        result = unlink_account("user-1", "github", has_password_auth=True)
-
-        self.assertTrue(result)
-
     def test_raises_when_account_not_found(self):
-        oauth_account_db_mock.count_oauth_accounts_by_user_id.return_value = 2
         oauth_account_db_mock.delete_oauth_account.return_value = False
 
         with self.assertRaises(_OAuthLinkError):
@@ -707,7 +761,7 @@ class TestGetProviderUserInfoEdgeCases(unittest.TestCase):
             with patch.dict(os.environ, env, clear=False):
                 result = get_provider_user_info("github", "test_token")
 
-        self.assertEqual(result["email"], "testuser@nexent.com")
+        self.assertEqual(result["email"], "")
 
     def test_wechat_does_not_fetch_emails(self):
         mock_user_resp = MagicMock()

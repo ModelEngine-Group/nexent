@@ -5,22 +5,16 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
-  
-  # Prometheus receiver to collect metrics from instrumented apps
-  prometheus:
-    config:
-      scrape_configs:
-        - job_name: 'nexent-backend-otel'
-          static_configs:
-            - targets: ['host.docker.internal:8000']
-          scrape_interval: 5s
 
 processors:
   batch:
     timeout: 1s
     send_batch_size: 512
-  
-  # Resource processor to add common attributes
+
+  memory_limiter:
+    limit_mib: 256
+    check_interval: 1s
+
   resource:
     attributes:
       - key: service.name
@@ -30,51 +24,71 @@ processors:
         from_attribute: version
         action: insert
 
-  # Memory limiter to prevent OOM
-  memory_limiter:
-    limit_mib: 256
-    check_interval: 1s
-
-  # Add attributes specifically for LLM monitoring
-  attributes:
-    actions:
-      - key: llm.system
-        value: openai
-        action: insert
-      - key: deployment.environment
-        value: development
-        action: insert
-
 exporters:
-  # Export traces to Jaeger via OTLP
-  otlp/jaeger:
-    endpoint: jaeger:14250
-    tls:
-      insecure: true
-
-  # Export metrics to Prometheus
-  prometheus:
-    endpoint: "0.0.0.0:8889"
-    resource_to_telemetry_conversion:
-      enabled: true
-
-  # Logging exporter for debugging
-  logging:
+  debug:
     verbosity: normal
 
 service:
-  extensions: []
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [otlp/jaeger, logging]
-    
+      exporters: [debug]
+
     metrics:
-      receivers: [otlp, prometheus]
-      processors: [memory_limiter, resource, attributes, batch]
-      exporters: [prometheus, logging]
-  
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug]
+
   telemetry:
     logs:
       level: "info"
+
+# Example configurations for AI observability platforms:
+#
+# === Arize Phoenix ===
+# Set environment variables:
+#   OTEL_EXPORTER_OTLP_ENDPOINT=https://app.phoenix.arize.com/s/YOUR_SPACE
+#   OTEL_EXPORTER_OTLP_AUTHORIZATION=Bearer YOUR_PHOENIX_API_KEY
+#   OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+#
+# Or configure directly in exporters section:
+#   otlphttp/arize:
+#     endpoint: https://app.phoenix.arize.com/s/YOUR_SPACE
+#     headers:
+#       Authorization: Bearer YOUR_PHOENIX_API_KEY
+# Then add otlphttp/arize to the traces pipeline exporters.
+#
+# === Langfuse ===
+# Set environment variables:
+#   OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
+#   OTEL_EXPORTER_OTLP_AUTHORIZATION=Basic BASE64_ENCODED_KEY
+#   OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION=4
+#
+# Where BASE64_ENCODED_KEY = base64(public_key:secret_key)
+#
+# Or configure directly:
+#   otlphttp/langfuse:
+#     endpoint: https://cloud.langfuse.com/api/public/otel
+#     headers:
+#       Authorization: Basic BASE64_ENCODED_KEY
+#       x-langfuse-ingestion-version: "4"
+# Then add otlphttp/langfuse to the traces pipeline exporters.
+#
+# === LangSmith ===
+# Set environment variables:
+#   LANGSMITH_API_KEY=lsv2_...
+#   LANGSMITH_PROJECT=nexent
+#
+# Or configure directly:
+#   otlphttp/langsmith:
+#     traces_endpoint: https://api.smith.langchain.com/otel/v1/traces
+#     headers:
+#       x-api-key: YOUR_LANGSMITH_API_KEY
+#       Langsmith-Project: nexent
+# Then add otlphttp/langsmith to the traces pipeline exporters.
+#
+# === Multiple Exporters ===
+# To export to multiple backends simultaneously, create multiple exporters
+# and add them to the pipelines:
+#   exporters: [otlphttp/arize, otlphttp/langfuse, otlphttp/langsmith, debug]
