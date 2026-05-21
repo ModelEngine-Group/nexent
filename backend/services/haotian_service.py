@@ -11,7 +11,7 @@ import httpx
 
 logger = logging.getLogger("haotian_service")
 
-_DEFAULT_KNOWLEDGE_BASE_ID = "abcdefg"
+_DEFAULT_KNOWLEDGE_BASE_ID = "a8d68fbf-bd6e-5461-a9d1-cf1bb3522e38"
 
 
 def _normalize_list_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
