@@ -99,8 +99,9 @@ export interface ToolParam {
   type: "string" | "number" | "boolean" | "array" | "object" | "Optional";
   required: boolean;
   value?: any;
-  description_en?: string;
+  description?: string;
   description_zh?: string;
+  default?: string;
   depends_on?: string;
 }
 
