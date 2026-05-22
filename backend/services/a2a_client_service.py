@@ -88,14 +88,23 @@ class A2AClientService:
             # Extract endpoint URL - prioritize supportedInterfaces (A2A v1.0 standard)
             agent_url = self._extract_agent_url(card)
 
-            # Extract protocol info and supported interfaces
-            capabilities = card.get("capabilities", {})
-            protocol_version = capabilities.get("protocolVersion", "1.0")
-            streaming = capabilities.get("streaming", False)
-            transport_type = "http-streaming" if streaming else "http-polling"
-
             # Extract supported interfaces (A2A v1.0 standard format)
             supported_interfaces = card.get("supportedInterfaces", [])
+
+            # Extract protocol info from supported_interfaces (A2A 1.0 spec)
+            # protocol_version and streaming are properties of each interface, not top-level
+            first_interface = supported_interfaces[0] if supported_interfaces else {}
+            interface_capabilities = first_interface.get("capabilities", {})
+            protocol_version = first_interface.get("protocolVersion", "1.0")
+            streaming = interface_capabilities.get("streaming", False)
+
+            # Fallback to top-level capabilities if no supported_interfaces
+            if not supported_interfaces:
+                card_capabilities = card.get("capabilities", {})
+                if protocol_version == "1.0" and card_capabilities.get("protocolVersion"):
+                    protocol_version = card_capabilities.get("protocolVersion")
+                if not streaming and card_capabilities.get("streaming"):
+                    streaming = card_capabilities.get("streaming")
 
             # Store in database
             result = a2a_agent_db.create_external_agent_from_url(
@@ -104,7 +113,7 @@ class A2AClientService:
                 description=description,
                 agent_url=agent_url,
                 version=protocol_version,
-                streaming=(transport_type == "http-streaming"),
+                streaming=streaming,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 raw_card=card,
@@ -222,50 +231,95 @@ class A2AClientService:
         client = NacosClient(nacos_addr, username, password)
 
         try:
-            # Query service instance from Nacos
-            instance = await client.query_service_instance(agent_name, namespace)
-            if not instance:
-                logger.warning(f"No instance found for agent '{agent_name}' in Nacos")
+            # Query A2A agent from Nacos using dedicated A2A endpoint
+            agent_info = await client.query_a2a_agent(agent_name, namespace)
+            if not agent_info:
+                logger.warning(f"No A2A agent found for '{agent_name}' in Nacos")
                 return None
 
-            # Fetch Agent Card from instance
-            agent_card_url = instance.get("metadata", {}).get("a2a_card_url")
-            if not agent_card_url:
-                # Construct URL from instance host/port
-                host = instance.get("ip")
-                port = instance.get("port")
-                if host and port:
-                    agent_card_url = f"http://{host}:{port}/.well-known/agent-{agent_name}.json"
-
-            if not agent_card_url:
-                logger.warning(f"No Agent Card URL found for agent '{agent_name}'")
+            # Extract agent URL from A2A response
+            agent_url = agent_info.get("agent_url") or agent_info.get("url")
+            if not agent_url:
+                logger.warning(f"No agent URL found for A2A agent '{agent_name}'")
                 return None
 
-            # Fetch Agent Card
-            try:
-                async with A2AHttpClient() as http_client:
-                    card = await http_client.get_json(agent_card_url)
-            except aiohttp.ClientError:
-                # Network errors retrieving agent card should result in None
-                logger.warning(f"Failed to retrieve agent card from {agent_card_url}")
-                return None
+            # Get metadata and extract description from Nacos response
+            metadata = agent_info.get("metadata") or {}
+            description = agent_info.get("description") or metadata.get("description", "")
+            nacos_interfaces = metadata.get("supported_interfaces", [])
+            supported_interfaces = nacos_interfaces.copy() if nacos_interfaces else []
+            protocol_version = "1.0"
+            streaming = False
+            agent_card_fetched = False
 
-            # Extract endpoint URL and supported interfaces
-            agent_url = self._extract_agent_url(card)
-            supported_interfaces = card.get("supportedInterfaces", [])
+            # Fetch Agent Card from agent_url to get supported_interfaces (A2A v1.0 spec)
+            # Try common Agent Card endpoints (order matters - try more specific paths first)
+            card_urls = [
+                f"{agent_url.rstrip('/')}/.well-known/agent-card.json",
+                f"{agent_url.rstrip('/')}/.well-known/agent.json",
+                f"{agent_url.rstrip('/')}/.well-known/agent-1.0.json",
+                f"{agent_url.rstrip('/')}/agent-card.json",
+                f"{agent_url.rstrip('/')}/agent.json",
+            ]
+
+            for card_url in card_urls:
+                try:
+                    async with A2AHttpClient() as http_client:
+                        card = await http_client.get_json(card_url, headers=build_a2a_headers())
+
+                    if card and (card.get("name") or card.get("agent_id")):
+                        logger.info(f"Fetched Agent Card from {card_url}")
+
+                        # Extract supported_interfaces from Agent Card
+                        card_interfaces = card.get("supportedInterfaces", [])
+
+                        # Always update from Agent Card if present
+                        if card_interfaces:
+                            supported_interfaces = card_interfaces
+                            agent_card_fetched = True
+
+                        # Extract description from Agent Card if not found in Nacos
+                        if not description:
+                            description = card.get("description", "")
+
+                        # Extract protocol info from supported_interfaces
+                        first_interface = supported_interfaces[0] if supported_interfaces else {}
+                        capabilities = first_interface.get("capabilities", {})
+                        protocol_version = first_interface.get("protocolVersion", "1.0")
+                        streaming = capabilities.get("streaming", False)
+
+                        # Merge raw_card: Agent Card takes precedence over Nacos info
+                        agent_info = card
+                        break
+
+                except Exception as e:
+                    logger.warning(f"Failed to fetch Agent Card from {card_url}: {e}")
+                    continue
+
+            if not agent_card_fetched:
+                logger.warning(
+                    f"[Nacos Discovery] Failed to fetch Agent Card for '{agent_name}', "
+                    f"using Nacos interfaces: {supported_interfaces}"
+                )
+
+            logger.info(
+                f"[Nacos Discovery] Storing agent: name={agent_name}, "
+                f"agent_url={agent_url}, supported_interfaces_count={len(supported_interfaces) if supported_interfaces else 0}, "
+                f"protocol_version={protocol_version}, streaming={streaming}"
+            )
 
             # Store in database
             result = a2a_agent_db.create_external_agent_from_nacos(
-                name=card.get("name", agent_name),
-                description=card.get("description", ""),
+                name=agent_name,
+                description=description,
                 agent_url=agent_url,
-                protocol_version=card.get("capabilities", {}).get("protocolVersion", "1.0"),
-                transport_type="http-streaming" if card.get("capabilities", {}).get("streaming") else "http-polling",
+                version=protocol_version,
+                streaming=streaming,
                 nacos_config_id=nacos_config["config_id"],
                 nacos_agent_name=agent_name,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                raw_card=card,
+                raw_card=agent_info,
                 supported_interfaces=supported_interfaces
             )
 
@@ -312,13 +366,10 @@ class A2AClientService:
         return ""
 
     def _find_url_in_interfaces(self, interfaces: List[Any]) -> str:
-        """Find URL from supportedInterfaces array, preferring http-json-rpc."""
-        json_rpc_protocols = ("http-json-rpc", "jsonrpc", "httpjsonrpc")
-        for iface in interfaces:
-            if iface.get("protocolBinding", "").lower() in json_rpc_protocols:
-                url = iface.get("url", "")
-                if url:
-                    return url
+        """Find URL from supportedInterfaces array - return the first interface's URL.
+
+        This ensures protocol and URL are always from the same interface.
+        """
         for iface in interfaces:
             url = iface.get("url", "")
             if url:
@@ -426,46 +477,128 @@ class A2AClientService:
         if not agent:
             raise AgentDiscoveryError(f"Agent {external_agent_id} not found")
 
+        source_type = agent.get("source_type")
+        source_url = agent.get("source_url")
+        agent_url = agent.get("agent_url")
+        base_url = agent.get("base_url")
+
         try:
-            # Fetch fresh Agent Card
-            source_url = agent.get("source_url")
-            if not source_url:
-                raise AgentDiscoveryError("No source URL available for refresh")
+            if source_type == "nacos":
+                # Nacos discovered agents: use /health endpoint to check availability
+                if not base_url:
+                    raise AgentDiscoveryError("No base_url available for health check")
 
-            async with A2AHttpClient() as client:
-                card = await client.get_json(source_url)
+                health_url = f"{base_url.rstrip('/')}/health"
+                logger.info(f"Checking health for Nacos agent: {health_url}")
 
-            # Extract updated info - use _extract_agent_url for A2A v1.0 standard
-            new_url = self._extract_agent_url(card)
-            new_name = card.get("name")
-            new_description = card.get("description")
-            new_supported_interfaces = card.get("supportedInterfaces", [])
+                async with A2AHttpClient() as client:
+                    health_response = await client.get_json(health_url)
 
-            # Note: Do NOT update protocol_type and agent_url during refresh
-            # These are user-configured values and should not be overwritten
-            # The refresh should only update metadata (name, description, supported_interfaces, raw_card)
+                # Update availability based on health check
+                a2a_agent_db.update_agent_availability(
+                    external_agent_id=external_agent_id,
+                    tenant_id=tenant_id,
+                    is_available=True,
+                    check_result="OK"
+                )
 
-            # Update cache
-            result = a2a_agent_db.refresh_external_agent_cache(
-                external_agent_id=external_agent_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                new_raw_card=card,
-                new_name=new_name,
-                new_description=new_description,
-                new_supported_interfaces=new_supported_interfaces
-            )
+                # Update cache timestamp
+                a2a_agent_db.refresh_external_agent_cache(
+                    external_agent_id=external_agent_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id
+                )
 
-            # Update availability
-            a2a_agent_db.update_agent_availability(
-                external_agent_id=external_agent_id,
-                tenant_id=tenant_id,
-                is_available=True,
-                check_result="OK"
-            )
+                logger.info(f"Health check passed for agent {external_agent_id}")
+                return {
+                    "agent_id": external_agent_id,
+                    "source_type": source_type,
+                    "health_url": health_url,
+                    "health_response": health_response,
+                    "status": "available"
+                }
 
-            logger.info(f"Refreshed agent {external_agent_id}")
-            return result
+            else:
+                # URL discovered agents: fetch fresh Agent Card from source_url
+                if not source_url:
+                    raise AgentDiscoveryError("No source URL available for refresh")
+
+                async with A2AHttpClient() as client:
+                    card = await client.get_json(source_url)
+
+                # Extract updated info - use _extract_agent_url for A2A v1.0 standard
+                new_url = self._extract_agent_url(card)
+                new_name = card.get("name")
+                new_description = card.get("description")
+                new_supported_interfaces = card.get("supportedInterfaces", [])
+
+                # Extract new protocol type from the card
+                new_protocol_type = _extract_protocol_type(new_supported_interfaces)
+                current_protocol_type = agent.get("protocol_type")
+
+                # Determine if we need to update agent_url and protocol_type
+                # Update agent_url if it changed in the remote card
+                update_agent_url = new_url is not None and new_url != agent_url
+
+                # Update protocol_type if it changed in the remote card
+                update_protocol_type = new_protocol_type != current_protocol_type
+
+                # When protocol_type changes, we need to find the corresponding interface URL
+                if update_protocol_type:
+                    logger.info(
+                        f"Protocol type changed for agent {external_agent_id}: "
+                        f"{current_protocol_type} -> {new_protocol_type}"
+                    )
+                    # The database function will handle finding the correct interface URL
+                    result = a2a_agent_db.refresh_external_agent_cache(
+                        external_agent_id=external_agent_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        new_raw_card=card,
+                        new_agent_url=new_url if update_agent_url else None,
+                        new_name=new_name,
+                        new_description=new_description,
+                        new_supported_interfaces=new_supported_interfaces,
+                        new_protocol_type=new_protocol_type
+                    )
+                elif update_agent_url:
+                    # Only agent_url changed
+                    logger.info(
+                        f"Agent URL changed for agent {external_agent_id}: "
+                        f"{agent_url} -> {new_url}"
+                    )
+                    result = a2a_agent_db.refresh_external_agent_cache(
+                        external_agent_id=external_agent_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        new_raw_card=card,
+                        new_agent_url=new_url,
+                        new_name=new_name,
+                        new_description=new_description,
+                        new_supported_interfaces=new_supported_interfaces
+                    )
+                else:
+                    # No changes to agent_url or protocol_type, just update metadata
+                    result = a2a_agent_db.refresh_external_agent_cache(
+                        external_agent_id=external_agent_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        new_raw_card=card,
+                        new_name=new_name,
+                        new_description=new_description,
+                        new_supported_interfaces=new_supported_interfaces
+                    )
+
+                # Update availability
+                a2a_agent_db.update_agent_availability(
+                    external_agent_id=external_agent_id,
+                    tenant_id=tenant_id,
+                    is_available=True,
+                    check_result="OK"
+                )
+
+                logger.info(f"Refreshed agent {external_agent_id}")
+                return result
 
         except aiohttp.ClientError as e:
             logger.error(f"Failed to refresh agent {external_agent_id}: {e}")

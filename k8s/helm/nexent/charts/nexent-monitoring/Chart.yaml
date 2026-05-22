@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nexent-monitoring
+description: Optional OpenTelemetry monitoring stack for Nexent
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - nexent
+  - monitoring
+  - opentelemetry
+maintainers:
+  - name: Nexent Team

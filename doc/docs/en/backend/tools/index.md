@@ -12,6 +12,10 @@ Integrate with the LangChain ecosystem for advanced AI workflows.
 Model Context Protocol tools for standardized AI agent communication.
 → [MCP Tools Development](./mcp)
 
+### Skills System
+Create reusable skill packages through natural language or ZIP files, giving agents more flexible tool-calling capabilities.
+→ [Skills Documentation](../skills/index)
+
 ## Quick Start
 
 1. **Choose your tool type**: LangChain for general AI workflows, MCP for standardized agent communication

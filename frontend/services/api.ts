@@ -24,6 +24,8 @@ export const API_ENDPOINTS = {
     providers: `${API_BASE_URL}/user/oauth/providers`,
     authorize: `${API_BASE_URL}/user/oauth/authorize`,
     link: `${API_BASE_URL}/user/oauth/link`,
+    pending: `${API_BASE_URL}/user/oauth/pending`,
+    complete: `${API_BASE_URL}/user/oauth/complete`,
     accounts: `${API_BASE_URL}/user/oauth/accounts`,
     unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
   },
@@ -85,6 +87,14 @@ export const API_ENDPOINTS = {
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
+    optimize: `${API_BASE_URL}/prompt/optimize`,
+  },
+  promptTemplates: {
+    list: `${API_BASE_URL}/prompt_templates`,
+    detail: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    create: `${API_BASE_URL}/prompt_templates`,
+    update: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    delete: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
   },
   stt: {
     ws: `/api/voice/stt/ws`,
@@ -272,6 +282,7 @@ export const API_ENDPOINTS = {
     // Nacos config management
     nacosConfigs: `${API_BASE_URL}/a2a/client/nacos-configs`,
     nacosConfig: (configId: string) => `${API_BASE_URL}/a2a/client/nacos-configs/${configId}`,
+    nacosTestConnection: `${API_BASE_URL}/a2a/client/nacos-configs/test-connection`,
     // A2A Server management
     serverAgents: `${API_BASE_URL}/a2a/management/agents`,
     serverAgent: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}`,
@@ -380,6 +391,7 @@ export const API_ENDPOINTS = {
   },
   monitoring: {
     models: `${API_BASE_URL}/monitoring/models`,
+    status: `${API_BASE_URL}/monitoring/status`,
   },
 };
 
@@ -431,6 +443,12 @@ export const fetchWithErrorHandling = async (
         errorCodeStr === ErrorCode.TOKEN_EXPIRED ||
         errorCodeStr === ErrorCode.TOKEN_INVALID
       ) {
+        handleSessionExpired();
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      // Handle HTTP 401 - trigger session expired modal for all unauthorized errors
+      if (response.status === 401) {
         handleSessionExpired();
         throw new ApiError(errorCode, errorMessage);
       }

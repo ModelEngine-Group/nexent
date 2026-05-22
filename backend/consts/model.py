@@ -1,8 +1,10 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from nexent.core.agents.agent_model import ToolConfig
+
+from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 
 
 class ModelConnectStatusEnum(Enum):
@@ -38,6 +40,13 @@ class UserSignInRequest(BaseModel):
     """User login request model"""
     email: EmailStr
     password: str
+
+
+class OAuthCompleteRequest(BaseModel):
+    """Complete a pending OAuth signup."""
+    email: Optional[EmailStr] = None
+    password: str = Field(..., min_length=6)
+    invite_code: str = Field(..., min_length=1)
 
 
 class UserUpdateRequest(BaseModel):
@@ -121,6 +130,8 @@ class ModelRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = None
     access_token: Optional[str] = None
+    timeout_seconds: Optional[int] = None
+    concurrency_limit: Optional[int] = None
 
 
 class ProviderModelRequest(BaseModel):
@@ -312,6 +323,67 @@ class GeneratePromptRequest(BaseModel):
     task_description: str
     agent_id: int
     model_id: int
+    prompt_template_id: Optional[int] = None
+    tool_ids: Optional[List[int]] = Field(
+        None, description="Optional: tool IDs from frontend (takes precedence over database query)")
+    sub_agent_ids: Optional[List[int]] = Field(
+        None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
+    knowledge_base_display_names: Optional[List[str]] = Field(
+        None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+
+
+class PromptTemplateContentRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    duty_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["duty_system_prompt"]
+    )
+    constraint_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["constraint_system_prompt"]
+    )
+    few_shots_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["few_shots_system_prompt"]
+    )
+    agent_variable_name_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_variable_name_system_prompt"]
+    )
+    agent_display_name_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_system_prompt"]
+    )
+    agent_description_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_description_system_prompt"]
+    )
+    user_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["user_prompt"]
+    )
+    agent_name_regenerate_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_system_prompt"]
+    )
+    agent_name_regenerate_user_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_user_prompt"]
+    )
+    agent_display_name_regenerate_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_system_prompt"]
+    )
+    agent_display_name_regenerate_user_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_user_prompt"]
+    )
+
+
+class PromptTemplateRequest(BaseModel):
+    template_name: str
+    description: Optional[str] = None
+    template_type: str = "agent_generate"
+    template_content_zh: PromptTemplateContentRequest
+    template_content_en: Optional[PromptTemplateContentRequest] = None
+class OptimizePromptSectionRequest(BaseModel):
+    task_description: str
+    agent_id: int
+    model_id: int
+    section_type: str
+    section_title: str
+    current_content: str
+    feedback: str
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
@@ -343,9 +415,12 @@ class AgentInfoRequest(BaseModel):
     enabled: Optional[bool] = None
     business_logic_model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
+    prompt_template_id: Optional[int] = None
+    prompt_template_name: Optional[str] = None
     enabled_tool_ids: Optional[List[int]] = None
     enabled_skill_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
+    related_external_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
@@ -431,6 +506,8 @@ class ExportAndImportAgentInfo(BaseModel):
     model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
     business_logic_model_name: Optional[str] = None
+    prompt_template_id: Optional[int] = None
+    prompt_template_name: Optional[str] = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -755,6 +832,8 @@ class ManageTenantModelCreateRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = Field(None, description="Application ID for STT models (e.g., Volcano Engine)")
     access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
+    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
+    concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
 
 
 class ManageTenantModelUpdateRequest(BaseModel):
@@ -775,6 +854,8 @@ class ManageTenantModelUpdateRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = Field(None, description="Application ID for STT models")
     access_token: Optional[str] = Field(None, description="Access token for STT models")
+    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
+    concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):

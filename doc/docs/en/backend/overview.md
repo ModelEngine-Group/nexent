@@ -203,3 +203,5 @@ python backend/mcp_service.py            # MCP service
 - Auto-scaling capabilities
 
 For detailed backend development guidelines, see the [Developer Guide](../developer-guide/overview).
+
+For skill development and management, see the [Skills System Documentation](./skills/index).

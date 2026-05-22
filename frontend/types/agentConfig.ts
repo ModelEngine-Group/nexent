@@ -4,10 +4,15 @@ import type { Dispatch, SetStateAction } from "react";
 import { ChatMessageType } from "./chat";
 import { ModelOption } from "@/types/modelConfig";
 import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
+import type { PromptTemplateFieldKey } from "../const/promptTemplate";
 
 export type AgentBusinessInfo = Partial<Pick<
   Agent,
-  "business_description" | "business_logic_model_id" | "business_logic_model_name"
+  | "business_description"
+  | "business_logic_model_id"
+  | "business_logic_model_name"
+  | "prompt_template_id"
+  | "prompt_template_name"
 >>;
 
 export type AgentProfileInfo = Partial<
@@ -26,6 +31,8 @@ export type AgentProfileInfo = Partial<
     | "few_shots_prompt"
     | "group_ids"
     | "ingroup_permission"
+    | "prompt_template_id"
+    | "prompt_template_name"
   >
 >;
 
@@ -50,6 +57,8 @@ export interface Agent {
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;
+  prompt_template_id?: number;
+  prompt_template_name?: string;
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
@@ -407,7 +416,8 @@ export interface McpContainer {
 export interface GeneratePromptParams {
   agent_id: number;
   task_description: string;
-  model_id: string;
+  model_id: number;
+  prompt_template_id?: number;
   tool_ids?: number[]; // Optional: tool IDs selected in frontend (takes precedence over database query)
   sub_agent_ids?: number[]; // Optional: sub-agent IDs selected in frontend (takes precedence over database query)
   /**
@@ -419,6 +429,26 @@ export interface GeneratePromptParams {
   knowledge_base_display_names?: string[];
 }
 
+export interface OptimizePromptSectionParams {
+  agent_id: number;
+  task_description: string;
+  model_id: string;
+  section_type: "duty" | "constraint" | "few_shots";
+  section_title: string;
+  current_content: string;
+  feedback: string;
+  tool_ids?: number[];
+  sub_agent_ids?: number[];
+  knowledge_base_display_names?: string[];
+}
+
+export interface OptimizePromptSectionResponse {
+  section_type: "duty" | "constraint" | "few_shots";
+  section_title: string;
+  original_content: string;
+  optimized_content: string;
+}
+
 /**
  * Stream Response Data Structure
  */
@@ -426,4 +456,26 @@ export interface StreamResponseData {
   type: (typeof GENERATE_PROMPT_STREAM_TYPES)[keyof typeof GENERATE_PROMPT_STREAM_TYPES];
   content: string;
   is_complete: boolean;
+}
+
+export type PromptTemplateContent = Record<PromptTemplateFieldKey, string>;
+
+export interface PromptTemplate {
+  template_id: number;
+  template_name: string;
+  description?: string | null;
+  template_type: string;
+  template_content_zh: PromptTemplateContent;
+  template_content_en?: PromptTemplateContent | null;
+  is_system_default?: boolean;
+  create_time?: string;
+  update_time?: string;
+}
+
+export interface PromptTemplatePayload {
+  template_name: string;
+  description?: string;
+  template_type?: string;
+  template_content_zh: PromptTemplateContent;
+  template_content_en?: PromptTemplateContent | null;
 }
