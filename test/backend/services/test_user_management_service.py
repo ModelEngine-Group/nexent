@@ -26,7 +26,8 @@ sys.modules['services.invitation_service'] = MagicMock()
 sys.modules['services.group_service'] = MagicMock()
 sys.modules['services.tool_configuration_service'] = MagicMock()
 
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
+from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException
+from consts.error_code import ErrorCode
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -577,7 +578,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
         # Mock init_tool_list_for_tenant as async function
         with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
-            result = await signup_user_with_invitation("admin@example.com", "password123", invite_code="ADMIN123")
+            result = await signup_user_with_invitation("admin@example.com", "Password123", invite_code="ADMIN123")
 
             # Verify generate_tts_stt_4_admin was called for admin user
             mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
@@ -631,7 +632,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
         # Mock init_tool_list_for_tenant as async function
         with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
-            result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV456")
+            result = await signup_user_with_invitation("dev@example.com", "Password123", invite_code="DEV456")
 
             self.assertEqual(result, {"user": "dev_data"})
             mock_insert_tenant.assert_called_once_with(user_id="user-456", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
@@ -650,7 +651,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
         mock_check_available.return_value = False
 
         with self.assertRaises(IncorrectInviteCodeException) as context:
-            await signup_user_with_invitation("test@example.com", "password123", "INVALID")
+            await signup_user_with_invitation("test@example.com", "Password123", "INVALID")
 
         self.assertIn("is not available", str(context.exception))
 
@@ -683,7 +684,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
             mock_parse.return_value = {"user": "data"}
 
             # Use lowercase invite code
-            result = await signup_user_with_invitation("test@example.com", "password123", invite_code="lowercase")
+            result = await signup_user_with_invitation("test@example.com", "Password123", invite_code="lowercase")
 
             # Verify the code was converted to uppercase in the check
             mock_check_available.assert_called_with("LOWERCASE")
@@ -700,7 +701,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
         mock_get_invite_code.return_value = None
 
         with self.assertRaises(IncorrectInviteCodeException) as context:
-            await signup_user_with_invitation("test@example.com", "password123", invite_code="NONEXISTENT")
+            await signup_user_with_invitation("test@example.com", "Password123", invite_code="NONEXISTENT")
 
         self.assertIn("not found", str(context.exception))
 
@@ -733,7 +734,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
             mock_get_client.return_value = mock_client
             mock_parse.return_value = {"user": "data"}
 
-            result = await signup_user_with_invitation("admin@example.com", "password123", invite_code="ADMIN123")
+            result = await signup_user_with_invitation("admin@example.com", "Password123", invite_code="ADMIN123")
 
             # Verify ADMIN role was assigned and TTS/STT generation was called
             mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
@@ -770,7 +771,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
             mock_get_client.return_value = mock_client
             mock_parse.return_value = {"user": "data"}
 
-            result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV123")
+            result = await signup_user_with_invitation("dev@example.com", "Password123", invite_code="DEV123")
 
             # Verify DEV role was assigned and TTS/STT generation was NOT called
             mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
@@ -785,7 +786,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
         mock_check_available.side_effect = Exception("Database connection failed")
 
         with self.assertRaises(IncorrectInviteCodeException) as context:
-            await signup_user_with_invitation("test@example.com", "password123", invite_code="TEST123")
+            await signup_user_with_invitation("test@example.com", "Password123", invite_code="TEST123")
 
         self.assertIn("Invalid invitation code: Database connection failed", str(context.exception))
 
@@ -826,7 +827,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
         with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
             result = await signup_user_with_invitation(
                 "admin@example.com",
-                "password123",
+                "Password123",
                 invite_code="ADMIN123",
                 auto_login=False
             )
@@ -873,7 +874,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
         with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
             result = await signup_user_with_invitation(
                 "admin@example.com",
-                "password123",
+                "Password123",
                 invite_code="ADMIN123"
             )
 
@@ -1117,7 +1118,7 @@ class TestSigninUser(unittest.IsolatedAsyncioTestCase):
         mock_calc_expires.return_value = "2024-01-01T00:00:00Z"
         mock_get_expiry.return_value = 3600
 
-        result = await signin_user("test@example.com", "password123")
+        result = await signin_user("test@example.com", "Password123")
 
         expected = {
             "message": "Login successful, session validity is 3600 seconds",
@@ -1161,7 +1162,7 @@ class TestSigninUser(unittest.IsolatedAsyncioTestCase):
         mock_calc_expires.return_value = "2024-01-01T00:00:00Z"
         mock_get_expiry.return_value = 3600
 
-        result = await signin_user("test@example.com", "password123")
+        result = await signin_user("test@example.com", "Password123")
 
         self.assertEqual(result["data"]["user"]["role"], "user")
 
@@ -1520,6 +1521,130 @@ class TestDeleteToken(unittest.IsolatedAsyncioTestCase):
         result = ums.delete_token(999, "user-123")
 
         assert result is False
+
+
+class TestUpdatePassword(unittest.IsolatedAsyncioTestCase):
+    """Tests for update_password function in user_management_service."""
+
+    @patch('backend.services.user_management_service.validate_password_strength')
+    @patch('backend.services.user_management_service.get_supabase_admin_client')
+    @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
+    async def test_update_password_success(self, mock_get_tenant, mock_get_client, mock_validate_strength):
+        """Test successful password update."""
+        from backend.services import user_management_service as ums
+
+        mock_validate_strength.return_value = True
+        mock_get_tenant.return_value = {"user_email": "test@example.com"}
+        mock_client = MagicMock()
+        mock_client.auth.sign_in_with_password.return_value = MagicMock()
+        mock_client.auth.update_user.return_value = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        result = await ums.update_password("user-123", "OldPass123", "NewPass456")
+
+        assert result is True
+        mock_validate_strength.assert_called_once_with("NewPass456")
+        mock_get_tenant.assert_called_once_with("user-123")
+        mock_client.auth.sign_in_with_password.assert_called_once_with({
+            "email": "test@example.com",
+            "password": "OldPass123"
+        })
+        mock_client.auth.update_user.assert_called_once_with({"password": "NewPass456"})
+
+    @patch('backend.services.user_management_service.validate_password_strength')
+    async def test_update_password_weak_password(self, mock_validate_strength):
+        """Test password update with weak password."""
+        from backend.services import user_management_service as ums
+
+        mock_validate_strength.return_value = False
+
+        with self.assertRaises(AppException) as context:
+            await ums.update_password("user-123", "OldPass123", "weak")
+
+        assert context.exception.error_code == ErrorCode.PROFILE_PASSWORD_WEAK
+
+    @patch('backend.services.user_management_service.validate_password_strength')
+    async def test_update_password_same_as_old(self, mock_validate_strength):
+        """Test password update with new password same as old."""
+        from backend.services import user_management_service as ums
+
+        mock_validate_strength.return_value = True
+
+        with self.assertRaises(AppException) as context:
+            await ums.update_password("user-123", "SamePass123", "SamePass123")
+
+        assert context.exception.error_code == ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD
+
+    @patch('backend.services.user_management_service.validate_password_strength')
+    @patch('backend.services.user_management_service.get_supabase_admin_client')
+    @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
+    async def test_update_password_user_not_found(self, mock_get_tenant, mock_get_client, mock_validate_strength):
+        """Test password update when user tenant not found."""
+        from backend.services import user_management_service as ums
+
+        mock_validate_strength.return_value = True
+        mock_get_tenant.return_value = None
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        with self.assertRaises(UnauthorizedError) as context:
+            await ums.update_password("user-123", "OldPass123", "NewPass456")
+
+        assert "Unable to retrieve user email" in str(context.exception)
+
+    @patch('backend.services.user_management_service.validate_password_strength')
+    @patch('backend.services.user_management_service.get_supabase_admin_client')
+    @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
+    async def test_update_password_missing_email(self, mock_get_tenant, mock_get_client, mock_validate_strength):
+        """Test password update when user email is missing."""
+        from backend.services import user_management_service as ums
+
+        mock_validate_strength.return_value = True
+        mock_get_tenant.return_value = {"user_email": None}
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        with self.assertRaises(UnauthorizedError) as context:
+            await ums.update_password("user-123", "OldPass123", "NewPass456")
+
+        assert "Unable to retrieve user email" in str(context.exception)
+
+    @patch('backend.services.user_management_service.validate_password_strength')
+    @patch('backend.services.user_management_service.get_supabase_admin_client')
+    @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
+    async def test_update_password_invalid_old_password(self, mock_get_tenant, mock_get_client, mock_validate_strength):
+        """Test password update with incorrect old password."""
+        from backend.services import user_management_service as ums
+
+        mock_validate_strength.return_value = True
+        mock_get_tenant.return_value = {"user_email": "test@example.com"}
+        mock_client = MagicMock()
+        mock_client.auth.sign_in_with_password.side_effect = Exception("Invalid login credentials")
+        mock_get_client.return_value = mock_client
+
+        with self.assertRaises(UnauthorizedError) as context:
+            await ums.update_password("user-123", "WrongPass", "NewPass456")
+
+        assert "Invalid old password" in str(context.exception)
+
+    @patch('backend.services.user_management_service.validate_password_strength')
+    @patch('backend.services.user_management_service.get_supabase_admin_client')
+    @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
+    async def test_update_password_update_user_error(self, mock_get_tenant, mock_get_client, mock_validate_strength):
+        """Test password update when update_user fails."""
+        from backend.services import user_management_service as ums
+
+        mock_validate_strength.return_value = True
+        mock_get_tenant.return_value = {"user_email": "test@example.com"}
+        mock_client = MagicMock()
+        mock_client.auth.sign_in_with_password.return_value = MagicMock()
+        mock_client.auth.update_user.side_effect = Exception("Update failed")
+        mock_get_client.return_value = mock_client
+
+        with self.assertRaises(Exception) as context:
+            await ums.update_password("user-123", "OldPass123", "NewPass456")
+
+        assert "Update failed" in str(context.exception)
 
 
 class TestIntegrationScenarios(unittest.IsolatedAsyncioTestCase):

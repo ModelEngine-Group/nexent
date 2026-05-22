@@ -49,6 +49,7 @@ export function RegisterModal() {
   const [form] = Form.useForm<AuthFormValues>();
   const [isLoading, setIsLoading] = useState(false);
   const [emailError, setEmailError] = useState("");
+  const [passwordValue, setPasswordValue] = useState("");
   const [passwordError, setPasswordError] = useState<{
     target: "password" | "confirmPassword" | "";
     message: string;
@@ -67,7 +68,30 @@ export function RegisterModal() {
   };
 
   const validatePassword = (password: string): boolean => {
-    return !!(password && password.length >= 6);
+    if (!password || password.length < 8) return false;
+    const hasUpper = /[A-Z]/.test(password);
+    const hasLower = /[a-z]/.test(password);
+    const hasDigit = /\d/.test(password);
+    return hasUpper && hasLower && hasDigit;
+  };
+
+  // Get individual password strength checks
+  const getPasswordChecks = (password: string) => ({
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    digit: /\d/.test(password),
+    special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password),
+  });
+
+  // Get strength level (0-3) and styling
+  const getStrengthLevel = (password: string) => {
+    const checks = getPasswordChecks(password);
+    const metCount = Object.values(checks).filter(Boolean).length;
+    if (metCount <= 2) return { level: 0, color: "#ff4d4f", label: t("auth.strengthWeak") || "Weak" };
+    if (metCount === 3) return { level: 1, color: "#faad14", label: t("auth.strengthFair") || "Fair" };
+    if (metCount === 4) return { level: 2, color: "#52c41a", label: t("auth.strengthGood") || "Good" };
+    return { level: 3, color: "#52c41a", label: t("auth.strengthStrong") || "Strong" };
   };
 
   const resetForm = () => {
@@ -166,7 +190,7 @@ export function RegisterModal() {
     }
 
     if (!validatePassword(values.password)) {
-      const errorMsg = t("auth.passwordMinLength");
+      const errorMsg = t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit";
       message.error(errorMsg);
       setPasswordError({ target: "password", message: errorMsg });
       form.setFields([
@@ -237,7 +261,7 @@ export function RegisterModal() {
         }
 
         if (validationError.loc && validationError.loc.includes("password")) {
-          const errorMsg = t("auth.passwordMinLength");
+          const errorMsg = t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit";
           message.error(errorMsg);
           setPasswordError({ target: "password", message: errorMsg });
           setIsLoading(false);
@@ -404,12 +428,13 @@ export function RegisterModal() {
   // Handle password input change - use new validation logic
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
+    setPasswordValue(value);
 
     // Use validation function to check password strength
     if (value && !validatePassword(value)) {
       setPasswordError({
         target: "password",
-        message: t("auth.passwordMinLength"),
+        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
       });
       return; // Exit early if password length is invalid
     }
@@ -436,7 +461,7 @@ export function RegisterModal() {
     if (password && !validatePassword(password)) {
       setPasswordError({
         target: "password",
-        message: t("auth.passwordMinLength"),
+        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
       });
       return;
     }
@@ -530,7 +555,7 @@ export function RegisterModal() {
                 validator: (_, value) => {
                   if (!value) return Promise.resolve();
                   if (!validatePassword(value)) {
-                    return Promise.reject(new Error(t("auth.passwordMinLength")));
+                    return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
                   }
                   return Promise.resolve();
                 },
@@ -546,6 +571,33 @@ export function RegisterModal() {
               onChange={handlePasswordChange}
             />
           </Form.Item>
+
+          {/* Password Strength Indicator */}
+          {passwordValue && (() => {
+            const checks = getPasswordChecks(passwordValue);
+            const levelInfo = getStrengthLevel(passwordValue);
+            return (
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500">{t("auth.passwordStrength") || "Password strength"}</span>
+                  <span className="text-xs font-medium" style={{ color: levelInfo.color }}>
+                    {levelInfo.label}
+                  </span>
+                </div>
+                <div className="flex gap-1">
+                  {[0, 1, 2, 3].map((level) => (
+                    <div
+                      key={level}
+                      className="h-1 flex-1 rounded-full transition-colors"
+                      style={{
+                        backgroundColor: level <= levelInfo.level ? levelInfo.color : "#e5e7eb"
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           <Form.Item
             name="confirmPassword"
@@ -576,9 +628,9 @@ export function RegisterModal() {
                   if (password && !validatePassword(password)) {
                     setPasswordError({
                       target: "password",
-                      message: t("auth.passwordMinLength"),
+                      message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
                     });
-                    return Promise.reject(new Error(t("auth.passwordMinLength")));
+                    return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
                   }
                   // Then check password match
                   if (!value || getFieldValue("password") === value) {
