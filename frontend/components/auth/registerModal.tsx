@@ -29,6 +29,7 @@ import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEventUtils } from "@/lib/authEvents";
 import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
+import { getPasswordChecks, getStrengthLevel, validatePassword as validatePasswordUtil } from "@/lib/utils";
 
 const { Text } = Typography;
 
@@ -67,32 +68,7 @@ export function RegisterModal() {
     return emailRegex.test(email);
   };
 
-  const validatePassword = (password: string): boolean => {
-    if (!password || password.length < 8) return false;
-    const hasUpper = /[A-Z]/.test(password);
-    const hasLower = /[a-z]/.test(password);
-    const hasDigit = /\d/.test(password);
-    return hasUpper && hasLower && hasDigit;
-  };
-
-  // Get individual password strength checks
-  const getPasswordChecks = (password: string) => ({
-    length: password.length >= 8,
-    uppercase: /[A-Z]/.test(password),
-    lowercase: /[a-z]/.test(password),
-    digit: /\d/.test(password),
-    special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password),
-  });
-
-  // Get strength level (0-3) and styling
-  const getStrengthLevel = (password: string) => {
-    const checks = getPasswordChecks(password);
-    const metCount = Object.values(checks).filter(Boolean).length;
-    if (metCount <= 2) return { level: 0, color: "#ff4d4f", label: t("auth.strengthWeak") || "Weak" };
-    if (metCount === 3) return { level: 1, color: "#faad14", label: t("auth.strengthFair") || "Fair" };
-    if (metCount === 4) return { level: 2, color: "#52c41a", label: t("auth.strengthGood") || "Good" };
-    return { level: 3, color: "#52c41a", label: t("auth.strengthStrong") || "Strong" };
-  };
+  const validatePassword = validatePasswordUtil;
 
   const resetForm = () => {
     setEmailError("");
@@ -575,7 +551,7 @@ export function RegisterModal() {
           {/* Password Strength Indicator */}
           {passwordValue && (() => {
             const checks = getPasswordChecks(passwordValue);
-            const levelInfo = getStrengthLevel(passwordValue);
+            const levelInfo = getStrengthLevel(passwordValue, t);
             return (
               <div className="mb-4">
                 <div className="flex items-center justify-between mb-1">

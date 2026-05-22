@@ -38,6 +38,7 @@ import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
 import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection";
 import log from "@/lib/logger";
 import { authService } from "@/services/authService";
+import { getPasswordChecks, getStrengthLevel } from "@/lib/utils";
 import {
   getUserTokens,
   deleteUserToken,
@@ -91,24 +92,6 @@ export default function UserProfileComp() {
 
   // Password strength state for change password modal
   const [newPasswordValue, setNewPasswordValue] = useState("");
-
-  // Password strength check functions
-  const getPasswordChecks = (password: string) => ({
-    length: password.length >= 8,
-    uppercase: /[A-Z]/.test(password),
-    lowercase: /[a-z]/.test(password),
-    digit: /\d/.test(password),
-    special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password),
-  });
-
-  const getStrengthLevel = (password: string) => {
-    const checks = getPasswordChecks(password);
-    const metCount = Object.values(checks).filter(Boolean).length;
-    if (metCount <= 2) return { level: 0, color: "#ff4d4f", label: t("auth.strengthWeak") || "Weak" };
-    if (metCount === 3) return { level: 1, color: "#faad14", label: t("auth.strengthFair") || "Fair" };
-    if (metCount === 4) return { level: 2, color: "#52c41a", label: t("auth.strengthGood") || "Good" };
-    return { level: 3, color: "#52c41a", label: t("auth.strengthStrong") || "Strong" };
-  };
 
   // AK/SK state
   const [akInfo, setAkInfo] = useState<string | null>(null);
@@ -605,7 +588,7 @@ export default function UserProfileComp() {
           {/* Password Strength Indicator */}
           {newPasswordValue && (() => {
             const checks = getPasswordChecks(newPasswordValue);
-            const levelInfo = getStrengthLevel(newPasswordValue);
+            const levelInfo = getStrengthLevel(newPasswordValue, t);
             return (
               <div className="mb-4">
                 <div className="flex items-center justify-between mb-1">
