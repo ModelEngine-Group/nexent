@@ -31,7 +31,7 @@ class ModelConnectStatusEnum(Enum):
 class UserSignUpRequest(BaseModel):
     """User registration request model"""
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8)
     invite_code: Optional[str] = None
     auto_login: Optional[bool] = True  # Whether to return session after signup
 
@@ -47,6 +47,12 @@ class OAuthCompleteRequest(BaseModel):
     email: Optional[EmailStr] = None
     password: str = Field(..., min_length=6)
     invite_code: str = Field(..., min_length=1)
+
+
+class UpdatePasswordRequest(BaseModel):
+    """Password update request model for changing user password"""
+    old_password: str = Field(..., min_length=1, description="Current password for verification")
+    new_password: str = Field(..., min_length=8, description="New password to set (min 8 characters)")
 
 
 class UserUpdateRequest(BaseModel):
