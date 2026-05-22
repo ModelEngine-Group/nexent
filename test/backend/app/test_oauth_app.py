@@ -1,7 +1,7 @@
 import sys
 import os
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 test_dir = os.path.dirname(__file__)
 backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
@@ -20,7 +20,18 @@ consts_mock.const.DEFAULT_TENANT_ID = "default"
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 
-sys.modules["consts.model"] = MagicMock()
+consts_model_mock = MagicMock()
+
+
+class _OAuthCompleteRequest:
+    def __init__(self, **data):
+        self.email = data.get("email")
+        self.password = data.get("password")
+        self.invite_code = data.get("invite_code")
+
+
+consts_model_mock.OAuthCompleteRequest = _OAuthCompleteRequest
+sys.modules["consts.model"] = consts_model_mock
 
 oauth_providers_mock = MagicMock()
 oauth_providers_mock.get_all_provider_definitions.return_value = {
@@ -75,6 +86,9 @@ oauth_service_mock = MagicMock()
 oauth_service_mock.parse_state = MagicMock(
     return_value={"provider": "github", "token": "tok", "link_user_id": ""}
 )
+oauth_service_mock.generate_pending_oauth_token = MagicMock(return_value="pending.jwt")
+oauth_service_mock.find_supabase_user_id_by_email = MagicMock(return_value=None)
+oauth_service_mock.complete_pending_oauth_account = AsyncMock()
 sys.modules["services"] = MagicMock()
 sys.modules["services.oauth_service"] = oauth_service_mock
 
@@ -232,6 +246,9 @@ class TestLink(unittest.TestCase):
 
 
 class TestCallback(unittest.TestCase):
+    def setUp(self):
+        oauth_service_mock.find_supabase_user_id_by_email.return_value = None
+
     def test_returns_error_when_provider_error(self):
         response = client.get(
             "/user/oauth/callback?provider=github&error=access_denied&error_description=User+cancelled"
@@ -258,7 +275,11 @@ class TestCallback(unittest.TestCase):
     def test_success_returns_session_data(self):
         oauth_service_mock.reset_mock()
         oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
-        database_oauth_mock.get_oauth_account_by_provider.return_value = None
+        database_oauth_mock.get_oauth_account_by_provider.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "user-uuid-123",
+        }
         database_oauth_mock.get_soft_deleted_oauth_account.return_value = None
         oauth_service_mock.exchange_code_for_provider_token.return_value = {
             "access_token": "ghu_provider_token_123",
@@ -269,17 +290,6 @@ class TestCallback(unittest.TestCase):
             "username": "octocat",
         }
 
-        mock_existing_user = MagicMock()
-        mock_existing_user.id = "user-uuid-123"
-        mock_existing_user.email = "octocat@github.com"
-
-        mock_users_resp = MagicMock()
-        mock_users_resp.users = [mock_existing_user]
-
-        mock_admin_client = MagicMock()
-        mock_admin_client.auth.admin.list_users.return_value = mock_users_resp
-
-        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
         auth_utils_mock.generate_session_jwt.return_value = "eyJ.mock.jwt.token"
 
         response = client.get("/user/oauth/callback?provider=github&code=valid_code")
@@ -298,7 +308,7 @@ class TestCallback(unittest.TestCase):
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
-    def test_success_creates_new_user_when_not_found(self):
+    def test_new_unbound_oauth_requires_account_completion(self):
         oauth_service_mock.reset_mock()
         oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
         database_oauth_mock.get_oauth_account_by_provider.return_value = None
@@ -333,8 +343,67 @@ class TestCallback(unittest.TestCase):
             print("Response:", response.json())
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
-        self.assertEqual(data["data"]["user"]["email"], "newuser@github.com")
-        mock_admin_client.auth.admin.create_user.assert_called_once()
+        self.assertTrue(data["data"]["requires_account_completion"])
+        self.assertEqual(data["data"]["pending_token"], "pending.jwt")
+        self.assertEqual(data["data"]["provider_email"], "newuser@github.com")
+        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
+            mock_admin_client,
+            "newuser@github.com",
+        )
+        mock_admin_client.auth.admin.create_user.assert_not_called()
+
+        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+
+    def test_unbound_oauth_with_existing_email_links_existing_account(self):
+        oauth_service_mock.reset_mock()
+        oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
+        database_oauth_mock.get_oauth_account_by_provider.return_value = None
+        database_oauth_mock.get_soft_deleted_oauth_account.return_value = None
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {
+            "access_token": "ghu_provider_token_existing",
+        }
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "67891",
+            "email": "existing@example.com",
+            "username": "existing-user",
+        }
+        oauth_service_mock.find_supabase_user_id_by_email.return_value = "existing-user-id"
+        oauth_service_mock.ensure_user_tenant_exists.return_value = {
+            "user_id": "existing-user-id",
+            "tenant_id": "t-1",
+        }
+        oauth_service_mock.create_or_update_oauth_account.return_value = {
+            "provider": "github",
+            "provider_user_id": "67891",
+            "user_id": "existing-user-id",
+        }
+        mock_admin_client = MagicMock()
+        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
+        auth_utils_mock.generate_session_jwt.return_value = "eyJ.existing.jwt"
+
+        response = client.get("/user/oauth/callback?provider=github&code=existing_code")
+
+        if response.status_code != HTTPStatus.OK:
+            print("Response:", response.json())
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        data = response.json()
+        self.assertNotIn("requires_account_completion", data["data"])
+        self.assertEqual(data["data"]["user"]["id"], "existing-user-id")
+        self.assertEqual(data["data"]["user"]["email"], "existing@example.com")
+        self.assertEqual(data["data"]["session"]["access_token"], "eyJ.existing.jwt")
+
+        oauth_service_mock.generate_pending_oauth_token.assert_not_called()
+        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
+            mock_admin_client,
+            "existing@example.com",
+        )
+        oauth_service_mock.create_or_update_oauth_account.assert_called_once_with(
+            user_id="existing-user-id",
+            provider="github",
+            provider_user_id="67891",
+            email="existing@example.com",
+            username="existing-user",
+        )
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
@@ -414,6 +483,40 @@ class TestCallback(unittest.TestCase):
             email="octocat@github.com",
             username="octocat",
         )
+
+    def test_link_user_id_binding_returns_specific_error_when_already_bound(self):
+        oauth_service_mock.reset_mock()
+        database_oauth_mock.reset_mock()
+        oauth_service_mock.parse_state.return_value = {
+            "provider": "github",
+            "token": "tok",
+            "link_user_id": "existing-user-uuid",
+        }
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {
+            "access_token": "ghu_provider_token",
+        }
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "12345",
+            "email": "octocat@github.com",
+            "username": "octocat",
+        }
+        oauth_service_mock.create_or_update_oauth_account.side_effect = _OAuthLinkError(
+            "This github account is already bound to another user"
+        )
+
+        response = client.get(
+            "/user/oauth/callback?provider=github&code=bind_code&state=github:tok:existing-user-uuid"
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        data = response.json()
+        self.assertEqual(data["data"]["oauth_error"], "oauth_account_already_bound")
+        self.assertEqual(
+            data["data"]["oauth_error_description"],
+            "OAuth account is already bound to another user",
+        )
+
+        oauth_service_mock.create_or_update_oauth_account.side_effect = None
 
     def test_success_with_already_bound_oauth_account(self):
         """Callback with existing binding should use that user_id without Supabase lookup."""
@@ -506,21 +609,7 @@ class TestGetAccounts(unittest.TestCase):
 
 class TestDeleteAccount(unittest.TestCase):
     def setUp(self):
-        mock_identity = MagicMock()
-        mock_identity.provider = "email"
-
-        mock_user = MagicMock()
-        mock_user.identities = [mock_identity]
-        mock_user.app_metadata = MagicMock()
-        mock_user.app_metadata.get = MagicMock(return_value="email")
-
-        mock_user_resp = MagicMock()
-        mock_user_resp.user = mock_user
-
-        mock_admin = MagicMock()
-        mock_admin.auth.admin.get_user_by_id.return_value = mock_user_resp
-        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin
-        oauth_service_mock.count_oauth_accounts_by_user_id.return_value = 2
+        oauth_service_mock.unlink_account.side_effect = None
 
     def test_unlinks_successfully(self):
         oauth_service_mock.unlink_account.reset_mock()
@@ -534,7 +623,7 @@ class TestDeleteAccount(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
         self.assertTrue(data["data"]["unlinked"])
-        oauth_service_mock.unlink_account.assert_called_once()
+        oauth_service_mock.unlink_account.assert_called_once_with("user-1", "github")
 
     def test_returns_401_without_auth(self):
         response = client.delete("/user/oauth/accounts/github")
@@ -542,10 +631,10 @@ class TestDeleteAccount(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
     @patch("apps.oauth_app.get_current_user_id")
-    def test_returns_400_when_last_account(self, mock_get_user):
+    def test_returns_400_when_account_not_found(self, mock_get_user):
         mock_get_user.return_value = ("user-1", "t-1")
         oauth_service_mock.unlink_account.side_effect = _OAuthLinkError(
-            "Cannot unlink last"
+            "No linked github account found"
         )
 
         response = client.delete(
@@ -559,6 +648,9 @@ class TestDeleteAccount(unittest.TestCase):
 
 
 class TestCallbackPagination(unittest.TestCase):
+    def setUp(self):
+        oauth_service_mock.find_supabase_user_id_by_email.return_value = None
+
     def test_finds_user_on_second_page(self):
         oauth_service_mock.reset_mock()
         database_oauth_mock.reset_mock()
@@ -582,31 +674,21 @@ class TestCallbackPagination(unittest.TestCase):
             "provider_user_id": "12345",
             "user_id": "page2-uuid",
         }
-
-        mock_page1_user = MagicMock()
-        mock_page1_user.id = "user-page1"
-        mock_page1_user.email = "other@github.com"
-        mock_page2_user = MagicMock()
-        mock_page2_user.id = "page2-uuid"
-        mock_page2_user.email = "page2user@github.com"
-
-        mock_page1_resp = MagicMock()
-        mock_page1_resp.users = [mock_page1_user]
-        mock_page1_resp.__len__ = lambda self: 1
-
-        mock_page2_resp = MagicMock()
-        mock_page2_resp.users = [mock_page2_user]
-        mock_page2_resp.__len__ = lambda self: 1
+        oauth_service_mock.find_supabase_user_id_by_email.return_value = "page2-uuid"
 
         mock_admin_client = MagicMock()
-        mock_admin_client.auth.admin.list_users.side_effect = [mock_page1_resp, mock_page2_resp]
         auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
 
         response = client.get("/user/oauth/callback?provider=github&code=page2_code&state=github:tok")
 
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
+        self.assertEqual(data["data"]["user"]["id"], "page2-uuid")
         self.assertEqual(data["data"]["user"]["email"], "page2user@github.com")
+        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
+            mock_admin_client,
+            "page2user@github.com",
+        )
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
@@ -649,7 +731,13 @@ class TestCallbackPagination(unittest.TestCase):
         response = client.get("/user/oauth/callback?provider=github&code=short_page_code&state=github:tok")
 
         self.assertEqual(response.status_code, HTTPStatus.OK)
-        mock_admin_client.auth.admin.list_users.assert_called_once()
+        data = response.json()
+        self.assertTrue(data["data"]["requires_account_completion"])
+        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
+            mock_admin_client,
+            "newuser@github.com",
+        )
+        mock_admin_client.auth.admin.create_user.assert_not_called()
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
@@ -695,58 +783,95 @@ class TestCallbackEmailFallback(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
-        self.assertIn("@oauth.nexent", data["data"]["user"]["email"])
+        self.assertTrue(data["data"]["requires_account_completion"])
+        self.assertTrue(data["data"]["email_required"])
+        self.assertEqual(data["data"]["provider_email"], "")
+        oauth_service_mock.find_supabase_user_id_by_email.assert_not_called()
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
 
-class TestDeleteAccountMetadata(unittest.TestCase):
-    def test_handles_get_user_exception_gracefully(self):
-        oauth_service_mock.reset_mock()
-        oauth_service_mock.count_oauth_accounts_by_user_id.return_value = 2
-        oauth_service_mock.unlink_account.return_value = True
+class TestCompleteOAuth(unittest.TestCase):
+    def test_pending_returns_provider_info(self):
+        pending_info = {
+            "provider": "github",
+            "provider_username": "octocat",
+            "provider_email": "",
+            "email_required": True,
+        }
 
-        mock_admin = MagicMock()
-        mock_admin.auth.admin.get_user_by_id.side_effect = Exception("User lookup failed")
-        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin
-
-        response = client.delete(
-            "/user/oauth/accounts/github",
-            headers={"Authorization": "Bearer valid_token"},
-        )
+        with patch("apps.oauth_app.get_pending_oauth_info", return_value=pending_info):
+            response = client.get(
+                "/user/oauth/pending",
+                headers={"X-OAuth-Pending-Token": "pending.jwt"},
+            )
 
         self.assertEqual(response.status_code, HTTPStatus.OK)
+        self.assertTrue(response.json()["data"]["email_required"])
 
-        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+    def test_pending_returns_401_when_missing_or_invalid(self):
+        with patch(
+            "apps.oauth_app.get_pending_oauth_info",
+            side_effect=_OAuthLinkError("expired"),
+        ):
+            response = client.get("/user/oauth/pending")
 
-    def test_unlinks_with_password_auth_detected(self):
-        oauth_service_mock.reset_mock()
-        oauth_service_mock.count_oauth_accounts_by_user_id.return_value = 1
-        oauth_service_mock.unlink_account.return_value = True
+        self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
-        mock_identity = MagicMock()
-        mock_identity.provider = "email"
-
-        mock_user = MagicMock()
-        mock_user.identities = [mock_identity]
-        mock_user.app_metadata = MagicMock()
-        mock_user.app_metadata.get = MagicMock(return_value="email")
-
-        mock_user_resp = MagicMock()
-        mock_user_resp.user = mock_user
-
-        mock_admin = MagicMock()
-        mock_admin.auth.admin.get_user_by_id.return_value = mock_user_resp
-        auth_utils_mock.get_supabase_admin_client.return_value = mock_admin
-
-        response = client.delete(
-            "/user/oauth/accounts/github",
-            headers={"Authorization": "Bearer valid_token"},
+    def test_complete_returns_session_data(self):
+        complete_mock = AsyncMock(
+            return_value={
+                "user": {"id": "new-user", "email": "new@example.com", "role": "USER"},
+                "session": {
+                    "access_token": "jwt",
+                    "refresh_token": "",
+                    "expires_at": 1735689600,
+                    "expires_in_seconds": 3600,
+                },
+            }
         )
 
-        self.assertEqual(response.status_code, HTTPStatus.OK)
+        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+            response = client.post(
+                "/user/oauth/complete",
+                headers={"X-OAuth-Pending-Token": "pending.jwt"},
+                json={
+                    "email": "new@example.com",
+                    "password": "secret1",
+                    "invite_code": "ABC123",
+                },
+            )
 
-        auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        data = response.json()
+        self.assertEqual(data["data"]["user"]["id"], "new-user")
+        self.assertEqual(data["data"]["session"]["expires_in_seconds"], 3600)
+        complete_mock.assert_awaited_once_with(
+            pending_token="pending.jwt",
+            email="new@example.com",
+            password="secret1",
+            invite_code="ABC123",
+        )
+
+    def test_complete_returns_conflict_for_existing_email(self):
+        complete_mock = AsyncMock(
+            side_effect=_OAuthLinkError(
+                "Email already exists. Please log in with email and password."
+            )
+        )
+
+        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+            response = client.post(
+                "/user/oauth/complete",
+                headers={"X-OAuth-Pending-Token": "pending.jwt"},
+                json={
+                    "email": "taken@example.com",
+                    "password": "secret1",
+                    "invite_code": "ABC123",
+                },
+            )
+
+        self.assertEqual(response.status_code, HTTPStatus.CONFLICT)
 
 
 class TestGetAccounts(unittest.TestCase):

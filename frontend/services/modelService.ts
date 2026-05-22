@@ -71,6 +71,8 @@ export const modelService = {
           // STT specific fields
           modelAppid: model.model_appid,
           accessToken: model.access_token,
+          timeoutSeconds: model.timeout_seconds,
+          concurrencyLimit: model.concurrency_limit,
         }));
       }
       return [];
@@ -106,6 +108,8 @@ export const modelService = {
     modelFactory?: string;
     modelAppid?: string;
     accessToken?: string;
+    timeoutSeconds?: number;
+    concurrencyLimit?: number;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -119,6 +123,8 @@ export const modelService = {
         expected_chunk_size: model.expectedChunkSize,
         maximum_chunk_size: model.maximumChunkSize,
         chunk_batch: model.chunkingBatchSize,
+        timeout_seconds: model.timeoutSeconds,
+        concurrency_limit: model.concurrencyLimit,
       };
 
       // Add STT specific fields
@@ -314,6 +320,8 @@ export const modelService = {
     modelFactory?: string;
     modelAppid?: string;
     accessToken?: string;
+    timeoutSeconds?: number;
+    concurrencyLimit?: number;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -349,6 +357,12 @@ export const modelService = {
             ...(model.accessToken !== undefined
               ? { access_token: model.accessToken }
               : {}),
+            ...(model.timeoutSeconds !== undefined
+              ? { timeout_seconds: model.timeoutSeconds }
+              : {}),
+            ...(model.concurrencyLimit !== undefined
+              ? { concurrency_limit: model.concurrencyLimit }
+              : {})
           }),
         }
       );
@@ -370,6 +384,8 @@ export const modelService = {
       model_id: string;
       apiKey: string;
       maxTokens?: number;
+      timeoutSeconds?: number;
+      concurrencyLimit?: number;
     }[],
     provider?: string
   ): Promise<any> => {
@@ -382,6 +398,8 @@ export const modelService = {
             model_id: m.model_id,
             api_key: m.apiKey,
             ...(m.maxTokens !== undefined ? { max_tokens: m.maxTokens } : {}),
+            ...(m.timeoutSeconds !== undefined ? { timeout_seconds: m.timeoutSeconds } : {}),
+            ...(m.concurrencyLimit !== undefined ? { concurrency_limit: m.concurrencyLimit } : {}),
             ...(provider ? { model_factory: provider } : {}),
           }))
         ),
@@ -643,6 +661,8 @@ export const modelService = {
             // STT specific fields
             modelAppid: model.model_appid,
             accessToken: model.access_token,
+            timeoutSeconds: model.timeout_seconds,
+            concurrencyLimit: model.concurrency_limit,
           })),
           total: result.data.total || 0,
           page: result.data.page || 1,
@@ -689,6 +709,8 @@ export const modelService = {
     modelFactory?: string;
     modelAppid?: string;
     accessToken?: string;
+    timeoutSeconds?: number;
+    concurrencyLimit?: number;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -700,9 +722,12 @@ export const modelService = {
         api_key: params.apiKey,
         max_tokens: params.maxTokens || 4096,
         display_name: params.displayName || params.name,
+        model_factory: params.modelFactory || "OpenAI-API-Compatible",
         expected_chunk_size: params.expectedChunkSize,
         maximum_chunk_size: params.maximumChunkSize,
         chunk_batch: params.chunkingBatchSize,
+        timeout_seconds: params.timeoutSeconds,
+        concurrency_limit: params.concurrencyLimit,
       };
 
       // Add STT specific fields
@@ -754,6 +779,8 @@ export const modelService = {
     modelFactory?: string;
     modelAppid?: string;
     accessToken?: string;
+    timeoutSeconds?: number;
+    concurrencyLimit?: number;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -777,6 +804,8 @@ export const modelService = {
             ...(params.modelFactory !== undefined ? { model_factory: params.modelFactory } : {}),
             ...(params.modelAppid !== undefined ? { model_appid: params.modelAppid } : {}),
             ...(params.accessToken !== undefined ? { access_token: params.accessToken } : {}),
+            ...(params.timeoutSeconds !== undefined ? { timeout_seconds: params.timeoutSeconds } : {}),
+            ...(params.concurrencyLimit !== undefined ? { concurrency_limit: params.concurrencyLimit } : {}),
           }),
         }
       );

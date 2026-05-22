@@ -7,11 +7,16 @@ Uses an independent database connection pool to avoid impacting business operati
 
 import logging
 from http import HTTPStatus
-from typing import Annotated, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from sqlalchemy import text
 
+from consts.const import (
+    ENABLE_TELEMETRY,
+    MONITORING_DASHBOARD_URL,
+    MONITORING_PROVIDER,
+)
 from consts.model import ConversationResponse
 from database.client import get_monitoring_db_session
 from utils.auth_utils import get_current_user_id
@@ -21,6 +26,25 @@ logger = logging.getLogger("monitoring_app")
 router = APIRouter(prefix="/monitoring")
 
 
+def _normalize_monitoring_provider(value: str | None) -> str:
+    return str(value or "otlp").strip().lower()
+
+
+def get_monitoring_status() -> dict[str, Any]:
+    """Return telemetry state and the monitoring UI entrypoint for frontend use."""
+    telemetry_enabled = ENABLE_TELEMETRY
+    provider = _normalize_monitoring_provider(MONITORING_PROVIDER)
+    dashboard_url = MONITORING_DASHBOARD_URL.strip() or None
+
+    return {
+        "telemetry_enabled": telemetry_enabled,
+        "provider": provider,
+        "dashboard_url": dashboard_url,
+        "dashboard_port": None,
+        "dashboard_path": None,
+    }
+
+
 def _compute_time_range_filter(time_range: str) -> str:
     """Convert time_range parameter to SQL timestamp condition."""
     hours = {"24h": 24, "7d": 168, "30d": 720}.get(time_range, 24)
@@ -28,12 +52,12 @@ def _compute_time_range_filter(time_range: str) -> str:
 
 
 def _query_model_metrics_from_db(
-    time_range: str, tenant_id: Optional[str] = None
-) -> list[dict]:
+    time_range: str, tenant_id: str | None = None
+) -> list[dict[str, Any]]:
     time_filter = _compute_time_range_filter(time_range)
 
     tenant_filter = ""
-    params = {}
+    params: dict[str, str] = {}
     if tenant_id:
         tenant_filter = "AND m.tenant_id = :tenant_id"
         params["tenant_id"] = tenant_id
@@ -96,7 +120,7 @@ async def list_models_endpoint(
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(
         ge=1, le=100, description="Items per page")] = 20,
-    authorization: Annotated[Optional[str], Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ):
     """List all models with aggregated monitoring metrics from database."""
     try:
@@ -113,3 +137,13 @@ async def list_models_endpoint(
         logger.error(f"Failed to list monitoring models: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/status", response_model=ConversationResponse)
+async def get_monitoring_status_endpoint():
+    """Return whether monitoring UI should be shown in the frontend."""
+    return ConversationResponse(
+        code=0,
+        message="success",
+        data=get_monitoring_status(),
+    )

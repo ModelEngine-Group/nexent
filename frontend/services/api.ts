@@ -19,11 +19,14 @@ export const API_ENDPOINTS = {
     revoke: `${API_BASE_URL}/user/revoke`,
     tokens: `${API_BASE_URL}/user/tokens`,
     deleteToken: (tokenId: number) => `${API_BASE_URL}/user/tokens/${tokenId}`,
+    updatePassword: `${API_BASE_URL}/user/password`,
   },
   oauth: {
     providers: `${API_BASE_URL}/user/oauth/providers`,
     authorize: `${API_BASE_URL}/user/oauth/authorize`,
     link: `${API_BASE_URL}/user/oauth/link`,
+    pending: `${API_BASE_URL}/user/oauth/pending`,
+    complete: `${API_BASE_URL}/user/oauth/complete`,
     accounts: `${API_BASE_URL}/user/oauth/accounts`,
     unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
   },
@@ -86,6 +89,13 @@ export const API_ENDPOINTS = {
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
+  },
+  promptTemplates: {
+    list: `${API_BASE_URL}/prompt_templates`,
+    detail: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    create: `${API_BASE_URL}/prompt_templates`,
+    update: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    delete: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
   },
   stt: {
     ws: `/api/voice/stt/ws`,
@@ -385,6 +395,7 @@ export const API_ENDPOINTS = {
   },
   monitoring: {
     models: `${API_BASE_URL}/monitoring/models`,
+    status: `${API_BASE_URL}/monitoring/status`,
   },
 };
 

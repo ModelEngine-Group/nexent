@@ -1,0 +1,64 @@
+{{- if and .Values.enabled (include "nexent-monitoring.phoenixEnabled" .) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-phoenix
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-phoenix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-phoenix
+  template:
+    metadata:
+      labels:
+        app: nexent-phoenix
+    spec:
+      containers:
+        - name: phoenix
+          image: "{{ .Values.images.phoenix.repository }}:{{ .Values.images.phoenix.tag }}"
+          imagePullPolicy: {{ .Values.images.phoenix.pullPolicy }}
+          env:
+            - name: PHOENIX_WORKING_DIR
+              value: /mnt/data
+          ports:
+            - containerPort: 6006
+              name: http
+            - containerPort: 4317
+              name: otlp-grpc
+          volumeMounts:
+            - name: phoenix-data
+              mountPath: /mnt/data
+      volumes:
+        - name: phoenix-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: nexent-phoenix
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-phoenix
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-phoenix
+spec:
+  type: {{ .Values.phoenix.service.type }}
+  ports:
+    - port: {{ .Values.phoenix.service.port }}
+      targetPort: 6006
+      name: http
+      {{- if and (eq .Values.phoenix.service.type "NodePort") .Values.phoenix.service.nodePort }}
+      nodePort: {{ .Values.phoenix.service.nodePort }}
+      {{- end }}
+    - port: {{ .Values.phoenix.service.grpcPort }}
+      targetPort: 4317
+      name: otlp-grpc
+  selector:
+    app: nexent-phoenix
+{{- end }}

@@ -21,6 +21,8 @@ from utils.auth_utils import (
 )
 from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, DEFAULT_TENANT_ID
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 
 from database.model_management_db import create_model_record
 from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
@@ -135,6 +137,12 @@ async def signup_user_with_invitation(email: EmailStr,
                                       auto_login: Optional[bool] = True):
     """User registration with invitation code support"""
     client = get_supabase_client()
+
+    # Validate password strength before registration
+    if not validate_password_strength(password):
+        raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK,
+                           "Password must be at least 8 characters with uppercase, lowercase, and digit.")
+
     logging.info(
         f"Receive registration request: email={email}, invite_code={'provided' if invite_code else 'not provided'}, auto_login={auto_login}")
 
@@ -543,3 +551,83 @@ def delete_token(token_id: int, user_id: str) -> bool:
         True if the token was deleted, False if not found or not owned by user.
     """
     return delete_token_record(token_id, user_id)
+
+
+# -----------------------------
+# Password Management
+# -----------------------------
+
+def validate_password_strength(password: str) -> bool:
+    """Validate password meets minimum security requirements.
+
+    Args:
+        password: The password to validate.
+
+    Returns:
+        True if password meets requirements, False otherwise.
+    """
+    if len(password) < 8:
+        return False
+    has_upper = any(c.isupper() for c in password)
+    has_lower = any(c.islower() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    return has_upper and has_lower and has_digit
+
+
+async def update_password(user_id: str, old_password: str, new_password: str) -> bool:
+    """Update user password with old password verification.
+
+    This method first re-authenticates the user with their old password,
+    then updates to the new password.
+
+    Args:
+        user_id: The user ID to update password for.
+        old_password: The current password for verification.
+        new_password: The new password to set.
+
+    Returns:
+        True if password was updated successfully.
+
+    Raises:
+        UnauthorizedError: If old password is incorrect.
+        AppException (PROFILE_PASSWORD_WEAK): If new password does not meet requirements.
+        AppException (PROFILE_PASSWORD_SAME_AS_OLD): If new password is the same as old password.
+    """
+    if not validate_password_strength(new_password):
+        raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK)
+
+    if old_password == new_password:
+        raise AppException(ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD)
+
+    admin_client = get_supabase_admin_client()
+
+    try:
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        if not user_tenant or not user_tenant.get("user_email"):
+            raise UnauthorizedError("Unable to retrieve user email")
+
+        user_email = user_tenant["user_email"]
+
+        # Re-authenticate with old password to verify identity using admin client
+        try:
+            admin_client.auth.sign_in_with_password({
+                "email": user_email,
+                "password": old_password
+            })
+        except Exception as auth_err:
+            logging.warning(f"Password verification failed for user {user_id}: {str(auth_err)}")
+            raise UnauthorizedError("Invalid old password")
+
+        # Update to new password using admin client
+        admin_client.auth.update_user({"password": new_password})
+
+        logging.info(f"Password updated successfully for user {user_id}")
+        return True
+
+    except UnauthorizedError:
+        raise
+    except AppException:
+        raise
+    except Exception as exc:
+        logging.error(f"Failed to update password for user {user_id}: {str(exc)}")
+        raise

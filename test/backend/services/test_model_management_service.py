@@ -138,6 +138,10 @@ async def _prepare_model_dict(**kwargs):
     return {}
 
 
+def _merge_existing_model_attributes(model_list, tenant_id, provider, model_type, fields=None):
+    return model_list
+
+
 def _merge_existing_model_tokens(model_list, tenant_id, provider, model_type):
     return model_list
 
@@ -145,6 +149,7 @@ def _merge_existing_model_tokens(model_list, tenant_id, provider, model_type):
 async def _get_provider_models(model_data):
     return []
 services_provider_mod.prepare_model_dict = _prepare_model_dict
+services_provider_mod.merge_existing_model_attributes = _merge_existing_model_attributes
 services_provider_mod.merge_existing_model_tokens = _merge_existing_model_tokens
 services_provider_mod.get_provider_models = _get_provider_models
 sys.modules["services.model_provider_service"] = services_provider_mod
@@ -210,9 +215,15 @@ def _get_models_by_display_name(*args, **kwargs):
     return []
 
 
+def _get_model_by_name_factory(*args, **kwargs):
+    """Return None by default; tests can patch svc.get_model_by_name_factory."""
+    return None
+
+
 db_mm_mod.create_model_record = _noop
 db_mm_mod.delete_model_record = _noop
 db_mm_mod.get_model_by_display_name = _noop
+db_mm_mod.get_model_by_name_factory = _get_model_by_name_factory
 db_mm_mod.get_models_by_display_name = _get_models_by_display_name
 db_mm_mod.get_model_records = _get_model_records
 db_mm_mod.get_models_by_tenant_factory_type = _get_models_by_tenant_factory_type
@@ -536,7 +547,7 @@ async def test_create_provider_models_for_tenant_success():
     models = [{"id": "silicon/a"}, {"id": "silicon/b"}]
 
     with mock.patch.object(svc, "get_provider_models", new=mock.AsyncMock(return_value=models)) as mock_get, \
-            mock.patch.object(svc, "merge_existing_model_tokens", return_value=models) as mock_merge, \
+            mock.patch.object(svc, "merge_existing_model_attributes", return_value=models) as mock_merge, \
             mock.patch.object(svc, "sort_models_by_id", side_effect=lambda m: m) as mock_sort:
 
         out = await svc.create_provider_models_for_tenant("t1", req)
@@ -866,18 +877,33 @@ async def test_update_single_model_for_tenant_multi_embedding_updates_both():
 async def test_batch_update_models_for_tenant_success():
     svc = import_svc()
 
-    models = [{"model_id": "a"}, {"model_id": "b"}]
+    models = [{"model_id": "1", "max_tokens": 4096}, {"model_id": "2", "max_tokens": 8192}]
     with mock.patch.object(svc, "update_model_record") as mock_update:
         await svc.batch_update_models_for_tenant("u1", "t1", models)
         assert mock_update.call_count == 2
-        mock_update.assert_any_call("a", models[0], "u1", "t1")
-        mock_update.assert_any_call("b", models[1], "u1", "t1")
+        mock_update.assert_any_call(1, {"max_tokens": 4096}, "u1", "t1")
+        mock_update.assert_any_call(2, {"max_tokens": 8192}, "u1", "t1")
+
+
+async def test_batch_update_models_for_tenant_by_name_factory():
+    """Batch update resolves model_id via get_model_by_name_factory when model_id is not numeric."""
+    svc = import_svc()
+
+    models = [{"model_id": "openai/gpt-4", "max_tokens": 4096}]
+    with mock.patch.object(
+        svc,
+        "get_model_by_name_factory",
+        return_value={"model_id": 42},
+    ) as mock_lookup, mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.batch_update_models_for_tenant("u1", "t1", models)
+        mock_lookup.assert_called_once_with("gpt-4", "openai", "t1")
+        mock_update.assert_called_once_with(42, {"max_tokens": 4096}, "u1", "t1")
 
 
 async def test_batch_update_models_for_tenant_exception():
     svc = import_svc()
 
-    models = [{"model_id": "a"}]
+    models = [{"model_id": "1"}]
     with mock.patch.object(svc, "update_model_record", side_effect=Exception("oops")):
         with pytest.raises(Exception) as exc:
             await svc.batch_update_models_for_tenant("u1", "t1", models)

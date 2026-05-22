@@ -1,26 +1,58 @@
 "use client";
 
-import { Button } from "antd";
+import { Button, Tooltip } from "antd";
 import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Globe } from "lucide-react";
+import { Activity, ChevronDown, Globe } from "lucide-react";
 import { Dropdown } from "antd";
 import Link from "next/link";
 import { HEADER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
 import { languageOptions } from "@/const/constants";
 import { useLanguageSwitch } from "@/lib/language";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Flex, Layout } from "antd";
 import { ChatTopNavContent } from "./ChatTopNavContent";
 import { useAuthorizationContext } from "../providers/AuthorizationProvider";
 import { useDeployment } from "../providers/deploymentProvider";
+import { monitoringService } from "@/services/monitoringService";
+import type { MonitoringStatus } from "@/types/monitoring";
+
 const { Header } = Layout;
+
+function buildMonitoringUrl(status: MonitoringStatus | null): string | null {
+  if (!status?.telemetry_enabled || typeof window === "undefined") return null;
+
+  return status.dashboard_url || null;
+}
 
 export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
   const { t } = useTranslation("common");
   const { user, isLoading } = useAuthorizationContext();
-  const { isSpeedMode } = useDeployment()
+  const { isSpeedMode } = useDeployment();
   const { currentLanguage, handleLanguageChange } = useLanguageSwitch();
+  const [monitoringStatus, setMonitoringStatus] =
+    useState<MonitoringStatus | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    monitoringService.fetchStatus().then((status) => {
+      if (mounted) {
+        setMonitoringStatus(status);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const monitoringUrl = buildMonitoringUrl(monitoringStatus);
+
+  const openMonitoringDashboard = () => {
+    if (!monitoringUrl) return;
+    window.open(monitoringUrl, "_blank", "noopener,noreferrer");
+  };
 
   // Left content - Logo + optional additional title (aligned with sidebar width)
   const leftContent = (
@@ -61,6 +93,18 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
   // Right content - Additional content + default navigation items
   const rightContent = (
     <Flex align="center" gap={16} className="hidden md:flex">
+      {monitoringUrl && (
+        <Tooltip title={t("monitoring.topbar.openDashboard")}>
+          <Button
+            type="text"
+            size="small"
+            aria-label={t("monitoring.topbar.openDashboard")}
+            className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+            icon={<Activity className="h-4 w-4" />}
+            onClick={openMonitoringDashboard}
+          />
+        </Tooltip>
+      )}
 
       {/* GitHub link */}
       <Link
@@ -142,6 +186,19 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
         {rightContent}
 
         {/* Mobile hamburger menu button */}
+        {monitoringUrl && (
+          <Tooltip title={t("monitoring.topbar.openDashboard")}>
+            <Button
+              type="text"
+              size="small"
+              aria-label={t("monitoring.topbar.openDashboard")}
+              className="md:hidden h-8 w-8 p-0 text-emerald-600 dark:text-emerald-400"
+              icon={<Activity className="h-4 w-4" />}
+              onClick={openMonitoringDashboard}
+            />
+          </Tooltip>
+        )}
+
         <Button type="text" size="small" className="md:hidden h-5 w-5 p-0">
           <svg
             xmlns="http://www.w3.org/2000/svg"

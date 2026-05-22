@@ -309,3 +309,45 @@ export function getScoreColor(score: number): string {
   
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
+
+// Password validation utilities
+export interface PasswordChecks {
+  length: boolean;
+  uppercase: boolean;
+  lowercase: boolean;
+  digit: boolean;
+  special: boolean;
+}
+
+export interface StrengthLevel {
+  level: number;
+  color: string;
+  label: string;
+}
+
+const SPECIAL_CHARS = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/;
+
+export function getPasswordChecks(password: string): PasswordChecks {
+  return {
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    digit: /\d/.test(password),
+    special: SPECIAL_CHARS.test(password),
+  };
+}
+
+export function getStrengthLevel(password: string, t: (key: string) => string): StrengthLevel {
+  const checks = getPasswordChecks(password);
+  const metCount = Object.values(checks).filter(Boolean).length;
+  if (metCount <= 2) return { level: 0, color: "#ff4d4f", label: t("auth.strengthWeak") || "Weak" };
+  if (metCount === 3) return { level: 1, color: "#faad14", label: t("auth.strengthFair") || "Fair" };
+  if (metCount === 4) return { level: 2, color: "#52c41a", label: t("auth.strengthGood") || "Good" };
+  return { level: 3, color: "#52c41a", label: t("auth.strengthStrong") || "Strong" };
+}
+
+export function validatePassword(password: string): boolean {
+  if (!password || password.length < 8) return false;
+  const checks = getPasswordChecks(password);
+  return checks.uppercase && checks.lowercase && checks.digit;
+}
