@@ -43,7 +43,6 @@ PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
 
-
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 
@@ -74,7 +73,8 @@ SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 # JWT secret for verifying Supabase-signed access tokens.
 # GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
-SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+SUPABASE_JWT_SECRET = os.getenv(
+    'SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
 
 
 # OAuth Configuration
@@ -105,9 +105,18 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
+# Invitation code type for asset administrator registration
+ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
+
+# User role identifier for asset administrators
+ASSET_OWNER_ROLE = "ASSET_OWNER"
+
+# Tenant ID for asset administrators (virtual tenant, not a real tenant)
+ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+
 # Roles that can edit all resources within a tenant (permission = EDIT).
 # Keep this centralized to avoid drifting role logic across modules.
-CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED"}
+CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED", "ASSET_OWNER"}
 
 # Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
 PERMISSION_READ = "READ_ONLY"
@@ -194,8 +203,10 @@ QUEUES = os.getenv("QUEUES", "process_q,process_part_q,forward_q")
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "4"))
-RAY_WARM_ACTOR_POOL_SIZE_PART = int(os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
-RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
+RAY_WARM_ACTOR_POOL_SIZE_PART = int(
+    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
+RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
+    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
 # Global Ray actor pool (shared by process_q/process_part_q workers)
 RAY_GLOBAL_ACTOR_POOL_SIZE = int(os.getenv("RAY_GLOBAL_ACTOR_POOL_SIZE", "3"))
 RAY_ACTOR_WARM_TIMEOUT_S = float(os.getenv("RAY_ACTOR_WARM_TIMEOUT_S", "60"))
@@ -203,9 +214,6 @@ RAY_GLOBAL_ACTOR_POOL_NAME = os.getenv(
     "RAY_GLOBAL_ACTOR_POOL_NAME", "nexent_global_data_processor_pool")
 RAY_GLOBAL_ACTOR_POOL_NAMESPACE = os.getenv(
     "RAY_GLOBAL_ACTOR_POOL_NAMESPACE", "nexent-data-process")
-
-
-
 
 
 # Voice Service Configuration
@@ -360,11 +368,13 @@ MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 
 # Container Platform Configuration
-IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
+IS_DEPLOYED_BY_KUBERNETES = os.getenv(
+    "IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
 
 # Northbound API public base URL (used for A2A agent cards and external file proxy links)
-NORTHBOUND_EXTERNAL_URL = os.getenv("NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
+NORTHBOUND_EXTERNAL_URL = os.getenv(
+    "NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
 
 
 # APP Version

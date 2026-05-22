@@ -17,7 +17,8 @@ from agents.create_agent_info import create_agent_run_info, create_tool_config_l
 from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
-    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
+    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE, \
+    ASSET_OWNER_TENANT_ID
 from consts.exceptions import MemoryPreparationException
 from consts.model import (
     AgentInfoRequest,
@@ -1496,6 +1497,88 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
         logger.error(f"Failed to query all agent info: {str(e)}")
         raise ValueError(f"Failed to query all agent info: {str(e)}")
 
+
+async def list_all_asset_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
+    """
+    list all asset agent info (read-only view of ASSET_OWNER tenant agents)
+    for non-ASSET_OWNER callers.
+
+    Args:
+        tenant_id (str): caller's tenant id; if it equals ASSET_OWNER_TENANT_ID,
+            returns an empty list because the caller already owns these assets.
+        user_id (str): user id (kept for signature parity; not used for filtering).
+
+    Raises:
+        ValueError: failed to query all agent info
+
+    Returns:
+        list: list of asset agent info, each entry marked as read-only.
+    """
+    if tenant_id == ASSET_OWNER_TENANT_ID:
+        return []
+    try:
+        agent_list = query_all_agent_info_by_tenant_id(tenant_id=ASSET_OWNER_TENANT_ID)
+
+        # Get all agent IDs that are registered as A2A Server agents in the asset owner tenant
+        a2a_server_agent_ids = get_server_agent_ids(ASSET_OWNER_TENANT_ID)
+
+        model_cache: Dict[int, Optional[dict]] = {}
+        enriched_agents: list[dict] = []
+
+        for agent in agent_list:
+            if not agent["enabled"]:
+                continue
+
+            # Use shared availability check against the asset owner tenant
+            _, unavailable_reasons = check_agent_availability(
+                agent_id=agent["agent_id"],
+                tenant_id=ASSET_OWNER_TENANT_ID,
+                agent_info=agent,
+                model_cache=model_cache
+            )
+
+            enriched_agents.append({
+                "raw_agent": agent,
+                "unavailable_reasons": unavailable_reasons,
+            })
+
+        # Handle duplicate name/display_name within the asset owner tenant
+        _apply_duplicate_name_availability_rules(enriched_agents)
+
+        simple_agent_list: list[dict] = []
+        for entry in enriched_agents:
+            agent = entry["raw_agent"]
+            unavailable_reasons = list(dict.fromkeys(entry["unavailable_reasons"]))
+
+            model_id = agent.get("model_id")
+            model_info = None
+            if model_id is not None:
+                if model_id not in model_cache:
+                    model_cache[model_id] = get_model_by_model_id(model_id, ASSET_OWNER_TENANT_ID)
+                model_info = model_cache.get(model_id)
+
+            simple_agent_list.append({
+                "agent_id": agent["agent_id"],
+                "name": agent["name"] if agent["name"] else agent["display_name"],
+                "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
+                "description": agent["description"],
+                "author": agent.get("author"),
+                "model_id": model_id,
+                "model_name": model_info.get("model_name") if model_info is not None else agent.get("model_name"),
+                "model_display_name": model_info.get("display_name") if model_info is not None else None,
+                "is_available": len(unavailable_reasons) == 0,
+                "unavailable_reasons": unavailable_reasons,
+                "is_new": agent.get("is_new", False),
+                "group_ids": convert_string_to_list(agent.get("group_ids")),
+                "permission": PERMISSION_READ,
+                "is_published": agent.get("current_version_no") is not None,
+                "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
+            })
+
+        return simple_agent_list
+    except Exception as e:
+        logger.error(f"Failed to query all agent info: {str(e)}")
+        raise ValueError(f"Failed to query all agent info: {str(e)}")
 
 def _apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> None:
     """

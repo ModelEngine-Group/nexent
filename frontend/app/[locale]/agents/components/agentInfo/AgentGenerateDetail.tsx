@@ -40,6 +40,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { USER_ROLES } from "@/const/auth";
+import { resolveAgentListTenantKey } from "@/lib/agentListTenant";
 import { Can } from "@/components/permission/Can";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
@@ -93,11 +94,14 @@ export default function AgentGenerateDetail({
 
   // Tenant & group data for group selection
   const { data: tenantData } = useTenantList();
-  const tenantId = user?.tenantId ?? tenantData?.data?.[0]?.tenant_id ?? null;
+  const tenantId =
+    user?.tenantId?.trim() ||
+    tenantData?.data?.[0]?.tenant_id ||
+    null;
   const { data: groupData } = useGroupList(tenantId);
 
-  // Agent list for name uniqueness validation (use local data instead of API call)
-  const { agents: agentList } = useAgentList(tenantId);
+  // Agent list for name uniqueness validation (auth-scoped, same as agent dev sidebar)
+  const { agents: agentList } = useAgentList("");
   const groups = groupData?.groups || [];
 
   // State management
@@ -545,16 +549,11 @@ export default function AgentGenerateDetail({
     onBlurUpdate: (value: string) => void
   ) => {
     return (
-      <div className="overflow-y-auto overflow-x-hidden h-full flex flex-col">
+      <div className="overflow-y-auto overflow-x-hidden h-full flex flex-col agent-config-form">
         {renderPromptToolbar(type, title)}
-        <Form
-          form={form}
-          layout="vertical"
-          className="h-full flex-1 min-h-0 agent-config-form"
-          disabled={isGenerating}
-        >
+        <div className="h-full flex-1 min-h-0">
           {renderPromptEditor(fieldName, title, onBlurUpdate)}
-        </Form>
+        </div>
       </div>
     );
   };
@@ -978,57 +977,57 @@ export default function AgentGenerateDetail({
           <Row gutter={[16, 16]}>
             <Col span={24}>
               {wrapNoEditTooltipBlock(
-                <Form form={form} layout="vertical" disabled={!editable || isGenerating}>
-                <Form.Item
-                  name="agentDisplayName"
-                  label={t("agent.displayName")}
-                  rules={[
-                    {
-                      required: true,
-                      message: t("agent.info.name.error.empty"),
-                    },
-                    {
-                      max: 50,
-                      message: t("agent.info.name.error.length"),
-                    },
-                    { validator: validateAgentDisplayNameUnique },
-                  ]}
-                  validateTrigger={["onBlur"]}
-                  className="mb-3"
-                >
-                  <Input
-                    placeholder={t("agent.displayNamePlaceholder")}
-                    onBlur={(e) =>
-                      updateProfileInfo({ display_name: e.target.value })
-                    }
-                  />
-                </Form.Item>
+                <>
+                  <Form.Item
+                    name="agentDisplayName"
+                    label={t("agent.displayName")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("agent.info.name.error.empty"),
+                      },
+                      {
+                        max: 50,
+                        message: t("agent.info.name.error.length"),
+                      },
+                      { validator: validateAgentDisplayNameUnique },
+                    ]}
+                    validateTrigger={["onBlur"]}
+                    className="mb-3"
+                  >
+                    <Input
+                      placeholder={t("agent.displayNamePlaceholder")}
+                      onBlur={(e) =>
+                        updateProfileInfo({ display_name: e.target.value })
+                      }
+                    />
+                  </Form.Item>
 
-                <Form.Item
-                  name="agentName"
-                  label={t("agent.name")}
-                  rules={[
-                    {
-                      required: true,
-                      message: t("agent.info.name.error.empty"),
-                    },
-                    { max: 50, message: t("agent.info.name.error.length") },
-                    {
-                      pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/,
-                      message: t("agent.info.name.error.format"),
-                    },
-                    { validator: validateAgentNameUnique },
-                  ]}
-                  validateTrigger={["onBlur"]}
-                  className="mb-3"
-                >
-                  <Input
-                    placeholder={t("agent.namePlaceholder")}
-                    onChange={(e) =>
-                      updateProfileInfo({ name: e.target.value })
-                    }
-                  />
-                </Form.Item>
+                  <Form.Item
+                    name="agentName"
+                    label={t("agent.name")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("agent.info.name.error.empty"),
+                      },
+                      { max: 50, message: t("agent.info.name.error.length") },
+                      {
+                        pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/,
+                        message: t("agent.info.name.error.format"),
+                      },
+                      { validator: validateAgentNameUnique },
+                    ]}
+                    validateTrigger={["onBlur"]}
+                    className="mb-3"
+                  >
+                    <Input
+                      placeholder={t("agent.namePlaceholder")}
+                      onChange={(e) =>
+                        updateProfileInfo({ name: e.target.value })
+                      }
+                    />
+                  </Form.Item>
 
                 <Can permission="group:read">
                   <Form.Item
@@ -1200,7 +1199,7 @@ export default function AgentGenerateDetail({
                     }
                   />
                 </Form.Item>
-              </Form>
+                </>
               )}
             </Col>
           </Row>
@@ -1240,7 +1239,13 @@ export default function AgentGenerateDetail({
   ];
 
   return (
-    <Flex vertical className="h-full">
+    <Form
+      form={form}
+      layout="vertical"
+      disabled={!editable || isGenerating}
+      component={false}
+    >
+      <Flex vertical className="h-full">
       {/* Business Logic Section */}
       <Row gutter={[12, 12]} className="mb-4">
         <Col xs={24}>
@@ -1498,6 +1503,7 @@ export default function AgentGenerateDetail({
           onReplace={handleReplaceOptimizedContent}
         />
       ) : null}
-    </Flex>
+      </Flex>
+    </Form>
   );
 }

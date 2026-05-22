@@ -113,8 +113,9 @@ export const fetchTools = async () => {
  */
 export const fetchAgentList = async (tenantId?: string) => {
   try {
-    const url = tenantId
-      ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(tenantId)}`
+    const trimmedTenantId = tenantId?.trim();
+    const url = trimmedTenantId
+      ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(trimmedTenantId)}`
       : API_ENDPOINTS.agent.list;
     const response = await fetch(url, {
       headers: getAuthHeaders(),
@@ -1287,6 +1288,13 @@ export interface SkillFileNode {
   children?: SkillFileNode[];
 }
 
+export class SkillFilesAccessDeniedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SkillFilesAccessDeniedError";
+  }
+}
+
 export const fetchSkillFiles = async (skillName: string): Promise<SkillFileNode[]> => {
   try {
     const response = await fetch(API_ENDPOINTS.skills.files(skillName), {
@@ -1296,6 +1304,9 @@ export const fetchSkillFiles = async (skillName: string): Promise<SkillFileNode[
       throw new Error(`Request failed: ${response.status}`);
     }
     const data = await response.json();
+    if (data && typeof data === "object" && typeof data.content === "string") {
+      throw new SkillFilesAccessDeniedError(data.content);
+    }
     // SDK returns a single root object { name, type, children };
     // normalize to array so callers can always iterate over an array.
     if (Array.isArray(data)) {
@@ -1306,6 +1317,9 @@ export const fetchSkillFiles = async (skillName: string): Promise<SkillFileNode[
     }
     return [];
   } catch (error) {
+    if (error instanceof SkillFilesAccessDeniedError) {
+      throw error;
+    }
     log.error("Error fetching skill files:", error);
     return [];
   }

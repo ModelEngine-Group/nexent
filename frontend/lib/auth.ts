@@ -25,6 +25,7 @@ const ROLE_COLORS: Record<string, string> = {
   [USER_ROLES.DEV]: "cyan",
   [USER_ROLES.USER]: "geekblue",
   [USER_ROLES.SPEED]: "green",
+  [USER_ROLES.ASSET_OWNER]: "gold",
 };
 
 /**

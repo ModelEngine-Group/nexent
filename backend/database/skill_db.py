@@ -170,6 +170,7 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
     """Convert SkillInfo to dict."""
     return {
         "skill_id": skill.skill_id,
+        "tenant_id": skill.tenant_id,
         "name": skill.skill_name,
         "description": skill.skill_description,
         "tags": skill.skill_tags or [],
@@ -235,6 +236,7 @@ def create_skill(skill_data: Dict[str, Any]) -> Dict[str, Any]:
             skill_content=skill_data.get("content", ""),
             params=_params_value_for_db(skill_data.get("params")),
             source=skill_data.get("source", "custom"),
+            tenant_id=skill_data.get("tenant_id"),
             created_by=skill_data.get("created_by"),
             create_time=datetime.now(),
             updated_by=skill_data.get("updated_by"),

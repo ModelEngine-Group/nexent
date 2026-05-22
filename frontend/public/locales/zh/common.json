@@ -1016,6 +1016,7 @@
   "auth.su": "超级管理员",
   "auth.dev": "开发者",
   "auth.speed": "默认角色",
+  "auth.assetOwner": "资产管理员",
   "auth.inviteCodeLabel": "邀请码",
   "auth.inviteCodeRequired": "请输入邀请码",
   "auth.inviteCodePlaceholder": "请输入邀请码",
@@ -1665,6 +1666,8 @@
   "tenantResources.invitation.codeType.ADMIN_INVITE": "管理员邀请",
   "tenantResources.invitation.codeType.DEV_INVITE": "开发者邀请",
   "tenantResources.invitation.codeType.USER_INVITE": "用户邀请",
+  "tenantResources.invitation.codeType.ASSET_OWNER_INVITE": "资产管理员邀请",
+  "tenantResources.invitation.assetOwnerTab": "资产管理员邀请码",
 
   "tenantResources.invitation.status.IN_USE": "可用",
   "tenantResources.invitation.status.EXPIRE": "已过期",

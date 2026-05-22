@@ -18,7 +18,15 @@ import {
   Alert,
   Space,
 } from "antd";
-import { Users, Plus, Edit, Edit2, Building2, Trash2, AlertTriangle } from "lucide-react";
+import {
+  Users,
+  Plus,
+  Edit,
+  Edit2,
+  Building2,
+  Trash2,
+  AlertTriangle,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
@@ -30,7 +38,10 @@ import {
   getTenantUsers,
   getTenant,
 } from "@/services/tenantService";
-import { createInvitation, deleteInvitation } from "@/services/invitationService";
+import {
+  createInvitation,
+  deleteInvitation,
+} from "@/services/invitationService";
 import { authService } from "@/services/authService";
 import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
@@ -42,7 +53,7 @@ import McpList from "./resources/McpList";
 import SkillList from "./resources/SkillList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+import { ASSET_OWNER_TENANT_ID, USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
 
 // Default page size for pagination
@@ -76,8 +87,8 @@ function TenantList({
   onTenantsRefetch: () => Promise<unknown>;
   loading?: boolean;
   t: (key: string, options?: any) => string;
-    onUserListRefresh?: () => void;
-    onInvitationListRefresh?: () => void;
+  onUserListRefresh?: () => void;
+  onInvitationListRefresh?: () => void;
 }) {
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -148,7 +159,8 @@ function TenantList({
         }
       }
     } catch (error: any) {
-      const errorMessage = error?.response?.data?.detail || error?.message || "";
+      const errorMessage =
+        error?.response?.data?.detail || error?.message || "";
       message.error(errorMessage || t("tenantResources.tenantDeleteFailed"));
     } finally {
       setDeleteModalVisible(false);
@@ -205,10 +217,15 @@ function TenantList({
             if (signupResult.error) {
               // Handle signup error
               const errorMsg = signupResult.error.message || "";
-              if (errorMsg.includes("already exists") || errorMsg.includes("EMAIL_ALREADY_EXISTS")) {
+              if (
+                errorMsg.includes("already exists") ||
+                errorMsg.includes("EMAIL_ALREADY_EXISTS")
+              ) {
                 message.error(t("tenantResources.tenants.emailAlreadyExists"));
               } else {
-                message.error(t("tenantResources.tenants.failedToCreateAdminAccount"));
+                message.error(
+                  t("tenantResources.tenants.failedToCreateAdminAccount")
+                );
               }
             } else {
               message.success(t("tenantResources.tenants.adminAccountCreated"));
@@ -217,7 +234,10 @@ function TenantList({
                 await deleteInvitation(invitation.invitation_code);
               } catch (deleteError) {
                 // Log error but don't block the success flow
-                console.warn("Failed to delete invitation code after admin registration:", deleteError);
+                console.warn(
+                  "Failed to delete invitation code after admin registration:",
+                  deleteError
+                );
               }
               // Refresh user list and invitation list to show the newly created admin
               onUserListRefresh?.();
@@ -225,11 +245,17 @@ function TenantList({
             }
           } catch (adminError: any) {
             // Handle admin account creation error
-            const errorMsg = adminError?.response?.data?.message || adminError?.message || "";
-            if (errorMsg.includes("already exists") || errorMsg.includes("EMAIL_ALREADY_EXISTS")) {
+            const errorMsg =
+              adminError?.response?.data?.message || adminError?.message || "";
+            if (
+              errorMsg.includes("already exists") ||
+              errorMsg.includes("EMAIL_ALREADY_EXISTS")
+            ) {
               message.error(t("tenantResources.tenants.emailAlreadyExists"));
             } else {
-              message.error(t("tenantResources.tenants.failedToCreateAdminAccount"));
+              message.error(
+                t("tenantResources.tenants.failedToCreateAdminAccount")
+              );
             }
           }
         }
@@ -237,11 +263,17 @@ function TenantList({
       setModalVisible(false);
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
-      const nameConflictMatch = errorMessage.match(/Tenant with name '(.*)' already exists/i);
+      const nameConflictMatch = errorMessage.match(
+        /Tenant with name '(.*)' already exists/i
+      );
 
       if (nameConflictMatch && nameConflictMatch[1]) {
         // Extract the duplicate name and show translated error
-        message.error(t("tenantResources.tenants.nameExists", { name: nameConflictMatch[1] }));
+        message.error(
+          t("tenantResources.tenants.nameExists", {
+            name: nameConflictMatch[1],
+          })
+        );
       } else if (errorMessage.includes("Tenant name cannot be empty")) {
         // Handle empty name error
         message.error(t("tenantResources.tenants.nameRequired"));
@@ -276,49 +308,51 @@ function TenantList({
           </div>
         )}
         {!loading && tenants.length === 0 && (
-          <div key="empty" className="p-4 text-center text-gray-500">No tenants found</div>
+          <div key="empty" className="p-4 text-center text-gray-500">
+            No tenants found
+          </div>
         )}
         {!loading && tenants.length > 0 && (
           <>
             {tenants.map((tenant, index) => (
-            <div
-              key={tenant.tenant_id || `tenant-${index}`}
-              className={`group p-2 rounded-md cursor-pointer transition-all ${
-                selected === tenant.tenant_id
-                  ? "bg-blue-50 border border-blue-200"
-                  : "hover:bg-gray-50"
-              }`}
-              onClick={() => onSelect(tenant.tenant_id)}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  {tenant.tenant_name || t("tenantResources.tenants.unnamed")}
-                </div>
-                <div className="opacity-0 group-hover:opacity-100 flex space-x-1">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Edit className="h-3 w-3" />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEdit(tenant);
-                    }}
-                    className="p-1 hover:bg-gray-200 rounded"
-                  />
-                  {/* Delete button - shows warning modal with users list */}
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Trash2 className="h-3 w-3" />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteClick(tenant);
-                    }}
-                    className="p-1 hover:bg-red-100 text-red-500 hover:text-red-600 rounded"
-                  />
+              <div
+                key={tenant.tenant_id || `tenant-${index}`}
+                className={`group p-2 rounded-md cursor-pointer transition-all ${
+                  selected === tenant.tenant_id
+                    ? "bg-blue-50 border border-blue-200"
+                    : "hover:bg-gray-50"
+                }`}
+                onClick={() => onSelect(tenant.tenant_id)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    {tenant.tenant_name || t("tenantResources.tenants.unnamed")}
+                  </div>
+                  <div className="opacity-0 group-hover:opacity-100 flex space-x-1">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Edit className="h-3 w-3" />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEdit(tenant);
+                      }}
+                      className="p-1 hover:bg-gray-200 rounded"
+                    />
+                    {/* Delete button - shows warning modal with users list */}
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Trash2 className="h-3 w-3" />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteClick(tenant);
+                      }}
+                      className="p-1 hover:bg-red-100 text-red-500 hover:text-red-600 rounded"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
             ))}
           </>
         )}
@@ -352,7 +386,12 @@ function TenantList({
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
       >
-        <Form layout="vertical" form={form} autoComplete="off" style={{ marginBottom: -12 }}>
+        <Form
+          layout="vertical"
+          form={form}
+          autoComplete="off"
+          style={{ marginBottom: -12 }}
+        >
           <Form.Item
             name="name"
             label={t("tenantResources.tenants.name")}
@@ -369,18 +408,21 @@ function TenantList({
           {/* Generate Admin Account Switch - Only show in create mode */}
           {!editingTenant && (
             <>
-              <Form.Item
-                labelCol={{ span: 24 }}
-                wrapperCol={{ span: 24 }}
-              >
+              <Form.Item labelCol={{ span: 24 }} wrapperCol={{ span: 24 }}>
                 <div className="flex items-center justify-between">
-                  <span>{t("tenantResources.tenants.generateAdminAccount")}</span>
+                  <span>
+                    {t("tenantResources.tenants.generateAdminAccount")}
+                  </span>
                   <Switch
                     checked={generateAdminAccount}
                     onChange={(checked) => {
                       setGenerateAdminAccount(checked);
                       if (!checked) {
-                        form.resetFields(["adminEmail", "adminPassword", "confirmAdminPassword"]);
+                        form.resetFields([
+                          "adminEmail",
+                          "adminPassword",
+                          "confirmAdminPassword",
+                        ]);
                       }
                     }}
                   />
@@ -396,15 +438,22 @@ function TenantList({
                     rules={[
                       {
                         required: true,
-                        message: t("tenantResources.tenants.adminEmailRequired"),
+                        message: t(
+                          "tenantResources.tenants.adminEmailRequired"
+                        ),
                       },
                       {
                         type: "email",
-                        message: t("tenantResources.tenants.invalidEmailFormat"),
+                        message: t(
+                          "tenantResources.tenants.invalidEmailFormat"
+                        ),
                       },
                     ]}
                   >
-                    <Input placeholder={t("tenantResources.tenants.adminEmail")} autoComplete="new-email" />
+                    <Input
+                      placeholder={t("tenantResources.tenants.adminEmail")}
+                      autoComplete="new-email"
+                    />
                   </Form.Item>
 
                   <Form.Item
@@ -413,7 +462,9 @@ function TenantList({
                     rules={[
                       {
                         required: true,
-                        message: t("tenantResources.tenants.adminPasswordRequired"),
+                        message: t(
+                          "tenantResources.tenants.adminPasswordRequired"
+                        ),
                       },
                       {
                         min: 6,
@@ -434,20 +485,31 @@ function TenantList({
                     rules={[
                       {
                         required: true,
-                        message: t("tenantResources.tenants.adminPasswordRequired"),
+                        message: t(
+                          "tenantResources.tenants.adminPasswordRequired"
+                        ),
                       },
                       ({ getFieldValue }) => ({
                         validator(_, value) {
-                          if (!value || getFieldValue("adminPassword") === value) {
+                          if (
+                            !value ||
+                            getFieldValue("adminPassword") === value
+                          ) {
                             return Promise.resolve();
                           }
-                          return Promise.reject(new Error(t("tenantResources.tenants.passwordsDoNotMatch")));
+                          return Promise.reject(
+                            new Error(
+                              t("tenantResources.tenants.passwordsDoNotMatch")
+                            )
+                          );
                         },
                       }),
                     ]}
                   >
                     <Input.Password
-                      placeholder={t("tenantResources.tenants.confirmAdminPassword")}
+                      placeholder={t(
+                        "tenantResources.tenants.confirmAdminPassword"
+                      )}
                       autoComplete="new-password"
                     />
                   </Form.Item>
@@ -622,11 +684,15 @@ export default function UserManageComp() {
   if (!isSuperAdmin && directTenantData) {
     // Non-super-admin: use directly fetched tenant info
     currentTenant = directTenantData;
-    currentTenantName = directTenantData.tenant_name || t("tenantResources.tenants.unnamed");
+    currentTenantName =
+      directTenantData.tenant_name || t("tenantResources.tenants.unnamed");
   } else {
     // Super-admin: search in paginated list
-    currentTenant = tenantData?.data?.find((t: Tenant) => t.tenant_id === tenantId);
-    currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
+    currentTenant = tenantData?.data?.find(
+      (t: Tenant) => t.tenant_id === tenantId
+    );
+    currentTenantName =
+      currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
   }
 
   // Tenant name editing states
@@ -733,8 +799,12 @@ export default function UserManageComp() {
                     }}
                     loading={tenantsLoading}
                     t={t}
-                    onUserListRefresh={() => setUserListRefreshKey((prev) => prev + 1)}
-                    onInvitationListRefresh={() => setInvitationListRefreshKey((prev) => prev + 1)}
+                    onUserListRefresh={() =>
+                      setUserListRefreshKey((prev) => prev + 1)
+                    }
+                    onInvitationListRefresh={() =>
+                      setInvitationListRefreshKey((prev) => prev + 1)
+                    }
                   />
                 </div>
               </div>
@@ -776,7 +846,12 @@ export default function UserManageComp() {
                   {
                     key: "users",
                     label: t("tenantResources.tabs.users") || "Users",
-                    children: <UserList tenantId={tenantId} refreshKey={userListRefreshKey} />,
+                    children: (
+                      <UserList
+                        tenantId={tenantId}
+                        refreshKey={userListRefreshKey}
+                      />
+                    ),
                   },
                   {
                     key: "groups",
@@ -795,9 +870,9 @@ export default function UserManageComp() {
                     children: <KnowledgeList tenantId={tenantId} />,
                   },
                   {
-                          key: "agents",
-                          label: t("tenantResources.tabs.agents") || "Agents",
-                          children: <AgentList tenantId={tenantId} />,
+                    key: "agents",
+                    label: t("tenantResources.tabs.agents") || "Agents",
+                    children: <AgentList tenantId={tenantId} />,
                   },
                   {
                     key: "mcp",
@@ -812,7 +887,31 @@ export default function UserManageComp() {
                   {
                     key: "invitations",
                     label: t("tenantResources.invitation.tab") || "Invitations",
-                    children: <InvitationList tenantId={tenantId} refreshKey={invitationListRefreshKey} />,
+                    children: (
+                      <InvitationList
+                        tenantId={tenantId}
+                        refreshKey={invitationListRefreshKey}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            ) : isSuperAdmin ? (
+              <Tabs
+                defaultActiveKey="assetOwnerInvitations"
+                className="h-full flex flex-col"
+                items={[
+                  {
+                    key: "assetOwnerInvitations",
+                    label:
+                      t("tenantResources.invitation.assetOwnerTab") ||
+                      "Asset Owner Invitations",
+                    children: (
+                      <InvitationList
+                        tenantId={ASSET_OWNER_TENANT_ID}
+                        refreshKey={invitationListRefreshKey}
+                      />
+                    ),
                   },
                 ]}
               />
@@ -821,7 +920,7 @@ export default function UserManageComp() {
                 <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
                   <Users className="h-8 w-8 text-gray-400" />
                 </div>
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
                   {t("tenantResources.selectTenantFirst") ||
                     "Please select a tenant"}
                 </h3>

@@ -32,8 +32,8 @@ export default function AgentManageComp() {
   const [importWizardData, setImportWizardData] =
     useState<ImportAgentData | null>(null);
 
-  // Shared agent list via React Query
-  const { agents: agentList, isLoading: loading, refetch } = useAgentList(user?.tenantId ?? null);
+  // Always resolve tenant from auth on the agent dev page (matches published_list; avoids stale/wrong tenant_id query params)
+  const { agents: agentList, isLoading: loading, refetch } = useAgentList("");
 
   // Handle import agent for space view - open wizard instead of direct import
   const handleImportAgent = () => {

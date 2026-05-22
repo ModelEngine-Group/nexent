@@ -689,7 +689,6 @@ export default function SkillList({
         cancelText={t("common.cancel")}
         width={660}
         centered
-        destroyOnClose
         styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
       >
         <Form

@@ -87,7 +87,7 @@ async def signin(request: UserSignInRequest):
     except AuthApiError as e:
         logging.error(f"User login failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
-                            detail="Email or password error")
+                        detail="Email or password error")
     except Exception as e:
         logging.error(f"User login failed, unknown error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

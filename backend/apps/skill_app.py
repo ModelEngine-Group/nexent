@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Hea
 from starlette.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from consts.const import APP_VERSION, STREAMABLE_CONTENT_TYPES
+from consts.const import APP_VERSION, ASSET_OWNER_TENANT_ID, STREAMABLE_CONTENT_TYPES
 from consts.exceptions import SkillException, UnauthorizedError
 from services.skill_service import (
     SkillService,
@@ -65,7 +65,7 @@ async def create_skill(
             "params": request.params,
             "files": request.files if request.files else [],
         }
-        skill = service.create_skill(skill_data, user_id=user_id)
+        skill = service.create_skill(skill_data, user_id=user_id, tenant_id=tenant_id)
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -129,16 +129,33 @@ async def create_skill_from_file(
 
 # Routes with path parameters
 @router.get("/{skill_name}/files")
-async def get_skill_file_tree(skill_name: str) -> JSONResponse:
+async def get_skill_file_tree(
+    skill_name: str,
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
     """Get file tree structure of a skill."""
     try:
+        _, tenant_id = get_current_user_id(authorization)
         service = SkillService()
+        skill = service.get_skill(skill_name)
+        if not skill:
+            raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
+
+        skill_tenant_id = skill.get("tenant_id")
+        if (
+            skill_tenant_id == ASSET_OWNER_TENANT_ID
+            and tenant_id != ASSET_OWNER_TENANT_ID
+        ):
+            return JSONResponse(content={"content": "您无权限查看"})
+
         tree = service.get_skill_file_tree(skill_name)
         if not tree:
             raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
         return JSONResponse(content=tree)
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:

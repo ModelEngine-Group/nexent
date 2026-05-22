@@ -914,7 +914,7 @@ class ElasticSearchService:
                 effective_user_role = "SPEED"
                 logger.info("User under SPEED version is treated as admin")
 
-            if effective_user_role in ["SU", "ADMIN", "SPEED"]:
+            if effective_user_role in ["SU", "ADMIN", "SPEED", "ASSET_OWNER"]:
                 # SU, ADMIN and SPEED roles can see all knowledgebases
                 permission = PERMISSION_EDIT
             elif effective_user_role in ["USER", "DEV"]:

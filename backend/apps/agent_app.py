@@ -6,6 +6,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Request, Query
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse
 
+from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
 from services.agent_service import (
     get_agent_info_impl,
@@ -17,6 +18,7 @@ from services.agent_service import (
     check_agent_name_conflict_batch_impl,
     regenerate_agent_name_batch_impl,
     list_all_agent_info_impl,
+    list_all_asset_agent_info_impl,
     run_agent_stream,
     stop_agent_tasks,
     get_agent_call_relationship_impl,
@@ -257,9 +259,14 @@ async def list_all_agent_info_api(
     """
     try:
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        # Treat ASSET_OWNER_TENANT_ID as if no tenant_id was provided, so we fall back to auth tenant_id
+        if tenant_id == ASSET_OWNER_TENANT_ID:
+            tenant_id = None
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
-        return await list_all_agent_info_impl(tenant_id=effective_tenant_id, user_id=user_id)
+        own_agent_list = await list_all_agent_info_impl(tenant_id=effective_tenant_id, user_id=user_id)
+        asset_agent_list = await list_all_asset_agent_info_impl(tenant_id=effective_tenant_id, user_id=user_id)
+        return own_agent_list + asset_agent_list
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(

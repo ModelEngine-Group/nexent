@@ -5,6 +5,7 @@ from sqlalchemy import update
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
 from utils.str_utils import convert_list_to_string
+from utils.tenant_scope_utils import apply_agent_tenant_filter
 
 logger = logging.getLogger("agent_db")
 
@@ -278,11 +279,12 @@ def query_all_agent_info_by_tenant_id(tenant_id: str, version_no: int = 0):
         version_no: Version number to filter. Default 0 = draft/editing state
     """
     with get_db_session() as session:
-        agents = session.query(AgentInfo).filter(
-            AgentInfo.tenant_id == tenant_id,
+        query = session.query(AgentInfo).filter(
             AgentInfo.version_no == version_no,
-            AgentInfo.delete_flag != 'Y'
-        ).order_by(AgentInfo.create_time.desc()).all()
+            AgentInfo.delete_flag != 'Y',
+        )
+        query = apply_agent_tenant_filter(query, tenant_id, AgentInfo)
+        agents = query.order_by(AgentInfo.create_time.desc()).all()
         return [as_dict(agent) for agent in agents]
 
 

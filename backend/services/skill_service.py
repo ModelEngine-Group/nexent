@@ -538,6 +538,9 @@ class SkillService:
             skill_data["created_by"] = user_id
             skill_data["updated_by"] = user_id
 
+        if tenant_id:
+            skill_data["tenant_id"] = tenant_id
+
         try:
             # Create database record first
             result = skill_db.create_skill(skill_data)
@@ -659,6 +662,9 @@ class SkillService:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
 
+        if tenant_id:
+            skill_dict["tenant_id"] = tenant_id
+
         result = skill_db.create_skill(skill_dict)
 
         # Write SKILL.md to local storage
@@ -774,6 +780,9 @@ class SkillService:
         if user_id:
             skill_dict["created_by"] = user_id
             skill_dict["updated_by"] = user_id
+
+        if tenant_id:
+            skill_dict["tenant_id"] = tenant_id
 
         result = skill_db.create_skill(skill_dict)
 

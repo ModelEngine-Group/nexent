@@ -1025,6 +1025,7 @@
   "auth.su": "Super Admin",
   "auth.dev": "Developer",
   "auth.speed": "Default Role",
+  "auth.assetOwner": "Asset Owner",
   "auth.inviteCodeLabel": "Invite Code",
   "auth.inviteCodeRequired": "Invite code is required",
   "auth.inviteCodePlaceholder": "Please enter invite code",
@@ -1674,6 +1675,8 @@
   "tenantResources.invitation.codeType.ADMIN_INVITE": "Admin Invite",
   "tenantResources.invitation.codeType.DEV_INVITE": "Dev Invite",
   "tenantResources.invitation.codeType.USER_INVITE": "User Invite",
+  "tenantResources.invitation.codeType.ASSET_OWNER_INVITE": "Asset Owner Invite",
+  "tenantResources.invitation.assetOwnerTab": "Asset Owner Invitations",
 
   "tenantResources.invitation.status.IN_USE": "Available",
   "tenantResources.invitation.status.EXPIRE": "Expired",

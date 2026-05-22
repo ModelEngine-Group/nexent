@@ -3,14 +3,9 @@
 import React, { useState, useEffect } from "react";
 import {
   Button,
-  Typography,
-  Space,
   Modal,
-  Form,
-  Input,
   App,
   Flex,
-  Alert,
   Tag,
   Tooltip,
 } from "antd";
@@ -23,7 +18,6 @@ import {
   Shield,
   Mail,
   Edit,
-  Key,
   ChevronRight,
   KeySquare,
   KeyRound,
@@ -83,8 +77,6 @@ export default function UserProfileComp() {
   }, [groupIds, groupNameMap, groups, t]);
 
   // Modal states
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   // AK/SK state
@@ -92,10 +84,6 @@ export default function UserProfileComp() {
   const [existingTokenIds, setExistingTokenIds] = useState<number[]>([]);
   const [isLoadingAkSk, setIsLoadingAkSk] = useState(false);
   const [isGeneratingAkSk, setIsGeneratingAkSk] = useState(false);
-
-  // Form instances
-  const [editForm] = Form.useForm();
-  const [passwordForm] = Form.useForm();
 
   // Check if user is admin or super admin (cannot delete account)
   const isAdminOrSuperAdmin = user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU;
@@ -111,6 +99,8 @@ export default function UserProfileComp() {
         return t("auth.dev");
       case USER_ROLES.USER:
         return t("auth.user");
+      case USER_ROLES.ASSET_OWNER:
+        return t("auth.assetOwner");
       default:
         return t("auth.user");
     }
@@ -473,112 +463,6 @@ export default function UserProfileComp() {
           </motion.div>
         </div>
       </div>
-
-      {/* Edit Profile Modal */}
-      <Modal
-        title={
-          <Space>
-            <Edit className="h-5 w-5 text-blue-500" />
-            <span>{t("profile.editProfile") || "Edit Profile"}</span>
-          </Space>
-        }
-        open={isEditModalOpen}
-        onOk={() => editForm.submit()}
-        onCancel={() => setIsEditModalOpen(false)}
-        okText={t("common.save") || "Save"}
-        cancelText={t("common.cancel") || "Cancel"}
-      >
-        <Form
-          form={editForm}
-          layout="vertical"
-          onFinish={(values) => {
-            antdMessage.success(t("profile.updateSuccess") || "Profile updated successfully");
-            setIsEditModalOpen(false);
-          }}
-        >
-          <Form.Item
-            name="displayName"
-            label={t("profile.displayName") || "Display Name"}
-          >
-            <Input placeholder={t("profile.enterDisplayName") || "Enter your display name"} />
-          </Form.Item>
-          <Form.Item
-            name="email"
-            label={t("common.email") || "Email"}
-          >
-            <Input disabled placeholder={user?.email} />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* Change Password Modal */}
-      <Modal
-        title={
-          <Space>
-            <Key className="h-5 w-5 text-green-500" />
-            <span>{t("profile.changePassword") || "Change Password"}</span>
-          </Space>
-        }
-        open={isPasswordModalOpen}
-        onOk={() => passwordForm.submit()}
-        onCancel={() => setIsPasswordModalOpen(false)}
-        okText={t("common.save") || "Save"}
-        cancelText={t("common.cancel") || "Cancel"}
-        width={500}
-      >
-        <Alert
-          message={t("profile.passwordAlertTitle") || "Note"}
-          description={t("profile.passwordAlertDesc") || "Password change functionality will be available soon."}
-          type="info"
-          showIcon
-          className="mb-4"
-        />
-        <Form
-          form={passwordForm}
-          layout="vertical"
-          onFinish={(values) => {
-            antdMessage.success(t("profile.passwordUpdateSuccess") || "Password updated successfully");
-            setIsPasswordModalOpen(false);
-            passwordForm.resetFields();
-          }}
-        >
-          <Form.Item
-            name="currentPassword"
-            label={t("profile.currentPassword") || "Current Password"}
-            rules={[{ required: true, message: t("auth.passwordRequired") }]}
-          >
-            <Input.Password placeholder={t("auth.passwordLabel")} />
-          </Form.Item>
-          <Form.Item
-            name="newPassword"
-            label={t("profile.newPassword") || "New Password"}
-            rules={[
-              { required: true, message: t("auth.passwordRequired") },
-              { min: 6, message: t("auth.passwordMinLength") },
-            ]}
-          >
-            <Input.Password placeholder={t("profile.enterNewPassword") || "Enter new password"} />
-          </Form.Item>
-          <Form.Item
-            name="confirmPassword"
-            label={t("auth.confirmPasswordLabel") || "Confirm Password"}
-            dependencies={["newPassword"]}
-            rules={[
-              { required: true, message: t("auth.confirmPasswordRequired") },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  if (!value || getFieldValue("newPassword") === value) {
-                    return Promise.resolve();
-                  }
-                  return Promise.reject(new Error(t("auth.passwordsDoNotMatch")));
-                },
-              }),
-            ]}
-          >
-            <Input.Password placeholder={t("auth.confirmPasswordLabel")} />
-          </Form.Item>
-        </Form>
-      </Modal>
 
       {/* Delete Account Confirmation Modal */}
       <DeleteAccountModal
