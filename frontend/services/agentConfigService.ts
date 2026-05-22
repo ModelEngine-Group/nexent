@@ -473,7 +473,7 @@ export const deleteAgent = async (agentId: number, tenantId?: string) => {
 /**
  * export agent configuration
  * @param agentId agent id to export
- * @returns export result
+ * @returns export result with data (JSON string or null if ZIP download triggered)
  */
 export const exportAgent = async (agentId: number) => {
   try {
@@ -485,6 +485,19 @@ export const exportAgent = async (agentId: number) => {
 
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const contentType = response.headers.get("Content-Type") || "";
+
+    if (contentType.includes("application/zip")) {
+      const blob = await response.blob();
+      const filename = response.headers.get("Content-Disposition") || `agent_${agentId}.zip`;
+      downloadBlob(blob, filename.replace("attachment; filename=", ""));
+      return {
+        success: true,
+        data: null,
+        message: "Agent exported with skills as ZIP",
+      };
     }
 
     const data = await response.json();
@@ -513,27 +526,59 @@ export const exportAgent = async (agentId: number) => {
 };
 
 /**
+ * Trigger browser download of a Blob
+ */
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+/**
  * import agent configuration
  * @param agentId main agent id
  * @param agentInfo agent configuration data
+ * @param options import options including optional skill ZIPs
  * @returns import result
  */
 export const importAgent = async (
   agentInfo: any,
-  options?: { forceImport?: boolean }
+  options?: { forceImport?: boolean; skillZips?: Array<{ skill_name: string; skill_zip_base64: string }> }
 ) => {
   try {
+    const payload: any = {
+      agent_info: agentInfo,
+      force_import: options?.forceImport ?? false,
+    };
+    if (options?.skillZips && options.skillZips.length > 0) {
+      payload.skills = options.skillZips;
+    }
     const response = await fetch(API_ENDPOINTS.agent.import, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify({
-        agent_info: agentInfo,
-        force_import: options?.forceImport ?? false,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+      const errorData = await response.json().catch(() => ({}));
+      const errMsg = errorData?.message;
+      if (typeof errMsg === "object" && errMsg !== null) {
+        return {
+          success: false,
+          data: { detail: errMsg },
+          message: errMsg?.type === "skill_duplicate"
+            ? "Skill name conflict detected"
+            : (errorData?.message ?? "Failed to import Agent, please try again later"),
+        };
+      }
+      const error = new Error(`Request failed: ${response.status}`);
+      (error as any).detail = errMsg;
+      throw error;
     }
 
     const data = await response.json();
@@ -546,7 +591,7 @@ export const importAgent = async (
     log.error("Failed to import Agent:", error);
     return {
       success: false,
-      data: null,
+      data: (error as Error).detail ? { detail: (error as Error).detail } : null,
       message: "Failed to import Agent, please try again later",
     };
   }

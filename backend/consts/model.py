@@ -451,6 +451,7 @@ class ExportAndImportAgentInfo(BaseModel):
     model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
     business_logic_model_name: Optional[str] = None
+    skill_names: Optional[List[str]] = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -467,9 +468,16 @@ class ExportAndImportDataFormat(BaseModel):
     mcp_info: List[MCPInfo]
 
 
+class SkillZipEntry(BaseModel):
+    """A skill bundled inside an agent export ZIP."""
+    skill_name: str
+    skill_zip_base64: str
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
+    skills: Optional[List[SkillZipEntry]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):

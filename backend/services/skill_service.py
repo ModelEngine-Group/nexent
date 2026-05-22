@@ -1289,20 +1289,34 @@ class SkillService:
 
         zip_stream = io.BytesIO(zip_bytes)
 
-        # Determine if folder renaming is needed
+        try:
+            with zipfile.ZipFile(zip_stream, "r") as zf:
+                file_list = zf.namelist()
+        except zipfile.BadZipFile:
+            raise SkillException("Invalid ZIP archive")
+
+        # Determine if this ZIP has a subdirectory structure or root-level structure.
+        # Root-level: SKILL.md is at root (e.g., "SKILL.md", "script/analyze.py") -> no stripping
+        # Subdirectory: SKILL.md is inside a folder (e.g., "my-skill/SKILL.md") -> strip folder prefix
         needs_rename = (
             original_folder_name is not None
             and original_folder_name != skill_name
         )
 
-        logger.info(
-            "Starting ZIP extraction for skill '%s': needs_rename=%s, original_folder='%s'",
-            skill_name, needs_rename, original_folder_name
+        has_root_skill_md = any(
+            not fp.endswith("/")
+            and fp.replace("\\", "/").split("/")[0].lower() == "skill.md"
+            for fp in file_list
         )
 
+        logger.info(
+            "Starting ZIP extraction for skill '%s': needs_rename=%s, original_folder='%s', has_root_skill_md=%s",
+            skill_name, needs_rename, original_folder_name, has_root_skill_md
+        )
+
+        zip_stream.seek(0)
         try:
             with zipfile.ZipFile(zip_stream, "r") as zf:
-                file_list = zf.namelist()
                 logger.info("ZIP contains %d entries for skill '%s'", len(file_list), skill_name)
 
                 extracted_count = 0
@@ -1314,10 +1328,12 @@ class SkillService:
                     parts = normalized_path.split("/")
 
                     # Calculate target relative path
+                    # Only strip the first component when the ZIP has a subdirectory structure
+                    # (SKILL.md is inside a folder, not at root level)
                     if needs_rename and len(parts) >= 2 and parts[0] == original_folder_name:
-                        # Replace original folder name with skill_name
                         relative_path = parts[0].replace(original_folder_name, skill_name) + "/" + "/".join(parts[1:])
-                    elif len(parts) >= 2:
+                    elif len(parts) >= 2 and not has_root_skill_md:
+                        # Strip first component (ZIP has subdirectory structure without root SKILL.md)
                         relative_path = "/".join(parts[1:])
                     else:
                         relative_path = normalized_path
@@ -1931,6 +1947,189 @@ class SkillService:
             tenant_id=tenant_id,
             version_no=version_no
         )
+
+    def create_skill_from_zip_bytes(
+        self,
+        zip_bytes: bytes,
+        skill_name: Optional[str] = None,
+        source: str = "导入",
+        user_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        skip_duplicate_check: bool = False
+    ) -> Dict[str, Any]:
+        """Create a skill from ZIP bytes, optionally skipping the duplicate name check.
+
+        This is the shared implementation used by both the upload endpoint and the
+        agent import flow. When skip_duplicate_check is True, the existence check
+        is bypassed (used during agent import where we pre-validate duplicates).
+
+        Args:
+            zip_bytes: Raw ZIP file bytes
+            skill_name: Optional skill name override
+            source: Source label for the skill
+            user_id: Creator user ID
+            tenant_id: Tenant ID
+            skip_duplicate_check: If True, skip the "skill already exists" check
+
+        Returns:
+            Created skill dict
+        """
+        import zipfile
+
+        zip_stream = io.BytesIO(zip_bytes)
+
+        try:
+            with zipfile.ZipFile(zip_stream, "r") as zf:
+                file_list = zf.namelist()
+        except zipfile.BadZipFile:
+            raise SkillException("Invalid ZIP archive")
+
+        zip_stream.seek(0)
+
+        skill_md_path: Optional[str] = None
+        detected_skill_name: Optional[str] = None
+
+        for file_path in file_list:
+            if file_path.endswith("/"):
+                continue
+            normalized_path = file_path.replace("\\", "/")
+            parts = normalized_path.split("/")
+            if len(parts) == 1 and parts[0].lower() == "skill.md":
+                skill_md_path = file_path
+                break
+
+        if not skill_md_path:
+            for file_path in file_list:
+                if file_path.endswith("/"):
+                    continue
+                normalized_path = file_path.replace("\\", "/")
+                parts = normalized_path.split("/")
+                if len(parts) >= 2 and parts[-1].lower() == "skill.md":
+                    skill_md_path = file_path
+                    detected_skill_name = parts[0]
+                    break
+
+        if not skill_md_path:
+            raise SkillException("SKILL.md not found in ZIP archive")
+
+        name = skill_name or detected_skill_name
+        if not name:
+            raise SkillException("Skill name is required")
+
+        if not skip_duplicate_check:
+            existing = skill_db.get_skill_by_name(name, tenant_id)
+            if existing:
+                raise SkillException(f"Skill '{name}' already exists")
+
+        with zipfile.ZipFile(zip_stream, "r") as zf:
+            skill_content = zf.read(skill_md_path).decode("utf-8")
+
+        try:
+            skill_data = SkillLoader.parse(skill_content)
+        except ValueError as e:
+            raise SkillException(f"Invalid SKILL.md in ZIP: {e}")
+
+        if not name:
+            name = skill_data.get("name")
+
+        if not name:
+            raise SkillException("Skill name is required")
+
+        allowed_tools = skill_data.get("allowed_tools", [])
+        tool_ids = []
+        if allowed_tools:
+            tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
+
+        skill_dict = {
+            "name": name,
+            "description": skill_data.get("description", ""),
+            "content": skill_data.get("content", ""),
+            "tags": skill_data.get("tags", []),
+            "source": source,
+            "tool_ids": tool_ids,
+            "allowed-tools": allowed_tools,
+        }
+
+        preferred_root = detected_skill_name or name
+
+        schema_from_zip = _read_schema_yaml_from_zip(zip_bytes, preferred_root)
+        inputs_from_scripts = _get_skill_inputs_from_zip(
+            zip_bytes,
+            preferred_skill_root=preferred_root,
+        )
+        params_from_zip = _read_params_from_zip_config_yaml(
+            zip_bytes,
+            preferred_skill_root=preferred_root,
+        )
+
+        if schema_from_zip:
+            skill_dict["config_schemas"] = schema_from_zip
+        elif inputs_from_scripts:
+            skill_dict["config_schemas"] = inputs_from_scripts
+
+        if params_from_zip is not None:
+            skill_dict["config_values"] = params_from_zip
+
+        if user_id:
+            skill_dict["created_by"] = user_id
+            skill_dict["updated_by"] = user_id
+
+        result = skill_db.create_skill(skill_dict, tenant_id)
+
+        self.skill_manager.save_skill(skill_dict)
+
+        self._upload_zip_files(zip_bytes, name, detected_skill_name)
+
+        return self._enrich_configs_from_yaml(result)
+
+    def export_skills_by_names(
+        self,
+        skill_names: List[str],
+        tenant_id: Optional[str] = None
+    ) -> List[Dict[str, str]]:
+        """Export skills as ZIP files by name.
+
+        Packages the entire skill directory (SKILL.md, scripts/, assets/, config/)
+        into a ZIP for each skill name.
+
+        Args:
+            skill_names: List of skill names to export
+            tenant_id: Tenant ID for skill lookup
+
+        Returns:
+            List of dicts with skill_name and skill_zip_base64
+        """
+        import base64
+
+        effective_tenant_id = tenant_id or self.tenant_id
+        results: List[Dict[str, str]] = []
+
+        for skill_name in skill_names:
+            skill_dir = os.path.join(
+                self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH,
+                skill_name
+            )
+            if not os.path.isdir(skill_dir):
+                logger.warning(f"Skill directory not found for export: {skill_name}")
+                continue
+
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for root, dirs, files in os.walk(skill_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(file_path, skill_dir)
+                        arcname = os.path.join(skill_name, rel_path)
+                        zf.write(file_path, arcname)
+
+            zip_buffer.seek(0)
+            zip_base64 = base64.b64encode(zip_buffer.read()).decode("utf-8")
+            results.append({
+                "skill_name": skill_name,
+                "skill_zip_base64": zip_base64
+            })
+
+        return results
 
 
 def classify_streaming_content(

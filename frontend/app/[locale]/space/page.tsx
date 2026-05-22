@@ -15,6 +15,20 @@ import { ImportAgentData } from "@/hooks/useAgentImport";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import log from "@/lib/logger";
 
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+};
+
+const extractSkillNameFromPath = (path: string): string => {
+  const filename = path.split("/").pop() || "";
+  return filename.replace(/\.zip$/i, "");
+};
+
 /**
  * Agent Space page component
  * Displays agent cards grid and management controls
@@ -45,26 +59,60 @@ export default function SpacePage() {
   const onImportAgent = () => {
     const fileInput = document.createElement("input");
     fileInput.type = "file";
-    fileInput.accept = ".json";
+    fileInput.accept = ".json,.zip";
     fileInput.onchange = async (event) => {
       const file = (event.target as HTMLInputElement).files?.[0];
       if (!file) return;
 
-      if (!file.name.endsWith(".json")) {
+      if (!file.name.endsWith(".json") && !file.name.endsWith(".zip")) {
         message.error(t("businessLogic.config.error.invalidFileType"));
         return;
       }
 
       try {
-        // Read and parse file
-        const fileContent = await file.text();
         let agentData: ImportAgentData;
 
-        try {
-          agentData = JSON.parse(fileContent);
-        } catch (parseError) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
+        if (file.name.endsWith(".zip")) {
+          const JSZip = (await import("jszip")).default;
+          const zip = await JSZip.loadAsync(file);
+          const agentJsonFile = zip.file("agent.json");
+          if (!agentJsonFile) {
+            message.error("agent.json not found in ZIP");
+            return;
+          }
+          const content = await agentJsonFile.async("string");
+          try {
+            agentData = JSON.parse(content);
+          } catch {
+            message.error(t("businessLogic.config.error.invalidFileType"));
+            return;
+          }
+
+          const skills: Array<{ skill_name: string; skill_zip_base64: string }> = [];
+          const skillsFolder = zip.folder("skills");
+          if (skillsFolder) {
+            const skillFiles = Object.keys(zip.files).filter(
+              (name) => name.startsWith("skills/") && name.toLowerCase().endsWith(".zip")
+            );
+            for (const skillFileName of skillFiles) {
+              const skillZipFile = zip.file(skillFileName);
+              if (skillZipFile) {
+                const skillZipContent = await skillZipFile.async("arraybuffer");
+                const base64 = arrayBufferToBase64(skillZipContent);
+                const skillName = extractSkillNameFromPath(skillFileName);
+                skills.push({ skill_name: skillName, skill_zip_base64: base64 });
+              }
+            }
+          }
+          agentData.skills = skills;
+        } else {
+          const fileContent = await file.text();
+          try {
+            agentData = JSON.parse(fileContent);
+          } catch {
+            message.error(t("businessLogic.config.error.invalidFileType"));
+            return;
+          }
         }
 
         // Validate structure

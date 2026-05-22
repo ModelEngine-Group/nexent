@@ -1,12 +1,14 @@
+import json
 import logging
 from http import HTTPStatus
 from typing import Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException, Request, Query
 from fastapi.encoders import jsonable_encoder
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
+from consts.exceptions import SkillDuplicateError
 from services.agent_service import (
     get_agent_info_impl,
     get_creating_sub_agent_info_impl,
@@ -22,6 +24,8 @@ from services.agent_service import (
     get_agent_call_relationship_impl,
     clear_agent_new_mark_impl,
     get_agent_by_name_impl,
+    export_agent_with_skills_impl,
+    import_agent_with_skills_impl,
 )
 from services.agent_version_service import (
     publish_version_impl,
@@ -171,11 +175,24 @@ async def delete_agent_api(
 @agent_config_router.post("/export")
 async def export_agent_api(request: AgentIDRequest, authorization: Optional[str] = Header(None)):
     """
-    export an agent
+    export an agent.
+
+    Returns a ZIP file if the agent has skill instances, otherwise returns plain JSON.
+    The response Content-Type and body differ based on the agent's skill configuration.
     """
     try:
-        agent_info_str = await export_agent_impl(request.agent_id, authorization)
-        return ConversationResponse(code=0, message="success", data=agent_info_str)
+        result = await export_agent_with_skills_impl(request.agent_id, authorization)
+        if isinstance(result, dict) and result.get("_zip"):
+            return Response(
+                content=result["data"],
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f"attachment; filename=\"{result.get('filename', 'agent_export.zip')}\""
+                }
+            )
+        if isinstance(result, str):
+            result = json.loads(result)
+        return ConversationResponse(code=0, message="success", data=result)
     except Exception as e:
         logger.error(f"Agent export error: {str(e)}")
         raise HTTPException(
@@ -185,15 +202,32 @@ async def export_agent_api(request: AgentIDRequest, authorization: Optional[str]
 @agent_config_router.post("/import")
 async def import_agent_api(request: AgentImportRequest, authorization: Optional[str] = Header(None)):
     """
-    import an agent
+    import an agent.
+
+    Accepts both plain JSON (agent without skills) and JSON with embedded skill ZIPs
+    (agent with skills). The skills field, if present, should contain base64-encoded
+    ZIP packages for each skill.
     """
     try:
-        await import_agent_impl(
-            request.agent_info,
-            authorization,
-            force_import=request.force_import
-        )
+        if request.skills:
+            await import_agent_with_skills_impl(
+                request.agent_info,
+                request.skills,
+                authorization,
+                force_import=request.force_import
+            )
+        else:
+            await import_agent_impl(
+                request.agent_info,
+                authorization,
+                force_import=request.force_import
+            )
         return {}
+    except SkillDuplicateError as exc:
+        raise HTTPException(status_code=409, detail={
+            "type": "skill_duplicate",
+            "duplicate_skills": exc.duplicate_names
+        })
     except Exception as e:
         logger.error(f"Agent import error: {str(e)}")
         raise HTTPException(
