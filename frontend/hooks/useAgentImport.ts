@@ -329,30 +329,6 @@ export function useAgentImport(
   };
 
   /**
-   * Helper: Read file as text
-   */
-  const readFileAsText = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-
-      reader.onload = (e) => {
-        const content = e.target?.result;
-        if (typeof content === "string") {
-          resolve(content);
-        } else {
-          reject(new Error("Failed to read file content"));
-        }
-      };
-
-      reader.onerror = () => {
-        reject(new Error("Failed to read file"));
-      };
-
-      reader.readAsText(file);
-    });
-  };
-
-  /**
    * Helper: Convert ArrayBuffer to base64 string
    */
   const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {

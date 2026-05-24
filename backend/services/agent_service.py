@@ -1263,7 +1263,6 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
                                           business_logic_model_id=business_logic_model_id,
                                           business_logic_model_name=business_logic_model_display_name,
                                           skill_names=skill_names,
-                                          business_logic_model_name=business_logic_model_display_name,
                                           prompt_template_id=agent_info.get("prompt_template_id"),
                                           prompt_template_name=agent_info.get("prompt_template_name"))
     return agent_info

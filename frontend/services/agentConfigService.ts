@@ -593,7 +593,7 @@ export const importAgent = async (
     log.error("Failed to import Agent:", error);
     return {
       success: false,
-      data: (error as Error).detail ? { detail: (error as Error).detail } : null,
+      data: (error as any).detail ? { detail: (error as any).detail } : null,
       message: "Failed to import Agent, please try again later",
     };
   }

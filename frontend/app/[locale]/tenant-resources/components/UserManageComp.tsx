@@ -264,7 +264,7 @@ function TenantList({
                 next.add(name);
                 return next;
               });
-            }, 300 + Math.random() * 500);
+            }, 300);
           });
         }
 
