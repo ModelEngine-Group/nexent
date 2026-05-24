@@ -8,7 +8,7 @@ import { ModelOption } from "@/types/modelConfig";
 import { modelService } from "@/services/modelService";
 import { getMcpServerList, addMcpServer, updateToolList } from "@/services/mcpService";
 import { McpServer } from "@/types/agentConfig";
-import { ImportAgentData } from "@/hooks/useAgentImport";
+import { ImportAgentData } from "@/lib/agentImportUtils";
 import { importAgent, checkAgentNameConflictBatch, regenerateAgentNameBatch, fetchTools } from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
 import log from "@/lib/logger";
