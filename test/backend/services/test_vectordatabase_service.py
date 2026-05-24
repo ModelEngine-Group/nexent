@@ -244,9 +244,15 @@ group_service_mock.get_tenant_default_group_id = MagicMock(return_value=1)
 sys.modules['services.group_service'] = group_service_mock
 setattr(sys.modules['services'], 'group_service', group_service_mock)
 
-# Create mock utils modules
-sys.modules['utils'] = types.ModuleType('utils')  # No __path__ so Python won't try submodule lookup
-sys.modules['backend.utils'] = sys.modules['utils']
+# Create mock utils modules - backend.utils needs __path__ for submodule lookups
+utils_mock = types.ModuleType('utils')  # No __path__ so Python won't try submodule lookup
+utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
+sys.modules['utils'] = utils_mock
+
+# backend.utils needs to be a proper package with __path__ for submodules
+backend_utils_mock = types.ModuleType('backend.utils')
+backend_utils_mock.__path__ = []  # Empty __path__ makes it a namespace package
+sys.modules['backend.utils'] = backend_utils_mock
 
 # Create a mock document_vector_utils module with required functions
 document_vector_utils_mock = types.ModuleType('backend.utils.document_vector_utils')
@@ -257,6 +263,7 @@ document_vector_utils_mock.merge_cluster_summaries = MagicMock(return_value="mer
 sys.modules['backend.utils.document_vector_utils'] = document_vector_utils_mock
 sys.modules['utils.document_vector_utils'] = document_vector_utils_mock
 setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
+setattr(sys.modules['backend.utils'], 'document_vector_utils', document_vector_utils_mock)
 
 async def _mock_get_all_files_status(index_name):
     return {}
@@ -267,12 +274,15 @@ file_management_utils_mock.get_all_files_status = _mock_get_all_files_status
 file_management_utils_mock.get_file_size = MagicMock(return_value=0)
 sys.modules['utils.file_management_utils'] = file_management_utils_mock
 setattr(sys.modules['utils'], 'file_management_utils', file_management_utils_mock)
+setattr(sys.modules['backend.utils'], 'file_management_utils', file_management_utils_mock)
 
 str_utils_mock = types.ModuleType('utils.str_utils')
 str_utils_mock.convert_list_to_string = lambda items: ",".join(str(item) for item in items) if items else ""
 str_utils_mock.convert_string_to_list = lambda s: [int(x.strip()) for x in s.split(',') if x.strip().isdigit()] if s and s.strip() else []
 sys.modules['utils.str_utils'] = str_utils_mock
+sys.modules['backend.utils.str_utils'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
+setattr(sys.modules['backend.utils'], 'str_utils', str_utils_mock)
 
 config_utils_mock = types.ModuleType('utils.config_utils')
 config_utils_mock.tenant_config_manager = MagicMock()
@@ -280,7 +290,9 @@ config_utils_mock.tenant_config_manager.get_app_config = MagicMock(return_value=
 config_utils_mock.tenant_config_manager.get_model_config = MagicMock(return_value={})
 config_utils_mock.get_model_name_from_config = MagicMock(return_value='')
 sys.modules['utils.config_utils'] = config_utils_mock
+sys.modules['backend.utils.config_utils'] = config_utils_mock
 setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
+setattr(sys.modules['backend.utils'], 'config_utils', config_utils_mock)
 
 # Shared mock instances for MinIO
 storage_client_mock = MagicMock()

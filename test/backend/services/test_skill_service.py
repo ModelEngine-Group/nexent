@@ -297,6 +297,7 @@ database_skill_db_mock.query_skill_instance_by_id = mock_query_skill_instance_by
 database_skill_db_mock.search_skills_for_agent = mock_search_skills_for_agent
 database_skill_db_mock.delete_skills_by_agent_id = mock_delete_skills_by_agent_id
 database_skill_db_mock.delete_skill_instances_by_skill_id = mock_delete_skill_instances_by_skill_id
+database_skill_db_mock.check_skill_list_initialized = MagicMock(return_value=False)
 
 database_mock.client = database_client_mock
 database_mock.skill_db = database_skill_db_mock

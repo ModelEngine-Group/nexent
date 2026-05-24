@@ -167,6 +167,7 @@ services_mock = types.ModuleType('services')
 services_skill_service_mock = types.ModuleType('services.skill_service')
 sys.modules['services'] = services_mock
 sys.modules['services.skill_service'] = services_skill_service_mock
+setattr(services_mock, 'skill_service', services_skill_service_mock)
 
 class MockSkillService:
     def __init__(self):
@@ -2498,6 +2499,53 @@ class TestUpdateSkillWithFiles:
                 )
 
                 assert response.status_code == 200
+
+
+# ===== Build Model Config From Tenant Tests =====
+class TestBuildModelConfigFromTenant:
+    """Test _build_model_config_from_tenant helper function (lines 532-553)."""
+
+    def test_build_model_config_success(self, mocker):
+        """Test successful model config building."""
+        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
+            with patch('utils.config_utils.get_model_name_from_config') as mock_get_model:
+                mock_config_mgr.get_model_config.return_value = {
+                    "display_name": "GPT-4",
+                    "api_key": "test-key",
+                    "base_url": "https://api.openai.com",
+                    "model_factory": "openai"
+                }
+                mock_get_model.return_value = "gpt-4"
+
+                from backend.apps.skill_app import _build_model_config_from_tenant
+                config = _build_model_config_from_tenant("tenant123")
+
+                assert config.cite_name == "GPT-4"
+                assert config.api_key == "test-key"
+                assert config.model_name == "gpt-4"
+                assert config.url == "https://api.openai.com"
+                assert config.temperature == 0.1
+                assert config.top_p == 0.95
+                assert config.ssl_verify == True
+                assert config.model_factory == "openai"
+
+    def test_build_model_config_missing_quick_config(self, mocker):
+        """Test error when tenant has no LLM model configured."""
+        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
+            mock_config_mgr.get_model_config.return_value = None
+
+            from backend.apps.skill_app import _build_model_config_from_tenant
+            with pytest.raises(ValueError, match="No LLM model configured for tenant"):
+                _build_model_config_from_tenant("tenant123")
+
+    def test_build_model_config_empty_quick_config(self, mocker):
+        """Test error when tenant has empty LLM model config."""
+        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
+            mock_config_mgr.get_model_config.return_value = {}
+
+            from backend.apps.skill_app import _build_model_config_from_tenant
+            with pytest.raises(ValueError, match="No LLM model configured for tenant"):
+                _build_model_config_from_tenant("tenant123")
 
 
 if __name__ == "__main__":

@@ -4,9 +4,17 @@ Unit tests for backend.apps.tenant_app module.
 import sys
 import os
 
-# Import conftest first to set up all mocks
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
+# Add test/backend/app to sys.path for conftest import
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+# Import conftest from the same directory to set up mocks
 import conftest  # noqa: F401 - needed for module-level mocks
+
+# Add backend path for backend imports
+backend_path = os.path.join(current_dir, "../../../backend")
+if backend_path not in sys.path:
+    sys.path.insert(0, backend_path)
 
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
