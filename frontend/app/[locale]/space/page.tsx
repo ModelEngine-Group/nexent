@@ -11,23 +11,12 @@ import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { Agent } from "@/types/agentConfig";
 import AgentCard from "./components/AgentCard";
-import { ImportAgentData } from "@/hooks/useAgentImport";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import {
+  openImportWizardWithFile,
+} from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
-
-const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-};
-
-const extractSkillNameFromPath = (path: string): string => {
-  const filename = path.split("/").pop() || "";
-  return filename.replace(/\.zip$/i, "");
-};
+import { ImportAgentData } from "@/hooks/useAgentImport";
 
 /**
  * Agent Space page component
@@ -44,9 +33,7 @@ export default function SpacePage() {
 
   // Import wizard state
   const [importWizardVisible, setImportWizardVisible] = useState(false);
-  const [importWizardData, setImportWizardData] =
-    useState<ImportAgentData | null>(null);
-
+  const [importWizardData, setImportWizardData] = useState<ImportAgentData | null>(null);
 
   const handleCreateAgent = () => {
     router.push("/agents?create=true");
@@ -57,80 +44,31 @@ export default function SpacePage() {
   };
 
   const onImportAgent = () => {
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = ".json,.zip";
-    fileInput.onchange = async (event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      if (!file.name.endsWith(".json") && !file.name.endsWith(".zip")) {
-        message.error(t("businessLogic.config.error.invalidFileType"));
-        return;
-      }
-
-      try {
-        let agentData: ImportAgentData;
-
-        if (file.name.endsWith(".zip")) {
-          const JSZip = (await import("jszip")).default;
-          const zip = await JSZip.loadAsync(file);
-          const agentJsonFile = zip.file("agent.json");
-          if (!agentJsonFile) {
-            message.error("agent.json not found in ZIP");
-            return;
-          }
-          const content = await agentJsonFile.async("string");
-          try {
-            agentData = JSON.parse(content);
-          } catch {
-            message.error(t("businessLogic.config.error.invalidFileType"));
-            return;
-          }
-
-          const skills: Array<{ skill_name: string; skill_zip_base64: string }> = [];
-          const skillsFolder = zip.folder("skills");
-          if (skillsFolder) {
-            const skillFiles = Object.keys(zip.files).filter(
-              (name) => name.startsWith("skills/") && name.toLowerCase().endsWith(".zip")
-            );
-            for (const skillFileName of skillFiles) {
-              const skillZipFile = zip.file(skillFileName);
-              if (skillZipFile) {
-                const skillZipContent = await skillZipFile.async("arraybuffer");
-                const base64 = arrayBufferToBase64(skillZipContent);
-                const skillName = extractSkillNameFromPath(skillFileName);
-                skills.push({ skill_name: skillName, skill_zip_base64: base64 });
-              }
-            }
-          }
-          agentData.skills = skills;
-        } else {
-          const fileContent = await file.text();
-          try {
-            agentData = JSON.parse(fileContent);
-          } catch {
-            message.error(t("businessLogic.config.error.invalidFileType"));
-            return;
-          }
-        }
-
-        // Validate structure
-        if (!agentData.agent_id || !agentData.agent_info) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
-        // Open wizard with parsed data
+    openImportWizardWithFile({
+      onSuccess: (agentData) => {
         setImportWizardData(agentData);
         setImportWizardVisible(true);
-      } catch (error) {
+        setIsImporting(false);
+      },
+      onParseError: (msg) => {
+        message.error(t(msg));
+        setIsImporting(false);
+      },
+      onFileNotFound: (msg) => {
+        message.error(msg);
+        setIsImporting(false);
+      },
+      onValidationError: (msg) => {
+        message.error(t(msg));
+        setIsImporting(false);
+      },
+      onGenericError: (error) => {
         log.error("Failed to read import file:", error);
         message.error(t("businessLogic.config.error.agentImportFailed"));
-      }
-    };
-
-    fileInput.click();
+        setIsImporting(false);
+      },
+    });
+    setIsImporting(true);
   };
 
 

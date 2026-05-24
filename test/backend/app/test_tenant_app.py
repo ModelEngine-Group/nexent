@@ -1,50 +1,33 @@
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+"""
+Unit tests for backend.apps.tenant_app module.
+"""
 import sys
 import os
-from typing import Optional
 
-# Add path for correct imports
+# Import conftest first to set up all mocks
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
+import conftest  # noqa: F401 - needed for module-level mocks
 
-# Mock external dependencies
-sys.modules['boto3'] = MagicMock()
-sys.modules['psycopg2'] = MagicMock()
-sys.modules['supabase'] = MagicMock()
-
-# Apply critical patches before importing any modules
-storage_client_mock = MagicMock()
-minio_mock = MagicMock()
-minio_mock._ensure_bucket_exists = MagicMock()
-minio_mock.client = MagicMock()
-
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
-
-# Import exception classes and models
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
-from consts.model import TenantCreateRequest, TenantUpdateRequest, PaginationRequest
-
-# Import the modules we need
-from fastapi.testclient import TestClient
+import pytest
+from unittest.mock import patch, MagicMock, AsyncMock
 from http import HTTPStatus
+
+from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
-# Create a test client with a fresh FastAPI app
 from apps.tenant_app import router
+from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+
 
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
 
 
-class TestTenantCreation:
-    """Test tenant creation endpoint"""
+class TestCreateTenantEndpoint:
+    """Test POST /tenants endpoint"""
 
-    def test_create_tenant_success(self):
+    def test_create_tenant_success(self, mocker):
         """Test successful tenant creation"""
         mock_tenant_info = {
             "tenant_id": "tenant-123",
@@ -53,84 +36,98 @@ class TestTenantCreation:
             "created_at": "2024-01-01T00:00:00Z"
         }
 
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.create_tenant') as mock_create_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-456", "tenant-123"))
+        mocker.patch("apps.tenant_app.create_tenant", return_value=mock_tenant_info)
 
-            mock_get_user.return_value = ("user-456", "tenant-123")
-            mock_create_tenant.return_value = mock_tenant_info
+        response = client.post(
+            "/tenants",
+            json={"tenant_name": "Test Tenant"},
+            headers={"Authorization": "Bearer token"}
+        )
 
-            request_data = {
-                "tenant_name": "Test Tenant"
-            }
+        assert response.status_code == HTTPStatus.CREATED
+        data = response.json()
+        assert data["message"] == "Tenant created successfully"
+        assert data["data"] == mock_tenant_info
 
-            response = client.post("/tenants", json=request_data, headers={"Authorization": "Bearer token"})
+    def test_create_tenant_with_all_fields(self, mocker):
+        """Test tenant creation with skill_ids, skill_names, and locale"""
+        mock_tenant_info = {
+            "tenant_id": "tenant-123",
+            "tenant_name": "Test Tenant",
+            "created_by": "user-456",
+            "created_at": "2024-01-01T00:00:00Z"
+        }
 
-            assert response.status_code == HTTPStatus.CREATED
-            data = response.json()
-            assert data["message"] == "Tenant created successfully"
-            assert data["data"] == mock_tenant_info
-            mock_get_user.assert_called_once_with("Bearer token")
-            mock_create_tenant.assert_called_once_with(
-                tenant_name="Test Tenant",
-                created_by="user-456"
-            )
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-456", "tenant-123"))
+        mock_create = mocker.patch("apps.tenant_app.create_tenant", return_value=mock_tenant_info)
 
-    def test_create_tenant_unauthorized(self):
-        """Test tenant creation with unauthorized access"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user:
-            mock_get_user.side_effect = UnauthorizedError("Invalid token")
+        response = client.post(
+            "/tenants",
+            json={
+                "tenant_name": "Test Tenant",
+                "skill_ids": [1, 2],
+                "skill_names": ["skill-a", "skill-b"],
+                "locale": "en"
+            },
+            headers={"Authorization": "Bearer token"}
+        )
 
-            request_data = {
-                "tenant_name": "Test Tenant"
-            }
+        assert response.status_code == HTTPStatus.CREATED
+        mock_create.assert_called_once_with(
+            tenant_name="Test Tenant",
+            created_by="user-456",
+            skill_ids=[1, 2],
+            skill_names=["skill-a", "skill-b"],
+            locale="en"
+        )
 
-            response = client.post("/tenants", json=request_data, headers={"Authorization": "Bearer invalid"})
+    def test_create_tenant_unauthorized(self, mocker):
+        """Test tenant creation with invalid token"""
+        mocker.patch("apps.tenant_app.get_current_user_id", side_effect=UnauthorizedError("Invalid token"))
 
-            assert response.status_code == HTTPStatus.UNAUTHORIZED
-            data = response.json()
-            assert "Invalid token" in data["detail"]
+        response = client.post(
+            "/tenants",
+            json={"tenant_name": "Test Tenant"},
+            headers={"Authorization": "Bearer invalid"}
+        )
 
-    def test_create_tenant_validation_error(self):
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        assert "Invalid token" in response.json()["detail"]
+
+    def test_create_tenant_validation_error(self, mocker):
         """Test tenant creation with validation error"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.create_tenant') as mock_create_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-456", "tenant-123"))
+        mocker.patch("apps.tenant_app.create_tenant", side_effect=ValidationError("Tenant name already exists"))
 
-            mock_get_user.return_value = ("user-456", "tenant-123")
-            mock_create_tenant.side_effect = ValidationError("Tenant name already exists")
+        response = client.post(
+            "/tenants",
+            json={"tenant_name": "Existing Tenant"},
+            headers={"Authorization": "Bearer token"}
+        )
 
-            request_data = {
-                "tenant_name": "Existing Tenant"
-            }
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert "Tenant name already exists" in response.json()["detail"]
 
-            response = client.post("/tenants", json=request_data, headers={"Authorization": "Bearer token"})
-
-            assert response.status_code == HTTPStatus.BAD_REQUEST
-            data = response.json()
-            assert "Tenant name already exists" in data["detail"]
-
-    def test_create_tenant_unexpected_error(self):
+    def test_create_tenant_unexpected_error(self, mocker):
         """Test tenant creation with unexpected error"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.create_tenant') as mock_create_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-456", "tenant-123"))
+        mocker.patch("apps.tenant_app.create_tenant", side_effect=Exception("Database connection failed"))
 
-            mock_get_user.return_value = ("user-456", "tenant-123")
-            mock_create_tenant.side_effect = Exception("Database connection failed")
+        response = client.post(
+            "/tenants",
+            json={"tenant_name": "Test Tenant"},
+            headers={"Authorization": "Bearer token"}
+        )
 
-            request_data = {
-                "tenant_name": "Test Tenant"
-            }
-
-            response = client.post("/tenants", json=request_data, headers={"Authorization": "Bearer token"})
-
-            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-            data = response.json()
-            assert data["detail"] == "Failed to create tenant"
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Failed to create tenant"
 
 
-class TestTenantRetrieval:
-    """Test tenant retrieval endpoints"""
+class TestGetTenantEndpoint:
+    """Test GET /tenants/{tenant_id} endpoint"""
 
-    def test_get_tenant_success(self):
+    def test_get_tenant_success(self, mocker):
         """Test successful tenant retrieval"""
         mock_tenant_info = {
             "tenant_id": "tenant-123",
@@ -140,126 +137,96 @@ class TestTenantRetrieval:
             "updated_at": "2024-01-02T00:00:00Z"
         }
 
-        with patch('apps.tenant_app.get_tenant_info') as mock_get_tenant:
-            mock_get_tenant.return_value = mock_tenant_info
+        mocker.patch("apps.tenant_app.get_tenant_info", return_value=mock_tenant_info)
 
-            response = client.get("/tenants/tenant-123")
+        response = client.get("/tenants/tenant-123")
 
-            assert response.status_code == HTTPStatus.OK
-            data = response.json()
-            assert data["message"] == "Tenant retrieved successfully"
-            assert data["data"] == mock_tenant_info
-            mock_get_tenant.assert_called_once_with("tenant-123")
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "Tenant retrieved successfully"
+        assert data["data"] == mock_tenant_info
 
-    def test_get_tenant_not_found(self):
+    def test_get_tenant_not_found(self, mocker):
         """Test tenant retrieval when tenant doesn't exist"""
-        with patch('apps.tenant_app.get_tenant_info') as mock_get_tenant:
-            mock_get_tenant.side_effect = NotFoundException("Tenant tenant-999 not found")
+        mocker.patch("apps.tenant_app.get_tenant_info", side_effect=NotFoundException("Tenant tenant-999 not found"))
 
-            response = client.get("/tenants/tenant-999")
+        response = client.get("/tenants/tenant-999")
 
-            assert response.status_code == HTTPStatus.NOT_FOUND
-            data = response.json()
-            assert "Tenant tenant-999 not found" in data["detail"]
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        assert "Tenant tenant-999 not found" in response.json()["detail"]
 
-    def test_get_tenant_unexpected_error(self):
+    def test_get_tenant_unexpected_error(self, mocker):
         """Test tenant retrieval with unexpected error"""
-        with patch('apps.tenant_app.get_tenant_info') as mock_get_tenant:
-            mock_get_tenant.side_effect = Exception("Database error")
+        mocker.patch("apps.tenant_app.get_tenant_info", side_effect=Exception("Database error"))
 
-            response = client.get("/tenants/tenant-123")
+        response = client.get("/tenants/tenant-123")
 
-            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-            data = response.json()
-            assert data["detail"] == "Failed to retrieve tenant"
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Failed to retrieve tenant"
 
-    def test_get_all_tenants_success(self):
+
+class TestGetAllTenantsEndpoint:
+    """Test POST /tenants/tenant-list endpoint"""
+
+    def test_get_all_tenants_success(self, mocker):
         """Test successful retrieval of all tenants with pagination"""
         mock_tenants = [
-            {
-                "tenant_id": "tenant-123",
-                "tenant_name": "Tenant 1",
-                "created_by": "user-456"
-            },
-            {
-                "tenant_id": "tenant-456",
-                "tenant_name": "Tenant 2",
-                "created_by": "user-789"
-            }
+            {"tenant_id": "tenant-123", "tenant_name": "Tenant 1", "created_by": "user-456"},
+            {"tenant_id": "tenant-456", "tenant_name": "Tenant 2", "created_by": "user-789"}
         ]
 
-        with patch('apps.tenant_app.get_tenants_paginated') as mock_get_tenants:
-            mock_get_tenants.return_value = {
-                "data": mock_tenants,
-                "total": 2,
-                "page": 1,
-                "page_size": 20,
-                "total_pages": 1
-            }
+        mocker.patch("apps.tenant_app.get_tenants_paginated", return_value={
+            "data": mock_tenants,
+            "total": 2,
+            "page": 1,
+            "page_size": 20,
+            "total_pages": 1
+        })
 
-            request_data = {
-                "page": 1,
-                "page_size": 20
-            }
+        response = client.post("/tenants/tenant-list", json={"page": 1, "page_size": 20})
 
-            response = client.post("/tenants/tenant-list", json=request_data)
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "Tenants retrieved successfully"
+        assert data["data"] == mock_tenants
+        assert data["total"] == 2
+        assert data["page"] == 1
+        assert data["page_size"] == 20
+        assert data["total_pages"] == 1
 
-            assert response.status_code == HTTPStatus.OK
-            data = response.json()
-            assert data["message"] == "Tenants retrieved successfully"
-            assert data["data"] == mock_tenants
-            assert data["total"] == 2
-            assert data["page"] == 1
-            assert data["page_size"] == 20
-            assert data["total_pages"] == 1
-            mock_get_tenants.assert_called_once_with(page=1, page_size=20)
-
-    def test_get_all_tenants_pagination(self):
+    def test_get_all_tenants_pagination(self, mocker):
         """Test tenant list with custom pagination parameters"""
-        with patch('apps.tenant_app.get_tenants_paginated') as mock_get_tenants:
-            mock_get_tenants.return_value = {
-                "data": [],
-                "total": 100,
-                "page": 2,
-                "page_size": 10,
-                "total_pages": 10
-            }
+        mocker.patch("apps.tenant_app.get_tenants_paginated", return_value={
+            "data": [],
+            "total": 100,
+            "page": 2,
+            "page_size": 10,
+            "total_pages": 10
+        })
 
-            request_data = {
-                "page": 2,
-                "page_size": 10
-            }
+        response = client.post("/tenants/tenant-list", json={"page": 2, "page_size": 10})
 
-            response = client.post("/tenants/tenant-list", json=request_data)
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["page"] == 2
+        assert data["page_size"] == 10
+        assert data["total"] == 100
+        assert data["total_pages"] == 10
 
-            assert response.status_code == HTTPStatus.OK
-            data = response.json()
-            assert data["page"] == 2
-            assert data["page_size"] == 10
-            assert data["total"] == 100
-            mock_get_tenants.assert_called_once_with(page=2, page_size=10)
-
-    def test_get_all_tenants_unexpected_error(self):
+    def test_get_all_tenants_unexpected_error(self, mocker):
         """Test retrieval of all tenants with unexpected error"""
-        with patch('apps.tenant_app.get_tenants_paginated') as mock_get_tenants:
-            mock_get_tenants.side_effect = Exception("Database error")
+        mocker.patch("apps.tenant_app.get_tenants_paginated", side_effect=Exception("Database error"))
 
-            request_data = {
-                "page": 1,
-                "page_size": 20
-            }
+        response = client.post("/tenants/tenant-list", json={"page": 1, "page_size": 20})
 
-            response = client.post("/tenants/tenant-list", json=request_data)
-
-            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-            data = response.json()
-            assert data["detail"] == "Failed to retrieve tenants"
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Failed to retrieve tenants"
 
 
-class TestTenantUpdate:
-    """Test tenant update endpoint"""
+class TestUpdateTenantEndpoint:
+    """Test PUT /tenants/{tenant_id} endpoint"""
 
-    def test_update_tenant_success(self):
+    def test_update_tenant_success(self, mocker):
         """Test successful tenant update"""
         mock_updated_tenant = {
             "tenant_id": "tenant-123",
@@ -269,168 +236,126 @@ class TestTenantUpdate:
             "updated_at": "2024-01-03T00:00:00Z"
         }
 
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.update_tenant_info') as mock_update_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-789", "tenant-123"))
+        mocker.patch("apps.tenant_app.update_tenant_info", return_value=mock_updated_tenant)
 
-            mock_get_user.return_value = ("user-789", "tenant-123")
-            mock_update_tenant.return_value = mock_updated_tenant
+        response = client.put(
+            "/tenants/tenant-123",
+            json={"tenant_name": "Updated Tenant Name"},
+            headers={"Authorization": "Bearer token"}
+        )
 
-            request_data = {
-                "tenant_name": "Updated Tenant Name"
-            }
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "Tenant updated successfully"
+        assert data["data"] == mock_updated_tenant
 
-            response = client.put("/tenants/tenant-123", json=request_data, headers={"Authorization": "Bearer token"})
-
-            assert response.status_code == HTTPStatus.OK
-            data = response.json()
-            assert data["message"] == "Tenant updated successfully"
-            assert data["data"] == mock_updated_tenant
-            mock_get_user.assert_called_once_with("Bearer token")
-            mock_update_tenant.assert_called_once_with(
-                tenant_id="tenant-123",
-                tenant_name="Updated Tenant Name",
-                updated_by="user-789"
-            )
-
-    def test_update_tenant_not_found(self):
+    def test_update_tenant_not_found(self, mocker):
         """Test tenant update when tenant doesn't exist"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.update_tenant_info') as mock_update_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-789", "tenant-123"))
+        mocker.patch("apps.tenant_app.update_tenant_info", side_effect=NotFoundException("Tenant tenant-999 not found"))
 
-            mock_get_user.return_value = ("user-789", "tenant-123")
-            mock_update_tenant.side_effect = NotFoundException("Tenant tenant-999 not found")
+        response = client.put(
+            "/tenants/tenant-999",
+            json={"tenant_name": "Updated Name"},
+            headers={"Authorization": "Bearer token"}
+        )
 
-            request_data = {
-                "tenant_name": "Updated Name"
-            }
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        assert "Tenant tenant-999 not found" in response.json()["detail"]
 
-            response = client.put("/tenants/tenant-999", json=request_data, headers={"Authorization": "Bearer token"})
-
-            assert response.status_code == HTTPStatus.NOT_FOUND
-            data = response.json()
-            assert "Tenant tenant-999 not found" in data["detail"]
-
-    def test_update_tenant_validation_error(self):
+    def test_update_tenant_validation_error(self, mocker):
         """Test tenant update with validation error"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.update_tenant_info') as mock_update_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-789", "tenant-123"))
+        mocker.patch("apps.tenant_app.update_tenant_info", side_effect=ValidationError("Tenant name already exists"))
 
-            mock_get_user.return_value = ("user-789", "tenant-123")
-            mock_update_tenant.side_effect = ValidationError("Tenant name already exists")
+        response = client.put(
+            "/tenants/tenant-123",
+            json={"tenant_name": "Existing Name"},
+            headers={"Authorization": "Bearer token"}
+        )
 
-            request_data = {
-                "tenant_name": "Existing Name"
-            }
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert "Tenant name already exists" in response.json()["detail"]
 
-            response = client.put("/tenants/tenant-123", json=request_data, headers={"Authorization": "Bearer token"})
-
-            assert response.status_code == HTTPStatus.BAD_REQUEST
-            data = response.json()
-            assert "Tenant name already exists" in data["detail"]
-
-    def test_update_tenant_unauthorized(self):
+    def test_update_tenant_unauthorized(self, mocker):
         """Test tenant update with unauthorized access"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user:
-            mock_get_user.side_effect = UnauthorizedError("Invalid token")
+        mocker.patch("apps.tenant_app.get_current_user_id", side_effect=UnauthorizedError("Invalid token"))
 
-            request_data = {
-                "tenant_name": "Updated Name"
-            }
+        response = client.put(
+            "/tenants/tenant-123",
+            json={"tenant_name": "Updated Name"},
+            headers={"Authorization": "Bearer invalid"}
+        )
 
-            response = client.put("/tenants/tenant-123", json=request_data, headers={"Authorization": "Bearer invalid"})
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        assert "Invalid token" in response.json()["detail"]
 
-            assert response.status_code == HTTPStatus.UNAUTHORIZED
-            data = response.json()
-            assert "Invalid token" in data["detail"]
-
-    def test_update_tenant_unexpected_error(self):
+    def test_update_tenant_unexpected_error(self, mocker):
         """Test tenant update with unexpected error"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.update_tenant_info') as mock_update_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-789", "tenant-123"))
+        mocker.patch("apps.tenant_app.update_tenant_info", side_effect=Exception("Database error"))
 
-            mock_get_user.return_value = ("user-789", "tenant-123")
-            mock_update_tenant.side_effect = Exception("Database error")
+        response = client.put(
+            "/tenants/tenant-123",
+            json={"tenant_name": "Updated Name"},
+            headers={"Authorization": "Bearer token"}
+        )
 
-            request_data = {
-                "tenant_name": "Updated Name"
-            }
-
-            response = client.put("/tenants/tenant-123", json=request_data, headers={"Authorization": "Bearer token"})
-
-            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-            data = response.json()
-            assert data["detail"] == "Failed to update tenant"
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Failed to update tenant"
 
 
-class TestTenantDeletion:
-    """Test tenant deletion endpoint"""
+class TestDeleteTenantEndpoint:
+    """Test DELETE /tenants/{tenant_id} endpoint"""
 
-    def test_delete_tenant_success(self):
+    def test_delete_tenant_success(self, mocker):
         """Test successful tenant deletion"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.delete_tenant') as mock_delete_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-789", "tenant-123"))
+        mock_delete = mocker.patch("apps.tenant_app.delete_tenant", new_callable=AsyncMock, return_value=True)
 
-            mock_get_user.return_value = ("user-789", "tenant-123")
-            mock_delete_tenant.return_value = True
+        response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer token"})
 
-            response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer token"})
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "Tenant deleted successfully"
+        assert data["data"]["tenant_id"] == "tenant-123"
 
-            assert response.status_code == HTTPStatus.OK
-            data = response.json()
-            assert "deleted successfully" in data["message"]
-            mock_get_user.assert_called_once_with("Bearer token")
-            mock_delete_tenant.assert_called_once_with("tenant-123", deleted_by="user-789")
-
-    def test_delete_tenant_not_found(self):
+    def test_delete_tenant_not_found(self, mocker):
         """Test tenant deletion when tenant doesn't exist"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.delete_tenant') as mock_delete_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-789", "tenant-123"))
+        mocker.patch("apps.tenant_app.delete_tenant", new_callable=AsyncMock, side_effect=NotFoundException("Tenant tenant-999 not found"))
 
-            mock_get_user.return_value = ("user-789", "tenant-123")
-            mock_delete_tenant.side_effect = NotFoundException("Tenant tenant-999 not found")
+        response = client.delete("/tenants/tenant-999", headers={"Authorization": "Bearer token"})
 
-            response = client.delete("/tenants/tenant-999", headers={"Authorization": "Bearer token"})
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        assert "Tenant tenant-999 not found" in response.json()["detail"]
 
-            assert response.status_code == HTTPStatus.NOT_FOUND
-            data = response.json()
-            assert "Tenant tenant-999 not found" in data["detail"]
-
-    def test_delete_tenant_validation_error(self):
+    def test_delete_tenant_validation_error(self, mocker):
         """Test tenant deletion with validation error"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.delete_tenant') as mock_delete_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-789", "tenant-123"))
+        mocker.patch("apps.tenant_app.delete_tenant", new_callable=AsyncMock, side_effect=ValidationError("Cannot delete tenant with active resources"))
 
-            mock_get_user.return_value = ("user-789", "tenant-123")
-            mock_delete_tenant.side_effect = ValidationError("Cannot delete tenant with active resources")
+        response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer token"})
 
-            response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer token"})
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert "Cannot delete tenant with active resources" in response.json()["detail"]
 
-            assert response.status_code == HTTPStatus.BAD_REQUEST
-            data = response.json()
-            assert "Cannot delete tenant with active resources" in data["detail"]
-
-    def test_delete_tenant_unauthorized(self):
+    def test_delete_tenant_unauthorized(self, mocker):
         """Test tenant deletion with unauthorized access"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user:
-            mock_get_user.side_effect = UnauthorizedError("Invalid token")
+        mocker.patch("apps.tenant_app.get_current_user_id", side_effect=UnauthorizedError("Invalid token"))
 
-            response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer invalid"})
+        response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer invalid"})
 
-            assert response.status_code == HTTPStatus.UNAUTHORIZED
-            data = response.json()
-            assert "Invalid token" in data["detail"]
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        assert "Invalid token" in response.json()["detail"]
 
-    def test_delete_tenant_unexpected_error(self):
+    def test_delete_tenant_unexpected_error(self, mocker):
         """Test tenant deletion with unexpected error"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
-             patch('apps.tenant_app.delete_tenant') as mock_delete_tenant:
+        mocker.patch("apps.tenant_app.get_current_user_id", return_value=("user-789", "tenant-123"))
+        mocker.patch("apps.tenant_app.delete_tenant", new_callable=AsyncMock, side_effect=Exception("Database error"))
 
-            mock_get_user.return_value = ("user-789", "tenant-123")
-            mock_delete_tenant.side_effect = Exception("Database error")
+        response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer token"})
 
-            response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer token"})
-
-            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-            data = response.json()
-            assert data["detail"] == "Failed to delete tenant"
-
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Failed to delete tenant"

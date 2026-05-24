@@ -29,7 +29,7 @@ import {
 } from "@/components/tool-config";
 import { useKnowledgeBasesForToolConfig, useSyncKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import log from "@/lib/logger";
-import { isZhLocale } from "@/lib/utils";
+import { isZhLocale, getKbDisplayName, mapKbIdsToDisplayNames, parseKbIds } from "@/lib/utils";
 
 export interface SkillConfigModalProps {
   isOpen: boolean;
@@ -130,13 +130,7 @@ export default function SkillConfigModal({
   // Sync selectedKbDisplayNames when knowledgeBases or selectedKbIds changes
   useEffect(() => {
     if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
-      const displayNames = selectedKbIds.map((id) => {
-        const kb = knowledgeBases.find(
-          (k) => String(k.id).trim() === String(id).trim()
-        );
-        return kb?.display_name || kb?.name || id;
-      });
-      setSelectedKbDisplayNames(displayNames);
+      setSelectedKbDisplayNames(mapKbIdsToDisplayNames(selectedKbIds, knowledgeBases));
     }
   }, [knowledgeBases, selectedKbIds]);
 
@@ -157,13 +151,7 @@ export default function SkillConfigModal({
       );
       if (validKbIds.length !== selectedKbIds.length) {
         setSelectedKbIds(validKbIds);
-        const displayNames = validKbIds.map((id) => {
-          const kb = knowledgeBases.find(
-            (k) => String(k.id).trim() === String(id).trim()
-          );
-          return kb?.display_name || kb?.name || id;
-        });
-        setSelectedKbDisplayNames(displayNames);
+        setSelectedKbDisplayNames(mapKbIdsToDisplayNames(validKbIds, knowledgeBases));
       }
     }
   }, [knowledgeBases, selectedKbIds]);
@@ -201,19 +189,7 @@ export default function SkillConfigModal({
     if (skillRequiresKbSelection && kbParamName) {
       const kbParam = merged.find((p) => p.name === kbParamName);
       if (kbParam?.value) {
-        let ids: string[] = [];
-        if (Array.isArray(kbParam.value)) {
-          ids = kbParam.value.map(String);
-        } else if (typeof kbParam.value === "string") {
-          try {
-            const parsed = JSON.parse(kbParam.value);
-            if (Array.isArray(parsed)) {
-              ids = parsed.map(String);
-            }
-          } catch {
-            ids = kbParam.value.split(",").filter(Boolean);
-          }
-        }
+        const ids = parseKbIds(kbParam.value);
         if (ids.length > 0) {
           setSelectedKbIds(ids);
         }
@@ -329,9 +305,7 @@ export default function SkillConfigModal({
   // Handle knowledge base selection confirm
   const handleKbConfirm = (selectedKnowledgeBases: KnowledgeBase[]) => {
     const ids = selectedKnowledgeBases.map((kb) => kb.id);
-    const displayNames = selectedKnowledgeBases.map(
-      (kb) => kb.display_name || kb.name
-    );
+    const displayNames = selectedKnowledgeBases.map((kb) => getKbDisplayName(kb));
 
     setSelectedKbIds(ids);
     setSelectedKbDisplayNames(displayNames);
@@ -395,25 +369,10 @@ export default function SkillConfigModal({
       let displayNames: string[] = [];
       let ids: string[] = [];
       if (formValue) {
-        if (Array.isArray(formValue)) {
-          ids = formValue.map((id) => String(id));
-        } else if (typeof formValue === "string") {
-          try {
-            const parsed = JSON.parse(formValue);
-            if (Array.isArray(parsed)) {
-              ids = parsed.map((id) => String(id));
-            }
-          } catch {
-            ids = formValue.split(",").filter(Boolean);
-          }
-        }
+        ids = parseKbIds(formValue);
 
         if (ids.length > 0 && knowledgeBases.length > 0) {
-          displayNames = ids.map((id) => {
-            const cleanId = id.trim();
-            const kb = knowledgeBases.find((k) => k.id === cleanId);
-            return kb?.display_name || kb?.name || cleanId;
-          });
+          displayNames = mapKbIdsToDisplayNames(ids, knowledgeBases);
         }
       }
 
@@ -624,11 +583,8 @@ export default function SkillConfigModal({
                   rules.push({
                     validator: async () => {
                       if (selectedKbIds.length === 0) {
-                        return Promise.reject(
-                          t("toolConfig.validation.selectKb")
-                        );
+                        throw new Error(t("toolConfig.validation.selectKb"));
                       }
-                      return Promise.resolve();
                     },
                   });
                 }

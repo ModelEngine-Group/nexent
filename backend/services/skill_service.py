@@ -1,5 +1,6 @@
 """Skill management service."""
 
+import aiofiles
 import argparse
 import ast
 import asyncio
@@ -2479,8 +2480,8 @@ async def update_skill_list(tenant_id: str, user_id: str):
             # Try schema.yaml first; fall back to AST-parsed scripts
             schema_path = _local_skill_schema_yaml_path(skill_name, local_base)
             if os.path.isfile(schema_path):
-                with open(schema_path, "rb") as f:
-                    raw = f.read()
+                async with aiofiles.open(schema_path, "rb") as f:
+                    raw = await f.read()
                 parsed = _parse_skill_schema_from_yaml_bytes(raw)
                 skill_data["config_schemas"] = parsed
                 logger.debug("Loaded config_schemas from schema.yaml for skill %s", skill_name)

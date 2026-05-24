@@ -35,7 +35,7 @@ import {
 import { API_ENDPOINTS } from "@/services/api";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
-import { isZhLocale, getLocalizedDescription } from "@/lib/utils";
+import { isZhLocale, getLocalizedDescription, getKbDisplayName, mapKbIdsToDisplayNames, parseKbIds } from "@/lib/utils";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -1132,10 +1132,7 @@ export default function ToolConfigModal({
   // Handle knowledge base selection confirm
   const handleKbConfirm = (selectedKnowledgeBases: KnowledgeBase[]) => {
     const ids = selectedKnowledgeBases.map((kb) => kb.id);
-    // Use display_name if available, otherwise fall back to name
-    const displayNames = selectedKnowledgeBases.map(
-      (kb) => kb.display_name || kb.name
-    );
+    const displayNames = selectedKnowledgeBases.map((kb) => getKbDisplayName(kb));
 
     setSelectedKbIds(ids);
     setSelectedKbDisplayNames(displayNames);
@@ -1235,18 +1232,7 @@ export default function ToolConfigModal({
       let ids: string[] = [];
       if (formValue) {
         // Value can be an array or a JSON string
-        if (Array.isArray(formValue)) {
-          ids = formValue.map((id) => String(id));
-        } else if (typeof formValue === "string") {
-          try {
-            const parsed = JSON.parse(formValue);
-            if (Array.isArray(parsed)) {
-              ids = parsed.map((id) => String(id));
-            }
-          } catch {
-            ids = formValue.split(",").filter(Boolean);
-          }
-        }
+        ids = parseKbIds(formValue);
 
         // Map IDs to display names
         if (ids.length > 0) {
@@ -1263,11 +1249,7 @@ export default function ToolConfigModal({
               return cleanId;
             });
           } else if (knowledgeBases.length > 0) {
-            displayNames = ids.map((id) => {
-              const cleanId = id.trim();
-              const kb = knowledgeBases.find((k) => k.id === cleanId);
-              return kb?.display_name || kb?.name || cleanId;
-            });
+            displayNames = mapKbIdsToDisplayNames(ids, knowledgeBases);
           }
         }
       }

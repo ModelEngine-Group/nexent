@@ -6144,6 +6144,318 @@ class TestCoverageImprovement(unittest.TestCase):
             )
         self.assertIn("Hybrid search failed", str(ctx.exception))
 
+    # Tests for full_delete_knowledge_base - file without path_or_url (lines 467-471)
+    @patch('services.redis_service.get_redis_service')
+    def test_full_delete_knowledge_base_file_without_path_or_url(self, mock_get_redis):
+        """Test full_delete_knowledge_base skips file when path_or_url is missing (lines 467-471)."""
+        mock_vdb_core = MagicMock()
+        mock_redis = MagicMock()
+        mock_redis.delete_knowledgebase_records.return_value = {
+            "total_deleted": 0, "tasks_cancelled": 0
+        }
+        mock_get_redis.return_value = mock_redis
+
+        files_payload = {"files": [{"filename": "orphan.txt"}]}  # No path_or_url
+
+        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+                   new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
+                patch('backend.services.vectordatabase_service.delete_file') as mock_delete_file, \
+                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                      new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
+            async def run_test():
+                return await ElasticSearchService.full_delete_knowledge_base(
+                    index_name="kb-no-url",
+                    vdb_core=mock_vdb_core,
+                    user_id="user-1",
+                )
+
+            result = asyncio.run(run_test())
+
+        # Should succeed and mark as failure (skipped)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["minio_cleanup"]["failed_count"], 1)
+        mock_delete_file.assert_not_called()
+
+    # Tests for full_delete_knowledge_base - outer exception (lines 545-548)
+    @patch('services.redis_service.get_redis_service')
+    def test_full_delete_knowledge_base_outer_exception(self, mock_get_redis):
+        """Test full_delete_knowledge_base raises outer exception (lines 545-548)."""
+        mock_vdb_core = MagicMock()
+        mock_redis = MagicMock()
+        mock_redis.delete_knowledgebase_records.return_value = {
+            "total_deleted": 0, "tasks_cancelled": 0
+        }
+        mock_get_redis.return_value = mock_redis
+
+        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+                   new_callable=AsyncMock, return_value={"files": []}), \
+                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                      new_callable=AsyncMock, side_effect=Exception("Fatal error")) as mock_delete_index:
+            async def run_test():
+                return await ElasticSearchService.full_delete_knowledge_base(
+                    index_name="kb-fatal",
+                    vdb_core=mock_vdb_core,
+                    user_id="user-1",
+                )
+
+            with self.assertRaises(Exception) as ctx:
+                asyncio.run(run_test())
+
+            self.assertIn("Fatal error", str(ctx.exception))
+
+    # Tests for create_index - no model_id provided (line 572)
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_index_no_model_id(self, mock_create_record):
+        """Test create_index when model_id is None (line 572)."""
+        mock_create_record.return_value = {"index_name": "test-index"}
+        self.mock_vdb_core.check_index_exists.return_value = False
+        self.mock_vdb_core.create_index.return_value = True
+
+        result = ElasticSearchService.create_index(
+            index_name="test-index",
+            embedding_dim=512,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            model_id=None,
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_create_record.assert_called_once()
+        call_kwargs = mock_create_record.call_args[0][0]
+        self.assertIsNone(call_kwargs["embedding_model_name"])
+        self.assertIsNone(call_kwargs["embedding_model_id"])
+
+    # Tests for delete_index - list_files exception (lines 818-820)
+    @pytest.mark.asyncio
+    async def test_delete_index_list_files_exception_continues(self):
+        """Test delete_index continues when list_files raises (lines 818-820)."""
+        self.mock_vdb_core.delete_index.return_value = True
+        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+                   new_callable=AsyncMock, side_effect=Exception("List files failed")), \
+                patch('backend.services.vectordatabase_service.delete_knowledge_record', return_value=True):
+            result = await ElasticSearchService.delete_index(
+                index_name="test-index",
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.mock_vdb_core.delete_index.assert_called_once_with("test-index")
+
+    # Tests for list_indices - empty user_group_ids (line 939)
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_empty_both_groups_backward_compat(self, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Test list_indices backward compat when both kb and user groups are empty (line 939)."""
+        mock_user_tenant.return_value = {
+            "user_id": "user-1", "tenant_id": "tenant-1", "user_role": "USER"
+        }
+        mock_group_ids.return_value = []  # User has no groups
+        # Knowledge base also has no groups (empty string)
+        mock_get_info.return_value = [{
+            "index_name": "kb-1",
+            "knowledge_name": "KB 1",
+            "knowledge_sources": "elasticsearch",
+            "group_ids": "",  # Empty string = no groups
+            "created_by": "other-user",
+            "ingroup_permission": "READ_ONLY",
+            "tenant_id": "tenant-1",
+        }]
+        self.mock_vdb_core.get_user_indices.return_value = ["kb-1"]
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="user-1",
+            vdb_core=self.mock_vdb_core,
+        )
+
+        # Should include the kb due to backward compat (both empty = intersecting)
+        self.assertEqual(result["count"], 1)
+
+    # Tests for list_indices - creator permission (line 951)
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_creator_permission_granted(self, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Test list_indices grants CREATOR permission when user is creator (line 951)."""
+        mock_user_tenant.return_value = {
+            "user_id": "user-creator", "tenant_id": "tenant-1", "user_role": "USER"
+        }
+        mock_group_ids.return_value = []
+        mock_get_info.return_value = [{
+            "index_name": "kb-owned",
+            "knowledge_name": "My KB",
+            "knowledge_sources": "elasticsearch",
+            "group_ids": "",
+            "created_by": "user-creator",  # User is the creator
+            "ingroup_permission": "READ_ONLY",
+            "tenant_id": "tenant-1",
+        }]
+        self.mock_vdb_core.get_user_indices.return_value = ["kb-owned"]
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="user-creator",
+            vdb_core=self.mock_vdb_core,
+        )
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["indices"][0], "kb-owned")
+
+    # Tests for list_indices - private permission (line 959-960)
+    # Note: The PRIVATE permission branch (lines 959-960) sets permission=None which correctly
+    # excludes the KB from the result. This code path is difficult to isolate in unit tests
+    # due to the interaction with other permission logic. The overall permission handling is
+    # validated by other tests in TestElasticSearchService class.
+
+    # Tests for index_documents - empty index_name (line 1070)
+    def test_index_documents_empty_index_name(self):
+        """Test index_documents raises when index_name is empty (line 1070)."""
+        mock_embedding = MagicMock()
+        mock_embedding.model = "test-model"
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.index_documents(
+                embedding_model=mock_embedding,
+                index_name="",  # Empty index name
+                data=[{"content": "test"}],
+                vdb_core=self.mock_vdb_core,
+            )
+        self.assertIn("Index name is required", str(ctx.exception))
+
+    # Tests for index_documents - index creation exception (lines 1078-1079)
+    @patch('backend.services.vectordatabase_service.ElasticSearchService.create_index')
+    def test_index_documents_index_creation_failure(self, mock_create_index):
+        """Test index_documents handles exception from create_index (lines 1078-1079)."""
+        mock_create_index.side_effect = Exception("Index creation failed")
+        self.mock_vdb_core.check_index_exists.return_value = False
+        mock_embedding = MagicMock()
+        mock_embedding.model = "test-model"
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.index_documents(
+                embedding_model=mock_embedding,
+                index_name="new-index",
+                data=[{"content": "test"}],
+                vdb_core=self.mock_vdb_core,
+            )
+        self.assertIn("Failed to create index", str(ctx.exception))
+
+    # Tests for list_files - msearch response error (lines 1401-1403)
+    @pytest.mark.asyncio
+    async def test_list_files_msearch_response_error(self):
+        """Test list_files handles error in msearch response (lines 1401-1403)."""
+        mock_vdb_core = MagicMock()
+        mock_vdb_core.get_documents_detail.return_value = [
+            {"path_or_url": "file1.txt", "filename": "file1.txt", "file_size": 100,
+             "create_time": "2024-01-01T00:00:00", "status": "COMPLETED", "chunk_count": 1}
+        ]
+        mock_vdb_core.client.count.return_value = {"count": 1}
+        # Return error in first response
+        mock_vdb_core.multi_search.return_value = {
+            "responses": [{"error": "Search failed"}]
+        }
+        with patch('backend.services.vectordatabase_service.get_all_files_status',
+                   new_callable=AsyncMock, return_value={}):
+            result = await ElasticSearchService.list_files(
+                index_name="test-index",
+                include_chunks=True,
+                vdb_core=mock_vdb_core,
+            )
+
+        # Should still return the file with empty chunks
+        self.assertEqual(len(result["files"]), 1)
+        self.assertEqual(result["files"][0]["chunks"], [])
+
+    # Tests for get_random_documents - outer exception (lines 1670-1671)
+    def test_get_random_documents_exception(self):
+        """Test get_random_documents handles outer exception (lines 1670-1671)."""
+        self.mock_vdb_core.count_documents.side_effect = Exception("Connection lost")
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.get_random_documents(
+                index_name="test-index",
+                vdb_core=self.mock_vdb_core,
+            )
+        self.assertIn("Connection lost", str(ctx.exception))
+
+    # Tests for create_chunk - knowledge_record exception (lines 1812-1813)
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_create_chunk_knowledge_record_exception(self, mock_get_record):
+        """Test create_chunk handles exception when getting knowledge record (lines 1812-1813)."""
+        mock_get_record.side_effect = Exception("DB error")
+        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
+        from consts.model import ChunkCreateRequest
+        with patch('backend.services.vectordatabase_service.get_embedding_model_by_id',
+                   return_value=(MagicMock(), 1)):
+            result = ElasticSearchService.create_chunk(
+                index_name="test-index",
+                chunk_request=ChunkCreateRequest(chunk_id="c1", content="test"),
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+                tenant_id="tenant-1",
+            )
+
+        # Should succeed with None embedding_model_id due to exception
+        self.assertEqual(result["status"], "success")
+        self.mock_vdb_core.create_chunk.assert_called_once()
+
+    # Tests for create_chunk - embedding generation exception (lines 1829-1830)
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    def test_create_chunk_embedding_exception(self, mock_get_model, mock_get_record):
+        """Test create_chunk handles exception when generating embedding (lines 1829-1830)."""
+        mock_get_record.return_value = {"embedding_model_id": 1, "tenant_id": "tenant-1"}
+        mock_model = MagicMock()
+        mock_model.get_embeddings.side_effect = Exception("Embedding service error")
+        mock_get_model.return_value = (mock_model, 1)
+        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
+        from consts.model import ChunkCreateRequest
+        result = ElasticSearchService.create_chunk(
+            index_name="test-index",
+            chunk_request=ChunkCreateRequest(chunk_id="c1", content="test"),
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+        # Should succeed even when embedding generation fails
+        self.assertEqual(result["status"], "success")
+        self.mock_vdb_core.create_chunk.assert_called_once()
+
+    # Tests for update_chunk - empty payload (line 1890)
+    def test_update_chunk_empty_payload(self):
+        """Test update_chunk raises when no update fields supplied (line 1890)."""
+        from consts.model import ChunkUpdateRequest
+        # Mock _build_chunk_payload to return empty dict
+        with patch.object(ElasticSearchService, '_build_chunk_payload', return_value={}):
+            with self.assertRaises(Exception) as ctx:
+                ElasticSearchService.update_chunk(
+                    index_name="test-index",
+                    chunk_id="chunk-1",
+                    chunk_request=ChunkUpdateRequest(),  # All fields None
+                    vdb_core=self.mock_vdb_core,
+                    user_id="user-1",
+                )
+            self.assertIn("No update fields supplied", str(ctx.exception))
+
+    # Tests for list_indices - no user tenant (line 879)
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    def test_list_indices_no_user_tenant(self, mock_user_tenant):
+        """Test list_indices returns empty when user has no tenant (line 879)."""
+        mock_user_tenant.return_value = None
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="unknown-user",
+            vdb_core=self.mock_vdb_core,
+        )
+
+        self.assertEqual(result["indices"], [])
+        self.assertEqual(result["count"], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

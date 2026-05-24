@@ -1,10 +1,13 @@
 import { useState } from "react";
-import JSZip from "jszip";
 import {
   checkAgentNameConflictBatch,
   importAgent,
   regenerateAgentNameBatch,
 } from "@/services/agentConfigService";
+import {
+  arrayBufferToBase64,
+  extractSkillNameFromPath,
+} from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 
 export interface ImportAgentData {
@@ -326,26 +329,6 @@ export function useAgentImport(
         ? error
         : new Error("Name conflict handling failed");
     }
-  };
-
-  /**
-   * Helper: Convert ArrayBuffer to base64 string
-   */
-  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-    let binary = "";
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  };
-
-  /**
-   * Helper: Extract skill name from ZIP path (e.g. "skills/my-skill.zip" -> "my-skill")
-   */
-  const extractSkillNameFromPath = (path: string): string => {
-    const filename = path.split("/").pop() || "";
-    return filename.replace(/\.zip$/i, "");
   };
 
   return {

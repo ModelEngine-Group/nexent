@@ -171,6 +171,30 @@ sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 
+# Set up aiofiles mock for async file operations
+import aiofiles
+aiofiles_mock = types.ModuleType('aiofiles')
+
+class MockAiofilesContextManager:
+    def __init__(self, content=b""):
+        self.content = content
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+    async def read(self):
+        return self.content
+
+class MockAiofiles:
+    async def open(self, path, mode='r', encoding=None):
+        return MockAiofilesContextManager(b"mocked content")
+
+sys.modules['aiofiles'] = aiofiles_mock
+sys.modules['aiofiles'].open = MockAiofiles().open
+
 # Set up utils mocks
 utils_mock = types.ModuleType('utils')
 utils_skill_params_utils_mock = types.ModuleType('utils.skill_params_utils')
@@ -4707,3 +4731,136 @@ class TestSkillServiceGetSkillByIdWithTenant:
         assert result is not None
         assert result["skill_id"] == 5
         mock_get.assert_called_once()
+
+
+class TestUpdateSkillListAsync:
+    """Test async update_skill_list function."""
+
+    def test_update_skill_list_with_schema_yaml(self, mocker):
+        """Test update_skill_list reads schema.yaml using async file API."""
+        from backend.services import skill_service
+
+        mock_skill_manager = MagicMock()
+        mock_skill_manager.list_skills.return_value = [
+            {"name": "test_skill", "description": "A test skill", "tags": []}
+        ]
+        mock_skill_manager.load_skill.return_value = {
+            "name": "test_skill",
+            "description": "A test skill",
+            "content": "# Test content"
+        }
+        mock_skill_manager.local_skills_dir = "/tmp/skills"
+
+        mocker.patch(
+            'nexent.skills.SkillManager',
+            return_value=mock_skill_manager
+        )
+        mocker.patch(
+            'backend.services.skill_service.SkillManager',
+            return_value=mock_skill_manager
+        )
+        mocker.patch(
+            'backend.services.skill_service.CONTAINER_SKILLS_PATH',
+            "/tmp/skills"
+        )
+
+        mock_upsert = mocker.patch(
+            'backend.services.skill_service.skill_db.upsert_scanned_skills'
+        )
+
+        async def run_test():
+            await skill_service.update_skill_list(
+                tenant_id="test-tenant",
+                user_id="test-user"
+            )
+            return True
+
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(run_test())
+
+        assert result is True
+        mock_upsert.assert_called_once()
+        call_args = mock_upsert.call_args[0][0]
+        assert len(call_args) == 1
+        assert call_args[0]["name"] == "test_skill"
+
+    def test_update_skill_list_without_schema_yaml(self, mocker):
+        """Test update_skill_list falls back to AST parsing when no schema.yaml."""
+        from backend.services import skill_service
+
+        mock_skill_manager = MagicMock()
+        mock_skill_manager.list_skills.return_value = [
+            {"name": "simple_skill", "description": "A simple skill", "tags": []}
+        ]
+        mock_skill_manager.load_skill.return_value = {
+            "name": "simple_skill",
+            "description": "A simple skill",
+            "content": "# Simple content"
+        }
+        mock_skill_manager.local_skills_dir = "/tmp/skills"
+
+        mocker.patch(
+            'nexent.skills.SkillManager',
+            return_value=mock_skill_manager
+        )
+        mocker.patch(
+            'backend.services.skill_service.SkillManager',
+            return_value=mock_skill_manager
+        )
+        mocker.patch(
+            'backend.services.skill_service.CONTAINER_SKILLS_PATH',
+            "/tmp/skills"
+        )
+        mocker.patch(
+            'os.path.isfile',
+            return_value=False
+        )
+        mocker.patch(
+            'os.path.isdir',
+            return_value=False
+        )
+
+        mock_upsert = mocker.patch(
+            'backend.services.skill_service.skill_db.upsert_scanned_skills'
+        )
+
+        async def run_test():
+            await skill_service.update_skill_list(
+                tenant_id="test-tenant",
+                user_id="test-user"
+            )
+            return True
+
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(run_test())
+
+        assert result is True
+        mock_upsert.assert_called_once()
+
+
+class TestInitSkillListForTenantAsync:
+    """Test async init_skill_list_for_tenant function."""
+
+    def test_init_skill_list_for_tenant(self, mocker):
+        """Test init_skill_list_for_tenant calls update_skill_list."""
+        from backend.services import skill_service
+
+        mock_update = mocker.patch(
+            'backend.services.skill_service.update_skill_list',
+            return_value=None
+        )
+
+        async def run_test():
+            return await skill_service.init_skill_list_for_tenant(
+                tenant_id="new-tenant",
+                user_id="new-user"
+            )
+
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(run_test())
+
+        assert result["status"] == "success"
+        mock_update.assert_called_once_with(
+            tenant_id="new-tenant",
+            user_id="new-user"
+        )

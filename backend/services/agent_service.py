@@ -958,7 +958,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                             skill_description=instance.get("skill_description"),
                             skill_content=instance.get("skill_content"),
                             enabled=False,
-                            config_values=(existing_instance or {}).get("config_values"),
+                            config_values=instance.get("config_values"),
                         ),
                         tenant_id=tenant_id,
                         user_id=user_id
