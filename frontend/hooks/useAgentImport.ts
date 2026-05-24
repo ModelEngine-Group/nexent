@@ -1,4 +1,5 @@
 import { useState } from "react";
+import JSZip from "jszip";
 import {
   checkAgentNameConflictBatch,
   importAgent,
@@ -7,20 +8,9 @@ import {
 import {
   arrayBufferToBase64,
   extractSkillNameFromPath,
+  ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
-
-export interface ImportAgentData {
-  agent_id: number;
-  agent_info: Record<string, any>;
-  mcp_info?: Array<{
-    mcp_server_name: string;
-    mcp_url: string;
-  }>;
-  business_logic_model_id?: number | null;
-  business_logic_model_name?: string | null;
-  skills?: Array<{ skill_name: string; skill_zip_base64: string }>;
-}
 
 export interface UseAgentImportOptions {
   onSuccess?: () => void;

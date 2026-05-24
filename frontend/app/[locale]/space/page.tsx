@@ -14,9 +14,9 @@ import AgentCard from "./components/AgentCard";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import {
   openImportWizardWithFile,
+  ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
-import { ImportAgentData } from "@/hooks/useAgentImport";
 
 /**
  * Agent Space page component

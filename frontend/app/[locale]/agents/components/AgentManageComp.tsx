@@ -10,7 +10,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useState } from "react";
-import { ImportAgentData } from "@/hooks/useAgentImport";
+import { ImportAgentData } from "@/lib/agentImportUtils";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { openImportWizardWithFile } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
