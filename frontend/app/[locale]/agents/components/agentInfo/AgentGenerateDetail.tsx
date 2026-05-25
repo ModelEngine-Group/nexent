@@ -95,7 +95,6 @@ export default function AgentGenerateDetail({}) {
   const [activeTab, setActiveTab] = useState<string>("agent-info");
 
   // Streaming field values (accumulated from SSE, bypasses Form disabled state)
-  const [streamingValues, setStreamingValues] = useState<Record<string, string>>({});
 
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
@@ -109,12 +108,7 @@ export default function AgentGenerateDetail({}) {
     clearExpiredGenerationCaches();
   }, []);
 
-  // Clear streaming values when switching agents to prevent stale content bleed-through
-  useEffect(() => {
-    setStreamingValues({});
-  }, [currentAgentId]);
 
-  // Reset form fields when entering create mode to clear stale values
   // (e.g. business_description from a previously edited agent)
   useEffect(() => {
     if (isCreatingMode) {
@@ -137,7 +131,7 @@ export default function AgentGenerateDetail({}) {
 
       const fieldName = fieldMap[type];
       if (fieldName) {
-        setStreamingValues((prev) => ({ ...prev, [fieldName]: content }));
+        form.setFieldsValue({ [fieldName]: content });
       }
     },
   });
@@ -190,7 +184,7 @@ export default function AgentGenerateDetail({}) {
 
     form.setFieldsValue(initialAgentInfo);
 
-  }, [currentAgentId, isCreatingMode, forceRefreshKey]);
+  }, [currentAgentId, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
@@ -381,7 +375,7 @@ export default function AgentGenerateDetail({}) {
           className="flex flex-col flex-1 min-h-0 h-full"
           disabled={isGenerating}
         >
-          {renderPromptEditor(fieldName, title, onBlurUpdate, streamingValues[fieldName] ?? form.getFieldValue(fieldName) ?? "")}
+          {renderPromptEditor(fieldName, title, onBlurUpdate)}
         </Form>
       </div>
     );
@@ -390,20 +384,16 @@ export default function AgentGenerateDetail({}) {
   const renderPromptEditor = (
     fieldName: "dutyPrompt" | "constraintPrompt" | "fewShotsPrompt",
     placeholder: string,
-    onBlurUpdate: (value: string) => void,
-    value: string
+    onBlurUpdate: (value: string) => void
   ) => {
     return (
       <Form.Item name={fieldName} className="mb-0 h-full [&_.ant-row]:!h-full [&_.ant-col]:!h-full [&_.ant-form-item-control-input]:!h-full [&_.ant-form-item-control-input-content]:!h-full">
-        <div className="h-full">
-          <TextArea
-            placeholder={placeholder}
-            style={promptEditorStyle}
-            value={value}
-            disabled={!editable || isGenerating}
-            onBlur={(e) => onBlurUpdate(e.target.value)}
-          />
-        </div>
+        <TextArea
+          placeholder={placeholder}
+          style={promptEditorStyle}
+          disabled={!editable || isGenerating}
+          onBlur={(e) => onBlurUpdate(e.target.value)}
+        />
       </Form.Item>
     );
   };
@@ -738,7 +728,6 @@ export default function AgentGenerateDetail({}) {
                       >
                         <Input
                           placeholder={t("agent.displayNamePlaceholder")}
-                          value={streamingValues.agentDisplayName ?? form.getFieldValue("agentDisplayName") ?? ""}
                           onBlur={(e) =>
                             updateAgentConfig({ display_name: e.target.value })
                           }
@@ -765,7 +754,6 @@ export default function AgentGenerateDetail({}) {
                       >
                         <Input
                           placeholder={t("agent.namePlaceholder")}
-                          value={streamingValues.agentName ?? form.getFieldValue("agentName") ?? ""}
                           onChange={(e) =>
                             updateAgentConfig({ name: e.target.value })
                           }
@@ -949,7 +937,6 @@ export default function AgentGenerateDetail({}) {
                           placeholder={t("agent.descriptionPlaceholder")}
                           rows={6}
                           style={{ minHeight: "140px" }}
-                          value={streamingValues.agentDescription ?? form.getFieldValue("agentDescription") ?? ""}
                           onBlur={(e) =>
                             updateAgentConfig({ description: e.target.value })
                           }

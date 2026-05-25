@@ -220,7 +220,7 @@ export function useAuthorization(): AuthorizationContextType {
   const getAccessibleGroupIds = useCallback((): number[] => {
     const canSelectAllGroups = user?.role === USER_ROLES.SU || user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SPEED
     return canSelectAllGroups ? allGroupIds : allGroupIds.filter((id) => groupIds.includes(id));
-  }, [allGroupIds, groupIds]);
+  }, [allGroupIds, groupIds, user?.role]);
 
   return {
     user,
