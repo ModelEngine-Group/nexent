@@ -401,7 +401,13 @@ async def create_agent_config(
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
+    # Migration phase: pass the fully-rendered Jinja2 prompt so
+    # build_context_components emits a single behavior-preserving
+    # SystemPromptComponent. Individual tool/skill/memory components are
+    # already embedded in the rendered string and will be re-introduced as
+    # standalone components in a future pass.
     context_components = build_context_components(
+        system_prompt=system_prompt,
         tools=render_kwargs["tools"],
         skills=skills,
         managed_agents=render_kwargs["managed_agents"],

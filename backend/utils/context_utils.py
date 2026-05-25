@@ -324,6 +324,7 @@ def build_system_prompt_component(
 
 
 def build_context_components(
+    system_prompt: Optional[str] = None,
     tools: Optional[Dict[str, Any]] = None,
     skills: Optional[List[Dict[str, str]]] = None,
     managed_agents: Optional[Dict[str, Any]] = None,
@@ -344,11 +345,29 @@ def build_context_components(
     include_app_context: bool = True,
 ) -> List["ContextComponent"]:
     """Build list of ContextComponents from agent configuration data.
-    
-    This function converts the raw data used in Jinja2 template rendering
-    into ContextComponent instances that can be registered with ContextManager.
-    
+
+    Two operating modes:
+
+    1. ``system_prompt`` provided (preferred for the current migration phase):
+       returns a single SystemPromptComponent carrying the fully-rendered
+       Jinja2 prompt. All other ``include_*`` data is assumed to already be
+       embedded in that rendered string, so individual tool / skill / memory
+       components are NOT emitted to avoid double-injection. This is the
+       behavior-preserving path: ContextManager receives one component whose
+       content is byte-identical to what the old CoreAgent saw, while still
+       flowing through the new component machinery for future extensibility.
+
+    2. ``system_prompt`` omitted (future / incremental componentization):
+       returns one ContextComponent per data source (tools, skills, memory,
+       knowledge base, managed/external agents). The component assembly will
+       produce a prompt that is NOT byte-equivalent to the Jinja2 baseline
+       and is intended for downstream callers that want to selectively
+       inject/strip sections.
+
     Args:
+        system_prompt: Pre-rendered system prompt content. When non-empty,
+                       a single SystemPromptComponent is returned and all
+                       other inputs are ignored.
         tools: Dict of tool name -> ToolConfig
         skills: List of skill dicts with name and description
         managed_agents: Dict of agent name -> AgentConfig
@@ -367,30 +386,34 @@ def build_context_components(
         include_managed_agents: Whether to include managed agents component
         include_external_agents: Whether to include external agents component
         include_app_context: Whether to include app context
-        
+
     Returns:
         List of ContextComponent instances ready for ContextManager
     """
+    if system_prompt:
+        # Behavior-preserving path: one component carries the full Jinja2 output.
+        return [build_system_prompt_component(content=system_prompt)]
+
     components: List = []
-    
+
     if include_tools and tools:
         components.append(build_tools_component(tools))
-    
+
     if include_skills and skills:
         components.append(build_skills_component(skills))
-    
+
     if include_memory and memory_list:
         components.append(build_memory_component(memory_list, memory_search_query))
-    
+
     if include_knowledge_base and knowledge_base_summary:
         components.append(build_knowledge_base_component(knowledge_base_summary, kb_ids))
-    
+
     if include_managed_agents and managed_agents:
         components.append(build_managed_agents_component(managed_agents))
-    
+
     if include_external_agents and external_a2a_agents:
         components.append(build_external_agents_component(external_a2a_agents))
-    
+
     return components
 
 
