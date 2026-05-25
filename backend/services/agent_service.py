@@ -62,6 +62,7 @@ from database.tool_db import (
     search_tools_for_sub_agent
 )
 from database import skill_db
+from services.skill_service import SkillService
 from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -790,21 +791,15 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         agent_info["sub_agent_id_list"] = []
 
     try:
-        skill_instances = skill_db.search_skills_for_agent(
-            agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
-        agent_info["skills"] = [
-            {
-                "skill_id": str(skill["skill_id"]),
-                "name": skill.get("skill_name", ""),
-                "description": skill.get("skill_description", ""),
-                "source": skill.get("source", "custom"),
-                "tags": skill.get("skill_tags", []),
-                "content": skill.get("skill_content", ""),
-            }
-            for skill in skill_instances
-        ]
+        skill_service = SkillService()
+        instances = skill_service.list_skill_instances(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no
+        )
+        agent_info["skills"] = instances
     except Exception as e:
-        logger.error(f"Failed to get agent skills: {str(e)}")
+        logger.exception(f"Failed to get agent skills: {str(e)}")
         agent_info["skills"] = []
 
     try:

@@ -12,7 +12,6 @@ import { updateToolList } from "@/services/mcpService";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
-import { useAgentSkillInstances } from "@/hooks/agent/useAgentSkillInstances";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import McpConfigModal from "./agentConfig/McpConfigModal";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
@@ -41,9 +40,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   // Use tool list hook for data management
   const { groupedTools, invalidate } = useToolList();
   const { groupedSkills, invalidate: invalidateSkills } = useSkillList();
-  const { invalidate: invalidateSkillInstances } = useAgentSkillInstances(
-    currentAgentId ?? null
-  );
   const { invalidate: invalidateExternalAgents } = useExternalAgents();
 
   const handleRefreshTools = useCallback(async () => {
@@ -69,21 +65,17 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
     setIsRefreshingSkill(true);
     try {
       invalidateSkills();
-      invalidateSkillInstances();
       message.success(t("skillManagement.message.refreshSuccess"));
     } catch (error) {
       message.error(t("skillManagement.message.refreshFailed"));
     } finally {
       setIsRefreshingSkill(false);
     }
-  }, [invalidateSkills, invalidateSkillInstances]);
+  }, [invalidateSkills]);
 
   const handleSkillBuildSuccess = useCallback(() => {
     invalidateSkills();
-    if (currentAgentId) {
-      invalidateSkillInstances();
-    }
-  }, [invalidateSkills, invalidateSkillInstances, currentAgentId]);
+  }, [invalidateSkills]);
 
   return (
     <>

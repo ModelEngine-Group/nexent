@@ -124,7 +124,7 @@ export interface ToolSubGroup {
 
 // Skill interface for skill management
 export interface Skill {
-  skill_id: string;
+  skill_id: number;
   name: string;
   description: string;
   source: string;

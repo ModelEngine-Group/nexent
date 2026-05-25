@@ -53,7 +53,7 @@ export default function SkillManagement({
   }, [groupedSkills, activeTabKey]);
 
   const handleSkillClick = (skill: Skill) => {
-    if (!isReadOnly) return;
+    if (isReadOnly) return;
 
     const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
     const isCurrentlySelected = currentSkills.some(
@@ -125,7 +125,6 @@ export default function SkillManagement({
         >
           {group.skills.map((skill) => {
             const isSelected = originalSelectedSkillIdsSet.has(skill.skill_id);
-            const isDisabled = isReadOnly;
 
             return (
               <div
@@ -134,7 +133,7 @@ export default function SkillManagement({
                   isSelected
                     ? "bg-blue-100 border-blue-400 shadow-md"
                     : "border-gray-200 hover:border-blue-300 hover:shadow-md"
-                } ${!isReadOnly && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                } ${isReadOnly ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
                 onClick={() => handleSkillClick(skill)}
               >
                 <span className="font-medium text-gray-800 truncate">

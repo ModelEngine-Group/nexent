@@ -723,7 +723,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
               description_zh: tool.description_zh,
               source: tool.source,
               is_available: tool.is_available,
-              usage: tool.usage, // New: handle usage field
+              usage: tool.usage,
               category: tool.category,
               initParams: Array.isArray(params)
                 ? params.map((param: any) => ({
@@ -738,6 +738,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
             };
           })
         : [],
+      skills: data.skills || [],
       current_version_no: data.current_version_no
     };
 
@@ -957,7 +958,7 @@ export const fetchSkills = async () => {
     const skills = data.skills || data || [];
 
     const formattedSkills = skills.map((skill: any) => ({
-      skill_id: String(skill.skill_id),
+      skill_id: Number(skill.skill_id),
       name: skill.name,
       description: skill.description || "",
       source: skill.source || "custom",
