@@ -247,57 +247,90 @@ class TestListSkillsEndpoint:
 
     def test_list_skills_success(self, mocker):
         """Test successful listing of skills."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            mock_service = MagicMock()
-            mock_service_class.return_value = mock_service
-            mock_service.list_skills.return_value = [
-                {"skill_id": 1, "name": "skill1", "description": "Desc1"},
-                {"skill_id": 2, "name": "skill2", "description": "Desc2"}
-            ]
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.return_value = [
+                    {"skill_id": 1, "name": "skill1", "description": "Desc1"},
+                    {"skill_id": 2, "name": "skill2", "description": "Desc2"}
+                ]
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get("/skills")
+                response = client.get("/skills", headers={"Authorization": "Bearer token123"})
 
-            assert response.status_code == 200
-            data = response.json()
-            assert "skills" in data
-            assert len(data["skills"]) == 2
+                assert response.status_code == 200
+                data = response.json()
+                assert "skills" in data
+                assert len(data["skills"]) == 2
 
     def test_list_skills_empty(self, mocker):
         """Test listing skills when none exist."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            mock_service = MagicMock()
-            mock_service_class.return_value = mock_service
-            mock_service.list_skills.return_value = []
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.return_value = []
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get("/skills")
+                response = client.get("/skills", headers={"Authorization": "Bearer token123"})
 
-            assert response.status_code == 200
-            data = response.json()
-            assert data["skills"] == []
+                assert response.status_code == 200
+                data = response.json()
+                assert data["skills"] == []
 
     def test_list_skills_error(self, mocker):
         """Test listing skills when service throws exception."""
         from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            mock_service = MagicMock()
-            mock_service_class.return_value = mock_service
-            mock_service.list_skills.side_effect = SkillException("Database error")
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.side_effect = SkillException("Database error")
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get("/skills")
+                response = client.get("/skills", headers={"Authorization": "Bearer token123"})
 
             assert response.status_code == 500
+
+    def test_list_skills_super_admin_with_tenant_id(self, mocker):
+        """Test super admin listing skills for a specific tenant via tenant_id query param."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("super_user", "super_tenant")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.return_value = [
+                    {"skill_id": 10, "name": "admin_skill", "description": "Admin desc"}
+                ]
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills?tenant_id=target_tenant",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert "skills" in data
+                assert len(data["skills"]) == 1
+                # Verify the service was called with the target tenant_id, not super_tenant
+                mock_service.list_skills.assert_called_once_with(tenant_id="target_tenant")
 
 
 # ===== Create Skill Endpoint Tests =====
@@ -1014,16 +1047,18 @@ class TestErrorHandling:
 
     def test_unexpected_error_in_list_skills(self, mocker):
         """Test unexpected error handling in list_skills."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            mock_service = MagicMock()
-            mock_service_class.return_value = mock_service
-            mock_service.list_skills.side_effect = Exception("Unexpected error")
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.side_effect = Exception("Unexpected error")
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get("/skills")
+                response = client.get("/skills", headers={"Authorization": "Bearer token123"})
 
             assert response.status_code == 500
             assert "Internal server error" in response.json()["detail"]
@@ -2083,43 +2118,48 @@ class TestListOfficialSkillsEndpoint:
 
     def test_list_official_skills_success(self, mocker):
         """Test successful listing of official skills."""
-        with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
-            mock_func.return_value = [
-                {"skill_id": 1, "name": "skill1", "source": "official", "status": "installable"},
-                {"skill_id": 2, "name": "skill2", "source": "official", "status": "installed"}
-            ]
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+                mock_func.return_value = [
+                    {"skill_id": 1, "name": "skill1", "source": "official", "status": "installable"},
+                    {"skill_id": 2, "name": "skill2", "source": "official", "status": "installed"}
+                ]
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get(
-                "/skills/official",
-                headers={"Authorization": "Bearer token123"}
-            )
+                response = client.get(
+                    "/skills/official",
+                    headers={"Authorization": "Bearer token123"}
+                )
 
-            assert response.status_code == 200
-            data = response.json()
-            assert "skills" in data
-            assert len(data["skills"]) == 2
+                assert response.status_code == 200
+                data = response.json()
+                assert "skills" in data
+                assert len(data["skills"]) == 2
+                mock_func.assert_called_once_with(tenant_id="tenant123")
 
     def test_list_official_skills_empty(self, mocker):
         """Test listing official skills when none available."""
-        with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
-            mock_func.return_value = []
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+                mock_func.return_value = []
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get(
-                "/skills/official",
-                headers={"Authorization": "Bearer token123"}
-            )
+                response = client.get(
+                    "/skills/official",
+                    headers={"Authorization": "Bearer token123"}
+                )
 
-            assert response.status_code == 200
-            data = response.json()
-            assert data["skills"] == []
+                assert response.status_code == 200
+                data = response.json()
+                assert data["skills"] == []
 
     def test_list_official_skills_unauthorized(self, mocker):
         """Test listing official skills without auth returns 500 (no explicit UnauthorizedError handler)."""
@@ -2136,21 +2176,48 @@ class TestListOfficialSkillsEndpoint:
             # Endpoint returns 500 because it doesn't catch UnauthorizedError explicitly
             assert response.status_code == 500
 
+    def test_list_official_skills_super_admin_with_tenant_id(self, mocker):
+        """Test super admin listing official skills for a specific tenant via tenant_id query param."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("super_user", "super_tenant")
+            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+                mock_func.return_value = [
+                    {"skill_id": 1, "name": "admin_skill", "source": "official", "status": "installable"}
+                ]
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills/official?tenant_id=target_tenant",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert "skills" in data
+                assert len(data["skills"]) == 1
+                # Verify the function was called with the target tenant_id, not super_tenant
+                mock_func.assert_called_once_with(tenant_id="target_tenant")
+
     def test_list_official_skills_error(self, mocker):
         """Test listing official skills with error."""
-        with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
-            mock_func.side_effect = Exception("Database error")
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+                mock_func.side_effect = Exception("Database error")
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get(
-                "/skills/official",
-                headers={"Authorization": "Bearer token123"}
-            )
+                response = client.get(
+                    "/skills/official",
+                    headers={"Authorization": "Bearer token123"}
+                )
 
-            assert response.status_code == 500
+                assert response.status_code == 500
 
 
 # ===== Install Skills Endpoint Tests =====
@@ -2179,6 +2246,10 @@ class TestInstallSkillsEndpoint:
                 assert data["message"] == "Skills installed successfully"
                 assert data["installed"] == ["skill1", "skill2"]
                 assert data["total"] == 2
+                mock_install.assert_called_once()
+                call_kwargs = mock_install.call_args
+                assert call_kwargs.kwargs["tenant_id"] == "tenant123"
+                assert call_kwargs.kwargs["user_id"] == "user123"
 
     def test_install_skills_empty_list(self, mocker):
         """Test installing empty skill list."""
@@ -2218,6 +2289,33 @@ class TestInstallSkillsEndpoint:
 
             # Endpoint returns 500 because it doesn't catch UnauthorizedError explicitly
             assert response.status_code == 500
+
+    def test_install_skills_super_admin_with_tenant_id(self, mocker):
+        """Test super admin installing skills for a specific tenant via tenant_id query param."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("super_user", "super_tenant")
+            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+                mock_install.return_value = ["skill1"]
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.post(
+                    "/skills/install?tenant_id=target_tenant",
+                    json={"skill_names": ["skill1"], "locale": "en"},
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["message"] == "Skills installed successfully"
+                assert data["installed"] == ["skill1"]
+                # Verify the function was called with the target tenant_id, not super_tenant
+                mock_install.assert_called_once()
+                call_kwargs = mock_install.call_args
+                assert call_kwargs.kwargs["tenant_id"] == "target_tenant"
+                assert call_kwargs.kwargs["user_id"] == "super_user"
 
     def test_install_skills_error(self, mocker):
         """Test installing skills with error."""
