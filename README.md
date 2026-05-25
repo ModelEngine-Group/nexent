@@ -51,6 +51,10 @@ cp .env.example .env
 bash deploy.sh
 ```
 
+The Docker and Kubernetes deploy scripts share the same deployment configuration model. Interactive runs show Bash TUI menus for component selection, port policy, and image source, with `infrastructure` and `application` selected and required. Non-interactive runs can pass the same choices with `--components`, `--port-policy development|production`, and `--image-source general|mainland|local-latest`. Successful deployments save non-sensitive choices to each deploy directory's `deploy.options` for reuse on the next run.
+
+Docker uninstall is handled by `bash uninstall.sh`. It can preserve or delete data volumes: run it interactively, pass `--delete-volumes true|false`, or use `bash uninstall.sh delete-all` to remove containers and persistent data.
+
 For detailed deployment instructions, see [Docker Installation](https://modelengine-group.github.io/nexent/en/quick-start/installation.html).
 
 ### Kubernetes Deployment (For Enterprise Production)

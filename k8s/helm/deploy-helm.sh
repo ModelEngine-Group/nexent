@@ -16,11 +16,22 @@ CHART_DIR="$SCRIPT_DIR/nexent"
 COMMON_VALUES="$CHART_DIR/charts/nexent-common/values.yaml"
 NAMESPACE="nexent"
 RELEASE_NAME="nexent"
+DEPLOYMENT_COMMON="$(cd "$SCRIPT_DIR/../.." && pwd)/scripts/deployment/common.sh"
 
 # Constants for deployment options
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONST_FILE="$PROJECT_ROOT/../backend/consts/const.py"
-DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/.deploy.options"
+DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
+GENERATED_VALUES="$CHART_DIR/generated-values.yaml"
+GENERATED_SECRETS_VALUES="$CHART_DIR/generated-secrets-values.yaml"
+
+if [ -f "$DEPLOYMENT_COMMON" ]; then
+    # shellcheck source=/dev/null
+    source "$DEPLOYMENT_COMMON"
+else
+    echo "Error: shared deployment helper not found: $DEPLOYMENT_COMMON"
+    exit 1
+fi
 
 # Global variables for deployment options
 IS_MAINLAND=""
@@ -32,6 +43,7 @@ VERSION_CHOICE_SAVED=""
 # First argument is the command
 COMMAND="$1"
 shift
+ORIGINAL_ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,6 +71,41 @@ cd "$SCRIPT_DIR"
 sanitize_input() {
   local input="$1"
   printf "%s" "$input" | tr -d '\r'
+}
+
+apply_deployment_common_config() {
+    if [ -z "$APP_VERSION" ]; then
+        APP_VERSION=$(get_app_version)
+    fi
+    if [ -n "$APP_VERSION" ]; then
+        export APP_VERSION
+    fi
+
+    deployment_prepare_config "${ORIGINAL_ARGS[@]}" || return 1
+
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
+        DEPLOYMENT_VERSION="full"
+    else
+        DEPLOYMENT_VERSION="speed"
+    fi
+
+    APP_VERSION="$DEPLOYMENT_APP_VERSION"
+    VERSION_CHOICE_SAVED="$DEPLOYMENT_VERSION"
+
+    case "$DEPLOYMENT_REGISTRY_PROFILE" in
+        mainland)
+            IS_MAINLAND_SAVED="Y"
+            source .env.mainland
+            ;;
+        general|local-latest)
+            IS_MAINLAND_SAVED="N"
+            source .env.general
+            ;;
+    esac
+
+    deployment_apply_image_source
+    deployment_render_helm_values "$GENERATED_VALUES"
+    deployment_print_summary k8s
 }
 
 # Get APP_VERSION from backend/consts/const.py
@@ -128,10 +175,10 @@ choose_image_env() {
   echo ""
 }
 
-# Update image tags in values.yaml based on loaded environment variables
+# Render image tags into generated Helm values based on loaded environment variables
 update_values_yaml() {
   echo "=========================================="
-  echo "  Updating Image Tags in values.yaml"
+  echo "  Rendering generated image values"
   echo "=========================================="
 
   # Get APP_VERSION if not already set
@@ -146,78 +193,9 @@ update_values_yaml() {
   echo "Using APP_VERSION: $APP_VERSION"
   echo ""
 
-  # Define paths to each chart's values.yaml
-  VAL_CONFIG="$CHART_DIR/charts/nexent-config/values.yaml"
-  VAL_RUNTIME="$CHART_DIR/charts/nexent-runtime/values.yaml"
-  VAL_MCP="$CHART_DIR/charts/nexent-mcp/values.yaml"
-  VAL_NORTHBOUND="$CHART_DIR/charts/nexent-northbound/values.yaml"
-  VAL_WEB="$CHART_DIR/charts/nexent-web/values.yaml"
-  VAL_DATA_PROCESS="$CHART_DIR/charts/nexent-data-process/values.yaml"
-  VAL_ELASTICSEARCH="$CHART_DIR/charts/nexent-elasticsearch/values.yaml"
-  VAL_POSTGRESQL="$CHART_DIR/charts/nexent-postgresql/values.yaml"
-  VAL_REDIS="$CHART_DIR/charts/nexent-redis/values.yaml"
-  VAL_MINIO="$CHART_DIR/charts/nexent-minio/values.yaml"
-  VAL_SUPABASE_KONG="$CHART_DIR/charts/nexent-supabase-kong/values.yaml"
-  VAL_SUPABASE_AUTH="$CHART_DIR/charts/nexent-supabase-auth/values.yaml"
-  VAL_SUPABASE_DB="$CHART_DIR/charts/nexent-supabase-db/values.yaml"
-  VAL_OPENSSH="$CHART_DIR/charts/nexent-openssh/values.yaml"
-
-
-  # Update backend image (nexent/nexent) for: config, runtime, mcp, northbound
-  # Pattern: match from "images:" section to next top-level key
-  for VAL_FILE in "$VAL_CONFIG" "$VAL_RUNTIME" "$VAL_MCP" "$VAL_NORTHBOUND"; do
-    sed -i "s|repository:.*|repository: ${NEXENT_IMAGE%%:*}|" "$VAL_FILE"
-  sed -i "s|tag:.*|tag: ${APP_VERSION}|" "$VAL_FILE"
-  done
-
-  # Update web image (nexent-web)
-  sed -i "s|repository:.*|repository: ${NEXENT_WEB_IMAGE%%:*}|" "$VAL_WEB"
-  sed -i "s|tag:.*|tag: ${APP_VERSION}|" "$VAL_WEB"
-
-  # Update dataProcess image (nexent-data-process)
-  sed -i "s|repository:.*|repository: ${NEXENT_DATA_PROCESS_IMAGE%%:*}|" "$VAL_DATA_PROCESS"
-  sed -i "s|tag:.*|tag: ${APP_VERSION}|" "$VAL_DATA_PROCESS"
-
-  # Update mcp container image
-  sed -i "/^  mcp:/,/^  [a-z]/{s|    repository:.*|    repository: \"${NEXENT_MCP_DOCKER_IMAGE%%:*}\"|}" "$COMMON_VALUES"
-  sed -i "/^  mcp:/,/^  [a-z]/{s|    tag:.*|    tag: \"$APP_VERSION\"|}" "$COMMON_VALUES"
-
-  # Update elasticsearch image
-  sed -i "s|repository:.*|repository: ${ELASTICSEARCH_IMAGE%%:*}|" "$VAL_ELASTICSEARCH"
-  sed -i "s|tag:.*|tag: ${ELASTICSEARCH_IMAGE##*:}|" "$VAL_ELASTICSEARCH"
-
-  # Update postgresql image
-  sed -i "s|repository:.*|repository: ${POSTGRESQL_IMAGE%%:*}|" "$VAL_POSTGRESQL"
-  sed -i "s|tag:.*|tag: ${POSTGRESQL_IMAGE##*:}|" "$VAL_POSTGRESQL"
-
-  # Update redis image
-  sed -i "s|repository:.*|repository: ${REDIS_IMAGE%%:*}|" "$VAL_REDIS"
-  sed -i "s|tag:.*|tag: ${REDIS_IMAGE##*:}|" "$VAL_REDIS"
-
-  # Update minio image
-  sed -i "s|repository:.*|repository: ${MINIO_IMAGE%%:*}|" "$VAL_MINIO"
-  sed -i "s|tag:.*|tag: ${MINIO_IMAGE##*:}|" "$VAL_MINIO"
-
-  # Update Supabase images (only for full version)
-  if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    # Update supabase-kong image
-    sed -i "s|repository:.*|repository: ${SUPABASE_KONG%%:*}|" "$VAL_SUPABASE_KONG"
-    sed -i "s|tag:.*|tag: ${SUPABASE_KONG##*:}|" "$VAL_SUPABASE_KONG"
-
-    # Update supabase-auth (gotrue) image
-    sed -i "s|repository:.*|repository: ${SUPABASE_GOTRUE%%:*}|" "$VAL_SUPABASE_AUTH"
-    sed -i "s|tag:.*|tag: ${SUPABASE_GOTRUE##*:}|" "$VAL_SUPABASE_AUTH"
-
-    # Update supabase-db image
-    sed -i "s|repository:.*|repository: ${SUPABASE_DB%%:*}|" "$VAL_SUPABASE_DB"
-    sed -i "s|tag:.*|tag: ${SUPABASE_DB##*:}|" "$VAL_SUPABASE_DB"
-  fi
-
-  # Update openssh image
-  sed -i "s|repository:.*|repository: ${OPENSSH_SERVER_IMAGE%%:*}|" "$VAL_OPENSSH"
-  sed -i "s|tag:.*|tag: ${APP_VERSION}|" "$VAL_OPENSSH"
-
-  echo "Image tags updated in values.yaml"
+  deployment_apply_image_source
+  deployment_render_helm_values "$GENERATED_VALUES"
+  echo "Generated Helm values: $GENERATED_VALUES"
   echo ""
   echo "--------------------------------"
   echo ""
@@ -269,8 +247,7 @@ select_deployment_version() {
             ;;
     esac
 
-    # Update values.yaml with deployment version
-    sed -i "s/^[[:space:]]*deploymentVersion:.*/  deploymentVersion: \"$DEPLOYMENT_VERSION\"/" "$CHART_DIR/values.yaml"
+    # Legacy helper retained for compatibility; generated values carry the effective version.
 
     echo ""
     echo "--------------------------------"
@@ -315,35 +292,9 @@ generate_supabase_secrets() {
     local anon_key=$(generate_jwt "anon")
     local service_role_key=$(generate_jwt "service_role")
 
-    # Write to values.yaml
-    echo "Updating Supabase secrets in values.yaml..."
-
-    # Update secrets.supabase.jwtSecret
-    if grep -q "jwtSecret:" "$COMMON_VALUES"; then
-        sed -i "s|jwtSecret:.*|jwtSecret: \"$JWT_SECRET\"|" "$COMMON_VALUES"
-    fi
-
-    # Update secrets.supabase.secretKeyBase
-    if grep -q "secretKeyBase:" "$COMMON_VALUES"; then
-        sed -i "s|secretKeyBase:.*|secretKeyBase: \"$SECRET_KEY_BASE\"|" "$COMMON_VALUES"
-    fi
-
-    # Update secrets.supabase.vaultEncKey
-    if grep -q "vaultEncKey:" "$COMMON_VALUES"; then
-        sed -i "s|vaultEncKey:.*|vaultEncKey: \"$VAULT_ENC_KEY\"|" "$COMMON_VALUES"
-    fi
-
-    # Update secrets.supabase.anonKey
-    if grep -q "anonKey:" "$COMMON_VALUES"; then
-        sed -i "s|anonKey:.*|anonKey: \"$anon_key\"|" "$COMMON_VALUES"
-    fi
-
-    # Update secrets.supabase.serviceRoleKey
-    if grep -q "serviceRoleKey:" "$COMMON_VALUES"; then
-        sed -i "s|serviceRoleKey:.*|serviceRoleKey: \"$service_role_key\"|" "$COMMON_VALUES"
-    fi
-
-    echo "Supabase secrets generated and saved to values.yaml"
+    SUPABASE_ANON_KEY="$anon_key"
+    SUPABASE_SERVICE_ROLE_KEY="$service_role_key"
+    echo "Supabase secrets generated for generated Helm values"
     echo ""
     echo "--------------------------------"
     echo ""
@@ -386,19 +337,34 @@ pull_mcp_image() {
     echo ""
 }
 
+render_runtime_secret_values() {
+    {
+        echo "nexent-common:"
+        echo "  secrets:"
+        echo "    minio:"
+        echo "      accessKey: \"$MINIO_ACCESS_KEY\""
+        echo "      secretKey: \"$MINIO_SECRET_KEY\""
+        if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
+            echo "    supabase:"
+            echo "      jwtSecret: \"$JWT_SECRET\""
+            echo "      secretKeyBase: \"$SECRET_KEY_BASE\""
+            echo "      vaultEncKey: \"$VAULT_ENC_KEY\""
+            echo "      anonKey: \"$SUPABASE_ANON_KEY\""
+            echo "      serviceRoleKey: \"$SUPABASE_SERVICE_ROLE_KEY\""
+        fi
+    } > "$GENERATED_SECRETS_VALUES"
+}
+
 apply() {
     echo "Deploying Nexent using Helm..."
 
-    # Step 1: Select deployment version (speed or full)
-    select_deployment_version
+    # Step 1: Select deployment components, port policy and image source.
+    apply_deployment_common_config
 
-    # Step 2: Select image source environment (mainland China or general)
-    choose_image_env
-
-    # Step 3: Update values.yaml with image tags from selected environment
+    # Step 2: Render generated values with image tags from selected environment
     update_values_yaml
 
-    # Step 4: Generate MinIO Access Key and Secret Key
+    # Step 3: Generate MinIO Access Key and Secret Key
     echo "=========================================="
     echo "  MinIO Access Key/Secret Key Setup"
     echo "=========================================="
@@ -412,40 +378,22 @@ apply() {
         MINIO_ACCESS_KEY="nexent-$(head -c 8 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 12)"
         MINIO_SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)
 
-        # Write to values.yaml
-        if grep -q "accessKey:" "$COMMON_VALUES"; then
-            sed -i "s|accessKey:.*|accessKey: \"$MINIO_ACCESS_KEY\"|" "$COMMON_VALUES"
-        else
-            sed -i "/minio:/a\\    accessKey: \"$MINIO_ACCESS_KEY\"" "$COMMON_VALUES"
-        fi
-
-        if grep -q "secretKey:" "$COMMON_VALUES"; then
-            sed -i "s|secretKey:.*|secretKey: \"$MINIO_SECRET_KEY\"|" "$COMMON_VALUES"
-        else
-            sed -i "/minio:/a\\    secretKey: \"$MINIO_SECRET_KEY\"" "$COMMON_VALUES"
-        fi
-        echo "MinIO credentials generated and saved to values.yaml"
+        echo "MinIO credentials generated for generated Helm values"
         echo "Access Key: $MINIO_ACCESS_KEY"
-        echo "Secret Key: $MINIO_SECRET_KEY (saved in values.yaml)"
+        echo "Secret Key: $MINIO_SECRET_KEY (saved in generated Helm values)"
     else
-        echo "MinIO credentials already exist in values.yaml"
+        echo "MinIO credentials already exist in chart defaults"
         echo "Access Key: $MINIO_ACCESS_KEY"
     fi
     echo ""
 
-    # Step 5: Generate Supabase secrets (only for full version)
+    # Step 4: Generate Supabase secrets (only for full version)
     generate_supabase_secrets
 
-    # Step 6: Ask user for Terminal tool (OpenSSH) configuration
-    echo "=========================================="
-    echo "  Terminal Tool (OpenSSH) Setup"
-    echo "=========================================="
-    echo "Terminal tool allows AI agents to execute shell commands via SSH."
-    echo "This will create an openssh-server pod for secure command execution."
-    read -p "Do you want to enable Terminal tool? [Y/N] (default: N): " enable_openssh
+    render_runtime_secret_values
 
-    # Default to N if empty
-    if [[ "$enable_openssh" =~ ^[Yy]$ ]]; then
+    # Step 5: Configure Terminal tool (OpenSSH) only when selected.
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
         ENABLE_OPENSSH="true"
         echo "Terminal tool will be enabled."
 
@@ -463,7 +411,7 @@ apply() {
     fi
     echo ""
 
-    # Step 7: Clean up stale PVs
+    # Step 6: Clean up stale PVs
     echo "Checking for stale PersistentVolumes..."
     for pv in nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv; do
         pv_status=$(kubectl get pv $pv -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
@@ -474,7 +422,7 @@ apply() {
     done
 
     # Clean up supabase PV if exists
-    if [ "$DEPLOYMENT_VERSION" = "full" ]; then
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
         for pv in nexent-supabase-db-pv; do
             pv_status=$(kubectl get pv $pv -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
             if [ "$pv_status" = "Released" ]; then
@@ -484,11 +432,13 @@ apply() {
         done
     fi
 
-    # Step 8: Deploy using Helm
+    # Step 7: Deploy using Helm
     echo "Deploying Helm chart..."
     helm upgrade --install nexent "$CHART_DIR" \
         --namespace "$NAMESPACE" \
         --create-namespace \
+        -f "$GENERATED_VALUES" \
+        -f "$GENERATED_SECRETS_VALUES" \
         --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
         --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
         --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
@@ -515,7 +465,9 @@ apply() {
                 # Restart backend services to pick up the new ES API key
                 echo ""
                 echo "Restarting backend services..."
-                for svc in config runtime data-process mcp northbound; do
+                local backend_services="config runtime mcp northbound"
+                deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && backend_services="$backend_services data-process"
+                for svc in $backend_services; do
                     echo "  Restarting nexent-$svc..."
                     kubectl rollout restart deployment/nexent-$svc -n $NAMESPACE 2>/dev/null || true
                 done
@@ -524,7 +476,7 @@ apply() {
                 echo ""
                 echo "Waiting for backend services to be ready..."
                 sleep 5
-                for svc in config runtime data-process mcp northbound; do
+                for svc in $backend_services; do
                     echo "  Waiting for nexent-$svc..."
                     if kubectl wait --for=condition=ready pod -l app=nexent-$svc -n $NAMESPACE --timeout=300s 2>/dev/null; then
                         echo "  nexent-$svc is ready."
@@ -556,22 +508,25 @@ apply() {
 
     # Step 10: Create super admin user (only for full deployment)
     CREATE_SUADMIN_SCRIPT="$SCRIPT_DIR/create-suadmin.sh"
-    if [ -f "$CREATE_SUADMIN_SCRIPT" ]; then
-        echo ""
-        echo "=========================================="
-        echo "  Super Admin User Creation"
-        echo "=========================================="
-        if bash "$CREATE_SUADMIN_SCRIPT"; then
-            echo "Super admin user creation completed."
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
+        if [ -f "$CREATE_SUADMIN_SCRIPT" ]; then
+            echo ""
+            echo "=========================================="
+            echo "  Super Admin User Creation"
+            echo "=========================================="
+            if bash "$CREATE_SUADMIN_SCRIPT"; then
+                echo "Super admin user creation completed."
+            else
+                echo "Warning: Super admin user creation failed, but continuing deployment."
+            fi
         else
-            echo "Warning: Super admin user creation failed, but continuing deployment."
+            echo "Warning: create-suadmin.sh not found at $CREATE_SUADMIN_SCRIPT"
         fi
-    else
-        echo "Warning: create-suadmin.sh not found at $CREATE_SUADMIN_SCRIPT"
     fi
 
     # Save deployment options for future use
     persist_deploy_options
+    deployment_persist_local_config
 
     # Step 11: Pull MCP image after persisting deployment options
     pull_mcp_image
@@ -647,14 +602,15 @@ delete-all)
     echo "  delete-all - Delete ALL resources including data"
     echo ""
     echo "Options:"
-    echo "  --is-mainland Y|N         Specify if server is in mainland China (Y) or not (N)"
+    echo "  --image-source SOURCE     Image source: general, mainland, or local-latest"
+    echo "  --is-mainland Y|N         Legacy alias for image source mainland/general"
     echo "  --version VERSION         Specify app version (auto-detected from const.py if not set)"
     echo "  --deployment-version VER  Specify deployment version: 'speed' (no Supabase) or 'full' (includes Supabase)"
     echo ""
     echo "Examples:"
     echo "  $0 apply                           # Interactive deployment"
-    echo "  $0 apply --is-mainland Y            # Deploy with mainland China image sources"
-    echo "  $0 apply --is-mainland N            # Deploy with general image sources"
+    echo "  $0 apply --image-source mainland    # Deploy with mainland China image sources"
+    echo "  $0 apply --image-source general     # Deploy with general image sources"
     echo "  $0 apply --deployment-version full # Deploy full version with Supabase"
     echo ""
     echo "Deployment Versions:"

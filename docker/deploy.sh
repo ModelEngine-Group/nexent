@@ -13,6 +13,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONST_FILE="$PROJECT_ROOT/backend/consts/const.py"
 DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
+DEPLOYMENT_COMMON="$PROJECT_ROOT/scripts/deployment/common.sh"
+ORIGINAL_ARGS=("$@")
+
+if [ -f "$DEPLOYMENT_COMMON" ]; then
+  # shellcheck source=/dev/null
+  source "$DEPLOYMENT_COMMON"
+else
+  echo "❌ Shared deployment helper not found: $DEPLOYMENT_COMMON"
+  exit 1
+fi
 
 MODE_CHOICE_SAVED=""
 VERSION_CHOICE_SAVED=""
@@ -21,8 +31,19 @@ ENABLE_SKILLS_SAVED="Y"
 ENABLE_TERMINAL_SAVED="N"
 TERMINAL_MOUNT_DIR_SAVED="${TERMINAL_MOUNT_DIR:-}"
 APP_VERSION=""
+CREATED_SUPER_ADMIN_ACCESS_TOKEN=""
 
 cd "$SCRIPT_DIR"
+
+if [ ! -f ".env" ]; then
+  if [ -f ".env.example" ]; then
+    cp .env.example .env
+    echo "✅ Created docker/.env from docker/.env.example"
+  else
+    echo "❌ .env not found and .env.example is missing in $SCRIPT_DIR"
+    exit 1
+  fi
+fi
 
 set -a
 source .env
@@ -40,6 +61,25 @@ export COMPOSE_IGNORE_ORPHANS=True
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    delete|delete-all|--delete-volumes|--remove-volumes|--keep-volumes)
+      echo "❌ Docker uninstall has moved to uninstall.sh. Use: bash uninstall.sh"
+      exit 1
+      ;;
+    --help|-h)
+      echo "Usage: $0 [options]"
+      echo ""
+      echo "Deploy options:"
+      echo "  --components LIST"
+      echo "  --port-policy development|production"
+      echo "  --image-source general|mainland|local-latest"
+      echo "  --use-local-config"
+      echo "  --reconfigure"
+      echo "  --config PATH"
+      echo "  --root-dir PATH"
+      echo ""
+      echo "Uninstall: bash uninstall.sh"
+      exit 0
+      ;;
     --mode)
       MODE_CHOICE="$2"
       shift 2
@@ -115,6 +155,49 @@ is_port_in_use() {
 
   # If no inspection tool is available, assume the port is free
   return 1
+}
+
+is_nexent_container_name() {
+  local container_name="$1"
+
+  case "$container_name" in
+    nexent-*|nexent_*|supabase-*-mini)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+docker_containers_using_host_port() {
+  local port="$1"
+
+  if ! command -v docker >/dev/null 2>&1; then
+    return 0
+  fi
+
+  while IFS=$'\t' read -r container_name published_ports; do
+    if [ -n "$container_name" ] && [[ "$published_ports" == *":${port}->"* ]]; then
+      echo "$container_name"
+    fi
+  done < <(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null)
+}
+
+is_port_used_by_nexent_only() {
+  local port="$1"
+  local container_name
+  local found="false"
+
+  while IFS= read -r container_name; do
+    [ -n "$container_name" ] || continue
+    found="true"
+    if ! is_nexent_container_name "$container_name"; then
+      return 1
+    fi
+  done < <(docker_containers_using_host_port "$port")
+
+  [ "$found" = "true" ]
 }
 
 add_port_if_new() {
@@ -199,6 +282,8 @@ check_ports_in_env_files() {
   echo "🔍 Checking port availability defined in environment files..."
   local occupied_ports=()
   local occupied_sources=()
+  local ignored_nexent_ports=0
+  local free_ports=0
 
   local idx
   for idx in "${!PORTS_TO_CHECK[@]}"; do
@@ -206,13 +291,25 @@ check_ports_in_env_files() {
     local source="${PORT_SOURCES[$idx]}"
 
     if is_port_in_use "$port"; then
+      if is_port_used_by_nexent_only "$port"; then
+        ignored_nexent_ports=$((ignored_nexent_ports + 1))
+        continue
+      fi
       occupied_ports+=("$port")
       occupied_sources+=("$source")
       echo "   ❌ Port $port is already in use."
     else
-      echo "   ✅ Port $port is free."
+      free_ports=$((free_ports + 1))
     fi
   done
+
+  if [ "$free_ports" -gt 0 ]; then
+    echo "   ✅ $free_ports port(s) available."
+  fi
+
+  if [ "$ignored_nexent_ports" -gt 0 ]; then
+    echo "   ↺ Ignored $ignored_nexent_ports port(s) already used by Nexent containers."
+  fi
 
   if [ ${#occupied_ports[@]} -gt 0 ]; then
     echo ""
@@ -235,6 +332,72 @@ check_ports_in_env_files() {
     fi
 
     echo "⚠️  Continuing deployment even though some required ports are already in use."
+  fi
+
+  echo ""
+  echo "--------------------------------"
+  echo ""
+}
+
+check_deployment_ports() {
+  PORTS_TO_CHECK=()
+  PORT_SOURCES=()
+
+  local port
+  for port in $DEPLOYMENT_DOCKER_PORTS; do
+    add_port_if_new "$port" "deployment port policy: $DEPLOYMENT_PORT_POLICY"
+  done
+
+  if [ ${#PORTS_TO_CHECK[@]} -eq 0 ]; then
+    echo "🔍 No host ports are published by the selected deployment configuration."
+    echo ""
+    echo "--------------------------------"
+    echo ""
+    return 0
+  fi
+
+  echo "🔍 Checking port availability for selected deployment policy..."
+  local occupied_ports=()
+  local ignored_nexent_ports=0
+  local free_ports=0
+  local idx
+  for idx in "${!PORTS_TO_CHECK[@]}"; do
+    local selected_port="${PORTS_TO_CHECK[$idx]}"
+    if is_port_in_use "$selected_port"; then
+      if is_port_used_by_nexent_only "$selected_port"; then
+        ignored_nexent_ports=$((ignored_nexent_ports + 1))
+        continue
+      fi
+      occupied_ports+=("$selected_port")
+      echo "   ❌ Port $selected_port is already in use."
+    else
+      free_ports=$((free_ports + 1))
+    fi
+  done
+
+  if [ "$free_ports" -gt 0 ]; then
+    echo "   ✅ $free_ports port(s) available."
+  fi
+
+  if [ "$ignored_nexent_ports" -gt 0 ]; then
+    echo "   ↺ Ignored $ignored_nexent_ports port(s) already used by Nexent containers."
+  fi
+
+  if [ ${#occupied_ports[@]} -gt 0 ]; then
+    echo ""
+    echo "❌ Port conflict detected for selected deployment policy:"
+    local occupied
+    for occupied in "${occupied_ports[@]}"; do
+      echo "   - Port $occupied"
+    done
+    echo ""
+    local confirm_continue
+    read -p "👉 Do you still want to continue deployment even though some ports are in use? [y/N]: " confirm_continue
+    confirm_continue=$(sanitize_input "$confirm_continue")
+    if ! [[ "$confirm_continue" =~ ^[Yy]$ ]]; then
+      echo "🚫 Deployment aborted due to port conflicts."
+      exit 1
+    fi
   fi
 
   echo ""
@@ -440,6 +603,14 @@ disable_dashboard() {
 }
 
 pull_mcp_image() {
+  if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
+    echo "🔄 Skipping MCP image pull because image source is local-latest."
+    echo ""
+    echo "--------------------------------"
+    echo ""
+    return 0
+  fi
+
   echo "🔄 Checking MCP Docker image..."
 
   # Get MCP image name from environment or use default
@@ -633,8 +804,23 @@ prepare_directory_and_data() {
 
 deploy_core_services() {
   # Function to deploy core services
-  echo "👀 Starting core services..."
-  if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process; then
+  local core_services=()
+  local service
+  for service in $DEPLOYMENT_SELECTED_DOCKER_SERVICES; do
+    case "$service" in
+      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process)
+        core_services+=("$service")
+        ;;
+    esac
+  done
+
+  if [ ${#core_services[@]} -eq 0 ]; then
+    echo "👀 No core services selected, skipping core service startup."
+    return 0
+  fi
+
+  echo "👀 Starting core services: ${core_services[*]}"
+  if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
     echo "   ❌ ERROR Failed to start core services"
     return 1
   fi
@@ -643,25 +829,33 @@ deploy_core_services() {
 deploy_infrastructure() {
   # Start infrastructure services (basic services only)
   echo "🔧 Starting infrastructure services..."
-  INFRA_SERVICES="nexent-elasticsearch nexent-postgresql nexent-minio redis"
+  INFRA_SERVICES=""
+
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure"; then
+    INFRA_SERVICES="nexent-elasticsearch nexent-postgresql nexent-minio redis"
+  fi
 
   # Add openssh-server if Terminal tool container is enabled
-  if [ "$ENABLE_TERMINAL_TOOL_CONTAINER" = "true" ]; then
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
     INFRA_SERVICES="$INFRA_SERVICES nexent-openssh-server"
     echo "🔧 Terminal tool container enabled - openssh-server will be included in infrastructure"
   fi
 
-  if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d $INFRA_SERVICES; then
-    echo "   ❌ ERROR Failed to start infrastructure services"
-    return 1
+  if [ -n "$INFRA_SERVICES" ]; then
+    if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d $INFRA_SERVICES; then
+      echo "   ❌ ERROR Failed to start infrastructure services"
+      return 1
+    fi
+  else
+    echo "🔧 No infrastructure services selected, skipping infrastructure startup."
   fi
 
-  if [ "$ENABLE_TERMINAL_TOOL_CONTAINER" = "true" ]; then
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
     echo "🔧 Terminal tool container (openssh-server) is now available for AI agents"
   fi
 
-  # Deploy Supabase services based on DEPLOYMENT_VERSION
-  if [ "$DEPLOYMENT_VERSION" = "full" ]; then
+  # Deploy Supabase services based on selected components
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
       echo ""
       echo "🔧 Starting Supabase services..."
       # Check if the supabase compose file exists
@@ -682,6 +876,104 @@ deploy_infrastructure() {
   fi
 
   echo "   ✅ Infrastructure services started successfully"
+}
+
+deploy_monitoring() {
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" || return 0
+
+  if [ ! -f "docker-compose-monitoring.yml" ]; then
+    echo "   ❌ ERROR Monitoring compose file not found: docker-compose-monitoring.yml"
+    return 1
+  fi
+
+  local profile_args=()
+  case "$DEPLOYMENT_MONITORING_PROVIDER" in
+    phoenix|grafana|zipkin|langfuse)
+      profile_args+=(--profile "$DEPLOYMENT_MONITORING_PROVIDER")
+      ;;
+  esac
+
+  echo "🔭 Starting monitoring services..."
+  if ! ${docker_compose_command} "${profile_args[@]}" -f "docker-compose-monitoring.yml" up -d; then
+    echo "   ❌ ERROR Failed to start monitoring services"
+    return 1
+  fi
+}
+
+configure_root_dir_from_env() {
+  if [ -n "$ROOT_DIR_PARAM" ]; then
+    ROOT_DIR="$ROOT_DIR_PARAM"
+    echo "   📁 Using ROOT_DIR from parameter: $ROOT_DIR"
+    update_env_var "ROOT_DIR" "$ROOT_DIR"
+  elif grep -q "^ROOT_DIR=" .env; then
+    ROOT_DIR="$(grep "^ROOT_DIR=" .env | cut -d'=' -f2 | sed 's/^"//;s/"$//')"
+    echo "   📁 Use existing ROOT_DIR path: $ROOT_DIR"
+  else
+    local default_root_dir="$HOME/nexent-data"
+    if [ -t 0 ]; then
+      local user_root_dir
+      read -p "   📁 Enter ROOT_DIR path (default: $default_root_dir): " user_root_dir
+      ROOT_DIR="${user_root_dir:-$default_root_dir}"
+    else
+      ROOT_DIR="$default_root_dir"
+    fi
+    update_env_var "ROOT_DIR" "$ROOT_DIR"
+  fi
+  export ROOT_DIR
+  echo ""
+  echo "--------------------------------"
+  echo ""
+}
+
+apply_deployment_common_config() {
+  deployment_prepare_config "${ORIGINAL_ARGS[@]}" || return 1
+
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
+    export DEPLOYMENT_VERSION="full"
+  else
+    export DEPLOYMENT_VERSION="speed"
+  fi
+  update_env_var "DEPLOYMENT_VERSION" "$DEPLOYMENT_VERSION"
+
+  if [ "$DEPLOYMENT_PORT_POLICY" = "production" ]; then
+    export DEPLOYMENT_MODE="production"
+    export COMPOSE_FILE_SUFFIX=".prod.yml"
+    disable_dashboard
+  elif [ "$DEPLOYMENT_COMPONENTS" = "infrastructure" ]; then
+    export DEPLOYMENT_MODE="infrastructure"
+    export COMPOSE_FILE_SUFFIX=".yml"
+  else
+    export DEPLOYMENT_MODE="development"
+    export COMPOSE_FILE_SUFFIX=".yml"
+  fi
+
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
+    ENABLE_TERMINAL_SAVED="Y"
+    export ENABLE_TERMINAL_TOOL_CONTAINER="true"
+    export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}terminal"
+  else
+    ENABLE_TERMINAL_SAVED="N"
+    export ENABLE_TERMINAL_TOOL_CONTAINER="false"
+  fi
+
+  export APP_VERSION="$DEPLOYMENT_APP_VERSION"
+  case "$DEPLOYMENT_REGISTRY_PROFILE" in
+    mainland)
+      IS_MAINLAND_SAVED="Y"
+      source .env.mainland
+      ;;
+    general|local-latest)
+      IS_MAINLAND_SAVED="N"
+      source .env.general
+      ;;
+  esac
+
+  deployment_apply_image_source
+  deployment_render_docker_env "$SCRIPT_DIR/.env.generated"
+  set -a
+  source "$SCRIPT_DIR/.env.generated"
+  set +a
+  deployment_print_summary docker
 }
 
 select_deployment_version() {
@@ -918,12 +1210,22 @@ get_access_token_by_credentials() {
   # Get access token by signing in with email and password
   local email="$1"
   local password="$2"
+  local curl_container="nexent-config"
+
+  if [ "$DEPLOYMENT_MODE" = "infrastructure" ] || ! docker ps | grep -q "nexent-config"; then
+    if docker ps | grep -q "supabase-db-mini"; then
+      curl_container="supabase-db-mini"
+    else
+      echo "   ❌ Failed to get access token: no suitable container available" >&2
+      return 1
+    fi
+  fi
 
   # Suppress echo messages when capturing output
   set +x 2>/dev/null
 
   local response
-  response=$(docker exec nexent-config bash -c "curl -s -X POST http://kong:8000/auth/v1/token?grant_type=password -H \"apikey: ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"${password}\"}'" 2>/dev/null)
+  response=$(docker exec "$curl_container" bash -c "curl -s -X POST http://kong:8000/auth/v1/token?grant_type=password -H \"apikey: ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"${password}\"}'" 2>/dev/null)
 
   if echo "$response" | grep -q '"access_token"'; then
     local access_token
@@ -1216,8 +1518,11 @@ create_default_super_admin_user() {
 
   # Execute the script with password as argument
   if bash "$script_path" "$password"; then
+    CREATED_SUPER_ADMIN_ACCESS_TOKEN="$(get_access_token_by_credentials "$email" "$password" 2>/dev/null || true)"
+    unset password
     return 0
   else
+    unset password
     return 1
   fi
 }
@@ -1291,14 +1596,13 @@ main_deploy() {
   fi
   echo "🌐 App version: $APP_VERSION"
 
-  # Check all relevant ports from environment files before starting deployment
-  check_ports_in_env_files
+  # Select deployment components, port policy and image source via shared config.
+  apply_deployment_common_config || { echo "❌ Deployment configuration failed"; exit 1; }
 
-  # Select deployment version, mode and image source
-  select_deployment_version || { echo "❌ Deployment version selection failed"; exit 1; }
-  select_deployment_mode || { echo "❌ Deployment mode selection failed"; exit 1; }
-  select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 1; }
-  choose_image_env || { echo "❌ Image environment setup failed"; exit 1; }
+  # Check only the ports published by the selected deployment configuration.
+  check_deployment_ports
+
+  configure_root_dir_from_env || { echo "❌ ROOT_DIR configuration failed"; exit 1; }
   select_skills_installation || { echo "❌ Skills installation selection failed"; exit 1; }
 
   # Set NEXENT_MCP_DOCKER_IMAGE in .env file
@@ -1319,6 +1623,8 @@ main_deploy() {
 
   # Deploy infrastructure services
   deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 1; }
+
+  deploy_monitoring || { echo "❌ Monitoring deployment failed"; exit 1; }
 
   # Generate Elasticsearch API key
   generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 1; }
@@ -1341,21 +1647,14 @@ main_deploy() {
         echo "--------------------------------"
         echo "📦 Checking if skills installation is needed..."
 
-        # Read access token from file (saved by create-su.sh)
-        local token_file="$SCRIPT_DIR/.access_token"
-        if [ -f "$token_file" ]; then
-          local access_token
-          access_token=$(cat "$token_file" | tr -d '[:space:]')
-          rm -f "$token_file"  # Clean up after reading
-
-          if [ -n "$access_token" ]; then
-            echo "   💡 Found access token, proceeding with skills installation..."
-            install_skills_after_user_creation "$access_token" || {
-              echo "   ⚠️  Warning: Skills installation encountered issues"
-            }
-          fi
+        if [ -n "$CREATED_SUPER_ADMIN_ACCESS_TOKEN" ]; then
+          echo "   💡 Found access token, proceeding with skills installation..."
+          install_skills_after_user_creation "$CREATED_SUPER_ADMIN_ACCESS_TOKEN" || {
+            echo "   ⚠️  Warning: Skills installation encountered issues"
+          }
+          CREATED_SUPER_ADMIN_ACCESS_TOKEN=""
         else
-          echo "   ℹ️  No access token file found. Infrastructure mode may need manual skill installation."
+          echo "   ℹ️  No access token available. Infrastructure mode may need manual skill installation."
         fi
         echo ""
         echo "--------------------------------"
@@ -1371,6 +1670,7 @@ main_deploy() {
     pull_mcp_image
 
     persist_deploy_options
+    deployment_persist_local_config
     return 0
   fi
 
@@ -1392,21 +1692,14 @@ main_deploy() {
       echo "--------------------------------"
       echo "📦 Checking if skills installation is needed..."
 
-      # Read access token from file (saved by create-su.sh)
-      local token_file="$SCRIPT_DIR/.access_token"
-      if [ -f "$token_file" ]; then
-        local access_token
-        access_token=$(cat "$token_file" | tr -d '[:space:]')
-        rm -f "$token_file"  # Clean up after reading
-
-        if [ -n "$access_token" ]; then
-          echo "   💡 Found access token, proceeding with skills installation..."
-          install_skills_after_user_creation "$access_token" || {
-            echo "   ⚠️  Warning: Skills installation encountered issues"
-          }
-        fi
+      if [ -n "$CREATED_SUPER_ADMIN_ACCESS_TOKEN" ]; then
+        echo "   💡 Found access token, proceeding with skills installation..."
+        install_skills_after_user_creation "$CREATED_SUPER_ADMIN_ACCESS_TOKEN" || {
+          echo "   ⚠️  Warning: Skills installation encountered issues"
+        }
+        CREATED_SUPER_ADMIN_ACCESS_TOKEN=""
       else
-        echo "   ℹ️  No access token file found. Checking if skills installation is needed..."
+        echo "   ℹ️  No access token available. Checking if skills installation is needed..."
         # Check if super admin user already exists (was created previously)
         check_super_admin_user_exists "suadmin@nexent.com"
         local check_result=$?
@@ -1435,6 +1728,7 @@ main_deploy() {
   fi
 
   persist_deploy_options
+  deployment_persist_local_config
 
   # Pull MCP image for later use
   pull_mcp_image

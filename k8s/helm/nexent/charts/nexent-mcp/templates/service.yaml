@@ -4,13 +4,19 @@ metadata:
   name: nexent-mcp
   namespace: {{ .Values.global.namespace }}
 spec:
-  type: ClusterIP
+  type: {{ default "ClusterIP" .Values.service.type }}
   ports:
     - port: 5011
       targetPort: 5011
       name: http
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePorts.http }}
+      nodePort: {{ .Values.service.nodePorts.http }}
+      {{- end }}
     - port: 5015
       targetPort: 5015
       name: http-alt
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePorts.httpAlt }}
+      nodePort: {{ .Values.service.nodePorts.httpAlt }}
+      {{- end }}
   selector:
     app: nexent-mcp

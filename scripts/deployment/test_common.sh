@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/common.sh"
+
+TMP_DIR="${TMPDIR:-/tmp}/nexent-deployment-test-$$"
+mkdir -p "$TMP_DIR"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+assert_eq() {
+  local expected="$1"
+  local actual="$2"
+  local message="$3"
+  if [ "$expected" != "$actual" ]; then
+    echo "FAIL: $message"
+    echo "  expected: $expected"
+    echo "  actual:   $actual"
+    exit 1
+  fi
+}
+
+assert_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+  if [[ "$haystack" != *"$needle"* ]]; then
+    echo "FAIL: $message"
+    echo "  missing: $needle"
+    echo "  in: $haystack"
+    exit 1
+  fi
+}
+
+write_full_config() {
+  local file="$1"
+  {
+    echo 'schemaVersion: "1"'
+    echo 'appVersion: "latest"'
+    echo 'components:'
+    echo '  - infrastructure'
+    echo '  - application'
+    echo '  - data-process'
+    echo '  - supabase'
+    echo '  - terminal'
+    echo 'portPolicy: "development"'
+    echo 'imageSource: "local-latest"'
+  } > "$file"
+}
+
+APP_VERSION="latest"
+deployment_prepare_config --components infrastructure,application --port-policy production --image-source general --app-version latest
+assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "components should come from CLI"
+assert_eq "production" "$DEPLOYMENT_PORT_POLICY" "port policy should come from CLI"
+assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "image source should come from CLI"
+assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-web" "application services should include web"
+if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-data-process"* ]]; then
+  echo "FAIL: application should not include data-process"
+  exit 1
+fi
+assert_contains "$DEPLOYMENT_DOCKER_PORTS" "3000" "production should expose web"
+
+deployment_prepare_config --components supabase --port-policy development --app-version latest
+assert_eq "infrastructure,application,supabase" "$DEPLOYMENT_COMPONENTS" "required components should be added and ordered"
+
+deployment_prepare_config --components infrastructure,application --port-policy development --registry-profile mainland --app-version latest
+assert_eq "mainland" "$DEPLOYMENT_IMAGE_SOURCE" "legacy registry profile should map to mainland image source"
+
+if deployment_prepare_config --components infrastructure,application --port-policy development --image-source pinned --app-version latest 2>/dev/null; then
+  echo "FAIL: pinned image source should be rejected"
+  exit 1
+fi
+
+DEPLOYMENT_VERSION="full"
+DEPLOYMENT_MODE="development"
+IS_MAINLAND="Y"
+deployment_prepare_config --app-version latest
+assert_contains "$DEPLOYMENT_COMPONENTS" "supabase" "legacy full should include supabase"
+assert_eq "mainland" "$DEPLOYMENT_REGISTRY_PROFILE" "legacy mainland flag should map registry profile"
+assert_eq "mainland" "$DEPLOYMENT_IMAGE_SOURCE" "legacy mainland flag should map image source"
+unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
+
+FULL_CONFIG="$TMP_DIR/full.yaml"
+write_full_config "$FULL_CONFIG"
+deployment_prepare_config --config "$FULL_CONFIG"
+deployment_apply_image_source
+assert_eq "nexent/nexent:latest" "$NEXENT_IMAGE" "local-latest image should be applied"
+assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-data-process" "data-process chart should be selected"
+
+HELM_VALUES="$TMP_DIR/generated-values.yaml"
+deployment_render_helm_values "$HELM_VALUES"
+assert_contains "$(sed -n '1,220p' "$HELM_VALUES")" "data-process: true" "component table should include data-process"
+assert_contains "$(sed -n '1,260p' "$HELM_VALUES")" "type: \"NodePort\"" "development policy should render NodePort values"
+assert_contains "$(sed -n '1,260p' "$HELM_VALUES")" "enabled: true" "selected charts should be enabled"
+
+DOCKER_ENV="$TMP_DIR/.env.generated"
+deployment_render_docker_env "$DOCKER_ENV"
+assert_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "NEXENT_IMAGE=" "docker generated env should contain image variables"
+if grep -Eq '^DEPLOYMENT_(SCHEMA_VERSION|COMPONENTS|PORT_POLICY|IMAGE_SOURCE|REGISTRY_PROFILE|APP_VERSION|MONITORING_PROVIDER|SELECTED_DOCKER_SERVICES|DOCKER_PORTS)=' "$DOCKER_ENV"; then
+  echo "FAIL: docker generated env should not contain persisted deployment decisions"
+  exit 1
+fi
+
+LOCAL_CONFIG="$TMP_DIR/local-config.yaml"
+deployment_persist_local_config "$LOCAL_CONFIG"
+if grep -Eq 'PASSWORD|TOKEN|JWT|SECRET|KEY' "$LOCAL_CONFIG"; then
+  echo "FAIL: persisted local config should not contain secret-looking fields"
+  exit 1
+fi
+if grep -q 'registryProfile' "$LOCAL_CONFIG"; then
+  echo "FAIL: persisted local config should not contain registryProfile"
+  exit 1
+fi
+
+echo "All deployment common tests passed."
