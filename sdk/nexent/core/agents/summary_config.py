@@ -44,6 +44,13 @@ class ContextManagerConfig:
     estimated_chunk_summary_tokens: int = 400
     chars_per_token: float = 1.5
 
+    # Pre-truncate single observations (model/tool outputs) longer than this
+    # character limit at execute_action time, before they reach memory.
+    # 0 = disabled (production default). Only takes effect when ``enabled``
+    # is True, so production callers that do not opt in see no behaviour
+    # change.
+    max_observation_length: int = 0
+
     # === NEW: Strategy Selection ===
     strategy: StrategyType = "token_budget"
     """Context component selection strategy.
