@@ -70,6 +70,8 @@ sys.modules['services'] = services_module
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
 agent_version_service_mock = MagicMock()
+skill_service_mock = MagicMock()
+skill_service_mock.SkillService.return_value.list_skill_instances.return_value = []
 prompt_template_service_mock = MagicMock()
 prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_ID = 0
 prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_NAME = "system_default"
@@ -79,6 +81,7 @@ prompt_template_service_mock.resolve_prompt_generate_template = MagicMock(return
 sys.modules['services.conversation_management_service'] = conversation_management_service_mock
 sys.modules['services.memory_config_service'] = memory_config_service_mock
 sys.modules['services.agent_version_service'] = agent_version_service_mock
+sys.modules['services.skill_service'] = skill_service_mock
 sys.modules['services.prompt_template_service'] = prompt_template_service_mock
 
 # Mock agents submodules
