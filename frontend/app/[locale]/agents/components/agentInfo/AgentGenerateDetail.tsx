@@ -952,7 +952,7 @@ export default function AgentGenerateDetail({}) {
               {renderPromptSection(
                 "duty",
                 "dutyPrompt",
-                t("定义智能体的角色和行为准则"),
+                t("systemPrompt.card.duty.title"),
                 (value) => updateAgentConfig({ duty_prompt: value })
               )}
             </TabsContent>
@@ -961,7 +961,7 @@ export default function AgentGenerateDetail({}) {
               {renderPromptSection(
                 "constraint",
                 "constraintPrompt",
-                t("设定智能体的使用限制和要求"),
+                t("systemPrompt.card.constraint.title"),
                 (value) => updateAgentConfig({ constraint_prompt: value })
               )}
             </TabsContent>
@@ -970,7 +970,7 @@ export default function AgentGenerateDetail({}) {
               {renderPromptSection(
                 "few-shots",
                 "fewShotsPrompt",
-                t("提供对话示例帮助智能体理解预期行为"),
+                t("systemPrompt.card.fewShots.title"),
                 (value) => updateAgentConfig({ few_shots_prompt: value })
               )}
             </TabsContent>

@@ -615,12 +615,12 @@ export default function AgentSelectorHeader({
                   <div className="text-lg font-medium text-gray-900 leading-tight mb-2">
                     {isCreatingMode
                       ? t("subAgentPool.button.create")
-                      : currentAgent?.display_name || currentAgent?.name || t("选择智能体")}
+                      : currentAgent?.display_name || currentAgent?.name || t("agentConfig.agents.selectAgent")}
                   </div>
                   <div className="text-sm text-gray-500 leading-tight truncate">
                     {isCreatingMode
                     ? t("subAgentPool.button.create")
-                    : currentAgent?.description || t("请选择一个智能体进行编辑")}
+                    : currentAgent?.description || t("agentConfig.agents.noAgentSelected")}
                   </div>
                 </div>
                 <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
@@ -663,7 +663,7 @@ export default function AgentSelectorHeader({
                 className="flex items-center gap-1"
               >
                 <Plus className="w-4 h-4" />
-                <span>{t("新建")}</span>
+                <span>{t("agentConfig.button.new")}</span>
               </Button>
               <Button
                 type="text"
@@ -672,7 +672,7 @@ export default function AgentSelectorHeader({
                 className="flex items-center gap-1"
               >
                 <FileInput className="w-4 h-4" />
-                <span>{t("导入")}</span>
+                <span>{t("agentConfig.button.import")}</span>
               </Button>
             </Flex>
 

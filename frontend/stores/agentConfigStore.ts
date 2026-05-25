@@ -306,6 +306,7 @@ const isDirty = (
       (editedAgent.prompt_template_name || "system_default") !== "system_default" ||
       normalizeArray(editedAgent.group_ids || []).length > 0 ||
       normalizeArray(editedAgent.sub_agent_id_list || []).length > 0 ||
+      normalizeArray(editedAgent.external_sub_agent_id_list || []).length > 0 ||
       editedAgent.tools.length > 0 ||
       editedAgent.skills.length > 0 ||
       editedAgent.ingroup_permission !== "READ_ONLY"
@@ -333,6 +334,8 @@ const isDirty = (
       JSON.stringify(normalizeArray(editedAgent.group_ids ?? [])) ||
     JSON.stringify(normalizeArray(baselineAgent.sub_agent_id_list ?? [])) !==
       JSON.stringify(normalizeArray(editedAgent.sub_agent_id_list ?? [])) ||
+    JSON.stringify(normalizeArray(baselineAgent.external_sub_agent_id_list ?? [])) !==
+      JSON.stringify(normalizeArray(editedAgent.external_sub_agent_id_list ?? [])) ||
     isToolsDirty(baselineAgent.tools, editedAgent.tools) ||
     isSkillsDirty(baselineAgent.skills, editedAgent.skills) ||
     baselineAgent.ingroup_permission !== editedAgent.ingroup_permission
@@ -434,7 +437,8 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   updateExternalSubAgentIds: (ids) => {
     set((state) => {
       const editedAgent = { ...state.editedAgent, external_sub_agent_id_list: ids };
-      return { editedAgent, hasUnsavedChanges: true };
+      const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
+      return { editedAgent, hasUnsavedChanges };
     });
   },
 
