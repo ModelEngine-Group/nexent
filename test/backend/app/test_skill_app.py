@@ -33,6 +33,7 @@ nexent_core_mock = types.ModuleType('nexent.core')
 nexent_core_agents_mock = types.ModuleType('nexent.core.agents')
 nexent_core_agents_agent_model_mock = types.ModuleType('nexent.core.agents.agent_model')
 nexent_skills_mock = types.ModuleType('nexent.skills')
+nexent_skills_mock.__path__ = []  # Required for submodule lookups
 nexent_skills_skill_manager_mock = types.ModuleType('nexent.skills.skill_manager')
 nexent_storage_mock = types.ModuleType('nexent.storage')
 nexent_storage_storage_client_factory_mock = types.ModuleType('nexent.storage.storage_client_factory')
@@ -47,6 +48,9 @@ sys.modules['nexent.skills.skill_manager'] = nexent_skills_skill_manager_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_storage_client_factory_mock
 sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
+
+# Set attributes on nexent_mock for proper submodule resolution
+setattr(nexent_mock, 'skills', nexent_skills_mock)
 
 # Mock ToolConfig from agent_model
 nexent_core_agents_agent_model_mock.ToolConfig = type('ToolConfig', (), {})
@@ -183,6 +187,7 @@ services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(retur
 
 # Mock utils
 utils_mock = types.ModuleType('utils')
+utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
 utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
 utils_config_utils_mock = types.ModuleType('utils.config_utils')
 sys.modules['utils'] = utils_mock
@@ -192,6 +197,8 @@ utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))
 utils_config_utils_mock.tenant_config_manager = MagicMock()
 utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+# Set utils.config_utils as attribute for attribute-based imports
+setattr(utils_mock, 'config_utils', utils_config_utils_mock)
 
 # Mock utils.prompt_template_utils
 utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')

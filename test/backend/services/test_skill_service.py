@@ -25,11 +25,15 @@ nexent_core_mock = types.ModuleType('nexent.core')
 nexent_core_agents_mock = types.ModuleType('nexent.core.agents')
 nexent_core_agents_agent_model_mock = types.ModuleType('nexent.core.agents.agent_model')
 nexent_skills_mock = types.ModuleType('nexent.skills')
+nexent_skills_mock.__path__ = []  # Required for submodule lookups
 nexent_skills_skill_loader_mock = types.ModuleType('nexent.skills.skill_loader')
 nexent_skills_skill_manager_mock = types.ModuleType('nexent.skills.skill_manager')
 nexent_storage_mock = types.ModuleType('nexent.storage')
 nexent_storage_storage_client_factory_mock = types.ModuleType('nexent.storage.storage_client_factory')
 nexent_storage_minio_config_mock = types.ModuleType('nexent.storage.minio_config')
+
+# Set attributes on nexent_mock for proper submodule resolution
+setattr(nexent_mock, 'skills', nexent_skills_mock)
 
 # Create mock classes
 class MockAgentConfig:
@@ -298,6 +302,7 @@ database_skill_db_mock.search_skills_for_agent = mock_search_skills_for_agent
 database_skill_db_mock.delete_skills_by_agent_id = mock_delete_skills_by_agent_id
 database_skill_db_mock.delete_skill_instances_by_skill_id = mock_delete_skill_instances_by_skill_id
 database_skill_db_mock.check_skill_list_initialized = MagicMock(return_value=False)
+database_skill_db_mock.upsert_scanned_skills = MagicMock(return_value=[])
 
 database_mock.client = database_client_mock
 database_mock.skill_db = database_skill_db_mock
@@ -307,6 +312,7 @@ sys.modules['database'] = database_mock
 sys.modules['database.client'] = database_client_mock
 sys.modules['database.skill_db'] = database_skill_db_mock
 sys.modules['database.db_models'] = database_db_models_mock
+setattr(database_mock, 'skill_db', database_skill_db_mock)
 
 # Mock nexent.core.agents.run_agent for create_skill_from_request
 nexent_core_agents_run_agent_mock = types.ModuleType('nexent.core.agents.run_agent')
@@ -4737,7 +4743,8 @@ class TestSkillServiceGetSkillByIdWithTenant:
 class TestUpdateSkillListAsync:
     """Test async update_skill_list function."""
 
-    def test_update_skill_list_with_schema_yaml(self, mocker):
+    @pytest.mark.asyncio
+    async def test_update_skill_list_with_schema_yaml(self):
         """Test update_skill_list reads schema.yaml using async file API."""
         from backend.services import skill_service
 
@@ -4752,40 +4759,22 @@ class TestUpdateSkillListAsync:
         }
         mock_skill_manager.local_skills_dir = "/tmp/skills"
 
-        mocker.patch(
-            'nexent.skills.SkillManager',
-            return_value=mock_skill_manager
-        )
-        mocker.patch(
-            'backend.services.skill_service.SkillManager',
-            return_value=mock_skill_manager
-        )
-        mocker.patch(
-            'backend.services.skill_service.CONTAINER_SKILLS_PATH',
-            "/tmp/skills"
-        )
-
-        mock_upsert = mocker.patch(
-            'backend.services.skill_service.skill_db.upsert_scanned_skills'
-        )
-
-        async def run_test():
+        with patch('nexent.skills.SkillManager', return_value=mock_skill_manager), \
+                patch('backend.services.skill_service.SkillManager', return_value=mock_skill_manager), \
+                patch('backend.services.skill_service.CONTAINER_SKILLS_PATH', "/tmp/skills"), \
+                patch('database.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
             await skill_service.update_skill_list(
                 tenant_id="test-tenant",
                 user_id="test-user"
             )
-            return True
 
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(run_test())
+            mock_upsert.assert_called_once()
+            call_args = mock_upsert.call_args[0][0]
+            assert len(call_args) == 1
+            assert call_args[0]["name"] == "test_skill"
 
-        assert result is True
-        mock_upsert.assert_called_once()
-        call_args = mock_upsert.call_args[0][0]
-        assert len(call_args) == 1
-        assert call_args[0]["name"] == "test_skill"
-
-    def test_update_skill_list_without_schema_yaml(self, mocker):
+    @pytest.mark.asyncio
+    async def test_update_skill_list_without_schema_yaml(self):
         """Test update_skill_list falls back to AST parsing when no schema.yaml."""
         from backend.services import skill_service
 
@@ -4800,43 +4789,18 @@ class TestUpdateSkillListAsync:
         }
         mock_skill_manager.local_skills_dir = "/tmp/skills"
 
-        mocker.patch(
-            'nexent.skills.SkillManager',
-            return_value=mock_skill_manager
-        )
-        mocker.patch(
-            'backend.services.skill_service.SkillManager',
-            return_value=mock_skill_manager
-        )
-        mocker.patch(
-            'backend.services.skill_service.CONTAINER_SKILLS_PATH',
-            "/tmp/skills"
-        )
-        mocker.patch(
-            'os.path.isfile',
-            return_value=False
-        )
-        mocker.patch(
-            'os.path.isdir',
-            return_value=False
-        )
-
-        mock_upsert = mocker.patch(
-            'backend.services.skill_service.skill_db.upsert_scanned_skills'
-        )
-
-        async def run_test():
+        with patch('nexent.skills.SkillManager', return_value=mock_skill_manager), \
+                patch('backend.services.skill_service.SkillManager', return_value=mock_skill_manager), \
+                patch('backend.services.skill_service.CONTAINER_SKILLS_PATH', "/tmp/skills"), \
+                patch('os.path.isfile', return_value=False), \
+                patch('os.path.isdir', return_value=False), \
+                patch('database.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
             await skill_service.update_skill_list(
                 tenant_id="test-tenant",
                 user_id="test-user"
             )
-            return True
 
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(run_test())
-
-        assert result is True
-        mock_upsert.assert_called_once()
+            mock_upsert.assert_called_once()
 
 
 class TestInitSkillListForTenantAsync:

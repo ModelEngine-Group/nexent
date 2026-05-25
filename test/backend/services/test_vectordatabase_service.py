@@ -307,6 +307,8 @@ minio_client_mock._storage_client = storage_client_mock
 import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
+# Set backend.utils as attribute so imports like 'from backend.utils.xxx import yyy' work
+setattr(backend_module, 'utils', backend_utils_mock)
 backend_database_module = importlib.import_module('backend.database')
 sys.modules['backend.database'] = backend_database_module
 backend_database_client_module = importlib.import_module('backend.database.client')
