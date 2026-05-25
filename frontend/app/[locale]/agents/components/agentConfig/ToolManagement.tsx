@@ -18,6 +18,7 @@ interface ToolManagementProps {
   toolGroups: ToolGroup[];
   isCreatingMode?: boolean;
   currentAgentId?: number | undefined;
+  isReadOnly?: boolean;
 }
 
 // Tool types that require knowledge base selection
@@ -74,20 +75,15 @@ export default function ToolManagement({
   toolGroups,
   isCreatingMode,
   currentAgentId,
+  isReadOnly: isReadOnlyProp,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const { confirm } = useConfirmModal();
 
-  // Get current agent permission from store
-  const currentAgentPermission = useAgentConfigStore(
-    (state) => state.currentAgentPermission
-  );
-
-  // Check if current agent is read-only (only when agent is selected and permission is READ_ONLY)
-  const isReadOnly = !isCreatingMode && currentAgentId !== undefined && currentAgentPermission === "READ_ONLY";
-
-  const editable = (currentAgentId || isCreatingMode) && !isReadOnly;
+  // Use prop if provided, otherwise fall back to local calculation
+  const isReadOnly = isReadOnlyProp ?? (!isCreatingMode && currentAgentId !== undefined && currentAgentPermission === "READ_ONLY");
+  const editable = !isReadOnly;
 
   // Get state from store
   const originalSelectedTools = useAgentConfigStore(

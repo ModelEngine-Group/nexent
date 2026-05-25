@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Row, Col, Flex, Tooltip, Badge, Divider } from "antd";
 import CollaborativeAgent from "./agentConfig/CollaborativeAgent";
@@ -29,6 +29,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   // Get state from store
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
 
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
@@ -37,18 +38,10 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   const [showA2ADiscovery, setShowA2ADiscovery] = useState(false);
   const { groupedTools, invalidate } = useToolList();
   const { groupedSkills, invalidate: invalidateSkills } = useSkillList();
-  const { skillInstances, invalidate: invalidateSkillInstances } = useAgentSkillInstances(
+  const { invalidate: invalidateSkillInstances } = useAgentSkillInstances(
     currentAgentId ?? null
   );
   const { invalidate: invalidateExternalAgents } = useExternalAgents();
-  const setInitialSkills = useAgentConfigStore((state) => state.setInitialSkills);
-
-  // Load skill instances when agent changes
-  useEffect(() => {
-    if (currentAgentId && skillInstances.length > 0) {
-      setInitialSkills(skillInstances);
-    }
-  }, [currentAgentId, skillInstances, setInitialSkills]);
 
   const handleRefreshTools = useCallback(async () => {
     setIsRefreshing(true);
@@ -195,6 +188,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                 toolGroups={groupedTools}
                 isCreatingMode={isCreatingMode}
                 currentAgentId={currentAgentId ?? undefined}
+                isReadOnly={isReadOnly}
               />
             </Col>
           </Row>
@@ -235,6 +229,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                 skillGroups={groupedSkills}
                 isCreatingMode={isCreatingMode}
                 currentAgentId={currentAgentId ?? undefined}
+                isReadOnly={isReadOnly}
               />
             </Col>
           </Row>

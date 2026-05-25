@@ -293,6 +293,9 @@ export function useConfig() {
   // Default LLM model name from config (modelName or displayName)
   const defaultLlmModelName = config?.models?.llm?.modelName || config?.models?.llm?.displayName || "";
 
+  // Default LLM model config (the full config from load_config, not resolved from model list)
+  const defaultLlmModelConfig = config?.models?.llm;
+
   const updateAppConfig = useCallback(
     (partial: Partial<AppConfig>) => {
       if (!config) return;
@@ -370,6 +373,7 @@ export function useConfig() {
     isVlmAvailable,
     isEmbeddingAvailable,
     defaultLlmModelName,
+    defaultLlmModelConfig,
     updateAppConfig,
     updateModelConfig,
     updateConfig,

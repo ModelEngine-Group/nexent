@@ -6,35 +6,27 @@ import { ModelOption } from "@/types/modelConfig";
 import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
 import type { PromptTemplateFieldKey } from "../const/promptTemplate";
 
-export type AgentBusinessInfo = Partial<Pick<
+export type AgentConfigUpdate = Partial<Pick<
   Agent,
+  | "name"
+  | "display_name"
+  | "author"
+  | "model"
+  | "model_id"
+  | "max_step"
+  | "provide_run_summary"
+  | "description"
+  | "duty_prompt"
+  | "constraint_prompt"
+  | "few_shots_prompt"
   | "business_description"
   | "business_logic_model_id"
   | "business_logic_model_name"
   | "prompt_template_id"
   | "prompt_template_name"
+  | "group_ids"
+  | "ingroup_permission"
 >>;
-
-export type AgentProfileInfo = Partial<
-  Pick<
-    Agent,
-    | "name"
-    | "display_name"
-    | "author"
-    | "model"
-    | "model_id"
-    | "max_step"
-    | "provide_run_summary"
-    | "description"
-    | "duty_prompt"
-    | "constraint_prompt"
-    | "few_shots_prompt"
-    | "group_ids"
-    | "ingroup_permission"
-    | "prompt_template_id"
-    | "prompt_template_name"
-  >
->;
 
 // ========== Core Interfaces ==========
 
@@ -51,6 +43,7 @@ export interface Agent {
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
   tools: Tool[];
+  skills?: Skill[];  // Skills configured for this agent
   duty_prompt?: string;
   constraint_prompt?: string;
   few_shots_prompt?: string;
@@ -62,6 +55,7 @@ export interface Agent {
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
+  external_sub_agent_id_list?: number[];  // External A2A agent IDs
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   /**

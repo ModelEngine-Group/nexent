@@ -35,7 +35,9 @@ export default function CollaborativeAgent() {
     (agent: A2AExternalAgent) => externalSubAgentIdList.includes(agent.id)
   );
 
-  const editable = !!isCreatingMode || (currentAgentId != null && currentAgentPermission !== "READ_ONLY");
+  // Determine if form should be editable (based on isReadOnly only, isGenerating handled separately)
+  const isReadOnly = !isCreatingMode && currentAgentPermission === "READ_ONLY";
+  const editable = !isReadOnly;
 
   // Related internal agent IDs
   const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list) ? editedAgent.sub_agent_id_list : [];
@@ -93,6 +95,8 @@ export default function CollaborativeAgent() {
       const result = await a2aClientService.addRelation(Number(currentAgentId), externalAgentId);
       if (result.success) {
         messageApi.success(t("a2a.service.addRelationSuccess"));
+        // Sync the store so save() sends the updated external_sub_agent_id_list
+        updateExternalSubAgentIds([...externalSubAgentIdList, externalAgentId]);
         loadExternalRelatedAgents();
       } else {
         messageApi.error(result.message || t("a2a.service.addRelationFailed"));
@@ -117,6 +121,8 @@ export default function CollaborativeAgent() {
       const result = await a2aClientService.removeRelation(Number(currentAgentId), agentId);
       if (result.success) {
         messageApi.success(t("a2a.service.removeRelationSuccess"));
+        // Sync the store so save() sends the updated external_sub_agent_id_list
+        updateExternalSubAgentIds(externalSubAgentIdList.filter((id) => id !== agentId));
         loadExternalRelatedAgents();
       } else {
         messageApi.error(result.message || t("a2a.service.removeRelationFailed"));

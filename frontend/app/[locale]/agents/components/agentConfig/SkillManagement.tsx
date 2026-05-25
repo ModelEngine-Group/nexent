@@ -15,12 +15,14 @@ interface SkillManagementProps {
   skillGroups: SkillGroup[];
   isCreatingMode?: boolean;
   currentAgentId?: number | undefined;
+  isReadOnly?: boolean;
 }
 
 export default function SkillManagement({
   skillGroups,
   isCreatingMode,
   currentAgentId,
+  isReadOnly: isReadOnlyProp,
 }: SkillManagementProps) {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
@@ -29,9 +31,9 @@ export default function SkillManagement({
     (state) => state.currentAgentPermission
   );
 
-  const isReadOnly = !isCreatingMode && currentAgentId !== undefined && currentAgentPermission === "READ_ONLY";
-
-  const editable = (currentAgentId || isCreatingMode) && !isReadOnly;
+  // Use prop if provided, otherwise fall back to local calculation
+  const isReadOnly = isReadOnlyProp ?? (!isCreatingMode && currentAgentId !== undefined && currentAgentPermission === "READ_ONLY");
+  const editable = !isReadOnly;
 
   const originalSelectedSkills = useAgentConfigStore(
     (state) => state.editedAgent.skills

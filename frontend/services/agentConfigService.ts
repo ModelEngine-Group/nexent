@@ -709,6 +709,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
       sub_agent_id_list: data.sub_agent_id_list || [], // Add sub_agent_id_list
       group_ids: data.group_ids || [],
       ingroup_permission: data.ingroup_permission || "READ_ONLY",
+      permission: data.permission, // Per-agent edit permission
       tools: data.tools
         ? data.tools.map((tool: any) => {
             const params =

@@ -62,6 +62,7 @@ export default function AgentSelectorHeader({
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
   const enterCreateMode = useAgentConfigStore((state) => state.enterCreateMode);
   const reset = useAgentConfigStore((state) => state.reset);
+  const hasUnsavedChanges = useAgentConfigStore((state) => state.hasUnsavedChanges);
 
   const { agentInfo } = useAgentInfo(currentAgentId);
   const { agentVersionList, total } = useAgentVersionList(currentAgentId);
@@ -410,11 +411,7 @@ export default function AgentSelectorHeader({
     try {
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
-        const permissionFromList = agent.permission ?? undefined;
-        setCurrentAgent({
-          ...result.data,
-          permission: permissionFromList,
-        });
+        setCurrentAgent(result.data);
       } else {
         message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
       }
@@ -556,8 +553,6 @@ export default function AgentSelectorHeader({
           >
             {agent.description}
           </div>
-          {/* Row 3: Action Buttons */}
-
         </Flex>
         </div>
       ),
@@ -608,8 +603,13 @@ export default function AgentSelectorHeader({
               <div
                 className="flex items-center gap-2 py-2 pr-2 cursor-pointer hover:bg-gray-50 rounded-md transition-colors w-full overflow-hidden"
               >
-                <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 mx-2">
-                  <Bot className="w-8 h-8 text-blue-600" />
+                <div className="relative w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 mx-2">
+                  {hasUnsavedChanges && (
+                    <Badge dot color="blue" style={{ position: "absolute", top: -8, right: -8 }} >
+                      <Bot className="w-8 h-8 text-blue-600" />
+                    </Badge>
+                  )}
+                  {!hasUnsavedChanges && <Bot className="w-8 h-8 text-blue-600" />}
                 </div>
                 <div className="flex-1 min-w-0 mx-2">
                   <div className="text-lg font-medium text-gray-900 leading-tight mb-2">

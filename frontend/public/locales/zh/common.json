@@ -927,6 +927,7 @@
   "businessLogic.config.message.selectModelRequired": "请选择模型",
   "businessLogic.config.message.businessDescriptionRequired": "请先输入业务描述",
   "businessLogic.config.message.generateSuccess": "智能体提示词生成成功",
+  "businessLogic.config.message.generateCompleteDifferentAgent": "其他智能体提示词已生成完成",
   "businessLogic.config.message.generateError": "智能体提示词生成失败",
   "businessLogic.config.error.noAgentId": "无法继续：未设置智能体ID",
   "businessLogic.config.error.businessDescriptionRequired": "请先输入业务描述",

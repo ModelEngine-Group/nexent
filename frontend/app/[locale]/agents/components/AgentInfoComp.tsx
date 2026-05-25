@@ -22,6 +22,7 @@ export default function AgentInfoComp() {
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
   const currentAgentPermission = useAgentConfigStore((state) => state.currentAgentPermission);
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
+  const isGenerating = useAgentConfigStore((state) => state.isGenerating);
 
   const isPanelActive = (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
   const { agentVersionList, total, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
@@ -40,9 +41,6 @@ export default function AgentInfoComp() {
 
   // Debug drawer state
   const [isDebugDrawerOpen, setIsDebugDrawerOpen] = useState(false);
-
-  // Generation state shared with AgentGenerateDetail
-  const [isGenerating, setIsGenerating] = useState(false);
 
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
 
@@ -87,11 +85,7 @@ export default function AgentInfoComp() {
           <Row className="flex-1 min-h-0 h-full">
             <Col xs={24} className="h-full">
               <Flex vertical className="h-full min-h-0 w-full min-w-0">
-                <AgentGenerateDetail
-                  editable={isEditable}
-                  isGenerating={isGenerating}
-                  setIsGenerating={setIsGenerating}
-                />
+                <AgentGenerateDetail/>
               </Flex>
             </Col>
           </Row>

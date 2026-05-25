@@ -233,6 +233,8 @@ export interface AuthorizationContextType {
   hasAnyPermission: (permissions: string[]) => boolean;
   canAccessRoute: (route: string) => boolean;
 
+  getAccessibleGroupIds: () => number[];
+
   // Authz prompt modal (permission denied)
   isAuthzPromptModalOpen: boolean;
   openAuthzPromptModal: () => void;

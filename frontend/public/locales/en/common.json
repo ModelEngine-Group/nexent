@@ -936,6 +936,7 @@
   "businessLogic.config.message.selectModelRequired": "Please select a model",
   "businessLogic.config.message.businessDescriptionRequired": "Please enter business description first",
   "businessLogic.config.message.generateSuccess": "Agent prompt generated successfully",
+  "businessLogic.config.message.generateCompleteDifferentAgent": "Agent prompt generation for other agent completed.",
   "businessLogic.config.message.generateError": "Failed to generate Agent prompt",
   "businessLogic.config.error.noAgentId": "Cannot continue: Agent ID is not set",
   "businessLogic.config.error.businessDescriptionRequired": "Please enter business description first",
