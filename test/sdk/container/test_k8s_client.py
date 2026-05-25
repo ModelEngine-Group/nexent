@@ -176,55 +176,71 @@ class TestGeneratePodName:
 
     def test_generate_pod_name_basic(self, k8s_container_client):
         """Test basic pod name generation"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", "user12345")
-        assert name == "mcp-test-service-tenant12-user1234"  # user_id truncated to 8 chars
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", "user12345")
+            assert name == "mcp-test-service-tenant12-user1234-a1b2c3d4"
 
     def test_generate_pod_name_with_special_chars(self, k8s_container_client):
         """Test pod name generation with special characters"""
-        name = k8s_container_client._generate_pod_name(
-            "test@service#123", "tenant123", "user12345")
-        assert name == "mcp-test-service-123-tenant12-user1234"  # user_id truncated to 8 chars
-        assert "@" not in name
-        assert "#" not in name
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test@service#123", "tenant123", "user12345")
+            assert name == "mcp-test-service-123-tenant12-user1234-a1b2c3d4"
+            assert "@" not in name
+            assert "#" not in name
 
     def test_generate_pod_name_long_user_id(self, k8s_container_client):
         """Test pod name generation with long user ID"""
         long_user_id = "a" * 20
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", long_user_id)
-        # Should only use first 8 characters of tenant_id and user_id
-        assert name == f"mcp-test-service-tenant12-{long_user_id[:8]}"
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", long_user_id)
+            # Should only use first 8 characters of tenant_id and user_id
+            assert name == f"mcp-test-service-tenant12-{long_user_id[:8]}-a1b2c3d4"
 
     def test_generate_pod_name_short_user_id(self, k8s_container_client):
         """Test pod name generation with short user ID"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", "user")
-        assert name == "mcp-test-service-tenant12-user"
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", "user")
+            assert name == "mcp-test-service-tenant12-user-a1b2c3d4"
 
     def test_generate_pod_name_empty_tenant(self, k8s_container_client):
         """Test pod name generation with empty tenant_id"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "", "user12345")
-        assert name == "mcp-test-service--user1234"  # user_id truncated to 8 chars
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "", "user12345")
+            assert name == "mcp-test-service--user1234-a1b2c3d4"
 
     def test_generate_pod_name_empty_user(self, k8s_container_client):
         """Test pod name generation with empty user_id"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", "")
-        assert name == "mcp-test-service-tenant12-"
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", "")
+            assert name == "mcp-test-service-tenant12--a1b2c3d4"
 
     def test_generate_pod_name_none_tenant(self, k8s_container_client):
         """Test pod name generation with None tenant_id"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", None, "user12345")
-        assert name == "mcp-test-service--user1234"  # user_id truncated to 8 chars
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", None, "user12345")
+            assert name == "mcp-test-service--user1234-a1b2c3d4"
 
     def test_generate_pod_name_none_user(self, k8s_container_client):
         """Test pod name generation with None user_id"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", None)
-        assert name == "mcp-test-service-tenant12-"
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", None)
+            assert name == "mcp-test-service-tenant12--a1b2c3d4"
 
 
 # ---------------------------------------------------------------------------
@@ -441,40 +457,42 @@ class TestStartContainer:
         mock_core_v1 = MagicMock()
         mock_apps_v1 = MagicMock()
 
-        # Create pod with matching name (pod_name is generated, not from fixture)
-        pod_name = "mcp-test-service-tenant12-user1234"
-        mock_pod = MagicMock()
-        mock_pod.metadata = MagicMock()
-        mock_pod.metadata.uid = "test-pod-uid-12345"
-        mock_pod.metadata.name = pod_name
-        mock_pod.status = MagicMock()
-        mock_pod.status.phase = "Running"
-        mock_pod.status.container_statuses = [MagicMock(ready=True)]
-        mock_core_v1.read_namespaced_pod.return_value = mock_pod
+        # Create pod with matching name (pod_name is generated with uuid)
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            generated_pod_name = "mcp-test-service-tenant12-user1234-a1b2c3d4"
+            mock_pod = MagicMock()
+            mock_pod.metadata = MagicMock()
+            mock_pod.metadata.uid = "test-pod-uid-12345"
+            mock_pod.metadata.name = generated_pod_name
+            mock_pod.status = MagicMock()
+            mock_pod.status.phase = "Running"
+            mock_pod.status.container_statuses = [MagicMock(ready=True)]
+            mock_core_v1.read_namespaced_pod.return_value = mock_pod
 
-        config = KubernetesContainerConfig(
-            namespace="test-namespace",
-            service_port=5020,
-        )
-
-        with patch("nexent.container.k8s_client.client.CoreV1Api", return_value=mock_core_v1), \
-             patch("nexent.container.k8s_client.client.AppsV1Api", return_value=mock_apps_v1), \
-             patch("nexent.container.k8s_client.kubernetes.config.load_kube_config"):
-            client = KubernetesContainerClient(config)
-            client.core_v1 = mock_core_v1
-            client.apps_v1 = mock_apps_v1
-
-            result = await client.start_container(
-                service_name="test-service",
-                tenant_id="tenant123",
-                user_id="user12345",
-                full_command=["npx", "-y", "test-mcp"],
+            config = KubernetesContainerConfig(
+                namespace="test-namespace",
+                service_port=5020,
             )
 
-            assert result["status"] == "existing"
-            assert result["container_id"] == "test-pod-uid-12345"
-            assert result["service_url"] == f"http://{pod_name}:5020/mcp"
-            mock_core_v1.read_namespaced_pod.assert_called_once()
+            with patch("nexent.container.k8s_client.client.CoreV1Api", return_value=mock_core_v1), \
+                 patch("nexent.container.k8s_client.client.AppsV1Api", return_value=mock_apps_v1), \
+                 patch("nexent.container.k8s_client.kubernetes.config.load_kube_config"):
+                client = KubernetesContainerClient(config)
+                client.core_v1 = mock_core_v1
+                client.apps_v1 = mock_apps_v1
+
+                result = await client.start_container(
+                    service_name="test-service",
+                    tenant_id="tenant123",
+                    user_id="user12345",
+                    full_command=["npx", "-y", "test-mcp"],
+                )
+
+                assert result["status"] == "existing"
+                assert result["container_id"] == "test-pod-uid-12345"
+                assert result["service_url"] == f"http://{generated_pod_name}:5020/mcp"
+                mock_core_v1.read_namespaced_pod.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_start_container_existing_not_running(self, k8s_container_client, mock_pod):
