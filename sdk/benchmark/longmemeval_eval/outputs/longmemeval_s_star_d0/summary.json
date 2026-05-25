@@ -1,0 +1,64 @@
+{
+  "dialogue_id": "longmemeval_s_star_d0",
+  "ctx_chars": 1600183,
+  "num_sessions": 111,
+  "num_questions": 10,
+  "summary_schema": "multi_topic",
+  "baseline": {
+    "accuracy": 0.4,
+    "n": 10
+  },
+  "compressed": {
+    "accuracy": 0.2,
+    "n": 10,
+    "memory_retention": 0.5,
+    "token_reduction": 0.06339814444455283,
+    "token_counts": {
+      "last_uncompressed": 205006,
+      "last_compressed": 192009
+    },
+    "num_batches": 10,
+    "num_sessions_ingested": 111,
+    "compression_boundary": {
+      "config_keep_recent_pairs": 10,
+      "config_keep_recent_steps": 2,
+      "previous_compressed_pairs": 329,
+      "previous_retained_pairs": 10,
+      "current_compressed_steps": 0,
+      "current_retained_steps": 2
+    },
+    "previous_summary": "{\n  \"topics\": \"1. Job Search — updating resume and LinkedIn for Content Marketing Strategist/Digital Marketing Consultant roles, highlighting Google Analytics/HubSpot certs, 50hr/week peak capacity, hybrid tailoring strategy. 2. Work Schedule — prioritizing tasks for 3-day off (Wed-Fri), buffer time strategies, variable 40-45hr workload. 3. Career Transition — preparing for specialized role via learning plan, portfolio, mentorship. 4. Aquarium Setup — 20-gallon tank with neon tetras, honey gouramis, pleco; adding Java Moss/Anacharis, schooling fish (lemon tetras/zebra danios), treasure chest decor. 5. Betta Care — Bubbles the betta, frozen bloodworms, 10-gallon tank upgrade. 6. Las Vegas Travel — Hilton Lake Las Vegas Resort amenities, Hilton points redemption (Category 5), comparing HGVC and Waldorf Astoria (Category 10). 7. Paris Travel — Nov trip, $200-300 budget, Eiffel Tower view hotels (Pullman, Novotel, Hilton Paris Eiffel Tower), breakfast buffet comparisons. 8. Gardening — planting marigolds/tomatoes/peppers/cucumbers in 23456 (Virginia Beach), soil temp 48-52°F, compost benefits, DIY trellises. 9. BBQ Party — vegetarian options (jackfruit, tofu), Korean-style BBQ marinades, wood chips (apple, hickory), patio furniture. 10. Remote Work Socializing — virtual coffee breaks, team buy-in strategies. 11. Gift Giving — minimalist earrings ($80 range, Aurate/Mejuri), neighbor coffee gift card, music gifts. 12. Theme Park Trip — Six Flags Magic Mountain coasters (Twisted Colossus, Full Throttle), Universal Studios Hollywood memories. 13. Bereavement — support group (3-5 sessions), memory box for grandmother (locket, recipe book). 14. Fitness Routine — bodyweight exercises, reading 'Wild'/'Daring Greatly', meal prep (lentil bolognese, sweet potatoes), power banks, phone backup (Google Drive 200GB). 15. Vintage Collections — cameras (17 total, Brownie Hawkeye), Funko POPs (MCU), vinyl (Fleetwood Mac Rumours), posters (Mondo Harry Potter). 16. Finances — Mint app, cutting luxury spending (Saks/Neiman), beauty box cancellation. 17. Art Museums — Met Greek/Roman art (Euphiletos Cup), Temple of Dendur (Isis mythology). 18. Street Art — LA scene (Arts District, Shepard Fairey, Retna), history, local artists. 19. Feminist Art — Rachel Lee exhibition, history resources, online courses. 20. Skincare — Sephora loyalty (300 pts), La Roche-Posay moisturizer, Laneige Time Freeze Essence. 21. Europe Trip — Germany/France/UK visa (US citizen), language learning (Spanish cognates), cultural etiquette. 22. Family History — 75% European/15% African/10% Native American, WWII refugee great-aunt, Bricha movement, Emergency Quota Act 1944. 23. Fitness Playlists — BodyPump, Zumba, Hip Hop Abs, strength training. 24. Cat Care — Luna (9 months), weight management, shedding, microchipping, interactive toys/camera. 25. Moncayo Park — hiking (GR-90), autumn visit, rural cottage stay. 26. Podcasts — History/Science (Hardcore History, Lore, StarTalk), episode recs. 27. Italian Food — Seco de Cordero (Ancash), Arroz con Leche, beer pairing. 28. Political Propaganda — humor/satire effectiveness, stereotypes. 29. Meal Prep — quinoa/protein sources, lentil bolognese, roasted sweet potatoes. 30. Granola — customization tips. 31. Camera Maintenance — storage, display, organization. 32. Vinyl/Poster Display — storage solutions. 33. Budgeting — Mint, tracking expenses, $800 handbag. 34. Art Inspiration — mixed media/feminist art, book recs. 35. Phone Tech — power bank, app organization, backup (Google Drive), charger. 36. Travel Insurance — options/prices. 37. Airline Loyalty — Delta SkyMiles (Miami redemption), Citi AAdvantage Executive card, Chase Sapphire Preferred. 38. Spirit Airlines — baggage policy, Fort Lauderdale trip. 39. Hotel Booking — Miami airport shuttle to Port of Miami (Hyatt Regency). 40. Solo vs Family Travel — Hawaii trip reflection, Japan food interest. 41. Budgeting Tips — NYC solo trip savings, Europe hostels. 42. Antique Furniture — 1950s armchair, crystal chandelier care, estate sale history. 43. Adoption — California foster care, home study, birth mother support. 44. Birthday Parties — Olivia (Art Studio), Jackson/Julia (Woodland/Explorer). 45. Book Club — 'Seven Husbands of Evelyn Hugo', Taylor Jenkins Reid, debut author process. 46. Content Calendar — language learning project, Facebook inspiration.\",\n  \"topic_details\": \"- Job Search: Transitioning to Content Marketing Strategist/Digital Marketing Consultant. Resume highlights: 50 hrs/week during peak, Google Analytics/HubSpot certs, social media growth metrics. Strategy: Hybrid approach (core version + tailored versions). - Work Schedule: 40-45 hr weeks. Buffer time strategies: padding, task grouping, overflow time. Off: Wed-Fri. - Aquarium: 20-gal tank. Fish: 10 neon tetras, 5 golden honey gouramis, pleco. Plants: Java Moss, Anacharis. Decor: Treasure chest 'city' area. Schooling fish: Lemon tetras/Zebra Danios. - Betta: Bubbles in 10-gal tank. Diet: Frozen bloodworms. - Las Vegas: Hilton Lake Las Vegas (Cat 5, ~40k pts). Alternatives: HGVC (Strip, suites), Waldorf Astoria (Cat 10, ~90-120k pts). - Paris: Nov trip. Budget $200-300. Hotels: Pullman (rooftop bar), Novotel (family-friendly), Hilton Paris Eiffel Tower (Executive Lounge, 50-60k pts). Breakfast: Pullman (full buffet), Hilton (made-to-order). - Gardening: Zip 23456 (Virginia Beach). Soil temp 48-52°F. Compost adds 1-2°F. Plants: Marigolds (started Mar 3), tomatoes, peppers, cucumbers. Support: Stakes/twine grid. - BBQ: Vegetarian options: Jackfruit sandwiches, tofu satay, portobello burgers. Korean BBQ: Bulgogi, galbi, gochujang marinade. Wood chips: Apple (fruity), Hickory (strong). Patio furniture: Wicker/Recycled plastic (Polywood/Hanover). - Remote Work: Virtual coffee breaks. Strategy: Collaborative suggestion, optional, clear expectations. - Gifts: Minimalist earrings ($80, Aurate/Mejuri/Catbird). Neighbor: $10 coffee gift card. Music: Portable speaker/subscription. - Six Flags: Coasters: Twisted Colossus, Full Throttle, West Coast Racers, X2. Single-rider lines. - Bereavement: 3-5 support sessions. Memory box: Grandmother's locket, recipe book, photos. - Fitness: Bodyweight exercises (squats/lunges form tips). Reading: 'Wild', 'Daring Greatly'. Meal prep: Lentil bolognese, roasted sweet potatoes (rosemary). - Tech: Power bank (Anker/Mophie). Backup: Google Drive 200GB plan. App org: Folders, widgets. - Collections: 17 vintage cameras (Brownie Hawkeye). Funko POPs (MCU). Vinyl: Fleetwood Mac Rumours (1978). Posters: Mondo Harry Potter. - Finances: Mint app. Cut Saks/Neiman, beauty box ($50/mo). $800 handbag expense. - Art: Met Greek/Roman (Euphiletos Cup, Temple of Dendur/Isis). Street Art: LA (Arts District, Shepard Fairey, Retna). Feminist Art: Rachel Lee exhibition. - Skincare: Sephora 300 pts. La Roche-Posay SPF 50. Laneige Time Freeze Essence (anti-aging). - Europe: US Visa-free (90/180 rule). Language: Spanish cognates help with French/German. Etiquette: France (bise, tipping), Germany (directness, shoes off). - Family History: 75% Euro/15% Afr/10% Native. Great-aunt: WWII refugee. Bricha movement. Emergency Quota Act 1944 (1k/month). - Fitness Playlists: BodyPump (Rock/Metal/Hip-Hop), Zumba (Latin/Pop), Hip Hop Abs (Hip-Hop). - Cat: Luna (9 months). Microchipping (Fri appt). Interactive toys (Petcube wall toy). Camera: Furbo/Petcube (treat dispense). - Moncayo: Hiking GR-90. Autumn visit. Rural cottage stay. - Podcasts: Hardcore History, Lore, StarTalk. - Italian: Seco de Cordero (Ancash lamb stew, Pilsner beer). Arroz con Leche. - Propaganda: Humor effectiveness, stereotypes. - Meal Prep: Quinoa/protein (lentil bolognese, sweet potatoes). - Granola: Customization (nuts, dried fruit, spices). - Cameras: Storage (65-70°F, 50% humidity). Display: Tiered shelves, glass cases. - Vinyl/Posters: Acid-free tubes, shadow boxes. - Budget: Mint, $800 handbag. - Art: Mixed media/Feminist recs. - Phone: Backup Google Drive 200GB. Charger Anker/Aukey. - Insurance: Trip cancellation/delay. - Airlines: Delta SkyMiles (Miami 10k pts). Citi AAdvantage Executive ($450 fee, 50k bonus). Chase Sapphire Preferred (25% travel redemption). - Spirit: Bag fees ($35-55 carry-on). BOS-FLL non-stop. - Hotels: Miami airport shuttle to Port of Miami (Hyatt Regency, Hilton Blue Lagoon). - Travel: Solo vs Family (Hawaii trip). Japan food interest. - Budget: NYC solo savings. Europe hostels (Meininger, Generator). - Antiques: 1950s armchair, crystal chandelier care. Estate sale research. - Adoption: CA foster care. Home study (3-6 mos, $1.5-3k). Birth mother support focus. - Parties: Olivia (Art Studio). Jackson/Julia (Woodland/Explorer). - Books: 'Seven Husbands of Evelyn Hugo' (Taylor Jenkins Reid). Debut author process. - Content Calendar: Language learning project. Blog/Social/Video. Facebook inspiration.\",\n  \"recent_topic\": \"Content Calendar for Language Learning Project: User is starting a language learning/exchange project inspired by Facebook groups. Plan includes blog posts, social media, and videos. Themes: Tips, resources, cultural insights, interviews. Frequency: 1-2 blogs/month, 3-5 social posts/week, 1-2 videos/month. Sample 4-week calendar created with specific post ideas (e.g., '5 Essential Apps', 'Cultural Immersion', 'Language Learner Interviews').\",\n  \"user_profile\": \"User is a Digital Marketing Specialist transitioning to Content Marketing Strategist/Digital Marketing Consultant. Lives in Virginia Beach (23456). Has a cat named Luna (9 months). Has a betta named Bubbles. Collects vintage cameras (17), Funko POPs (MCU), vinyl (Fleetwood Mac), and posters. Interested in fitness (BodyPump, Zumba, Hip Hop Abs), gardening, and cooking (Italian, Korean BBQ). Planning trips to Europe (Paris, Rome, Miami) and Las Vegas. Active in book club ('Page Turners'). Considering adopting from CA foster care. Has family in Hawaii and twins Jackson/Julia.\",\n  \"pending_items\": \"- Finalize resume/LinkedIn for job search. - Create memory box for grandmother. - Microchip cat Luna (scheduled). - Book flights/hotels for Europe/Miami trips. - Research adoption agencies in CA. - Plan Olivia's Art Studio party and Jackson/Julia's birthday. - Start content calendar for language learning project. - Backup phone data to Google Drive 200GB. - Buy new phone charger. - Research debut author resources for book club member.\"\n}"
+  },
+  "per_category": {
+    "knowledge-update": {
+      "n": 2,
+      "baseline_accuracy": 0.0,
+      "compressed_accuracy": 0.0,
+      "memory_retention": null
+    },
+    "multi-session": {
+      "n": 2,
+      "baseline_accuracy": 0.5,
+      "compressed_accuracy": 1.0,
+      "memory_retention": 2.0
+    },
+    "single-session-assistant": {
+      "n": 1,
+      "baseline_accuracy": 1.0,
+      "compressed_accuracy": 0.0,
+      "memory_retention": 0.0
+    },
+    "single-session-preference": {
+      "n": 1,
+      "baseline_accuracy": 0.0,
+      "compressed_accuracy": 0.0,
+      "memory_retention": null
+    },
+    "temporal-reasoning": {
+      "n": 4,
+      "baseline_accuracy": 0.5,
+      "compressed_accuracy": 0.0,
+      "memory_retention": 0.0
+    }
+  }
+}

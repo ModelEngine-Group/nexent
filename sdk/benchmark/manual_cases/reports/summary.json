@@ -1,0 +1,16 @@
+{
+  "total_cases": 1,
+  "metrics": {
+    "avg_task_success_retention": 1.0,
+    "avg_probe_retention": 0.9285714285714286,
+    "avg_token_reduction": 0.6566630384077126,
+    "per_case": {
+      "example_infra": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.9285714285714286,
+        "token_reduction": 0.6566630384077126,
+        "summary_score": 0.6
+      }
+    }
+  }
+}

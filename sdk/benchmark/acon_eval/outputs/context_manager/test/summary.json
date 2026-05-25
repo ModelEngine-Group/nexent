@@ -1,0 +1,13 @@
+{
+  "total": 1,
+  "avg_em": 0.75,
+  "avg_f1": 0.75,
+  "mode": "context_manager",
+  "split": "test",
+  "num_objectives": 4,
+  "data_path": "./data/nq_multi_8/test.jsonl",
+  "max_steps": 30,
+  "token_threshold": 6000,
+  "keep_recent_pairs": 1,
+  "timestamp": "2026-05-18T20:59:51.425935"
+}
