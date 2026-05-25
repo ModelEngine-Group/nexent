@@ -37,7 +37,7 @@ boto3_mock = MagicMock()
 minio_client_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
-# Patch smolagents and its sub-modules before importing consts.model to avoid ImportError
+# Patch smolagents and its sub-modules before importi ng consts.model to avoid ImportError
 mock_smolagents = MagicMock()
 sys.modules['smolagents'] = mock_smolagents
 
@@ -944,12 +944,12 @@ class TestGetAllMcpTools:
     @patch('backend.services.tool_configuration_service.urljoin')
     async def test_get_all_mcp_tools_success(self, mock_urljoin, mock_get_tools, mock_get_records):
         """Test successfully getting all MCP tools"""
-        # Mock MCP records
+        # Mock MCP records - must include "enabled" field as implementation checks both enabled AND status
         mock_get_records.return_value = [
-            {"mcp_name": "server1", "mcp_server": "http://server1.com", "status": True},
+            {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True},
             {"mcp_name": "server2", "mcp_server": "http://server2.com",
-                "status": False},  # Not connected
-            {"mcp_name": "server3", "mcp_server": "http://server3.com", "status": True}
+                "enabled": True, "status": False},  # Not connected
+            {"mcp_name": "server3", "mcp_server": "http://server3.com", "enabled": True, "status": True}
         ]
 
         # Mock tool information
@@ -966,6 +966,7 @@ class TestGetAllMcpTools:
                      inputs="{}", output_type="string", class_name="DefaultTool", usage="nexent")
         ]
 
+        # Call order: server1, server3 (server2 is skipped due to status=False), default server
         mock_get_tools.side_effect = [
             mock_tools1, mock_tools2, mock_default_tools]
         mock_urljoin.return_value = "http://default-server.com/sse"
@@ -994,9 +995,9 @@ class TestGetAllMcpTools:
     async def test_get_all_mcp_tools_connection_error(self, mock_urljoin, mock_get_tools, mock_get_records):
         """Test MCP connection error scenario"""
         mock_get_records.return_value = [
-            {"mcp_name": "server1", "mcp_server": "http://server1.com", "status": True}
+            {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True}
         ]
-        # First call fails, second call succeeds (default server)
+        # First call (server1) fails, second call (default server) succeeds
         mock_get_tools.side_effect = [Exception("Connection failed"),
                                       [ToolInfo(name="default_tool", description="Default Tool", params=[],
                                                 source=ToolSourceEnum.MCP.value, inputs="{}", output_type="string",
@@ -1018,8 +1019,8 @@ class TestGetAllMcpTools:
     async def test_get_all_mcp_tools_no_connected_servers(self, mock_urljoin, mock_get_tools, mock_get_records):
         """Test scenario with no connected servers"""
         mock_get_records.return_value = [
-            {"mcp_name": "server1", "mcp_server": "http://server1.com", "status": False},
-            {"mcp_name": "server2", "mcp_server": "http://server2.com", "status": False}
+            {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": False},
+            {"mcp_name": "server2", "mcp_server": "http://server2.com", "enabled": True, "status": False}
         ]
         mock_default_tools = [
             ToolInfo(name="default_tool", description="Default Tool", params=[], source=ToolSourceEnum.MCP.value,
@@ -2494,7 +2495,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
     @patch('backend.services.tool_configuration_service.get_embedding_model_by_index_name')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
     def test_validate_local_tool_knowledge_base_search_missing_user_id(self, mock_get_vector_db_core,
-                                                                       mock_get_embedding_model_by_index_name, 
+                                                                       mock_get_embedding_model_by_index_name,
                                                                        mock_get_class, mock_get_knowledge_map):
         """Test knowledge_base_search tool validation when user_id is missing - should still succeed"""
         mock_tool_class = Mock()
@@ -2672,7 +2673,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_vdb_core = Mock()
         mock_get_vector_db_core.return_value = mock_vdb_core
         mock_get_knowledge_map.return_value = {}
-        
+
         # Mock rerank model
         mock_rerank_model = Mock()
         mock_get_rerank_model.return_value = mock_rerank_model
@@ -2688,10 +2689,10 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         )
 
         assert result == "knowledge base search result with rerank"
-        
+
         # Verify rerank model was fetched
         mock_get_rerank_model.assert_called_once_with(tenant_id="tenant1", model_name="rerank_model")
-        
+
         # Verify tool class was called with rerank_model
         call_kwargs = mock_tool_class.call_args.kwargs
         assert call_kwargs['rerank_model'] == mock_rerank_model

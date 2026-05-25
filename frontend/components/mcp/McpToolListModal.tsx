@@ -74,7 +74,7 @@ export default function McpToolListModal({
       footer={[<Button key="close" onClick={onCancel}>{t("mcpConfig.modal.close")}</Button>]}
     >
       <Table
-        loading={{ spinning: loading, tip: t("mcpConfig.toolsList.loading") }}
+        loading={{ spinning: loading, description: t("mcpConfig.toolsList.loading") }}
         columns={toolColumns}
         dataSource={tools}
         rowKey="name"

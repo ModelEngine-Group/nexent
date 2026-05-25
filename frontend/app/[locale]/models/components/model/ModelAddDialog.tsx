@@ -830,7 +830,6 @@ export const ModelAddDialog = ({
   };
 
   const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
-  const isRerankModel = form.type === MODEL_TYPES.RERANK;
   const isSTTModel = form.type === MODEL_TYPES.STT;
 
   return (

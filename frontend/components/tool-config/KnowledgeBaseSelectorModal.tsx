@@ -846,7 +846,7 @@ export default function KnowledgeBaseSelectorModal({
       <div className="flex-1 overflow-y-auto overflow-x-hidden bg-white">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
-            <Spin tip={t("common.loading")} />
+            <Spin description={t("common.loading")} />
           </div>
         ) : filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">

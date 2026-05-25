@@ -37,11 +37,14 @@ import { useMemo } from "react";
 import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
 import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection";
 import log from "@/lib/logger";
+import { authService } from "@/services/authService";
+import { getPasswordChecks, getStrengthLevel } from "@/lib/utils";
 import {
   getUserTokens,
   deleteUserToken,
   createUserToken,
 } from "@/services/tokenService";
+import { ErrorCode } from "@/const/errorCode";
 
 /**
  * UserProfileComp - User profile and account settings component
@@ -86,6 +89,9 @@ export default function UserProfileComp() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+  // Password strength state for change password modal
+  const [newPasswordValue, setNewPasswordValue] = useState("");
 
   // AK/SK state
   const [akInfo, setAkInfo] = useState<string | null>(null);
@@ -336,7 +342,8 @@ export default function UserProfileComp() {
                 </div>
 
                 <div
-                  className="w-full px-6 py-3 flex items-center justify-between opacity-50 cursor-not-allowed"
+                  className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+                  onClick={() => setIsPasswordModalOpen(true)}
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
@@ -521,22 +528,34 @@ export default function UserProfileComp() {
         }
         open={isPasswordModalOpen}
         onOk={() => passwordForm.submit()}
-        onCancel={() => setIsPasswordModalOpen(false)}
+        onCancel={() => {
+          setIsPasswordModalOpen(false);
+          passwordForm.resetFields();
+          setNewPasswordValue("");
+        }}
         okText={t("common.save") || "Save"}
         cancelText={t("common.cancel") || "Cancel"}
         width={500}
+        confirmLoading={false}
       >
-        <Alert
-          message={t("profile.passwordAlertTitle") || "Note"}
-          description={t("profile.passwordAlertDesc") || "Password change functionality will be available soon."}
-          type="info"
-          showIcon
-          className="mb-4"
-        />
         <Form
           form={passwordForm}
           layout="vertical"
-          onFinish={(values) => {
+          onFinish={async (values) => {
+            const result = await authService.updatePassword(
+              values.currentPassword,
+              values.newPassword
+            );
+            if (result.errorCode) {
+              const errorMessages: Record<string, string> = {
+                [ErrorCode.INVALID_CREDENTIALS]: t("profile.invalidOldPassword"),
+                [ErrorCode.PASSWORD_WEAK]: t("profile.passwordWeak"),
+                [ErrorCode.PASSWORD_SAME_AS_OLD]: t("profile.passwordSameAsOld"),
+              };
+              const translatedError = errorMessages[result.errorCode] || result.error;
+              antdMessage.error(translatedError);
+              return;
+            }
             antdMessage.success(t("profile.passwordUpdateSuccess") || "Password updated successfully");
             setIsPasswordModalOpen(false);
             passwordForm.resetFields();
@@ -554,11 +573,45 @@ export default function UserProfileComp() {
             label={t("profile.newPassword") || "New Password"}
             rules={[
               { required: true, message: t("auth.passwordRequired") },
-              { min: 6, message: t("auth.passwordMinLength") },
+              {
+                pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/,
+                message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+              },
             ]}
           >
-            <Input.Password placeholder={t("profile.enterNewPassword") || "Enter new password"} />
+            <Input.Password
+              placeholder={t("profile.enterNewPassword") || "Enter new password"}
+              onChange={(e) => setNewPasswordValue(e.target.value)}
+            />
           </Form.Item>
+
+          {/* Password Strength Indicator */}
+          {newPasswordValue && (() => {
+            const checks = getPasswordChecks(newPasswordValue);
+            const levelInfo = getStrengthLevel(newPasswordValue, t);
+            return (
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500">{t("auth.passwordStrength") || "Password strength"}</span>
+                  <span className="text-xs font-medium" style={{ color: levelInfo.color }}>
+                    {levelInfo.label}
+                  </span>
+                </div>
+                <div className="flex gap-1">
+                  {[0, 1, 2, 3].map((level) => (
+                    <div
+                      key={level}
+                      className="h-1 flex-1 rounded-full transition-colors"
+                      style={{
+                        backgroundColor: level <= levelInfo.level ? levelInfo.color : "#e5e7eb"
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           <Form.Item
             name="confirmPassword"
             label={t("auth.confirmPasswordLabel") || "Confirm Password"}
