@@ -28,7 +28,8 @@ patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
+from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException
+from consts.error_code import ErrorCode
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
 # Import the modules we need
@@ -47,7 +48,7 @@ client = TestClient(app)
 
 class MockUser:
     """Mock User class for testing"""
-    
+
     def __init__(self, user_id, email):
         self.id = user_id
         self.email = email
@@ -283,7 +284,7 @@ class TestUserSignup:
                 }
             )
 
-            assert response.status_code == HTTPStatus.NOT_ACCEPTABLE
+            assert response.status_code == HTTPStatus.BAD_REQUEST
             data = response.json()
             assert data["detail"] == "WEAK_PASSWORD"
 
@@ -1074,5 +1075,133 @@ class TestDeleteTokenEndpoint:
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
+class TestUpdatePasswordEndpoint:
+    """Tests for PUT /password endpoint."""
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_success(self, mock_get_user_id, mock_update_password):
+        """Test successful password update."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.return_value = True
+
+        response = client.put(
+            "/user/password",
+            json={
+                "old_password": "OldPass123",
+                "new_password": "NewPass456"
+            },
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "Password updated successfully"
+        mock_update_password.assert_awaited_once_with(
+            user_id="user-123",
+            old_password="OldPass123",
+            new_password="NewPass456"
+        )
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_invalid_old_password(self, mock_get_user_id, mock_update_password):
+        """Test password update with incorrect old password."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.side_effect = UnauthorizedError("Invalid old password")
+
+        with pytest.raises(AppException) as exc_info:
+            client.put(
+                "/user/password",
+                json={
+                    "old_password": "WrongPass123",
+                    "new_password": "NewPass456"
+                },
+                headers={"Authorization": "Bearer test-jwt-token"}
+            )
+
+        assert exc_info.value.error_code == ErrorCode.PROFILE_INVALID_CREDENTIALS
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_weak_password(self, mock_get_user_id, mock_update_password):
+        """Test password update with weak password."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.side_effect = AppException(ErrorCode.PROFILE_PASSWORD_WEAK)
+
+        with pytest.raises(AppException) as exc_info:
+            client.put(
+                "/user/password",
+                json={
+                    "old_password": "OldPass123",
+                    "new_password": "weak1234"
+                },
+                headers={"Authorization": "Bearer test-jwt-token"}
+            )
+
+        assert exc_info.value.error_code == ErrorCode.PROFILE_PASSWORD_WEAK
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_same_as_old(self, mock_get_user_id, mock_update_password):
+        """Test password update with new password same as old."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.side_effect = AppException(ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD)
+
+        with pytest.raises(AppException) as exc_info:
+            client.put(
+                "/user/password",
+                json={
+                    "old_password": "SamePass123",
+                    "new_password": "SamePass123"
+                },
+                headers={"Authorization": "Bearer test-jwt-token"}
+            )
+
+        assert exc_info.value.error_code == ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_unexpected_error(self, mock_get_user_id, mock_update_password):
+        """Test password update with unexpected error."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.side_effect = Exception("Database error")
+
+        response = client.put(
+            "/user/password",
+            json={
+                "old_password": "OldPass123",
+                "new_password": "NewPass456"
+            },
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+    def test_update_password_missing_old_password(self):
+        """Test password update with missing old_password field."""
+        response = client.put(
+            "/user/password",
+            json={
+                "new_password": "NewPass456"
+            },
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_update_password_missing_new_password(self):
+        """Test password update with missing new_password field."""
+        response = client.put(
+            "/user/password",
+            json={
+                "old_password": "OldPass123"
+            },
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
 if __name__ == "__main__":
-    pytest.main([__file__]) 
+    pytest.main([__file__])

@@ -19,6 +19,7 @@ export const API_ENDPOINTS = {
     revoke: `${API_BASE_URL}/user/revoke`,
     tokens: `${API_BASE_URL}/user/tokens`,
     deleteToken: (tokenId: number) => `${API_BASE_URL}/user/tokens/${tokenId}`,
+    updatePassword: `${API_BASE_URL}/user/password`,
   },
   oauth: {
     providers: `${API_BASE_URL}/user/oauth/providers`,
