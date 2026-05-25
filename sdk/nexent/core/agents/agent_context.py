@@ -64,6 +64,12 @@ class ContextManager:
         self._step_local_log: List[CompressionCallRecord] = []
         self._lock = threading.Lock()
 
+        # Token accounting for benchmark instrumentation.
+        # Recorded by compress_if_needed at each return point so benchmarks
+        # can compute token_reduction = 1 - last_compressed / last_uncompressed.
+        self._last_uncompressed_token_count: Optional[int] = None
+        self._last_compressed_token_count: Optional[int] = None
+
         if self.config.max_summary_input_tokens <= 0:
             self.config.max_summary_input_tokens = int(self.config.token_threshold * 1.2)
         if self.config.max_summary_reduce_tokens <= 0:
@@ -248,9 +254,13 @@ class ContextManager:
         # G1
         if not self.config.enabled:
             return original_messages
-        
+
         if self._estimate_tokens(memory) <= self.config.token_threshold:
-            return original_messages 
+            # No compression needed; record that compressed == uncompressed
+            # so benchmark token_reduction reads as zero rather than stale.
+            self._last_uncompressed_token_count = self._msg_token_count(original_messages)
+            self._last_compressed_token_count = self._last_uncompressed_token_count
+            return original_messages
 
         with self._lock:
             # Run detection
@@ -303,11 +313,16 @@ class ContextManager:
                 self.compression_calls_log.append(record)
                 self._step_local_log.append(record)
 
-                return self._build_messages(
+                compressed_msgs = self._build_messages(
                     memory, prev_summary_step, prev_tail_steps, curr_kept_steps
-                ) 
+                )
+                self._last_uncompressed_token_count = self._msg_token_count(original_messages)
+                self._last_compressed_token_count = self._msg_token_count(compressed_msgs)
+                return compressed_msgs
 
             self._step_local_log.clear()
+
+            self._last_uncompressed_token_count = self._msg_token_count(original_messages)
 
             prev_steps = memory.steps[:current_run_start_idx]
             curr_steps = memory.steps[current_run_start_idx:]
@@ -406,6 +421,7 @@ class ContextManager:
                 memory, prev_summary_step, prev_tail_steps, curr_kept_steps
             )
             final_tokens = self._msg_token_count(final_messages)
+            self._last_compressed_token_count = final_tokens
             # This situation is unlikely to occur unless the threshold itself is set unreasonably small
             if final_tokens > int(self.config.token_threshold * 1.1):
                 logger.warning(
@@ -470,7 +486,8 @@ class ContextManager:
                 if input_tokens <= self.config.max_summary_input_tokens:
                     summary_text = self._generate_summary(
                         incremental_input, model,
-                        call_type="previous_incremental"
+                        call_type="previous_incremental",
+                        prompt_type="incremental",
                     )
                     if summary_text:
                         last_t, last_a = pairs_to_compress[-1]
@@ -584,7 +601,9 @@ class ContextManager:
                 input_tokens = self._estimate_text_tokens(incremental_input)
                 if input_tokens <= self.config.max_summary_input_tokens:
                     summary_text = self._generate_summary(
-                        incremental_input, model, call_type="current_incremental"
+                        incremental_input, model,
+                        call_type="current_incremental",
+                        prompt_type="incremental",
                     )
                     if summary_text:
                         self._current_summary_cache = CurrentSummaryCache(
@@ -770,9 +789,10 @@ class ContextManager:
             "input length", "exceeds context", "context window",
         ))
 
-    def _generate_summary(self, text: str, model, call_type: str = "summary") -> Optional[str]:
+    def _generate_summary(self, text: str, model, call_type: str = "summary",
+                          prompt_type: str = "initial") -> Optional[str]:
         try:
-            return self._do_generate_summary(text, model, call_type)
+            return self._do_generate_summary(text, model, call_type, prompt_type)
         except Exception as e:
             if self._is_context_length_error(e):
                 logger.warning(f"{call_type} exceeds context limit; retrying with 2/3 budget truncation")
@@ -780,24 +800,45 @@ class ContextManager:
                     text, int(self.config.max_summary_input_tokens * 0.66)
                 )
                 try:
-                    return self._do_generate_summary(shrunk, model, call_type + "_retry")
+                    return self._do_generate_summary(shrunk, model, call_type + "_retry", prompt_type)
                 except Exception as e2:
                     logger.error(f"Retry still failed: {e2}")
                     return None
             logger.error(f"Summary generation exception: {e}")
             return None
 
-    def _do_generate_summary(self, text: str, model, call_type: str = "summary") -> Optional[str]:
+    def _do_generate_summary(self, text: str, model, call_type: str = "summary",
+                             prompt_type: str = "initial") -> Optional[str]:
+        # prompt_type selects which system prompt to render. For "incremental"
+        # we use the dedicated incremental_summary_system_prompt (with fallback
+        # to summary_system_prompt if it is empty) and a user prompt phrased
+        # as an update; "initial" keeps the original fresh-compaction phrasing.
+        if prompt_type == "incremental":
+            system_prompt = (
+                self.config.incremental_summary_system_prompt
+                or self.config.summary_system_prompt
+            )
+        else:
+            system_prompt = self.config.summary_system_prompt
+
         schema_desc = json.dumps(
             self.config.summary_json_schema, ensure_ascii=False, indent=2
         )
-        user_prompt = (
-            f"Output a summary following this JSON structure:\n{schema_desc}\n\n"
-            f"Conversation content to summarize:\n{text}"
-        )
+        if prompt_type == "incremental":
+            # text already contains the "## Previous Summary" + "## New ..."
+            # sections; the prompt only needs to instruct the update.
+            user_prompt = (
+                f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
+                f"{text}"
+            )
+        else:
+            user_prompt = (
+                f"Output a summary following this JSON structure:\n{schema_desc}\n\n"
+                f"Conversation content to summarize:\n{text}"
+            )
         messages = [
             ChatMessage(role=MessageRole.SYSTEM,
-                        content=[{"type": "text", "text": self.config.summary_system_prompt}]),
+                        content=[{"type": "text", "text": system_prompt}]),
             ChatMessage(role=MessageRole.USER,
                         content=[{"type": "text", "text": user_prompt}]),
         ]
@@ -940,6 +981,67 @@ class ContextManager:
                 "total_input_tokens": sum(r.input_tokens for r in real_calls),
                 "total_output_tokens": sum(r.output_tokens for r in real_calls),
                 "total_cache_hits": sum(1 for r in self.compression_calls_log if r.cache_hit),
+            }
+
+    # ============================================================
+    #  Benchmark export APIs
+    # ============================================================
+
+    def get_token_counts(self) -> dict:
+        """Return token counts from the most recent compression pass.
+
+        Returns a dict with ``last_uncompressed`` and ``last_compressed`` token
+        counts, enabling accurate ``token_reduction = 1 - compressed/uncompressed``
+        measurement in benchmarks. Values are None before the first compress_if_needed
+        call on this instance.
+        """
+        with self._lock:
+            return {
+                "last_uncompressed": self._last_uncompressed_token_count,
+                "last_compressed": self._last_compressed_token_count,
+            }
+
+    def export_summary(self) -> dict:
+        """Export current compression summary state for benchmark inspection.
+
+        Returns a dict with the cached summary texts, cache metadata, and a
+        compression_boundary block describing which pairs/steps fed the
+        summary versus which were retained verbatim. Benchmarks use the
+        boundary block to validate probe design: probes should only target
+        information that was actually compressed.
+        """
+        with self._lock:
+            prev_cache = self._previous_summary_cache
+            curr_cache = self._current_summary_cache
+            return {
+                "previous_summary": prev_cache.summary_text if prev_cache else None,
+                "current_summary": curr_cache.summary_text if curr_cache else None,
+                "previous_cache_info": (
+                    {
+                        "covered_pairs": prev_cache.covered_pairs,
+                        "is_fallback": "[CONTEXT COMPACTION" in (prev_cache.summary_text or ""),
+                    }
+                    if prev_cache else None
+                ),
+                "current_cache_info": (
+                    {
+                        "end_steps": curr_cache.end_steps,
+                        "is_fallback": "[CONTEXT COMPACTION" in (curr_cache.summary_text or ""),
+                    }
+                    if curr_cache else None
+                ),
+                "compression_boundary": {
+                    "config_keep_recent_pairs": self.config.keep_recent_pairs,
+                    "config_keep_recent_steps": self.config.keep_recent_steps,
+                    "previous_compressed_pairs": (
+                        prev_cache.covered_pairs if prev_cache else 0
+                    ),
+                    "previous_retained_pairs": self.config.keep_recent_pairs,
+                    "current_compressed_steps": (
+                        curr_cache.end_steps if curr_cache else 0
+                    ),
+                    "current_retained_steps": self.config.keep_recent_steps,
+                },
             }
 
     # ============================================================

@@ -31,6 +31,21 @@ class ContextManagerConfig:
         "pending items, and context to preserve. Output strict JSON format without markdown blocks."
     )
 
+    # Separate prompt for INCREMENTAL summary updates ("here is the previous
+    # summary + new turns; produce an updated summary"). When empty the
+    # incremental compression path falls back to summary_system_prompt for
+    # backwards compatibility.
+    incremental_summary_system_prompt: str = (
+        "You are a conversation summarization assistant updating an existing "
+        "structured summary. The input has two sections: '## Previous Summary' "
+        "(the prior compaction) and '## New Conversations' or '## New Steps' "
+        "(turns that occurred after the prior compaction). Produce an updated "
+        "JSON summary that PRESERVES information from the previous summary "
+        "(do not drop it unless clearly obsolete), MERGES the new turns into "
+        "the appropriate fields, and KEEPS the same JSON schema. Do not include "
+        "narration outside the JSON. No markdown code blocks."
+    )
+
     summary_json_schema: Dict[str, Any] = field(default_factory=lambda: {
         "task_overview": "User's core request and success criteria (<=150 words)",
         "completed_work": "Work completed, files or results produced (<=200 words)",
