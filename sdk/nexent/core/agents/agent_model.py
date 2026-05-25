@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from threading import Event
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+
+logger = logging.getLogger("context_strategy")
 
 # Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
@@ -430,12 +433,31 @@ class TokenBudgetStrategy(ContextStrategy):
             comp_tokens = comp.token_estimate or comp.estimate_tokens()
             comp_budget = component_budgets.get(comp.component_type, token_budget)
             current_type_total = type_totals.get(comp.component_type, 0)
-            
-            if total_tokens + comp_tokens <= token_budget and current_type_total + comp_tokens <= comp_budget:
+
+            fits_total = total_tokens + comp_tokens <= token_budget
+            fits_type = current_type_total + comp_tokens <= comp_budget
+
+            if fits_total and fits_type:
                 selected.append(comp)
                 total_tokens += comp_tokens
                 type_totals[comp.component_type] = current_type_total + comp_tokens
-        
+            else:
+                # Surface the drop so operators can see when the prompt is
+                # being silently truncated by budget pressure. Identifying
+                # which constraint tripped (global vs per-type) is the most
+                # useful detail when tuning component_budgets.
+                reason = (
+                    "total_budget"
+                    if not fits_total else "type_budget"
+                )
+                logger.warning(
+                    "TokenBudgetStrategy dropped component type=%s priority=%d "
+                    "tokens=%d reason=%s (total %d/%d, type %d/%d)",
+                    comp.component_type, comp.priority, comp_tokens, reason,
+                    total_tokens, token_budget,
+                    current_type_total, comp_budget,
+                )
+
         return selected
 
     def get_strategy_name(self) -> str:
@@ -462,8 +484,15 @@ class BufferedStrategy(ContextStrategy):
         selected: List[ContextComponent] = []
         for comp_type, bucket in type_buckets.items():
             recent = bucket[-self.buffer_size:]
+            dropped = len(bucket) - len(recent)
+            if dropped > 0:
+                logger.warning(
+                    "BufferedStrategy dropped %d component(s) of type=%s "
+                    "(buffer_size=%d, total=%d)",
+                    dropped, comp_type, self.buffer_size, len(bucket),
+                )
             selected.extend(recent)
-        
+
         return sorted(selected, key=lambda c: c.priority, reverse=True)
 
     def get_strategy_name(self) -> str:
@@ -483,23 +512,37 @@ class PriorityWeightedStrategy(ContextStrategy):
         component_budgets: Dict[str, int]
     ) -> List[ContextComponent]:
         scored_components: List[Tuple[ContextComponent, float]] = []
-        
+
         for comp in components:
             relevance = comp.metadata.get("relevance_score", 1.0)
             score = comp.priority * 0.7 + relevance * 0.3 * 100
             if relevance >= self.relevance_threshold:
                 scored_components.append((comp, score))
-        
+            else:
+                logger.warning(
+                    "PriorityWeightedStrategy dropped component type=%s "
+                    "priority=%d relevance=%.3f<threshold=%.3f",
+                    comp.component_type, comp.priority,
+                    relevance, self.relevance_threshold,
+                )
+
         sorted_components = sorted(scored_components, key=lambda x: x[1], reverse=True)
         selected: List[ContextComponent] = []
         total_tokens = 0
-        
-        for comp, _ in sorted_components:
+
+        for comp, score in sorted_components:
             comp_tokens = comp.token_estimate or comp.estimate_tokens()
             if total_tokens + comp_tokens <= token_budget:
                 selected.append(comp)
                 total_tokens += comp_tokens
-        
+            else:
+                logger.warning(
+                    "PriorityWeightedStrategy dropped component type=%s "
+                    "priority=%d score=%.2f tokens=%d (total %d/%d)",
+                    comp.component_type, comp.priority, score, comp_tokens,
+                    total_tokens, token_budget,
+                )
+
         return selected
 
     def get_strategy_name(self) -> str:
