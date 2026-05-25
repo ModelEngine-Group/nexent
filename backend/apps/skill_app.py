@@ -29,12 +29,17 @@ skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
 
 # List routes first (no path parameters)
 @router.get("")
-async def list_skills(authorization: Optional[str] = Header(None)) -> JSONResponse:
-    """List all available skills for the current tenant."""
+async def list_skills(
+    tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to query specific tenant's skills"),
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """List all available skills for the current tenant (or a specific tenant for super admin)."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        service = SkillService(tenant_id=tenant_id)
-        skills = service.list_skills(tenant_id=tenant_id)
+        _, current_tenant_id = get_current_user_id(authorization)
+        # Super admin can query a specific tenant's skills; otherwise use current user's tenant
+        effective_tenant_id = tenant_id if tenant_id else current_tenant_id
+        service = SkillService(tenant_id=effective_tenant_id)
+        skills = service.list_skills(tenant_id=effective_tenant_id)
         return JSONResponse(content={"skills": skills})
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -44,16 +49,20 @@ async def list_skills(authorization: Optional[str] = Header(None)) -> JSONRespon
 
 
 @router.get("/official")
-async def list_official_skills(authorization: Optional[str] = Header(None)) -> JSONResponse:
-    """List all official skills with installation status for the current tenant.
+async def list_official_skills(
+    tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to query specific tenant's skills"),
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """List all official skills with installation status for the current tenant (or a specific tenant for super admin).
 
     Returns skills that have source='official', each with a status field:
       - installable: skill exists globally but not yet installed for this tenant
       - installed: skill already exists for this tenant
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        skills = get_official_skills_with_status(tenant_id=tenant_id)
+        _, current_tenant_id = get_current_user_id(authorization)
+        effective_tenant_id = tenant_id if tenant_id else current_tenant_id
+        skills = get_official_skills_with_status(tenant_id=effective_tenant_id)
         return JSONResponse(content={"skills": skills})
     except Exception as e:
         logger.error(f"Error listing official skills: {e}")
@@ -68,20 +77,22 @@ class InstallSkillsRequest(BaseModel):
 @router.post("/install")
 async def install_skills(
     request: InstallSkillsRequest,
+    tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to install skills for a specific tenant"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
-    """Install official skills for the current tenant.
+    """Install official skills for the current tenant (or a specific tenant for super admin).
 
     Uses ZIP-based installation for each skill name provided.
     Skills that already exist are skipped.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, current_tenant_id = get_current_user_id(authorization)
         from services.skill_service import install_skills_from_zip_for_tenant
 
+        effective_tenant_id = tenant_id if tenant_id else current_tenant_id
         installed_names = install_skills_from_zip_for_tenant(
             skill_names=request.skill_names,
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             user_id=user_id,
             locale=request.locale
         )

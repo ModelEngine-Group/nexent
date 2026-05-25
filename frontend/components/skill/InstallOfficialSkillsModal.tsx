@@ -13,12 +13,14 @@ interface InstallOfficialSkillsModalProps {
   open: boolean;
   onClose: () => void;
   onInstalled: () => void;
+  tenantId?: string;
 }
 
 export function InstallOfficialSkillsModal({
   open,
   onClose,
   onInstalled,
+  tenantId,
 }: InstallOfficialSkillsModalProps) {
   const { t } = useTranslation("common");
 
@@ -38,7 +40,7 @@ export function InstallOfficialSkillsModal({
     setInstalling(new Set());
     setInstalledSession(new Set());
 
-    fetchOfficialSkillsWithStatus()
+    fetchOfficialSkillsWithStatus(tenantId)
       .then((data) => {
         if (cancelled) return;
         setSkills(data);
@@ -69,7 +71,7 @@ export function InstallOfficialSkillsModal({
 
     const names = Array.from(selectedIds);
     try {
-      await installOfficialSkills(names);
+      await installOfficialSkills(names, undefined, tenantId);
       setInstalling(new Set());
       setInstalledSession(new Set(names));
       message.success(

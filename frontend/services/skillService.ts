@@ -154,9 +154,10 @@ export const processSkillStream = async (
 /**
  * Load skills for lists (tenant-resources table, etc.).
  * Maps API payload to {@link SkillListItem} including config_schemas for config editing.
+ * @param tenantId - Optional tenant ID for super admin to query a specific tenant's skills.
  */
-export async function fetchSkillsList(): Promise<SkillListItem[]> {
-  const res = await fetchSkills();
+export async function fetchSkillsList(tenantId?: string): Promise<SkillListItem[]> {
+  const res = await fetchSkills(tenantId);
   if (!res.success) {
     throw new Error(res.message || "Failed to fetch skills");
   }
@@ -825,10 +826,14 @@ export const stopSkillCreation = async (taskId: string): Promise<boolean> => {
 /**
  * Fetch official skills with installation status for a tenant.
  * Used in the tenant creation flow to show which skills are installable.
+ * @param tenantId - Optional tenant ID for super admin to query a specific tenant's skills.
  */
-export async function fetchOfficialSkillsWithStatus(): Promise<InstallableSkill[]> {
+export async function fetchOfficialSkillsWithStatus(tenantId?: string): Promise<InstallableSkill[]> {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.skills.official);
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.official}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.official;
+    const response = await fetchWithAuth(url);
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status}`);
     }
@@ -849,10 +854,14 @@ export async function fetchOfficialSkillsWithStatus(): Promise<InstallableSkill[
 
 export async function installOfficialSkills(
   skillNames: string[],
-  locale: string = "en"
+  locale: string = "en",
+  tenantId?: string
 ): Promise<{ installed: string[]; total: number }> {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.skills.install, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.install}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.install;
+    const response = await fetchWithAuth(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ skill_names: skillNames, locale }),

@@ -985,12 +985,16 @@ export const validateTool = async (
 };
 
 /**
- * Fetch all available skills
+ * Fetch all available skills for a specific tenant (used by super admin).
+ * @param tenantId - Optional tenant ID. If not provided, fetches for the current user's tenant.
  * @returns list of skills with skill_id, name, description, source, etc.
  */
-export const fetchSkills = async () => {
+export const fetchSkills = async (tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.skills.list, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.list}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.list;
+    const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
