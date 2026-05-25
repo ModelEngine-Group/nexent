@@ -1891,6 +1891,7 @@ export default function AgentImportWizard({
       open={visible}
       onCancel={handleCancel}
       width={800}
+      zIndex={1050}
       footer={
         <div className="flex justify-between">
           <Button onClick={handleCancel}>

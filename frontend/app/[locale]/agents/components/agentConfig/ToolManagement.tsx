@@ -304,7 +304,7 @@ export default function ToolManagement({
           <span
             style={{
               display: "block",
-              maxWidth: "70px",
+              maxWidth: "100px",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -575,8 +575,8 @@ export default function ToolManagement({
             height: "100%",
           }}
           tabBarStyle={{
-            minWidth: "80px",
-            maxWidth: "100px",
+            minWidth: "120px",
+            maxWidth: "120px",
             padding: "4px 0",
             margin: 0,
           }}

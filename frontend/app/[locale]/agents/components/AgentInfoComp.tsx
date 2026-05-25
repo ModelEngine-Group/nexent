@@ -16,17 +16,7 @@ import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import AgentVersionPubulishModal from "../versions/AgentVersionPubulishModal";
 
-export interface AgentInfoCompProps {
-  isShowVersionManagePanel: boolean;
-  openVersionManagePanel: () => void;
-  closeVersionManagementPanel: () => void;
-}
-
-export default function AgentInfoComp({
-  isShowVersionManagePanel,
-  openVersionManagePanel,
-  closeVersionManagementPanel,
-}: AgentInfoCompProps) {
+export default function AgentInfoComp() {
   const { t } = useTranslation("common");
 
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
@@ -83,45 +73,16 @@ export default function AgentInfoComp({
                 className="w-full"
               >
                 <Flex justify="flex-start" align="center" gap={8}>
-                  <Badge count={3} color="blue" />
-                  <h2 className="text-lg font-medium">
+                  <Badge count={2} color="blue" />
+                  <h2 className="text-[16px] font-medium">
                     {t("guide.steps.describeBusinessLogic.title")}
                   </h2>
                 </Flex>
-                <Button
-                  icon={<GitBranch size={16} />}
-                  onClick={isShowVersionManagePanel ? closeVersionManagementPanel : openVersionManagePanel}
-                  type={isShowVersionManagePanel ? "primary" : "default"}
-                >
-                  {t("agent.version.manage")}
-                </Button>
               </Flex>
             </Col>
           </Row>
 
           <Divider style={{ margin: "10px 0" }} />
-          {!isCreatingMode && agentInfo?.current_version_no !== 0 && total > 0 && (
-            <Row style={{ marginBottom: "8px" }}>
-              <Col className="w-full">
-                <Flex
-                  justify="space-between"
-                  align="center"
-                  className="w-full py-2 px-4 bg-gray-100 rounded-lg text-gray-700"
-                >
-                  <Flex justify="start" align="center" gap={4}>
-                    <History size={16} />
-                    <span className="text-sm">
-                      {t("agent.version.currentVersion")} :
-                    </span>
-                    <Tag color="cyan" variant="outlined" className="rounded-md font-mono text-sm"> {agentVersionDetail?.version.version_name}</Tag>
-                  </Flex>
-                  <Flex justify="end" align="center" gap={8} >
-                    {t("agent.version.totalVersions", { count: total ?? 0 })}
-                  </Flex>
-                </Flex>
-              </Col>
-            </Row>
-          )}
 
           <Row className="flex-1 min-h-0 h-full">
             <Col xs={24} className="h-full">

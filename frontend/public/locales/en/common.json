@@ -360,7 +360,7 @@
   "agent.action.viewCallRelationship": "View Call Relationship",
   "agent.error.nameExists": "Agent var name {{name}} already exists, please modify",
   "agent.error.displayNameExists": "Agent name {{displayName}} already exists, please modify",
-  "agent.error.modelUnavailable": "LLM {{modelName}} is unavailable, please modify",
+  "agent.error.modelUnavailable": "LLM is unavailable, please modify",
   "agent.debug.placeholder": "Enter test question...",
   "agent.debug.stop": "Stop",
   "agent.debug.clear": "Clear",
@@ -1126,7 +1126,7 @@
   "toolManagement.message.refreshFailed": "Failed to refresh tools list",
   "toolManagement.message.refreshFailedRetry": "Failed to refresh tools list, please try again later",
 
-  "skillPool.title": "Select Agent Skills",
+  "skillPool.title": "Select Skills",
   "skillPool.noSkills": "No skills available",
   "skillPool.noDescription": "No description",
   "skillPool.group.official": "Official",

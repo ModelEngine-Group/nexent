@@ -4,8 +4,6 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Button,
-  Tooltip,
-  Tabs,
   Form,
   Input,
   Select,
@@ -16,7 +14,7 @@ import {
   Card,
   App,
 } from "antd";
-import type { TabsProps } from "antd";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Zap, Maximize2, Settings2, Sparkles } from "lucide-react";
 
 import log from "@/lib/logger";
@@ -166,53 +164,6 @@ export default function AgentGenerateDetail({
     editedAgent.prompt_template_id,
     editedAgent.prompt_template_name,
   ]);
-
-  // Only show "no edit permission" tooltip when the panel is active and agent is read-only.
-  // Note: when no agent is selected, AgentInfoComp shows an overlay and we should not show
-  // this tooltip in that state.
-  const showNoEditPermissionTip =
-    !editable && currentAgentId !== null && currentAgentId !== undefined;
-
-  const noEditPermissionTitle = showNoEditPermissionTip
-    ? t("agent.noEditPermission")
-    : undefined;
-
-  const wrapNoEditTooltipBlock = (node: React.ReactNode) => {
-    return (
-      <Tooltip title={noEditPermissionTitle}>
-        <span style={{ display: "block" }}>{node}</span>
-      </Tooltip>
-    );
-  };
-
-  const wrapNoEditTooltipInline = (node: React.ReactNode) => {
-    return (
-      <Tooltip title={noEditPermissionTitle}>
-        <span style={{ display: "inline-block" }}>{node}</span>
-      </Tooltip>
-    );
-  };
-
-
-  const stylesObject: TabsProps["styles"] = {
-    root: {},
-    header: {},
-    item: {
-      fontWeight: "500",
-      color: "#000",
-      padding: `6px 10px`,
-      textAlign: "center",
-      backgroundColor: "#fff",
-    },
-    indicator: { height: 4 },
-    content: {
-      backgroundColor: "#fff",
-      borderWidth: 1,
-      padding: "4px 8px 8px",
-      borderRadius: "0 0 8px 8px",
-      height: "100%",
-    },
-  };
 
   // Local state for business info to avoid frequent updates
   const [businessInfo, setBusinessInfo] = useState({
@@ -517,7 +468,7 @@ export default function AgentGenerateDetail({
   };
 
   const renderExpandButton = (type: "duty" | "constraint" | "few-shots") => {
-    return wrapNoEditTooltipInline(
+    return (
       <Button
         onClick={() => handleOpenExpandModal(type)}
         title={t("systemPrompt.button.expand")}
@@ -538,7 +489,7 @@ export default function AgentGenerateDetail({
   };
 
   const renderOptimizeButton = (type: "duty" | "constraint" | "few-shots") => {
-    return wrapNoEditTooltipInline(
+    return (
       <Button
         onClick={() => handleOpenOptimizeModal(type)}
         title={t("systemPrompt.button.optimize")}
@@ -577,7 +528,7 @@ export default function AgentGenerateDetail({
     justifyContent: "space-between",
     padding: "2px 10px 4px",
     borderBottom: "1px solid #eef2f7",
-    backgroundColor: "#fbfdff",
+    backgroundColor: "#fff",
     flexShrink: 0,
   };
 
@@ -622,12 +573,12 @@ export default function AgentGenerateDetail({
     onBlurUpdate: (value: string) => void
   ) => {
     return (
-      <div className="overflow-y-auto overflow-x-hidden h-full flex flex-col">
+      <div className="flex flex-col h-full">
         {renderPromptToolbar(type, title)}
         <Form
           form={form}
           layout="vertical"
-          className="h-full flex-1 min-h-0 agent-config-form"
+          className="flex flex-col flex-1 min-h-0 h-full"
           disabled={isGenerating}
         >
           {renderPromptEditor(fieldName, title, onBlurUpdate)}
@@ -641,23 +592,17 @@ export default function AgentGenerateDetail({
     placeholder: string,
     onBlurUpdate: (value: string) => void
   ) => {
-    const item = (
-      <Form.Item name={fieldName} className="mb-0 h-full">
-        <TextArea
-          placeholder={placeholder}
-          style={promptEditorStyle}
-          disabled={!editable || isGenerating}
-          onBlur={(e) => onBlurUpdate(e.target.value)}
-        />
+    return (
+      <Form.Item name={fieldName} className="mb-0 h-full [&_.ant-row]:!h-full [&_.ant-col]:!h-full [&_.ant-form-item-control-input]:!h-full [&_.ant-form-item-control-input-content]:!h-full">
+        <div className="h-full">
+          <TextArea
+            placeholder={placeholder}
+            style={promptEditorStyle}
+            disabled={!editable || isGenerating}
+            onBlur={(e) => onBlurUpdate(e.target.value)}
+          />
+        </div>
       </Form.Item>
-    );
-
-    return showNoEditPermissionTip ? (
-      <Tooltip title={t("agent.noEditPermission")}>
-        <div className="h-full">{item}</div>
-      </Tooltip>
-    ) : (
-      item
     );
   };
 
@@ -971,30 +916,17 @@ export default function AgentGenerateDetail({
           // Track the agent this generation was for
           const generationAgentId = effectiveAgentId;
 
-          // Check if we're still on the same agent
           const currentEffectiveAgentId = useAgentConfigStore.getState().currentAgentId ?? 0;
           const isSameAgent = generationInitiatorRef.current === currentEffectiveAgentId;
 
-          // Clear generating state immediately for ALL cases
-          // This prevents the "stuck in generating" state when user switches agents
           setIsGenerating(false);
           generationInitiatorRef.current = null;
 
-          // If not on same agent, keep the cache so user can restore when switching back
-          // Do NOT clear cache here - the cache contains the completed generation result
-          // Always mark cache as finished (isGenerating=false) so switch-back effect can restore it
           if (!isSameAgent) {
             setAgentGenerationStatus(generationAgentId, false);
             return;
           }
 
-          // On same agent: proceed with updating form values and store
-
-          // After generation completes, get all form values and update parent component state
-          // CRITICAL: Read from localStorage cache FIRST as the primary source, because:
-          // 1. localStorage is written synchronously with each streaming update (always up-to-date)
-          // 2. generatedContent React state may have closure staleness issues
-          // 3. form.getFieldsValue() depends on React state updates which may lag
           const formValues = form.getFieldsValue();
           
           // Read cached values as primary source (always fresh due to sync writes)
@@ -1084,295 +1016,14 @@ export default function AgentGenerateDetail({
     t,
   ]);
 
-  const generationControlSelectStyle = {
-    width: "min(300px, 100%)",
-    minWidth: "220px",
-    maxWidth: "300px",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  };
-
   const generationControlLabelStyle = {
     width: 84,
     minWidth: 84,
     flexShrink: 0,
   };
 
-  // Tab items configuration
-  const tabItems = [
-    {
-      key: "agent-info",
-      label: t("agent.info.title"),
-      children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full px-3">
-          <Row gutter={[16, 16]}>
-            <Col span={24}>
-              {wrapNoEditTooltipBlock(
-                <Form form={form} layout="vertical" disabled={!editable || isGenerating}>
-                <Form.Item
-                  name="agentDisplayName"
-                  label={t("agent.displayName")}
-                  rules={[
-                    {
-                      required: true,
-                      message: t("agent.info.name.error.empty"),
-                    },
-                    {
-                      max: 50,
-                      message: t("agent.info.name.error.length"),
-                    },
-                    { validator: validateAgentDisplayNameUnique },
-                  ]}
-                  validateTrigger={["onBlur"]}
-                  className="mb-3"
-                >
-                  <Input
-                    placeholder={t("agent.displayNamePlaceholder")}
-                    onBlur={(e) =>
-                      updateProfileInfo({ display_name: e.target.value })
-                    }
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  name="agentName"
-                  label={t("agent.name")}
-                  rules={[
-                    {
-                      required: true,
-                      message: t("agent.info.name.error.empty"),
-                    },
-                    { max: 50, message: t("agent.info.name.error.length") },
-                    {
-                      pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/,
-                      message: t("agent.info.name.error.format"),
-                    },
-                    { validator: validateAgentNameUnique },
-                  ]}
-                  validateTrigger={["onBlur"]}
-                  className="mb-3"
-                >
-                  <Input
-                    placeholder={t("agent.namePlaceholder")}
-                    onChange={(e) =>
-                      updateProfileInfo({ name: e.target.value })
-                    }
-                  />
-                </Form.Item>
-
-                <Can permission="group:read">
-                  <Form.Item
-                    name="group_ids"
-                    label={t("agent.userGroup")}
-                    className="mb-3"
-                  >
-                    <Select
-                      mode="multiple"
-                      placeholder={t("agent.userGroup")}
-                      options={groupSelectOptions}
-                      allowClear
-                      onChange={(value) => {
-                        const nextGroupIds = normalizeNumberArray(value || []);
-                        const currentGroupIds = normalizeNumberArray(
-                          editedAgent.group_ids || []
-                        );
-                        if (
-                          JSON.stringify(nextGroupIds) ===
-                          JSON.stringify(currentGroupIds)
-                        ) {
-                          return;
-                        }
-                        updateProfileInfo({ group_ids: nextGroupIds });
-                      }}
-                    />
-                  </Form.Item>
-                </Can>
-
-                <Can permission="group:read">
-                  <Form.Item
-                    name="ingroup_permission"
-                    label={t("tenantResources.knowledgeBase.permission")}
-                    className="mb-3"
-                  >
-                    <Select
-                      placeholder={t("tenantResources.knowledgeBase.permission")}
-                      options={[
-                        { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
-                        { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
-                        { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
-                      ]}
-                      onChange={(value) => {
-                        updateProfileInfo({ ingroup_permission: value });
-                      }}
-                    />
-                  </Form.Item>
-                </Can>
-
-                <Form.Item
-                  name="agentAuthor"
-                  label={t("agent.author")}
-                  rules={[
-                    {
-                      required: true,
-                      message: t("agent.authorPlaceholder"),
-                    },
-                  ]}
-                  className="mb-3"
-                >
-                  <Input
-                    placeholder={t("agent.authorPlaceholder")}
-                    onBlur={(e) =>
-                      updateProfileInfo({ author: e.target.value })
-                    }
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  name="mainAgentModel"
-                  label={t("businessLogic.config.model")}
-                  rules={[
-                    {
-                      required: true,
-                      message: t("businessLogic.config.modelPlaceholder"),
-                    },
-                  ]}
-                  help={
-                    availableLlmModels.length === 0 &&
-                    t("businessLogic.config.error.noAvailableModels")
-                  }
-                  className="mb-3"
-                >
-                  <Select
-                    placeholder={t("businessLogic.config.modelPlaceholder")}
-                    onChange={(value) => {
-                      const selectedModel = availableLlmModels.find(
-                        (m) => m.displayName === value
-                      );
-                      updateProfileInfo({
-                        model: value,
-                        model_id: selectedModel?.id || 0,
-                      });
-                    }}
-                  >
-                    {availableLlmModels.map((model) => (
-                      <Select.Option
-                        key={model.id}
-                        value={model.displayName}
-                        disabled={model.connect_status !== "available"}
-                      >
-                        {model.displayName}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-
-                <Form.Item
-                  name="mainAgentMaxStep"
-                  label={t("businessLogic.config.maxSteps")}
-                  rules={[
-                    {
-                      required: true,
-                      message: t("businessLogic.config.maxSteps"),
-                    },
-                    {
-                      type: "number",
-                      min: 1,
-                      max: 20,
-                      message: t("businessLogic.config.maxSteps"),
-                    },
-                  ]}
-                  className="mb-3"
-                >
-                  <InputNumber
-                    min={1}
-                    max={20}
-                    style={{ width: "100%" }}
-                    onBlur={() => {
-                      const value = form.getFieldValue("mainAgentMaxStep");
-                      updateProfileInfo({ max_step: value || 1 });
-                    }}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  name="provideRunSummary"
-                  label={t("agent.provideRunSummary")}
-                  rules={[
-                    {
-                      required: true,
-                      message: t("agent.provideRunSummary.error"),
-                    },
-                  ]}
-                  className="mb-3"
-                >
-                  <Select
-                    options={[
-                      { value: true, label: t("common.yes") },
-                      { value: false, label: t("common.no") },
-                    ]}
-                    onChange={(value) => {
-                      updateProfileInfo({ provide_run_summary: value });
-                    }}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  name="agentDescription"
-                  label={t("agent.description")}
-                  className="mb-3"
-                >
-                  <TextArea
-                    placeholder={t("agent.descriptionPlaceholder")}
-                    rows={6}
-                    style={{ minHeight: "150px" }}
-                    onBlur={(e) =>
-                      updateProfileInfo({ description: e.target.value })
-                    }
-                  />
-                </Form.Item>
-              </Form>
-              )}
-            </Col>
-          </Row>
-        </div>
-      ),
-    },
-    {
-      key: "duty",
-      label: t("systemPrompt.card.duty.title"),
-      children: renderPromptSection(
-        "duty",
-        "dutyPrompt",
-        t("systemPrompt.card.duty.title"),
-        (value) => updateProfileInfo({ duty_prompt: value })
-      ),
-    },
-    {
-      key: "constraint",
-      label: t("systemPrompt.card.constraint.title"),
-      children: renderPromptSection(
-        "constraint",
-        "constraintPrompt",
-        t("systemPrompt.card.constraint.title"),
-        (value) => updateProfileInfo({ constraint_prompt: value })
-      ),
-    },
-    {
-      key: "few-shots",
-      label: t("systemPrompt.card.fewShots.title"),
-      children: renderPromptSection(
-        "few-shots",
-        "fewShotsPrompt",
-        t("systemPrompt.card.fewShots.title"),
-        (value) => updateProfileInfo({ few_shots_prompt: value })
-      ),
-    },
-  ];
-
   return (
     <Flex vertical className="h-full">
-      {/* Business Logic Section */}
       <Row gutter={[12, 12]} className="mb-4">
         <Col xs={24}>
           <h4 className="text-md font-medium text-gray-700">
@@ -1385,43 +1036,49 @@ export default function AgentGenerateDetail({
               className="w-full rounded-md"
               styles={{ body: { padding: "16px" } }}
             >
-              {wrapNoEditTooltipBlock(
-                <Input.TextArea
-                  value={businessInfo.businessDescription}
-                  onChange={(e) =>
-                    setBusinessInfo((prev) => ({
-                      ...prev,
-                      businessDescription: e.target.value,
-                    }))
-                  }
-                  onBlur={() =>
-                    handleBusinessDescriptionChange(
-                      businessInfo.businessDescription
-                    )
-                  }
-                  placeholder={t("businessLogic.placeholder")}
-                  className="w-full resize-none text-sm mb-2"
-                  style={{
-                    minHeight: "80px",
-                    maxHeight: "160px",
-                    border: "none",
-                    boxShadow: "none",
-                    padding: 0,
-                    background: "transparent",
-                    overflowX: "hidden",
-                    overflowY: "auto",
-                  }}
-                  autoSize={false}
-                  disabled={!editable || isGenerating}
-                />
-              )}
+              <Input.TextArea
+                value={businessInfo.businessDescription}
+                onChange={(e) =>
+                  setBusinessInfo((prev) => ({
+                    ...prev,
+                    businessDescription: e.target.value,
+                  }))
+                }
+                onBlur={() =>
+                  handleBusinessDescriptionChange(
+                    businessInfo.businessDescription
+                  )
+                }
+                placeholder={t("businessLogic.placeholder")}
+                className="w-full resize-none text-sm mb-2"
+                style={{
+                  minHeight: "80px",
+                  maxHeight: "170px",
+                  border: "none",
+                  boxShadow: "none",
+                  padding: 0,
+                  background: "transparent",
+                  overflowX: "hidden",
+                  overflowY: "auto",
+                }}
+                autoSize={false}
+                disabled={!editable || isGenerating}
+              />
 
               {/* Control area */}
               <Flex vertical gap={12} style={{ width: "100%" }}>
                 <Flex align="center" justify="space-between" gap={12} wrap="wrap">
-                  <div style={{ flex: 1, display: "flex", alignItems: "center", minWidth: 0 }}>
+                  <div
+                    style={{
+                      flex: "1 1 auto",
+                      display: "flex",
+                      alignItems: "center",
+                      minWidth: 0,
+                      gap: 12,
+                    }}
+                  >
                     <span
-                      className="text-xs text-gray-600 mr-3"
+                      className="text-xs text-gray-600"
                       style={generationControlLabelStyle}
                     >
                       {t("businessLogic.config.template.label")}:
@@ -1433,28 +1090,32 @@ export default function AgentGenerateDetail({
                       options={promptTemplateSelectOptions}
                       size="middle"
                       disabled={!editable || isGenerating}
-                      style={generationControlSelectStyle}
+                      style={{ flex: "1 1 200px", minWidth: 0 }}
                     />
                   </div>
-                  <div>
-                    {wrapNoEditTooltipInline(
-                      <Button
-                        type="primary"
-                        size="middle"
-                        icon={<Settings2 size={16} />}
-                        onClick={() => setPromptTemplateManagerOpen(true)}
-                        disabled={!editable || isGenerating}
-                      >
-                        {t("businessLogic.config.template.manage")}
-                      </Button>
-                    )}
-                  </div>
+                  <Button
+                    type="primary"
+                    size="middle"
+                    icon={<Settings2 size={16} />}
+                    onClick={() => setPromptTemplateManagerOpen(true)}
+                    disabled={!editable || isGenerating}
+                  >
+                    {t("businessLogic.config.template.manage")}
+                  </Button>
                 </Flex>
 
                 <Flex align="center" justify="space-between" gap={12} wrap="wrap">
-                  <div style={{ flex: 1, display: "flex", alignItems: "center", minWidth: 0 }}>
+                  <div
+                    style={{
+                      flex: "1 1 auto",
+                      display: "flex",
+                      alignItems: "center",
+                      minWidth: 0,
+                      gap: 12,
+                    }}
+                  >
                     <span
-                      className="text-xs text-gray-600 mr-3"
+                      className="text-xs text-gray-600"
                       style={generationControlLabelStyle}
                     >
                       {t("model.type.llm")}:
@@ -1467,26 +1128,22 @@ export default function AgentGenerateDetail({
                       options={modelSelectOptions}
                       size="middle"
                       disabled={!editable || isGenerating}
-                      style={generationControlSelectStyle}
+                      style={{ flex: "1 1 200px", minWidth: 0 }}
                     />
                   </div>
-                  <div>
-                    {wrapNoEditTooltipInline(
-                      <Button
-                        type="primary"
-                        size="middle"
-                        onClick={handleGenerateAgent}
-                        disabled={!editable || loadingModels || isGenerating}
-                        icon={<Zap size={16} />}
-                      >
-                        <span className="button-text-full">
-                          {isGenerating
-                            ? t("businessLogic.config.button.generating")
-                            : t("businessLogic.config.button.generatePrompt")}
-                        </span>
-                      </Button>
-                    )}
-                  </div>
+                  <Button
+                    type="primary"
+                    size="middle"
+                    onClick={handleGenerateAgent}
+                    disabled={!editable || loadingModels || isGenerating}
+                    icon={<Zap size={16} />}
+                  >
+                    <span className="button-text-full">
+                      {isGenerating
+                        ? t("businessLogic.config.button.generating")
+                        : t("businessLogic.config.button.generatePrompt")}
+                    </span>
+                  </Button>
                 </Flex>
               </Flex>
             </Card>
@@ -1504,112 +1161,290 @@ export default function AgentGenerateDetail({
       </Row>
 
       {/* Tabs Content */}
-      <Row className="flex:1 min-h-0 h-full">
+      <Row className="flex-1 min-h-0" style={{ height: 0 }}>
         <Col className="w-full h-full">
           <Tabs
-            centered
-            activeKey={activeTab}
-            onChange={(key) => {
-              setActiveTab(key);
+            value={activeTab}
+            onValueChange={(value) => {
+              setActiveTab(value);
             }}
-            items={tabItems}
-            size="middle"
-            type="card"
-            tabBarStyle={{}}
-            tabBarGutter={0}
-            styles={stylesObject}
-            className="agent-config-tabs h-full"
-          />
+            className="agent-config-tabs flex flex-col h-full w-full"
+          >
+            <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
+              <TabsTrigger value="agent-info">{t("agent.info.title")}</TabsTrigger>
+              <TabsTrigger value="duty">{t("systemPrompt.card.duty.title")}</TabsTrigger>
+              <TabsTrigger value="constraint">{t("systemPrompt.card.constraint.title")}</TabsTrigger>
+              <TabsTrigger value="few-shots">{t("systemPrompt.card.fewShots.title")}</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="agent-info" className="flex-1 min-h-0 overflow-y-auto">
+              <div className="overflow-y-auto overflow-x-hidden h-full px-3 pb-3">
+                <Row gutter={[16, 16]}>
+                  <Col span={24}>
+                    <Form form={form} layout="vertical" disabled={!editable || isGenerating}>
+                      <Form.Item
+                        name="agentDisplayName"
+                        label={t("agent.displayName")}
+                        rules={[
+                          {
+                            required: true,
+                            message: t("agent.info.name.error.empty"),
+                          },
+                          {
+                            max: 50,
+                            message: t("agent.info.name.error.length"),
+                          },
+                          { validator: validateAgentDisplayNameUnique },
+                        ]}
+                        validateTrigger={["onBlur"]}
+                        className="mb-3"
+                      >
+                        <Input
+                          placeholder={t("agent.displayNamePlaceholder")}
+                          onBlur={(e) =>
+                            updateProfileInfo({ display_name: e.target.value })
+                          }
+                        />
+                      </Form.Item>
+
+                      <Form.Item
+                        name="agentName"
+                        label={t("agent.name")}
+                        rules={[
+                          {
+                            required: true,
+                            message: t("agent.info.name.error.empty"),
+                          },
+                          { max: 50, message: t("agent.info.name.error.length") },
+                          {
+                            pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/,
+                            message: t("agent.info.name.error.format"),
+                          },
+                          { validator: validateAgentNameUnique },
+                        ]}
+                        validateTrigger={["onBlur"]}
+                        className="mb-3"
+                      >
+                        <Input
+                          placeholder={t("agent.namePlaceholder")}
+                          onChange={(e) =>
+                            updateProfileInfo({ name: e.target.value })
+                          }
+                        />
+                      </Form.Item>
+
+                      <Can permission="group:read">
+                        <Row gutter={16}>
+                          <Col span={12}>
+                            <Form.Item
+                              name="group_ids"
+                              label={t("agent.userGroup")}
+                            >
+                              <Select
+                                mode="multiple"
+                                placeholder={t("agent.userGroup")}
+                                options={groupSelectOptions}
+                                allowClear
+                                onChange={(value) => {
+                                  const nextGroupIds = normalizeNumberArray(value || []);
+                                  const currentGroupIds = normalizeNumberArray(
+                                    editedAgent.group_ids || []
+                                  );
+                                  if (
+                                    JSON.stringify(nextGroupIds) ===
+                                    JSON.stringify(currentGroupIds)
+                                  ) {
+                                    return;
+                                  }
+                                  updateProfileInfo({ group_ids: nextGroupIds });
+                                }}
+                              />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item
+                              name="ingroup_permission"
+                              label={t("tenantResources.knowledgeBase.permission")}
+                            >
+                              <Select
+                                placeholder={t("tenantResources.knowledgeBase.permission")}
+                                options={[
+                                  { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
+                                  { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
+                                  { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
+                                ]}
+                                onChange={(value) => {
+                                  updateProfileInfo({ ingroup_permission: value });
+                                }}
+                              />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                      </Can>
+
+                      <Row gutter={16}>
+                        <Col span={12}>
+                          <Form.Item
+                            name="agentAuthor"
+                            label={t("agent.author")}
+                            rules={[
+                              {
+                                required: true,
+                                message: t("agent.authorPlaceholder"),
+                              },
+                            ]}
+                          >
+                            <Input
+                              placeholder={t("agent.authorPlaceholder")}
+                              onBlur={(e) =>
+                                updateProfileInfo({ author: e.target.value })
+                              }
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item
+                            name="mainAgentModel"
+                            label={t("businessLogic.config.model")}
+                            rules={[
+                              {
+                                required: true,
+                                message: t("businessLogic.config.modelPlaceholder"),
+                              },
+                            ]}
+                            help={
+                              availableLlmModels.length === 0 &&
+                              t("businessLogic.config.error.noAvailableModels")
+                            }
+                          >
+                            <Select
+                              placeholder={t("businessLogic.config.modelPlaceholder")}
+                              onChange={(value) => {
+                                const selectedModel = availableLlmModels.find(
+                                  (m) => m.displayName === value
+                                );
+                                updateProfileInfo({
+                                  model: value,
+                                  model_id: selectedModel?.id || 0,
+                                });
+                              }}
+                            >
+                              {availableLlmModels.map((model) => (
+                                <Select.Option
+                                  key={model.id}
+                                  value={model.displayName}
+                                  disabled={model.connect_status !== "available"}
+                                >
+                                  {model.displayName}
+                                </Select.Option>
+                              ))}
+                            </Select>
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Row gutter={16}>
+                        <Col span={12}>
+                          <Form.Item
+                            name="mainAgentMaxStep"
+                            label={t("businessLogic.config.maxSteps")}
+                            rules={[
+                              {
+                                required: true,
+                                message: t("businessLogic.config.maxSteps"),
+                              },
+                              {
+                                type: "number",
+                                min: 1,
+                                max: 20,
+                                message: t("businessLogic.config.maxSteps"),
+                              },
+                            ]}
+                          >
+                            <InputNumber
+                              min={1}
+                              max={20}
+                              style={{ width: "100%" }}
+                              onBlur={() => {
+                                const value = form.getFieldValue("mainAgentMaxStep");
+                                updateProfileInfo({ max_step: value || 1 });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item
+                            name="provideRunSummary"
+                            label={t("agent.provideRunSummary")}
+                            rules={[
+                              {
+                                required: true,
+                                message: t("agent.provideRunSummary.error"),
+                              },
+                            ]}
+                          >
+                            <Select
+                              options={[
+                                { value: true, label: t("common.yes") },
+                                { value: false, label: t("common.no") },
+                              ]}
+                              onChange={(value) => {
+                                updateProfileInfo({ provide_run_summary: value });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Form.Item
+                        name="agentDescription"
+                        label={t("agent.description")}
+                        className="mb-3"
+                      >
+                        <TextArea
+                          placeholder={t("agent.descriptionPlaceholder")}
+                          rows={6}
+                          style={{ minHeight: "140px" }}
+                          onBlur={(e) =>
+                            updateProfileInfo({ description: e.target.value })
+                          }
+                        />
+                      </Form.Item>
+                    </Form>
+                  </Col>
+                </Row>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="duty" className="flex-1 min-h-0 overflow-y-auto">
+              {renderPromptSection(
+                "duty",
+                "dutyPrompt",
+                t("定义智能体的角色和行为准则"),
+                (value) => updateProfileInfo({ duty_prompt: value })
+              )}
+            </TabsContent>
+
+            <TabsContent value="constraint" className="flex-1 min-h-0 overflow-y-auto">
+              {renderPromptSection(
+                "constraint",
+                "constraintPrompt",
+                t("设定智能体的使用限制和要求"),
+                (value) => updateProfileInfo({ constraint_prompt: value })
+              )}
+            </TabsContent>
+
+            <TabsContent value="few-shots" className="flex-1 min-h-0 overflow-y-auto">
+              {renderPromptSection(
+                "few-shots",
+                "fewShotsPrompt",
+                t("提供对话示例帮助智能体理解预期行为"),
+                (value) => updateProfileInfo({ few_shots_prompt: value })
+              )}
+            </TabsContent>
+          </Tabs>
         </Col>
       </Row>
-
-      {/* style={{ height: "100%" }}
-      className="agent-config-tabs" */}
-
-      {/* Fix tabs not adapting to height and make tabs evenly distributed (overriding Ant Design's default styles) */}
-      <style jsx global>{`
-        .agent-config-tabs .ant-tabs-nav-list {
-          width: 100% !important;
-          display: flex !important;
-          transform: none !important;
-          transition: none !important;
-          justify-content: center !important;
-        }
-
-        /* Each tab is fixed to 1/4 of parent width */
-        .agent-config-tabs .ant-tabs-tab {
-          flex: 0 0 25% !important;
-          max-width: 25% !important;
-          box-sizing: border-box;
-        }
-
-        /* Ensure text in tab is horizontally centered and shows ellipsis when overflow */
-        .agent-config-tabs .ant-tabs-tab-btn {
-          display: block;
-          width: 100%;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          text-align: center;
-        }
-
-        /* Selected state style: blue background, white text */
-        .agent-config-tabs .ant-tabs-tab-active {
-          background-color: #1890ff !important;
-        }
-
-        .agent-config-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
-          color: #fff !important;
-        }
-        .agent-config-tabs .ant-tabs-content {
-          height: 100% !important;
-        }
-
-        .agent-config-tabs .prompt-toolbar-button.ant-btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          transition:
-            background-color 0.2s ease,
-            color 0.2s ease,
-            transform 0.2s ease;
-        }
-
-        .agent-config-tabs .prompt-toolbar-button.ant-btn:not(:disabled):hover {
-          background-color: #eff6ff !important;
-          color: #2563eb !important;
-        }
-
-        .agent-config-tabs .prompt-toolbar-button.ant-btn:not(:disabled):active {
-          background-color: #dbeafe !important;
-          color: #1d4ed8 !important;
-          transform: scale(0.98);
-        }
-
-        .agent-config-tabs .prompt-toolbar-button.ant-btn:disabled {
-          color: #cbd5e1 !important;
-        }
-
-        /* Ensure the form and its nested Ant components use a flex layout so textarea can grow */
-        .agent-config-form,
-        .agent-config-form .ant-form-item,
-        .agent-config-form .ant-form-item .ant-row,
-        .agent-config-form .ant-form-item .ant-row .ant-col,
-        .agent-config-form
-          .ant-form-item
-          .ant-row
-          .ant-col
-          .ant-form-item-control-input,
-        .agent-config-form
-          .ant-form-item
-          .ant-row
-          .ant-col
-          .ant-form-item-control-input
-          .ant-form-item-control-input-content,
-        .agent-config-form .ant-form-item-control-input-content {
-          height: 100% !important;
-        }
-      `}</style>
 
       {/* Expand Edit Modal */}
       <ExpandEditModal

@@ -10,7 +10,7 @@ import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 
 import { Agent } from "@/types/agentConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
-import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
+import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import {
   searchAgentInfo,
   updateAgentInfo,
