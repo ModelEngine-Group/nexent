@@ -24,7 +24,8 @@ logger = logging.getLogger("openai_llm")
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
                  ssl_verify=True, model_factory: Optional[str] = None,
-                 display_name: Optional[str] = None, *args, **kwargs):
+                 display_name: Optional[str] = None,
+                 extra_body: Optional[Dict[str, Any]] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
@@ -36,6 +37,9 @@ class OpenAIModel(OpenAIServerModel):
                        Set to False for local services without SSL support.
             model_factory: Provider identifier (e.g., openai, modelengine)
             display_name: Human-readable display name for monitoring
+            extra_body: Optional dict merged into every chat.completions.create
+                       request body. Defaults to None so production behaviour
+                       is unchanged for callers that do not opt in.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -46,6 +50,7 @@ class OpenAIModel(OpenAIServerModel):
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
+        self.extra_body = extra_body or None
 
         # Create http_client based on ssl_verify parameter
         if not ssl_verify:
@@ -120,6 +125,12 @@ class OpenAIModel(OpenAIServerModel):
         )
 
         completion_kwargs["stream_options"] = {"include_usage": True}
+
+        # Provider-specific extras (e.g. Qwen3 chat_template_kwargs) - only
+        # set when the caller actually supplied something so default OpenAI
+        # behaviour is unchanged for everyone else.
+        if self.extra_body:
+            completion_kwargs["extra_body"] = self.extra_body
 
         current_request = self.client.chat.completions.create(
             stream=True, **completion_kwargs)

@@ -35,6 +35,15 @@ class ModelConfig(BaseModel):
         description="Model provider identifier (e.g., openai, modelengine)",
         default=None
     )
+    extra_body: Optional[Dict[str, Any]] = Field(
+        description=(
+            "Optional dict merged into every OpenAI-compatible "
+            "chat.completions.create request body. Used for provider-specific "
+            'switches such as Qwen3 chat_template_kwargs={"enable_thinking": false}. '
+            "Defaults to None so production behaviour is unchanged."
+        ),
+        default=None,
+    )
 
 
 class ToolConfig(BaseModel):
