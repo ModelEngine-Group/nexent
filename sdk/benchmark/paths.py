@@ -1,19 +1,24 @@
 # -*- coding: utf-8 -*-
 """Robust path resolution for benchmark scripts.
 
-Finds the project root by searching upward for a .git directory,
-then derives SDK_DIR and BACKEND_PATH from it. This makes path
-setup resilient to file relocation within the project tree.
+Finds the project root by searching upward for a .git entry (directory
+or file), then derives SDK_DIR and BACKEND_PATH from it. This makes
+path setup resilient to file relocation within the project tree and to
+git worktrees (which store a .git file rather than directory at root).
 """
 import os
 import sys
 
 
 def _find_project_root(start: str = None) -> str:
-    """Walk upward from *start* until a directory containing .git is found."""
+    """Walk upward from *start* until a .git entry is found.
+
+    Accepts ``.git`` as either a directory (normal checkout) or a file
+    (git worktree, where ``.git`` is a pointer file to the gitdir).
+    """
     current = os.path.abspath(start or os.path.dirname(__file__))
     while True:
-        if os.path.isdir(os.path.join(current, ".git")):
+        if os.path.exists(os.path.join(current, ".git")):
             return current
         parent = os.path.dirname(current)
         if parent == current:
