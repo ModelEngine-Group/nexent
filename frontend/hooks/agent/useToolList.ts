@@ -17,6 +17,8 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 			return res.data || [];
 		},
 		staleTime: options?.staleTime ?? 60_000,
+		refetchOnMount: "always",
+		refetchOnWindowFocus: true,
 		enabled: options?.enabled ?? true,
 	});
 

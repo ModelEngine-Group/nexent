@@ -34,6 +34,9 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
   const [showA2ADiscovery, setShowA2ADiscovery] = useState(false);
+  const showLegacyMcpConfig = false;
+
+  // Use tool list hook for data management
   const { groupedTools, invalidate } = useToolList();
   const { groupedSkills, invalidate: invalidateSkills } = useSkillList();
   const { skillInstances, invalidate: invalidateSkillInstances } = useAgentSkillInstances(

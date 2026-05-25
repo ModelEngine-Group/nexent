@@ -252,7 +252,7 @@ export const API_ENDPOINTS = {
     tools: `${API_BASE_URL}/mcp/tools`,
     add: `${API_BASE_URL}/mcp/add`,
     update: `${API_BASE_URL}/mcp/update`,
-    delete: `${API_BASE_URL}/mcp`,
+    delete: (mcpId: number) => `${API_BASE_URL}/mcp/${mcpId}`,
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
     addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,
@@ -263,6 +263,10 @@ export const API_ENDPOINTS = {
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
+    portCheck: `${API_BASE_URL}/mcp/port/check`,
+    portSuggest: `${API_BASE_URL}/mcp/port/suggest`,
+    enable: `${API_BASE_URL}/mcp/enable`,
+    disable: `${API_BASE_URL}/mcp/disable`,
   },
   // A2A Client endpoints
   a2a: {
@@ -308,6 +312,16 @@ export const API_ENDPOINTS = {
     create: `${API_BASE_URL}/skills`,
     createStream: `${API_BASE_URL}/skills/create`,
     stopCreate: (taskId: string) => `${API_BASE_URL}/skills/stop/${taskId}`,
+  },
+  mcpTools: {
+    // Community and Registry endpoints remain under /mcp-tools prefix
+    registryList: `${API_BASE_URL}/mcp-tools/registry/list`,
+    communityList: `${API_BASE_URL}/mcp-tools/community/list`,
+    communityPublish: `${API_BASE_URL}/mcp-tools/community/publish`,
+    communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
+    communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
+    communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
+    communityTagsStats: `${API_BASE_URL}/mcp-tools/community/tags/stats`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
