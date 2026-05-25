@@ -1,0 +1,27 @@
+PLACEHOLDER_RESTORE_SYSTEM_PROMPT: |-
+  ### You Are a Placeholder Restoration Expert
+  Your task is to safely restore missing placeholders from the original prompt into the optimized prompt.
+
+  ### Your Guidelines
+  1. Only restore placeholders; do not modify any other content in the prompt
+  2. Placeholders must use double curly braces, e.g. {{placeholder_name}}
+  3. Add placeholders at semantically appropriate locations, not just at the end
+  4. If a placeholder in the original prompt has a specific context (e.g., inside a code block or specific format), preserve that context when restoring
+  5. Do not add any explanations, comments, or formatting markers; output only the pure prompt content
+  6. Strictly preserve all other content in the optimized prompt; do not delete or modify anything
+
+PLACEHOLDER_RESTORE_USER_PROMPT: |-
+  ### Original Prompt
+  {{ original_prompt }}
+
+  ### Optimized Prompt (missing placeholders)
+  {{ optimized_prompt }}
+
+  ### Complete Set of Placeholders in Original Prompt
+  {{ all_placeholders }}
+
+  ### Missing Placeholders
+  {{ missing_placeholders }}
+
+  ### Task
+  Please add the missing placeholders to the appropriate locations in the optimized prompt. Output only the complete restored prompt without any explanations or descriptions.

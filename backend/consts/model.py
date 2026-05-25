@@ -396,6 +396,60 @@ class OptimizePromptSectionRequest(BaseModel):
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
     knowledge_base_display_names: Optional[List[str]] = Field(
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+    bad_cases: Optional[List["BadCase"]] = Field(
+        None, description="Optional: list of bad cases for Textual Gradient optimization")
+
+
+class OptimizePromptFeedbackRequest(BaseModel):
+    """Feedback-based prompt optimization request supporting general/insert/select modes."""
+    agent_id: int
+    model_id: int
+    task_description: str
+    section_type: str
+    section_title: str
+    current_content: str
+    feedback: str
+    mode: str = Field(
+        "general", description="Optimization mode: 'general', 'insert', or 'select'"
+    )
+    start_pos: Optional[int] = Field(
+        None, description="For insert/select mode: start position (character index)"
+    )
+    end_pos: Optional[int] = Field(
+        None, description="For select mode: end position (exclusive, character index)"
+    )
+    tool_ids: Optional[List[int]] = Field(None)
+    sub_agent_ids: Optional[List[int]] = Field(None)
+    knowledge_base_display_names: Optional[List[str]] = Field(None)
+
+
+class OptimizePromptBadCaseRequest(BaseModel):
+    """Bad case driven prompt optimization request."""
+    agent_id: int
+    model_id: int
+    task_description: str
+    section_type: str
+    section_title: str
+    current_content: str
+    feedback: str
+    bad_cases: List["BadCase"] = Field(..., description="List of bad cases for analysis")
+    tool_ids: Optional[List[int]] = Field(None)
+    sub_agent_ids: Optional[List[int]] = Field(None)
+    knowledge_base_display_names: Optional[List[str]] = Field(None)
+
+
+class BadCase(BaseModel):
+    """A single bad case for prompt analysis."""
+    question: str = Field(..., description="User input / question")
+    label: str = Field(..., description="Expected correct answer")
+    answer: str = Field(..., description="Actual wrong answer produced")
+    reason: str = Field(..., description="Reason / user feedback explaining why it is wrong")
+
+
+# Rebuild model validators for forward references
+OptimizePromptFeedbackRequest.model_rebuild()
+OptimizePromptBadCaseRequest.model_rebuild()
+OptimizePromptSectionRequest.model_rebuild()
 
 
 class GenerateTitleRequest(BaseModel):

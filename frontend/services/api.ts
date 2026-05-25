@@ -89,6 +89,8 @@ export const API_ENDPOINTS = {
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
+    optimizeFeedback: `${API_BASE_URL}/prompt/optimize/feedback`,
+    optimizeBadCase: `${API_BASE_URL}/prompt/optimize/badcase`,
   },
   promptTemplates: {
     list: `${API_BASE_URL}/prompt_templates`,

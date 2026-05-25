@@ -27,8 +27,10 @@ from services.agent_service import (
 from services.prompt_template_service import resolve_prompt_generate_template
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
+    extract_placeholders,
     get_prompt_generate_prompt_template,
     get_prompt_optimize_prompt_template,
+    get_prompt_template,
 )
 
 # Configure logging
@@ -270,6 +272,491 @@ def generate_and_save_system_prompt_impl(agent_id: int,
     if not has_content:
         raise Exception("Failed to generate prompt content.")
 
+def _restore_placeholders_if_needed(
+    original_content: str,
+    optimized_content: str,
+    model_id: int,
+    tenant_id: str,
+    language: str,
+) -> str:
+    """
+    Compare placeholders between original and optimized content.
+    If any are missing, call LLM to restore them.
+    Falls back to appending missing placeholders as plain text if LLM also fails.
+    """
+    original_keys = extract_placeholders(original_content)
+    optimized_keys = extract_placeholders(optimized_content)
+    missing = original_keys - optimized_keys
+
+    if not missing:
+        return optimized_content
+
+    logger.info(f"Detected {len(missing)} missing placeholders: {missing}")
+
+    try:
+        restore_template = get_prompt_template('placeholder_restore', language)
+        context = Template(
+            restore_template["PLACEHOLDER_RESTORE_USER_PROMPT"],
+            undefined=StrictUndefined
+        ).render({
+            "original_prompt": original_content,
+            "optimized_prompt": optimized_content,
+            "all_placeholders": str(sorted(original_keys)),
+            "missing_placeholders": str(sorted(missing)),
+        })
+
+        restored = call_llm_for_system_prompt(
+            model_id=model_id,
+            user_prompt=context,
+            system_prompt=restore_template["PLACEHOLDER_RESTORE_SYSTEM_PROMPT"],
+            tenant_id=tenant_id,
+        ).strip()
+
+        # Verify restored content has all placeholders
+        restored_keys = extract_placeholders(restored)
+        still_missing = original_keys - restored_keys
+        if still_missing:
+            logger.warning(f"Still missing {len(still_missing)} placeholders after LLM restore: {still_missing}")
+            placeholder_text = "\n" + "\n".join(f"{{{{{ph}}}}}" for ph in sorted(still_missing))
+            restored = f"{restored}{placeholder_text}"
+
+        return restored
+    except Exception as e:
+        logger.error(f"Failed to restore placeholders via LLM: {e}, falling back to appending")
+        placeholder_text = "\n" + "\n".join(f"{{{{{ph}}}}}" for ph in sorted(missing))
+        return f"{optimized_content}{placeholder_text}"
+
+
+def _parse_position_with_llm(
+    current_content: str,
+    insert_content: str,
+    model_id: int,
+    tenant_id: str,
+    language: str,
+) -> int:
+    """Step 1 of insert mode: use LLM to determine insertion position."""
+    template = get_prompt_template('prompt_feedback', language)
+
+    context = Template(
+        template["INSERT_POSITION_USER_PROMPT"],
+        undefined=StrictUndefined
+    ).render({
+        "current_content": current_content,
+        "insert_content": insert_content,
+    })
+
+    raw = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=context,
+        system_prompt=template["INSERT_POSITION_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning(f"Failed to parse position from LLM response: {raw!r}, using 0")
+        return 0
+
+
+def _optimize_insert_mode(
+    current_content: str,
+    insert_content: str,
+    model_id: int,
+    tenant_id: str,
+    language: str,
+) -> str:
+    """Step 2 of insert mode: generate content at insertion position."""
+    template = get_prompt_template('prompt_feedback', language)
+
+    insert_pos = _parse_position_with_llm(
+        current_content, insert_content, model_id, tenant_id, language
+    )
+
+    start_marker = "<<<INSERT_MARKER_START>>>"
+    middle_marker = "<<<INSERT_MARKER_MIDDLE>>>"
+    end_marker = "<<<INSERT_MARKER_END>>>"
+
+    before = current_content[:insert_pos]
+    after = current_content[insert_pos:]
+
+    context = Template(
+        template["INSERT_GENERATE_USER_PROMPT"],
+        undefined=StrictUndefined
+    ).render({
+        "current_content": current_content,
+        "insert_content": insert_content,
+        "insert_position": insert_pos,
+        "start_marker": start_marker,
+        "middle_marker": middle_marker,
+        "end_marker": end_marker,
+    })
+
+    result = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=context,
+        system_prompt=template["INSERT_GENERATE_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    result = result.replace(start_marker, before)
+    result = result.replace(middle_marker, insert_content)
+    result = result.replace(end_marker, after)
+
+    return result
+
+
+def _optimize_select_mode(
+    current_content: str,
+    start_pos: int,
+    end_pos: int,
+    replace_content: str,
+    model_id: int,
+    tenant_id: str,
+    language: str,
+) -> str:
+    """Select mode: replace the [start_pos, end_pos) range."""
+    template = get_prompt_template('prompt_feedback', language)
+
+    context = Template(
+        template["SELECT_REPLACE_USER_PROMPT"],
+        undefined=StrictUndefined
+    ).render({
+        "current_content": current_content,
+        "start_pos": start_pos,
+        "end_pos": end_pos,
+        "replace_content": replace_content,
+    })
+
+    result = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=context,
+        system_prompt=template["SELECT_REPLACE_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    return result
+
+
+def optimize_prompt_with_feedback_impl(
+    agent_id: int,
+    model_id: int,
+    task_description: str,
+    tenant_id: str,
+    language: str,
+    section_type: str,
+    section_title: str,
+    current_content: str,
+    feedback: str,
+    mode: str = "general",
+    start_pos: Optional[int] = None,
+    end_pos: Optional[int] = None,
+    tool_ids: Optional[List[int]] = None,
+    sub_agent_ids: Optional[List[int]] = None,
+    knowledge_base_display_names: Optional[List[str]] = None,
+) -> dict:
+    """
+    Optimize a prompt section with feedback, supporting three modes:
+    - general: standard optimization (reuses existing optimize_prompt_section_impl)
+    - insert: insert new content at a specific position
+    - select: replace a specific range [start_pos, end_pos)
+    """
+    normalized_section_type = (section_type or "").strip()
+    if normalized_section_type not in {"duty", "constraint", "few_shots"}:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "Unsupported prompt section type."
+        )
+
+    if mode not in {"general", "insert", "select"}:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "Mode must be 'general', 'insert', or 'select'."
+        )
+
+    if mode == "select":
+        if start_pos is None or end_pos is None:
+            raise AppException(
+                ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+                "start_pos and end_pos are required for select mode."
+            )
+        if start_pos >= end_pos:
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "start_pos must be less than end_pos."
+            )
+        if end_pos > len(current_content):
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "end_pos exceeds content length."
+            )
+
+    if mode == "insert":
+        if not (feedback or "").strip():
+            raise AppException(
+                ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+                "feedback is required for insert mode."
+            )
+
+    tool_info_list = _resolve_prompt_generation_tools(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        tool_ids=tool_ids,
+    )
+    knowledge_base_display_names_resolved = _resolve_knowledge_base_display_names(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        tool_info_list=tool_info_list,
+        knowledge_base_display_names=knowledge_base_display_names,
+    )
+    sub_agent_info_list = _resolve_prompt_generation_sub_agents(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        sub_agent_ids=sub_agent_ids,
+    )
+
+    if mode == "general":
+        optimized_content = _optimize_general_mode(
+            current_content=current_content,
+            feedback=feedback,
+            section_type=normalized_section_type,
+            section_title=section_title or _default_prompt_section_title(normalized_section_type, language),
+            task_description=task_description,
+            tool_info_list=tool_info_list,
+            sub_agent_info_list=sub_agent_info_list,
+            language=language,
+            knowledge_base_display_names=knowledge_base_display_names_resolved,
+            model_id=model_id,
+            tenant_id=tenant_id,
+        )
+    elif mode == "insert":
+        insert_content = feedback.strip()
+        optimized_content = _optimize_insert_mode(
+            current_content=current_content,
+            insert_content=insert_content,
+            model_id=model_id,
+            tenant_id=tenant_id,
+            language=language,
+        )
+    else:  # select mode
+        optimized_content = _optimize_select_mode(
+            current_content=current_content,
+            start_pos=start_pos,
+            end_pos=end_pos,
+            replace_content=feedback.strip(),
+            model_id=model_id,
+            tenant_id=tenant_id,
+            language=language,
+        )
+
+    # Protect placeholders (Phase 1 mechanism)
+    optimized_content = _restore_placeholders_if_needed(
+        original_content=current_content,
+        optimized_content=optimized_content,
+        model_id=model_id,
+        tenant_id=tenant_id,
+        language=language,
+    )
+
+    return {
+        "section_type": normalized_section_type,
+        "section_title": section_title or _default_prompt_section_title(normalized_section_type, language),
+        "original_content": current_content,
+        "optimized_content": optimized_content,
+    }
+
+
+def _optimize_general_mode(
+    current_content: str,
+    feedback: str,
+    section_type: str,
+    section_title: str,
+    task_description: str,
+    tool_info_list: List[dict],
+    sub_agent_info_list: List[dict],
+    language: str,
+    knowledge_base_display_names: Optional[List[str]],
+    model_id: int,
+    tenant_id: str,
+) -> str:
+    """Standard general mode optimization using existing template."""
+    prompt_template = get_prompt_optimize_prompt_template(language)
+    prompt_context = join_info_for_optimize_prompt_section(
+        prompt_for_optimize=prompt_template,
+        section_type=section_type,
+        section_title=section_title,
+        task_description=task_description,
+        current_content=current_content,
+        feedback=feedback,
+        tool_info_list=tool_info_list,
+        sub_agent_info_list=sub_agent_info_list,
+        language=language,
+        knowledge_base_display_names=knowledge_base_display_names,
+    )
+
+    result = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=prompt_context,
+        system_prompt=prompt_template["OPTIMIZE_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    if not result:
+        raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+
+    return result
+
+
+BAD_CASE_MAX_LIMIT = 10
+
+
+def _format_bad_cases(bad_cases: List[dict], language: str) -> str:
+    """Format bad cases into a readable string for LLM prompt."""
+    is_zh = language != LANGUAGE["EN"]
+    lines = []
+    for i, case in enumerate(bad_cases, 1):
+        label = f"反例 {i}:" if is_zh else f"Bad Case {i}:"
+        lines.append(label)
+        lines.append(f"  [question]: {case.get('question', '')}")
+        lines.append(f"  [expected answer]: {case.get('label', '')}")
+        lines.append(f"  [assistant answer]: {case.get('answer', '')}")
+        lines.append(f"  [reason]: {case.get('reason', '')}")
+    return "\n".join(lines)
+
+
+def _parse_badcase_intent(llm_response: str) -> tuple[bool, str]:
+    """Parse intent and summary from LLM analysis response."""
+    import re
+    intent_match = re.search(r'<intent>\s*(true|false)\s*</intent>', llm_response, re.IGNORECASE)
+    summary_match = re.search(r'<summary>(.*?)</summary>', llm_response, re.DOTALL)
+    intent = intent_match.group(1).lower() == "true" if intent_match else False
+    summary = summary_match.group(1).strip() if summary_match else llm_response
+    return intent, summary
+
+
+def optimize_prompt_with_badcase_impl(
+    agent_id: int,
+    model_id: int,
+    task_description: str,
+    tenant_id: str,
+    language: str,
+    section_type: str,
+    section_title: str,
+    current_content: str,
+    feedback: str,
+    bad_cases: List[dict],
+    tool_ids: Optional[List[int]] = None,
+    sub_agent_ids: Optional[List[int]] = None,
+    knowledge_base_display_names: Optional[List[str]] = None,
+) -> dict:
+    """
+    Two-stage bad case driven prompt optimization.
+
+    Stage 1: Analyze bad cases → get intent + summary
+    Stage 2: Regenerate prompt based on analysis
+    """
+    if not bad_cases:
+        raise AppException(
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+            "bad_cases cannot be empty"
+        )
+    if len(bad_cases) > BAD_CASE_MAX_LIMIT:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"bad_cases cannot exceed {BAD_CASE_MAX_LIMIT}"
+        )
+
+    normalized_section_type = (section_type or "").strip()
+    if normalized_section_type not in {"duty", "constraint", "few_shots"}:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "Unsupported prompt section type."
+        )
+
+    tool_info_list = _resolve_prompt_generation_tools(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        tool_ids=tool_ids,
+    )
+    knowledge_base_display_names_resolved = _resolve_knowledge_base_display_names(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        tool_info_list=tool_info_list,
+        knowledge_base_display_names=knowledge_base_display_names,
+    )
+    sub_agent_info_list = _resolve_prompt_generation_sub_agents(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        sub_agent_ids=sub_agent_ids,
+    )
+
+    template = get_prompt_template('badcase_optimize', language)
+    formatted_bad_cases = _format_bad_cases(bad_cases, language)
+
+    # Stage 1: Analyze bad cases
+    analyze_context = Template(
+        template["BAD_CASE_ANALYZE_USER_PROMPT"],
+        undefined=StrictUndefined
+    ).render({
+        "original_prompt": current_content,
+        "bad_cases": formatted_bad_cases,
+    })
+
+    analysis_result = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=analyze_context,
+        system_prompt=template["BAD_CASE_ANALYZE_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    intent, summary = _parse_badcase_intent(analysis_result)
+
+    if not intent:
+        logger.info("Bad case analysis intent=false, returning original content")
+        return {
+            "section_type": normalized_section_type,
+            "section_title": section_title or _default_prompt_section_title(normalized_section_type, language),
+            "original_content": current_content,
+            "optimized_content": current_content,
+        }
+
+    # Stage 2: Regenerate prompt
+    regenerate_context = Template(
+        template["BAD_CASE_REGENERATE_USER_PROMPT"],
+        undefined=StrictUndefined
+    ).render({
+        "current_content": current_content,
+        "analysis_summary": summary,
+        "bad_cases": formatted_bad_cases,
+    })
+
+    optimized_content = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=regenerate_context,
+        system_prompt=template["BAD_CASE_REGENERATE_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    if not optimized_content:
+        raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+
+    # Protect placeholders (Phase 1 mechanism)
+    optimized_content = _restore_placeholders_if_needed(
+        original_content=current_content,
+        optimized_content=optimized_content,
+        model_id=model_id,
+        tenant_id=tenant_id,
+        language=language,
+    )
+
+    return {
+        "section_type": normalized_section_type,
+        "section_title": section_title or _default_prompt_section_title(normalized_section_type, language),
+        "original_content": current_content,
+        "optimized_content": optimized_content,
+    }
+
+
 def optimize_prompt_section_impl(
     agent_id: int,
     model_id: int,
@@ -283,6 +770,7 @@ def optimize_prompt_section_impl(
     tool_ids: Optional[List[int]] = None,
     sub_agent_ids: Optional[List[int]] = None,
     knowledge_base_display_names: Optional[List[str]] = None,
+    bad_cases: Optional[List[dict]] = None,
 ) -> dict:
     normalized_section_type = (section_type or "").strip()
     if normalized_section_type not in {"duty", "constraint", "few_shots"}:
@@ -303,12 +791,18 @@ def optimize_prompt_section_impl(
             "Optimization feedback is required."
         )
 
+    if bad_cases and len(bad_cases) > BAD_CASE_MAX_LIMIT:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"bad_cases cannot exceed {BAD_CASE_MAX_LIMIT}"
+        )
+
     tool_info_list = _resolve_prompt_generation_tools(
         agent_id=agent_id,
         tenant_id=tenant_id,
         tool_ids=tool_ids,
     )
-    knowledge_base_display_names = _resolve_knowledge_base_display_names(
+    knowledge_base_display_names_resolved = _resolve_knowledge_base_display_names(
         agent_id=agent_id,
         tenant_id=tenant_id,
         tool_info_list=tool_info_list,
@@ -320,29 +814,56 @@ def optimize_prompt_section_impl(
         sub_agent_ids=sub_agent_ids,
     )
 
-    prompt_template = get_prompt_optimize_prompt_template(language)
-    prompt_context = join_info_for_optimize_prompt_section(
-        prompt_for_optimize=prompt_template,
-        section_type=normalized_section_type,
-        section_title=section_title or _default_prompt_section_title(normalized_section_type, language),
-        task_description=task_description,
-        current_content=current_content,
-        feedback=feedback,
-        tool_info_list=tool_info_list,
-        sub_agent_info_list=sub_agent_info_list,
-        language=language,
-        knowledge_base_display_names=knowledge_base_display_names,
-    )
+    if bad_cases and len(bad_cases) > 0:
+        # ========== Textual Gradient 双阶段优化 ==========
+        optimized_content = _optimize_with_textual_gradient(
+            current_content=current_content,
+            section_type=normalized_section_type,
+            section_title=section_title or _default_prompt_section_title(normalized_section_type, language),
+            task_description=task_description,
+            feedback=feedback,
+            bad_cases=bad_cases,
+            tool_info_list=tool_info_list,
+            sub_agent_info_list=sub_agent_info_list,
+            language=language,
+            knowledge_base_display_names=knowledge_base_display_names_resolved,
+            model_id=model_id,
+            tenant_id=tenant_id,
+        )
+    else:
+        # ========== 现有单次 LLM 调用（向后兼容）==========
+        prompt_template = get_prompt_optimize_prompt_template(language)
+        prompt_context = join_info_for_optimize_prompt_section(
+            prompt_for_optimize=prompt_template,
+            section_type=normalized_section_type,
+            section_title=section_title or _default_prompt_section_title(normalized_section_type, language),
+            task_description=task_description,
+            current_content=current_content,
+            feedback=feedback,
+            tool_info_list=tool_info_list,
+            sub_agent_info_list=sub_agent_info_list,
+            language=language,
+            knowledge_base_display_names=knowledge_base_display_names_resolved,
+        )
 
-    optimized_content = call_llm_for_system_prompt(
+        optimized_content = call_llm_for_system_prompt(
+            model_id=model_id,
+            user_prompt=prompt_context,
+            system_prompt=prompt_template["OPTIMIZE_SYSTEM_PROMPT"],
+            tenant_id=tenant_id,
+        ).strip()
+
+        if not optimized_content:
+            raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+
+    # Restore any placeholders that the LLM may have dropped during optimization
+    optimized_content = _restore_placeholders_if_needed(
+        original_content=current_content,
+        optimized_content=optimized_content,
         model_id=model_id,
-        user_prompt=prompt_context,
-        system_prompt=prompt_template["OPTIMIZE_SYSTEM_PROMPT"],
         tenant_id=tenant_id,
-    ).strip()
-
-    if not optimized_content:
-        raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+        language=language,
+    )
 
     return {
         "section_type": normalized_section_type,
@@ -350,6 +871,80 @@ def optimize_prompt_section_impl(
         "original_content": current_content,
         "optimized_content": optimized_content,
     }
+
+
+def _optimize_with_textual_gradient(
+    current_content: str,
+    section_type: str,
+    section_title: str,
+    task_description: str,
+    feedback: str,
+    bad_cases: List[dict],
+    tool_info_list: List[dict],
+    sub_agent_info_list: List[dict],
+    language: str,
+    knowledge_base_display_names: Optional[List[str]],
+    model_id: int,
+    tenant_id: str,
+) -> str:
+    """Two-stage Textual Gradient optimization."""
+    template = get_prompt_template('textual_gradient', language)
+    formatted_bad_cases = _format_bad_cases(bad_cases, language)
+
+    input_label = "Inputs" if language == LANGUAGE["EN"] else "接受输入"
+    output_label = "Output type" if language == LANGUAGE["EN"] else "返回输出类型"
+    tool_description = "\n".join(
+        f"- {tool['name']}: {tool['description']} \n {input_label}: {tool['inputs']}\n {output_label}: {tool['output_type']}"
+        for tool in tool_info_list
+    )
+    assistant_description = "\n".join(
+        f"- {sub_agent['name']}: {sub_agent['description']}" for sub_agent in sub_agent_info_list
+    )
+    kb_names_str = ", ".join(f'"{name}"' for name in knowledge_base_display_names) if knowledge_base_display_names else ""
+
+    # Stage 1: Generate textual gradient
+    gradient_context = Template(
+        template["CREATE_TEXTUAL_GRADIENT_USER_PROMPT"],
+        undefined=StrictUndefined
+    ).render({
+        "original_prompt": current_content,
+        "bad_cases": formatted_bad_cases,
+    })
+
+    textual_gradient = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=gradient_context,
+        system_prompt=template["CREATE_TEXTUAL_GRADIENT_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    # Stage 2: Optimize with gradient
+    optimize_context = Template(
+        template["TEXTUAL_OPTIMIZE_USER_PROMPT"],
+        undefined=StrictUndefined
+    ).render({
+        "section_type": section_type,
+        "section_title": section_title,
+        "task_description": task_description,
+        "current_content": current_content,
+        "textual_gradient": textual_gradient,
+        "bad_cases": formatted_bad_cases,
+        "tool_description": tool_description,
+        "assistant_description": assistant_description,
+        "knowledge_base_names": kb_names_str,
+    })
+
+    optimized = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=optimize_context,
+        system_prompt=template["TEXTUAL_OPTIMIZE_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    if not optimized:
+        raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+
+    return optimized
 
 
 

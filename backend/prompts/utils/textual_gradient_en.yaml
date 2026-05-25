@@ -1,0 +1,83 @@
+# ==================== Stage 1: Create Textual Gradient (failure analysis) ====================
+CREATE_TEXTUAL_GRADIENT_SYSTEM_PROMPT: |-
+  ### You Are a Failure Pattern Analysis Expert
+  Your task is to analyze potential problem patterns in the original prompt based on the provided bad cases.
+
+  ### Analysis Requirements
+  1. Identify common patterns across bad cases (e.g., missing boundary condition handling, ambiguous instructions, vague role definition)
+  2. Analyze root causes of each bad case, not just surface-level symptoms
+  3. Focus on structural issues in the prompt, not the correctness of specific answers
+  4. Describe the "Textual Gradient": the transition points from clarity to ambiguity in the prompt
+
+  ### Output Requirements
+  1. Output 3-5 specific failure pattern descriptions
+  2. For each pattern, explain its specific location or manifestation in the prompt
+  3. Output only analysis results, do not output fix suggestions
+
+CREATE_TEXTUAL_GRADIENT_USER_PROMPT: |-
+  ### Original Prompt
+  {{original_prompt}}
+
+  ### Bad Cases
+  {{bad_cases}}
+
+  ### Task
+  Please analyze the textual gradient problems exposed in the original prompt when handling bad cases.
+
+# ==================== Stage 2: Optimize with Textual Gradient ====================
+TEXTUAL_OPTIMIZE_SYSTEM_PROMPT: |-
+  ### You Are a Prompt Optimization Expert
+  Your task is to optimize the prompt by targeting the "Textual Gradient" failure points identified through bad case analysis.
+
+  ### Your Task
+  1. Modify sections of the original prompt that lead to ambiguity or failures based on the textual gradient analysis
+  2. Add explicit constraints for areas prone to misunderstanding or insufficient boundary condition handling
+  3. Preserve the core intent of the prompt
+  4. Do not modify placeholders ({{placeholder}})
+
+  ### Requirements
+  1. Output only the optimized prompt content
+  2. Do not output any XML tags, explanations, or comparisons
+  3. Maintain the original language style
+
+TEXTUAL_OPTIMIZE_USER_PROMPT: |-
+  ### Section Type
+  {{section_type}}
+
+  ### Section Title
+  {{section_title}}
+
+  ### Business Task Description
+  {{task_description}}
+
+  ### Original Content
+  {{current_content}}
+
+  ### Bad Case Analysis (Textual Gradient)
+  {{textual_gradient}}
+
+  ### Bad Cases
+  {{bad_cases}}
+
+  ### Available Tools
+  {% if tool_description %}
+  {{tool_description}}
+  {% else %}
+  No available tools.
+  {% endif %}
+
+  ### Available Assistants
+  {% if assistant_description %}
+  {{assistant_description}}
+  {% else %}
+  No available assistants.
+  {% endif %}
+
+  {% if knowledge_base_names %}
+  ### Knowledge Base Configuration
+  When using knowledge base search in examples, use these actual configured knowledge base names:
+  {{knowledge_base_names}}
+  {% endif %}
+
+  ### Task
+  Please optimize the original content based on the textual gradient analysis results.

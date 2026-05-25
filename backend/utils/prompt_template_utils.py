@@ -1,6 +1,7 @@
 import logging
 import os
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, Optional, Set
 
 import yaml
 
@@ -11,6 +12,32 @@ from consts.prompt_template import (
 )
 
 logger = logging.getLogger("prompt_template_utils")
+
+PLACEHOLDER_PATTERN = re.compile(r'\{\{([^}]+)\}\}')
+
+# Jinja2 control statements that also use {{...}} syntax - these are not user-defined placeholders
+_JINJA2_CONTROL_KEYWORDS = {
+    # Loop variables like {% for item in items %}{{item}}{% endfor %} should be excluded
+    # We exclude single short words commonly used as loop variables
+    'item', 'items', 'loop', 'index', 'key', 'value', 'name', 'loop_index', 'loop_revindex',
+    # Standard Jinja2 control/builtin names
+    'if', 'for', 'set', 'include', 'block', 'end', 'else', 'elif', 'in', 'true', 'false', 'none',
+}
+
+
+def extract_placeholders(prompt: str) -> Set[str]:
+    """
+    Extract all Jinja2 placeholder names from a prompt string, excluding control statements.
+
+    E.g. for "Use {{tool_name}} in {{index_names.0}}" returns {"tool_name", "index_names.0"}.
+    E.g. for "{% for item in items %}{{item}}{% endfor %}" returns {"items"} (not "item").
+    """
+    raw = PLACEHOLDER_PATTERN.findall(prompt)
+    return {
+        m.strip()
+        for m in raw
+        if m.strip() and m.strip().split('.')[0].split('|')[0].strip().lower() not in _JINJA2_CONTROL_KEYWORDS
+    }
 
 PROMPT_GENERATE_TEMPLATE_KEY_MAP = PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 PROMPT_GENERATE_TEMPLATE_KEYS = PROMPT_GENERATE_TEMPLATE_FIELDS
@@ -64,6 +91,7 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         template_type: Template type, supports the following values:
             - 'prompt_generate': Prompt generation template
             - 'prompt_optimize': Prompt section optimization template
+            - 'placeholder_restore': Placeholder restoration template
             - 'agent': Agent template including manager and managed agents
             - 'generate_title': Title generation template
             - 'document_summary': Document summary template (Map stage)
@@ -114,6 +142,22 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'skill_creation_complicated': {
             LANGUAGE["ZH"]: 'backend/prompts/skill_creation_complicate_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/skill_creation_complicate_en.yaml'
+        },
+        'placeholder_restore': {
+            LANGUAGE["ZH"]: 'backend/prompts/utils/placeholder_restore_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/utils/placeholder_restore_en.yaml'
+        },
+        'prompt_feedback': {
+            LANGUAGE["ZH"]: 'backend/prompts/utils/prompt_feedback_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/utils/prompt_feedback_en.yaml'
+        },
+        'badcase_optimize': {
+            LANGUAGE["ZH"]: 'backend/prompts/utils/badcase_optimize_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/utils/badcase_optimize_en.yaml'
+        },
+        'textual_gradient': {
+            LANGUAGE["ZH"]: 'backend/prompts/utils/textual_gradient_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/utils/textual_gradient_en.yaml'
         }
     }
 

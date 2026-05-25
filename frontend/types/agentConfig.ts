@@ -432,7 +432,7 @@ export interface GeneratePromptParams {
 export interface OptimizePromptSectionParams {
   agent_id: number;
   task_description: string;
-  model_id: string;
+  model_id: number;
   section_type: "duty" | "constraint" | "few_shots";
   section_title: string;
   current_content: string;
@@ -440,6 +440,10 @@ export interface OptimizePromptSectionParams {
   tool_ids?: number[];
   sub_agent_ids?: number[];
   knowledge_base_display_names?: string[];
+  bad_cases?: BadCase[];
+  mode?: OptimizeMode;
+  start_pos?: number;
+  end_pos?: number;
 }
 
 export interface OptimizePromptSectionResponse {
@@ -447,6 +451,23 @@ export interface OptimizePromptSectionResponse {
   section_title: string;
   original_content: string;
   optimized_content: string;
+}
+
+export type OptimizeMode = "general" | "insert" | "select";
+
+export interface OptimizePromptFeedbackParams extends OptimizePromptSectionParams {
+  // All fields (mode, start_pos, end_pos, bad_cases) are inherited from OptimizePromptSectionParams
+}
+
+export interface BadCase {
+  question: string;
+  label: string;
+  answer: string;
+  reason: string;
+}
+
+export interface OptimizePromptBadCaseParams extends OptimizePromptSectionParams {
+  bad_cases: BadCase[];
 }
 
 /**

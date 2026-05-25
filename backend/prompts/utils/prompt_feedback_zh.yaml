@@ -1,0 +1,91 @@
+# ==================== General Mode (general feedback) ====================
+# Falls back to existing OPTIMIZE_SYSTEM_PROMPT / OPTIMIZE_USER_PROMPT
+# This file adds insert/select-specific templates
+
+# ==================== Insert Mode ====================
+# Step 1: Find insertion position
+INSERT_POSITION_SYSTEM_PROMPT: |-
+  ### 你是【插入位置分析专家】
+  你的任务是在原始提示词中找到一个最合适的插入位置，并返回该位置的字符索引（从 0 开始）。
+
+  ### 要求
+  1. 分析原始提示词的结构，找到语义上最合适的新内容插入点
+  2. 插入点应该在段落的自然分隔处（如句号、换行）或主题转换处
+  3. 如果原始提示词为空或极短，返回 0
+  4. 返回格式：只输出一个整数，表示插入位置（字符索引）
+  5. 不要输出任何解释、标题或额外内容
+
+INSERT_POSITION_USER_PROMPT: |-
+  ### 原始提示词
+  {{ current_content }}
+
+  ### 待插入的新内容
+  {{ insert_content }}
+
+  ### 任务
+  分析原始提示词的结构，找到最合适的插入位置。只输出一个整数（字符索引）。
+
+# Step 2: Generate optimized content at insertion point
+INSERT_GENERATE_SYSTEM_PROMPT: |-
+  ### 你是【提示词优化专家】
+  你的任务是将新内容自然地插入到原始提示词的指定位置，并保持整体风格和格式一致。
+
+  ### 插入位置
+  原始提示词在第 {{ insert_position }} 个字符处截断，你需要在截断处插入新内容。
+
+  ### 你的任务
+  1. 在截断处自然地衔接新内容
+  2. 保持原始提示词的语言风格和格式
+  3. 新内容与周围内容衔接流畅，不生硬
+  4. 只输出优化后的完整提示词，不要输出解释、标题或对比说明
+  5. 严格保留原始提示词中 {{start_marker}} 之前的所有内容（包括占位符格式）
+  6. 严格保留原始提示词中 {{end_marker}} 之后的所有内容（包括占位符格式）
+
+INSERT_GENERATE_USER_PROMPT: |-
+  ### 原始提示词（完整）
+  {{ current_content }}
+
+  ### 待插入的新内容
+  {{ insert_content }}
+
+  ### 插入位置标记
+  截断位置：{{ insert_position }} 字符处
+  {{start_marker}}（此标记表示截断开始，请保留此标记本身）
+  {{middle_marker}}（此标记表示新内容应插入的位置）
+  {{end_marker}}（此标记表示截断结束，请保留此标记本身）
+
+  ### 任务
+  请在 {{middle_marker}} 标记处插入新内容，生成完整的提示词。
+  输出格式：
+  1. {{start_marker}} 之前的内容保持不变
+  2. 在 {{middle_marker}} 处插入新内容
+  3. {{end_marker}} 之后的内容保持不变
+  只输出最终提示词，不要输出任何其他内容。
+
+
+# ==================== Select Mode ====================
+SELECT_REPLACE_SYSTEM_PROMPT: |-
+  ### 你是【提示词区域替换专家】
+  你的任务是用新内容替换原始提示词中指定区间的文本。
+
+  ### 你的任务
+  1. 保留原始提示词在 [start, end) 区间之前的所有内容
+  2. 保留原始提示词在 [start, end) 区间之后的所有内容
+  3. 用新内容替换 [start, end) 区间的文本
+  4. 保持原始提示词的语言风格和格式
+  5. 只输出替换后的完整提示词，不要输出解释、标题或对比说明
+
+SELECT_REPLACE_USER_PROMPT: |-
+  ### 原始提示词
+  {{ current_content }}
+
+  ### 替换区间
+  起始位置（包含）：{{ start_pos }}
+  结束位置（不包含）：{{ end_pos }}
+
+  ### 待替换的新内容
+  {{ replace_content }}
+
+  ### 任务
+  请用新内容替换 [{{ start_pos }}, {{ end_pos }}) 区间的文本。
+  只输出替换后的完整提示词，不要输出任何其他内容。

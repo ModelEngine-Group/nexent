@@ -4,6 +4,8 @@ import {
   GeneratePromptParams,
   OptimizePromptSectionParams,
   OptimizePromptSectionResponse,
+  OptimizePromptFeedbackParams,
+  OptimizePromptBadCaseParams,
   StreamResponseData,
 } from '@/types/agentConfig';
 import { fetchWithAuth, getAuthHeaders } from '@/lib/auth';
@@ -73,6 +75,32 @@ export const optimizePromptSection = async (
   params: OptimizePromptSectionParams,
 ): Promise<OptimizePromptSectionResponse> => {
   const response = await fetch(API_ENDPOINTS.prompt.optimize, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(params),
+  });
+
+  const result = await response.json();
+  return result.data as OptimizePromptSectionResponse;
+};
+
+export const optimizePromptWithFeedback = async (
+  params: OptimizePromptFeedbackParams,
+): Promise<OptimizePromptSectionResponse> => {
+  const response = await fetch(API_ENDPOINTS.prompt.optimizeFeedback, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(params),
+  });
+
+  const result = await response.json();
+  return result.data as OptimizePromptSectionResponse;
+};
+
+export const optimizePromptWithBadCase = async (
+  params: OptimizePromptBadCaseParams,
+): Promise<OptimizePromptSectionResponse> => {
+  const response = await fetch(API_ENDPOINTS.prompt.optimizeBadCase, {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(params),

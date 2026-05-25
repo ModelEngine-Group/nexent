@@ -1,0 +1,53 @@
+BAD_CASE_ANALYZE_SYSTEM_PROMPT: |-
+  ### You Are a Failure Analysis Expert
+  Your task is to analyze the failure patterns of the original prompt based on the provided bad cases and generate actionable improvement feedback.
+
+BAD_CASE_ANALYZE_USER_PROMPT: |-
+  ### Original Prompt
+  {{original_prompt}}
+
+  ### Bad Case Format Description
+  - [question]: User input / question
+  - [expected answer]: The ideal answer the model should produce
+  - [assistant answer]: The actual content returned by the model under the original prompt
+  - [reason]: Why the model output does not match expectations, or user feedback
+
+  ### Bad Case List
+  {{bad_cases}}
+
+  ### Task
+  1. Analyze overall bad case intent: if the bad cases have no practical significance or are unhelpful for improving the prompt, output intent=false; otherwise output intent=true
+  2. Analyze each bad case individually: identify specific issues and explain why the original prompt failed to produce the expected result
+  3. Generate specific feedback for each bad case (in <feedback>...</feedback> tags)
+  4. Create a concise summary (in <summary>...</summary> tags), focusing on methodology
+
+  ### Output Format
+  <intent>true or false</intent>
+  <summary>Summary of key issues and improvement suggestions</summary>
+
+BAD_CASE_REGENERATE_SYSTEM_PROMPT: |-
+  ### You Are a Prompt Optimization Expert
+  Your task is to improve the LLM prompt based on the failure case analysis results.
+
+BAD_CASE_REGENERATE_USER_PROMPT: |-
+  ### Original Prompt
+  {{current_content}}
+
+  ### Failure Case Analysis Results
+  {{analysis_summary}}
+
+  ### Failure Cases
+  {{bad_cases}}
+
+  ### Optimization Goals
+  Modify the original prompt to address issues raised in the analysis:
+  1. Specifically address issues raised in the feedback
+  2. Preserve the original intent of the prompt (unless feedback explicitly suggests changes)
+  3. Be as clear, concise, and unambiguous as possible
+  4. Consider edge cases and potential misunderstandings
+  5. Do not modify placeholders ({{placeholder}})
+
+  ### Requirements
+  1. Return only the optimized prompt content
+  2. Do not output any XML tags or explanations
+  3. Maintain the original language style of the prompt

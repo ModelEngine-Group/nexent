@@ -1629,3 +1629,407 @@ class TestPromptService(unittest.TestCase):
         parsed = json.loads(result_list[0].replace("data: ", "").replace("\n\n", ""))
         self.assertTrue(parsed['success'])
 
+
+class TestPlaceholderRestoration(unittest.TestCase):
+    """Tests for placeholder preservation during prompt optimization."""
+
+    def test_extract_placeholders_simple(self):
+        from backend.utils.prompt_template_utils import extract_placeholders
+        prompt = "You are {{agent_name}}. Use {{tool_name}} to {{action}}."
+        result = extract_placeholders(prompt)
+        self.assertEqual(result, {"agent_name", "tool_name", "action"})
+
+    def test_extract_placeholders_with_filters(self):
+        from backend.utils.prompt_template_utils import extract_placeholders
+        # Jinja2 control statements like {% if %}, {% for %} should be filtered
+        prompt = "{% if enabled %}Use {{tool}}{% endif %}"
+        self.assertEqual(extract_placeholders(prompt), {"tool"})
+
+    def test_extract_placeholders_complex(self):
+        from backend.utils.prompt_template_utils import extract_placeholders
+        prompt = (
+            "Search in {{index_names.0}} with query {{query}}. "
+            "{% for item in items %}{{item}}{% endfor %}"
+        )
+        result = extract_placeholders(prompt)
+        self.assertEqual(result, {"index_names.0", "query"})
+
+    def test_extract_placeholders_empty(self):
+        from backend.utils.prompt_template_utils import extract_placeholders
+        self.assertEqual(extract_placeholders(""), set())
+        self.assertEqual(extract_placeholders("No placeholders here"), set())
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    def test_restore_placeholders_detects_missing(self, mock_get_template, mock_call_llm):
+        from backend.services.prompt_service import _restore_placeholders_if_needed
+
+        # Optimized content is missing {{knowledge_base_names}}
+        original = "Search in {{knowledge_base_names}} for {{query}}"
+        optimized = "Search in local database for {{query}}"
+
+        mock_get_template.return_value = {
+            "PLACEHOLDER_RESTORE_SYSTEM_PROMPT": "Restore placeholders",
+            "PLACEHOLDER_RESTORE_USER_PROMPT": "{{original_prompt}}\n{{optimized_prompt}}",
+        }
+        mock_call_llm.return_value = "Search in {{knowledge_base_names}} for {{query}}"
+
+        result = _restore_placeholders_if_needed(
+            original_content=original,
+            optimized_content=optimized,
+            model_id=1,
+            tenant_id="tenant-1",
+            language="zh",
+        )
+
+        # LLM was called since placeholder was missing
+        mock_call_llm.assert_called_once()
+        # Result contains the restored placeholder
+        self.assertIn("{{knowledge_base_names}}", result)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    def test_restore_placeholders_no_call_when_complete(self, mock_get_template, mock_call_llm):
+        from backend.services.prompt_service import _restore_placeholders_if_needed
+
+        # No placeholder missing - optimized content contains {{tool_name}} (the placeholder itself)
+        original = "Use {{tool_name}}"
+        # {{tool_name}} appears as a placeholder in the optimized text too
+        optimized = "Use {{tool_name}} for weather API"
+
+        result = _restore_placeholders_if_needed(
+            original_content=original,
+            optimized_content=optimized,
+            model_id=1,
+            tenant_id="tenant-1",
+            language="zh",
+        )
+
+        # No LLM call needed - all placeholders preserved
+        mock_call_llm.assert_not_called()
+        self.assertEqual(result, optimized)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    def test_restore_placeholders_fallback_on_llm_failure(self, mock_get_template, mock_call_llm):
+        from backend.services.prompt_service import _restore_placeholders_if_needed
+
+        original = "Query {{kb_name}} for {{query}}"
+        optimized = "Query local database"
+
+        mock_get_template.return_value = {
+            "PLACEHOLDER_RESTORE_SYSTEM_PROMPT": "Restore",
+            "PLACEHOLDER_RESTORE_USER_PROMPT": "Template",
+        }
+        # LLM fails to restore
+        mock_call_llm.side_effect = Exception("LLM unavailable")
+
+        result = _restore_placeholders_if_needed(
+            original_content=original,
+            optimized_content=optimized,
+            model_id=1,
+            tenant_id="tenant-1",
+            language="zh",
+        )
+
+        # Falls back to appending placeholders at end
+        self.assertIn("{{kb_name}}", result)
+        self.assertIn("{{query}}", result)
+        self.assertIn("Query local database", result)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    def test_restore_placeholders_second_verification_fallback(self, mock_get_template, mock_call_llm):
+        from backend.services.prompt_service import _restore_placeholders_if_needed
+
+        original = "Use {{a}} and {{b}}"
+        optimized = "Use X and Y"
+
+        mock_get_template.return_value = {
+            "PLACEHOLDER_RESTORE_SYSTEM_PROMPT": "Restore",
+            "PLACEHOLDER_RESTORE_USER_PROMPT": "Template",
+        }
+        # LLM restores only one placeholder
+        mock_call_llm.return_value = "Use {{a}} and Y"
+
+        result = _restore_placeholders_if_needed(
+            original_content=original,
+            optimized_content=optimized,
+            model_id=1,
+            tenant_id="tenant-1",
+            language="zh",
+        )
+
+        # Second verification detected missing {{b}}, appended it
+        self.assertIn("{{a}}", result)
+        self.assertIn("{{b}}", result)
+
+    @patch('backend.services.prompt_service._restore_placeholders_if_needed')
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_optimize_prompt_template')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_optimize_prompt_section_impl_preserves_placeholders(
+        self,
+        mock_search_agent_info,
+        mock_query_tools,
+        mock_get_optimize_template,
+        mock_call_llm,
+        mock_restore,
+    ):
+        from backend.services.prompt_service import optimize_prompt_section_impl
+
+        mock_query_tools.return_value = []
+        mock_search_agent_info.return_value = {"name": "assistant1", "description": "desc"}
+        mock_get_optimize_template.return_value = {
+            "OPTIMIZE_SYSTEM_PROMPT": "Optimize",
+            "OPTIMIZE_USER_PROMPT": "{{current_content}}",
+        }
+        mock_call_llm.return_value = "Search local database"
+        # The restore function should preserve the original since placeholder is missing
+        mock_restore.return_value = "Search in {{kb_names}}"
+
+        result = optimize_prompt_section_impl(
+            agent_id=1,
+            model_id=2,
+            task_description="Test",
+            tenant_id="tenant-1",
+            language="zh",
+            section_type="duty",
+            section_title="Test",
+            current_content="Search in {{kb_names}}",
+            feedback="Improve",
+            tool_ids=[1],
+            sub_agent_ids=[1],  # non-empty to avoid DB call in _resolve_prompt_generation_sub_agents
+        )
+
+        # The placeholder should be preserved by _restore_placeholders_if_needed
+        self.assertIn("{{kb_names}}", result["optimized_content"])
+
+
+class TestOptimizePromptFeedback(unittest.TestCase):
+    """Tests for feedback-based prompt optimization (general/insert/select modes)."""
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    @patch('backend.services.prompt_service.get_prompt_optimize_prompt_template')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_general_mode_optimizes_correctly(
+        self, mock_search, mock_query, mock_get_opt, mock_get_template, mock_call_llm
+    ):
+        from backend.services.prompt_service import optimize_prompt_with_feedback_impl
+
+        mock_query.return_value = []
+        mock_search.return_value = {"name": "assistant1", "description": "desc"}
+        mock_get_opt.return_value = {
+            "OPTIMIZE_SYSTEM_PROMPT": "Optimize",
+            "OPTIMIZE_USER_PROMPT": "{{current_content}}",
+        }
+        mock_call_llm.return_value = "Improved duty content"
+        mock_get_template.return_value = {
+            "PLACEHOLDER_RESTORE_SYSTEM_PROMPT": "Restore",
+            "PLACEHOLDER_RESTORE_USER_PROMPT": "{{optimized_prompt}}",
+        }
+
+        result = optimize_prompt_with_feedback_impl(
+            agent_id=1, model_id=2, task_description="Test",
+            tenant_id="tenant-1", language="zh",
+            section_type="duty", section_title="Test",
+            current_content="Original duty",
+            feedback="Make it more specific",
+            mode="general",
+            tool_ids=[1], sub_agent_ids=[1],
+        )
+
+        self.assertEqual(result["section_type"], "duty")
+        self.assertEqual(result["optimized_content"], "Improved duty content")
+
+    def test_general_mode_requires_feedback(self):
+        from backend.services.prompt_service import optimize_prompt_with_feedback_impl
+
+        with self.assertRaises(Exception):
+            optimize_prompt_with_feedback_impl(
+                agent_id=1, model_id=2, task_description="Test",
+                tenant_id="tenant-1", language="zh",
+                section_type="duty", section_title="Test",
+                current_content="Original duty",
+                feedback="",  # empty
+                mode="general",
+                tool_ids=[1], sub_agent_ids=[1],
+            )
+
+    def test_select_mode_requires_start_and_end(self):
+        from backend.services.prompt_service import optimize_prompt_with_feedback_impl
+
+        with self.assertRaises(Exception):
+            optimize_prompt_with_feedback_impl(
+                agent_id=1, model_id=2, task_description="Test",
+                tenant_id="tenant-1", language="zh",
+                section_type="duty", section_title="Test",
+                current_content="Original duty",
+                feedback="Replace this",
+                mode="select",
+                tool_ids=[1], sub_agent_ids=[1],
+                # start_pos and end_pos missing
+            )
+
+    def test_select_mode_requires_start_less_than_end(self):
+        from backend.services.prompt_service import optimize_prompt_with_feedback_impl
+
+        with self.assertRaises(Exception):
+            optimize_prompt_with_feedback_impl(
+                agent_id=1, model_id=2, task_description="Test",
+                tenant_id="tenant-1", language="zh",
+                section_type="duty", section_title="Test",
+                current_content="Original duty",
+                feedback="Replace this",
+                mode="select",
+                start_pos=10, end_pos=5,  # wrong order
+                tool_ids=[1], sub_agent_ids=[1],
+            )
+
+    def test_select_mode_requires_end_within_bounds(self):
+        from backend.services.prompt_service import optimize_prompt_with_feedback_impl
+
+        with self.assertRaises(Exception):
+            optimize_prompt_with_feedback_impl(
+                agent_id=1, model_id=2, task_description="Test",
+                tenant_id="tenant-1", language="zh",
+                section_type="duty", section_title="Test",
+                current_content="Short",
+                feedback="Replace",
+                mode="select",
+                start_pos=0, end_pos=100,  # exceeds length
+                tool_ids=[1], sub_agent_ids=[1],
+            )
+
+    def test_unsupported_mode_raises_error(self):
+        from backend.services.prompt_service import optimize_prompt_with_feedback_impl
+
+        with self.assertRaises(Exception):
+            optimize_prompt_with_feedback_impl(
+                agent_id=1, model_id=2, task_description="Test",
+                tenant_id="tenant-1", language="zh",
+                section_type="duty", section_title="Test",
+                current_content="Original",
+                feedback="Feedback",
+                mode="invalid_mode",
+                tool_ids=[1], sub_agent_ids=[1],
+            )
+
+    @patch('backend.services.prompt_service._optimize_select_mode')
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    @patch('backend.services.prompt_service.get_prompt_optimize_prompt_template')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_select_mode_calls_helper(
+        self, mock_search, mock_query, mock_get_opt, mock_get_template,
+        mock_call_llm, mock_select
+    ):
+        from backend.services.prompt_service import optimize_prompt_with_feedback_impl
+
+        mock_query.return_value = []
+        mock_search.return_value = {"name": "assistant1", "description": "desc"}
+        mock_get_opt.return_value = {"OPTIMIZE_SYSTEM_PROMPT": "", "OPTIMIZE_USER_PROMPT": ""}
+        mock_call_llm.return_value = "x"
+        mock_get_template.return_value = {"PLACEHOLDER_RESTORE_SYSTEM_PROMPT": "", "PLACEHOLDER_RESTORE_USER_PROMPT": ""}
+        mock_select.return_value = "Replaced content"
+
+        result = optimize_prompt_with_feedback_impl(
+            agent_id=1, model_id=2, task_description="Test",
+            tenant_id="tenant-1", language="zh",
+            section_type="duty", section_title="Test",
+            current_content="Original content here",
+            feedback="New replacement",
+            mode="select",
+            start_pos=8, end_pos=15,
+            tool_ids=[1], sub_agent_ids=[1],
+        )
+
+        mock_select.assert_called_once()
+        self.assertEqual(result["optimized_content"], "Replaced content")
+
+
+class TestOptimizePromptBadCase(unittest.TestCase):
+    """Tests for bad case driven prompt optimization."""
+
+    def test_unsupported_section_type(self):
+        from backend.services.prompt_service import optimize_prompt_with_badcase_impl
+        from consts.exceptions import AppException
+
+        with self.assertRaises(AppException):
+            optimize_prompt_with_badcase_impl(
+                agent_id=1, model_id=2, task_description="Test",
+                tenant_id="tenant-1", language="zh",
+                section_type="invalid", section_title="Test",
+                current_content="Content",
+                feedback="Feedback",
+                bad_cases=[],
+                tool_ids=[1], sub_agent_ids=[1],
+            )
+
+    def test_bad_case_limit_enforced(self):
+        from backend.services.prompt_service import optimize_prompt_with_badcase_impl
+        from consts.exceptions import AppException
+
+        bad_cases = [
+            {"question": f"Q{i}", "label": f"L{i}", "answer": f"A{i}", "reason": f"R{i}"}
+            for i in range(15)
+        ]
+
+        with self.assertRaises(AppException):
+            optimize_prompt_with_badcase_impl(
+                agent_id=1, model_id=2, task_description="Test",
+                tenant_id="tenant-1", language="zh",
+                section_type="duty", section_title="Test",
+                current_content="Content",
+                feedback="Feedback",
+                bad_cases=bad_cases,  # exceeds limit
+                tool_ids=[1], sub_agent_ids=[1],
+            )
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    @patch('backend.services.prompt_service.get_prompt_optimize_prompt_template')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_badcase_optimization_returns_content(
+        self, mock_search, mock_query, mock_get_opt, mock_get_template, mock_call_llm
+    ):
+        from backend.services.prompt_service import optimize_prompt_with_badcase_impl
+
+        mock_query.return_value = []
+        mock_search.return_value = {"name": "assistant1", "description": "desc"}
+        mock_get_opt.return_value = {
+            "OPTIMIZE_SYSTEM_PROMPT": "Optimize",
+            "OPTIMIZE_USER_PROMPT": "{{current_content}}",
+        }
+        mock_call_llm.side_effect = [
+            "<intent>true</intent>\n<summary>Need to improve clarity</summary>",  # intent analysis
+            "Improved based on bad cases",  # regeneration
+        ]
+        mock_get_template.return_value = {
+            "BAD_CASE_ANALYZE_SYSTEM_PROMPT": "Analyze",
+            "BAD_CASE_ANALYZE_USER_PROMPT": "{{bad_cases}}",
+            "BAD_CASE_REGENERATE_SYSTEM_PROMPT": "Regenerate",
+            "BAD_CASE_REGENERATE_USER_PROMPT": "{{current_content}}",
+            "PLACEHOLDER_RESTORE_SYSTEM_PROMPT": "Restore",
+            "PLACEHOLDER_RESTORE_USER_PROMPT": "{{optimized_prompt}}",
+        }
+
+        result = optimize_prompt_with_badcase_impl(
+            agent_id=1, model_id=2, task_description="Test",
+            tenant_id="tenant-1", language="zh",
+            section_type="duty", section_title="Test",
+            current_content="Original content",
+            feedback="Improve based on failures",
+            bad_cases=[
+                {"question": "Q1", "label": "L1", "answer": "A1", "reason": "R1"}
+            ],
+            tool_ids=[1], sub_agent_ids=[1],
+        )
+
+        self.assertEqual(result["section_type"], "duty")
+        self.assertEqual(result["optimized_content"], "Improved based on bad cases")

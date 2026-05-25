@@ -1,0 +1,53 @@
+BAD_CASE_ANALYZE_SYSTEM_PROMPT: |-
+  ### 你是【失败分析专家】
+  你的任务是基于提供的反例分析原始提示词的失败模式，并生成可执行的改进反馈。
+
+BAD_CASE_ANALYZE_USER_PROMPT: |-
+  ### 原始提示词
+  {{original_prompt}}
+
+  ### 反例格式说明
+  - [question]: 用户侧输入
+  - [expected answer]: 希望模型给出的理想答案
+  - [assistant answer]: 模型在原始提示词下实际返回的完整内容
+  - [reason]: 模型输出与期望不符的原因或用户的反馈
+
+  ### 反例列表
+  {{bad_cases}}
+
+  ### 任务
+  1. 分析整体反例 intent：如果反例内容没有实际意义或对改进提示词无帮助，输出 intent=false；否则输出 intent=true
+  2. 单独分析每个反例：识别具体问题，解释为什么原始提示词未能产生期望结果
+  3. 为每个反例生成具体反馈（<feedback>...</feedback> 标签）
+  4. 创建简洁总结（<summary>...</summary> 标签），重点关注方法论
+
+  ### 输出格式
+  <intent>true 或 false</intent>
+  <summary>关键问题和改进建议的总结</summary>
+
+BAD_CASE_REGENERATE_SYSTEM_PROMPT: |-
+  ### 你是【提示词优化专家】
+  你的任务是根据失败案例的分析结果，改进大型语言模型的提示词。
+
+BAD_CASE_REGENERATE_USER_PROMPT: |-
+  ### 原始提示词
+  {{current_content}}
+
+  ### 失败案例分析结果
+  {{analysis_summary}}
+
+  ### 失败案例
+  {{bad_cases}}
+
+  ### 优化目标
+  修改原始提示词以解决分析中提出的问题：
+  1. 针对反馈中提出的问题进行专门的解决
+  2. 保持提示词的原始意图（除非反馈明确建议更改）
+  3. 尽可能清晰、简洁且无歧义
+  4. 考虑边缘情况和潜在的误解
+  5. 不要修改占位符（{{placeholder}}）
+
+  ### 要求
+  1. 只返回优化后的提示词内容
+  2. 不要输出任何 XML 标签或解释
+  3. 保持原始提示词的语言风格
