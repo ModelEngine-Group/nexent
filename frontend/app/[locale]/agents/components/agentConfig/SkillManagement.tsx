@@ -27,13 +27,9 @@ export default function SkillManagement({
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
-  const currentAgentPermission = useAgentConfigStore(
-    (state) => state.currentAgentPermission
-  );
-
-  // Use prop if provided, otherwise fall back to local calculation
-  const isReadOnly = isReadOnlyProp ?? (!isCreatingMode && currentAgentId !== undefined && currentAgentPermission === "READ_ONLY");
-  const editable = !isReadOnly;
+  // Use prop if provided, otherwise fall back to store
+  const storeIsReadOnly = useAgentConfigStore((state) => state.isReadOnly());
+  const isReadOnly = isReadOnlyProp ?? storeIsReadOnly;
 
   const originalSelectedSkills = useAgentConfigStore(
     (state) => state.editedAgent.skills
@@ -57,7 +53,7 @@ export default function SkillManagement({
   }, [groupedSkills, activeTabKey]);
 
   const handleSkillClick = (skill: Skill) => {
-    if (!editable || isReadOnly) return;
+    if (!isReadOnly) return;
 
     const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
     const isCurrentlySelected = currentSkills.some(
@@ -138,7 +134,7 @@ export default function SkillManagement({
                   isSelected
                     ? "bg-blue-100 border-blue-400 shadow-md"
                     : "border-gray-200 hover:border-blue-300 hover:shadow-md"
-                } ${editable && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                } ${!isReadOnly && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
                 onClick={() => handleSkillClick(skill)}
               >
                 <span className="font-medium text-gray-800 truncate">

@@ -16,7 +16,6 @@ export default function CollaborativeAgent() {
 
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
-  const currentAgentPermission = useAgentConfigStore((state) => state.currentAgentPermission);
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const updateSubAgentIds = useAgentConfigStore((state) => state.updateSubAgentIds);
   const updateExternalSubAgentIds = useAgentConfigStore((state) => state.updateExternalSubAgentIds);
@@ -35,9 +34,8 @@ export default function CollaborativeAgent() {
     (agent: A2AExternalAgent) => externalSubAgentIdList.includes(agent.id)
   );
 
-  // Determine if form should be editable (based on isReadOnly only, isGenerating handled separately)
-  const isReadOnly = !isCreatingMode && currentAgentPermission === "READ_ONLY";
-  const editable = !isReadOnly;
+  // isReadOnly from store: isCreatingMode → false, READ_ONLY permission → true
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
 
   // Related internal agent IDs
   const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list) ? editedAgent.sub_agent_id_list : [];
@@ -169,14 +167,14 @@ export default function CollaborativeAgent() {
         <Flex justify="flex-start" align="center" className="w-full">
           <Dropdown
             menu={{ items: dropdownMenuItems }}
-            disabled={!editable}
+            disabled={isReadOnly}
             trigger={["click"]}
           >
             <div className="flex items-center shrink-0">
               <Button
                 icon={<Plus size={14} />}
-                disabled={!editable}
-                className={`${editable ? "hover:!border-2 hover:!border-dashed hover:!border-blue-500 hover:!text-blue-500 hover:!bg-blue-50 transition-colors" : "!bg-gray-50"}`}
+                disabled={isReadOnly}
+                className={`${isReadOnly ? "!bg-gray-50" : "hover:!border-2 hover:!border-dashed hover:!border-blue-500 hover:!text-blue-500 hover:!bg-blue-50 transition-colors"}`}
                 style={{ border: '2px dashed #9ca3af' }}
               >
               </Button>
@@ -189,8 +187,8 @@ export default function CollaborativeAgent() {
               {relatedInternalAgents.map((agent: Agent) => (
                 <Tag
                   key={`internal-${agent.id}`}
-                  closable={editable}
-                  onClose={editable ? () => handleRemoveInternalAgent(Number(agent.id)) : undefined}
+                  closable={!isReadOnly}
+                  onClose={!isReadOnly ? () => handleRemoveInternalAgent(Number(agent.id)) : undefined}
                   className="bg-blue-50 text-blue-700 border-blue-200"
                 >
                   {agent.display_name || agent.name}
@@ -205,8 +203,8 @@ export default function CollaborativeAgent() {
               {displayExternalAgents.map((agent) => (
                 <Tag
                   key={`external-${agent.id}`}
-                  closable={editable}
-                  onClose={editable ? () => handleRemoveExternalAgent(agent.id) : undefined}
+                  closable={!isReadOnly}
+                  onClose={!isReadOnly ? () => handleRemoveExternalAgent(agent.id) : undefined}
                   className="bg-green-50 text-green-700 border-green-200"
                 >
                   <span className="inline-flex items-center gap-1">

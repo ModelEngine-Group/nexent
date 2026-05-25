@@ -20,7 +20,6 @@ export default function AgentInfoComp() {
   const { t } = useTranslation("common");
 
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
-  const currentAgentPermission = useAgentConfigStore((state) => state.currentAgentPermission);
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const isGenerating = useAgentConfigStore((state) => state.isGenerating);
 
@@ -33,8 +32,7 @@ export default function AgentInfoComp() {
     currentAgentId, agentInfo?.current_version_no
   );
     
-  const isReadOnly = isPanelActive && !isCreatingMode && currentAgentPermission === "READ_ONLY";
-  const isEditable = isPanelActive && !isReadOnly;
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
 
   // Save guard hook
   const saveGuard = useSaveGuard();
