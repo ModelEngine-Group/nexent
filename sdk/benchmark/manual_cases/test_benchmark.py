@@ -498,7 +498,7 @@ async def main(case_names: list[str] = None):
         print(f"  Report saved to {per_case_path}")
     
     # Exclude cases where baseline itself failed
-    valid_reports = [r for r in reports if not r.get["baseline_failed"]]
+    valid_reports = [r for r in reports if not r.get("baseline_failed")]
     excluded_ids = [r["case_id"] for r in reports if r.get("baseline_failed")]
     if excluded_ids:
         print(f"\n  Excluded from average (baseline failed): {excluded_ids}")
