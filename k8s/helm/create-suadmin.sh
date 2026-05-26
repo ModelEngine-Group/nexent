@@ -10,6 +10,7 @@ CHART_DIR="$SCRIPT_DIR/nexent"
 COMMON_VALUES="$CHART_DIR/charts/nexent-common/values.yaml"
 NAMESPACE="nexent"
 RELEASE_NAME="nexent"
+SUPER_ADMIN_EMAIL="suadmin@nexent.com"
 
 # Prompt user to enter password for super admin user with confirmation
 prompt_super_admin_password() {
@@ -71,19 +72,85 @@ wait_for_nexent_postgresql_ready() {
   return 1
 }
 
+decode_base64() {
+  if base64 --help 2>&1 | grep -q -- '--decode'; then
+    base64 --decode
+  else
+    base64 -D
+  fi
+}
+
+get_supabase_anon_key() {
+  local encoded_key
+  encoded_key=$(kubectl get secret nexent-secrets -n "$NAMESPACE" -o jsonpath='{.data.SUPABASE_KEY}' 2>/dev/null || true)
+  if [ -n "$encoded_key" ]; then
+    printf '%s' "$encoded_key" | decode_base64
+    return 0
+  fi
+
+  grep "anonKey:" "$COMMON_VALUES" | sed 's/.*anonKey: *//' | tr -d '"' | tr -d "'" | xargs
+}
+
+get_existing_super_admin_user_id() {
+  local email="$1"
+  kubectl exec -n "$NAMESPACE" deploy/nexent-supabase-db -- \
+    psql -U postgres -d supabase -t -c "SELECT id FROM auth.users WHERE email = '${email}' LIMIT 1;" 2>/dev/null | tr -d '[:space:]'
+}
+
+insert_super_admin_tenant_record() {
+  local user_id="$1"
+  local email="$2"
+  local postgres_pod="nexent-postgresql"
+
+  if [ -z "$user_id" ]; then
+    echo "   ⚠️  Warning: user_id is empty. Skipping database insertion."
+    return 0
+  fi
+
+  echo "   ⏳ Waiting for PostgreSQL to be ready..."
+  if ! wait_for_nexent_postgresql_ready; then
+    echo "   ⚠️  Warning: PostgreSQL is not ready. Skipping database insertion."
+    return 0
+  fi
+
+  echo "   🔧 Inserting super admin user into user_tenant_t table..."
+  local sql="INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by) VALUES ('${user_id}', '', 'SU', '${email}', 'system', 'system') ON CONFLICT (user_id, tenant_id) DO NOTHING;"
+
+  if kubectl exec -n "$NAMESPACE" deploy/$postgres_pod -- psql -U root -d nexent -c "$sql" >/dev/null 2>&1; then
+    echo "   ✅ Super admin user inserted into user_tenant_t table successfully."
+  else
+    echo "   ⚠️  Warning: Failed to insert super admin user into user_tenant_t table."
+  fi
+}
+
 # Create default super admin user
 create_supabase_super_admin_user() {
-  local email="suadmin@nexent.com"
+  local email="$SUPER_ADMIN_EMAIL"
   local password
 
-  # Prompt user to enter password
-  password="$(prompt_super_admin_password)" || return 1
+  local existing_user_id
+  existing_user_id="$(get_existing_super_admin_user_id "$email")"
+  if [ -n "$existing_user_id" ]; then
+    echo "   🚧 Default super admin user already exists. Skipping password setup."
+    echo "   📧 Email:    ${email}"
+    insert_super_admin_tenant_record "$existing_user_id" "$email"
+    echo ""
+    echo "--------------------------------"
+    echo ""
+    return 0
+  fi
 
   echo "   🔧 Creating super admin user..."
 
-  # Get API keys from values.yaml
-  local anon_key=$(grep "anonKey:" "$COMMON_VALUES" | sed 's/.*anonKey: *//' | tr -d '"' | tr -d "'" | xargs)
-  local postgres_pod="nexent-postgresql"
+  local anon_key
+  anon_key="$(get_supabase_anon_key)"
+  if [ -z "$anon_key" ]; then
+    echo "   ❌ Could not load SUPABASE_KEY from Kubernetes secret."
+    return 1
+  fi
+
+  # Prompt user to enter password only when the user does not exist.
+  password="$(prompt_super_admin_password)" || return 1
 
   # Try to create user via Kong API
   local signup_response
@@ -118,22 +185,7 @@ create_supabase_super_admin_user() {
     if [ -z "$user_id" ]; then
       echo "   ⚠️  Warning: Could not extract user.id from response. Skipping database insertion."
     else
-      # Wait for PostgreSQL to be ready
-      echo "   ⏳ Waiting for PostgreSQL to be ready..."
-      if ! wait_for_nexent_postgresql_ready; then
-        echo "   ⚠️  Warning: PostgreSQL is not ready. Skipping database insertion."
-        return 0
-      fi
-
-      # Insert user_tenant_t record
-      echo "   🔧 Inserting super admin user into user_tenant_t table..."
-      local sql="INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by) VALUES ('${user_id}', '', 'SU', '${email}', 'system', 'system') ON CONFLICT (user_id, tenant_id) DO NOTHING;"
-
-      if kubectl exec -n $NAMESPACE deploy/$postgres_pod -- psql -U root -d nexent -c "$sql" >/dev/null 2>&1; then
-        echo "   ✅ Super admin user inserted into user_tenant_t table successfully."
-      else
-        echo "   ⚠️  Warning: Failed to insert super admin user into user_tenant_t table."
-      fi
+      insert_super_admin_tenant_record "$user_id" "$email"
     fi
   elif echo "$signup_response" | grep -q '"error_code":"user_already_exists"' || echo "$signup_response" | grep -q '"code":422'; then
     echo "   🚧 Default super admin user already exists. Skipping creation."
@@ -142,7 +194,7 @@ create_supabase_super_admin_user() {
     # Get user_id from Supabase auth.users table
     echo "   🔧 Retrieving user_id from Supabase database..."
     local user_id
-    user_id=$(kubectl exec -n $NAMESPACE deploy/nexent-supabase-db -- psql -U postgres -d supabase -t -c "SELECT id FROM auth.users WHERE email = '${email}' LIMIT 1;" 2>/dev/null | tr -d '[:space:]')
+    user_id="$(get_existing_super_admin_user_id "$email")"
 
     if [ -z "$user_id" ]; then
       echo "   ⚠️  Warning: Could not retrieve user_id. Skipping database insertion."
@@ -150,22 +202,7 @@ create_supabase_super_admin_user() {
       return 0
     fi
 
-    # Wait for PostgreSQL to be ready
-    echo "   ⏳ Waiting for PostgreSQL to be ready..."
-    if ! wait_for_nexent_postgresql_ready; then
-      echo "   ⚠️  Warning: PostgreSQL is not ready. Skipping database insertion."
-      return 0
-    fi
-
-    # Insert user_tenant_t record
-    echo "   🔧 Inserting super admin user into user_tenant_t table..."
-    local sql="INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by) VALUES ('${user_id}', '', 'SU', '${email}', 'system', 'system') ON CONFLICT (user_id, tenant_id) DO NOTHING;"
-
-    if kubectl exec -n $NAMESPACE deploy/$postgres_pod -- psql -U root -d nexent -c "$sql" >/dev/null 2>&1; then
-      echo "   ✅ Super admin user inserted into user_tenant_t table successfully."
-    else
-      echo "   ⚠️  Warning: Failed to insert super admin user into user_tenant_t table."
-    fi
+    insert_super_admin_tenant_record "$user_id" "$email"
   else
     echo "   ❌ Response from Supabase does not contain 'access_token' or 'user'."
     return 1
