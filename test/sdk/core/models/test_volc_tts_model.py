@@ -5,10 +5,27 @@ Tests the VolcTTSModel and VolcTTSConfig classes.
 """
 import gzip
 import io
+import os
 import pytest
+import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import sys as _sys
+
+_models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../sdk/nexent/core/models"))
+_core_dir = os.path.dirname(_models_dir)
+_nexent_dir = os.path.dirname(_core_dir)
+
+_sdk_nexent_pkg = types.ModuleType("sdk.nexent")
+_sdk_nexent_pkg.__path__ = [_nexent_dir]
+_sdk_nexent_core_pkg = types.ModuleType("sdk.nexent.core")
+_sdk_nexent_core_pkg.__path__ = [_core_dir]
+_sdk_nexent_models_pkg = types.ModuleType("sdk.nexent.core.models")
+_sdk_nexent_models_pkg.__path__ = [_models_dir]
+
+_sys.modules["sdk.nexent"] = _sdk_nexent_pkg
+_sys.modules["sdk.nexent.core"] = _sdk_nexent_core_pkg
+_sys.modules["sdk.nexent.core.models"] = _sdk_nexent_models_pkg
 
 _mock_websockets = MagicMock()
 _mock_websockets.connect = MagicMock()
@@ -39,8 +56,8 @@ with patch.dict(_sys.modules, _module_mocks):
         VolcTTSConfig,
         BaseTTSModel,
     )
+    _volc_tts_module = _sys.modules[VolcTTSModel.__module__]
 
-_volc_tts_module = _sys.modules[VolcTTSModel.__module__]
 _volc_tts_module.websockets = _mock_websockets
 
 
