@@ -163,6 +163,12 @@ async def list_external_agents(
         )
 
     except Exception as e:
+        # Return empty list if table doesn't exist
+        if "does not exist" in str(e).lower():
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={"status": "success", "data": []}
+            )
         logger.error(f"List agents failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

@@ -104,6 +104,24 @@ export const ModelDeleteDialog = ({
           text: "text-yellow-600",
           border: "border-yellow-100",
         };
+      case MODEL_TYPES.IMAGE_UNDERSTANDING:
+        return {
+          bg: "bg-indigo-50",
+          text: "text-indigo-600",
+          border: "border-indigo-100",
+        };
+      case MODEL_TYPES.IMAGE_GENERATION:
+        return {
+          bg: "bg-orange-50",
+          text: "text-orange-600",
+          border: "border-orange-100",
+        };
+      case MODEL_TYPES.VIDEO_UNDERSTANDING:
+        return {
+          bg: "bg-cyan-50",
+          text: "text-cyan-600",
+          border: "border-cyan-100",
+        };
       case MODEL_TYPES.STT:
         return {
           bg: "bg-red-50",
@@ -142,6 +160,12 @@ export const ModelDeleteDialog = ({
         return "🔊";
       case MODEL_TYPES.VLM:
         return "👁️";
+      case MODEL_TYPES.IMAGE_UNDERSTANDING:
+        return "🖼️👁️";
+      case MODEL_TYPES.IMAGE_GENERATION:
+        return "🎨";
+      case MODEL_TYPES.VIDEO_UNDERSTANDING:
+        return "🎬👁️";
       default:
         return "⚙️";
     }
@@ -165,6 +189,12 @@ export const ModelDeleteDialog = ({
         return t("model.type.tts");
       case MODEL_TYPES.VLM:
         return t("model.type.vlm");
+      case MODEL_TYPES.IMAGE_UNDERSTANDING:
+        return t("model.type.image_understanding");
+      case MODEL_TYPES.IMAGE_GENERATION:
+        return t("model.type.image_generation");
+      case MODEL_TYPES.VIDEO_UNDERSTANDING:
+        return t("model.type.video_understanding");
       default:
         return t("model.type.unknown");
     }
@@ -345,6 +375,18 @@ export const ModelDeleteDialog = ({
       }
       if (type === MODEL_TYPES.VLM) {
         const cfgUrl = modelConfig?.vlm?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+      if (type === MODEL_TYPES.IMAGE_UNDERSTANDING) {
+        const cfgUrl = modelConfig?.imageUnderstanding?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+      if (type === MODEL_TYPES.IMAGE_GENERATION) {
+        const cfgUrl = modelConfig?.imageGeneration?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+      if (type === MODEL_TYPES.VIDEO_UNDERSTANDING) {
+        const cfgUrl = modelConfig?.videoUnderstanding?.apiConfig?.modelUrl;
         if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
       }
       if (type === MODEL_TYPES.LLM) {
@@ -1016,7 +1058,9 @@ export const ModelDeleteDialog = ({
                 MODEL_TYPES.EMBEDDING,
                 MODEL_TYPES.MULTI_EMBEDDING,
                 MODEL_TYPES.RERANK,
-                MODEL_TYPES.VLM,
+                MODEL_TYPES.IMAGE_UNDERSTANDING,
+                MODEL_TYPES.IMAGE_GENERATION,
+                MODEL_TYPES.VIDEO_UNDERSTANDING,
                 MODEL_TYPES.STT,
                 MODEL_TYPES.TTS,
               ] as ModelType[]

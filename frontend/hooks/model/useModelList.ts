@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { modelService } from "@/services/modelService";
 import { ModelOption } from "@/types/modelConfig";
 import { useMemo } from "react";
+import { MODEL_TYPES } from "@/const/modelConfig";
 export function useModelList(options?: { enabled?: boolean; staleTime?: number }) {
 	const queryClient = useQueryClient();
 
@@ -46,6 +47,30 @@ export function useModelList(options?: { enabled?: boolean; staleTime?: number }
 		return models.filter((model) => model.type === "vlm" && model.connect_status === "available");
 	}, [models]);
 
+	const imageUnderstandingModels = useMemo(() => {
+		return models.filter((model) => model.type === MODEL_TYPES.IMAGE_UNDERSTANDING);
+	}, [models]);
+
+	const availableImageUnderstandingModels = useMemo(() => {
+		return models.filter((model) => model.type === MODEL_TYPES.IMAGE_UNDERSTANDING && model.connect_status === "available");
+	}, [models]);
+
+	const imageGenerationModels = useMemo(() => {
+		return models.filter((model) => model.type === "image_generation");
+	}, [models]);
+
+	const availableImageGenerationModels = useMemo(() => {
+		return models.filter((model) => model.type === "image_generation" && model.connect_status === "available");
+	}, [models]);
+
+	const videoUnderstandingModels = useMemo(() => {
+		return models.filter((model) => model.type === "video_understanding");
+	}, [models]);
+
+	const availableVideoUnderstandingModels = useMemo(() => {
+		return models.filter((model) => model.type === "video_understanding" && model.connect_status === "available");
+	}, [models]);
+
 	return {
 		...query,
 		models,
@@ -56,6 +81,12 @@ export function useModelList(options?: { enabled?: boolean; staleTime?: number }
 		availableEmbeddingModels,
 		vlmModels,
 		availableVlmModels,
+		imageUnderstandingModels,
+		availableImageUnderstandingModels,
+		imageGenerationModels,
+		availableImageGenerationModels,
+		videoUnderstandingModels,
+		availableVideoUnderstandingModels,
 		invalidate: () => queryClient.invalidateQueries({ queryKey: ["models"] }),
 	};
 }

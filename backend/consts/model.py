@@ -183,7 +183,11 @@ class ModelConfig(BaseModel):
     multiEmbedding: SingleModelConfig
     rerank: SingleModelConfig
     vlm: SingleModelConfig
-    stt: STTModelConfig
+    stt: SingleModelConfig
+    tts: SingleModelConfig
+    imageUnderstanding: SingleModelConfig
+    imageGeneration: SingleModelConfig
+    videoUnderstanding: SingleModelConfig
 
 
 class AppConfig(BaseModel):
@@ -431,7 +435,6 @@ class AgentInfoRequest(BaseModel):
     related_external_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
-    enable_context_manager: Optional[bool] = None
     version_no: int = 0
 
 

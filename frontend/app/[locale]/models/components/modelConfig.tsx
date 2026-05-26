@@ -56,7 +56,20 @@ const getModelData = (t: any) => ({
   },
   multimodal: {
     title: t("modelConfig.category.multimodal"),
-    options: [{ id: MODEL_TYPES.VLM, name: t("modelConfig.option.vlmModel") }],
+    options: [
+      {
+        id: MODEL_TYPES.IMAGE_UNDERSTANDING,
+        name: t("modelConfig.option.imageUnderstandingModel"),
+      },
+      {
+        id: MODEL_TYPES.IMAGE_GENERATION,
+        name: t("modelConfig.option.imageGenerationModel"),
+      },
+      {
+        id: MODEL_TYPES.VIDEO_UNDERSTANDING,
+        name: t("modelConfig.option.videoUnderstandingModel"),
+      },
+    ],
   },
   voice: {
     title: t("modelConfig.category.voice"),
@@ -142,7 +155,11 @@ export const ModelConfigSection = forwardRef<
     llm: { main: "" },
     embedding: { embedding: "", multi_embedding: "" },
     reranker: { reranker: "" },
-    multimodal: { vlm: "" },
+    multimodal: {
+      image_understanding: "",
+      image_generation: "",
+      video_understanding: "",
+    },
     voice: { tts: "", stt: "" },
   });
 
@@ -283,10 +300,40 @@ export const ModelConfigSection = forwardRef<
           )
         : true;
 
-      const vlm = modelConfig.vlm.displayName;
-      const vlmExists = vlm
+      // vlm is now called image_understanding, but we need to support legacy vlm models
+      const legacyVlm = modelConfig.vlm?.displayName;
+      const legacyVlmExists = legacyVlm
         ? allModels.some(
-            (m) => m.displayName === vlm && m.type === MODEL_TYPES.VLM
+            (m) =>
+              m.displayName === legacyVlm &&
+              (m.type === MODEL_TYPES.VLM || m.type === MODEL_TYPES.IMAGE_UNDERSTANDING)
+          )
+        : true;
+
+      const imageUnderstanding = modelConfig.imageUnderstanding?.displayName;
+      const imageUnderstandingExists = imageUnderstanding
+        ? allModels.some(
+            (m) =>
+              m.displayName === imageUnderstanding &&
+              (m.type === MODEL_TYPES.IMAGE_UNDERSTANDING || m.type === MODEL_TYPES.VLM)
+          )
+        : legacyVlmExists;
+
+      const imageGeneration = modelConfig.imageGeneration?.displayName;
+      const imageGenerationExists = imageGeneration
+        ? allModels.some(
+            (m) =>
+              m.displayName === imageGeneration &&
+              m.type === MODEL_TYPES.IMAGE_GENERATION
+          )
+        : true;
+
+      const videoUnderstanding = modelConfig.videoUnderstanding?.displayName;
+      const videoUnderstandingExists = videoUnderstanding
+        ? allModels.some(
+            (m) =>
+              m.displayName === videoUnderstanding &&
+              m.type === MODEL_TYPES.VIDEO_UNDERSTANDING
           )
         : true;
 
@@ -317,7 +364,9 @@ export const ModelConfigSection = forwardRef<
           reranker: rerankExists ? rerank : "",
         },
         multimodal: {
-          vlm: vlmExists ? vlm : "",
+          image_understanding: imageUnderstandingExists ? imageUnderstanding : "",
+          image_generation: imageGenerationExists ? imageGeneration : "",
+          video_understanding: videoUnderstandingExists ? videoUnderstanding : "",
         },
         voice: {
           tts: ttsExists ? tts : "",
@@ -359,8 +408,21 @@ export const ModelConfigSection = forwardRef<
         configUpdates.rerank = { modelName: "", displayName: "" };
       }
 
-      if (!vlmExists && vlm) {
+      // Handle legacy vlm configuration - migrate to imageUnderstanding or clear
+      if (!legacyVlmExists && legacyVlm) {
         configUpdates.vlm = { modelName: "", displayName: "" };
+      }
+
+      if (!imageUnderstandingExists && imageUnderstanding) {
+        configUpdates.imageUnderstanding = { modelName: "", displayName: "" };
+      }
+
+      if (!imageGenerationExists && imageGeneration) {
+        configUpdates.imageGeneration = { modelName: "", displayName: "" };
+      }
+
+      if (!videoUnderstandingExists && videoUnderstanding) {
+        configUpdates.videoUnderstanding = { modelName: "", displayName: "" };
       }
 
       if (!sttExists && stt) {
@@ -379,14 +441,20 @@ export const ModelConfigSection = forwardRef<
       }
 
       // Check if there are configured models that need connectivity verification
+      // Handle legacy vlm configuration check
+      const hasLegacyVlmConfigured = !!modelConfig.vlm?.modelName;
+
       const hasConfiguredModels =
         !!modelConfig.llm.modelName ||
         !!modelConfig.embedding.modelName ||
         !!modelConfig.multiEmbedding.modelName ||
         !!modelConfig.rerank.modelName ||
-        !!modelConfig.vlm.modelName ||
+        !!modelConfig.imageUnderstanding?.modelName ||
+        !!modelConfig.imageGeneration?.modelName ||
+        !!modelConfig.videoUnderstanding?.modelName ||
         !!modelConfig.tts.modelName ||
-        !!modelConfig.stt.modelName;
+        !!modelConfig.stt.modelName ||
+        hasLegacyVlmConfigured;
 
       // Perform verification directly here instead of using setTimeout
       // This ensures we use model data from the current function scope instead of relying on state updates
@@ -440,12 +508,16 @@ export const ModelConfigSection = forwardRef<
       const hasLlmMain = !!modelConfig.llm.modelName;
       const hasEmbedding = !!modelConfig.embedding.modelName;
       const hasReranker = !!modelConfig.rerank.modelName;
-      const hasVlm = !!modelConfig.vlm.modelName;
+      const hasImageUnderstanding = !!modelConfig.imageUnderstanding?.modelName;
+      const hasImageGeneration = !!modelConfig.imageGeneration?.modelName;
+      const hasVideoUnderstanding = !!modelConfig.videoUnderstanding?.modelName;
       const hasTts = !!modelConfig.tts.modelName;
       const hasStt = !!modelConfig.stt.modelName;
 
       hasSelectedModels =
-        hasLlmMain || hasEmbedding || hasReranker || hasVlm || hasTts || hasStt;
+        hasLlmMain || hasEmbedding || hasReranker ||
+        hasImageUnderstanding || hasImageGeneration || hasVideoUnderstanding ||
+        hasTts || hasStt;
 
       if (hasSelectedModels) {
         currentSelectedModels.llm.main = modelConfig.llm.modelName;
@@ -454,7 +526,12 @@ export const ModelConfigSection = forwardRef<
         currentSelectedModels.embedding.multi_embedding =
           modelConfig.multiEmbedding.modelName || "";
         currentSelectedModels.reranker.reranker = modelConfig.rerank.modelName;
-        currentSelectedModels.multimodal.vlm = modelConfig.vlm.modelName;
+        currentSelectedModels.multimodal.image_understanding =
+          modelConfig.imageUnderstanding?.modelName || "";
+        currentSelectedModels.multimodal.image_generation =
+          modelConfig.imageGeneration?.modelName || "";
+        currentSelectedModels.multimodal.video_understanding =
+          modelConfig.videoUnderstanding?.modelName || "";
         currentSelectedModels.voice.tts = modelConfig.tts.modelName;
         currentSelectedModels.voice.stt = modelConfig.stt.modelName;
       } else {
@@ -492,7 +569,7 @@ export const ModelConfigSection = forwardRef<
           } else if (category === "reranker") {
             modelType = MODEL_TYPES.RERANK;
           } else if (category === "multimodal") {
-            modelType = MODEL_TYPES.VLM;
+            modelType = optionId as ModelType;
           } else if (category === MODEL_TYPES.EMBEDDING) {
             modelType =
               optionId === MODEL_TYPES.MULTI_EMBEDDING
@@ -654,7 +731,7 @@ export const ModelConfigSection = forwardRef<
     } else if (category === "reranker") {
       modelType = MODEL_TYPES.RERANK;
     } else if (category === "multimodal") {
-      modelType = MODEL_TYPES.VLM;
+      modelType = option as ModelType;
     } else if (category === MODEL_TYPES.EMBEDDING) {
       modelType =
         option === MODEL_TYPES.MULTI_EMBEDDING
@@ -679,7 +756,16 @@ export const ModelConfigSection = forwardRef<
     ) {
       configKey = "multiEmbedding";
     } else if (category === "multimodal") {
-      configKey = MODEL_TYPES.VLM;
+      // Map multimodal option to config key
+      if (option === MODEL_TYPES.IMAGE_UNDERSTANDING) {
+        configKey = MODEL_TYPES.IMAGE_UNDERSTANDING;
+      } else if (option === MODEL_TYPES.IMAGE_GENERATION) {
+        configKey = MODEL_TYPES.IMAGE_GENERATION;
+      } else if (option === MODEL_TYPES.VIDEO_UNDERSTANDING) {
+        configKey = MODEL_TYPES.VIDEO_UNDERSTANDING;
+      } else {
+        configKey = option;
+      }
     } else if (category === "reranker") {
       configKey = MODEL_TYPES.RERANK;
     } else if (category === "voice" && option === "tts") {
@@ -1005,7 +1091,7 @@ export const ModelConfigSection = forwardRef<
                               ? MODEL_TYPES.TTS
                               : MODEL_TYPES.STT
                             : key === "multimodal"
-                              ? MODEL_TYPES.VLM
+                              ? (option.id as ModelType)
                               : key === MODEL_TYPES.EMBEDDING &&
                                   option.id === MODEL_TYPES.MULTI_EMBEDDING
                                 ? MODEL_TYPES.MULTI_EMBEDDING

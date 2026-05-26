@@ -31,7 +31,10 @@ export type ModelType =
   | "stt"
   | "tts"
   | "vlm"
-  | "multi_embedding";
+  | "multi_embedding"
+  | "image_understanding"
+  | "image_generation"
+  | "video_understanding";
 
 // Model option interface
 export interface ModelOption {
@@ -101,8 +104,11 @@ export interface ModelConfig {
   multiEmbedding: SingleModelConfig;
   rerank: SingleModelConfig;
   vlm: SingleModelConfig;
-  stt: STTModelConfig;
-  tts: TTSModelConfig;
+  stt: SingleModelConfig;
+  tts: SingleModelConfig;
+  imageUnderstanding: SingleModelConfig;
+  imageGeneration: SingleModelConfig;
+  videoUnderstanding: SingleModelConfig;
 }
 
 // Global configuration interface

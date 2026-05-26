@@ -2,7 +2,9 @@ import os
 import sys
 import types
 from unittest import mock
+from unittest.mock import MagicMock, AsyncMock
 
+import httpx
 import pytest
 
 # Dynamically determine the backend path
@@ -14,7 +16,7 @@ sys.path.append(backend_dir)
 class MockModule(mock.MagicMock):
     @classmethod
     def __getattr__(cls, key):
-        return mock.MagicMock()  # Return a regular MagicMock instead of a new MockModule
+        return mock.MagicMock()
 
 
 # Mock required modules before any imports occur
@@ -28,54 +30,87 @@ sys.modules['utils.model_name_utils'] = MockModule()
 
 # Mock nexent packages and modules with proper hierarchy
 sys.modules['nexent'] = MockModule()
-sys.modules['nexent.core'] = MockModule()
+sys.modules['nexent.core'] = types.ModuleType("nexent.core")
 sys.modules['nexent.core.agents'] = MockModule()
 sys.modules['nexent.core.agents.agent_model'] = MockModule()
-sys.modules['nexent.core.models'] = MockModule()
+sys.modules['nexent.core.models'] = types.ModuleType("nexent.core.models")
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
+sys.modules['nexent.core.models.rerank_model'] = MockModule()
 
-sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
-sys.modules['nexent.monitor'].set_monitoring_context = mock.MagicMock()
-sys.modules['nexent.monitor'].set_monitoring_operation = mock.MagicMock()
-
-# Mock rerank_model module with proper class exports
-
-
-class MockBaseRerank:
+# Create mock classes for nexent.core
+class MockMessageObserver:
     pass
 
+class MockOpenAIModel:
+    pass
 
-class MockOpenAICompatibleRerank(MockBaseRerank):
-    def __init__(self, *args, **kwargs):
-        pass
+class MockOpenAIVLModel:
+    pass
 
+sys.modules['nexent.core'].MessageObserver = MockMessageObserver
+sys.modules['nexent.core.models'].OpenAIModel = MockOpenAIModel
+sys.modules['nexent.core.models'].OpenAIVLModel = MockOpenAIVLModel
+sys.modules['nexent.core.models'].JinaEmbedding = mock.MagicMock()
+sys.modules['nexent.core.models'].OpenAICompatibleEmbedding = mock.MagicMock()
+sys.modules['nexent.core.models.rerank_model'].OpenAICompatibleRerank = mock.MagicMock()
 
-rerank_module = MockModule()
-rerank_module.BaseRerank = MockBaseRerank
-rerank_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
-sys.modules['nexent.core.models.rerank_model'] = rerank_module
+# Mock nexent.monitor module with the required functions
+nexent_monitor_mod = types.ModuleType("nexent.monitor")
+nexent_monitor_mod.set_monitoring_context = mock.MagicMock()
+nexent_monitor_mod.set_monitoring_operation = mock.MagicMock()
+sys.modules['nexent.monitor'] = nexent_monitor_mod
 
 # Mock services packages
 sys.modules['services'] = MockModule()
 sys.modules['services.voice_service'] = MockModule()
 
 # Define the ModelConnectStatusEnum for testing
+class _StatusEnumValue:
+    """Helper class to simulate enum value behavior."""
+    def __init__(self, val):
+        self._val = val
+
+    @property
+    def value(self):
+        return self._val
+
+    def __str__(self):
+        return self._val
+
+    def __eq__(self, other):
+        return str(self) == str(other)
+
+    def __hash__(self):
+        return hash(self._val)
 
 
 class ModelConnectStatusEnum:
-    AVAILABLE = "available"
-    UNAVAILABLE = "unavailable"
-    DETECTING = "detecting"
+    AVAILABLE = _StatusEnumValue("available")
+    UNAVAILABLE = _StatusEnumValue("unavailable")
+    DETECTING = _StatusEnumValue("detecting")
+    NOT_DETECTED = _StatusEnumValue("not_detected")
 
 # Define a ModelResponse class for testing
-
-
 class ModelResponse:
     def __init__(self, code, message="", data=None):
         self.code = code
         self.message = message
         self.data = data or {}
 
+# Mock consts modules
+sys.modules['consts'] = MockModule()
+sys.modules['consts.const'] = types.ModuleType("consts.const")
+sys.modules['consts.const'].LOCALHOST_NAME = "localhost"
+sys.modules['consts.const'].LOCALHOST_IP = "127.0.0.1"
+sys.modules['consts.const'].DOCKER_INTERNAL_HOST = "host.docker.internal"
+sys.modules['consts.model'] = types.ModuleType("consts.model")
+sys.modules['consts.model'].ModelConnectStatusEnum = ModelConnectStatusEnum
+
+# Mock httpx for image generation tests
+sys.modules['httpx'] = types.ModuleType("httpx")
+sys.modules['httpx'].AsyncClient = mock.MagicMock()
+sys.modules['httpx'].ConnectError = type('ConnectError', (Exception,), {})
+sys.modules['httpx'].TimeoutException = type('TimeoutException', (Exception,), {})
 
 # Now import the module under test
 try:
@@ -652,6 +687,161 @@ async def test_verify_model_config_connectivity_exception():
         assert "error" in response
         assert "Connection verification failed" in response["error"]
         assert "Unexpected error" in response["error"]
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_image_generation_success():
+    """Test connectivity check for image_generation model."""
+    mock_response = MagicMock()
+    mock_response.status_code = 400  # Bad request is OK, as long as server responds
+
+    mock_client = AsyncMock()
+    mock_client.post.return_value = mock_response
+
+    mock_cm = MagicMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+    with mock.patch("backend.services.model_health_service.httpx.AsyncClient", return_value=mock_cm):
+        result = await _perform_connectivity_check(
+            "Qwen/Qwen-Image-Edit",
+            "image_generation",
+            "https://api.siliconflow.cn/v1/images/generations",
+            "test-key",
+        )
+
+    assert result is True
+    mock_client.post.assert_called_once()
+    call_args = mock_client.post.call_args
+    assert call_args[0][0] == "https://api.siliconflow.cn/v1/images/generations"
+    assert call_args[1]["json"]["model"] == "Qwen/Qwen-Image-Edit"
+    assert call_args[1]["headers"]["Authorization"] == "Bearer test-key"
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_image_generation_failure():
+    """Test connectivity check failure for image_generation model."""
+    mock_response = MagicMock()
+    mock_response.status_code = 500  # Server error means connectivity failed
+
+    mock_client = AsyncMock()
+    mock_client.post.return_value = mock_response
+
+    mock_cm = MagicMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+    with mock.patch("backend.services.model_health_service.httpx.AsyncClient", return_value=mock_cm):
+        result = await _perform_connectivity_check(
+            "Qwen/Qwen-Image-Edit",
+            "image_generation",
+            "https://api.siliconflow.cn/v1/images/generations",
+            "test-key",
+        )
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_image_generation_connect_error():
+    """Test connectivity check for image_generation model with connection error."""
+    mock_client = AsyncMock()
+    mock_client.post.side_effect = httpx.ConnectError("Connection failed")
+
+    mock_cm = MagicMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+    with mock.patch("backend.services.model_health_service.httpx.AsyncClient", return_value=mock_cm):
+        result = await _perform_connectivity_check(
+            "Qwen/Qwen-Image-Edit",
+            "image_generation",
+            "https://api.siliconflow.cn/v1/images/generations",
+            "test-key",
+        )
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_image_generation_timeout():
+    """Test connectivity check for image_generation model with timeout."""
+    mock_client = AsyncMock()
+    mock_client.post.side_effect = httpx.TimeoutException("Timeout")
+
+    mock_cm = MagicMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+    with mock.patch("backend.services.model_health_service.httpx.AsyncClient", return_value=mock_cm):
+        result = await _perform_connectivity_check(
+            "Qwen/Qwen-Image-Edit",
+            "image_generation",
+            "https://api.siliconflow.cn/v1/images/generations",
+            "test-key",
+        )
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_image_understanding():
+    """Test connectivity check for image_understanding model."""
+    with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
+            mock.patch("backend.services.model_health_service.OpenAIVLModel") as mock_model:
+        mock_observer_instance = mock.MagicMock()
+        mock_observer.return_value = mock_observer_instance
+
+        mock_model_instance = mock.MagicMock()
+        mock_model_instance.check_connectivity = mock.AsyncMock(return_value=True)
+        mock_model.return_value = mock_model_instance
+
+        result = await _perform_connectivity_check(
+            "Qwen/Qwen2.5-VL",
+            "image_understanding",
+            "https://api.siliconflow.cn",
+            "test-key",
+        )
+
+        assert result is True
+        mock_model.assert_called_once_with(
+            mock_observer_instance,
+            model_id="Qwen/Qwen2.5-VL",
+            api_base="https://api.siliconflow.cn",
+            api_key="test-key",
+            ssl_verify=True
+        )
+        mock_model_instance.check_connectivity.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_video_understanding():
+    """Test connectivity check for video_understanding model."""
+    with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
+            mock.patch("backend.services.model_health_service.OpenAIVLModel") as mock_model:
+        mock_observer_instance = mock.MagicMock()
+        mock_observer.return_value = mock_observer_instance
+
+        mock_model_instance = mock.MagicMock()
+        mock_model_instance.check_connectivity = mock.AsyncMock(return_value=True)
+        mock_model.return_value = mock_model_instance
+
+        result = await _perform_connectivity_check(
+            "Qwen/Qwen2-VL",
+            "video_understanding",
+            "https://api.siliconflow.cn",
+            "test-key",
+        )
+
+        assert result is True
+        mock_model.assert_called_once_with(
+            mock_observer_instance,
+            model_id="Qwen/Qwen2-VL",
+            api_base="https://api.siliconflow.cn",
+            api_key="test-key",
+            ssl_verify=True
+        )
+        mock_model_instance.check_connectivity.assert_called_once()
 
 
 @pytest.mark.asyncio

@@ -889,6 +889,10 @@ class SkillService:
             enriched = [self._enrich_configs_from_yaml(s) for s in skills]
             return enriched
         except Exception as e:
+            # Return empty list if table doesn't exist (migration not applied)
+            if "relation" in str(e).lower() and "does not exist" in str(e).lower():
+                logger.warning(f"Skills table not found, returning empty list: {e}")
+                return []
             logger.error(f"Error listing skills: {e}")
             raise SkillException(f"Failed to list skills: {str(e)}") from e
 

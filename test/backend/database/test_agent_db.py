@@ -123,7 +123,6 @@ class MockAgent:
         self.prompt_template_name = None
         self.group_ids = None
         self.is_new = True
-        self.enable_context_manager = False
         self.current_version_no = None
         self.version_no = 0
         self.created_by = None
@@ -277,7 +276,7 @@ def test_query_sub_agents_id_list(monkeypatch, mock_session):
     assert result == [2]
 
 def test_create_agent_success(monkeypatch, mock_session):
-    """测试成功创建agent"""
+    """Test successful creating agent"""
     session, query = mock_session
     session.add = MagicMock()
     session.flush = MagicMock()

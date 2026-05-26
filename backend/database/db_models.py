@@ -323,7 +323,6 @@ class AgentInfo(TableBase):
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
     ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
-    enable_context_manager = Column(Boolean, default=False, doc="Whether to enable context management (compression) for this agent")
 
 
 class PromptTemplate(TableBase):

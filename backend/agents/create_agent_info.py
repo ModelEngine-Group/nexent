@@ -415,10 +415,8 @@ async def create_agent_config(
             model_max_tokens = model_info["max_tokens"]
     else:
         model_name = "main_model"
-    # Use agent-level setting for context management, default to False
-    enable_context_manager = agent_info.get("enable_context_manager", False)
     cm_config = ContextManagerConfig(
-        enabled=enable_context_manager,
+        enabled=False,
         token_threshold=model_max_tokens,
     )
     agent_config = AgentConfig(

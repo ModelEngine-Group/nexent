@@ -44,6 +44,9 @@ async def list_skills(
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
+        # Return empty list if table doesn't exist
+        if "does not exist" in str(e).lower():
+            return JSONResponse(content={"skills": []})
         logger.error(f"Error listing skills: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 

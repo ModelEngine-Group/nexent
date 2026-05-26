@@ -578,3 +578,257 @@ class TestSiliconModelProvider:
         # Verify the URL contains sub_type=reranker for rerank
         call_args = mock_client.get.call_args
         assert "sub_type=reranker" in call_args[0][0]
+
+
+class TestSiliconModelProviderFiltering:
+    """Tests for model filtering in SiliconModelProvider."""
+
+    @pytest.mark.asyncio
+    async def test_get_models_llm_excludes_vision_models(self, mocker: MockFixture):
+        """Test that LLM filter excludes vision/image models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "gpt-4", "name": "GPT-4"},
+                {"id": "gpt-4-vision", "name": "GPT-4 Vision"},
+                {"id": "qwen-vl-72b", "name": "Qwen VL"},
+                {"id": "stable-diffusion-xl", "name": "SDXL"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = SiliconModelProvider()
+        result = await provider.get_models({
+            "model_type": "llm",
+            "api_key": "test-key"
+        })
+
+        assert len(result) == 1
+        assert result[0]["id"] == "gpt-4"
+
+    @pytest.mark.asyncio
+    async def test_get_models_image_understanding_filter(self, mocker: MockFixture):
+        """Test that image_understanding filter includes only vision models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "gpt-4", "name": "GPT-4"},
+                {"id": "gpt-4-vision-preview", "name": "GPT-4V"},
+                {"id": "qwen-vl-72b", "name": "Qwen VL"},
+                {"id": "llava-1.5", "name": "LLaVA"},
+                {"id": "stable-diffusion-xl", "name": "SDXL"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = SiliconModelProvider()
+        result = await provider.get_models({
+            "model_type": "image_understanding",
+            "api_key": "test-key"
+        })
+
+        result_ids = [m["id"] for m in result]
+        assert "gpt-4" not in result_ids
+        assert "stable-diffusion-xl" not in result_ids
+        assert len(result) >= 1
+
+    @pytest.mark.asyncio
+    async def test_get_models_image_generation_filter(self, mocker: MockFixture):
+        """Test that image_generation filter includes only image gen models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "gpt-4", "name": "GPT-4"},
+                {"id": "stable-diffusion-xl", "name": "SDXL"},
+                {"id": "wanx-t2i", "name": "Wanx T2I"},
+                {"id": "flux-pro", "name": "Flux Pro"},
+                {"id": "qwen-vl-72b", "name": "Qwen VL"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = SiliconModelProvider()
+        result = await provider.get_models({
+            "model_type": "image_generation",
+            "api_key": "test-key"
+        })
+
+        result_ids = [m["id"] for m in result]
+        assert "gpt-4" not in result_ids
+        assert "qwen-vl-72b" not in result_ids
+        assert len(result) >= 1
+
+    @pytest.mark.asyncio
+    async def test_get_models_video_understanding_filter(self, mocker: MockFixture):
+        """Test that video_understanding filter includes only video models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "gpt-4", "name": "GPT-4"},
+                {"id": "video-understanding-model", "name": "Video Model"},
+                {"id": "stable-diffusion-xl", "name": "SDXL"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = SiliconModelProvider()
+        result = await provider.get_models({
+            "model_type": "video_understanding",
+            "api_key": "test-key"
+        })
+
+        result_ids = [m["id"] for m in result]
+        assert "gpt-4" not in result_ids
+        assert "stable-diffusion-xl" not in result_ids
+        assert len(result) == 1
+        assert result[0]["id"] == "video-understanding-model"
+
+    @pytest.mark.asyncio
+    async def test_get_models_correct_url_for_image_generation(self, mocker: MockFixture):
+        """Test that correct URL is used for image_generation models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": [{"id": "stable-diffusion-xl"}]}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = SiliconModelProvider()
+        await provider.get_models({
+            "model_type": "image_generation",
+            "api_key": "test-key"
+        })
+
+        call_args = mock_client.get.call_args
+        assert "sub_type=chat" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_get_models_correct_url_for_video_understanding(self, mocker: MockFixture):
+        """Test that correct URL is used for video_understanding models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": [{"id": "video-model"}]}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = SiliconModelProvider()
+        await provider.get_models({
+            "model_type": "video_understanding",
+            "api_key": "test-key"
+        })
+
+        call_args = mock_client.get.call_args
+        assert "sub_type=chat" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_get_models_image_generation_correct_base_url(self, mocker: MockFixture):
+        """Test that image generation models have correct base_url set."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "stable-diffusion-xl", "name": "SDXL"},
+                {"id": "flux-pro", "name": "Flux Pro"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+        mocker.patch(
+            "backend.services.providers.silicon_provider.SILICON_IMAGE_GEN_URL",
+            "https://api.siliconflow.cn/v1/images/generations"
+        )
+
+        provider = SiliconModelProvider()
+        result = await provider.get_models({
+            "model_type": "image_generation",
+            "api_key": "test-key"
+        })
+
+        for model in result:
+            assert model["base_url"] == "https://api.siliconflow.cn/v1/images/generations"
+            assert model["model_type"] == "image_generation"
+            assert model["model_tag"] == "chat"

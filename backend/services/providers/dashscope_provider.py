@@ -22,6 +22,10 @@ class DashScopeModelProvider(AbstractModelProvider):
         """
         try:
             target_model_type: str = provider_config["model_type"]
+            # Normalize model_type to snake_case for consistency
+            # Convert camelCase to snake_case (e.g., "imageUnderstanding" -> "image_understanding")
+            import re
+            model_type_normalized = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', target_model_type).lower()
             model_api_key: str = provider_config["api_key"]
 
             headers = {"Authorization": f"Bearer {model_api_key}"}
@@ -53,10 +57,13 @@ class DashScopeModelProvider(AbstractModelProvider):
                     current_page += 1
                     await asyncio.sleep(0.5)
 
-            # Initialize containers for the 6 main categories
+            # Initialize containers for the 7 main categories
             categorized_models = {
                 "chat": [],  # Maps to "llm"
                 "vlm": [],  # Maps to "vlm"
+                "image_understanding": [],  # Maps to "image_understanding"
+                "image_generation": [],  # Maps to "image_generation"
+                "video_understanding": [],  # Maps to "video_understanding"
                 "embedding": [],  # Maps to "embedding" / "multi_embedding"
                 "rerank": [],  # Maps to "rerank"
                 "tts": [],  # Maps to "tts"
@@ -106,11 +113,22 @@ class DashScopeModelProvider(AbstractModelProvider):
                     categorized_models['tts'].append(cleaned_model)
                     continue
 
-                # 5. VLM
+                # 5. VLM / Image Understanding / Image Generation / Video Understanding
                 vision_mods = {'Image', 'Video'}
-                if (set(req_mod) & vision_mods) or (set(res_mod) & vision_mods) or '视觉' in desc:
-                    cleaned_model.update({"model_tag": "chat", "model_type": "vlm"})
-                    categorized_models['vlm'].append(cleaned_model)
+                has_vision = (set(req_mod) & vision_mods) or (set(res_mod) & vision_mods)
+                has_image_gen = 'Image' in res_mod and 'Video' not in res_mod
+                has_video = 'Video' in req_mod or 'Video' in res_mod
+
+                if has_vision or '视觉' in desc:
+                    if has_image_gen:
+                        cleaned_model.update({"model_tag": "image_generation", "model_type": "image_generation"})
+                        categorized_models['image_generation'].append(cleaned_model)
+                    elif has_video:
+                        cleaned_model.update({"model_tag": "video_understanding", "model_type": "video_understanding"})
+                        categorized_models['video_understanding'].append(cleaned_model)
+                    else:
+                        cleaned_model.update({"model_tag": "image_understanding", "model_type": "image_understanding"})
+                        categorized_models['image_understanding'].append(cleaned_model)
                     continue
 
                 # 6. Chat / LLM
@@ -119,12 +137,14 @@ class DashScopeModelProvider(AbstractModelProvider):
                     categorized_models['chat'].append(cleaned_model)
 
             # Return the specific list based on the requested target_model_type
-            if target_model_type == "llm":
+            if model_type_normalized == "llm":
                 return categorized_models["chat"]
-            elif target_model_type in ("embedding", "multi_embedding"):
+            elif model_type_normalized in ("embedding", "multi_embedding"):
                 return categorized_models["embedding"]
-            elif target_model_type in categorized_models:
-                return categorized_models[target_model_type]
+            elif model_type_normalized in ("image_understanding", "image_generation", "video_understanding"):
+                return categorized_models[model_type_normalized]
+            elif model_type_normalized in categorized_models:
+                return categorized_models[model_type_normalized]
             else:
                 return []
         except (httpx.HTTPStatusError, httpx.ConnectTimeout, httpx.ConnectError, Exception) as e:

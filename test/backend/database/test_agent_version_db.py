@@ -247,26 +247,39 @@ def mock_as_dict(obj):
 def mock_sqlalchemy_insert(monkeypatch):
     """Helper function to mock SQLAlchemy insert"""
     from sqlalchemy.sql import Insert
-    
+    from sqlalchemy.exc import ProgrammingError
+
+    # Track if we should raise an error on the first call
+    should_raise = [False]
+
     def insert_wrapper(table):
         """Wrapper that accepts the actual table class (or MagicMock) and returns a mock statement"""
+        # If we need to raise an error (first call), raise ProgrammingError
+        if should_raise[0]:
+            should_raise[0] = False  # Reset for next call
+            raise ProgrammingError(
+                "statement", {}, BaseException(
+                    "column \"is_a2a\" of relation \"ag_tenant_agent_version_t\" does not exist"
+                )
+            )
+
         # Create a mock statement that chains properly
         # This bypasses SQLAlchemy's table validation by directly returning a mock
         mock_stmt = MagicMock(spec=Insert)
         mock_values_result = MagicMock()
         mock_returning_result = MagicMock()
-        
+
         # Chain: .values(**kwargs) returns an object that has .returning()
         mock_values_result.returning = lambda *args, **kwargs: mock_returning_result
         mock_stmt.values = lambda **kwargs: mock_values_result
-        
+
         # The final statement is what gets executed
         return mock_stmt
-    
+
     # Patch the imported function in agent_version_db module (this is what the code actually uses)
     # We patch at the module level after import, so it overrides the imported function
     monkeypatch.setattr(agent_version_db_module, "insert", insert_wrapper)
-    return insert_wrapper
+    return insert_wrapper, should_raise
 
 
 def mock_sqlalchemy_update(monkeypatch):
@@ -401,13 +414,15 @@ def test_query_version_list_success(monkeypatch, mock_session):
     mock_version2 = MockAgentVersion()
     mock_version2.version_no = 2
     mock_version2.version_name = "v2.0"
-    
+    mock_version2.__dict__['version_no'] = 2
+    mock_version2.__dict__['version_name'] = "v2.0"
+
     mock_order_by = MagicMock()
     mock_order_by.all = lambda: [mock_version2, mock_version1]  # Ordered desc
     mock_filter = MagicMock()
     mock_filter.order_by.return_value = mock_order_by
     query.filter.return_value = mock_filter
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
@@ -415,9 +430,9 @@ def test_query_version_list_success(monkeypatch, mock_session):
     # This is needed because agent_version_db imports get_db_session and as_dict at module level
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
-    
+
     result = query_version_list(agent_id=1, tenant_id="tenant1")
-    
+
     assert len(result) == 2
     assert result[0]["version_no"] == 2  # Should be ordered desc
     assert result[1]["version_no"] == 1
@@ -639,14 +654,14 @@ def test_query_agent_draft(monkeypatch, mock_session):
 def test_insert_version_success(monkeypatch, mock_session):
     """Test successfully inserting a new version"""
     session, query = mock_session
-    
+
     mock_result = MagicMock()
     mock_result.scalar_one.return_value = 123
     session.execute.return_value = mock_result
-    
+
     # Mock SQLAlchemy insert to avoid ArgumentError
-    mock_sqlalchemy_insert(monkeypatch)
-    
+    mock_sqlalchemy_insert(monkeypatch)[0]  # Ignore the returned tuple
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
@@ -654,7 +669,7 @@ def test_insert_version_success(monkeypatch, mock_session):
     # This is needed because agent_version_db imports get_db_session and as_dict at module level
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
-    
+
     version_data = {
         "tenant_id": "tenant1",
         "agent_id": 1,
@@ -662,11 +677,117 @@ def test_insert_version_success(monkeypatch, mock_session):
         "version_name": "v1.0",
         "status": STATUS_RELEASED,
     }
-    
+
     result = insert_version(version_data)
-    
+
     assert result == 123
     session.execute.assert_called_once()
+
+
+def test_insert_version_with_is_a2a_column_missing(monkeypatch, mock_session):
+    """Test inserting version when is_a2a column doesn't exist in database"""
+    session, query = mock_session
+
+    # Mock SQLAlchemy insert with should_raise flag to trigger error on first call
+    insert_wrapper, should_raise = mock_sqlalchemy_insert(monkeypatch)
+    should_raise[0] = True  # First call should raise error
+
+    # Second call succeeds
+    mock_result = MagicMock()
+    mock_result.scalar_one.return_value = 456
+    session.execute.return_value = mock_result
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
+
+    # Version data includes is_a2a field
+    version_data = {
+        "tenant_id": "tenant1",
+        "agent_id": 1,
+        "version_no": 1,
+        "version_name": "v1.0",
+        "status": STATUS_RELEASED,
+        "is_a2a": False,
+    }
+
+    result = insert_version(version_data)
+
+    assert result == 456
+
+
+def test_insert_version_undefined_column_error(monkeypatch, mock_session):
+    """Test inserting version when UndefinedColumn error occurs"""
+    session, query = mock_session
+
+    # Mock SQLAlchemy insert with should_raise flag to trigger error on first call
+    insert_wrapper, should_raise = mock_sqlalchemy_insert(monkeypatch)
+    should_raise[0] = True  # First call should raise error
+
+    # Second call succeeds
+    mock_result = MagicMock()
+    mock_result.scalar_one.return_value = 789
+    session.execute.return_value = mock_result
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
+
+    version_data = {
+        "tenant_id": "tenant1",
+        "agent_id": 1,
+        "version_no": 1,
+        "is_a2a": True,
+    }
+
+    result = insert_version(version_data)
+
+    assert result == 789
+
+
+def test_query_version_list_with_is_a2a_column_missing(monkeypatch, mock_session):
+    """Test querying version list when is_a2a column doesn't exist"""
+    session, query = mock_session
+
+    # First call raises error, second call with explicit columns succeeds
+    call_count = [0]
+    mock_version = MockAgentVersion()
+
+    def execute_side_effect(*args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            from sqlalchemy.exc import ProgrammingError
+            raise ProgrammingError(
+                "statement", {}, BaseException(
+                    "column \"is_a2a\" does not exist"
+                )
+            )
+        # Return mock result for the fallback query
+        mock_result = MagicMock()
+        mock_result.all.return_value = [(1, "tenant1", 1, 1, "v1.0", None, None, "NORMAL", "RELEASED", "user1", "2023-01-01")]
+        return mock_result
+
+    session.execute.side_effect = execute_side_effect
+
+    mock_order_by = MagicMock()
+    mock_order_by.all = lambda: [mock_version]
+    mock_filter = MagicMock()
+    mock_filter.order_by.return_value = mock_order_by
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
+
+    result = query_version_list(agent_id=1, tenant_id="tenant1")
+
+    assert len(result) == 1
 
 
 def test_update_version_status_success(monkeypatch, mock_session):
@@ -794,7 +915,7 @@ def test_insert_agent_snapshot_success(monkeypatch, mock_session):
     session.execute = MagicMock()
     
     # Mock SQLAlchemy insert to avoid ArgumentError
-    mock_sqlalchemy_insert(monkeypatch)
+    mock_sqlalchemy_insert(monkeypatch)[0]  # Ignore the returned tuple
     
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -823,7 +944,7 @@ def test_insert_tool_snapshot_success(monkeypatch, mock_session):
     session.execute = MagicMock()
     
     # Mock SQLAlchemy insert to avoid ArgumentError
-    mock_sqlalchemy_insert(monkeypatch)
+    mock_sqlalchemy_insert(monkeypatch)[0]  # Ignore the returned tuple
     
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -852,7 +973,7 @@ def test_insert_relation_snapshot_success(monkeypatch, mock_session):
     session.execute = MagicMock()
     
     # Mock SQLAlchemy insert to avoid ArgumentError
-    mock_sqlalchemy_insert(monkeypatch)
+    mock_sqlalchemy_insert(monkeypatch)[0]  # Ignore the returned tuple
     
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session

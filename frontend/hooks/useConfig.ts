@@ -95,6 +95,31 @@ const defaultConfig: GlobalConfig = {
         modelUrl: "",
       },
     },
+    // New multimodal model types
+    imageUnderstanding: {
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
+    imageGeneration: {
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
+    videoUnderstanding: {
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
   },
 };
 
@@ -161,8 +186,12 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
         ),
         rerank: transformModelEntry(backendConfig.models.rerank),
         vlm: transformModelEntry(backendConfig.models.vlm),
-        stt: transformVoiceModelEntry(backendConfig.models.stt),
-        tts: transformVoiceModelEntry(backendConfig.models.tts),
+        stt: transformModelEntry(backendConfig.models.stt),
+        tts: transformModelEntry(backendConfig.models.tts),
+        // New multimodal model types
+        imageUnderstanding: transformModelEntry(backendConfig.models.imageUnderstanding),
+        imageGeneration: transformModelEntry(backendConfig.models.imageGeneration),
+        videoUnderstanding: transformModelEntry(backendConfig.models.videoUnderstanding),
       }
     : defaultConfig.models;
 
@@ -284,8 +313,18 @@ export function useConfig() {
 
   const config: GlobalConfig = (query.data as GlobalConfig | undefined) ?? defaultConfig;
 
-  // Whether config has selected a VLM model
-  const isVlmAvailable = !!(config?.models?.vlm?.modelName || config?.models?.vlm?.displayName);
+  // Debug log for imageUnderstanding config
+  console.log("[useConfig] imageUnderstanding config:", JSON.stringify(config?.models?.imageUnderstanding));
+
+  // Whether config has selected a VLM model (image understanding, image generation, or video understanding)
+  const isVlmAvailable = !!(
+    config?.models?.vlm?.modelName || config?.models?.vlm?.displayName ||
+    config?.models?.imageUnderstanding?.modelName || config?.models?.imageUnderstanding?.displayName ||
+    config?.models?.imageGeneration?.modelName || config?.models?.imageGeneration?.displayName ||
+    config?.models?.videoUnderstanding?.modelName || config?.models?.videoUnderstanding?.displayName
+  );
+
+  console.log("[useConfig] isVlmAvailable:", isVlmAvailable);
 
   // Whether config has selected an Embedding model
   const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);

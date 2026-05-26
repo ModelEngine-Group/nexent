@@ -43,40 +43,53 @@ def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: st
     skill_info_dict.setdefault("created_by", user_id)
     skill_info_dict.setdefault("updated_by", user_id)
 
-    with get_db_session() as session:
-        query = session.query(SkillInstance).filter(
-            SkillInstance.tenant_id == tenant_id,
-            SkillInstance.agent_id == skill_info_dict.get('agent_id'),
-            SkillInstance.delete_flag != 'Y',
-            SkillInstance.skill_id == skill_info_dict.get('skill_id'),
-            SkillInstance.version_no == version_no
-        )
-        skill_instance = query.first()
+    try:
+        with get_db_session() as session:
+            query = session.query(SkillInstance).filter(
+                SkillInstance.tenant_id == tenant_id,
+                SkillInstance.agent_id == skill_info_dict.get('agent_id'),
+                SkillInstance.delete_flag != 'Y',
+                SkillInstance.skill_id == skill_info_dict.get('skill_id'),
+                SkillInstance.version_no == version_no
+            )
+            skill_instance = query.first()
 
-        if skill_instance:
-            for key, value in skill_info_dict.items():
-                if hasattr(skill_instance, key):
-                    setattr(skill_instance, key, value)
-        else:
-            new_skill_instance = SkillInstance(
-                **filter_property(skill_info_dict, SkillInstance))
-            session.add(new_skill_instance)
-            session.flush()
-            skill_instance = new_skill_instance
+            if skill_instance:
+                for key, value in skill_info_dict.items():
+                    if hasattr(skill_instance, key):
+                        setattr(skill_instance, key, value)
+            else:
+                new_skill_instance = SkillInstance(
+                    **filter_property(skill_info_dict, SkillInstance))
+                session.add(new_skill_instance)
+                session.flush()
+                skill_instance = new_skill_instance
 
-        return as_dict(skill_instance)
+            return as_dict(skill_instance)
+    except Exception as e:
+        # Return None if table doesn't exist (migration not applied)
+        if "relation" in str(e).lower() and "does not exist" in str(e).lower():
+            logger.warning(f"Skill instance table not found, skipping skill update: {e}")
+            return None
+        raise
 
 
 def query_skill_instances_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
     """Query all SkillInstance for an agent (regardless of enabled status)."""
-    with get_db_session() as session:
-        query = session.query(SkillInstance).filter(
-            SkillInstance.tenant_id == tenant_id,
-            SkillInstance.agent_id == agent_id,
-            SkillInstance.version_no == version_no,
-            SkillInstance.delete_flag != 'Y')
-        skill_instances = query.all()
-        return [as_dict(skill_instance) for skill_instance in skill_instances]
+    try:
+        with get_db_session() as session:
+            query = session.query(SkillInstance).filter(
+                SkillInstance.tenant_id == tenant_id,
+                SkillInstance.agent_id == agent_id,
+                SkillInstance.version_no == version_no,
+                SkillInstance.delete_flag != 'Y')
+            skill_instances = query.all()
+            return [as_dict(skill_instance) for skill_instance in skill_instances]
+    except Exception as e:
+        # Return empty list if table doesn't exist (migration not applied)
+        if "relation" in str(e).lower() and "does not exist" in str(e).lower():
+            return []
+        raise
 
 
 def query_enabled_skill_instances(agent_id: int, tenant_id: str, version_no: int = 0):

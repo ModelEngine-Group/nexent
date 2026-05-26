@@ -154,13 +154,22 @@ export const ModelListCard = ({
 
   // Get filtered models by type
   const getFilteredModels = (): ModelOption[] => {
-    return modelsData.filter((model) => model.type === type);
+    // Support both camelCase (imageUnderstanding) and snake_case (image_understanding)
+    return modelsData.filter((model) => {
+      if (model.type === type) return true;
+      // Handle VLM type compatibility (vlm -> image_understanding/imageUnderstanding)
+      if (type === MODEL_TYPES.IMAGE_UNDERSTANDING &&
+          (model.type === 'image_understanding' || model.type === 'vlm')) {
+        return true;
+      }
+      return false;
+    });
   };
 
   // Get model source label based on source field
   const getModelSource = (displayName: string): string => {
     const model = modelsData.find(
-      (m) => m.type === type && m.displayName === displayName
+      (m) => (m.type === type || m.type === 'image_understanding' || m.type === 'vlm') && m.displayName === displayName
     );
 
     if (!model) return t("model.source.unknown");

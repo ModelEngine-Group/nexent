@@ -96,8 +96,10 @@ async def save_config_impl(config, tenant_id, user_id):
             continue
 
         model_display_name = model_config.get("displayName")
-
         config_key = get_env_key(model_type) + "_ID"
+
+        logger.info(f"Saving model config: type={model_type}, key={config_key}, displayName={model_display_name}")
+
         model_id = get_model_id_by_display_name(
             model_display_name, tenant_id)
 
@@ -171,6 +173,7 @@ def build_models_config(tenant_id: str) -> dict:
         try:
             model_config = tenant_config_manager.get_model_config(
                 config_key, tenant_id=tenant_id)
+            logger.info(f"build_models_config: key={model_key}, config_key={config_key}, model_config={model_config}")
             models_config[model_key] = build_model_config(model_config)
         except Exception as e:
             logger.warning(f"Failed to get config for {config_key}: {e}")
