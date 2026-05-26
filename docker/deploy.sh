@@ -535,7 +535,7 @@ generate_elasticsearch_api_key() {
 
 generate_env_for_infrastructure() {
   # Function to generate complete environment file for infrastructure mode using generate_env.sh
-  echo "🔑 Generating complete environment file in root directory..."
+  echo "🔑 Updating docker/.env for infrastructure mode..."
   echo "   🚀 Running generate_env.sh..."
 
   # Check if generate_env.sh exists
@@ -551,16 +551,14 @@ generate_env_for_infrastructure() {
   export DEPLOYMENT_VERSION
 
   if ./generate_env.sh; then
-      echo "   ✅ Environment file generated successfully for infrastructure mode!"
-      # Source the generated .env file to make variables available
-      if [ -f "../.env" ]; then
-          echo "   ⏏️ Sourcing generated root .env file..."
+      echo "   ✅ docker/.env updated successfully for infrastructure mode!"
+      if [ -f ".env" ]; then
           set -a
-          source ../.env
+          source .env
           set +a
-          echo "   ✅ Environment variables loaded from ../.env"
+          echo "   ✅ Environment variables loaded from docker/.env"
       else
-          echo "   ⚠️  Warning: ../.env file not found after generation"
+          echo "   ⚠️  Warning: docker/.env file not found after generation"
           return 1
       fi
   else
@@ -717,9 +715,6 @@ clean() {
 
   if [ -f ".env.bak" ]; then
     rm .env.bak
-  fi
-  if [ -f "../.env.bak" ]; then
-    rm ../.env.bak
   fi
 }
 
@@ -1663,8 +1658,8 @@ main_deploy() {
 
     echo "🎉 Infrastructure deployment completed successfully!"
     echo "     You can now start the core services manually using dev containers"
-    echo "     Environment file available at: $(cd .. && pwd)/.env"
-    echo "💡 Use 'source .env' to load environment variables in your development shell"
+    echo "     Environment file available at: $SCRIPT_DIR/.env"
+    echo "💡 Use 'source docker/.env' from the project root to load environment variables"
 
     # Pull MCP image for later use
     pull_mcp_image

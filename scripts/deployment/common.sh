@@ -163,6 +163,7 @@ deployment_parse_common_args() {
 
 deployment_load_config_file() {
   local config_file="$1"
+  local load_mode="${2:-apply}"
   [ -z "$config_file" ] && return 0
   [ ! -f "$config_file" ] && {
     deployment_error "Deployment config not found: $config_file"
@@ -197,17 +198,23 @@ deployment_load_config_file() {
       value="${value#\"}"
       case "$key" in
         portPolicy) DEPLOYMENT_PORT_POLICY="$value" ;;
-        schemaVersion) DEPLOYMENT_LOADED_SCHEMA_VERSION="$value" ;;
+        schemaVersion)
+          [ "$load_mode" = "apply" ] && DEPLOYMENT_LOADED_SCHEMA_VERSION="$value"
+          ;;
         imageSource) DEPLOYMENT_IMAGE_SOURCE="$value" ;;
         registryProfile) DEPLOYMENT_REGISTRY_PROFILE="$value" ;;
-        appVersion) DEPLOYMENT_APP_VERSION="$value"; DEPLOYMENT_LOADED_APP_VERSION="$value" ;;
+        appVersion)
+          DEPLOYMENT_APP_VERSION="$value"
+          [ "$load_mode" = "apply" ] && DEPLOYMENT_LOADED_APP_VERSION="$value"
+          ;;
         monitoringProvider) DEPLOYMENT_MONITORING_PROVIDER="$value" ;;
       esac
     fi
   done < "$config_file"
 
   [ -n "$components" ] && DEPLOYMENT_COMPONENTS="$components"
-  DEPLOYMENT_CONFIG_FILE_LOADED="true"
+  [ "$load_mode" = "apply" ] && DEPLOYMENT_CONFIG_FILE_LOADED="true"
+  return 0
 }
 
 deployment_apply_legacy_inputs() {
@@ -650,7 +657,10 @@ deployment_tui_select_image_source() {
 
 deployment_maybe_select_local_config() {
   [ -f "$DEPLOYMENT_LOCAL_CONFIG_PATH" ] || return 0
-  [ "$DEPLOYMENT_RECONFIGURE" = "true" ] && return 0
+  if [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; then
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
+    return 0
+  fi
   if [ "$DEPLOYMENT_USE_LOCAL_CONFIG" = "true" ]; then
     DEPLOYMENT_CONFIG_PATH="$DEPLOYMENT_LOCAL_CONFIG_PATH"
     return 0
@@ -666,6 +676,7 @@ deployment_maybe_select_local_config() {
     DEPLOYMENT_CONFIG_PATH="$DEPLOYMENT_LOCAL_CONFIG_PATH"
   else
     DEPLOYMENT_RECONFIGURE="true"
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
   fi
 }
 
@@ -815,7 +826,7 @@ deployment_render_image_values() {
   printf 'nexent-runtime:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-mcp:\n'
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
   printf 'nexent-northbound:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-web:\n'
@@ -907,7 +918,7 @@ deployment_render_helm_chart_values() {
   printf '  service:\n    type: "%s"\n    nodePort: 30014\n' "$internal_type"
   printf 'nexent-mcp:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30011\n      httpAlt: 30015\n' "$internal_type"
   printf 'nexent-northbound:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"

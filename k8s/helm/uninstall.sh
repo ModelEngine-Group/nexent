@@ -22,12 +22,12 @@ print_usage() {
   echo "Uninstall Nexent K8s resources."
   echo ""
   echo "Commands:"
-  echo "  delete       Uninstall Helm release and preserve PVC/PV data"
-  echo "  delete-all   Uninstall Helm release and delete PVC/PV data"
+  echo "  delete       Uninstall Helm release and delete namespace"
+  echo "  delete-all   Uninstall Helm release and delete namespace"
   echo "  clean        Clean Helm release state only"
   echo ""
   echo "Options:"
-  echo "  --delete-data true|false     Control whether persistent data is deleted"
+  echo "  --delete-data true|false     Compatibility option; Helm removes managed PV/PVC resources"
   echo "  --delete-volumes true|false  Alias for --delete-data"
   echo "  --remove-volumes             Alias for --delete-data true"
   echo "  --keep-volumes               Alias for --delete-data false"
@@ -118,54 +118,27 @@ clean_helm_state() {
   echo "Helm state cleaned."
 }
 
-resolve_delete_data() {
-  if [ -n "$DELETE_DATA" ]; then
-    parse_bool_option "$DELETE_DATA"
-    return $?
-  fi
-
-  [ -t 0 ] || return 1
-
-  echo ""
-  echo "Delete K8s persistent data?"
-  echo "This removes PVCs, PVs, and the namespace."
-  local answer
-  read -r -p "Delete persistent data? [y/N]: " answer
-  answer="$(sanitize_input "$answer")"
-  [[ "$answer" =~ ^[Yy]$ ]]
+delete_namespace_after_uninstall() {
+  echo "Deleting namespace..."
+  kubectl delete namespace "$NAMESPACE" --ignore-not-found=true || true
 }
 
 uninstall_preserve_data() {
-  echo "Uninstalling Helm release (preserving data)..."
-  helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE" || true
-  echo "Cleanup completed. Data is preserved in PVC/PV resources."
+  echo "Uninstalling Helm release..."
+  helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE"
+  delete_namespace_after_uninstall
+  echo "Cleanup completed. Helm-managed resources were removed; hostPath data remains on the node."
   echo "Re-run './deploy.sh' to redeploy with existing data."
 }
 
 delete_all_data() {
-  echo "Deleting Helm release and persistent data..."
-  helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE" || true
-
-  echo "Waiting for pods to terminate..."
-  kubectl wait --for=delete pod -l app=nexent-elasticsearch -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -l app=nexent-postgresql -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -l app=nexent-redis -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -l app=nexent-minio -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -l app=nexent-supabase-db -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -l app=nexent-supabase-auth -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -l app=nexent-supabase-kong -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-
-  echo "Deleting PVCs..."
-  kubectl delete pvc -n "$NAMESPACE" --all --ignore-not-found=true || true
-  sleep 5
-
-  echo "Deleting PersistentVolumes..."
-  kubectl delete pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv nexent-supabase-db-pv --ignore-not-found=true || true
-
-  echo "Deleting namespace..."
-  kubectl delete namespace "$NAMESPACE" --ignore-not-found=true || true
-
-  echo "Cleanup completed. All resources including data have been deleted."
+  echo "Deleting Helm release and namespace..."
+  if ! helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE"; then
+    echo "Helm uninstall failed. Namespace was not deleted."
+    return 1
+  fi
+  delete_namespace_after_uninstall
+  echo "Cleanup completed. Helm-managed PV/PVC resources and the namespace have been deleted."
 }
 
 case "$COMMAND" in
@@ -173,7 +146,7 @@ case "$COMMAND" in
     clean_helm_state
     ;;
   uninstall)
-    if resolve_delete_data; then
+    if [ -n "$DELETE_DATA" ] && parse_bool_option "$DELETE_DATA"; then
       delete_all_data
     else
       uninstall_preserve_data

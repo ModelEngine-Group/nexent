@@ -222,14 +222,13 @@ update_values_yaml() {
   echo ""
 }
 
-# Function to clean helm state without deleting data
-clean_helm_state() {
-    echo "Cleaning Helm release state..."
-    helm uninstall $RELEASE_NAME -n $NAMESPACE --no-hooks 2>/dev/null || true
-    kubectl delete secret -n $NAMESPACE -l "owner=helm" --ignore-not-found=true 2>/dev/null || true
-    kubectl delete secret -n $NAMESPACE --field-selector type=helm.sh/release.v1 --ignore-not-found=true 2>/dev/null || true
-    kubectl delete secret -n $NAMESPACE -l "name=$RELEASE_NAME" --ignore-not-found=true 2>/dev/null || true
-    echo "Helm state cleaned!"
+ensure_namespace() {
+    if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+        echo "Namespace '$NAMESPACE' already exists."
+    else
+        echo "Creating namespace '$NAMESPACE'..."
+        kubectl create namespace "$NAMESPACE"
+    fi
 }
 
 # Select deployment version (speed or full)
@@ -329,7 +328,11 @@ pull_mcp_image() {
 
     # Use image from environment, fallback to default image
     local image="${NEXENT_MCP_DOCKER_IMAGE:-nexent/nexent-mcp}"
-    local mcp_image_name="${image%%:*}:${APP_VERSION:-latest}"
+    local image_tail="${image##*/}"
+    local mcp_image_name="$image"
+    if [[ "$image_tail" != *:* ]]; then
+        mcp_image_name="${image}:${APP_VERSION:-latest}"
+    fi
     echo "Checking MCP image: ${mcp_image_name}"
 
     if ! command -v docker >/dev/null 2>&1; then
@@ -343,6 +346,9 @@ pull_mcp_image() {
     # Pull image only when not present locally
     if docker image inspect "${mcp_image_name}" >/dev/null 2>&1; then
         echo "MCP image already exists locally, skipping pull."
+    elif [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
+        echo "Warning: MCP local image not found: ${mcp_image_name}"
+        echo "Build or load it locally before using --image-source local-latest."
     else
         echo "MCP image not found locally, pulling..."
         if docker pull "${mcp_image_name}"; then
@@ -454,10 +460,10 @@ apply() {
     fi
 
     # Step 7: Deploy using Helm
+    ensure_namespace
     echo "Deploying Helm chart..."
     helm upgrade --install nexent "$CHART_DIR" \
         --namespace "$NAMESPACE" \
-        --create-namespace \
         -f "$GENERATED_VALUES" \
         -f "$GENERATED_SECRETS_VALUES" \
         --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
@@ -581,7 +587,6 @@ help)
     print_usage
     ;;
 apply)
-    clean_helm_state
     apply
     ;;
 esac

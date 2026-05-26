@@ -89,6 +89,17 @@ deployment_apply_image_source
 assert_eq "nexent/nexent:latest" "$NEXENT_IMAGE" "local-latest image should be applied"
 assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-data-process" "data-process chart should be selected"
 
+LOCAL_HELM_VALUES="$TMP_DIR/local-generated-values.yaml"
+deployment_render_helm_values "$LOCAL_HELM_VALUES"
+assert_contains "$(sed -n '1,90p' "$LOCAL_HELM_VALUES")" "repository: \"nexent/nexent-mcp\"" "local-latest should render mcp chart with local mcp image"
+assert_contains "$(sed -n '1,90p' "$LOCAL_HELM_VALUES")" "pullPolicy: \"Never\"" "local-latest should render mcp chart with local pull policy"
+
+deployment_prepare_config --local-config "$FULL_CONFIG" --reconfigure --image-source general --app-version latest
+assert_eq "false" "$DEPLOYMENT_CONFIG_FILE_LOADED" "reconfigure should use local config as defaults without skipping configuration"
+assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "reconfigure defaults should include saved components"
+assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "reconfigure defaults should include saved port policy"
+assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "explicit image source should override reconfigure defaults"
+
 HELM_VALUES="$TMP_DIR/generated-values.yaml"
 deployment_render_helm_values "$HELM_VALUES"
 assert_contains "$(sed -n '1,220p' "$HELM_VALUES")" "data-process: true" "component table should include data-process"
