@@ -22,8 +22,6 @@ docker/.env
 docker/monitoring/monitoring.env
 docker/.run
 docker/deploy.options
-docker/.access_token
-k8s/helm/.deploy.options
 k8s/helm/deploy.options
 scripts/deployment/local-config.yaml
 scripts/deployment/generated/

@@ -14,6 +14,9 @@ cd "$SCRIPT_DIR"
 NAMESPACE="nexent"
 RELEASE_NAME="nexent"
 DELETE_DATA=""
+DELETE_NAMESPACE=""
+DELETE_LOCAL_DATA=""
+LOCAL_DATA_DELETED="false"
 COMMAND="uninstall"
 
 print_usage() {
@@ -23,7 +26,7 @@ print_usage() {
   echo ""
   echo "Commands:"
   echo "  delete       Uninstall Helm release and delete namespace"
-  echo "  delete-all   Uninstall Helm release and delete namespace"
+  echo "  delete-all   Uninstall Helm release, delete namespace, and delete local data"
   echo "  clean        Clean Helm release state only"
   echo ""
   echo "Options:"
@@ -31,6 +34,12 @@ print_usage() {
   echo "  --delete-volumes true|false  Alias for --delete-data"
   echo "  --remove-volumes             Alias for --delete-data true"
   echo "  --keep-volumes               Alias for --delete-data false"
+  echo "  --delete-local-data true|false  Control whether hostPath data is deleted"
+  echo "  --remove-local-data             Alias for --delete-local-data true"
+  echo "  --keep-local-data               Alias for --delete-local-data false"
+  echo "  --delete-namespace true|false  Control whether the namespace is deleted"
+  echo "  --remove-namespace             Alias for --delete-namespace true"
+  echo "  --keep-namespace               Alias for --delete-namespace false"
   echo "  --namespace NAME             Kubernetes namespace (default: nexent)"
   echo "  --release NAME               Helm release name (default: nexent)"
   echo "  --help, -h                   Show this help message"
@@ -39,7 +48,12 @@ print_usage() {
   echo "  bash uninstall.sh"
   echo "  bash uninstall.sh --delete-data false"
   echo "  bash uninstall.sh --delete-data true"
+  echo "  bash uninstall.sh --delete-local-data true"
+  echo "  bash uninstall.sh --keep-local-data"
+  echo "  bash uninstall.sh --keep-namespace"
+  echo "  bash uninstall.sh --delete-namespace true"
   echo "  bash uninstall.sh delete-all"
+  echo "  bash uninstall.sh delete-all --keep-local-data"
   echo "  bash uninstall.sh clean"
 }
 
@@ -66,11 +80,14 @@ while [[ $# -gt 0 ]]; do
     delete)
       COMMAND="uninstall"
       DELETE_DATA="false"
+      DELETE_NAMESPACE="true"
       shift
       ;;
     delete-all)
       COMMAND="uninstall"
       DELETE_DATA="true"
+      DELETE_NAMESPACE="true"
+      DELETE_LOCAL_DATA="true"
       shift
       ;;
     clean)
@@ -87,6 +104,30 @@ while [[ $# -gt 0 ]]; do
       ;;
     --keep-volumes)
       DELETE_DATA="false"
+      shift
+      ;;
+    --delete-local-data)
+      DELETE_LOCAL_DATA="$2"
+      shift 2
+      ;;
+    --remove-local-data)
+      DELETE_LOCAL_DATA="true"
+      shift
+      ;;
+    --keep-local-data)
+      DELETE_LOCAL_DATA="false"
+      shift
+      ;;
+    --delete-namespace)
+      DELETE_NAMESPACE="$2"
+      shift 2
+      ;;
+    --remove-namespace)
+      DELETE_NAMESPACE="true"
+      shift
+      ;;
+    --keep-namespace)
+      DELETE_NAMESPACE="false"
       shift
       ;;
     --namespace)
@@ -123,22 +164,114 @@ delete_namespace_after_uninstall() {
   kubectl delete namespace "$NAMESPACE" --ignore-not-found=true || true
 }
 
+resolve_delete_namespace() {
+  if [ -n "$DELETE_NAMESPACE" ]; then
+    parse_bool_option "$DELETE_NAMESPACE"
+    return $?
+  fi
+
+  [ -t 0 ] || return 1
+
+  echo ""
+  echo "Delete Kubernetes namespace '$NAMESPACE'?"
+  local answer
+  read -r -p "Delete namespace? [y/N]: " answer
+  answer="$(sanitize_input "$answer")"
+  [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+maybe_delete_namespace_after_uninstall() {
+  if resolve_delete_namespace; then
+    delete_namespace_after_uninstall
+  else
+    echo "Namespace '$NAMESPACE' preserved."
+  fi
+}
+
+local_volume_paths() {
+  printf '%s\n' \
+    "/var/lib/nexent-data/nexent-elasticsearch" \
+    "/var/lib/nexent-data/nexent-postgresql" \
+    "/var/lib/nexent-data/nexent-redis" \
+    "/var/lib/nexent-data/nexent-minio" \
+    "/var/lib/nexent-data/nexent-supabase-db" \
+    "/var/lib/nexent-data/nexent-phoenix" \
+    "/var/lib/nexent-data/nexent-grafana" \
+    "/var/lib/nexent-data/nexent-tempo" \
+    "/var/lib/nexent-data/nexent-langfuse-postgres" \
+    "/var/lib/nexent-data/nexent-langfuse-clickhouse" \
+    "/var/lib/nexent-data/nexent-langfuse-clickhouse-logs" \
+    "/var/lib/nexent-data/nexent-langfuse-minio" \
+    "/var/lib/nexent-data/nexent-langfuse-redis"
+}
+
+resolve_delete_local_data() {
+  if [ -n "$DELETE_LOCAL_DATA" ]; then
+    parse_bool_option "$DELETE_LOCAL_DATA"
+    return $?
+  fi
+
+  [ -t 0 ] || return 1
+
+  echo ""
+  echo "Delete local hostPath volume data under /var/lib/nexent-data?"
+  local answer
+  read -r -p "Delete local volume data? [y/N]: " answer
+  answer="$(sanitize_input "$answer")"
+  [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+delete_local_volume_data() {
+  echo "Deleting local hostPath volume data..."
+
+  local path
+  while IFS= read -r path; do
+    case "$path" in
+      /var/lib/nexent-data/nexent-*)
+        if [ -e "$path" ]; then
+          echo "Removing $path"
+          rm -rf -- "$path"
+        fi
+        ;;
+      *)
+        echo "Refusing to remove unsafe path: $path"
+        return 1
+      ;;
+    esac
+  done < <(local_volume_paths)
+  LOCAL_DATA_DELETED="true"
+}
+
+maybe_delete_local_volume_data() {
+  if resolve_delete_local_data; then
+    delete_local_volume_data
+  else
+    echo "Local hostPath volume data preserved."
+  fi
+}
+
 uninstall_preserve_data() {
   echo "Uninstalling Helm release..."
   helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE"
-  delete_namespace_after_uninstall
-  echo "Cleanup completed. Helm-managed resources were removed; hostPath data remains on the node."
-  echo "Re-run './deploy.sh' to redeploy with existing data."
+  maybe_delete_local_volume_data
+  maybe_delete_namespace_after_uninstall
+  echo "Cleanup completed. Helm-managed resources were removed."
+  if [ "$LOCAL_DATA_DELETED" = "true" ]; then
+    echo "Re-run './deploy.sh' to redeploy with fresh local data."
+  else
+    echo "Re-run './deploy.sh' to redeploy with existing data."
+  fi
 }
 
 delete_all_data() {
-  echo "Deleting Helm release and namespace..."
+  echo "Deleting Helm release..."
   if ! helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE"; then
     echo "Helm uninstall failed. Namespace was not deleted."
     return 1
   fi
-  delete_namespace_after_uninstall
-  echo "Cleanup completed. Helm-managed PV/PVC resources and the namespace have been deleted."
+  maybe_delete_local_volume_data
+  maybe_delete_namespace_after_uninstall
+  echo "Cleanup completed. Helm-managed PV/PVC resources were deleted with the release."
 }
 
 case "$COMMAND" in
