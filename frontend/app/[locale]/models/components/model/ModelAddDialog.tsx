@@ -281,8 +281,8 @@ export const ModelAddDialog = ({
   let getModelList;
   let getProviderSelectedModalList;
 
-// 2. 根据条件赋值
-  if (form.provider === "silicon") {
+  // Use silicon hook for silicon and modelengine providers (both use the same API pattern)
+  if (form.provider === "silicon" || form.provider === "modelengine") {
     ({ getModelList, getProviderSelectedModalList } = siliconHook);
   } else if (form.provider === "dashscope") {
     ({ getModelList, getProviderSelectedModalList } = dashscopeHook);

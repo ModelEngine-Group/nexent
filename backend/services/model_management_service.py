@@ -55,6 +55,10 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
             model_data["ssl_verify"] = False
         else:
             model_data["ssl_verify"] = True
+
+        # Set model_factory to modelengine when using open/router URL
+        if "open/router" in model_base_url:
+            model_data["model_factory"] = "modelengine"
         # Split model_name into repo and name
         model_repo, model_name = split_repo_name(
             model_data["model_name"]) if model_data.get("model_name") else ("", "")
