@@ -1,5 +1,5 @@
-from sqlalchemy import BigInteger, Boolean, Column, ForeignKey, ForeignKeyConstraint, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -182,6 +182,10 @@ class ModelRecord(TableBase):
         String(100), doc="Application ID for model authentication (used by some STT/TTS providers like Volcano Engine)")
     access_token = Column(
         String(100), doc="Access token for model authentication (used by some STT/TTS providers like Volcano Engine)")
+    timeout_seconds = Column(
+        Integer, doc="Request timeout in seconds for this model. Default is 120 seconds.")
+    concurrency_limit = Column(
+        Integer, doc="Maximum concurrent requests for this model. Default is null (unlimited).")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -313,11 +317,48 @@ class AgentInfo(TableBase):
         Text, doc="Manually entered by the user to describe the entire business process")
     business_logic_model_name = Column(String(100), doc="Model name used for business logic prompt generation")
     business_logic_model_id = Column(Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
+    prompt_template_id = Column(Integer, doc="Prompt template ID used for business logic prompt generation")
+    prompt_template_name = Column(String(100), doc="Prompt template name used for business logic prompt generation")
     group_ids = Column(String, doc="Agent group IDs list")
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
     ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
     enable_context_manager = Column(Boolean, default=False, doc="Whether to enable context management (compression) for this agent")
+
+
+class PromptTemplate(TableBase):
+    """
+    Prompt template table for user-defined prompt generation templates.
+    """
+    __tablename__ = "ag_prompt_template_t"
+    __table_args__ = (
+        Index(
+            "uq_prompt_template_user_name_active",
+            "tenant_id",
+            "user_id",
+            "template_name",
+            unique=True,
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        Index(
+            "idx_ag_prompt_template_t_user",
+            "tenant_id",
+            "user_id",
+            "template_type",
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    template_id = Column(Integer, Sequence(
+        "ag_prompt_template_t_template_id_seq", schema=SCHEMA), primary_key=True, nullable=False, autoincrement=True, doc="Prompt template ID")
+    template_name = Column(String(100), nullable=False, doc="Prompt template name")
+    description = Column(String(500), doc="Prompt template description")
+    template_type = Column(String(50), nullable=False, default="agent_generate", doc="Prompt template type")
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    user_id = Column(String(100), nullable=False, doc="User ID")
+    template_content_zh = Column(JSONB, nullable=False, doc="Chinese prompt template content")
+    template_content_en = Column(JSONB, doc="English prompt template content")
 
 
 class ToolInstance(TableBase):
@@ -357,10 +398,17 @@ class KnowledgeRecord(TableBase):
     knowledge_describe = Column(String(3000), doc="Knowledge base description")
     knowledge_sources = Column(String(300), doc="Knowledge base sources")
     embedding_model_name = Column(String(200), doc="Embedding model name, used to record the embedding model used by the knowledge base")
+    embedding_model_id = Column(Integer, doc="Embedding model ID, foreign key reference to model_record_t.model_id")
     tenant_id = Column(String(100), doc="Tenant ID")
     group_ids = Column(String, doc="Knowledge base group IDs list")
     ingroup_permission = Column(
         String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
+    summary_frequency = Column(String(10), nullable=True,
+        doc="Auto-summary frequency: '3h', '5h', '1d', '1w', or NULL (disabled)")
+    last_summary_time = Column(TIMESTAMP(timezone=False), nullable=True,
+        doc="Timestamp of last summary generation")
+    last_doc_update_time = Column(TIMESTAMP(timezone=False), nullable=True,
+        doc="Timestamp of last document add/delete operation")
 
 
 class TenantConfig(TableBase):
@@ -419,12 +467,47 @@ class McpRecord(TableBase):
         String(200),
         doc="Docker container ID for MCP service, None for non-containerized MCP",
     )
+    container_port = Column(
+        Integer,
+        doc="Host port bound for containerized MCP service",
+    )
     authorization_token = Column(
         String(500),
         doc="Authorization token for MCP server authentication (e.g., Bearer token)",
         default=None,
     )
+    source = Column(String(30), doc="Source type: local/mcp_registry/community")
+    registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
+    config_json = Column(JSON, doc="MCP config data")
+    enabled = Column(Boolean, default=True, doc="Enabled")
+    tags = Column(ARRAY(Text), doc="Tags")
+    description = Column(Text, doc="Description")
 
+
+class McpCommunityRecord(TableBase):
+    """Community MCP market records table."""
+
+    __tablename__ = "mcp_community_record_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    community_id = Column(
+        Integer,
+        Sequence("mcp_community_record_t_community_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Community record ID, unique primary key",
+    )
+    tenant_id = Column(String(100), doc="Publisher tenant ID")
+    user_id = Column(String(100), doc="Publisher user ID")
+    mcp_name = Column(String(100), doc="MCP name")
+    mcp_server = Column(String(500), doc="MCP server URL")
+    source = Column(String(30), doc="Source type, fixed to community")
+    version = Column(String(50), doc="MCP version")
+    registry_json = Column(JSONB, doc="Full MCP metadata JSON")
+    transport_type = Column(String(30), doc="Transport type: http/sse/container")
+    config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
+    tags = Column(ARRAY(Text), doc="Tags")
+    description = Column(Text, doc="Description")
 
 class UserTenant(TableBase):
     """
@@ -641,10 +724,12 @@ class SkillInfo(TableBase):
     skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
     skill_name = Column(String(100), nullable=False, unique=True, doc="Unique skill name")
+    tenant_id = Column(String(100), nullable=True, doc="Tenant ID for multi-tenancy. NULL for pre-existing skills.")
     skill_description = Column(String(1000), doc="Skill description")
     skill_tags = Column(JSON, doc="Skill tags as JSON array")
     skill_content = Column(Text, doc="Skill content in markdown format")
-    params = Column(JSON, doc="Skill configuration parameters as JSON object")
+    config_schemas = Column(JSON, doc="Parameter metadata from config/schema.yaml")
+    config_values = Column(JSON, doc="Runtime parameter values from config/config.yaml")
     source = Column(String(30), nullable=False, default="official",
                     doc="Skill source: official, custom, etc.")
 
@@ -684,6 +769,8 @@ class SkillInstance(TableBase):
     tenant_id = Column(String(100), doc="Tenant ID")
     enabled = Column(Boolean, default=True, doc="Whether this skill is enabled for the agent")
     version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    config_values = Column(JSON, doc="Per-agent runtime parameter values (mirrors ag_tool_instance_t.params)")
+    config_schemas = Column(JSON, doc="Per-agent parameter schema overrides from config/schema.yaml")
 
 
 class OuterApiService(TableBase):
@@ -779,6 +866,9 @@ class A2AExternalAgent(TableBase):
     nacos_config_id = Column(String(64), doc="Reference to Nacos config used for discovery")
     nacos_agent_name = Column(String(255), doc="Original name used for Nacos query")
 
+    # Base URL for infrastructure health checks
+    base_url = Column(String(512), doc="Base URL for health checks (service root address), e.g., http://agent:8080")
+
     # Tenant isolation
     tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
 
@@ -805,12 +895,6 @@ class A2AExternalAgentRelation(TableBase):
         UniqueConstraint(
             "local_agent_id", "external_agent_id",
             name="uq_local_external_agent",
-            deferrable=True,
-        ),
-        ForeignKeyConstraint(
-            ["external_agent_id"],
-            [f"{SCHEMA}.ag_a2a_external_agent_t.id"],
-            name="fk_external_agent",
             deferrable=True,
         ),
         {"schema": SCHEMA},
@@ -923,7 +1007,7 @@ class A2AMessage(SimpleTableBase):
 
     # Core identifiers (following A2A spec)
     message_id = Column(String(64), primary_key=True, doc="Message ID (A2A spec: messageId)")
-    task_id = Column(String(64), ForeignKey(f"{SCHEMA}.ag_a2a_task_t.id", ondelete="CASCADE"), nullable=True, doc="Task ID this message belongs to (nullable for standalone/simple requests)")
+    task_id = Column(String(64), nullable=True, doc="Task ID this message belongs to (nullable for standalone/simple requests)")
 
     # Message attributes
     message_index = Column(Integer, nullable=False, doc="Order of message in the conversation")
@@ -951,7 +1035,7 @@ class A2AArtifact(SimpleTableBase):
     # Core identifiers (following A2A spec)
     id = Column(String(64), primary_key=True, doc="Internal primary key")
     artifact_id = Column(String(64), nullable=False, doc="Artifact ID (A2A spec: artifactId)")
-    task_id = Column(String(64), ForeignKey(f"{SCHEMA}.ag_a2a_task_t.id", ondelete="CASCADE"), nullable=False, doc="Task ID this artifact belongs to")
+    task_id = Column(String(64), nullable=False, doc="Task ID this artifact belongs to")
 
     # Artifact attributes
     name = Column(String(255), doc="Human-readable artifact name")

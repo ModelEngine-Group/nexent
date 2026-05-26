@@ -7,12 +7,12 @@ concurrency:
 on:
   workflow_dispatch:
   pull_request:
-    branches: [develop]
+    branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'doc/**'
       - '.github/workflows/**'
   push:
-    branches: [develop]
+    branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'doc/**'
       - '.github/workflows/**'

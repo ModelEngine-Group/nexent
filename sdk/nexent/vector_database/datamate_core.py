@@ -91,6 +91,7 @@ class DataMateCore(VectorDatabaseCore):
             batch_size: int = 64,
             content_field: str = "content",
             embedding_batch_size: int = 10,
+            large_mode: bool = False,
             progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         _ = (
@@ -100,6 +101,7 @@ class DataMateCore(VectorDatabaseCore):
             batch_size,
             content_field,
             embedding_batch_size,
+            large_mode,
             progress_callback,
         )
         raise NotImplementedError(

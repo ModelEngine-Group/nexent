@@ -40,6 +40,9 @@ with patch.dict(_sys.modules, _module_mocks):
         BaseTTSModel,
     )
 
+_volc_tts_module = _sys.modules[VolcTTSModel.__module__]
+_volc_tts_module.websockets = _mock_websockets
+
 
 class TestVolcTTSConfig:
     """Tests for VolcTTSConfig."""

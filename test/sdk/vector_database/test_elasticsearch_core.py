@@ -1,7 +1,9 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import time
+import types
 from typing import List, Dict, Any
+from contextlib import contextmanager
 from elasticsearch import exceptions
 
 # Import the class under test
@@ -819,6 +821,31 @@ def test_vectorize_documents_large_batch(elasticsearch_core_instance):
         mock_bulk.assert_called()
         mock_refresh.assert_called_once_with("test_index")
 
+
+def test_vectorize_documents_small_batch_large_mode_forces_large_path(elasticsearch_core_instance):
+    """large_mode=True should route small input into large-batch path."""
+    mock_embedding_model = MagicMock()
+    docs = [{"content": "a"}, {"content": "b"}]
+
+    @contextmanager
+    def _fake_bulk_ctx(*args, **kwargs):
+        yield "bulk-op"
+
+    with patch.object(elasticsearch_core_instance, "bulk_operation_context", side_effect=_fake_bulk_ctx) as mock_ctx, \
+         patch.object(elasticsearch_core_instance, "_large_batch_insert", return_value=2) as mock_large, \
+         patch.object(elasticsearch_core_instance, "_small_batch_insert", return_value=2) as mock_small:
+        out = elasticsearch_core_instance.vectorize_documents(
+            "idx",
+            mock_embedding_model,
+            docs,
+            large_mode=True,
+        )
+
+    assert out == 2
+    assert mock_ctx.called
+    assert mock_large.called
+    assert not mock_small.called
+
 def test_large_batch_progress_callback_invoked(elasticsearch_core_instance):
     """Progress callback should be triggered during embedding phase."""
     mock_embedding_model = MagicMock()
@@ -888,6 +915,33 @@ def test_large_batch_retry_logs_warning(elasticsearch_core_instance, caplog):
 
     assert call_counter["n"] == 3
     assert any("Embedding API error (attempt 1/3)" in m for m in caplog.messages)
+
+
+def test_large_batch_raises_after_sub_batch_retry_exhausted(elasticsearch_core_instance, monkeypatch):
+    """When embedding sub-batch keeps failing, method should raise and skip bulk insert."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.embedding_model_name = "test-model"
+    mock_embedding_model.get_embeddings.side_effect = RuntimeError("embed fail hard")
+
+    docs = [{"content": "a"}]
+    monkeypatch.setenv("EMBEDDING_SUB_BATCH_MAX_RETRIES", "2")
+    monkeypatch.setenv("EMBEDDING_SUB_BATCH_RETRY_DELAY_S", "0.2")
+    monkeypatch.setenv("EMBEDDING_SUB_BATCH_RETRY_MAX_DELAY_S", "0.2")
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+         patch.object(elasticsearch_core_instance, "_force_refresh_with_retry"), \
+         patch("time.sleep", lambda *args, **kwargs: None):
+        with pytest.raises(RuntimeError, match="embed fail hard"):
+            elasticsearch_core_instance._large_batch_insert(
+                "idx",
+                docs,
+                batch_size=1,
+                content_field="content",
+                embedding_model=mock_embedding_model,
+                embedding_batch_size=1,
+            )
+
+    mock_bulk.assert_not_called()
 
 
 def test_delete_documents_success(elasticsearch_core_instance):
@@ -2144,3 +2198,29 @@ def test_hybrid_search_empty_embedding_skips_storage(elasticsearch_core_instance
         mock_client.index.assert_not_called()
         # Should still complete search
         assert mock_semantic.call_count == 2
+
+
+def test_create_index_request_error_already_exists(elasticsearch_core_instance):
+    from elasticsearch import exceptions as es_exceptions
+    with patch.object(elasticsearch_core_instance, "client") as mock_client, \
+            patch.object(elasticsearch_core_instance, "_ensure_index_ready") as mock_ready:
+        mock_client.indices.exists.return_value = False
+        mock_client.indices.create.side_effect = es_exceptions.RequestError(
+            message="resource_already_exists_exception",
+            meta=types.SimpleNamespace(status=400),
+            body={"error": {"type": "resource_already_exists_exception"}},
+        )
+        assert elasticsearch_core_instance.create_index("idx") is True
+        mock_ready.assert_called_once_with("idx")
+
+
+def test_create_index_generic_exception_returns_false(elasticsearch_core_instance):
+    with patch.object(elasticsearch_core_instance, "client") as mock_client:
+        mock_client.indices.exists.side_effect = RuntimeError("boom")
+        assert elasticsearch_core_instance.create_index("idx") is False
+
+
+def test_get_user_indices_error_returns_empty(elasticsearch_core_instance):
+    with patch.object(elasticsearch_core_instance, "client") as mock_client:
+        mock_client.indices.get_alias.side_effect = RuntimeError("x")
+        assert elasticsearch_core_instance.get_user_indices("*") == []

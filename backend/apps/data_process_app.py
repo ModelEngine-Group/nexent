@@ -204,9 +204,14 @@ async def get_index_tasks(index_name: str):
 
     Returns tasks that are being processed or waiting to be processed
     """
+    import time
+    start = time.time()
     try:
-        return await service.get_index_tasks(index_name)
+        result = await service.get_index_tasks(index_name)
+        logger.info(f"[get_index_tasks] index={index_name}, tasks={len(result)}, duration={time.time()-start:.3f}s")
+        return result
     except Exception as e:
+        logger.error(f"[get_index_tasks] error: {e}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 

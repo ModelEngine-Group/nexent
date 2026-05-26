@@ -119,6 +119,13 @@ mock_langchain_core_tools_mod.BaseTool = MagicMock(name="BaseTool")
 mock_langchain_core_mod = MagicMock(name="langchain_core")
 mock_langchain_core_mod.tools = mock_langchain_core_tools_mod
 
+sys.modules['elangchain_cor'] = MagicMock()
+sys.modules['langchain_core.documents'] = MagicMock()
+sys.modules['langchain_core.documents.Document'] = MagicMock()
+sys.modules['langchain_core.documents.BaseDocumentTransformer'] = MagicMock()
+sys.modules['langchain_text_splitters'] = MagicMock()
+sys.modules['langchain_text_splitters.MarkdownHeaderTextSplitter'] = MagicMock()
+
 # Re-use mocks from test_nexent_agent for langchain and openai to avoid real imports
 mock_langchain_tools = MagicMock()
 mock_langchain_tools.StructuredTool = MagicMock()
@@ -781,14 +788,12 @@ def test_agent_run_thread_preserves_context_var(basic_agent_run_info, monkeypatc
     captured_value = {}
 
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
-    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
-
-    original_run = run_agent.agent_run_thread.__wrapped__
-
-    def capturing_run(info):
+    def create_nexent_agent(*args, **kwargs):
         captured_value["val"] = test_var.get()
-        return original_run(info)
+        return mock_nexent_instance
+
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(side_effect=create_nexent_agent))
 
     test_var.set("preserved!")
-    capturing_run(basic_agent_run_info)
+    run_agent.agent_run_thread(basic_agent_run_info)
     assert captured_value.get("val") == "preserved!"

@@ -80,6 +80,7 @@ class VectorDatabaseCore(ABC):
         batch_size: int = 64,
         content_field: str = "content",
         embedding_batch_size: int = 10,
+        large_mode: bool = False,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         """

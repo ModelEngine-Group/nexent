@@ -206,11 +206,19 @@ class ServiceManager:
             logger.debug(f"Process-worker concurrency set to: {process_worker_concurrency}")
             logger.debug(f"Forward-worker concurrency set to: {forward_worker_concurrency}")
 
-            # Define worker configurations based on new architecture
+            # Define worker configurations based on split architecture:
+            # - process-worker handles orchestration (process_q)
+            # - process-part-worker handles split sub-tasks (process_part_q)
+            # - forward-worker handles vectorization/storage (forward_q)
             workers_config = [
                 {
                     'name': 'process-worker',
                     'queue': 'process_q',
+                    'concurrency': process_worker_concurrency
+                },
+                {
+                    'name': 'process-part-worker',
+                    'queue': 'process_part_q',
                     'concurrency': process_worker_concurrency
                 },
                 {
@@ -243,7 +251,7 @@ if project_root not in sys.path:
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s: %(levelname)s/%(name)s] %(message)s')
 logger = logging.getLogger("data_process.worker_launcher")
 
-os.environ["QUEUES"] = "{config['queue']}"
+os.environ["QUEUES"] = "{config['queue']}"  # backward compatibility
 os.environ["WORKER_NAME"] = "{config['name']}"
 os.environ["WORKER_CONCURRENCY"] = "{config['concurrency']}"
 
@@ -254,6 +262,10 @@ try:
     logger.debug(f"Celery app instance: {{celery_app}}")
     logger.debug(f"Attempting to start worker for queue: {config['queue']}")
     from data_process.worker import start_worker
+    # Re-apply launcher values after imports in case .env override changed them.
+    os.environ["QUEUES"] = "{config['queue']}"
+    os.environ["WORKER_NAME"] = "{config['name']}"
+    os.environ["WORKER_CONCURRENCY"] = "{config['concurrency']}"
     start_worker()
 except ImportError as e:
     logger.error(f"Import error: {{e}}")
@@ -564,7 +576,11 @@ except Exception as e_exec:
         
         if success_count > 0:
             self.log_service_info()
-        
+
+        # Start auto-summary scheduler
+        from services.auto_summary_scheduler import auto_summary_scheduler
+        auto_summary_scheduler.start()
+
         return success_count == enabled_count
     
     def log_service_info(self):
@@ -700,7 +716,11 @@ except Exception as e_exec:
                         logger.error(f"Final attempt to kill Flower process failed: {final_e}")
             finally:
                 service_processes['flower'] = None
-        
+
+        # Stop auto-summary scheduler
+        from services.auto_summary_scheduler import auto_summary_scheduler
+        auto_summary_scheduler.stop()
+
         # Stop Redis last
         if service_processes['redis']:
             try:

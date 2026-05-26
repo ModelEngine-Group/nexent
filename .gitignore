@@ -19,6 +19,7 @@ docker/uploads
 docker/openssh-server
 docker/volumes/db/data
 docker/.env
+docker/monitoring/monitoring.env
 docker/.run
 docker/deploy.options
 k8s/helm/.deploy.options
@@ -42,3 +43,12 @@ model-assets/
 .opencode/
 openspec/
 logs/
+
+.devspace/
+devspace.yaml
+k8s/helm/**/*.tgz
+k8s/helm/nexent/Chart.lock
+
+MAC_DEVELOPMENT_GUIDE.md
+# Mac本地开发数据持久化（无需提交）
+data/

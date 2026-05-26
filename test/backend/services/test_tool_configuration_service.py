@@ -15,7 +15,7 @@ boto3_mock = MagicMock()
 minio_client_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
-# Patch smolagents and its sub-modules before importing consts.model to avoid ImportError
+# Patch smolagents and its sub-modules before importi ng consts.model to avoid ImportError
 mock_smolagents = MagicMock()
 sys.modules['smolagents'] = mock_smolagents
 
@@ -116,11 +116,49 @@ def _create_package_mock(name):
 
 nexent_mock = _create_package_mock('nexent')
 sys.modules['nexent'] = nexent_mock
+
+# Mock psycopg2 before backend.database.client is imported
+psycopg2_mock = MagicMock()
+sys.modules['psycopg2'] = psycopg2_mock
+sys.modules['psycopg2.pool'] = MagicMock()
+sys.modules['psycopg2.extras'] = MagicMock()
+
+# Mock redis before services.redis_service is imported
+redis_mock = MagicMock()
+sys.modules['redis'] = redis_mock
+sys.modules['redis.client'] = MagicMock()
+sys.modules['redis.connection'] = MagicMock()
+sys.modules['redis.lock'] = MagicMock()
+
+# Mock supabase before utils.auth_utils is imported
+supabase_mock = MagicMock()
+sys.modules['supabase'] = supabase_mock
+
+# Mock nexent.core.utils.observer before services.skill_service is imported
+nexent_core_utils = _create_package_mock('nexent.core.utils')
+sys.modules['nexent.core.utils'] = nexent_core_utils
+nexent_core_utils_observer = types.ModuleType('nexent.core.utils.observer')
+nexent_core_utils_observer.MessageObserver = MagicMock()
+sys.modules['nexent.core.utils.observer'] = nexent_core_utils_observer
+
 sys.modules['nexent.core'] = _create_package_mock('nexent.core')
 sys.modules['nexent.core.agents'] = _create_package_mock('nexent.core.agents')
 sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+sys.modules['nexent.core.agents.run_agent'] = MagicMock()
 sys.modules['nexent.core.models'] = _create_package_mock('nexent.core.models')
 
+# Mock nexent.multi_modal module
+multi_modal_module = types.ModuleType('nexent.multi_modal')
+sys.modules['nexent.multi_modal'] = multi_modal_module
+
+multi_modal_utils = types.ModuleType('nexent.multi_modal.utils')
+multi_modal_utils.parse_s3_url = MagicMock(return_value=("bucket", "key"))
+sys.modules['nexent.multi_modal.utils'] = multi_modal_utils
+setattr(multi_modal_module, 'utils', multi_modal_utils)
+
+sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
+sys.modules['nexent.monitor'].set_monitoring_context = MagicMock()
+sys.modules['nexent.monitor'].set_monitoring_operation = MagicMock()
 
 class MockMessageObserver:
     """Lightweight stand-in for nexent.MessageObserver."""
@@ -275,6 +313,21 @@ memory_service_module.clear_memory = MagicMock()
 sys.modules['nexent.memory'] = _create_package_mock('nexent.memory')
 sys.modules['nexent.memory.memory_service'] = memory_service_module
 
+# Mock nexent.multi_modal module to satisfy file_management_service imports
+sys.modules['nexent.multi_modal'] = _create_package_mock('nexent.multi_modal')
+multi_modal_utils_module = types.ModuleType('nexent.multi_modal.utils')
+multi_modal_utils_module.parse_s3_url = MagicMock()
+sys.modules['nexent.multi_modal.utils'] = multi_modal_utils_module
+setattr(sys.modules['nexent'], 'multi_modal', sys.modules['nexent.multi_modal'])
+setattr(sys.modules['nexent.multi_modal'], 'utils', multi_modal_utils_module)
+
+# Mock nexent.monitor module to satisfy tool_configuration_service imports
+monitor_module = types.ModuleType('nexent.monitor')
+monitor_module.set_monitoring_context = MagicMock()
+monitor_module.set_monitoring_operation = MagicMock()
+sys.modules['nexent.monitor'] = monitor_module
+setattr(sys.modules['nexent'], 'monitor', monitor_module)
+
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
@@ -328,6 +381,7 @@ patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
 patch('services.image_service.get_vlm_model', MagicMock()).start()
 patch('backend.database.knowledge_db.get_knowledge_name_map_by_index_names', MagicMock()).start()
+patch('backend.services.tool_configuration_service.get_embedding_model_by_index_name', MagicMock()).start()
 
 # Import consts after patching dependencies
 from consts.model import ToolInfo, ToolSourceEnum, ToolInstanceInfoRequest, ToolValidateRequest  # noqa: E402
@@ -836,12 +890,12 @@ class TestGetAllMcpTools:
     @patch('backend.services.tool_configuration_service.urljoin')
     async def test_get_all_mcp_tools_success(self, mock_urljoin, mock_get_tools, mock_get_records):
         """Test successfully getting all MCP tools"""
-        # Mock MCP records
+        # Mock MCP records - must include "enabled" field as implementation checks both enabled AND status
         mock_get_records.return_value = [
-            {"mcp_name": "server1", "mcp_server": "http://server1.com", "status": True},
+            {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True},
             {"mcp_name": "server2", "mcp_server": "http://server2.com",
-                "status": False},  # Not connected
-            {"mcp_name": "server3", "mcp_server": "http://server3.com", "status": True}
+                "enabled": True, "status": False},  # Not connected
+            {"mcp_name": "server3", "mcp_server": "http://server3.com", "enabled": True, "status": True}
         ]
 
         # Mock tool information
@@ -858,6 +912,7 @@ class TestGetAllMcpTools:
                      inputs="{}", output_type="string", class_name="DefaultTool", usage="nexent")
         ]
 
+        # Call order: server1, server3 (server2 is skipped due to status=False), default server
         mock_get_tools.side_effect = [
             mock_tools1, mock_tools2, mock_default_tools]
         mock_urljoin.return_value = "http://default-server.com/sse"
@@ -886,9 +941,9 @@ class TestGetAllMcpTools:
     async def test_get_all_mcp_tools_connection_error(self, mock_urljoin, mock_get_tools, mock_get_records):
         """Test MCP connection error scenario"""
         mock_get_records.return_value = [
-            {"mcp_name": "server1", "mcp_server": "http://server1.com", "status": True}
+            {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True}
         ]
-        # First call fails, second call succeeds (default server)
+        # First call (server1) fails, second call (default server) succeeds
         mock_get_tools.side_effect = [Exception("Connection failed"),
                                       [ToolInfo(name="default_tool", description="Default Tool", params=[],
                                                 source=ToolSourceEnum.MCP.value, inputs="{}", output_type="string",
@@ -910,8 +965,8 @@ class TestGetAllMcpTools:
     async def test_get_all_mcp_tools_no_connected_servers(self, mock_urljoin, mock_get_tools, mock_get_records):
         """Test scenario with no connected servers"""
         mock_get_records.return_value = [
-            {"mcp_name": "server1", "mcp_server": "http://server1.com", "status": False},
-            {"mcp_name": "server2", "mcp_server": "http://server2.com", "status": False}
+            {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": False},
+            {"mcp_name": "server2", "mcp_server": "http://server2.com", "enabled": True, "status": False}
         ]
         mock_default_tools = [
             ToolInfo(name="default_tool", description="Default Tool", params=[], source=ToolSourceEnum.MCP.value,
@@ -2205,9 +2260,9 @@ class TestValidateLocalToolKnowledgeBaseSearch:
     @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_embedding_model_by_index_name')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
-    def test_validate_local_tool_knowledge_base_search_success(self, mock_get_vector_db_core, mock_get_embedding_model,
+    def test_validate_local_tool_knowledge_base_search_success(self, mock_get_vector_db_core, mock_get_embedding_model_by_index_name,
                                                                mock_signature, mock_get_class, mock_get_knowledge_map):
         """Test successful knowledge_base_search tool validation with proper dependencies"""
         # Mock tool class
@@ -2231,8 +2286,8 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         }
         mock_signature.return_value = mock_sig
 
-        # Mock knowledge base dependencies
-        mock_get_embedding_model.return_value = "mock_embedding_model"
+        # Mock knowledge base dependencies - get_embedding_model_by_index_name returns tuple
+        mock_get_embedding_model_by_index_name.return_value = ("mock_embedding_model", 123, {})
         mock_vdb_core = Mock()
         mock_get_vector_db_core.return_value = mock_vdb_core
 
@@ -2244,7 +2299,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         result = _validate_local_tool(
             "knowledge_base_search",
             {"query": "test query"},
-            {"param": "config"},
+            {"index_names": ["test_index"]},
             "tenant1",
             "user1"
         )
@@ -2252,27 +2307,25 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         assert result == "knowledge base search result"
         mock_get_class.assert_called_once_with("knowledge_base_search")
 
-        # Verify knowledge base specific parameters were passed
-        expected_params = {
-            "param": "config",
-            "index_names": ["default_index"],
-            "vdb_core": mock_vdb_core,
-            "embedding_model": "mock_embedding_model",
-            "rerank_model": None,
-            "display_name_to_index_map": {},
-        }
-        mock_tool_class.assert_called_once_with(**expected_params)
-        mock_tool_instance.forward.assert_called_once_with(query="test query")
+        # Verify get_embedding_model_by_index_name was called with correct params
+        mock_get_embedding_model_by_index_name.assert_called_once_with("tenant1", "test_index")
 
-        # Verify service calls
-        mock_get_embedding_model.assert_called_once_with(tenant_id="tenant1")
+        # Verify knowledge base specific parameters were passed
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert call_kwargs['vdb_core'] == mock_vdb_core
+        assert call_kwargs['embedding_model'] == "mock_embedding_model"
+        assert call_kwargs['index_names'] == ["test_index"]
+        assert call_kwargs['rerank_model'] is None
+        assert call_kwargs['display_name_to_index_map'] == {}
+
+        mock_tool_instance.forward.assert_called_once_with(query="test query")
 
     @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_embedding_model_by_index_name')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
     def test_validate_local_tool_knowledge_base_search_with_display_name_mapping(
-            self, mock_get_vector_db_core, mock_get_embedding_model, mock_get_class, mock_get_knowledge_map):
+            self, mock_get_vector_db_core, mock_get_embedding_model_by_index_name, mock_get_class, mock_get_knowledge_map):
         """Test knowledge_base_search tool with display_name_to_index_map parameter"""
         mock_tool_class = Mock()
         mock_tool_instance = Mock()
@@ -2280,7 +2333,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
 
-        mock_get_embedding_model.return_value = "mock_embedding_model"
+        mock_get_embedding_model_by_index_name.return_value = ("mock_embedding_model", 123, {})
         mock_vdb_core = Mock()
         mock_get_vector_db_core.return_value = mock_vdb_core
 
@@ -2319,59 +2372,57 @@ class TestValidateLocalToolKnowledgeBaseSearch:
             "Display Knowledge 2": "test_index_2"
         }
 
+        # Verify get_embedding_model_by_index_name was called with first index
+        mock_get_embedding_model_by_index_name.assert_called_once_with("tenant1", "test_index_1")
+
         # Verify knowledge name map was called with index_names
         mock_get_knowledge_map.assert_called_once_with(["test_index_1", "test_index_2"])
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    @patch('backend.services.tool_configuration_service.get_embedding_model')
-    @patch('backend.services.tool_configuration_service.get_vector_db_core')
-    def test_validate_local_tool_knowledge_base_search_missing_tenant_id(self, mock_get_vector_db_core,
-                                                                        mock_get_embedding_model, mock_get_class):
-        """Test knowledge_base_search tool validation when tenant_id is missing"""
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_knowledge_base_search_missing_tenant_id(self, mock_signature, mock_get_class):
+        """Test knowledge_base_search tool validation when tenant_id is missing - should raise exception"""
         mock_tool_class = Mock()
-        mock_tool_instance = Mock()
-        mock_tool_instance.forward.return_value = "knowledge base search result"
-        mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
-
-        mock_get_embedding_model.return_value = "mock_embedding_model"
-        mock_get_vector_db_core.return_value = Mock()
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        # knowledge_base_search doesn't require tenant_id/user_id in current implementation
-        result = _validate_local_tool(
-            "knowledge_base_search",
-            {"query": "test query"},
-            {"param": "config"},
-            None,  # Missing tenant_id
-            "user1"
-        )
+        # New implementation requires tenant_id and index_names
+        with pytest.raises(ToolExecutionException,
+                           match="Embedding model is required for knowledge_base_search but index_names or tenant_id is missing"):
+            _validate_local_tool(
+                "knowledge_base_search",
+                {"query": "test query"},
+                {"index_names": ["test_index"]},
+                None,  # Missing tenant_id
+                "user1"
+            )
 
-        assert result == "knowledge base search result"
-
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_embedding_model_by_index_name')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
     def test_validate_local_tool_knowledge_base_search_missing_user_id(self, mock_get_vector_db_core,
-                                                                       mock_get_embedding_model, mock_get_class):
-        """Test knowledge_base_search tool validation when user_id is missing"""
+                                                                       mock_get_embedding_model_by_index_name,
+                                                                       mock_get_class, mock_get_knowledge_map):
+        """Test knowledge_base_search tool validation when user_id is missing - should still succeed"""
         mock_tool_class = Mock()
         mock_tool_instance = Mock()
         mock_tool_instance.forward.return_value = "knowledge base search result"
         mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
 
-        mock_get_embedding_model.return_value = "mock_embedding_model"
+        mock_get_embedding_model_by_index_name.return_value = ("mock_embedding_model", 123, {})
         mock_get_vector_db_core.return_value = Mock()
+        mock_get_knowledge_map.return_value = {}
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        # knowledge_base_search doesn't require tenant_id/user_id in current implementation
+        # knowledge_base_search doesn't require user_id in current implementation
         result = _validate_local_tool(
             "knowledge_base_search",
             {"query": "test query"},
-            {"param": "config"},
+            {"index_names": ["test_index"]},
             "tenant1",
             None  # Missing user_id
         )
@@ -2379,104 +2430,56 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         assert result == "knowledge base search result"
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    @patch('backend.services.tool_configuration_service.get_embedding_model')
-    @patch('backend.services.tool_configuration_service.get_vector_db_core')
-    def test_validate_local_tool_knowledge_base_search_missing_both_ids(self, mock_get_vector_db_core,
-                                                                        mock_get_embedding_model, mock_get_class):
-        """Test knowledge_base_search tool validation when both tenant_id and user_id are missing"""
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_knowledge_base_search_missing_both_ids(self, mock_signature, mock_get_class):
+        """Test knowledge_base_search tool validation when both tenant_id and user_id are missing - should raise exception"""
         mock_tool_class = Mock()
-        mock_tool_instance = Mock()
-        mock_tool_instance.forward.return_value = "knowledge base search result"
-        mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
-
-        mock_get_embedding_model.return_value = "mock_embedding_model"
-        mock_get_vector_db_core.return_value = Mock()
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        # knowledge_base_search doesn't require tenant_id/user_id in current implementation
-        result = _validate_local_tool(
-            "knowledge_base_search",
-            {"query": "test query"},
-            {"param": "config"},
-            None,  # Missing tenant_id
-            None   # Missing user_id
-        )
+        # New implementation requires tenant_id and index_names
+        with pytest.raises(ToolExecutionException,
+                           match="Embedding model is required for knowledge_base_search but index_names or tenant_id is missing"):
+            _validate_local_tool(
+                "knowledge_base_search",
+                {"query": "test query"},
+                {"index_names": ["test_index"]},
+                None,  # Missing tenant_id
+                None   # Missing user_id
+            )
 
-        assert result == "knowledge base search result"
-
-    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_embedding_model')
-    @patch('backend.services.tool_configuration_service.get_vector_db_core')
-    def test_validate_local_tool_knowledge_base_search_empty_knowledge_list(self, mock_get_vector_db_core,
-                                                                            mock_get_embedding_model,
-                                                                            mock_signature,
-                                                                            mock_get_class,
-                                                                            mock_get_knowledge_map):
-        """Test knowledge_base_search tool validation with empty knowledge list"""
+    def test_validate_local_tool_knowledge_base_search_empty_knowledge_list(self, mock_signature, mock_get_class):
+        """Test knowledge_base_search tool validation with empty knowledge list - should raise exception"""
         # Mock tool class
         mock_tool_class = Mock()
-        mock_tool_instance = Mock()
-        mock_tool_instance.forward.return_value = "empty knowledge result"
-        mock_tool_class.return_value = mock_tool_instance
-
         mock_get_class.return_value = mock_tool_class
-
-        # Mock signature for knowledge_base_search tool
-        mock_sig = Mock()
-        mock_index_names_param = Mock()
-        mock_index_names_param.default = []
-        mock_sig.parameters = {
-            'self': Mock(),
-            'index_names': mock_index_names_param,
-            'vdb_core': Mock(),
-            'embedding_model': Mock()
-        }
-        mock_signature.return_value = mock_sig
-
-        # Mock empty knowledge list
-        mock_get_embedding_model.return_value = "mock_embedding_model"
-        mock_vdb_core = Mock()
-        mock_get_vector_db_core.return_value = mock_vdb_core
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        result = _validate_local_tool(
-            "knowledge_base_search",
-            {"query": "test query"},
-            {"param": "config"},
-            "tenant1",
-            "user1"
-        )
+        # New implementation requires index_names to be non-empty
+        with pytest.raises(ToolExecutionException,
+                           match="Embedding model is required for knowledge_base_search but index_names or tenant_id is missing"):
+            _validate_local_tool(
+                "knowledge_base_search",
+                {"query": "test query"},
+                {"index_names": []},  # Empty index_names
+                "tenant1",
+                "user1"
+            )
 
-        assert result == "empty knowledge result"
-
-        # Verify knowledge base specific parameters were passed with empty index_names
-        expected_params = {
-            "param": "config",
-            "index_names": [],
-            "vdb_core": mock_vdb_core,
-            "embedding_model": "mock_embedding_model",
-            "rerank_model": None,
-            "display_name_to_index_map": {},
-        }
-        mock_tool_class.assert_called_once_with(**expected_params)
-        mock_tool_instance.forward.assert_called_once_with(query="test query")
-
-
-    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_embedding_model_by_index_name')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
-    def test_validate_local_tool_knowledge_base_search_execution_error(self, mock_get_vector_db_core,
-                                                                       mock_get_embedding_model,
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
+    def test_validate_local_tool_knowledge_base_search_execution_error(self, mock_get_knowledge_map,
+                                                                       mock_get_vector_db_core,
+                                                                       mock_get_embedding_model_by_index_name,
                                                                        mock_signature,
-                                                                       mock_get_class,
-                                                                       mock_get_knowledge_map):
+                                                                       mock_get_class):
         """Test knowledge_base_search tool validation when execution fails"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2499,10 +2502,11 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         }
         mock_signature.return_value = mock_sig
 
-        # Mock knowledge base dependencies
-        mock_get_embedding_model.return_value = "mock_embedding_model"
+        # Mock knowledge base dependencies - get_embedding_model_by_index_name returns tuple
+        mock_get_embedding_model_by_index_name.return_value = ("mock_embedding_model", 123, {})
         mock_vdb_core = Mock()
         mock_get_vector_db_core.return_value = mock_vdb_core
+        mock_get_knowledge_map.return_value = {}
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
@@ -2511,7 +2515,117 @@ class TestValidateLocalToolKnowledgeBaseSearch:
             _validate_local_tool(
                 "knowledge_base_search",
                 {"query": "test query"},
-                {"param": "config"},
+                {"index_names": ["test_index"]},
+                "tenant1",
+                "user1"
+            )
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    @patch('backend.services.tool_configuration_service.get_embedding_model_by_index_name')
+    def test_validate_local_tool_knowledge_base_search_no_embedding_model(self, mock_get_embedding_model_by_index_name,
+                                                                          mock_signature, mock_get_class):
+        """Test knowledge_base_search tool validation when embedding model not found - should raise exception"""
+        mock_tool_class = Mock()
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        # Mock get_embedding_model_by_index_name returns None (no embedding model found)
+        mock_get_embedding_model_by_index_name.return_value = (None, None, {})
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        with pytest.raises(ToolExecutionException,
+                           match="No embedding model found for index 'test_index'. Please configure an embedding model for this knowledge base"):
+            _validate_local_tool(
+                "knowledge_base_search",
+                {"query": "test query"},
+                {"index_names": ["test_index"]},
+                "tenant1",
+                "user1"
+            )
+
+        # Verify get_embedding_model_by_index_name was called
+        mock_get_embedding_model_by_index_name.assert_called_once_with("tenant1", "test_index")
+
+    @patch('backend.services.tool_configuration_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    @patch('backend.services.tool_configuration_service.get_embedding_model_by_index_name')
+    @patch('backend.services.tool_configuration_service.get_vector_db_core')
+    @patch('backend.services.tool_configuration_service.get_rerank_model')
+    def test_validate_local_tool_knowledge_base_search_with_rerank(self, mock_get_rerank_model,
+                                                                    mock_get_vector_db_core,
+                                                                    mock_get_embedding_model_by_index_name,
+                                                                    mock_signature,
+                                                                    mock_get_class,
+                                                                    mock_get_knowledge_map):
+        """Test knowledge_base_search tool validation with rerank enabled"""
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "knowledge base search result with rerank"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        # Mock knowledge base dependencies
+        mock_get_embedding_model_by_index_name.return_value = ("mock_embedding_model", 123, {})
+        mock_vdb_core = Mock()
+        mock_get_vector_db_core.return_value = mock_vdb_core
+        mock_get_knowledge_map.return_value = {}
+
+        # Mock rerank model
+        mock_rerank_model = Mock()
+        mock_get_rerank_model.return_value = mock_rerank_model
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "knowledge_base_search",
+            {"query": "test query"},
+            {"index_names": ["test_index"], "rerank": True, "rerank_model_name": "rerank_model"},
+            "tenant1",
+            "user1"
+        )
+
+        assert result == "knowledge base search result with rerank"
+
+        # Verify rerank model was fetched
+        mock_get_rerank_model.assert_called_once_with(tenant_id="tenant1", model_name="rerank_model")
+
+        # Verify tool class was called with rerank_model
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert call_kwargs['rerank_model'] == mock_rerank_model
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_knowledge_base_search_missing_index_names_key(self, mock_signature, mock_get_class):
+        """Test knowledge_base_search tool validation when index_names key is missing - should raise exception"""
+        mock_tool_class = Mock()
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        # instantiation_params doesn't have 'index_names' key - defaults to []
+        with pytest.raises(ToolExecutionException,
+                           match="Embedding model is required for knowledge_base_search but index_names or tenant_id is missing"):
+            _validate_local_tool(
+                "knowledge_base_search",
+                {"query": "test query"},
+                {},  # No index_names key
                 "tenant1",
                 "user1"
             )
@@ -2978,7 +3092,8 @@ class TestGetLlmModel:
             api_base="http://api.example.com",
             api_key="test_api_key",
             max_context_tokens=4096,
-            ssl_verify=True
+            ssl_verify=True,
+            timeout_seconds=None
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
@@ -4138,6 +4253,378 @@ class TestValidateLocalToolMonitoring:
         mock_ctx.assert_called_once_with(tenant_id="tenant1")
         mock_op.assert_called_once_with(
             "tool_validation", display_name="LLM-Model")
+
+
+class TestGetLocalToolsMissingCoverage:
+    """Tests for uncovered branches in get_local_tools function."""
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_get_local_tools_with_excluded_default(self, mock_get_classes):
+        """Test that parameters with exclude=True in default are skipped."""
+        from backend.services.tool_configuration_service import get_local_tools
+
+        class ExcludedField:
+            default = "value"
+            exclude = True
+            description = "Should be excluded"
+
+        MockToolClass = type('MockTool', (), {
+            'name': 'TestTool',
+            'description': 'Test tool',
+            'inputs': {},
+            'output_type': 'string',
+            'category': 'test',
+            '__name__': 'MockTool'
+        })
+
+        class MockParam:
+            def __init__(self, name, annotation, default):
+                self.name = name
+                self.annotation = annotation
+                self.default = default
+
+        mock_tool = MockToolClass()
+
+        mock_params = {
+            'excluded_param': MockParam("excluded_param", str, ExcludedField())
+        }
+
+        with patch('inspect.signature') as mock_sig:
+            mock_sig.return_value = Mock(parameters=mock_params)
+            mock_get_classes.return_value = [mock_tool]
+
+            result = get_local_tools()
+
+        assert len(result) == 1
+        params = result[0].params
+        param_names = [p["name"] for p in params]
+        assert "excluded_param" not in param_names
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_get_local_tools_with_pydantic_undefined(self, mock_get_classes):
+        """Test handling of PydanticUndefined in parameter defaults."""
+        from backend.services.tool_configuration_service import get_local_tools
+        from pydantic.fields import PydanticUndefined
+
+        class MockPydanticField:
+            def __init__(self):
+                self.default = PydanticUndefined
+                self.description = "A required parameter"
+
+        MockToolClass = type('MockTool', (), {
+            'name': 'TestTool',
+            'description': 'Test tool',
+            'inputs': {},
+            'output_type': 'string',
+            'category': 'test',
+            '__name__': 'MockTool'
+        })
+
+        class MockParam:
+            def __init__(self, name, annotation, default):
+                self.name = name
+                self.annotation = annotation
+                self.default = default
+
+        mock_tool = MockToolClass()
+
+        mock_params = {
+            'required_param': MockParam("required_param", str, MockPydanticField())
+        }
+
+        with patch('inspect.signature') as mock_sig:
+            mock_sig.return_value = Mock(parameters=mock_params)
+            mock_get_classes.return_value = [mock_tool]
+
+            result = get_local_tools()
+
+        assert len(result) == 1
+        params = result[0].params
+        required_params = [p for p in params if p["name"] == "required_param"]
+        assert len(required_params) == 1
+        assert required_params[0]["optional"] is False
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_get_local_tools_with_simple_default_value(self, mock_get_classes):
+        """Test handling of simple default values (not FieldInfo)."""
+        from backend.services.tool_configuration_service import get_local_tools
+
+        MockToolClass = type('MockTool', (), {
+            'name': 'TestTool',
+            'description': 'Test tool',
+            'inputs': {},
+            'output_type': 'string',
+            'category': 'test',
+            '__name__': 'MockTool'
+        })
+
+        class MockParam:
+            def __init__(self, name, annotation, default):
+                self.name = name
+                self.annotation = annotation
+                self.default = default
+
+        mock_tool = MockToolClass()
+
+        mock_params = {
+            'optional_param': MockParam("optional_param", str, "default_value")
+        }
+
+        with patch('inspect.signature') as mock_sig:
+            mock_sig.return_value = Mock(parameters=mock_params)
+            mock_get_classes.return_value = [mock_tool]
+
+            result = get_local_tools()
+
+        assert len(result) == 1
+        params = result[0].params
+        optional_params = [p for p in params if p["name"] == "optional_param"]
+        assert len(optional_params) == 1
+        assert optional_params[0]["optional"] is True
+        assert optional_params[0]["default"] == "default_value"
+
+
+class TestSearchToolInfoImplMissingCoverage:
+    """Tests for uncovered branches in search_tool_info_impl."""
+
+    @patch('backend.services.tool_configuration_service.query_tool_instances_by_id')
+    def test_search_tool_info_impl_returns_none(self, mock_query):
+        """Test search_tool_info_impl when tool_instance is None (empty/falsy)."""
+        from backend.services.tool_configuration_service import search_tool_info_impl
+
+        mock_query.return_value = None
+
+        result = search_tool_info_impl("agent1", 123, "tenant1")
+
+        assert result["params"] is None
+        assert result["enabled"] is False
+
+    @patch('backend.services.tool_configuration_service.query_tool_instances_by_id')
+    def test_search_tool_info_impl_returns_instance(self, mock_query):
+        """Test search_tool_info_impl when tool_instance exists."""
+        from backend.services.tool_configuration_service import search_tool_info_impl
+
+        mock_query.return_value = {"params": {"key": "value"}, "enabled": True}
+
+        result = search_tool_info_impl("agent1", 123, "tenant1")
+
+        assert result["params"] == {"key": "value"}
+        assert result["enabled"] is True
+
+
+class TestLoadLastToolConfigMissingCoverage:
+    """Tests for uncovered branches in load_last_tool_config_impl."""
+
+    @patch('backend.services.tool_configuration_service.search_last_tool_instance_by_tool_id')
+    def test_load_last_tool_config_impl_not_found(self, mock_search):
+        """Test load_last_tool_config_impl raises ValueError when not found."""
+        from backend.services.tool_configuration_service import load_last_tool_config_impl
+
+        mock_search.return_value = None
+
+        with pytest.raises(ValueError, match="Tool configuration not found"):
+            load_last_tool_config_impl(123, "tenant1", "user1")
+
+    @patch('backend.services.tool_configuration_service.search_last_tool_instance_by_tool_id')
+    def test_load_last_tool_config_impl_found(self, mock_search):
+        """Test load_last_tool_config_impl returns params when found."""
+        from backend.services.tool_configuration_service import load_last_tool_config_impl
+
+        mock_search.return_value = {"params": {"timeout": 30}, "enabled": True}
+
+        result = load_last_tool_config_impl(123, "tenant1", "user1")
+
+        assert result == {"timeout": 30}
+
+
+class TestUpdateToolListMissingCoverage:
+    """Tests for uncovered branches in update_tool_list."""
+
+    @patch('backend.services.tool_configuration_service.get_all_mcp_tools')
+    @patch('backend.services.tool_configuration_service._refresh_openapi_services_in_mcp')
+    @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
+    @patch('backend.services.tool_configuration_service.get_langchain_tools')
+    @patch('backend.services.tool_configuration_service.get_local_tools')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_update_tool_list_mcp_tools_exception(
+            self, mock_logger, mock_local, mock_langchain,
+            mock_update_table, mock_refresh, mock_mcp):
+        """Test update_tool_list handles get_all_mcp_tools exception."""
+        from backend.services.tool_configuration_service import update_tool_list
+        from consts.exceptions import MCPConnectionError
+
+        mock_local.return_value = []
+        mock_langchain.return_value = []
+        mock_mcp.side_effect = MCPConnectionError("Connection failed")
+
+        with pytest.raises(MCPConnectionError):
+            import asyncio
+            asyncio.run(update_tool_list("tenant1", "user1"))
+
+        mock_logger.error.assert_called_once()
+        assert "failed to get all mcp tools" in str(mock_logger.error.call_args)
+
+
+class TestValidateLocalToolMissingCoverage:
+    """Tests for uncovered branches in _validate_local_tool."""
+
+    @patch('backend.services.tool_configuration_service.get_rerank_model')
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_dify_with_rerank(
+            self, mock_sig, mock_get_class, mock_get_rerank):
+        """Test _validate_local_tool for dify_search with rerank enabled."""
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "ok"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+
+        mock_sig_params = {
+            'param1': Mock(default="default1"),
+        }
+        mock_sig.return_value = Mock(parameters=mock_sig_params)
+
+        mock_rerank = Mock()
+        mock_get_rerank.return_value = mock_rerank
+
+        _validate_local_tool(
+            "dify_search",
+            {"query": "test"},
+            {"rerank": True, "rerank_model_name": "model1"},
+            "tenant1",
+            "user1")
+
+        mock_get_rerank.assert_called_once_with(tenant_id="tenant1", model_name="model1")
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_haotian_search(self, mock_sig, mock_get_class):
+        """Test _validate_local_tool for haotian_search (special param filtering)."""
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "ok"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+
+        mock_sig_params = {
+            'query': Mock(default=""),
+            'observer': Mock(default=None),
+            'rerank_model': Mock(default=None),
+        }
+        mock_sig.return_value = Mock(parameters=mock_sig_params)
+
+        _validate_local_tool(
+            "haotian_search",
+            {"query": "test"},
+            {"query": "test query"},
+            "tenant1",
+            "user1")
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert "observer" in call_kwargs
+        assert call_kwargs["observer"] is None
+        assert "rerank_model" not in call_kwargs
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_else_branch(self, mock_sig, mock_get_class):
+        """Test _validate_local_tool else branch for unknown tool types."""
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "ok"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+
+        mock_sig_params = {
+            'param1': Mock(default="default"),
+        }
+        mock_sig.return_value = Mock(parameters=mock_sig_params)
+
+        _validate_local_tool(
+            "unknown_tool",
+            {"input": "test"},
+            {"param1": "value1"},
+            "tenant1",
+            "user1")
+
+        mock_tool_class.assert_called_once()
+
+
+class TestValidateToolImplMissingCoverage:
+    """Tests for uncovered exception handling paths in validate_tool_impl."""
+
+    @patch('backend.services.tool_configuration_service._validate_mcp_tool_nexent')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_validate_tool_impl_mcp_connection_error(self, mock_logger, mock_nexent):
+        """Test validate_tool_impl handles MCPConnectionError."""
+        from backend.services.tool_configuration_service import validate_tool_impl
+        from consts.exceptions import MCPConnectionError
+        from consts.model import ToolValidateRequest
+
+        mock_nexent.side_effect = MCPConnectionError("MCP connection failed")
+        request = ToolValidateRequest(
+            name="test_tool",
+            inputs={},
+            source="mcp",
+            usage="outer-apis",
+            params={}
+        )
+
+        with pytest.raises(MCPConnectionError):
+            import asyncio
+            asyncio.run(validate_tool_impl(request, "tenant1", "user1"))
+
+        mock_logger.error.assert_called()
+
+    @patch('backend.services.tool_configuration_service._validate_mcp_tool_remote')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_validate_tool_impl_generic_exception(self, mock_logger, mock_remote):
+        """Test validate_tool_impl handles generic Exception."""
+        from backend.services.tool_configuration_service import validate_tool_impl
+        from consts.exceptions import ToolExecutionException
+        from consts.model import ToolValidateRequest
+
+        mock_remote.side_effect = RuntimeError("Unexpected error")
+        request = ToolValidateRequest(
+            name="test_tool",
+            inputs={},
+            source="mcp",
+            usage="remote",
+            params={}
+        )
+
+        with pytest.raises(ToolExecutionException):
+            import asyncio
+            asyncio.run(validate_tool_impl(request, "tenant1", "user1"))
+
+        mock_logger.error.assert_called()
+
+    @patch('backend.services.tool_configuration_service._validate_mcp_tool_remote')
+    @patch('backend.services.tool_configuration_service.logger')
+    def test_validate_tool_impl_unsupported_source(self, mock_logger, mock_remote):
+        """Test validate_tool_impl raises Exception for unsupported tool source."""
+        from backend.services.tool_configuration_service import validate_tool_impl
+        from consts.model import ToolValidateRequest
+
+        request = ToolValidateRequest(
+            name="test_tool",
+            inputs={},
+            source="unsupported",
+            usage="unknown",
+            params={}
+        )
+
+        with pytest.raises(Exception, match="Unsupported tool source"):
+            import asyncio
+            asyncio.run(validate_tool_impl(request, "tenant1", "user1"))
 
 
 if __name__ == "__main__":

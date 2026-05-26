@@ -305,9 +305,7 @@ def test_jina_get_multimodal_embeddings_parses_embeddings(jina_embedding_instanc
     mock_resp.raise_for_status = Mock()
     mock_resp.json = Mock(return_value=fake_response)
 
-    with patch(
-        "nexent.core.models.embedding_model.requests.post", return_value=mock_resp
-    ) as mock_post:
+    with patch.object(jina_embedding_instance.session, "post", return_value=mock_resp) as mock_post:
         inputs = [{"text": "t1"}, {"image": "http://x/y.jpg"}]
         result = jina_embedding_instance.get_multimodal_embeddings(
             inputs, with_metadata=False, timeout=3
@@ -334,7 +332,7 @@ def test_jina_get_multimodal_embeddings_with_metadata(jina_embedding_instance):
     mock_resp.raise_for_status = Mock()
     mock_resp.json = Mock(return_value=fake_response)
 
-    with patch("nexent.core.models.embedding_model.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(jina_embedding_instance.session, "post", return_value=mock_resp) as mock_post:
         inputs = [{"text": "t"}]
         result = jina_embedding_instance.get_multimodal_embeddings(
             inputs, with_metadata=True, timeout=4
@@ -369,9 +367,7 @@ def test_jina_get_multimodal_embeddings_timeout_retry_succeeds(jina_embedding_in
 
     side_effect.calls = 0
 
-    with patch(
-        "nexent.core.models.embedding_model.requests.post", side_effect=side_effect
-    ) as mock_post:
+    with patch.object(jina_embedding_instance.session, "post", side_effect=side_effect) as mock_post:
         inputs = [{"text": "t"}]
         result = jina_embedding_instance.get_multimodal_embeddings(
             inputs, with_metadata=False, timeout=None, retries=2, retry_timeout_step=2
@@ -390,8 +386,9 @@ def test_jina_get_multimodal_embeddings_timeout_exhausts_raises(
 ):
     """Should raise Timeout after exhausting retries."""
 
-    with patch(
-        "nexent.core.models.embedding_model.requests.post",
+    with patch.object(
+        jina_embedding_instance.session,
+        "post",
         side_effect=requests.exceptions.Timeout(),
     ) as mock_post:
         with pytest.raises(requests.exceptions.Timeout):
@@ -470,7 +467,7 @@ def test_openai_get_embeddings_string_prepares_input_list(openai_embedding_insta
 
 
 def test_openai_make_request_invokes_requests_post(openai_embedding_instance):
-    """Cover OpenAI _make_request by patching requests.post path."""
+    """Cover OpenAI _make_request by patching session.post path."""
 
     fake_response = {"data": [{"embedding": [7, 8]}]}
 
@@ -478,7 +475,7 @@ def test_openai_make_request_invokes_requests_post(openai_embedding_instance):
     mock_resp.raise_for_status = Mock()
     mock_resp.json = Mock(return_value=fake_response)
 
-    with patch("nexent.core.models.embedding_model.requests.post", return_value=mock_resp) as mock_post:
+    with patch.object(openai_embedding_instance.session, "post", return_value=mock_resp) as mock_post:
         result = openai_embedding_instance.get_embeddings(
             ["hi"], with_metadata=False, timeout=2
         )
@@ -513,13 +510,13 @@ async def test_openai_dimension_check_connection_error_returns_empty(openai_embe
 def test_api_key_normalization_and_verify_jina(monkeypatch):
     captured = {}
 
-    def fake_post(url, headers=None, json=None, timeout=None, verify=True):
+    def fake_post(self, url, headers=None, json=None, timeout=None, verify=True, **kwargs):
         captured['url'] = url
         captured['headers'] = headers
         captured['verify'] = verify
         return DummyResponse()
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr("requests.Session.post", fake_post)
 
     # api_key containing Bearer prefix should be normalized
     emb = JinaEmbedding(api_key="my-secret", base_url="https://example.com/emb", ssl_verify=False)
@@ -533,13 +530,13 @@ def test_api_key_normalization_and_verify_jina(monkeypatch):
 def test_api_key_normalization_and_verify_openaicompatible(monkeypatch):
     captured = {}
 
-    def fake_post(url, headers=None, json=None, timeout=None, verify=True):
+    def fake_post(self, url, headers=None, json=None, timeout=None, verify=True, **kwargs):
         captured['url'] = url
         captured['headers'] = headers
         captured['verify'] = verify
         return DummyResponse()
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr("requests.Session.post", fake_post)
 
     emb = OpenAICompatibleEmbedding(model_name="m", base_url="https://api.example/emb", api_key="KEY", embedding_dim=16, ssl_verify=True)
     data = emb._prepare_input("hi")
@@ -576,7 +573,7 @@ def test_textembedding_super_init_executes():
 def test_jina_make_request_raises_http_error(monkeypatch):
     """Ensure _make_request propagates HTTP errors from requests.post"""
 
-    def fake_post(url, headers=None, json=None, timeout=None, verify=True):
+    def fake_post(self, url, headers=None, json=None, timeout=None, verify=True, **kwargs):
         class BadResp:
             status_code = 500
 
@@ -585,7 +582,7 @@ def test_jina_make_request_raises_http_error(monkeypatch):
 
         return BadResp()
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr("requests.Session.post", fake_post)
 
     emb = JinaEmbedding(api_key="k", base_url="https://api.jina.ai/v1/embeddings", ssl_verify=True)
     data = emb._prepare_multimodal_input([{"text": "hi"}])
@@ -596,7 +593,7 @@ def test_jina_make_request_raises_http_error(monkeypatch):
 def test_openai_make_request_raises_http_error(monkeypatch):
     """Ensure OpenAICompatibleEmbedding._make_request propagates HTTP errors"""
 
-    def fake_post(url, headers=None, json=None, timeout=None, verify=True):
+    def fake_post(self, url, headers=None, json=None, timeout=None, verify=True, **kwargs):
         class BadResp:
             status_code = 502
 
@@ -605,7 +602,7 @@ def test_openai_make_request_raises_http_error(monkeypatch):
 
         return BadResp()
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr("requests.Session.post", fake_post)
 
     emb = OpenAICompatibleEmbedding(model_name="m", base_url="https://api.example.com/emb", api_key="k", embedding_dim=16, ssl_verify=False)
     data = emb._prepare_input("hello")
@@ -623,7 +620,7 @@ def test_jina_get_multimodal_embeddings_missing_data_key(monkeypatch):
         def json(self):
             return {"meta": {"ok": True}}
 
-    monkeypatch.setattr("requests.post", lambda *a, **k: RespNoData())
+    monkeypatch.setattr("requests.Session.post", lambda *a, **k: RespNoData())
 
     emb = JinaEmbedding(api_key="k")
     with pytest.raises(KeyError):
@@ -647,7 +644,6 @@ def test_openai_get_embeddings_calls_record_model_call(mocker):
     mock_resp = Mock()
     mock_resp.raise_for_status = Mock()
     mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2]}]}
-    mocker.patch("requests.post", return_value=mock_resp)
 
     emb = OpenAICompatibleEmbedding(
         model_name="text-emb-3",
@@ -656,6 +652,7 @@ def test_openai_get_embeddings_calls_record_model_call(mocker):
         embedding_dim=2,
         ssl_verify=True,
     )
+    mocker.patch.object(emb.session, "post", return_value=mock_resp)
     emb.get_embeddings(["hello"], with_metadata=False, timeout=5)
 
     mock_record.assert_called_once_with(
@@ -675,9 +672,9 @@ def test_jina_get_embeddings_calls_record_model_call(mocker):
     mock_resp = Mock()
     mock_resp.raise_for_status = Mock()
     mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2]}]}
-    mocker.patch("requests.post", return_value=mock_resp)
 
     emb = JinaEmbedding(api_key="k", ssl_verify=True)
+    mocker.patch.object(emb.session, "post", return_value=mock_resp)
     emb.get_multimodal_embeddings([{"text": "hi"}], with_metadata=False, timeout=5)
 
     mock_record.assert_called_once_with(

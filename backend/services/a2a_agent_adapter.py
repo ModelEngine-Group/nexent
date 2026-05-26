@@ -227,7 +227,7 @@ class A2AAgentAdapter:
                 text_content = str(message)
             task["status"]["message"] = {
                 "role": message.get("role", "agent"),
-                "parts": [{"type": "text", "text": text_content, "mediaType": _MEDIA_TYPE_TEXT}]
+                "parts": [{"text": text_content, "mediaType": _MEDIA_TYPE_TEXT}]
             }
 
         # Handle artifacts
@@ -261,14 +261,14 @@ class A2AAgentAdapter:
             A2A Message response dict wrapped in {"message": {...}}.
         """
         if not message_id:
-            message_id = f"msg_{uuid4().hex[:16]}"
+            message_id = f"msg_{uuid4().hex}"
 
         if parts:
             message_parts = parts
         elif text:
-            message_parts = [{"type": "text", "text": text, "mediaType": _MEDIA_TYPE_TEXT}]
+            message_parts = [{"text": text, "mediaType": _MEDIA_TYPE_TEXT}]
         else:
-            message_parts = [{"type": "text", "text": "", "mediaType": _MEDIA_TYPE_TEXT}]
+            message_parts = [{"text": "", "mediaType": _MEDIA_TYPE_TEXT}]
 
         message_obj = {
             "messageId": message_id,
@@ -294,8 +294,8 @@ class A2AAgentAdapter:
             return parts
         if isinstance(content, dict):
             if content.get("type") == "text":
-                return [{"type": "text", "text": content.get("text", "")}]
-        return [{"type": "text", "text": str(content)}]
+                return [{"text": content.get("text", ""), "mediaType": _MEDIA_TYPE_TEXT}]
+        return [{"text": str(content), "mediaType": _MEDIA_TYPE_TEXT}]
 
     def _map_task_state(self, state: str) -> str:
         """Map shorthand state to TASK_STATE constant."""
@@ -343,7 +343,7 @@ class A2AAgentAdapter:
             text = str(message)
         return {
             "role": role,
-            "parts": [{"type": "text", "text": text}]
+            "parts": [{"text": text}]
         }
 
     def _build_artifact_update_event(

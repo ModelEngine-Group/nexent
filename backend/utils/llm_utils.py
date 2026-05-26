@@ -73,6 +73,8 @@ def call_llm_for_system_prompt(
     set_monitoring_operation("system_prompt_generation",
                              display_name=display_name or None)
 
+    timeout_seconds = llm_model_config.get("timeout_seconds") if llm_model_config else None
+
     llm = OpenAIModel(
         model_id=get_model_name_from_config(llm_model_config) if llm_model_config else "",
         api_base=llm_model_config.get("base_url", "") if llm_model_config else "",
@@ -82,6 +84,7 @@ def call_llm_for_system_prompt(
         model_factory=llm_model_config.get("model_factory") if llm_model_config else None,
         ssl_verify=llm_model_config.get("ssl_verify", True) if llm_model_config else True,
         display_name=display_name or None,
+        timeout_seconds=timeout_seconds,
     )
     messages = [
         {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},
@@ -100,9 +103,21 @@ def call_llm_for_system_prompt(
         reasoning_content_seen = False
         content_tokens_seen = 0
         for chunk in current_request:
-            delta = chunk.choices[0].delta
+            choices = getattr(chunk, "choices", None)
+            if choices is None:
+               logger.warning("Received non-standard chunk without choices during prompt generation.")
+               continue
+            if not choices:
+               logger.debug("Received empty choices chunk during prompt generation; skipping.")
+               continue
+
+            delta = getattr(choices[0], "delta", None)
+            if delta is None:
+                logger.debug("Skipping LLM stream chunk without delta")
+                continue
+ 
             reasoning_content = getattr(delta, "reasoning_content", None)
-            new_token = delta.content
+            new_token = getattr(delta, "content", None)
 
             # Note: reasoning_content is separate metadata and doesn't affect content filtering
             # We only filter content based on <think> tags in delta.content

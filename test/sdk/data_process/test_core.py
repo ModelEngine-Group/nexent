@@ -1,6 +1,7 @@
 import pytest
 from pytest_mock import MockFixture
 from unittest.mock import Mock, MagicMock
+from io import BytesIO
 
 from sdk.nexent.data_process.core import DataProcessCore
 
@@ -18,7 +19,7 @@ class TestDataProcessCore:
         assert core is not None
         assert "Unstructured" in core.processors
         assert "OpenPyxl" in core.processors
-        assert len(core.processors) == 2
+        assert len(core.processors) == 3
 
     def test_file_process_with_excel_file(self, core, mocker: MockFixture):
         """Test file processing with Excel file"""
@@ -310,3 +311,48 @@ class TestDataProcessCore:
 
         assert result["processor_type"] == "excel"
         assert result["file_extension"] == ".xlsx"
+
+    def test_file_split_unsupported_extension_returns_original_bytes(self, core):
+        """Unsupported extensions should bypass splitting and return original bytes."""
+        data = b"raw-bytes"
+        parts = core.file_split(data, "archive.bin")
+        assert len(parts) == 1
+        assert isinstance(parts[0], BytesIO)
+        assert parts[0].getvalue() == data
+
+    def test_file_split_uses_splitter_with_default_max_size(self, core):
+        """file_split should call FileSplitter with default max_size when omitted."""
+        splitter = Mock()
+        splitter.file_process.return_value = [BytesIO(b"p1"), BytesIO(b"p2")]
+        core.processors["FileSplitter"] = splitter
+
+        parts = core.file_split(b"csv-data", "data.csv")
+
+        assert len(parts) == 2
+        splitter.file_process.assert_called_once_with(
+            b"csv-data", "data.csv", max_size=5 * 1024 * 1024
+        )
+
+    def test_file_split_invalid_split_result_falls_back(self, core):
+        """Non-BytesIO split result should gracefully fall back to original bytes."""
+        splitter = Mock()
+        splitter.file_process.return_value = ["not-bytesio"]
+        core.processors["FileSplitter"] = splitter
+
+        data = b"hello"
+        parts = core.file_split(data, "data.txt", max_size=10)
+
+        assert len(parts) == 1
+        assert parts[0].getvalue() == data
+
+    def test_file_split_splitter_exception_falls_back(self, core):
+        """Exceptions from splitter should gracefully fall back to original bytes."""
+        splitter = Mock()
+        splitter.file_process.side_effect = RuntimeError("split failed")
+        core.processors["FileSplitter"] = splitter
+
+        data = b"hello"
+        parts = core.file_split(data, "data.txt", max_size=10)
+
+        assert len(parts) == 1
+        assert parts[0].getvalue() == data

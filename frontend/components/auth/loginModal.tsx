@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Button, Typography, Space, Divider, Alert } from "antd";
 import { UserRound, LockKeyhole, Github, Link2 } from "lucide-react";
@@ -73,15 +73,27 @@ export function LoginModal() {
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const { t } = useTranslation("common");
+
+  const getOAuthLoginErrorMessage = useCallback(
+    (error: string) => {
+      const key = `auth.oauthErrors.${error}`;
+      const translated = t(key);
+      if (translated !== key) {
+        return translated;
+      }
+      return t("auth.oauthLoginFailedGeneric");
+    },
+    [t]
+  );
 
   useEffect(() => {
     const error = searchParams.get("oauth_error");
-    const description = searchParams.get("oauth_error_description");
     if (error) {
-      setOauthError(description || error);
+      setOauthError(getOAuthLoginErrorMessage(error));
       router.replace("/");
     }
-  }, [searchParams, router]);
+  }, [searchParams, router, getOAuthLoginErrorMessage]);
 
   const resetForm = () => {
     setEmailError("");
@@ -107,9 +119,6 @@ export function LoginModal() {
       setPasswordError(false);
     }
   };
-
-  // Internationalization hook for multi-language support
-  const { t } = useTranslation("common");
 
   /**
    * Handles form submission for user login

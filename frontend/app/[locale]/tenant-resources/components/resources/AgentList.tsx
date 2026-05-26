@@ -33,6 +33,7 @@ import { fetchAgentVersionList } from "@/services/agentVersionService";
 import { Agent } from "@/types/agentConfig";
 import ExpandEditModal from "@/app/agents/components/agentInfo/ExpandEditModal";
 import type { AgentVersion } from "@/services/agentVersionService";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -61,21 +62,6 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
-
-  const getUnavailableReasonLabel = (reason: string) => {
-    switch (reason) {
-      case "duplicate_name":
-        return t("agent.unavailableReasons.duplicate_name");
-      case "duplicate_display_name":
-        return t("agent.unavailableReasons.duplicate_display_name");
-      case "tool_unavailable":
-        return t("agent.unavailableReasons.tool_unavailable");
-      case "model_unavailable":
-        return t("agent.unavailableReasons.model_unavailable");
-      default:
-        return reason;
-    }
-  };
 
   // View modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -357,7 +343,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         const reasons = Array.isArray(record.unavailable_reasons)
           ? record.unavailable_reasons.filter((r) => Boolean(r))
           : [];
-        const reasonLabels = reasons.map((r) => getUnavailableReasonLabel(String(r)));
+        const reasonLabels = getUnavailableReasonLabels(reasons, t);
 
         return (
           <div className="flex items-center gap-2 min-w-0">

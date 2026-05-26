@@ -11,42 +11,86 @@ Nexent 是一个基于 **Harness Engineering** 原则打造的零代码智能体
 
 > 一个提示词，无限种可能。
 
-### 🌐 访问我们的[官方网站](https://nexent.tech/)
+<video controls width="100%" style="max-width: 800px;">
+  <source src="https://github.com/user-attachments/assets/b844e05d-5277-4509-9463-1c5b3516f11e" type="video/mp4" />
+  <p><a href="https://github.com/user-attachments/assets/b844e05d-5277-4509-9463-1c5b3516f11e">查看演示视频</a></p>
+</video>
 
-![Nexent Banner](./assets/architecture_zh.png)
+# 🚀 先来试试看
 
-https://github.com/user-attachments/assets/b844e05d-5277-4509-9463-1c5b3516f11e
+> ⭐ 在您开始使用前，请您顺手在 [GitHub](https://github.com/ModelEngine-Group/nexent) 为我们点个 Star，您的支持是我们前进的动力！
 
-# ⚡ 先来试试看
+## 方式一：使用官方体验环境
 
-### 📋 系统要求  
+无需安装，直接访问我们的 **[在线体验环境](http://60.204.251.153:3000/zh)**，快速体验 Nexent 的强大功能。
 
-| 资源 | 最低要求 |
-|----------|---------|
-| **CPU**  | 2 核 |
-| **内存**  | 6 GiB   |
-| **软件** | 已安装 Docker 和 Docker Compose |
+## 方式二：自行部署
 
-### 🛠️ 使用 Docker Compose 快速开始
+如果需要在本地或私有环境中部署 Nexent，我们提供两种部署方式：
+
+### 系统要求
+
+| 资源 | Docker 部署 | Kubernetes 部署 |
+|------|------------|----------------|
+| **CPU** | 4 核（最低）/ 8 核（推荐） | 4 核（最低）/ 8 核（推荐） |
+| **内存** | 8 GiB（最低）/ 16 GiB（推荐） | 16 GiB（最低）/ 64 GiB（推荐） |
+| **磁盘** | 40 GiB（最低）/ 100 GiB（推荐） | 100 GiB（最低）/ 200 GiB（推荐） |
+| **架构** | x86_64 / ARM64 | x86_64 / ARM64 |
+| **软件** | Docker 24+, Docker Compose v2+ | Kubernetes 1.24+, Helm 3+ |
+
+> **注意：** 推荐配置可确保生产环境下的最佳性能。
+
+### Docker 部署（推荐个人/小团队使用）
+
+适用于大多数用户，快速简单。部署前需准备Docker 24+, Docker Compose v2+：
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent/docker
-cp .env.example .env # fill only necessary configs
+cp .env.example .env
 bash deploy.sh
 ```
 
-当容器运行后，在浏览器中打开 **http://localhost:3000** 并按照设置向导操作。
+详细部署指南请参考 [Docker 安装部署](https://modelengine-group.github.io/nexent/zh/quick-start/installation.html)。
+
+### Kubernetes 部署（适合企业级生产环境）
+
+适用于需要高可用、弹性扩展的企业场景。部署前需准备 Kubernetes 集群（1.24+）和 Helm 3+：
+
+```bash
+git clone https://github.com/ModelEngine-Group/nexent.git
+cd nexent/k8s/helm
+./deploy-helm.sh apply
+```
+
+详细部署指南请参考 [Kubernetes 安装部署](https://modelengine-group.github.io/nexent/zh/quick-start/kubernetes-installation.html)。
+
+# ✨ 核心特性
+
+Nexent 为构建强大的 AI 智能体提供全面的功能集：
+
+| 特性 | 描述 |
+|------|------|
+| **⚙️ 多模型集成** | OpenAI 兼容任意提供商，LLM/Embedding/VLM/STT/TTS 全覆盖，支持灵活切换 |
+| **🤖 零代码智能体生成** | 纯自然语言描述需求，一键生成可执行智能体，所想即所得 |
+| **🤝 A2A 智能体协作** | Agent-to-Agent 协议支持多智能体无缝协作，构建分布式工作流 |
+| **🧠 分层记忆机制** | 两层记忆体系（用户级+用户-智能体级），跨对话持续积累上下文 |
+| **📝 Skill 渐进式披露** | 动态加载 Skill 内容至上下文，高效利用上下文窗口 |
+| **🗄️ 个人级知识库** | 20+ 文档格式实时导入与智能检索，自动摘要，细粒度权限控制 |
+| **🔧 MCP 工具生态** | 即插即用的扩展工具体系，支持自定义开发和第三方 MCP 服务 |
+| **🌐 互联网知识集成** | 多搜索源混合，实时信息与私有数据融合 |
+| **🔍 知识级溯源** | 精确引用与来源验证，每个事实透明可查 |
+| **🎭 多模态交互** | 语音、文字、图像、文件，全方位自然对话 |
+| **🔢 智能体版本管理** | 版本迭代与历史回溯，安全可控 |
+| **🏪 智能体市场** | 官方与社区优质智能体一键安装即用 |
+| **👥 分权分域管理** | 多租户隔离，RBAC 权限体系，资源级精细管控 |
 
 # 🤝 加入我们的社区
 
 > *If you want to go fast, go alone; if you want to go far, go together.*
 
-我们已经发布了 **Nexent v1**，平台现在相对稳定。但是，可能仍然存在一些 bug，我们正在持续改进并添加新功能。敬请期待：我们很快将宣布 **v2.0**！
-
-* **🗺️ 查看我们的 [功能地图](https://github.com/orgs/ModelEngine-Group/projects/6)** 探索当前和即将推出的功能。
-* **🔍 试用当前版本** 并在 [问题反馈](https://github.com/ModelEngine-Group/nexent/issues) 中留下想法或报告错误。
-* **🐛 查看我们的[已知问题页面](https://github.com/orgs/ModelEngine-Group/projects/9)** 了解最新的问题状态和解决方案。
+- **🗺️ 查看我们的 [功能地图](https://github.com/orgs/ModelEngine-Group/projects/6)** 探索当前和即将推出的功能。
+- **🔍 试用当前版本** 并在 [问题反馈](https://github.com/ModelEngine-Group/nexent/issues) 中留下想法或报告错误。
 
 > *Rome wasn't built in a day.*
 
@@ -54,68 +98,17 @@ bash deploy.sh
 
 早期贡献者不会被忽视：从特殊徽章和纪念品到其他实质性奖励，我们致力于感谢那些帮助 Nexent 诞生的先驱者。
 
-最重要的是，我们需要关注度。请为仓库点星 ⭐ 并关注，与朋友分享，帮助更多开发者发现 Nexent —— 您的每一次点击都能为项目带来新的参与者，保持发展势头。
+最重要的是，我们需要关注度。请 [前往 GitHub](https://github.com/ModelEngine-Group/nexent) 为我们点星 ⭐ 并关注，与朋友分享，帮助更多开发者发现 Nexent —— 您的每一次点击都能为项目带来新的参与者，保持发展势头。
 
-## 💬 社区与联系方式
+# 📖 下一步
 
-- 浏览 [文档](https://modelengine-group.github.io/nexent) 了解更多信息。
-- 加入我们的 [Discord 社区](https://discord.gg/tb5H3S3wyv) 与其他开发者交流并获取帮助！
-- 通过微信联系我们，在我们的[网站](https://nexent.tech/zh/contact)找到二维码
+准备好深入了解了吗？以下是主要文档入口：
 
-# ✨ 主要特性
-
-`1` **智能体提示词自动生成**  
-   将自然语言转化为可被Agent执行的提示词。Nexent可以根据你的需要自动选择正确的工具并为每个请求规划最佳执行路径。
-
-   ![Feature 1](./assets/Feature1.png)
-
-`2` **可扩展数据处理引擎**  
-   支持 20+ 数据格式的快速 OCR 和表格结构提取，从单进程到大规模批处理管道都能平滑扩展。
-
-   ![Feature 2](./assets/Feature2.png)
-
-`3` **个人级知识库**  
-   实时导入文件，自动总结，让智能体能够即时访问个人和全局知识，并了解每个知识库能提供什么。
-
-   ![Feature 3](./assets/Feature3.png)
-
-`4` **互联网知识搜索**  
-   连接 5+ 个网络搜索提供商，让智能体能够将最新的互联网信息与您的私有数据结合。
-
-   ![Feature 4](./assets/Feature4.png)
-
-`5` **知识级可追溯性**  
-   提供来自网络和知识库来源的精确引用，使每个事实都可验证。
-
-   ![Feature 5](./assets/Feature5.png)
-
-`6` **多模态理解与对话**  
-   说话、打字、文件或展示图片。Nexent 理解语音、文本和图片，甚至可以根据需求生成新图像。
-
-   ![Feature 6](./assets/Feature6.png)
-
-`7` **MCP 工具生态系统**  
-   插入或构建符合 MCP 规范的 Python 插件；无需修改核心代码即可更换模型、工具和链。
-
-   ![Feature 7](./assets/Feature7.png)
-
-# 🌱 MCP 工具生态
-
-查看我们的[MCP 生态系统页面](https://modelengine-group.github.io/nexent/zh/mcp-ecosystem/overview.html)了解 MCP 工具生态系统的详细信息，包括社区中心、推荐工具和集成指南。
-
-# 🛠️ 开发者指南
-
-### 🤖 模型配置与模型提供商推荐
-
-查看我们的[模型提供商页面](https://modelengine-group.github.io/nexent/zh/getting-started/model-providers.html)了解详细的模型配置指南和推荐的提供商信息。
-
-### 🔧 开发 Nexent
-
-想要从源代码构建或添加新功能？查看 [贡献指南](https://modelengine-group.github.io/nexent/zh/contributing) 获取分步说明。
-
-### 🛠️ 从源码构建
-
-想要从源码运行 Nexent？查看我们的[开发者指南](https://modelengine-group.github.io/nexent/zh/getting-started/development-guide)获取详细的设置说明和自定义选项。
+- **[快速开始](https://modelengine-group.github.io/nexent/zh/quick-start/installation.html)** — 系统要求和部署指南
+- **[核心特性详解](https://modelengine-group.github.io/nexent/zh/getting-started/features.html)** — 完整的功能说明
+- **[用户指南](https://modelengine-group.github.io/nexent/zh/user-guide/home-page.html)** — 智能体开发与使用
+- **[开发者指南](https://modelengine-group.github.io/nexent/zh/developer-guide/overview)** — 从源码构建和自定义
+- **[常见问题](https://modelengine-group.github.io/nexent/zh/quick-start/faq.html)** — 常见问题和故障排除
 
 # 📄 许可证
 

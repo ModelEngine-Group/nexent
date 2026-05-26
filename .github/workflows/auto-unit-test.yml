@@ -12,14 +12,14 @@ on:
         required: false
         default: '["ubuntu-24.04-arm"]'
   pull_request:
-    branches: [develop]
+    branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/**'
       - 'sdk/**'
       - 'test/**'
       - '.github/workflows/**'
   push:
-    branches: [develop]
+    branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/**'
       - 'sdk/**'

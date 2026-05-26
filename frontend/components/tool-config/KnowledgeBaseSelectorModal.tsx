@@ -19,8 +19,12 @@ import {
 } from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
-import { ToolKbType } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
+import { ToolKbType, getKnowledgeBaseSourcesForTool } from "./index";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
+import { useModelList } from "@/hooks/model/useModelList";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
+import log from "@/lib/logger";
+import EmbeddingModelConfigDialog from "./EmbeddingModelConfigDialog";
 
 interface KnowledgeBaseSelectorProps {
   isOpen: boolean;
@@ -40,23 +44,6 @@ interface KnowledgeBaseSelectorProps {
     userId?: string;
     knowledgeSpaceId?: string;
   };
-}
-
-function getKnowledgeBaseSourcesForTool(
-  toolType: ToolKbType
-): string[] {
-  switch (toolType) {
-    case "knowledge_base_search":
-      return ["nexent"];
-    case "dify_search":
-      return ["dify"];
-    case "datamate_search":
-      return ["datamate"];
-    case "idata_search":
-      return ["idata"];
-    default:
-      return ["nexent"];
-  }
 }
 
 interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
@@ -102,6 +89,22 @@ export default function KnowledgeBaseSelectorModal({
   difyConfig,
 }: KnowledgeBaseSelectorModalProps) {
   const { t } = useTranslation("common");
+  const { data: allModels = [] } = useModelList();
+
+  // Memoized lookup function for model display names using the fetched model list
+  const resolveModelDisplayName = useMemo(() => {
+    const modelLookup = new Map<string, string>();
+    allModels.forEach((model) => {
+      const displayName = model.displayName || model.name || "";
+      if (model.displayName) modelLookup.set(model.displayName, displayName);
+      if (model.name) modelLookup.set(model.name, displayName);
+      if (model.id) modelLookup.set(String(model.id), displayName);
+    });
+    return (modelId: string) => modelLookup.get(modelId) || modelId;
+  }, [allModels]);
+
+  // Use the internal model lookup to get display names
+  const effectiveGetModelDisplayName = resolveModelDisplayName;
 
   // Selection state (kept for internal logic but not displayed)
   const [tempSelectedIds, setTempSelectedIds] = useState<string[]>([]);
@@ -121,6 +124,20 @@ export default function KnowledgeBaseSelectorModal({
     newKBName: string;
   } | null>(null);
 
+  // Embedding model config dialog state
+  const [embeddingModelDialogOpen, setEmbeddingModelDialogOpen] = useState(false);
+  const [embeddingModelDialogData, setEmbeddingModelDialogData] = useState<{
+    indexName: string;
+    knowledgeName: string;
+  } | null>(null);
+  const [embeddingModelDialogMismatch, setEmbeddingModelDialogMismatch] = useState(false);
+  const [configuringKbIds, setConfiguringKbIds] = useState<Set<string>>(new Set());
+
+  // Track configured models for display - use model display name instead of ID
+  const [configuredModels, setConfiguredModels] = useState<Map<string, string>>(new Map());
+  // Track index names of KBs that have been configured (so they won't be checked again)
+  const [configuredKbIndexNames, setConfiguredKbIndexNames] = useState<Set<string>>(new Set());
+
   // Initialize selection state when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -128,6 +145,11 @@ export default function KnowledgeBaseSelectorModal({
       setSearchKeyword("");
       setSelectedSources([]);
       setSelectedModels([]);
+      setEmbeddingModelDialogOpen(false);
+      setEmbeddingModelDialogData(null);
+      setEmbeddingModelDialogMismatch(false);
+      setConfiguringKbIds(new Set());
+      setConfiguredModels(new Map());
     }
   }, [isOpen]);
 
@@ -343,18 +365,143 @@ export default function KnowledgeBaseSelectorModal({
     setSelectedModels([]); // Clear the model filter as well
   }, []);
 
+  // Handle embedding model configuration complete
+  const handleEmbeddingModelConfigComplete = useCallback(
+    (indexNames: string, modelId: string, modelDisplayName?: string) => {
+      // Parse comma-separated index names
+      const indexNameList = indexNames.split(",").filter(Boolean);
+
+      // Find KBs matching the index names
+      const matchingKBs = knowledgeBases.filter((k) =>
+        indexNameList.includes(k.index_name || k.name) || tempSelectedIds.includes(k.id)
+      );
+
+      // Deduplicate - keep unique KBs
+      const seen = new Set<string>();
+      const selectedKBs = matchingKBs.filter((kb) => {
+        if (seen.has(kb.id)) return false;
+        seen.add(kb.id);
+        return true;
+      });
+
+      // Update the configured models map with model display name for all KBs
+      if (modelDisplayName) {
+        setConfiguredModels((prev) => {
+          const newMap = new Map(prev);
+          selectedKBs.forEach((kb) => {
+            newMap.set(kb.id, modelDisplayName);
+          });
+          return newMap;
+        });
+      }
+
+      // Track these index names as configured so they won't be checked again
+      setConfiguredKbIndexNames((prev) => {
+        const newSet = new Set(prev);
+        indexNameList.forEach((idxName) => newSet.add(idxName.trim()));
+        return newSet;
+      });
+
+      // Close the embedding model dialog first
+      setEmbeddingModelDialogOpen(false);
+      setEmbeddingModelDialogData(null);
+      setEmbeddingModelDialogMismatch(false);
+      setConfiguringKbIds(new Set());
+    },
+    [knowledgeBases, tempSelectedIds]
+  );
+
   // Handle confirm
-  const handleConfirm = useCallback(() => {
-    const selectedKnowledgeBases = knowledgeBases.filter((kb) =>
+  const handleConfirm = useCallback(async () => {
+    const selectedKBs = knowledgeBases.filter((kb) =>
       tempSelectedIds.includes(kb.id)
     );
-    onConfirm(selectedKnowledgeBases);
+
+    // Check for model mismatch among selected nexent KBs
+    const nexentKBs = selectedKBs.filter((kb) => kb.source === "nexent");
+    const nexentModelIds = [...new Set(nexentKBs.map((kb) => kb.embeddingModel).filter((m) => m && m !== "unknown"))];
+
+    if (nexentModelIds.length > 1) {
+      // Multiple different models - show the embedding model config dialog
+      // to allow user to select a unified model
+      const firstKB = nexentKBs[0];
+      setEmbeddingModelDialogData({
+        indexName: firstKB.index_name || firstKB.name,
+        knowledgeName: `${nexentKBs.length} knowledge bases`,
+      });
+      setEmbeddingModelDialogMismatch(true);
+      setEmbeddingModelDialogOpen(true);
+      // Track all selected nexent KB index names for batch update
+      setConfiguringKbIds(new Set(nexentKBs.map((k) => k.index_name || k.name)));
+      return; // Wait for user to configure before confirming
+    }
+
+    // Collect all KBs that need embedding model configuration
+    const kbIdsNeedingConfig: string[] = [];
+    const kbNamesNeedingConfig: string[] = [];
+
+    // Check each nexent KB that needs config
+    for (const kb of selectedKBs) {
+      if (kb.source !== "nexent") {
+        continue;
+      }
+
+      const kbIndexName = kb.index_name || kb.name;
+
+      // Skip if already configured (either in current session or previously)
+      if (configuringKbIds.has(kb.id) || configuredKbIndexNames.has(kbIndexName)) {
+        continue;
+      }
+
+      try {
+        const status = await knowledgeBaseService.getEmbeddingModelStatus(kbIndexName);
+
+        if (status.needs_config) {
+          kbIdsNeedingConfig.push(kbIndexName);
+          kbNamesNeedingConfig.push(kb.name);
+        }
+      } catch (error) {
+        log.error("Failed to check embedding model status:", error);
+        // If API fails, check if the KB might be missing model_id by checking local state
+        // If embeddingModel is empty/unknown, add to list needing config
+        if (!kb.embeddingModel || kb.embeddingModel === "unknown") {
+          kbIdsNeedingConfig.push(kbIndexName);
+          kbNamesNeedingConfig.push(kb.name);
+        }
+      }
+    }
+
+    // If any KBs need configuration, show the dialog with all of them
+    if (kbIdsNeedingConfig.length > 0) {
+      const firstIndexName = kbIdsNeedingConfig[0];
+      const knowledgeBaseName = kbIdsNeedingConfig.length === 1
+        ? kbNamesNeedingConfig[0]
+        : `${kbIdsNeedingConfig.length} knowledge bases`;
+
+      setEmbeddingModelDialogData({
+        indexName: firstIndexName,
+        knowledgeName: knowledgeBaseName,
+      });
+      setEmbeddingModelDialogMismatch(false);
+      setEmbeddingModelDialogOpen(true);
+      // Track all KBs that need configuration for batch update
+      setConfiguringKbIds(new Set(kbIdsNeedingConfig));
+      return; // Wait for user to configure before confirming
+    }
+
+    // All checks passed, proceed with confirm
+    onConfirm(selectedKBs);
     onClose();
-  }, [knowledgeBases, tempSelectedIds, onConfirm, onClose]);
+  }, [knowledgeBases, tempSelectedIds, configuringKbIds, configuredKbIndexNames, onConfirm, onClose]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
     setTempSelectedIds(selectedIds);
+    // Reset embedding model dialog state to prevent it from staying open
+    setEmbeddingModelDialogOpen(false);
+    setEmbeddingModelDialogData(null);
+    setEmbeddingModelDialogMismatch(false);
+    setConfiguringKbIds(new Set());
     onClose();
   }, [selectedIds, onClose]);
 
@@ -364,6 +511,7 @@ export default function KnowledgeBaseSelectorModal({
       knowledge_base_search: t("toolConfig.knowledgeBaseSelector.title.local"),
       dify_search: t("toolConfig.knowledgeBaseSelector.title.dify"),
       datamate_search: t("toolConfig.knowledgeBaseSelector.title.datamate"),
+      idata_search: t("toolConfig.knowledgeBaseSelector.title.idata", "选择 iData 知识库"),
     };
     return (
       titles[toolType] || t("toolConfig.knowledgeBaseSelector.title.default")
@@ -612,7 +760,7 @@ export default function KnowledgeBaseSelectorModal({
       <div className="flex-1 overflow-y-auto overflow-x-hidden bg-white">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
-            <Spin tip={t("common.loading")} />
+            <Spin description={t("common.loading")} />
           </div>
         ) : filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">
@@ -744,7 +892,8 @@ export default function KnowledgeBaseSelectorModal({
                             <span
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model} mr-1`}
                             >
-                              {getModelDisplayName(kb.embeddingModel)}
+                              {/* Use configuredModels state for updated display name, fallback to effectiveGetModelDisplayName */}
+                              {configuredModels.get(kb.id) || effectiveGetModelDisplayName(kb.embeddingModel)}
                               {t("knowledgeBase.tag.model", {
                                 model: "",
                               })}
@@ -867,6 +1016,22 @@ export default function KnowledgeBaseSelectorModal({
           </p>
         </div>
       </Modal>
+
+      {/* Embedding Model Config Dialog */}
+      <EmbeddingModelConfigDialog
+        isOpen={embeddingModelDialogOpen}
+        knowledgeBaseName={embeddingModelDialogData?.knowledgeName || ""}
+        indexName={embeddingModelDialogData?.indexName || ""}
+        isModelMismatch={embeddingModelDialogMismatch}
+        kbIdsToUpdate={Array.from(configuringKbIds)}
+        onClose={() => {
+          setEmbeddingModelDialogOpen(false);
+          setEmbeddingModelDialogData(null);
+          setEmbeddingModelDialogMismatch(false);
+          setConfiguringKbIds(new Set());
+        }}
+        onConfigComplete={handleEmbeddingModelConfigComplete}
+      />
     </Modal>
   );
 }

@@ -39,8 +39,16 @@ MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
+PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
+MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
+
+
+
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
+
+# Container-internal official skills ZIP directory
+OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
 
 
 # Preview Configuration
@@ -152,7 +160,7 @@ FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 RAY_ACTOR_NUM_CPUS = int(os.getenv("RAY_ACTOR_NUM_CPUS", "2"))
 RAY_DASHBOARD_PORT = int(os.getenv("RAY_DASHBOARD_PORT", "8265"))
 RAY_DASHBOARD_HOST = os.getenv("RAY_DASHBOARD_HOST", "0.0.0.0")
-RAY_NUM_CPUS = os.getenv("RAY_NUM_CPUS")
+RAY_NUM_CPUS = int(os.getenv("RAY_NUM_CPUS", "4"))
 RAY_OBJECT_STORE_MEMORY_GB = float(
     os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
 RAY_TEMP_DIR = os.getenv("RAY_TEMP_DIR", "/tmp/ray")
@@ -185,10 +193,22 @@ ELASTICSEARCH_REQUEST_TIMEOUT = int(
 
 # Worker Configuration
 RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
-QUEUES = os.getenv("QUEUES", "process_q,forward_q")
+QUEUES = os.getenv("QUEUES", "process_q,process_part_q,forward_q")
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "4"))
+RAY_WARM_ACTOR_POOL_SIZE_PART = int(os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
+RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
+# Global Ray actor pool (shared by process_q/process_part_q workers)
+RAY_GLOBAL_ACTOR_POOL_SIZE = int(os.getenv("RAY_GLOBAL_ACTOR_POOL_SIZE", "3"))
+RAY_ACTOR_WARM_TIMEOUT_S = float(os.getenv("RAY_ACTOR_WARM_TIMEOUT_S", "60"))
+RAY_GLOBAL_ACTOR_POOL_NAME = os.getenv(
+    "RAY_GLOBAL_ACTOR_POOL_NAME", "nexent_global_data_processor_pool")
+RAY_GLOBAL_ACTOR_POOL_NAMESPACE = os.getenv(
+    "RAY_GLOBAL_ACTOR_POOL_NAMESPACE", "nexent-data-process")
+
+
+
 
 
 # Voice Service Configuration
@@ -319,19 +339,66 @@ THINK_START_PATTERN = "<think>"
 THINK_END_PATTERN = "</think>"
 
 
-# Telemetry and Monitoring Configuration
-ENABLE_TELEMETRY = os.getenv("ENABLE_TELEMETRY", "false").lower() == "true"
-SERVICE_NAME = os.getenv("SERVICE_NAME", "nexent-backend")
-JAEGER_ENDPOINT = os.getenv(
-    "JAEGER_ENDPOINT", "http://localhost:14268/api/traces")
-PROMETHEUS_PORT = int(os.getenv("PROMETHEUS_PORT", "8000"))
-TELEMETRY_SAMPLE_RATE = float(os.getenv("TELEMETRY_SAMPLE_RATE", "1.0"))
+# Telemetry and Monitoring Configuration (OTLP Protocol)
+MONITORING_PROVIDER = os.getenv("MONITORING_PROVIDER", "")
+ENABLE_TELEMETRY_RAW = os.getenv("ENABLE_TELEMETRY")
+ENABLE_TELEMETRY = (ENABLE_TELEMETRY_RAW or "false").lower() == "true"
+OTEL_SERVICE_NAME_RAW = os.getenv("OTEL_SERVICE_NAME")
+OTEL_SERVICE_NAME = OTEL_SERVICE_NAME_RAW or "nexent-backend"
+OTEL_EXPORTER_OTLP_ENDPOINT_RAW = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+OTEL_EXPORTER_OTLP_ENDPOINT = OTEL_EXPORTER_OTLP_ENDPOINT_RAW or "http://localhost:4318"
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
+OTEL_EXPORTER_OTLP_PROTOCOL_RAW = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL")
+OTEL_EXPORTER_OTLP_PROTOCOL = OTEL_EXPORTER_OTLP_PROTOCOL_RAW or "http"
+OTEL_EXPORTER_OTLP_HEADERS_RAW = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
+OTEL_EXPORTER_OTLP_HEADERS = OTEL_EXPORTER_OTLP_HEADERS_RAW or ""
+OTEL_EXPORTER_OTLP_AUTHORIZATION = os.getenv("OTEL_EXPORTER_OTLP_AUTHORIZATION", "")
+OTEL_EXPORTER_OTLP_X_API_KEY = os.getenv("OTEL_EXPORTER_OTLP_X_API_KEY", "")
+OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION = os.getenv(
+    "OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION", "")
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
+LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "")
+OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENABLED")
+OTEL_EXPORTER_OTLP_METRICS_ENABLED = (
+    OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW or "true").lower() == "true"
+MONITORING_INSTRUMENT_REQUESTS_RAW = os.getenv("MONITORING_INSTRUMENT_REQUESTS")
+MONITORING_INSTRUMENT_REQUESTS = (
+    MONITORING_INSTRUMENT_REQUESTS_RAW or "false").lower() == "true"
+MONITORING_FASTAPI_INCLUDED_URLS = os.getenv("MONITORING_FASTAPI_INCLUDED_URLS", "")
+MONITORING_FASTAPI_EXCLUDED_URLS = os.getenv("MONITORING_FASTAPI_EXCLUDED_URLS", "")
+MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv("MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
+MONITORING_PROJECT_NAME = os.getenv("MONITORING_PROJECT_NAME", "")
+MONITORING_DASHBOARD_URL = os.getenv("MONITORING_DASHBOARD_URL", "")
+MONITORING_TRACE_CONTENT_MODE = os.getenv("MONITORING_TRACE_CONTENT_MODE", "summary")
+MONITORING_TRACE_MAX_CHARS = os.getenv("MONITORING_TRACE_MAX_CHARS", "4000")
+MONITORING_TRACE_MAX_ITEMS = os.getenv("MONITORING_TRACE_MAX_ITEMS", "20")
+TELEMETRY_SAMPLE_RATE_RAW = os.getenv("TELEMETRY_SAMPLE_RATE")
+TELEMETRY_SAMPLE_RATE = float(TELEMETRY_SAMPLE_RATE_RAW or "1.0")
 
-# Performance monitoring thresholds
-LLM_SLOW_REQUEST_THRESHOLD_SECONDS = float(
-    os.getenv("LLM_SLOW_REQUEST_THRESHOLD_SECONDS", "5.0"))
-LLM_SLOW_TOKEN_RATE_THRESHOLD = float(
-    os.getenv("LLM_SLOW_TOKEN_RATE_THRESHOLD", "10.0"))  # tokens per second
+# Parse OTLP headers into dict format
+def _parse_otlp_headers(headers_str: str) -> dict:
+    """Parse OTLP headers string into dict. Format: 'key1=value1,key2=value2'"""
+    if not headers_str:
+        return {}
+    headers = {}
+    for pair in headers_str.split(","):
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            headers[key.strip()] = value.strip()
+    return headers
+
+OTLP_HEADERS = _parse_otlp_headers(OTEL_EXPORTER_OTLP_HEADERS)
+if OTEL_EXPORTER_OTLP_AUTHORIZATION:
+    OTLP_HEADERS["Authorization"] = OTEL_EXPORTER_OTLP_AUTHORIZATION
+if OTEL_EXPORTER_OTLP_X_API_KEY:
+    OTLP_HEADERS["x-api-key"] = OTEL_EXPORTER_OTLP_X_API_KEY
+elif LANGSMITH_API_KEY:
+    OTLP_HEADERS["x-api-key"] = LANGSMITH_API_KEY
+if LANGSMITH_PROJECT:
+    OTLP_HEADERS["Langsmith-Project"] = LANGSMITH_PROJECT
+if OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION:
+    OTLP_HEADERS["x-langfuse-ingestion-version"] = OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION
 
 
 DEFAULT_ZH_TITLE = "新对话"
@@ -351,7 +418,7 @@ NORTHBOUND_EXTERNAL_URL = os.getenv("NORTHBOUND_EXTERNAL_URL", "http://localhost
 
 
 # APP Version
-APP_VERSION = "v2.1.0"
+APP_VERSION = "v2.1.1"
 
 
 # Skill Creation Streaming Configuration

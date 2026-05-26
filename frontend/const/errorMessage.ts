@@ -131,6 +131,11 @@ export const DEFAULT_ERROR_MESSAGES: Record<string, string> = {
   [ErrorCode.USER_UPDATE_FAILED]: "Profile update failed.",
   [ErrorCode.USER_ALREADY_EXISTS]: "User already exists.",
   [ErrorCode.INVALID_CREDENTIALS]: "Invalid username or password.",
+  // 02 - Password
+  [ErrorCode.PASSWORD_WEAK]:
+    "Password does not meet security requirements. Please use a stronger password.",
+  [ErrorCode.PASSWORD_SAME_AS_OLD]:
+    "New password cannot be the same as the old password.",
 
   // ==================== 12 TenantResource / 租户资源 ====================
   // 01 - Tenant
@@ -221,5 +226,5 @@ export interface ApiResponse<T = any> {
  * @returns True if success
  */
 export const isApiSuccess = (response: ApiResponse): boolean => {
-  return response.code === 0;;
+  return response.code === 0;
 }

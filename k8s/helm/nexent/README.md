@@ -114,6 +114,10 @@ After successful deployment:
 |---------|-----------------|
 | Web Application | http://localhost:30000 |
 | SSH Terminal | localhost:30022 (if enabled) |
+| Langfuse | http://localhost:30001 |
+| Grafana | http://localhost:30002 |
+| Phoenix | http://localhost:30006 |
+| Zipkin | http://localhost:30011 |
 
 ## Data Persistence
 
@@ -166,6 +170,56 @@ Using `delete-all` removes all PVCs, PVs, and the namespace, permanently deletin
 | Service | Description | Enabled By |
 |---------|-------------|------------|
 | nexent-openssh-server | SSH terminal for AI agents | `--set services.openssh.enabled=true` |
+| nexent-monitoring | OpenTelemetry Collector and optional observability backend | `--set nexent-monitoring.enabled=true` |
+
+### Monitoring
+
+The Helm chart includes an optional monitoring stack that mirrors the Docker
+monitoring deployment. The collector is always installed when
+`nexent-monitoring.enabled=true`; the backend stack is selected by
+`global.monitoring.provider`.
+
+Supported providers:
+
+- `otlp` / `collector` - Collector only, debug exporter
+- `phoenix` - Collector + local Phoenix
+- `grafana` - Collector + Tempo + Grafana
+- `zipkin` - Collector + local Zipkin
+- `langfuse` - Collector + self-hosted Langfuse stack
+- `langsmith` - Collector forwarding to hosted LangSmith
+
+Example:
+
+```bash
+helm upgrade --install nexent nexent \
+  --set nexent-monitoring.enabled=true \
+  --set global.monitoring.enabled=true \
+  --set global.monitoring.provider=grafana \
+  --set 'global.monitoring.dashboardUrl=http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
+```
+
+For LangSmith, also provide an API key:
+
+```bash
+helm upgrade --install nexent nexent \
+  --set nexent-monitoring.enabled=true \
+  --set global.monitoring.enabled=true \
+  --set global.monitoring.provider=langsmith \
+  --set global.monitoring.langsmithApiKey=lsv2_xxx
+```
+
+The monitoring subchart passes `global.monitoring.langsmithApiKey`,
+`global.monitoring.langsmithProject`, and the LangSmith OTLP trace endpoint to
+the Collector. If needed, override them directly with
+`nexent-monitoring.collector.env.*`.
+
+The backend receives OTLP settings through the shared `nexent-config`
+ConfigMap, with `OTEL_EXPORTER_OTLP_ENDPOINT` defaulting to
+`http://nexent-otel-collector:4318`. The frontend monitoring entry uses
+`global.monitoring.dashboardUrl`; leave it empty to hide the entry.
+Monitoring UI Services default to NodePort and can be overridden with
+`nexent-monitoring.<provider>.service.type` and
+`nexent-monitoring.<provider>.service.nodePort`.
 
 ## Configuration
 

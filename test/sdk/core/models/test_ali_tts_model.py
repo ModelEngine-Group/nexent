@@ -64,6 +64,9 @@ with patch.dict(_sys.modules, _module_mocks):
         QWEN_REALTIME_API_URL,
     )
 
+_ali_tts_module = _sys.modules[AliTTSModel.__module__]
+_ali_tts_module.websockets = _mock_websockets
+
 
 # ============================================================================
 # AliTTSConfig Tests

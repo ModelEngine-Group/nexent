@@ -175,6 +175,10 @@ CREATE TABLE IF NOT EXISTS "model_record_t" (
   "updated_by" varchar(100) COLLATE "pg_catalog"."default",
   "created_by" varchar(100) COLLATE "pg_catalog"."default",
   "tenant_id" varchar(100) COLLATE "pg_catalog"."default" DEFAULT 'tenant_id',
+  "model_appid" varchar(100) COLLATE "pg_catalog"."default" DEFAULT '',
+  "access_token" varchar(100) COLLATE "pg_catalog"."default" DEFAULT '',
+  "concurrency_limit" INTEGER DEFAULT NULL,
+  "timeout_seconds" INTEGER DEFAULT 120,
   CONSTRAINT "nexent_models_t_pk" PRIMARY KEY ("model_id")
 );
 ALTER TABLE "model_record_t" OWNER TO "root";
@@ -198,6 +202,10 @@ COMMENT ON COLUMN "model_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "model_record_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "model_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON COLUMN "model_record_t"."tenant_id" IS 'Tenant ID for filtering';
+COMMENT ON COLUMN "model_record_t"."model_appid" IS 'Application ID for model authentication.';
+COMMENT ON COLUMN "model_record_t"."access_token" IS 'Access token for model authentication.';
+COMMENT ON COLUMN "model_record_t"."concurrency_limit" IS 'Maximum concurrent requests for this model. Default is NULL (unlimited).';
+COMMENT ON COLUMN "model_record_t"."timeout_seconds" IS 'Request timeout in seconds for this model. Default is 120 seconds.';
 COMMENT ON TABLE "model_record_t" IS 'List of models defined by users in the configuration page';
 
 INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status") VALUES ('', 'volcano_tts', 'OpenAI-API-Compatible', 'tts', '', '', 0, 0, 'volcano_tts', 'unavailable');
@@ -211,6 +219,7 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "tenant_id" varchar(100) COLLATE "pg_catalog"."default",
   "knowledge_sources" varchar(100) COLLATE "pg_catalog"."default",
   "embedding_model_name" varchar(200) COLLATE "pg_catalog"."default",
+  "embedding_model_id" INTEGER,
   "group_ids" varchar,
   "ingroup_permission" varchar(30),
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
@@ -218,6 +227,9 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
   "updated_by" varchar(100) COLLATE "pg_catalog"."default",
   "created_by" varchar(100) COLLATE "pg_catalog"."default",
+  "summary_frequency" varchar(10) COLLATE "pg_catalog"."default",
+  "last_summary_time" timestamp(0),
+  "last_doc_update_time" timestamp(0),
   CONSTRAINT "knowledge_record_t_pk" PRIMARY KEY ("knowledge_id")
 );
 ALTER TABLE "knowledge_record_t" OWNER TO "root";
@@ -228,11 +240,17 @@ COMMENT ON COLUMN "knowledge_record_t"."knowledge_describe" IS 'Knowledge base d
 COMMENT ON COLUMN "knowledge_record_t"."tenant_id" IS 'Tenant ID';
 COMMENT ON COLUMN "knowledge_record_t"."knowledge_sources" IS 'Knowledge base sources';
 COMMENT ON COLUMN "knowledge_record_t"."embedding_model_name" IS 'Embedding model name, used to record the embedding model used by the knowledge base';
+COMMENT ON COLUMN "knowledge_record_t"."embedding_model_id" IS 'Embedding model ID, foreign key reference to model_record_t.model_id';
 COMMENT ON COLUMN "knowledge_record_t"."group_ids" IS 'Knowledge base group IDs list';
 COMMENT ON COLUMN "knowledge_record_t"."ingroup_permission" IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 COMMENT ON COLUMN "knowledge_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
+COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'User who last updated the record, audit field';
+COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'User who created the record, audit field';
+COMMENT ON COLUMN "knowledge_record_t"."summary_frequency" IS 'Auto-summary frequency: 1h, 3h, 6h, 1d, 1w, or NULL (disabled)';
+COMMENT ON COLUMN "knowledge_record_t"."last_summary_time" IS 'Timestamp of last summary generation';
+COMMENT ON COLUMN "knowledge_record_t"."last_doc_update_time" IS 'Timestamp of last document add/delete operation, used for auto-summary optimization to skip unnecessary summary regeneration';
 COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "knowledge_record_t" IS 'Records knowledge base description and status information';
@@ -306,6 +324,8 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     model_id INTEGER,
     business_logic_model_name VARCHAR(100),
     business_logic_model_id INTEGER,
+    prompt_template_id INTEGER,
+    prompt_template_name VARCHAR(100),
     max_steps INTEGER,
     duty_prompt TEXT,
     constraint_prompt TEXT,
@@ -356,6 +376,8 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.model_name IS '[DEPRECATED] Name of t
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.model_id IS 'Model ID, foreign key reference to model_record_t.model_id';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.business_logic_model_name IS 'Model name used for business logic prompt generation';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.business_logic_model_id IS 'Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.prompt_template_id IS 'Prompt template ID used for business logic prompt generation';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.prompt_template_name IS 'Prompt template name used for business logic prompt generation';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.max_steps IS 'Maximum number of steps';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.duty_prompt IS 'Duty prompt';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.constraint_prompt IS 'Constraint prompt';
@@ -380,6 +402,97 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.enable_context_manager IS 'Whether to
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
 ON nexent.ag_tenant_agent_t (tenant_id, is_new)
 WHERE delete_flag = 'N';
+
+CREATE TABLE IF NOT EXISTS nexent.ag_prompt_template_t (
+    template_id SERIAL PRIMARY KEY,
+    template_name VARCHAR(100) NOT NULL,
+    description VARCHAR(500),
+    template_type VARCHAR(50) NOT NULL DEFAULT 'agent_generate',
+    tenant_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    template_content_zh JSONB NOT NULL,
+    template_content_en JSONB,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.ag_prompt_template_t OWNER TO "root";
+
+CREATE OR REPLACE FUNCTION update_ag_prompt_template_update_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.update_time = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_ag_prompt_template_update_time_trigger
+BEFORE UPDATE ON nexent.ag_prompt_template_t
+FOR EACH ROW
+EXECUTE FUNCTION update_ag_prompt_template_update_time();
+
+COMMENT ON TABLE nexent.ag_prompt_template_t IS 'Prompt template table for user-defined business logic generation prompts';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_id IS 'Prompt template ID';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_name IS 'Prompt template name';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.description IS 'Prompt template description';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_type IS 'Prompt template type';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.user_id IS 'User ID';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_content_zh IS 'Chinese prompt template content';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_content_en IS 'English prompt template content';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_prompt_template_user_name_active
+ON nexent.ag_prompt_template_t (tenant_id, user_id, template_name)
+WHERE delete_flag = 'N';
+
+CREATE INDEX IF NOT EXISTS idx_ag_prompt_template_t_user
+ON nexent.ag_prompt_template_t (tenant_id, user_id, template_type)
+WHERE delete_flag = 'N';
+
+INSERT INTO nexent.ag_prompt_template_t (
+    template_id,
+    template_name,
+    description,
+    template_type,
+    tenant_id,
+    user_id,
+    template_content_zh,
+    template_content_en,
+    created_by,
+    updated_by,
+    delete_flag
+)
+VALUES (
+    0,
+    'system_default',
+    'System default prompt template',
+    'agent_generate',
+    'tenant_id',
+    'user_id',
+    '{}'::jsonb,
+    '{}'::jsonb,
+    'user_id',
+    'user_id',
+    'N'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    template_name = EXCLUDED.template_name,
+    description = EXCLUDED.description,
+    template_type = EXCLUDED.template_type,
+    tenant_id = EXCLUDED.tenant_id,
+    user_id = EXCLUDED.user_id,
+    template_content_zh = EXCLUDED.template_content_zh,
+    template_content_en = EXCLUDED.template_content_en,
+    updated_by = EXCLUDED.updated_by,
+    delete_flag = 'N';
 
 
 -- Create the ag_tool_instance_t table in the nexent schema
@@ -492,6 +605,13 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_record_t (
     status BOOLEAN DEFAULT NULL,
     container_id VARCHAR(200) DEFAULT NULL,
     authorization_token VARCHAR(500) DEFAULT NULL,
+    source VARCHAR(30),
+    registry_json JSONB,
+    config_json JSON,
+    enabled BOOLEAN DEFAULT TRUE,
+    tags TEXT[],
+    description TEXT,
+    container_port INTEGER,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -516,6 +636,13 @@ COMMENT ON COLUMN nexent.mcp_record_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.created_by IS 'Creator ID, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.updated_by IS 'Last updater ID, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.delete_flag IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
+COMMENT ON COLUMN nexent.mcp_record_t.source IS 'Source type: local/mcp_registry/community';
+COMMENT ON COLUMN nexent.mcp_record_t.registry_json IS 'Full MCP registry server.json snapshot';
+COMMENT ON COLUMN nexent.mcp_record_t.config_json IS 'MCP config data';
+COMMENT ON COLUMN nexent.mcp_record_t.enabled IS 'Enabled';
+COMMENT ON COLUMN nexent.mcp_record_t.tags IS 'Tags';
+COMMENT ON COLUMN nexent.mcp_record_t.description IS 'Description';
+COMMENT ON COLUMN nexent.mcp_record_t.container_port IS 'Host port bound for containerized MCP service';
 
 -- Create a function to update the update_time column
 CREATE OR REPLACE FUNCTION update_mcp_record_update_time()
@@ -537,6 +664,19 @@ EXECUTE FUNCTION update_mcp_record_update_time();
 
 -- Add comment to the trigger
 COMMENT ON TRIGGER update_mcp_record_update_time_trigger ON nexent.mcp_record_t IS 'Trigger to call update_mcp_record_update_time function before each update on mcp_record_t table';
+
+-- Add indexes for common management queries
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_delete
+    ON nexent.mcp_record_t (tenant_id, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_name
+    ON nexent.mcp_record_t (tenant_id, mcp_name, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_server
+    ON nexent.mcp_record_t (tenant_id, mcp_server, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tags_gin
+    ON nexent.mcp_record_t USING GIN (tags);
 
 -- Create user tenant relationship table
 CREATE TABLE IF NOT EXISTS nexent.user_tenant_t (
@@ -1076,10 +1216,12 @@ COMMENT ON COLUMN nexent.user_token_usage_log_t.delete_flag IS 'Soft delete flag
 CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
     skill_id SERIAL4 PRIMARY KEY NOT NULL,
     skill_name VARCHAR(100) NOT NULL,
+    tenant_id VARCHAR(100),
     skill_description VARCHAR(1000),
     skill_tags JSON,
     skill_content TEXT,
-    params JSON,
+    config_schemas JSON,
+    config_values JSON,
     source VARCHAR(30) DEFAULT 'official',
     created_by VARCHAR(100),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -1095,11 +1237,13 @@ COMMENT ON TABLE nexent.ag_skill_info_t IS 'Skill information table for managing
 
 -- Add comments to the columns
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_id IS 'Skill ID, unique primary key';
-COMMENT ON COLUMN nexent.ag_skill_info_t.skill_name IS 'Skill name, globally unique';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_name IS 'Skill name, unique within tenant';
+COMMENT ON COLUMN nexent.ag_skill_info_t.tenant_id IS 'Tenant ID for multi-tenancy. NULL for pre-existing skills.';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_description IS 'Skill description text';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_tags IS 'Skill tags stored as JSON array';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_content IS 'Skill content or prompt text';
-COMMENT ON COLUMN nexent.ag_skill_info_t.params IS 'Skill configuration parameters stored as JSON object';
+COMMENT ON COLUMN nexent.ag_skill_info_t.config_schemas IS 'Parameter metadata from config/schema.yaml';
+COMMENT ON COLUMN nexent.ag_skill_info_t.config_values IS 'Runtime parameter values from config/config.yaml';
 COMMENT ON COLUMN nexent.ag_skill_info_t.source IS 'Skill source: official, custom, or partner';
 COMMENT ON COLUMN nexent.ag_skill_info_t.created_by IS 'Creator ID';
 COMMENT ON COLUMN nexent.ag_skill_info_t.create_time IS 'Creation timestamp';
@@ -1145,6 +1289,8 @@ CREATE TABLE IF NOT EXISTS nexent.ag_skill_instance_t (
     tenant_id VARCHAR(100),
     enabled BOOLEAN DEFAULT TRUE,
     version_no INTEGER DEFAULT 0 NOT NULL,
+    config_values JSON,
+    config_schemas JSON,
     created_by VARCHAR(100),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(100),
@@ -1166,6 +1312,8 @@ COMMENT ON COLUMN nexent.ag_skill_instance_t.user_id IS 'User ID';
 COMMENT ON COLUMN nexent.ag_skill_instance_t.tenant_id IS 'Tenant ID';
 COMMENT ON COLUMN nexent.ag_skill_instance_t.enabled IS 'Whether this skill is enabled for the agent';
 COMMENT ON COLUMN nexent.ag_skill_instance_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.config_values IS 'Per-agent runtime parameter values from config/config.yaml';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.config_schemas IS 'Per-agent parameter schema overrides from config/schema.yaml';
 COMMENT ON COLUMN nexent.ag_skill_instance_t.created_by IS 'Creator ID';
 COMMENT ON COLUMN nexent.ag_skill_instance_t.create_time IS 'Creation timestamp';
 COMMENT ON COLUMN nexent.ag_skill_instance_t.updated_by IS 'Last updater ID';
@@ -1306,6 +1454,9 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_t (
     nacos_config_id VARCHAR(64),
     nacos_agent_name VARCHAR(255),
 
+    -- Base URL for infrastructure health checks
+    base_url VARCHAR(512),
+
     -- Tenant isolation
     tenant_id VARCHAR(100) NOT NULL,
     created_by VARCHAR(100) NOT NULL,
@@ -1352,6 +1503,7 @@ COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.last_check_result IS 'Last heal
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.create_time IS 'Record creation timestamp';
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.update_time IS 'Record last update timestamp';
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.delete_flag IS 'Soft delete flag: Y/N'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.base_url IS 'Base URL for health checks (service root address)';
 
 
 CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_relation_t (
@@ -1365,8 +1517,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_relation_t (
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     delete_flag VARCHAR(1) DEFAULT 'N',
-    CONSTRAINT uq_local_external_agent UNIQUE (local_agent_id, external_agent_id),
-    CONSTRAINT fk_external_agent FOREIGN KEY (external_agent_id) REFERENCES nexent.ag_a2a_external_agent_t(id)
+    CONSTRAINT uq_local_external_agent UNIQUE (local_agent_id, external_agent_id)
 );
 
 ALTER TABLE nexent.ag_a2a_external_agent_relation_t OWNER TO "root";
@@ -1476,9 +1627,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_message_t (
     extensions JSONB,                               -- Extension URI list
     reference_task_ids JSONB,                        -- Referenced task IDs array
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(task_id, message_index),
-    CONSTRAINT ag_a2a_message_t_task_id_fk FOREIGN KEY (task_id)
-        REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE
+    UNIQUE(task_id, message_index)
 );
 
 ALTER TABLE nexent.ag_a2a_message_t OWNER TO "root";
@@ -1504,8 +1653,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_a2a_artifact_t (
     meta_data JSONB,                                -- Metadata
     extensions JSONB,                                -- Extension URI list
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_artifact_task FOREIGN KEY (task_id)
-        REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE,
     UNIQUE(task_id, artifact_id)
 );
 
@@ -1640,3 +1787,78 @@ COMMENT ON COLUMN nexent.user_oauth_account_t.delete_flag IS 'Whether it is dele
 -- Create index for user_id queries
 CREATE INDEX IF NOT EXISTS idx_user_oauth_account_t_user_id
 ON nexent.user_oauth_account_t (user_id);
+
+-- mcp_community_record_t: Community MCP market table
+CREATE TABLE IF NOT EXISTS nexent.mcp_community_record_t (
+    community_id SERIAL PRIMARY KEY NOT NULL,
+    tenant_id VARCHAR(100),
+    user_id VARCHAR(100),
+    mcp_name VARCHAR(100) NOT NULL,
+    mcp_server VARCHAR(500) NOT NULL,
+    source VARCHAR(30) DEFAULT 'community',
+    version VARCHAR(50),
+    registry_json JSONB,
+    transport_type VARCHAR(30),
+    config_json JSON,
+    tags TEXT[],
+    description TEXT,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.mcp_community_record_t OWNER TO root;
+
+COMMENT ON TABLE nexent.mcp_community_record_t IS 'Community MCP market records, publishable from tenant MCP services';
+COMMENT ON COLUMN nexent.mcp_community_record_t.community_id IS 'Community record ID, unique primary key';
+COMMENT ON COLUMN nexent.mcp_community_record_t.tenant_id IS 'Publisher tenant ID';
+COMMENT ON COLUMN nexent.mcp_community_record_t.user_id IS 'Publisher user ID';
+COMMENT ON COLUMN nexent.mcp_community_record_t.mcp_name IS 'MCP name';
+COMMENT ON COLUMN nexent.mcp_community_record_t.mcp_server IS 'MCP server URL';
+COMMENT ON COLUMN nexent.mcp_community_record_t.source IS 'Source type, fixed to community for this table';
+COMMENT ON COLUMN nexent.mcp_community_record_t.version IS 'MCP version';
+COMMENT ON COLUMN nexent.mcp_community_record_t.registry_json IS 'Full MCP server metadata JSON for discovery and quick import';
+COMMENT ON COLUMN nexent.mcp_community_record_t.transport_type IS 'Transport type: url/container';
+COMMENT ON COLUMN nexent.mcp_community_record_t.config_json IS 'Public-shareable MCP configuration JSON';
+COMMENT ON COLUMN nexent.mcp_community_record_t.tags IS 'Tags';
+COMMENT ON COLUMN nexent.mcp_community_record_t.description IS 'Description';
+COMMENT ON COLUMN nexent.mcp_community_record_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.mcp_community_record_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.mcp_community_record_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.mcp_community_record_t.updated_by IS 'Updater ID';
+COMMENT ON COLUMN nexent.mcp_community_record_t.delete_flag IS 'Soft delete flag: Y/N';
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_tenant_delete
+    ON nexent.mcp_community_record_t (tenant_id, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_name_delete
+    ON nexent.mcp_community_record_t (mcp_name, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_transport_delete
+    ON nexent.mcp_community_record_t (transport_type, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_user_delete
+    ON nexent.mcp_community_record_t (user_id, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_tags_gin
+    ON nexent.mcp_community_record_t USING GIN (tags);
+
+CREATE OR REPLACE FUNCTION update_mcp_community_record_update_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.update_time = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION update_mcp_community_record_update_time() IS 'Auto-update update_time for mcp_community_record_t';
+
+DROP TRIGGER IF EXISTS update_mcp_community_record_update_time_trigger ON nexent.mcp_community_record_t;
+CREATE TRIGGER update_mcp_community_record_update_time_trigger
+BEFORE UPDATE ON nexent.mcp_community_record_t
+FOR EACH ROW
+EXECUTE FUNCTION update_mcp_community_record_update_time();
+
+COMMENT ON TRIGGER update_mcp_community_record_update_time_trigger ON nexent.mcp_community_record_t IS 'Trigger to maintain update_time';

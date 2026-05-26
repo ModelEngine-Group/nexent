@@ -11,6 +11,8 @@ import httpx
 
 logger = logging.getLogger("haotian_service")
 
+_DEFAULT_KNOWLEDGE_BASE_ID = "a8d68fbf-bd6e-5461-a9d1-cf1bb3522e38"
+
 
 def _normalize_list_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -24,7 +26,7 @@ def _normalize_list_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
       ]
     }
 
-    This function also filters out knowledge sets with name == "Public".
+    When dify_dataset_id is "null", it is replaced with the default ID.
     """
     knowledge_sets = raw.get("knowledge_sets", [])
     if not isinstance(knowledge_sets, list):
@@ -35,7 +37,7 @@ def _normalize_list_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(ks, dict):
             continue
         set_name = str(ks.get("name", "") or "").strip()
-        if not set_name or set_name == "Public":
+        if not set_name:
             continue
 
         bases = ks.get("knowledge_bases", [])
@@ -48,15 +50,18 @@ def _normalize_list_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             dataset_id = str(kb.get("dify_dataset_id", "") or "").strip()
             kb_name = str(kb.get("name", "") or "").strip()
-            if not dataset_id or not kb_name:
+            if not kb_name:
                 continue
+            if dataset_id == "null" or not dataset_id:
+                dataset_id = _DEFAULT_KNOWLEDGE_BASE_ID
             normalized_bases.append(
                 {"dify_dataset_id": dataset_id, "name": kb_name}
             )
 
-        normalized_sets.append(
-            {"name": set_name, "knowledge_bases": normalized_bases}
-        )
+        if normalized_bases:
+            normalized_sets.append(
+                {"name": set_name, "knowledge_bases": normalized_bases}
+            )
 
     return {"knowledge_sets": normalized_sets}
 
@@ -77,7 +82,7 @@ async def fetch_haotian_knowledge_sets_impl(
         )
 
     headers = {"Authorization": external_authorization}
-    async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True, trust_env=False) as client:
         resp = await client.get(list_url, headers=headers)
         if resp.status_code >= 400:
             raise RuntimeError(
