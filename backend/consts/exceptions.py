@@ -205,8 +205,20 @@ class VoiceServiceException(Exception):
     pass
 
 
+class VoiceConfigException(Exception):
+    """Raised when voice configuration is invalid or missing."""
+
+    pass
+
+
 class STTConnectionException(Exception):
     """Raised when STT service connection fails."""
+
+    pass
+
+
+class TTSConnectionException(Exception):
+    """Raised when TTS service connection fails."""
 
     pass
 
