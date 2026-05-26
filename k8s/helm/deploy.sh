@@ -1,12 +1,8 @@
 #!/bin/bash
 # Helm Deployment Script for Nexent
-# Usage: ./deploy-helm.sh [apply|delete|delete-all|clean]
+# Usage: ./deploy.sh [apply] [options]
 #
-# Commands:
-#   apply    - Deploy all K8s resources using Helm
-#   delete   - Delete resources but PRESERVE data (PVC/PV)
-#   delete-all - Delete ALL resources including data
-#   clean    - Clean helm state only (for fixing stuck releases)
+# Deploy only. Use uninstall.sh for uninstall and cleanup commands.
 
 set -e
 
@@ -39,10 +35,35 @@ APP_VERSION=""
 DEPLOYMENT_VERSION=""
 VERSION_CHOICE_SAVED=""
 
-# Parse command line arguments
-# First argument is the command
-COMMAND="$1"
-shift
+# Parse command line arguments. The optional "apply" command is kept as a deploy alias.
+COMMAND="apply"
+case "${1:-}" in
+  --help|-h)
+    COMMAND="help"
+    shift
+    ;;
+  ""|--*)
+    ;;
+  apply|deploy)
+    COMMAND="apply"
+    shift
+    ;;
+  delete|delete-all|clean)
+    echo "K8s uninstall and cleanup have moved to uninstall.sh."
+    echo "Use: bash uninstall.sh ${1}"
+    exit 1
+    ;;
+  *)
+    echo "Unknown command: $1"
+    echo "Usage: $0 [apply] [options]"
+    echo "Uninstall: bash uninstall.sh"
+    exit 1
+    ;;
+esac
+if [ "$COMMAND" = "apply" ] && { [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; }; then
+  COMMAND="help"
+  shift
+fi
 ORIGINAL_ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
@@ -538,87 +559,29 @@ apply() {
     fi
 }
 
-delete_with_data() {
-    echo "Uninstalling Helm release (preserving data)..."
-    helm uninstall nexent --namespace "$NAMESPACE" || true
-
-    echo "Cleanup completed! Data is preserved in the host data directories."
-    echo "Re-run './deploy-helm.sh apply' to redeploy with existing data."
-}
-
-delete_all() {
-    echo "Deleting Helm release AND all data..."
-
-    # Uninstall Helm release
-    helm uninstall nexent --namespace "$NAMESPACE" || true
-
-    # Wait for pods to terminate
-    echo "Waiting for pods to terminate..."
-    kubectl wait --for=delete pod -l app=nexent-elasticsearch -n $NAMESPACE --timeout=120s 2>/dev/null || true
-    kubectl wait --for=delete pod -l app=nexent-postgresql -n $NAMESPACE --timeout=120s 2>/dev/null || true
-    kubectl wait --for=delete pod -l app=nexent-redis -n $NAMESPACE --timeout=120s 2>/dev/null || true
-    kubectl wait --for=delete pod -l app=nexent-minio -n $NAMESPACE --timeout=120s 2>/dev/null || true
-    kubectl wait --for=delete pod -l app=nexent-supabase-db -n $NAMESPACE --timeout=120s 2>/dev/null || true
-    kubectl wait --for=delete pod -l app=nexent-supabase-auth -n $NAMESPACE --timeout=120s 2>/dev/null || true
-    kubectl wait --for=delete pod -l app=nexent-supabase-kong -n $NAMESPACE --timeout=120s 2>/dev/null || true
-
-    # Delete PVCs to release PVs
-    echo "Deleting PVCs to release PersistentVolumes..."
-    kubectl delete pvc -n $NAMESPACE --all --ignore-not-found=true || true
-    sleep 5
-
-    # Delete PVs
-    echo "Deleting PersistentVolumes..."
-    kubectl delete pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv nexent-supabase-db-pv --ignore-not-found=true || true
-
-    # Delete namespace
-    echo "Deleting namespace..."
-    kubectl delete namespace $NAMESPACE --ignore-not-found=true || true
-
-    echo "Cleanup completed! All resources including data have been deleted."
+print_usage() {
+    echo "Usage: $0 [apply] [options]"
+    echo ""
+    echo "Deploy Nexent K8s resources using Helm."
+    echo ""
+    echo "Options:"
+    echo "  --components LIST          Components to deploy"
+    echo "  --port-policy POLICY       development or production"
+    echo "  --image-source SOURCE      general, mainland, or local-latest"
+    echo "  --is-mainland Y|N          Legacy alias for image source mainland/general"
+    echo "  --version VERSION          Specify app version (auto-detected from const.py if not set)"
+    echo "  --deployment-version VER   Legacy deployment version: speed or full"
+    echo "  --help, -h                 Show this help message"
+    echo ""
+    echo "Uninstall: bash uninstall.sh"
 }
 
 case "$COMMAND" in
+help)
+    print_usage
+    ;;
 apply)
     clean_helm_state
     apply
-    ;;
-clean)
-    clean_helm_state
-    ;;
-delete)
-    delete_with_data
-    ;;
-delete-all)
-    delete_all
-    ;;
-*)
-    echo "Usage: $0 {apply|delete|delete-all|clean} [options]"
-    echo ""
-    echo "Commands:"
-    echo "  apply     - Clean helm state and deploy all K8s resources"
-    echo "  clean     - Clean helm state only (fixes stuck releases)"
-    echo "  delete    - Delete resources but PRESERVE data (PVC/PV)"
-    echo "  delete-all - Delete ALL resources including data"
-    echo ""
-    echo "Options:"
-    echo "  --image-source SOURCE     Image source: general, mainland, or local-latest"
-    echo "  --is-mainland Y|N         Legacy alias for image source mainland/general"
-    echo "  --version VERSION         Specify app version (auto-detected from const.py if not set)"
-    echo "  --deployment-version VER  Specify deployment version: 'speed' (no Supabase) or 'full' (includes Supabase)"
-    echo ""
-    echo "Examples:"
-    echo "  $0 apply                           # Interactive deployment"
-    echo "  $0 apply --image-source mainland    # Deploy with mainland China image sources"
-    echo "  $0 apply --image-source general     # Deploy with general image sources"
-    echo "  $0 apply --deployment-version full # Deploy full version with Supabase"
-    echo ""
-    echo "Deployment Versions:"
-    echo "  speed (default) - Lightweight deployment, essential features only"
-    echo "  full            - Full-featured deployment with Supabase authentication"
-    echo ""
-    echo "Tip: If you see 'Release does not exist' errors, run:"
-    echo "  $0 clean"
-    exit 1
     ;;
 esac

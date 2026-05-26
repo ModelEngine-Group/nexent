@@ -14,44 +14,44 @@ Navigate to the `k8s/helm` directory and run the deployment script:
 
 ```bash
 cd k8s/helm
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `apply` | Clean helm state and deploy all K8s resources |
-| `clean` | Clean helm state only (fixes stuck releases) |
-| `delete` | Delete resources but **PRESERVE** data (PVC/PV) |
-| `delete-all` | Delete ALL resources including data |
+| `./deploy.sh` | Deploy all K8s resources |
+| `./uninstall.sh` | Uninstall resources and preserve data by default |
+| `./uninstall.sh clean` | Clean Helm state only (fixes stuck releases) |
+| `./uninstall.sh delete-all` | Delete ALL resources including data |
 
 ### Usage Examples
 
 ```bash
 # Interactive deployment (will prompt for all options)
-./deploy-helm.sh apply
+./deploy.sh
 
 # Non-interactive deployment with the default component set
-./deploy-helm.sh apply --components infrastructure,application --port-policy development --image-source general
+./deploy.sh --components infrastructure,application --port-policy development --image-source general
 
 # Enable Supabase, data processing, and terminal
-./deploy-helm.sh apply --components infrastructure,application,supabase,data-process,terminal
+./deploy.sh --components infrastructure,application,supabase,data-process,terminal
 
 # Use mainland China image sources
-./deploy-helm.sh apply --image-source mainland
+./deploy.sh --image-source mainland
 
 # Use local latest Nexent images
-./deploy-helm.sh apply --image-source local-latest
+./deploy.sh --image-source local-latest
 
 # Clean helm state (fixes stuck releases)
-./deploy-helm.sh clean
+./uninstall.sh clean
 
 # Uninstall but preserve data
-./deploy-helm.sh delete
+./uninstall.sh
 
 # Complete uninstall including all data
-./deploy-helm.sh delete-all
+./uninstall.sh delete-all
 ```
 
 ## Command Line Options
@@ -297,8 +297,8 @@ helm upgrade --install nexent nexent \
 If you see "Release does not exist" errors:
 
 ```bash
-./deploy-helm.sh clean
-./deploy-helm.sh apply
+./uninstall.sh clean
+./deploy.sh
 ```
 
 ### Pods Not Starting

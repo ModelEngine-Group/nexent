@@ -155,7 +155,7 @@ resolve_delete_volumes() {
 
   echo ""
   echo "🧹 Delete Docker volumes and Nexent data directories?"
-  echo "   This removes persistent data under ROOT_DIR, including elasticsearch, postgresql, redis, minio, and supabase volumes."
+  echo "   This removes persistent data under ROOT_DIR, including elasticsearch, postgresql, redis, minio, scripts, and supabase volumes."
   local answer
   read -r -p "   Delete data volumes? [y/N]: " answer
   answer="$(sanitize_input "$answer")"
@@ -197,6 +197,7 @@ remove_nexent_data_dirs() {
     "$root_dir/minio"
     "$root_dir/volumes"
     "$root_dir/openssh-server"
+    "$root_dir/scripts"
   )
 
   local dir

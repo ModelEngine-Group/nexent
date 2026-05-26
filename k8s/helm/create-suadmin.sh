@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script to create super admin user and insert into user_tenant_t table for K8s deployment
-# This script should be called from deploy-helm.sh after Helm deployment completes
+# This script should be called from deploy.sh after Helm deployment completes
 
 set -e
 

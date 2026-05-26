@@ -64,8 +64,10 @@ Ideal for enterprise scenarios requiring high availability and elastic scaling. 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent/k8s/helm
-./deploy-helm.sh apply
+./deploy.sh
 ```
+
+Kubernetes uninstall is handled by `bash uninstall.sh`. It preserves PVC/PV data by default; use `bash uninstall.sh delete-all` or `--delete-data true` to remove persistent data.
 
 For detailed deployment instructions, see [Kubernetes Installation](https://modelengine-group.github.io/nexent/en/quick-start/kubernetes-installation.html).
 

@@ -393,7 +393,7 @@ deployment_tui_multiselect_components() {
       marker=" "
       [ "$row" -eq "$cursor" ] && marker=">"
       check=" "
-      [ "${selected[$row]}" = "1" ] && check="x"
+      [ "${selected[$row]}" = "1" ] && check="*"
       printf '%s [%s] %s - %s\n' "$marker" "$check" "${components[$row]}" "${details[$row]}"
     done
   }
