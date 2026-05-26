@@ -1,0 +1,269 @@
+{{- if and .Values.enabled (include "nexent-monitoring.tempoEnabled" .) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-tempo-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-tempo
+data:
+  tempo.yml: |
+    target: all
+    multitenancy_enabled: false
+    stream_over_http_enabled: true
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+    metrics_generator:
+      ring:
+        kvstore:
+          store: inmemory
+      storage:
+        path: /var/tempo/generator/wal
+        remote_write: []
+      traces_storage:
+        path: /var/tempo/generator/traces
+      processor:
+        local_blocks:
+          filter_server_spans: false
+          flush_to_storage: true
+    storage:
+      trace:
+        backend: local
+        wal:
+          path: /var/tempo/wal
+        local:
+          path: /var/tempo/blocks
+    overrides:
+      defaults:
+        metrics_generator:
+          processors:
+            - local-blocks
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-tempo
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-tempo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-tempo
+  template:
+    metadata:
+      labels:
+        app: nexent-tempo
+    spec:
+      containers:
+        - name: tempo
+          image: "{{ .Values.images.tempo.repository }}:{{ .Values.images.tempo.tag }}"
+          imagePullPolicy: {{ .Values.images.tempo.pullPolicy }}
+          args:
+            - "--config.file=/etc/tempo/tempo.yml"
+          ports:
+            - containerPort: 3200
+              name: http
+            - containerPort: 4317
+              name: otlp-grpc
+            - containerPort: 4318
+              name: otlp-http
+          volumeMounts:
+            - name: tempo-config
+              mountPath: /etc/tempo
+              readOnly: true
+            - name: tempo-data
+              mountPath: /var/tempo
+      volumes:
+        - name: tempo-config
+          configMap:
+            name: nexent-tempo-config
+        - name: tempo-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: nexent-tempo
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-tempo
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-tempo
+spec:
+  type: {{ .Values.tempo.service.type }}
+  ports:
+    - port: {{ .Values.tempo.service.port }}
+      targetPort: 3200
+      name: http
+    - port: {{ .Values.tempo.service.otlpGrpcPort }}
+      targetPort: 4317
+      name: otlp-grpc
+    - port: {{ .Values.tempo.service.otlpHttpPort }}
+      targetPort: 4318
+      name: otlp-http
+  selector:
+    app: nexent-tempo
+{{- end }}
+{{- if and .Values.enabled (include "nexent-monitoring.grafanaEnabled" .) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-grafana-provisioning
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-grafana
+data:
+  datasources.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Tempo
+        uid: Tempo
+        type: tempo
+        access: proxy
+        url: http://nexent-tempo:3200
+        isDefault: true
+        editable: true
+        basicAuth: false
+        jsonData:
+          nodeGraph:
+            enabled: true
+          search:
+            hide: false
+          traceQuery:
+            timeShiftEnabled: true
+            spanStartTimeShift: "-1h"
+            spanEndTimeShift: "1h"
+          streamingEnabled:
+            search: false
+            metrics: false
+  dashboards.yml: |
+    apiVersion: 1
+    providers:
+      - name: Nexent
+        orgId: 1
+        folder: Nexent
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /etc/grafana/dashboards
+  nexent-llm-agent.json: |
+    {
+      "uid": "nexent-llm-agent",
+      "title": "Nexent Agent Trace Monitoring",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "tags": ["nexent", "otel", "tempo"],
+      "panels": [
+        {
+          "type": "traces",
+          "title": "Recent traces",
+          "gridPos": {"x": 0, "y": 0, "w": 24, "h": 12},
+          "targets": [
+            {
+              "datasource": {"type": "tempo", "uid": "Tempo"},
+              "query": "{resource.service.name=\"nexent-backend\"}",
+              "queryType": "traceql"
+            }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-grafana
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-grafana
+  template:
+    metadata:
+      labels:
+        app: nexent-grafana
+    spec:
+      containers:
+        - name: grafana
+          image: "{{ .Values.images.grafana.repository }}:{{ .Values.images.grafana.tag }}"
+          imagePullPolicy: {{ .Values.images.grafana.pullPolicy }}
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: {{ .Values.grafana.adminUser | quote }}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: {{ .Values.grafana.adminPassword | quote }}
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_USERS_DEFAULT_LANGUAGE
+              value: {{ .Values.grafana.defaultLanguage | quote }}
+            - name: GF_PLUGINS_PREINSTALL_AUTO_UPDATE
+              value: "false"
+          ports:
+            - containerPort: 3000
+              name: http
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+            - name: grafana-provisioning
+              mountPath: /etc/grafana/provisioning/datasources/datasources.yml
+              subPath: datasources.yml
+              readOnly: true
+            - name: grafana-provisioning
+              mountPath: /etc/grafana/provisioning/dashboards/dashboards.yml
+              subPath: dashboards.yml
+              readOnly: true
+            - name: grafana-provisioning
+              mountPath: /etc/grafana/dashboards/nexent-llm-agent.json
+              subPath: nexent-llm-agent.json
+              readOnly: true
+      volumes:
+        - name: grafana-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: nexent-grafana
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: grafana-provisioning
+          configMap:
+            name: nexent-grafana-provisioning
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-grafana
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-grafana
+spec:
+  type: {{ .Values.grafana.service.type }}
+  ports:
+    - port: {{ .Values.grafana.service.port }}
+      targetPort: 3000
+      name: http
+      {{- if and (eq .Values.grafana.service.type "NodePort") .Values.grafana.service.nodePort }}
+      nodePort: {{ .Values.grafana.service.nodePort }}
+      {{- end }}
+  selector:
+    app: nexent-grafana
+{{- end }}

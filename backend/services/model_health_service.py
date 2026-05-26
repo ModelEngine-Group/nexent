@@ -29,6 +29,7 @@ async def _embedding_dimension_check(
     model_base_url: str,
     model_api_key: str,
     ssl_verify: bool = True,
+    timeout_seconds: Optional[float] = None,
 ):
     # Test connectivity based on different model types
     if model_type == "embedding":
@@ -38,6 +39,7 @@ async def _embedding_dimension_check(
             api_key=model_api_key,
             embedding_dim=0,
             ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
         ).dimension_check()
         if len(embedding) > 0:
             return len(embedding[0])
@@ -51,6 +53,7 @@ async def _embedding_dimension_check(
             api_key=model_api_key,
             embedding_dim=0,
             ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
         ).dimension_check()
         if len(embedding) > 0:
             return len(embedding[0])
@@ -71,6 +74,7 @@ async def _perform_connectivity_check(
     model_appid: Optional[str] = None,
     access_token: Optional[str] = None,
     display_name: Optional[str] = None,
+    timeout_seconds: Optional[float] = None,
 ) -> bool:
     """
     Perform specific model connectivity check
@@ -80,6 +84,8 @@ async def _perform_connectivity_check(
         model_base_url: Model base URL
         model_api_key: API key
         ssl_verify: Whether to verify SSL certificates (default: True)
+        display_name: Optional display name for monitoring
+        timeout_seconds: Optional request timeout in seconds
     Returns:
         bool: Connectivity check result
     """
@@ -91,21 +97,23 @@ async def _perform_connectivity_check(
 
     # Test connectivity based on different model types
     if model_type == "embedding":
-        connectivity = len(await OpenAICompatibleEmbedding(
+        embedding = OpenAICompatibleEmbedding(
             model_name=model_name,
             base_url=model_base_url,
             api_key=model_api_key,
             embedding_dim=0,
-            ssl_verify=ssl_verify
-        ).dimension_check()) > 0
+            ssl_verify=ssl_verify,
+        )
+        connectivity = len(await embedding.dimension_check(timeout=timeout_seconds if timeout_seconds else 5.0)) > 0
     elif model_type == "multi_embedding":
-        connectivity = len(await JinaEmbedding(
+        embedding = JinaEmbedding(
             model_name=model_name,
             base_url=model_base_url,
             api_key=model_api_key,
             embedding_dim=0,
-            ssl_verify=ssl_verify
-        ).dimension_check()) > 0
+            ssl_verify=ssl_verify,
+        )
+        connectivity = len(await embedding.dimension_check(timeout=timeout_seconds if timeout_seconds else 5.0)) > 0
     elif model_type == "llm":
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
@@ -115,7 +123,8 @@ async def _perform_connectivity_check(
             model_id=model_name,
             api_base=model_base_url,
             api_key=model_api_key,
-            ssl_verify=ssl_verify
+            ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
         ).check_connectivity()
     elif model_type == "rerank":
         rerank_model = OpenAICompatibleRerank(
@@ -192,14 +201,22 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         model_factory = model.get("model_factory")
         model_appid = model.get("model_appid")
         access_token = model.get("access_token")
+        timeout_seconds = model.get("timeout_seconds")
 
         try:
             set_monitoring_context(tenant_id=tenant_id)
 
+            ssl_verify_fallback = False
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
-                model_factory, model_appid, access_token,display_name=display_name,
+                model_factory, model_appid, access_token, display_name, timeout_seconds,
             )
+            if not connectivity and ssl_verify:
+                ssl_verify_fallback = True
+                connectivity = await _perform_connectivity_check(
+                    model_name, model_type, model_base_url, model_api_key, False,
+                    model_factory, model_appid, access_token, display_name, timeout_seconds,
+                )
         except Exception as e:
             update_data = {
                 "connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
@@ -215,6 +232,8 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
                 f"UNCONNECTED: {model_name}")
         connect_status = ModelConnectStatusEnum.AVAILABLE.value if connectivity else ModelConnectStatusEnum.UNAVAILABLE.value
         update_data = {"connect_status": connect_status}
+        if ssl_verify_fallback:
+            update_data["ssl_verify"] = False
         update_model_record(model["model_id"], update_data)
         return {
             "connectivity": connectivity,
@@ -245,16 +264,18 @@ async def verify_model_config_connectivity(model_config: dict):
         model_factory = model_config.get("model_factory")
         model_appid = model_config.get("model_appid")
         access_token = model_config.get("access_token")
+        # Get timeout from model config if present
+        timeout_seconds = model_config.get("timeout_seconds")
 
         try:
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
-                model_factory, model_appid, access_token
+                model_factory, model_appid, access_token, None, timeout_seconds,
             )
             if not connectivity and ssl_verify:
                 connectivity = await _perform_connectivity_check(
                     model_name, model_type, model_base_url, model_api_key, False,
-                    model_factory, model_appid, access_token
+                    model_factory, model_appid, access_token, None, timeout_seconds,
                 )
             if not connectivity:
                 error_msg = f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."
@@ -296,9 +317,17 @@ async def embedding_dimension_check(model_config: dict):
 
     try:
         ssl_verify = model_config.get("ssl_verify", True)
+        timeout_seconds = model_config.get("timeout_seconds")
         dimension = await _embedding_dimension_check(
-            model_name, model_type, model_base_url, model_api_key, ssl_verify
+            model_name, model_type, model_base_url, model_api_key, ssl_verify,
+            timeout_seconds=timeout_seconds
         )
+        # Fallback to ssl_verify=False if initial check fails
+        if dimension == 0 and ssl_verify:
+            dimension = await _embedding_dimension_check(
+                model_name, model_type, model_base_url, model_api_key, False,
+                timeout_seconds=timeout_seconds
+            )
         return dimension
     except ValueError as e:
         logger.error(f"Error checking embedding dimension: {str(e)}")

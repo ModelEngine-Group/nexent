@@ -52,6 +52,8 @@ export interface ModelOption {
   // STT specific fields
   modelAppid?: string;
   accessToken?: string;
+  timeoutSeconds?: number;
+  concurrencyLimit?: number;
 }
 
 // Application configuration interface

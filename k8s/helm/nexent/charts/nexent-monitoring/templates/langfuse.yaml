@@ -1,0 +1,342 @@
+{{- if and .Values.enabled (include "nexent-monitoring.langfuseEnabled" .) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-langfuse-postgres
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-langfuse-postgres
+  template:
+    metadata:
+      labels:
+        app: nexent-langfuse-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: "{{ .Values.images.postgres.repository }}:{{ .Values.images.postgres.tag }}"
+          imagePullPolicy: {{ .Values.images.postgres.pullPolicy }}
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.langfuse.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.langfuse.postgres.password | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.langfuse.postgres.database | quote }}
+            - name: TZ
+              value: UTC
+            - name: PGTZ
+              value: UTC
+          ports:
+            - containerPort: 5432
+              name: postgres
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: nexent-langfuse-postgres
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-langfuse-postgres
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-postgres
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+  selector:
+    app: nexent-langfuse-postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-langfuse-clickhouse
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-clickhouse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-langfuse-clickhouse
+  template:
+    metadata:
+      labels:
+        app: nexent-langfuse-clickhouse
+    spec:
+      securityContext:
+        runAsUser: 101
+        runAsGroup: 101
+      containers:
+        - name: clickhouse
+          image: "{{ .Values.images.clickhouse.repository }}:{{ .Values.images.clickhouse.tag }}"
+          imagePullPolicy: {{ .Values.images.clickhouse.pullPolicy }}
+          env:
+            - name: CLICKHOUSE_DB
+              value: default
+            - name: CLICKHOUSE_USER
+              value: {{ .Values.langfuse.clickhouse.user | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              value: {{ .Values.langfuse.clickhouse.password | quote }}
+          ports:
+            - containerPort: 8123
+              name: http
+            - containerPort: 9000
+              name: native
+          volumeMounts:
+            - name: clickhouse-data
+              mountPath: /var/lib/clickhouse
+      volumes:
+        - name: clickhouse-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: nexent-langfuse-clickhouse
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-langfuse-clickhouse
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-clickhouse
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8123
+      targetPort: 8123
+      name: http
+    - port: 9000
+      targetPort: 9000
+      name: native
+  selector:
+    app: nexent-langfuse-clickhouse
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-langfuse-minio
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-langfuse-minio
+  template:
+    metadata:
+      labels:
+        app: nexent-langfuse-minio
+    spec:
+      containers:
+        - name: minio
+          image: "{{ .Values.images.minio.repository }}:{{ .Values.images.minio.tag }}"
+          imagePullPolicy: {{ .Values.images.minio.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - mkdir -p /data/{{ .Values.langfuse.minio.bucket }} && minio server --address ":9000" --console-address ":9001" /data
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.langfuse.minio.rootUser | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ .Values.langfuse.minio.rootPassword | quote }}
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+      volumes:
+        - name: minio-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: nexent-langfuse-minio
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-langfuse-minio
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-minio
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: api
+    - port: 9001
+      targetPort: 9001
+      name: console
+  selector:
+    app: nexent-langfuse-minio
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-langfuse-redis
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-langfuse-redis
+  template:
+    metadata:
+      labels:
+        app: nexent-langfuse-redis
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.images.redis.repository }}:{{ .Values.images.redis.tag }}"
+          imagePullPolicy: {{ .Values.images.redis.pullPolicy }}
+          args:
+            - "--requirepass"
+            - {{ .Values.langfuse.redis.auth | quote }}
+            - "--maxmemory-policy"
+            - "noeviction"
+          ports:
+            - containerPort: 6379
+              name: redis
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: nexent-langfuse-redis
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-langfuse-redis
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-redis
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+  selector:
+    app: nexent-langfuse-redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-langfuse-web
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-langfuse-web
+  template:
+    metadata:
+      labels:
+        app: nexent-langfuse-web
+    spec:
+      containers:
+        - name: langfuse-web
+          image: "{{ .Values.images.langfuseWeb.repository }}:{{ .Values.images.langfuseWeb.tag }}"
+          imagePullPolicy: {{ .Values.images.langfuseWeb.pullPolicy }}
+          env:
+{{ include "nexent-monitoring.langfuseEnv" . | indent 12 }}
+            - name: LANGFUSE_INIT_ORG_ID
+              value: {{ .Values.langfuse.init.orgId | quote }}
+            - name: LANGFUSE_INIT_ORG_NAME
+              value: {{ .Values.langfuse.init.orgName | quote }}
+            - name: LANGFUSE_INIT_PROJECT_ID
+              value: {{ .Values.langfuse.init.projectId | quote }}
+            - name: LANGFUSE_INIT_PROJECT_NAME
+              value: {{ .Values.langfuse.init.projectName | quote }}
+            - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+              value: {{ .Values.langfuse.init.projectPublicKey | quote }}
+            - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+              value: {{ .Values.langfuse.init.projectSecretKey | quote }}
+            - name: LANGFUSE_INIT_USER_EMAIL
+              value: {{ .Values.langfuse.init.userEmail | quote }}
+            - name: LANGFUSE_INIT_USER_NAME
+              value: {{ .Values.langfuse.init.userName | quote }}
+            - name: LANGFUSE_INIT_USER_PASSWORD
+              value: {{ .Values.langfuse.init.userPassword | quote }}
+          ports:
+            - containerPort: 3000
+              name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-langfuse-web
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-web
+spec:
+  type: {{ .Values.langfuse.service.type }}
+  ports:
+    - port: {{ .Values.langfuse.service.port }}
+      targetPort: 3000
+      name: http
+      {{- if and (eq .Values.langfuse.service.type "NodePort") .Values.langfuse.service.nodePort }}
+      nodePort: {{ .Values.langfuse.service.nodePort }}
+      {{- end }}
+  selector:
+    app: nexent-langfuse-web
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-langfuse-worker
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-langfuse-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-langfuse-worker
+  template:
+    metadata:
+      labels:
+        app: nexent-langfuse-worker
+    spec:
+      containers:
+        - name: langfuse-worker
+          image: "{{ .Values.images.langfuseWorker.repository }}:{{ .Values.images.langfuseWorker.tag }}"
+          imagePullPolicy: {{ .Values.images.langfuseWorker.pullPolicy }}
+          env:
+{{ include "nexent-monitoring.langfuseEnv" . | indent 12 }}
+{{- end }}

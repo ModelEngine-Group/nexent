@@ -13,4 +13,4 @@ docker rm -f nexent-redis
 docker rm -f supabase-kong-mini
 docker rm -f supabase-auth-mini
 docker rm -f supabase-db-mini
-docker network rm nexent_nexent
+docker network rm nexent_network

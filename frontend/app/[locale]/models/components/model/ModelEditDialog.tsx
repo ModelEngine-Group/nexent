@@ -39,6 +39,8 @@ export const ModelEditDialog = ({
     url: "",
     apiKey: "",
     maxTokens: "4096",
+    timeoutSeconds: "120",
+    concurrencyLimit: "",
     vectorDimension: "1024",
     chunkSizeRange: [
       DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -65,6 +67,8 @@ export const ModelEditDialog = ({
         url: model.apiUrl || "",
         apiKey: model.apiKey || "",
         maxTokens: model.maxTokens?.toString() || "4096",
+        timeoutSeconds: model.timeoutSeconds?.toString() || "120",
+        concurrencyLimit: model.concurrencyLimit?.toString() || "",
         vectorDimension: model.maxTokens?.toString() || "1024",
         chunkSizeRange: [
           model.expectedChunkSize || DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -78,7 +82,7 @@ export const ModelEditDialog = ({
   const handleFormChange = (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     // If the key configuration item changes, clear the verification status
-    if (["url", "apiKey", "maxTokens", "vectorDimension"].includes(field)) {
+    if (["url", "apiKey", "maxTokens", "timeoutSeconds", "vectorDimension"].includes(field)) {
       setConnectivityStatus({ status: null, message: "" });
     }
   };
@@ -178,6 +182,8 @@ export const ModelEditDialog = ({
           expectedChunkSize: isEmbeddingModel ? form.chunkSizeRange[0] : undefined,
           maximumChunkSize: isEmbeddingModel ? form.chunkSizeRange[1] : undefined,
           chunkingBatchSize: isEmbeddingModel ? parseInt(form.chunkingBatchSize) || 10 : undefined,
+          timeoutSeconds: !isEmbeddingModel && !isRerankModel ? parseInt(form.timeoutSeconds) || 120 : undefined,
+          concurrencyLimit: !isEmbeddingModel && !isRerankModel ? (form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined) : undefined,
         });
       } else {
         await modelService.updateSingleModel({
@@ -196,6 +202,13 @@ export const ModelEditDialog = ({
                 expectedChunkSize: form.chunkSizeRange[0],
                 maximumChunkSize: form.chunkSizeRange[1],
                 chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
+              }
+            : {}),
+          // Send timeout for non-embedding models
+          ...(!isEmbeddingModel && !isRerankModel
+            ? {
+                timeoutSeconds: parseInt(form.timeoutSeconds) || 120,
+                concurrencyLimit: form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined,
               }
             : {}),
         });
@@ -310,6 +323,40 @@ export const ModelEditDialog = ({
           </div>
         )}
 
+        {/* Timeout Seconds */}
+        {!isEmbeddingModel && !isRerankModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.timeoutSeconds")}
+            </label>
+            <Input
+              type="number"
+              min="1"
+              value={form.timeoutSeconds}
+              onChange={(e) => handleFormChange("timeoutSeconds", e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* Concurrency Limit */}
+        {!isEmbeddingModel && !isRerankModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.concurrencyLimit")}
+            </label>
+            <Input
+              type="number"
+              min="1"
+              value={form.concurrencyLimit}
+              onChange={(e) => handleFormChange("concurrencyLimit", e.target.value)}
+              placeholder={t("model.dialog.placeholder.concurrencyLimit")}
+            />
+            <div className="text-xs text-gray-500 mt-1">
+              {t("model.dialog.hint.concurrencyLimit")}
+            </div>
+          </div>
+        )}
+
         {/* Chunk Size Range for embedding models */}
         {isEmbeddingModel && (
           <div>
@@ -412,28 +459,38 @@ interface ProviderConfigEditDialogProps {
   isOpen: boolean
   initialApiKey?: string
   initialMaxTokens?: string
+  initialTimeoutSeconds?: string
+  initialConcurrencyLimit?: string
   modelType?: ModelType
+  showApiKeyField?: boolean  // Whether to show API Key field (default: true)
   onClose: () => void
-  onSave: (config: { apiKey: string; maxTokens: number }) => Promise<void> | void
+  onSave: (config: { apiKey?: string; maxTokens: number; timeoutSeconds?: number; concurrencyLimit?: number }) => Promise<void> | void
 }
 
 export const ProviderConfigEditDialog = ({
   isOpen,
   initialApiKey = '',
   initialMaxTokens = '4096',
+  initialTimeoutSeconds = '120',
+  initialConcurrencyLimit = '',
   modelType,
+  showApiKeyField = true,
   onClose,
   onSave,
 }: ProviderConfigEditDialogProps) => {
   const { t } = useTranslation()
   const [apiKey, setApiKey] = useState<string>(initialApiKey)
   const [maxTokens, setMaxTokens] = useState<string>(initialMaxTokens)
+  const [timeoutSeconds, setTimeoutSeconds] = useState<string>(initialTimeoutSeconds)
+  const [concurrencyLimit, setConcurrencyLimit] = useState<string>(initialConcurrencyLimit)
   const [saving, setSaving] = useState<boolean>(false)
 
   useEffect(() => {
     setApiKey(initialApiKey)
     setMaxTokens(initialMaxTokens)
-  }, [initialApiKey, initialMaxTokens])
+    setTimeoutSeconds(initialTimeoutSeconds)
+    setConcurrencyLimit(initialConcurrencyLimit)
+  }, [initialApiKey, initialMaxTokens, initialTimeoutSeconds, initialConcurrencyLimit])
 
   const valid = () => {
     const parsed = parseInt(maxTokens)
@@ -444,7 +501,14 @@ export const ProviderConfigEditDialog = ({
     if (!valid()) return
     try {
       setSaving(true)
-      await onSave({ apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey, maxTokens: parseInt(maxTokens) })
+      const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
+      const isRerankModel = modelType === MODEL_TYPES.RERANK
+      await onSave({
+        ...(showApiKeyField ? { apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey } : {}),
+        maxTokens: parseInt(maxTokens),
+        ...(!isEmbeddingModel && !isRerankModel ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 } : {}),
+        ...(!isEmbeddingModel && !isRerankModel ? { concurrencyLimit: concurrencyLimit ? parseInt(concurrencyLimit) : undefined } : {}),
+      })
       onClose()
     } finally {
       setSaving(false)
@@ -452,6 +516,7 @@ export const ProviderConfigEditDialog = ({
   }
 
   const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
+  const isRerankModel = modelType === MODEL_TYPES.RERANK
 
   return (
     <Modal
@@ -462,18 +527,50 @@ export const ProviderConfigEditDialog = ({
       destroyOnHidden
     >
       <div className="space-y-4">
-        <div>
-          <label className="block mb-1 text-sm font-medium text-gray-700">
-            {t('model.dialog.label.apiKey')}
-          </label>
-          <Input.Password value={apiKey} onChange={(e) => setApiKey(e.target.value)} visibilityToggle={false} />
-        </div>
+        {showApiKeyField && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t('model.dialog.label.apiKey')}
+            </label>
+            <Input.Password value={apiKey} onChange={(e) => setApiKey(e.target.value)} visibilityToggle={false} />
+          </div>
+        )}
         {!isEmbeddingModel && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
               {t('model.dialog.label.maxTokens')}
             </label>
             <Input value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
+          </div>
+        )}
+        {!isEmbeddingModel && !isRerankModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.timeoutSeconds")}
+            </label>
+            <Input
+              type="number"
+              min="1"
+              value={timeoutSeconds}
+              onChange={(e) => setTimeoutSeconds(e.target.value)}
+            />
+          </div>
+        )}
+        {!isEmbeddingModel && !isRerankModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.concurrencyLimit")}
+            </label>
+            <Input
+              type="number"
+              min="1"
+              value={concurrencyLimit}
+              onChange={(e) => setConcurrencyLimit(e.target.value)}
+              placeholder={t("model.dialog.placeholder.concurrencyLimit")}
+            />
+            <div className="text-xs text-gray-500 mt-1">
+              {t("model.dialog.hint.concurrencyLimit")}
+            </div>
           </div>
         )}
         <div className="flex justify-end space-x-3">

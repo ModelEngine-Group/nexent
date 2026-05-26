@@ -22,6 +22,7 @@ The exception handler automatically maps legacy exception class names to ErrorCo
 
 from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
 from .error_message import ErrorMessage
+from typing import List
 
 
 # ==================== New Framework: AppException with ErrorCode ====================
@@ -115,6 +116,26 @@ class MCPConnectionError(Exception):
 class MCPNameIllegal(Exception):
     """Raised when MCP name is illegal."""
 
+    pass
+
+
+class McpNotFoundError(Exception):
+    """Raised when MCP resource is not found."""
+    pass
+
+
+class McpValidationError(Exception):
+    """Raised when MCP payload or runtime data is invalid."""
+    pass
+
+
+class McpNameConflictError(Exception):
+    """Raised when MCP name conflicts with an existing enabled service."""
+    pass
+
+
+class McpPortConflictError(Exception):
+    """Raised when an MCP container port conflicts with an existing service or runtime port."""
     pass
 
 
@@ -214,9 +235,14 @@ class DataMateConnectionError(Exception):
     pass
 
 
+class SkillDuplicateError(Exception):
+    """Raised when importing an agent with skills that have duplicate names in target tenant."""
+    def __init__(self, duplicate_names: List[str]):
+        self.duplicate_names = duplicate_names
+
+
 class SkillException(Exception):
     """Raised when skill operations fail."""
-
     pass
 
 

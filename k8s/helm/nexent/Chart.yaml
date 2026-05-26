@@ -64,3 +64,9 @@ dependencies:
   - name: nexent-openssh
     version: 0.1.0
     repository: "file://./charts/nexent-openssh"
+
+  # Optional OpenTelemetry monitoring stack
+  - name: nexent-monitoring
+    version: 0.1.0
+    repository: "file://./charts/nexent-monitoring"
+    condition: nexent-monitoring.enabled

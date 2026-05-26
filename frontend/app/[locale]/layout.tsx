@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import React, { ReactNode } from "react";
 import { RootProvider } from "@/components/providers/rootProvider";
 import { DeploymentProvider } from "@/components/providers/deploymentProvider";
@@ -13,8 +12,6 @@ import "github-markdown-css/github-markdown.css";
 import "katex/dist/katex.min.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
-
-const inter = Inter({ subsets: ["latin"] });
 
 export async function generateMetadata({
   params,
@@ -45,7 +42,7 @@ export default async function RootLayout({
 
   return (
     <html lang="zh" suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className="font-sans">
         <NextThemesProvider
           attribute="class"
           defaultTheme="light"

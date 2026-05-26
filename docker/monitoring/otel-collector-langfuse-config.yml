@@ -1,0 +1,69 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 512
+
+  memory_limiter:
+    limit_mib: 256
+    check_interval: 1s
+
+  resource:
+    attributes:
+      - key: service.name
+        value: nexent-backend
+        action: upsert
+      - key: service.version
+        from_attribute: version
+        action: insert
+
+exporters:
+  debug:
+    verbosity: normal
+
+  otlphttp/langfuse:
+    endpoint: http://langfuse-web:3000/api/public/otel
+    headers:
+      Authorization: ${env:LANGFUSE_OTLP_AUTH_HEADER}
+      x-langfuse-ingestion-version: "4"
+    # 1. 超时控制 (Timeout)
+    # 防止 Collector 等待太久导致协程暴涨
+    timeout: 5s
+
+    # 2. 发送队列 (Sending Queue)
+    # 当后端处理变慢时，把数据先缓存在 Collector 内存中
+    sending_queue:
+      enabled: true
+      num_consumers: 10         # 并发发送的工作线程数（可提升发送吞吐量）
+      queue_size: 5000          # 队列最大可容纳的批次数。如果队列满了，新来的数据将被丢弃！
+
+    # 3. 失败重试 (Retry on Failure)
+    # 遇到网络抖动或后端返回 503 等临时性错误时，进行指数退避重试
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s      # 第一次重试间隔 1s
+      max_interval: 30s         # 最大重试间隔不超过 30s
+      max_elapsed_time: 300s    # 一条数据最多重试 5 分钟，超过则彻底放弃并丢弃
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/langfuse, debug]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: "info"

@@ -1,16 +1,23 @@
 apiVersion: 1
 
 datasources:
-  - name: Prometheus
-    type: prometheus
+  - name: Tempo
+    uid: Tempo
+    type: tempo
     access: proxy
-    url: http://prometheus:9090
+    url: http://nexent-tempo:3200
     isDefault: true
     editable: true
-
-  - name: Jaeger
-    type: jaeger
-    access: proxy
-    url: http://jaeger:16686
-    editable: true
-
+    basicAuth: false
+    jsonData:
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      traceQuery:
+        timeShiftEnabled: true
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+      streamingEnabled:
+        search: false
+        metrics: false

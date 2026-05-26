@@ -1426,6 +1426,176 @@ class TestRedisService(unittest.TestCase):
         self.assertEqual((p, t), (0, 5))
         self.assertIsNone(self.redis_service._extract_error_metadata_from_exc_message("plain text"))
 
+    # ------------------------------------------------------------------
+    # Test batch_get_progress_info
+    # ------------------------------------------------------------------
+
+    def test_batch_get_progress_info_empty_list(self):
+        """Test batch_get_progress_info returns empty dict when task_ids is empty"""
+        result = self.redis_service.batch_get_progress_info([])
+        self.assertEqual(result, {})
+
+    def test_batch_get_progress_info_success(self):
+        """Test batch_get_progress_info successfully retrieves progress for multiple tasks"""
+        self.redis_service._client = self.mock_redis_client
+
+        # Mock pipeline
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.return_value = [
+            json.dumps({'processed_chunks': 50, 'total_chunks': 100}),
+            json.dumps({'processed_chunks': 25, 'total_chunks': 50}),
+        ]
+
+        result = self.redis_service.batch_get_progress_info(['task-1', 'task-2'])
+
+        self.assertEqual(result['task-1'], {'processed_chunks': 50, 'total_chunks': 100})
+        self.assertEqual(result['task-2'], {'processed_chunks': 25, 'total_chunks': 50})
+
+    def test_batch_get_progress_info_with_bytes_response(self):
+        """Test batch_get_progress_info handles bytes response from Redis"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.return_value = [
+            json.dumps({'processed_chunks': 75, 'total_chunks': 150}).encode('utf-8'),
+        ]
+
+        result = self.redis_service.batch_get_progress_info(['task-1'])
+
+        self.assertEqual(result['task-1'], {'processed_chunks': 75, 'total_chunks': 150})
+
+    def test_batch_get_progress_info_not_found(self):
+        """Test batch_get_progress_info returns None for missing keys"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.return_value = [None, None]
+
+        result = self.redis_service.batch_get_progress_info(['task-1', 'task-2'])
+
+        self.assertIsNone(result['task-1'])
+        self.assertIsNone(result['task-2'])
+
+    def test_batch_get_progress_info_partial_found(self):
+        """Test batch_get_progress_info handles mix of found and missing keys"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.return_value = [
+            json.dumps({'processed_chunks': 50, 'total_chunks': 100}),
+            None,
+        ]
+
+        result = self.redis_service.batch_get_progress_info(['task-1', 'task-2'])
+
+        self.assertEqual(result['task-1'], {'processed_chunks': 50, 'total_chunks': 100})
+        self.assertIsNone(result['task-2'])
+
+    def test_batch_get_progress_info_invalid_json(self):
+        """Test batch_get_progress_info handles invalid JSON gracefully"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.return_value = ['invalid json']
+
+        result = self.redis_service.batch_get_progress_info(['task-1'])
+
+        self.assertIsNone(result['task-1'])
+
+    def test_batch_get_progress_info_redis_error(self):
+        """Test batch_get_progress_info handles Redis errors gracefully"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.side_effect = redis.RedisError("Connection failed")
+
+        result = self.redis_service.batch_get_progress_info(['task-1', 'task-2'])
+
+        # Should return dict with None values for all task_ids
+        self.assertIsNone(result['task-1'])
+        self.assertIsNone(result['task-2'])
+
+    # ------------------------------------------------------------------
+    # Test batch_get_error_info
+    # ------------------------------------------------------------------
+
+    def test_batch_get_error_info_empty_list(self):
+        """Test batch_get_error_info returns empty dict when task_ids is empty"""
+        result = self.redis_service.batch_get_error_info([])
+        self.assertEqual(result, {})
+
+    def test_batch_get_error_info_success(self):
+        """Test batch_get_error_info successfully retrieves error reasons for multiple tasks"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.return_value = ['Error 1', 'Error 2']
+
+        result = self.redis_service.batch_get_error_info(['task-1', 'task-2'])
+
+        self.assertEqual(result['task-1'], 'Error 1')
+        self.assertEqual(result['task-2'], 'Error 2')
+
+    def test_batch_get_error_info_not_found(self):
+        """Test batch_get_error_info returns None for missing keys"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.return_value = [None, None]
+
+        result = self.redis_service.batch_get_error_info(['task-1', 'task-2'])
+
+        self.assertIsNone(result['task-1'])
+        self.assertIsNone(result['task-2'])
+
+    def test_batch_get_error_info_partial_found(self):
+        """Test batch_get_error_info handles mix of found and missing keys"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.return_value = ['Error reason', None]
+
+        result = self.redis_service.batch_get_error_info(['task-1', 'task-2'])
+
+        self.assertEqual(result['task-1'], 'Error reason')
+        self.assertIsNone(result['task-2'])
+
+    def test_batch_get_error_info_empty_string(self):
+        """Test batch_get_error_info returns None for empty string values"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.return_value = ['', 'Actual error']
+
+        result = self.redis_service.batch_get_error_info(['task-1', 'task-2'])
+
+        self.assertIsNone(result['task-1'])
+        self.assertEqual(result['task-2'], 'Actual error')
+
+    def test_batch_get_error_info_redis_error(self):
+        """Test batch_get_error_info handles Redis errors gracefully"""
+        self.redis_service._client = self.mock_redis_client
+
+        mock_pipe = MagicMock()
+        self.mock_redis_client.pipeline.return_value = mock_pipe
+        mock_pipe.execute.side_effect = redis.RedisError("Connection failed")
+
+        result = self.redis_service.batch_get_error_info(['task-1', 'task-2'])
+
+        # Should return dict with None values for all task_ids
+        self.assertIsNone(result['task-1'])
+        self.assertIsNone(result['task-2'])
+
 
 if __name__ == '__main__':
     unittest.main()

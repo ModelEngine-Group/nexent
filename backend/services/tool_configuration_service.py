@@ -130,11 +130,15 @@ def get_local_tools() -> List[ToolInfo]:
                 if hasattr(param.default, 'exclude') and param.default.exclude:
                     continue
 
+            # Check if default is a Pydantic FieldInfo (has .default attribute)
+            is_pydantic_field = hasattr(param.default, 'default')
+
             # Get description in both languages
-            param_description = param.default.description if hasattr(param.default, 'description') else ""
+            param_description = param.default.description if is_pydantic_field else ""
 
             # First try to get from param.default.description_zh (FieldInfo)
-            param_description_zh = param.default.description_zh if hasattr(param.default, 'description_zh') else None
+            # Note: Pydantic Field doesn't have description_zh attribute, so use getattr with default
+            param_description_zh = getattr(param.default, 'description_zh', None) if is_pydantic_field else None
 
             # Fallback to init_param_descriptions if not found
             if param_description_zh is None and param_name in init_param_descriptions:
@@ -146,11 +150,21 @@ def get_local_tools() -> List[ToolInfo]:
                 "description": param_description,
                 "description_zh": param_description_zh
             }
-            if param.default.default is PydanticUndefined:
-                param_info["optional"] = False
+
+            # Handle both Pydantic FieldInfo and simple defaults
+            if is_pydantic_field:
+                if param.default.default is PydanticUndefined:
+                    param_info["optional"] = False
+                else:
+                    param_info["default"] = param.default.default
+                    param_info["optional"] = True
             else:
-                param_info["default"] = param.default.default
-                param_info["optional"] = True
+                # Simple default value (not a FieldInfo)
+                if param.default == inspect.Parameter.empty:
+                    param_info["optional"] = False
+                else:
+                    param_info["default"] = param.default
+                    param_info["optional"] = True
 
             init_params_list.append(param_info)
 
@@ -262,8 +276,8 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
     mcp_info = get_mcp_records_by_tenant(tenant_id=tenant_id)
     tools_info = []
     for record in mcp_info:
-        # only update connected server
-        if record["status"]:
+        # Only scan MCP services that are explicitly enabled and currently healthy.
+        if bool(record.get("enabled")) and bool(record.get("status")):
             try:
                 tools_info.extend(await get_tool_from_remote_mcp_server(
                     mcp_server_name=record["mcp_name"],

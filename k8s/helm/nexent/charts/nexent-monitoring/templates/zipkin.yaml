@@ -1,0 +1,45 @@
+{{- if and .Values.enabled (include "nexent-monitoring.zipkinEnabled" .) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-zipkin
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-zipkin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexent-zipkin
+  template:
+    metadata:
+      labels:
+        app: nexent-zipkin
+    spec:
+      containers:
+        - name: zipkin
+          image: "{{ .Values.images.zipkin.repository }}:{{ .Values.images.zipkin.tag }}"
+          imagePullPolicy: {{ .Values.images.zipkin.pullPolicy }}
+          ports:
+            - containerPort: 9411
+              name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-zipkin
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-zipkin
+spec:
+  type: {{ .Values.zipkin.service.type }}
+  ports:
+    - port: {{ .Values.zipkin.service.port }}
+      targetPort: 9411
+      name: http
+      {{- if and (eq .Values.zipkin.service.type "NodePort") .Values.zipkin.service.nodePort }}
+      nodePort: {{ .Values.zipkin.service.nodePort }}
+      {{- end }}
+  selector:
+    app: nexent-zipkin
+{{- end }}

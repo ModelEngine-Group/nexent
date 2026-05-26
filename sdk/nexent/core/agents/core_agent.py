@@ -17,6 +17,8 @@ from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
 from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content, AgentMaxStepsError, \
     extract_code_from_text
 
+from ...monitor import get_monitoring_manager
+
 from ..utils.observer import MessageObserver, ProcessType
 from jinja2 import Template, StrictUndefined
 
@@ -28,10 +30,14 @@ from .agent_context import ContextManager
 from ..utils.token_estimation import msg_token_count
 
 def parse_code_blobs(text: str) -> str:
-    """Extract code blocs from the LLM's output for execution.
+    """Extract code blocks from the LLM's output for execution.
 
-    This function is used to parse code that needs to be executed, so it only handles
-    <code> format and legacy python formats.
+    This function handles only two formats:
+    - <code>...</code>: primary execution format
+    - ```<RUN>...</RUN>```: legacy format for backward compatibility
+
+    Note: ```python / ```py blocks are intentionally NOT extracted here to prevent
+    KB content containing code examples from being accidentally executed.
 
     Args:
         text (`str`): LLM's output text to parse.
@@ -83,42 +89,6 @@ def parse_code_blobs(text: str) -> str:
 
     if run_matches:
         return "\n\n".join(match.strip() for match in run_matches)
-
-    # Fallback to original patterns: py|python (for execution)
-    # Use string operations to prevent backtracking
-    py_matches = []
-    search_pos = 0
-    while True:
-        # Find ```py or ```python
-        start = text.find("```py", search_pos)
-        if start == -1:
-            start = text.find("```python", search_pos)
-        if start == -1:
-            break
-        # Skip the opening backticks and optional language specifier
-        if text[start:start + len("```python")] == "```python":
-            content_start = start + len("```python")
-        else:
-            content_start = start + len("```py")
-        # Skip optional newline after opening fence
-        if content_start < len(text) and text[content_start] == "\n":
-            content_start += 1
-        # Find the closing ```
-        end = text.find("```", content_start)
-        if end == -1:
-            break
-        py_matches.append(text[content_start:end])
-        search_pos = end + len("```")
-
-    if py_matches:
-        return "\n\n".join(match.strip() for match in py_matches)
-
-    # Maybe the LLM outputted a code blob directly
-    try:
-        ast.parse(text)
-        return text
-    except SyntaxError:
-        pass
 
     raise ValueError(
         dedent(
@@ -250,6 +220,11 @@ class CoreAgent(CodeAgent):
         self.context_manager: ContextManager = None
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
+        # Override smolagent default to prevent extracting ```python blocks from KB content.
+        # code_block_tags[0] and [1] are used by the system prompt template for opening/closing
+        # tags (e.g., ``` and ```). extract_code_from_text iterates all tags as language
+        # identifiers; omitting "python" and "py" ensures ```python blocks are not extracted.
+        self.code_block_tags = ["", ""]
 
     def _log_model_call_parameters(self, input_messages: List[ChatMessage], stop_sequences: List[str], additional_args: Dict[str, Any]) -> None:
         """
@@ -390,7 +365,25 @@ Additional Args:
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
         try:
-            code_output = self.python_executor(code_action)
+            monitoring_manager = get_monitoring_manager()
+            with monitoring_manager.trace_tool_call(
+                "python_interpreter",
+                self.name,
+                {"code": code_action, "step_number": memory_step.step_number},
+            ):
+                code_output = self.python_executor(code_action)
+                monitoring_manager.set_tool_output({
+                    "output": getattr(code_output, "output", None),
+                    "is_final_answer": getattr(code_output, "is_final_answer", False),
+                    "logs": getattr(code_output, "logs", ""),
+                })
+            if getattr(code_output, "is_final_answer", False):
+                with monitoring_manager.trace_tool_call(
+                    "FinalAnswerTool",
+                    self.name,
+                    {"step_number": memory_step.step_number},
+                ):
+                    monitoring_manager.set_tool_output(code_output.output)
             execution_outputs_console = []
             if len(code_output.logs) > 0:
                 # Record execution results
@@ -701,6 +694,15 @@ You have been provided with these additional arguments, that you can access usin
             metric["compression_ratio"] = 0.0
 
         self.step_metrics.append(metric)
+        token_threshold = (
+            self.context_manager.config.token_threshold
+            if self.context_manager and self.context_manager.config.enabled
+            else None
+        )
+        get_monitoring_manager().record_agent_step_metrics(
+            metric,
+            token_threshold=token_threshold,
+        )
 
     def _handle_max_steps_reached(self, task: str) -> Any:
         """Handle the case when max steps is reached by generating final answer with streaming.
@@ -773,4 +775,3 @@ You have been provided with these additional arguments, that you can access usin
         self.memory.steps.append(final_memory_step)
 
         return model_output
-

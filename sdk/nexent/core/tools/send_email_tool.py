@@ -44,6 +44,12 @@ class SendEmailTool(Tool):
             "description": "BCC email address, multiple BCCs separated by commas, optional",
             "description_zh": "密送邮箱地址，多个密送用逗号分隔，可选",
             "nullable": True
+        },
+        "sender_email": {
+            "type": "string",
+            "description": "Actual sender email address (From address), optional - defaults to username",
+            "description_zh": "实际发件人邮箱地址（From字段），可选，默认为username",
+            "nullable": True
         }
     }
 
@@ -65,8 +71,12 @@ class SendEmailTool(Tool):
             "description_zh": "SMTP 服务器密码"
         },
         "use_ssl": {
-            "description": "Use SSL",
-            "description_zh": "使用 SSL"
+            "description": "Use SSL/TLS encryption (set to False for plain text)",
+            "description_zh": "使用 SSL/TLS 加密（设为 False 使用明文）"
+        },
+        "sender_email": {
+            "description": "Actual sender email address (From address), defaults to username",
+            "description_zh": "实际发件人邮箱地址，默认为 username"
         },
         "sender_name": {
             "description": "Sender name",
@@ -80,28 +90,48 @@ class SendEmailTool(Tool):
     output_type = "string"
     category = ToolCategory.EMAIL.value
 
-    def __init__(self, smtp_server: str=Field(description="SMTP Server Address"),
-                 smtp_port: int=Field(description="SMTP server port"), 
-                 username: str=Field(description="SMTP server username"), 
-                 password: str=Field(description="SMTP server password"), 
-                 use_ssl: bool=Field(description="Use SSL", default=True),
-                 sender_name: Optional[str] = Field(description="Sender name", default=None),
-                 timeout: int = Field(description="Timeout", default=30)):
+    def __init__(self, smtp_server: str = "",
+                 smtp_port: int = 587,
+                 username: str = "",
+                 password: str = "",
+                 use_ssl: bool = True,
+                 sender_email: Optional[str] = None,
+                 sender_name: Optional[str] = None,
+                 timeout: int = 30):
         super().__init__()
         self.smtp_server = smtp_server
         self.smtp_port = smtp_port
         self.username = username
         self.password = password
         self.use_ssl = use_ssl
+        self.sender_email = sender_email or username
         self.sender_name = sender_name
         self.timeout = timeout
 
-    def forward(self, to: str, subject: str, content: str, cc: str = "", bcc: str = "") -> str:
+    def _create_ssl_context(self, skip_verify: bool = False) -> ssl.SSLContext:
+        """Create SSL context with optional verification disabled for self-signed certs."""
+        context = ssl.create_default_context()
+        if skip_verify:
+            logger.warning("SSL verification disabled - use only for internal/local SMTP servers")
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        else:
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+        return context
+
+    def forward(self, to: str, subject: str, content: str, cc: str = "", bcc: str = "",
+                sender_email: Optional[str] = None) -> str:
         try:
             logger.info("Creating email message...")
-            # Create email object
             msg = MIMEMultipart()
-            msg['From'] = f"{self.sender_name} <{self.username}>" if self.sender_name else self.username
+
+            sender = sender_email or self.sender_email
+            if self.sender_name:
+                msg['From'] = f"{self.sender_name} <{sender}>"
+            else:
+                msg['From'] = sender
+
             msg['To'] = to
             msg['Subject'] = subject
 
@@ -115,14 +145,30 @@ class SendEmailTool(Tool):
 
             logger.info(f"Connecting to SMTP server {self.smtp_server}:{self.smtp_port}...")
 
-            # Create SSL context
-            context = ssl.create_default_context()
-            context.check_hostname = True
-            context.verify_mode = ssl.CERT_REQUIRED
-
-            # Connect to SMTP server using SSL
-            logger.info("Using SSL connection...")
-            server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=self.timeout)
+            # Connect to SMTP server
+            if self.smtp_port == 465:
+                # Port 465 uses implicit SSL
+                logger.info("Using implicit SSL connection (port 465)...")
+                context = self._create_ssl_context(skip_verify=True)
+                server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=self.timeout)
+            elif self.use_ssl:
+                # Port 587 (and others) use STARTTLS
+                logger.info("Using STARTTLS connection...")
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=self.timeout)
+                server.starttls(context=self._create_ssl_context(skip_verify=True))
+            else:
+                # Port 25 - plain connection (may have self-signed certs)
+                logger.info("Using plain text connection (port 25)...")
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=self.timeout)
+                # Some servers force TLS handshake even on plain connections
+                # Skip cert verification for port 25 to handle self-signed certs
+                try:
+                    server.starttls(context=self._create_ssl_context(skip_verify=True))
+                    logger.info("Server upgraded to TLS connection")
+                except smtplib.SMTPNotSupportedError:
+                    logger.info("Server does not support STARTTLS, using plain connection")
+                except Exception as tls_err:
+                    logger.warning(f"TLS upgrade failed: {tls_err}, continuing with plain connection")
 
             logger.info("Logging in...")
             # Login

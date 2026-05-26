@@ -9,6 +9,8 @@ Local tools let agents interact with the workspace, remote hosts, and external s
 - [Search Tools](./search-tools): Local/DataMate KB search plus Exa/Tavily/Linkup web search.
 - [Multimodal Tools](./multimodal-tools): Download/parse/analyze text files and images.
 - [Terminal Tool](./terminal-tool): Persistent SSH sessions for remote commands.
+- [SQL Tools](./sql-tools): Connect to MySQL, PostgreSQL, SQL Server to execute SQL queries.
+- [Skills](../skills): Nexent's built-in tool combinations or custom capability packs with NL generation and version management.
 
 ## ⚙️ Configuration Entry
 

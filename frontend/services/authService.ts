@@ -22,6 +22,8 @@ import {
   checkSessionValid,
 } from "@/lib/session";
 import log from "@/lib/logger";
+import { ErrorCode } from "@/const/errorCode";
+import { getI18nErrorMessage } from "@/const/errorMessageI18n";
 
 
 export const authService = {
@@ -329,5 +331,52 @@ export const authService = {
 
     const newSession = await sessionService.refreshToken();
     return newSession !== null;
+  },
+
+  updatePassword: async (
+    oldPassword: string,
+    newPassword: string
+  ): Promise<{ error: string | null; errorCode?: string }> => {
+    try {
+      await fetchWithAuth(API_ENDPOINTS.user.updatePassword, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          old_password: oldPassword,
+          new_password: newPassword,
+        }),
+      });
+      return { error: null };
+    } catch (error: any) {
+      log.error("Update password failed:", error);
+
+      const errorCode = error?.code;
+
+      if (errorCode === ErrorCode.INVALID_CREDENTIALS) {
+        return {
+          errorCode: ErrorCode.INVALID_CREDENTIALS,
+          error: error?.message || getI18nErrorMessage(ErrorCode.INVALID_CREDENTIALS),
+        };
+      }
+      if (errorCode === ErrorCode.PASSWORD_WEAK) {
+        return {
+          errorCode: ErrorCode.PASSWORD_WEAK,
+          error: error?.message || getI18nErrorMessage(ErrorCode.PASSWORD_WEAK),
+        };
+      }
+      if (errorCode === ErrorCode.PASSWORD_SAME_AS_OLD) {
+        return {
+          errorCode: ErrorCode.PASSWORD_SAME_AS_OLD,
+          error: error?.message || getI18nErrorMessage(ErrorCode.PASSWORD_SAME_AS_OLD),
+        };
+      }
+
+      return {
+        errorCode: ErrorCode.USER_UPDATE_FAILED,
+        error: getI18nErrorMessage(ErrorCode.USER_UPDATE_FAILED),
+      };
+    }
   },
 };
