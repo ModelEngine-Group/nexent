@@ -1666,7 +1666,6 @@ class TestBuildModelConfig:
         # Test with None
         result = build_model_config(None)
         assert result == {
-            "id": None,
             "name": "",
             "displayName": "",
             "apiConfig": {
@@ -1678,7 +1677,6 @@ class TestBuildModelConfig:
         # Test with empty dict
         result = build_model_config({})
         assert result == {
-            "id": None,
             "name": "",
             "displayName": "",
             "apiConfig": {

@@ -4806,8 +4806,7 @@ class TestUpdateSkillListAsync:
 class TestInitSkillListForTenantAsync:
     """Test async init_skill_list_for_tenant function."""
 
-    @pytest.mark.asyncio
-    async def test_init_skill_list_for_tenant(self, mocker):
+    def test_init_skill_list_for_tenant(self, mocker):
         """Test init_skill_list_for_tenant calls update_skill_list."""
         from backend.services import skill_service
 
@@ -4816,10 +4815,14 @@ class TestInitSkillListForTenantAsync:
             return_value=None
         )
 
-        result = await skill_service.init_skill_list_for_tenant(
-            tenant_id="new-tenant",
-            user_id="new-user"
-        )
+        async def run_test():
+            return await skill_service.init_skill_list_for_tenant(
+                tenant_id="new-tenant",
+                user_id="new-user"
+            )
+
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(run_test())
 
         assert result["status"] == "success"
         mock_update.assert_called_once_with(
