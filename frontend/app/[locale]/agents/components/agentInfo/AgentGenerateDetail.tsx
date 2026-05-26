@@ -173,31 +173,15 @@ export default function AgentGenerateDetail({}) {
       promptTemplateId: editedAgent.prompt_template_id,
       promptTemplateName: editedAgent.prompt_template_name || "system_default",
     };
-
-    if (isCreatingMode) {
-      initialAgentInfo.group_ids = accessibleGroupIds;
-      initialAgentInfo.mainAgentModel = defaultLlmModel?.displayName;
-      initialAgentInfo.mainAgentModelId = defaultLlmModel?.id;
-      initialAgentInfo.businessLogicModelId = defaultLlmModel?.id;
-      initialAgentInfo.businessLogicModelName = defaultLlmModel?.displayName;
-    }
     form.setFieldsValue(initialAgentInfo);
 
   }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
-    const modelName = form.getFieldValue("businessLogicModelName") || editedAgent.business_logic_model_name || "";
-    const modelId = form.getFieldValue("businessLogicModelId") || editedAgent.business_logic_model_id || 0;
-    const templateId = form.getFieldValue("promptTemplateId") || editedAgent.prompt_template_id || 0;
-    const templateName = form.getFieldValue("promptTemplateName") || editedAgent.prompt_template_name || "system_default";
 
     updateAgentConfig({
       business_description: value,
-      business_logic_model_id: modelId,
-      business_logic_model_name: modelName,
-      prompt_template_id: templateId,
-      prompt_template_name: templateName,
     });
   };
 
@@ -206,16 +190,10 @@ export default function AgentGenerateDetail({}) {
     const selectedModel = availableLlmModels.find(
       (m) => m.name === modelName || m.displayName === modelName
     );
-    const businessDescription = form.getFieldValue("businessDescription") || editedAgent.business_description || "";
-    const templateId = form.getFieldValue("promptTemplateId") || editedAgent.prompt_template_id || 0;
-    const templateName = form.getFieldValue("promptTemplateName") || editedAgent.prompt_template_name || "system_default";
 
     updateAgentConfig({
-      business_description: businessDescription,
-      business_logic_model_id: selectedModel?.id || 0,
-      business_logic_model_name: modelName,
-      prompt_template_id: templateId,
-      prompt_template_name: templateName,
+      business_logic_model_id: selectedModel?.id,
+      business_logic_model_name: modelName
     });
   };
 
@@ -230,14 +208,8 @@ export default function AgentGenerateDetail({}) {
   };
 
   const handleSelectPromptTemplate = (template: PromptTemplate) => {
-    const businessDescription = form.getFieldValue("businessDescription") || editedAgent.business_description || "";
-    const modelName = form.getFieldValue("businessLogicModelName") || editedAgent.business_logic_model_name || "";
-    const modelId = form.getFieldValue("businessLogicModelId") || editedAgent.business_logic_model_id || 0;
 
     updateAgentConfig({
-      business_description: businessDescription,
-      business_logic_model_id: modelId,
-      business_logic_model_name: modelName,
       prompt_template_id: template.template_id,
       prompt_template_name: template.template_name,
     });

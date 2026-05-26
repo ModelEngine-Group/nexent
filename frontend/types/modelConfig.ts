@@ -88,6 +88,7 @@ export interface TTSModelConfig extends SingleModelConfig {
 
 // Single model configuration interface
 export interface SingleModelConfig {
+  id: number;
   modelName: string;
   displayName: string;
   apiConfig: ModelApiConfig;

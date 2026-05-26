@@ -35,6 +35,7 @@ const defaultConfig: GlobalConfig = {
   },
   models: {
     llm: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -43,6 +44,7 @@ const defaultConfig: GlobalConfig = {
       },
     },
     embedding: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -52,6 +54,7 @@ const defaultConfig: GlobalConfig = {
       dimension: 0,
     },
     multiEmbedding: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -61,6 +64,7 @@ const defaultConfig: GlobalConfig = {
       dimension: 0,
     },
     rerank: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -69,6 +73,7 @@ const defaultConfig: GlobalConfig = {
       },
     },
     vlm: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -77,6 +82,7 @@ const defaultConfig: GlobalConfig = {
       },
     },
     stt: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -88,6 +94,7 @@ const defaultConfig: GlobalConfig = {
       accessToken: "",
     },
     tts: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -103,6 +110,7 @@ function transformModelEntry(
   withDimension = false
 ): SingleModelConfig {
   return {
+    id: raw?.id ?? 0,
     modelName: raw?.name || "",
     displayName: raw?.displayName || "",
     apiConfig: {
@@ -118,6 +126,7 @@ function transformModelEntry(
  */
 function transformVoiceModelEntry(raw: Record<string, any> | undefined): STTModelConfig {
   return {
+    id: raw?.id ?? 0,
     modelName: raw?.name || "",
     displayName: raw?.displayName || "",
     apiConfig: {

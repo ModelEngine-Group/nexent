@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
+import { useConfig } from "@/hooks/useConfig";
 import { motion } from "framer-motion";
 import AgentConfigComp from "./components/AgentConfigComp";
 import AgentInfoComp from "./components/AgentInfoComp";
@@ -19,6 +20,19 @@ export default function AgentSetupOrchestrator() {
   const searchParams = useSearchParams();
   const enterCreateMode = useAgentConfigStore((state) => state.enterCreateMode);
   const reset = useAgentConfigStore((state) => state.reset);
+  const setDefaultLlmConfig = useAgentConfigStore((state) => state.setDefaultLlmConfig);
+  const { config } = useConfig();
+
+  // Sync default LLM config from load_config
+  useEffect(() => {
+    if (config?.models?.llm) {
+      setDefaultLlmConfig({
+        id: config.models.llm.id || 0,
+        name: config.models.llm.modelName || "",
+        displayName: config.models.llm.displayName || "",
+      });
+    }
+  }, [config, setDefaultLlmConfig]);
 
   // Local UI state for version panel
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] = useState(false);

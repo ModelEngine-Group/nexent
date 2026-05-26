@@ -48,22 +48,14 @@ export type EditableAgent = Pick<
 
 interface AgentConfigStoreState {
   currentAgentId: number | null;
-  /**
-   * Per-agent permission from /agent/list.
-   * - EDIT: editable
-   * - READ_ONLY: read-only
-   * null: unknown / not selected
-   */
   currentAgentPermission: "EDIT" | "READ_ONLY" | null;
   baselineAgent: EditableAgent | null;
   editedAgent: EditableAgent;
   hasUnsavedChanges: boolean;
   isCreatingMode: boolean; // true when user is in create mode, even if currentAgentId is null
   isGenerating: boolean; // true when agent generation is in progress
-  /**
-   * Incremented counter to signal downstream UI to force-refresh.
-   * Components that depend on this key will re-initialize when it changes.
-   */
+  defaultLlmConfig: { id: number | null; name: string; displayName: string } | null;
+
   forceRefreshKey: number;
 
   /**
@@ -139,35 +131,49 @@ interface AgentConfigStoreState {
   reset: () => void;
 
   /**
+   * Set the default LLM config from load_config interface.
+   * Updates the emptyEditableAgent defaults for model fields.
+   */
+  setDefaultLlmConfig: (config: { id: number | null; name: string; displayName: string } | null) => void;
+
+  /**
    * Get the current baseline editable agent (null = create or initial state).
    * Use isCreatingMode to distinguish between initial state and create mode.
    */
   getCurrentAgent: () => EditableAgent | null;
 }
 
-const emptyEditableAgent: EditableAgent = {
-  name: "",
-  display_name: "",
-  description: "",
-  author: "",
-  model: "",
-  model_id: 0,
-  max_step: 0,
-  provide_run_summary: false,
-  tools: [],
-  skills: [],
-  duty_prompt: "",
-  constraint_prompt: "",
-  few_shots_prompt: "",
-  business_description: "",
-  business_logic_model_name: "",
-  business_logic_model_id: 0,
-  prompt_template_id: 0,
-  prompt_template_name: "system_default",
-  sub_agent_id_list: [],
-  group_ids: [],
-  ingroup_permission: "READ_ONLY",
-};
+/**
+ * Factory function to create an empty editable agent.
+ * Initializes model fields from the default LLM config when available.
+ */
+function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string; displayName: string }): EditableAgent {
+  return {
+    name: "",
+    display_name: "",
+    description: "",
+    author: "",
+    model: llmConfig?.name || "",
+    model_id: llmConfig?.id || 0,
+    max_step: 5,
+    provide_run_summary: false,
+    tools: [],
+    skills: [],
+    duty_prompt: "",
+    constraint_prompt: "",
+    few_shots_prompt: "",
+    business_description: "",
+    business_logic_model_name: llmConfig?.name || "",
+    business_logic_model_id: llmConfig?.id || 0,
+    prompt_template_id: 0,
+    prompt_template_name: "system_default",
+    sub_agent_id_list: [],
+    group_ids: [],
+    ingroup_permission: "READ_ONLY",
+  };
+}
+
+const emptyEditableAgent: EditableAgent = createEmptyEditableAgent();
 
 const toEditable = (agent: Agent | null): EditableAgent =>
   agent
@@ -346,10 +352,11 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   currentAgentId: null,
   currentAgentPermission: null,
   baselineAgent: null,
-  editedAgent: { ...emptyEditableAgent },
+  editedAgent: createEmptyEditableAgent(),
   hasUnsavedChanges: false,
   isCreatingMode: false,
   isGenerating: false,
+  defaultLlmConfig: null,
   forceRefreshKey: 0,
 
   isReadOnly: () => {
@@ -361,7 +368,8 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   setCurrentAgent: (agent) => {
     const agentId = agent ? parseInt(agent.id) : null;
     const baselineAgent = agent ? toEditable(agent) : null;
-    let editedAgent = baselineAgent ? { ...baselineAgent } : { ...emptyEditableAgent };
+    const { defaultLlmConfig } = get();
+    let editedAgent = baselineAgent ? { ...baselineAgent } : createEmptyEditableAgent(defaultLlmConfig ?? undefined);
 
     // Check if there's a pending generation cache to restore
     if (agentId !== null && baselineAgent) {
@@ -394,11 +402,12 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   },
 
   enterCreateMode: () => {
+    const { defaultLlmConfig } = get();
     set({
       currentAgentId: null,
       currentAgentPermission: "EDIT",
       baselineAgent: null,
-      editedAgent: { ...emptyEditableAgent },
+      editedAgent: createEmptyEditableAgent(defaultLlmConfig ?? undefined),
       hasUnsavedChanges: false,
       isCreatingMode: true,
       forceRefreshKey: 0,
@@ -461,7 +470,8 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   discardChanges: () => {
     set((state) => {
       const baselineAgent = state.baselineAgent;
-      const editedAgent = baselineAgent ? { ...baselineAgent } : { ...emptyEditableAgent };
+      const { defaultLlmConfig } = state;
+      const editedAgent = baselineAgent ? { ...baselineAgent } : createEmptyEditableAgent(defaultLlmConfig ?? undefined);
       return {
         editedAgent,
         hasUnsavedChanges: false,
@@ -474,16 +484,21 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   },
 
   reset: () => {
+    const { defaultLlmConfig } = get();
     set({
       currentAgentId: null,
       currentAgentPermission: null,
       baselineAgent: null,
-      editedAgent: { ...emptyEditableAgent },
+      editedAgent: createEmptyEditableAgent(defaultLlmConfig ?? undefined),
       hasUnsavedChanges: false,
       isCreatingMode: false,
       isGenerating: false,
       forceRefreshKey: 0,
     });
+  },
+
+  setDefaultLlmConfig: (config) => {
+    set({ defaultLlmConfig: config });
   },
 
   getCurrentAgent: () => {
