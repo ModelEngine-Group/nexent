@@ -177,6 +177,16 @@ class STTModelConfig(BaseModel):
     accessToken: Optional[str] = None
 
 
+class TTSModelConfig(BaseModel):
+    """TTS model specific configuration with factory, appid, and access token fields"""
+    modelName: str
+    displayName: str
+    apiConfig: Optional[ModelApiConfig] = None
+    modelFactory: Optional[str] = None
+    modelAppid: Optional[str] = None
+    accessToken: Optional[str] = None
+
+
 class ModelConfig(BaseModel):
     llm: SingleModelConfig
     embedding: SingleModelConfig
@@ -184,6 +194,7 @@ class ModelConfig(BaseModel):
     rerank: SingleModelConfig
     vlm: SingleModelConfig
     stt: STTModelConfig
+    tts: TTSModelConfig
 
 
 class AppConfig(BaseModel):
@@ -337,6 +348,8 @@ class GeneratePromptRequest(BaseModel):
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
     knowledge_base_display_names: Optional[List[str]] = Field(
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+    has_selected_resources: bool = Field(
+        True, description="Whether tools or sub-agents are selected; when False, skips generating constraint and few_shots sections")
 
 
 class PromptTemplateContentRequest(BaseModel):
@@ -456,6 +469,7 @@ class SkillInstanceInfoRequest(BaseModel):
     agent_id: int
     enabled: bool = True
     version_no: int = 0
+    config_values: Optional[Dict[str, Any]] = None
 
 
 class ToolInstanceSearchRequest(BaseModel):
@@ -513,6 +527,7 @@ class ExportAndImportAgentInfo(BaseModel):
     model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
     business_logic_model_name: Optional[str] = None
+    skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
 
@@ -531,9 +546,16 @@ class ExportAndImportDataFormat(BaseModel):
     mcp_info: List[MCPInfo]
 
 
+class SkillZipEntry(BaseModel):
+    """A skill bundled inside an agent export ZIP."""
+    skill_name: str
+    skill_zip_base64: str
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
+    skills: Optional[List[SkillZipEntry]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):
@@ -588,7 +610,7 @@ class MemoryAgentShareMode(str, Enum):
 class VoiceConnectivityRequest(BaseModel):
     """Request model for voice service connectivity check"""
     model_type: str = Field(...,
-                            description="Type of model to check ('stt')")
+                            description="Type of model to check ('stt' or 'tts')")
 
 
 class VoiceConnectivityResponse(BaseModel):
@@ -656,6 +678,22 @@ class TenantCreateRequest(BaseModel):
     """Request model for creating a tenant"""
     tenant_name: str = Field(..., min_length=1,
                              description="Tenant display name")
+    skill_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Skill IDs to install for the new tenant (legacy, use skill_names instead)"
+    )
+    skill_names: Optional[List[str]] = Field(
+        default=None,
+        description="Skill names to install for the new tenant. "
+                    "Each name is used to derive a .zip filename from "
+                    "OFFICIAL_SKILLS_ZIP_PATH and installed via upload."
+    )
+    locale: Optional[str] = Field(
+        default=None,
+        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en'). "
+                    "Determines the source label for auto-installed skills: "
+                    "'zh' → '官方', other locales → 'official'."
+    )
 
 
 class TenantUpdateRequest(BaseModel):
@@ -994,7 +1032,8 @@ class SkillCreateRequest(BaseModel):
     tool_names: Optional[List[str]] = []
     tags: Optional[List[str]] = []
     source: Optional[str] = "custom"
-    params: Optional[Dict[str, Any]] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[Dict[str, str]]] = Field(
         default_factory=list,
         description="Additional skill files beyond SKILL.md. "
@@ -1017,7 +1056,8 @@ class SkillUpdateRequest(BaseModel):
     tool_names: Optional[List[str]] = None
     tags: Optional[List[str]] = None
     source: Optional[str] = None
-    params: Optional[Dict[str, Any]] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[SkillFileData]] = Field(
         default_factory=list,
         description="Updated skill files. Each entry has file_path and content. "
@@ -1034,7 +1074,8 @@ class SkillResponse(BaseModel):
     tool_ids: List[int]
     tags: List[str]
     source: str
-    params: Optional[Dict[str, Any]] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
     created_by: Optional[str] = None
     create_time: Optional[str] = None
     updated_by: Optional[str] = None

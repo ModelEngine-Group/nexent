@@ -11,8 +11,11 @@ import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { Agent } from "@/types/agentConfig";
 import AgentCard from "./components/AgentCard";
-import { ImportAgentData } from "@/hooks/useAgentImport";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import {
+  openImportWizardWithFile,
+  ImportAgentData,
+} from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 
 /**
@@ -30,9 +33,7 @@ export default function SpacePage() {
 
   // Import wizard state
   const [importWizardVisible, setImportWizardVisible] = useState(false);
-  const [importWizardData, setImportWizardData] =
-    useState<ImportAgentData | null>(null);
-
+  const [importWizardData, setImportWizardData] = useState<ImportAgentData | null>(null);
 
   const handleCreateAgent = () => {
     router.push("/agents?create=true");
@@ -43,46 +44,31 @@ export default function SpacePage() {
   };
 
   const onImportAgent = () => {
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = ".json";
-    fileInput.onchange = async (event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      if (!file.name.endsWith(".json")) {
-        message.error(t("businessLogic.config.error.invalidFileType"));
-        return;
-      }
-
-      try {
-        // Read and parse file
-        const fileContent = await file.text();
-        let agentData: ImportAgentData;
-
-        try {
-          agentData = JSON.parse(fileContent);
-        } catch (parseError) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
-        // Validate structure
-        if (!agentData.agent_id || !agentData.agent_info) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
-        // Open wizard with parsed data
+    openImportWizardWithFile({
+      onSuccess: (agentData) => {
         setImportWizardData(agentData);
         setImportWizardVisible(true);
-      } catch (error) {
+        setIsImporting(false);
+      },
+      onParseError: (msg) => {
+        message.error(t(msg));
+        setIsImporting(false);
+      },
+      onFileNotFound: (msg) => {
+        message.error(msg);
+        setIsImporting(false);
+      },
+      onValidationError: (msg) => {
+        message.error(t(msg));
+        setIsImporting(false);
+      },
+      onGenericError: (error) => {
         log.error("Failed to read import file:", error);
         message.error(t("businessLogic.config.error.agentImportFailed"));
-      }
-    };
-
-    fileInput.click();
+        setIsImporting(false);
+      },
+    });
+    setIsImporting(true);
   };
 
 

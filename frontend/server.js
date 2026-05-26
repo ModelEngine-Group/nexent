@@ -361,10 +361,17 @@ app.prepare().then(() => {
           pathname.startsWith("/api/conversation/") ||
           pathname.startsWith("/api/memory/") ||
           pathname.startsWith("/api/file/storage") ||
-          pathname.startsWith("/api/file/preprocess") ||
-          pathname.startsWith("/api/skills/create");
-        const target = isRuntime ? RUNTIME_HTTP_BACKEND : HTTP_BACKEND;
-        proxy.web(req, res, { target, changeOrigin: true });
+          pathname.startsWith("/api/file/preprocess");
+        if (isRuntime) {
+          proxy.web(req, res, { target: RUNTIME_HTTP_BACKEND, changeOrigin: true });
+        } else if (
+          pathname === "/api/skills/create" ||
+          pathname.startsWith("/api/skills/stop/")
+        ) {
+          proxy.web(req, res, { target: RUNTIME_HTTP_BACKEND, changeOrigin: true });
+        } else {
+          proxy.web(req, res, { target: HTTP_BACKEND, changeOrigin: true });
+        }
       }
     } else {
       // Let Next.js handle the request

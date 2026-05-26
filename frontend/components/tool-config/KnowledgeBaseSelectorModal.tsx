@@ -19,7 +19,7 @@ import {
 } from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
-import { ToolKbType } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
+import { ToolKbType, getKnowledgeBaseSourcesForTool } from "./index";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import {
   isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
@@ -48,23 +48,6 @@ interface KnowledgeBaseSelectorProps {
     userId?: string;
     knowledgeSpaceId?: string;
   };
-}
-
-function getKnowledgeBaseSourcesForTool(
-  toolType: ToolKbType
-): string[] {
-  switch (toolType) {
-    case "knowledge_base_search":
-      return ["nexent"];
-    case "dify_search":
-      return ["dify"];
-    case "datamate_search":
-      return ["datamate"];
-    case "idata_search":
-      return ["idata"];
-    default:
-      return ["nexent"];
-  }
 }
 
 interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
@@ -598,6 +581,7 @@ export default function KnowledgeBaseSelectorModal({
       knowledge_base_search: t("toolConfig.knowledgeBaseSelector.title.local"),
       dify_search: t("toolConfig.knowledgeBaseSelector.title.dify"),
       datamate_search: t("toolConfig.knowledgeBaseSelector.title.datamate"),
+      idata_search: t("toolConfig.knowledgeBaseSelector.title.idata", "选择 iData 知识库"),
     };
     return (
       titles[toolType] || t("toolConfig.knowledgeBaseSelector.title.default")

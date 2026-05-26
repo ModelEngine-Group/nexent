@@ -359,7 +359,7 @@ async def test_create_model_for_tenant_success_llm():
 
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_open_router_disables_ssl():
-    """When base_url contains 'open/router' ssl_verify should be set to False."""
+    """When base_url contains 'open/router' ssl_verify should be set to False and model_factory to 'modelengine'."""
     svc = import_svc()
 
     with mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
@@ -381,6 +381,8 @@ async def test_create_model_for_tenant_open_router_disables_ssl():
         assert mock_create.call_count == 1
         create_args = mock_create.call_args[0][0]
         assert create_args["ssl_verify"] is False
+        # model_factory should be set to modelengine when open/router URL is used
+        assert create_args["model_factory"] == "modelengine"
 
 
 @pytest.mark.asyncio

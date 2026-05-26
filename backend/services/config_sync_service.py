@@ -202,9 +202,9 @@ def build_model_config(model_config: dict) -> dict:
     if "embedding" in model_config.get("model_type", ""):
         config["dimension"] = model_config.get("max_tokens", 0)
 
-    # Add STT model specific fields
+    # Add voice model specific fields (STT and TTS)
     model_type = model_config.get("model_type", "")
-    if model_type == "stt":
+    if model_type == "stt" or model_type == "tts":
         config["modelFactory"] = model_config.get("model_factory", "")
         config["modelAppid"] = model_config.get("model_appid", "")
         config["accessToken"] = model_config.get("access_token", "")

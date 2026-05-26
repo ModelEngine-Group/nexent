@@ -138,6 +138,31 @@ def _create_package_mock(name):
 
 nexent_mock = _create_package_mock('nexent')
 sys.modules['nexent'] = nexent_mock
+
+# Mock psycopg2 before backend.database.client is imported
+psycopg2_mock = MagicMock()
+sys.modules['psycopg2'] = psycopg2_mock
+sys.modules['psycopg2.pool'] = MagicMock()
+sys.modules['psycopg2.extras'] = MagicMock()
+
+# Mock redis before services.redis_service is imported
+redis_mock = MagicMock()
+sys.modules['redis'] = redis_mock
+sys.modules['redis.client'] = MagicMock()
+sys.modules['redis.connection'] = MagicMock()
+sys.modules['redis.lock'] = MagicMock()
+
+# Mock supabase before utils.auth_utils is imported
+supabase_mock = MagicMock()
+sys.modules['supabase'] = supabase_mock
+
+# Mock nexent.core.utils.observer before services.skill_service is imported
+nexent_core_utils = _create_package_mock('nexent.core.utils')
+sys.modules['nexent.core.utils'] = nexent_core_utils
+nexent_core_utils_observer = types.ModuleType('nexent.core.utils.observer')
+nexent_core_utils_observer.MessageObserver = MagicMock()
+sys.modules['nexent.core.utils.observer'] = nexent_core_utils_observer
+
 sys.modules['nexent.core'] = _create_package_mock('nexent.core')
 sys.modules['nexent.core.agents'] = _create_package_mock('nexent.core.agents')
 if memory_pkg is not None:
@@ -146,6 +171,7 @@ if memory_pkg is not None:
     if real_memory_service is not None:
         sys.modules["nexent.memory.memory_service"] = real_memory_service
 sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+sys.modules['nexent.core.agents.run_agent'] = MagicMock()
 sys.modules['nexent.core.models'] = _create_package_mock('nexent.core.models')
 
 # Mock nexent.multi_modal module

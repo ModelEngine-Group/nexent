@@ -54,7 +54,7 @@ class DataProcessService:
 
         self._inspector = None
         self._inspector_last_time = 0
-        self._inspector_ttl = 60  # Inspector cache time in seconds
+        self._inspector_ttl = 300  # 5 minutes - inspector is expensive to create (ping all workers)
         self._inspector_lock = None
         self._inspector_lock = threading.Lock()
 
@@ -105,7 +105,7 @@ class DataProcessService:
         logger.info("Data processing service stopped")
 
     def _get_celery_inspector(self):
-        """Get Celery inspector"""
+        """Get Celery inspector (cached for performance)"""
         with self._inspector_lock:
             now = time.time()
             if self._inspector and now - self._inspector_last_time < self._inspector_ttl:
@@ -117,9 +117,9 @@ class DataProcessService:
                     f"Celery broker URL is not configured properly, reconfiguring to {celery_app.conf.broker_url}")
             try:
                 inspector = celery_app.control.inspect()
-                inspector.ping()
                 self._inspector = inspector
                 self._inspector_last_time = now
+                self._inspector_init_time = now
                 return inspector
             except Exception as e:
                 self._inspector = None
@@ -142,11 +142,9 @@ class DataProcessService:
         all_tasks = []
         try:
             start_time = time.time()
-            logger.debug(
-                "Getting inspector to check for active and reserved tasks (concurrent)")
+            inspector_start = time.time()
             inspector = self._get_celery_inspector()
-            logger.debug(
-                f"⏰ Inspector initialization took {time.time() - start_time}s")
+            inspector_duration = time.time() - inspector_start
 
             # Collect task IDs from different sources and keep runtime metadata
             task_ids = set()
@@ -171,18 +169,37 @@ class DataProcessService:
                     'original_filename': kwargs.get('original_filename', ''),
                 }
 
+            celery_start = time.time()
+
+            # Use short timeout for inspector since workers can respond in ~0.1s
+            # Default 1s timeout is unnecessary and causes delay
+            short_timeout = 0.2
+
             def get_active():
-                return inspector.active()
+                t = time.time()
+                # Create fresh inspector with short timeout for each call
+                short_inspector = celery_app.control.inspect(timeout=short_timeout)
+                result = short_inspector.active()
+                elapsed = time.time() - t
+                logger.info(f"[get_all_tasks] inspector.active() took {elapsed:.3f}s")
+                return result if result else {}
 
             def get_reserved():
-                return inspector.reserved()
+                t = time.time()
+                short_inspector = celery_app.control.inspect(timeout=short_timeout)
+                result = short_inspector.reserved()
+                elapsed = time.time() - t
+                logger.info(f"[get_all_tasks] inspector.reserved() took {elapsed:.3f}s")
+                return result if result else {}
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 future_active = executor.submit(get_active)
                 future_reserved = executor.submit(get_reserved)
-                active_tasks_dict = future_active.result()
-                reserved_tasks_dict = future_reserved.result()
-            logger.debug(
-                f"⏰ Get active and reserved tasks (concurrent) took {time.time() - start_time}s")
+                active_tasks_dict = future_active.result(timeout=short_timeout + 0.5)
+                reserved_tasks_dict = future_reserved.result(timeout=short_timeout + 0.5)
+            celery_duration = time.time() - celery_start
+            if celery_duration > 0.5:
+                logger.warning(f"[get_all_tasks] Inspector took {celery_duration:.3f}s (expected <0.5s)")
             if active_tasks_dict:
                 for worker, tasks in active_tasks_dict.items():
                     for task in tasks:
@@ -199,23 +216,17 @@ class DataProcessService:
                             # Keep active metadata if already present
                             runtime_task_meta.setdefault(task_id, _normalize_runtime_meta(task))
 
-            # Currently, we don't have scheduled tasks, so skip getting scheduled tasks here
-            start_time = time.time()
-            logger.debug("Getting task IDs from Redis backend")
-            # Also get task IDs from Redis backend (covers completed/failed tasks within expiry)
+            # Get task IDs from Redis backend (covers completed/failed tasks within expiry)
             try:
                 redis_task_ids = get_all_task_ids_from_redis(self.redis_client)
-                logger.debug(
-                    f"⏰ Get Redis task IDs took {time.time() - start_time}s")
                 for task_id in redis_task_ids:
-                    # Add to the set, duplicates will be handled
                     task_ids.add(task_id)
             except Exception as redis_error:
                 logger.warning(
                     f"Failed to query Redis for stored task IDs: {str(redis_error)}")
-            logger.debug(
-                f"Total unique task IDs collected (inspector + Redis): {len(task_ids)}")
+
             task_id_list = list(task_ids)
+            # Batch fetch all task info
             tasks = [get_task_info(task_id) for task_id in task_id_list]
             all_task_infos = await asyncio.gather(*tasks, return_exceptions=True)
             for idx, task_info in enumerate(all_task_infos):
@@ -243,7 +254,6 @@ class DataProcessService:
                     if not task_info.get('index_name'):
                         continue
                 all_tasks.append(task_info)
-            logger.debug(f"Retrieved {len(all_tasks)} tasks.")
         except Exception as e:
             logger.error(f"Error retrieving all tasks: {str(e)}")
             all_tasks = []

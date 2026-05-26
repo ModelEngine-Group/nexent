@@ -351,3 +351,57 @@ export function validatePassword(password: string): boolean {
   const checks = getPasswordChecks(password);
   return checks.uppercase && checks.lowercase && checks.digit;
 }
+
+// Knowledge Base utility types
+export interface KnowledgeBaseLike {
+  id?: string | number;
+  display_name?: string;
+  name?: string;
+}
+
+/**
+ * Get display name from a knowledge base object
+ * Priority: display_name > name > id
+ */
+export function getKbDisplayName(kb: KnowledgeBaseLike, fallbackId?: string): string {
+  if (kb.display_name) return kb.display_name;
+  if (kb.name) return kb.name;
+  if (fallbackId) return fallbackId;
+  if (kb.id) return String(kb.id);
+  return "";
+}
+
+/**
+ * Map knowledge base IDs to display names
+ */
+export function mapKbIdsToDisplayNames(
+  ids: string[],
+  knowledgeBases: KnowledgeBaseLike[]
+): string[] {
+  return ids.map((id) => {
+    const cleanId = String(id).trim();
+    const kb = knowledgeBases.find((k) => String(k.id).trim() === cleanId);
+    return kb ? getKbDisplayName(kb) : cleanId;
+  });
+}
+
+/**
+ * Parse KB IDs from various formats (array, JSON string, comma-separated string)
+ */
+export function parseKbIds(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(String);
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.map(String);
+      }
+    } catch {
+      // Not JSON, try comma-separated
+    }
+    return value.split(",").filter(Boolean);
+  }
+  return [];
+}

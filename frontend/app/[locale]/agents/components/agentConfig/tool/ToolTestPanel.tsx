@@ -14,7 +14,7 @@ import {
 } from "@/services/agentConfigService";
 import log from "@/lib/logger";
 import { DEFAULT_TYPE } from "@/const/constants";
-import { getLocalizedDescription } from "@/lib/utils";
+import { getLocalizedDescription, mapKbIdsToDisplayNames } from "@/lib/utils";
 
 const { Text, Title } = Typography;
 

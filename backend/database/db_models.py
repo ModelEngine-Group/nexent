@@ -724,10 +724,12 @@ class SkillInfo(TableBase):
     skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
     skill_name = Column(String(100), nullable=False, unique=True, doc="Unique skill name")
+    tenant_id = Column(String(100), nullable=True, doc="Tenant ID for multi-tenancy. NULL for pre-existing skills.")
     skill_description = Column(String(1000), doc="Skill description")
     skill_tags = Column(JSON, doc="Skill tags as JSON array")
     skill_content = Column(Text, doc="Skill content in markdown format")
-    params = Column(JSON, doc="Skill configuration parameters as JSON object")
+    config_schemas = Column(JSON, doc="Parameter metadata from config/schema.yaml")
+    config_values = Column(JSON, doc="Runtime parameter values from config/config.yaml")
     source = Column(String(30), nullable=False, default="official",
                     doc="Skill source: official, custom, etc.")
 
@@ -767,6 +769,8 @@ class SkillInstance(TableBase):
     tenant_id = Column(String(100), doc="Tenant ID")
     enabled = Column(Boolean, default=True, doc="Whether this skill is enabled for the agent")
     version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    config_values = Column(JSON, doc="Per-agent runtime parameter values (mirrors ag_tool_instance_t.params)")
+    config_schemas = Column(JSON, doc="Per-agent parameter schema overrides from config/schema.yaml")
 
 
 class OuterApiService(TableBase):
