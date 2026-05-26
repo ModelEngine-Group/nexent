@@ -30,10 +30,14 @@ from .agent_context import ContextManager
 from ..utils.token_estimation import msg_token_count
 
 def parse_code_blobs(text: str) -> str:
-    """Extract code blocs from the LLM's output for execution.
+    """Extract code blocks from the LLM's output for execution.
 
-    This function is used to parse code that needs to be executed, so it only handles
-    <code> format and legacy python formats.
+    This function handles only two formats:
+    - <code>...</code>: primary execution format
+    - ```<RUN>...</RUN>```: legacy format for backward compatibility
+
+    Note: ```python / ```py blocks are intentionally NOT extracted here to prevent
+    KB content containing code examples from being accidentally executed.
 
     Args:
         text (`str`): LLM's output text to parse.
@@ -85,42 +89,6 @@ def parse_code_blobs(text: str) -> str:
 
     if run_matches:
         return "\n\n".join(match.strip() for match in run_matches)
-
-    # Fallback to original patterns: py|python (for execution)
-    # Use string operations to prevent backtracking
-    py_matches = []
-    search_pos = 0
-    while True:
-        # Find ```py or ```python
-        start = text.find("```py", search_pos)
-        if start == -1:
-            start = text.find("```python", search_pos)
-        if start == -1:
-            break
-        # Skip the opening backticks and optional language specifier
-        if text[start:start + len("```python")] == "```python":
-            content_start = start + len("```python")
-        else:
-            content_start = start + len("```py")
-        # Skip optional newline after opening fence
-        if content_start < len(text) and text[content_start] == "\n":
-            content_start += 1
-        # Find the closing ```
-        end = text.find("```", content_start)
-        if end == -1:
-            break
-        py_matches.append(text[content_start:end])
-        search_pos = end + len("```")
-
-    if py_matches:
-        return "\n\n".join(match.strip() for match in py_matches)
-
-    # Maybe the LLM outputted a code blob directly
-    try:
-        ast.parse(text)
-        return text
-    except SyntaxError:
-        pass
 
     raise ValueError(
         dedent(
@@ -252,6 +220,11 @@ class CoreAgent(CodeAgent):
         self.context_manager: ContextManager = None
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
+        # Override smolagent default to prevent extracting ```python blocks from KB content.
+        # code_block_tags[0] and [1] are used by the system prompt template for opening/closing
+        # tags (e.g., ``` and ```). extract_code_from_text iterates all tags as language
+        # identifiers; omitting "python" and "py" ensures ```python blocks are not extracted.
+        self.code_block_tags = ["", ""]
 
     def _log_model_call_parameters(self, input_messages: List[ChatMessage], stop_sequences: List[str], additional_args: Dict[str, Any]) -> None:
         """

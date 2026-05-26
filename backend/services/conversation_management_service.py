@@ -248,6 +248,8 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     display_name = model_config.get("display_name", "") if model_config else ""
     set_monitoring_operation("title_generation", display_name=display_name or None)
 
+    timeout_seconds = model_config.get("timeout_seconds") if model_config else None
+
     # Create OpenAIModel instance
     llm = OpenAIModel(
         model_id=get_model_name_from_config(model_config) if model_config.get("model_name") else "",
@@ -256,7 +258,9 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
         temperature=0.7,
         top_p=0.95,
         model_factory=model_config.get("model_factory", None),
-        ssl_verify=model_config.get("ssl_verify", True)
+        ssl_verify=model_config.get("ssl_verify", True),
+        timeout_seconds=timeout_seconds,
+        stream=False,
     )
 
     # Build messages - use new template variable 'question' instead of 'content'

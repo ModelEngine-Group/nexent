@@ -16,6 +16,7 @@ import {
   App,
   Upload,
   Tabs,
+  Tag,
 } from "antd";
 import {
   Trash,
@@ -104,6 +105,7 @@ export default function McpConfigModal({
   const [containerPort, setContainerPort] = useState<number | undefined>(
     undefined
   );
+  const [containerServiceName, setContainerServiceName] = useState("");
 
   const [logsModalVisible, setLogsModalVisible] = useState(false);
   const [currentContainerId, setCurrentContainerId] = useState("");
@@ -306,8 +308,7 @@ export default function McpConfigModal({
 
     setUpdatingServer(true);
     const result = await handleUpdateServer(
-      editingServer.service_name,
-      editingServer.mcp_url,
+      editingServer.mcp_id,
       name.trim(),
       url.trim(),
       authorizationToken
@@ -347,12 +348,13 @@ export default function McpConfigModal({
     }
 
     setAddingContainer(true);
-    const result = await handleAddContainer(config, containerPort);
+    const result = await handleAddContainer(config, containerPort, containerServiceName.trim() || undefined);
     if (!result.success) {
       message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addContainerFailed")));
     } else {
       setContainerConfigJson("");
       setContainerPort(undefined);
+      setContainerServiceName("");
       message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addContainerSuccess"));
     }
     setAddingContainer(false);
@@ -561,8 +563,27 @@ export default function McpConfigModal({
       title: t("mcpConfig.serverList.column.url"),
       dataIndex: "mcp_url",
       key: "mcp_url",
-      width: "40%",
+      width: "30%",
       ellipsis: true,
+    },
+    {
+      title: t("mcpConfig.serverList.column.enabled"),
+      key: "enabled",
+      width: "10%",
+      render: (_: any, record: any) => {
+        const isEnabled = record.enabled;
+        return isEnabled ? (
+          <Tag color="#229954" variant="solid">
+            {t("mcpConfig.serverList.enabled.yes")}
+          </Tag>
+        ) : (
+          <Tooltip title={t("mcpConfig.serverList.enabled.tooltip")}>
+            <Tag color="#AEB6BF" variant="solid" style={{ cursor: "pointer" }}>
+              {t("mcpConfig.serverList.enabled.no")}
+            </Tag>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t("mcpConfig.serverList.column.action"),
@@ -831,7 +852,7 @@ export default function McpConfigModal({
                 children: (
                   <Card size="small" style={{ marginTop: 8 }}>
                     <Space orientation="vertical" style={{ width: "100%" }}>
-                      <Space direction="vertical" style={{ width: "100%" }} size="small">
+                      <Space orientation="vertical" style={{ width: "100%" }} size="small">
                         <div
                           style={{
                             display: "flex",
@@ -948,6 +969,19 @@ export default function McpConfigModal({
                         }}
                       >
                         <Text style={{ minWidth: 80 }}>
+                          {t("mcpConfig.addContainer.serviceName")}:
+                        </Text>
+                        <Input
+                          placeholder={t(
+                            "mcpConfig.addContainer.serviceNamePlaceholder"
+                          )}
+                          value={containerServiceName}
+                          onChange={(e) => setContainerServiceName(e.target.value)}
+                          style={{ width: 150 }}
+                          maxLength={20}
+                          disabled={actionsLocked}
+                        />
+                        <Text style={{ minWidth: 60 }}>
                           {t("mcpConfig.addContainer.port")}:
                         </Text>
                         <InputNumber
@@ -960,7 +994,7 @@ export default function McpConfigModal({
                           }}
                           min={1}
                           max={65535}
-                          style={{ width: 150 }}
+                          style={{ width: 120 }}
                           disabled={actionsLocked}
                           controls={false}
                         />
@@ -1226,7 +1260,6 @@ export default function McpConfigModal({
               size="small"
               pagination={false}
               locale={{ emptyText: t("mcpConfig.serverList.empty") }}
-              scroll={{ y: 300 }}
               style={{ width: "100%" }}
             />
           </div>
@@ -1253,7 +1286,6 @@ export default function McpConfigModal({
               size="small"
               pagination={false}
               locale={{ emptyText: t("mcpConfig.containerList.empty") }}
-              scroll={{ y: 300 }}
               style={{ width: "100%" }}
             />
           </div>
@@ -1277,7 +1309,6 @@ export default function McpConfigModal({
               size="small"
               pagination={false}
               locale={{ emptyText: t("mcpConfig.openapiService.list.empty") }}
-              scroll={{ y: 300 }}
               style={{ width: "100%" }}
             />
           </div>

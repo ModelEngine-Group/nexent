@@ -19,7 +19,7 @@ import {
 } from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
-import { ToolKbType } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
+import { ToolKbType, getKnowledgeBaseSourcesForTool } from "./index";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import { useModelList } from "@/hooks/model/useModelList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -44,23 +44,6 @@ interface KnowledgeBaseSelectorProps {
     userId?: string;
     knowledgeSpaceId?: string;
   };
-}
-
-function getKnowledgeBaseSourcesForTool(
-  toolType: ToolKbType
-): string[] {
-  switch (toolType) {
-    case "knowledge_base_search":
-      return ["nexent"];
-    case "dify_search":
-      return ["dify"];
-    case "datamate_search":
-      return ["datamate"];
-    case "idata_search":
-      return ["idata"];
-    default:
-      return ["nexent"];
-  }
 }
 
 interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
@@ -528,6 +511,7 @@ export default function KnowledgeBaseSelectorModal({
       knowledge_base_search: t("toolConfig.knowledgeBaseSelector.title.local"),
       dify_search: t("toolConfig.knowledgeBaseSelector.title.dify"),
       datamate_search: t("toolConfig.knowledgeBaseSelector.title.datamate"),
+      idata_search: t("toolConfig.knowledgeBaseSelector.title.idata", "选择 iData 知识库"),
     };
     return (
       titles[toolType] || t("toolConfig.knowledgeBaseSelector.title.default")
@@ -776,7 +760,7 @@ export default function KnowledgeBaseSelectorModal({
       <div className="flex-1 overflow-y-auto overflow-x-hidden bg-white">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
-            <Spin tip={t("common.loading")} />
+            <Spin description={t("common.loading")} />
           </div>
         ) : filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">

@@ -18,14 +18,24 @@ export function useAgentSkillInstances(agentId: number | null, options?: { stale
 				(instance: { skill_id: string; enabled: boolean }) => instance.enabled
 			);
 			// Convert to Skill format for consistency with store
+			// config_schemas: parameter definitions from schema.yaml (template)
+			// config_values: merged per-agent overrides (params) + template defaults
 			const skills: Skill[] = enabledInstances.map(
-				(instance: { skill_id: string; skill_name?: string; skill_description?: string }) => ({
+				(instance: {
+					skill_id: string;
+					skill_name?: string;
+					skill_description?: string;
+					config_schemas?: any[];
+					config_values?: Record<string, any>;
+				}) => ({
 					skill_id: instance.skill_id,
 					name: instance.skill_name || "",
 					description: instance.skill_description || "",
 					source: "custom",
 					tags: [],
 					content: "",
+					config_schemas: instance.config_schemas || null,
+					config_values: instance.config_values || null,
 				})
 			);
 			return skills;

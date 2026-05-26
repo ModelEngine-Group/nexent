@@ -1,5 +1,5 @@
 from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -182,6 +182,10 @@ class ModelRecord(TableBase):
         String(100), doc="Application ID for model authentication (used by some STT/TTS providers like Volcano Engine)")
     access_token = Column(
         String(100), doc="Access token for model authentication (used by some STT/TTS providers like Volcano Engine)")
+    timeout_seconds = Column(
+        Integer, doc="Request timeout in seconds for this model. Default is 120 seconds.")
+    concurrency_limit = Column(
+        Integer, doc="Maximum concurrent requests for this model. Default is null (unlimited).")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -463,12 +467,47 @@ class McpRecord(TableBase):
         String(200),
         doc="Docker container ID for MCP service, None for non-containerized MCP",
     )
+    container_port = Column(
+        Integer,
+        doc="Host port bound for containerized MCP service",
+    )
     authorization_token = Column(
         String(500),
         doc="Authorization token for MCP server authentication (e.g., Bearer token)",
         default=None,
     )
+    source = Column(String(30), doc="Source type: local/mcp_registry/community")
+    registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
+    config_json = Column(JSON, doc="MCP config data")
+    enabled = Column(Boolean, default=True, doc="Enabled")
+    tags = Column(ARRAY(Text), doc="Tags")
+    description = Column(Text, doc="Description")
 
+
+class McpCommunityRecord(TableBase):
+    """Community MCP market records table."""
+
+    __tablename__ = "mcp_community_record_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    community_id = Column(
+        Integer,
+        Sequence("mcp_community_record_t_community_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Community record ID, unique primary key",
+    )
+    tenant_id = Column(String(100), doc="Publisher tenant ID")
+    user_id = Column(String(100), doc="Publisher user ID")
+    mcp_name = Column(String(100), doc="MCP name")
+    mcp_server = Column(String(500), doc="MCP server URL")
+    source = Column(String(30), doc="Source type, fixed to community")
+    version = Column(String(50), doc="MCP version")
+    registry_json = Column(JSONB, doc="Full MCP metadata JSON")
+    transport_type = Column(String(30), doc="Transport type: http/sse/container")
+    config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
+    tags = Column(ARRAY(Text), doc="Tags")
+    description = Column(Text, doc="Description")
 
 class UserTenant(TableBase):
     """
@@ -685,10 +724,12 @@ class SkillInfo(TableBase):
     skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
     skill_name = Column(String(100), nullable=False, unique=True, doc="Unique skill name")
+    tenant_id = Column(String(100), nullable=True, doc="Tenant ID for multi-tenancy. NULL for pre-existing skills.")
     skill_description = Column(String(1000), doc="Skill description")
     skill_tags = Column(JSON, doc="Skill tags as JSON array")
     skill_content = Column(Text, doc="Skill content in markdown format")
-    params = Column(JSON, doc="Skill configuration parameters as JSON object")
+    config_schemas = Column(JSON, doc="Parameter metadata from config/schema.yaml")
+    config_values = Column(JSON, doc="Runtime parameter values from config/config.yaml")
     source = Column(String(30), nullable=False, default="official",
                     doc="Skill source: official, custom, etc.")
 
@@ -728,6 +769,8 @@ class SkillInstance(TableBase):
     tenant_id = Column(String(100), doc="Tenant ID")
     enabled = Column(Boolean, default=True, doc="Whether this skill is enabled for the agent")
     version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    config_values = Column(JSON, doc="Per-agent runtime parameter values (mirrors ag_tool_instance_t.params)")
+    config_schemas = Column(JSON, doc="Per-agent parameter schema overrides from config/schema.yaml")
 
 
 class OuterApiService(TableBase):

@@ -138,6 +138,9 @@ export const ErrorCode = {
   USER_UPDATE_FAILED: "110102",
   USER_ALREADY_EXISTS: "110103",
   INVALID_CREDENTIALS: "110104",
+  // 02 - Password
+  PASSWORD_WEAK: "110201",
+  PASSWORD_SAME_AS_OLD: "110202",
 
   // ==================== 12 TenantResource / 租户资源 ====================
   // 01 - Tenant

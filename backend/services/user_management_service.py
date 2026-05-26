@@ -21,6 +21,8 @@ from utils.auth_utils import (
 )
 from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, DEFAULT_TENANT_ID
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 
 from database.model_management_db import create_model_record
 from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
@@ -30,6 +32,7 @@ from database.db_models import RolePermission
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
+from services.skill_service import init_skill_list_for_tenant
 
 
 
@@ -134,6 +137,12 @@ async def signup_user_with_invitation(email: EmailStr,
                                       auto_login: Optional[bool] = True):
     """User registration with invitation code support"""
     client = get_supabase_client()
+
+    # Validate password strength before registration
+    if not validate_password_strength(password):
+        raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK,
+                           "Password must be at least 8 characters with uppercase, lowercase, and digit.")
+
     logging.info(
         f"Receive registration request: email={email}, invite_code={'provided' if invite_code else 'not provided'}, auto_login={auto_login}")
 
@@ -237,6 +246,7 @@ async def signup_user_with_invitation(email: EmailStr,
 
         # Initialize tool list for the new tenant (only once per tenant)
         await init_tool_list_for_tenant(tenant_id, user_id)
+        await init_skill_list_for_tenant(tenant_id, user_id)
 
         return await parse_supabase_response(False, response, user_role, auto_login)
     else:
@@ -488,7 +498,7 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
         permission_subtype = perm.get("permission_subtype", "")
 
         if permission_category == "RESOURCE" and permission_type and permission_subtype:
-            # Format as "permission_type:permission_subtype" 
+            # Format as "permission_type:permission_subtype"
             formatted_permissions.append(
                 f"{permission_type}:{permission_subtype}")
         elif permission_type == "LEFT_NAV_MENU" and permission_subtype:
@@ -541,3 +551,83 @@ def delete_token(token_id: int, user_id: str) -> bool:
         True if the token was deleted, False if not found or not owned by user.
     """
     return delete_token_record(token_id, user_id)
+
+
+# -----------------------------
+# Password Management
+# -----------------------------
+
+def validate_password_strength(password: str) -> bool:
+    """Validate password meets minimum security requirements.
+
+    Args:
+        password: The password to validate.
+
+    Returns:
+        True if password meets requirements, False otherwise.
+    """
+    if len(password) < 8:
+        return False
+    has_upper = any(c.isupper() for c in password)
+    has_lower = any(c.islower() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    return has_upper and has_lower and has_digit
+
+
+async def update_password(user_id: str, old_password: str, new_password: str) -> bool:
+    """Update user password with old password verification.
+
+    This method first re-authenticates the user with their old password,
+    then updates to the new password.
+
+    Args:
+        user_id: The user ID to update password for.
+        old_password: The current password for verification.
+        new_password: The new password to set.
+
+    Returns:
+        True if password was updated successfully.
+
+    Raises:
+        UnauthorizedError: If old password is incorrect.
+        AppException (PROFILE_PASSWORD_WEAK): If new password does not meet requirements.
+        AppException (PROFILE_PASSWORD_SAME_AS_OLD): If new password is the same as old password.
+    """
+    if not validate_password_strength(new_password):
+        raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK)
+
+    if old_password == new_password:
+        raise AppException(ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD)
+
+    admin_client = get_supabase_admin_client()
+
+    try:
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        if not user_tenant or not user_tenant.get("user_email"):
+            raise UnauthorizedError("Unable to retrieve user email")
+
+        user_email = user_tenant["user_email"]
+
+        # Re-authenticate with old password to verify identity using admin client
+        try:
+            admin_client.auth.sign_in_with_password({
+                "email": user_email,
+                "password": old_password
+            })
+        except Exception as auth_err:
+            logging.warning(f"Password verification failed for user {user_id}: {str(auth_err)}")
+            raise UnauthorizedError("Invalid old password")
+
+        # Update to new password using admin client
+        admin_client.auth.update_user({"password": new_password})
+
+        logging.info(f"Password updated successfully for user {user_id}")
+        return True
+
+    except UnauthorizedError:
+        raise
+    except AppException:
+        raise
+    except Exception as exc:
+        logging.error(f"Failed to update password for user {user_id}: {str(exc)}")
+        raise

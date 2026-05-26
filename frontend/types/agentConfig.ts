@@ -99,9 +99,20 @@ export interface ToolParam {
   type: "string" | "number" | "boolean" | "array" | "object" | "Optional";
   required: boolean;
   value?: any;
-  default?: any;
   description?: string;
   description_zh?: string;
+  default?: string;
+  depends_on?: string;
+}
+
+export interface SkillParam {
+  name: string;
+  type: "string" | "number" | "boolean" | "array" | "object" | "Optional";
+  required: boolean;
+  value?: any;
+  description_en?: string;
+  description_zh?: string;
+  depends_on?: string;
 }
 
 
@@ -131,11 +142,15 @@ export interface ToolSubGroup {
 // Skill interface for skill management
 export interface Skill {
   skill_id: string;
+  tenant_id?: string;
   name: string;
   description: string;
   source: string;
   tags?: string[];
   content?: string;
+  config_schemas?: SkillParam[] | null;
+  config_values?: Record<string, any> | null;
+  tool_ids?: number[];
   update_time?: string;
   create_time?: string;
 }
@@ -145,6 +160,17 @@ export interface SkillGroup {
   key: string;
   label: string;
   skills: Skill[];
+}
+
+// Skill with installation status for tenant creation flow
+export type SkillInstallStatus = "installable" | "installed" | "resource_missing";
+
+export interface InstallableSkill {
+  skill_id: number;
+  name: string;
+  description: string;
+  source: string;
+  status: SkillInstallStatus;
 }
 
 // Tree structure node type
@@ -379,7 +405,7 @@ export interface McpServer {
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;
-  mcp_id?: number;
+  mcp_id: number;
   /**
    * Per-item permission returned by /mcp/list.
    * EDIT: editable, READ_ONLY: read-only.
@@ -416,7 +442,7 @@ export interface McpContainer {
 export interface GeneratePromptParams {
   agent_id: number;
   task_description: string;
-  model_id: string;
+  model_id: number;
   prompt_template_id?: number;
   tool_ids?: number[]; // Optional: tool IDs selected in frontend (takes precedence over database query)
   sub_agent_ids?: number[]; // Optional: sub-agent IDs selected in frontend (takes precedence over database query)
@@ -427,6 +453,11 @@ export interface GeneratePromptParams {
    * without waiting for tool config to be saved first.
    */
   knowledge_base_display_names?: string[];
+  /**
+   * Whether tools or sub-agents are selected.
+   * When false, the backend skips generating constraint and few_shots sections.
+   */
+  has_selected_resources?: boolean;
 }
 
 export interface OptimizePromptSectionParams {

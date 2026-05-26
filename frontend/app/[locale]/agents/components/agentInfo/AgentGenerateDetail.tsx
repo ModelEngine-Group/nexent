@@ -305,6 +305,21 @@ export default function AgentGenerateDetail({
       delete initialAgentInfo.group_ids;
     }
 
+    // Check if the agent's model is still available
+    const agentModelAvailable = availableLlmModels.some(
+      (m) => m.name === editedAgent.model || m.displayName === editedAgent.model
+    );
+    let effectiveMainAgentModel = initialAgentInfo.mainAgentModel;
+    let effectiveMainAgentModelId = editedAgent.model_id || 0;
+
+    if (!agentModelAvailable && defaultLlmModel) {
+      // Agent's original model is no longer available, switch to default model
+      effectiveMainAgentModel = defaultLlmModel.displayName || "";
+      effectiveMainAgentModelId = defaultLlmModel.id || 0;
+      // Update the initialAgentInfo with the new model
+      initialAgentInfo.mainAgentModel = effectiveMainAgentModel;
+    }
+
     const initialBusinessInfo = {
       businessDescription: editedAgent.business_description || "",
       businessLogicModelName:
@@ -320,11 +335,17 @@ export default function AgentGenerateDetail({
     setBusinessInfo(initialBusinessInfo);
 
     form.setFieldsValue(initialAgentInfo);
-    // Sync model to store if not already set (e.g., in create mode with default model)
+    // Sync model to store (use default model if original is unavailable)
     if (isCreatingMode && defaultLlmModel) {
       updateProfileInfo({
         model: defaultLlmModel.displayName || "",
         model_id: defaultLlmModel.id || 0,
+      });
+    } else if (!agentModelAvailable && defaultLlmModel) {
+      // Update model in store when original model is no longer available
+      updateProfileInfo({
+        model: effectiveMainAgentModel,
+        model_id: effectiveMainAgentModelId,
       });
     }
     // Sync max_step to store in create mode (default to 5)
@@ -339,7 +360,7 @@ export default function AgentGenerateDetail({
       });
     }
 
-  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode, forceRefreshKey]);
+  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode, forceRefreshKey, availableLlmModels.length]);
 
   // Default to selecting all groups when creating a new agent.
   // Only applies when groups are loaded and no group is selected yet.
@@ -806,23 +827,29 @@ export default function AgentGenerateDetail({
       }
     }
 
+    // Determine if tools or sub-agents are selected
+    const toolIds = Array.isArray(editedAgent.tools)
+      ? editedAgent.tools.map((tool: any) =>
+          typeof tool === "object" && tool.id !== undefined
+            ? tool.id
+            : tool
+        )
+      : [];
+    const subAgentIds = editedAgent.sub_agent_id_list || [];
+    const hasSelectedResources = toolIds.length > 0 || subAgentIds.length > 0;
+
     try {
       await generatePromptStream(
         {
           agent_id: effectiveAgentId,
           task_description: businessInfo.businessDescription,
-          model_id: businessInfo.businessLogicModelId.toString(),
+          model_id: businessInfo.businessLogicModelId,
           prompt_template_id: businessInfo.promptTemplateId,
           sub_agent_ids: editedAgent.sub_agent_id_list,
-          tool_ids: Array.isArray(editedAgent.tools)
-            ? editedAgent.tools.map((tool: any) =>
-              typeof tool === "object" && tool.id !== undefined
-                ? tool.id
-                : tool
-            )
-            : [],
+          tool_ids: toolIds,
           // Pass knowledge base display names from frontend-configured tools
           knowledge_base_display_names: knowledgeBaseDisplayNames.length > 0 ? knowledgeBaseDisplayNames : undefined,
+          has_selected_resources: hasSelectedResources,
         },
         (data) => {
           // Track the agent this generation was for
@@ -873,7 +900,11 @@ export default function AgentGenerateDetail({
                   agentName: data.content,
                 }));
               }
-              saveGeneratedField(generationAgentId, 'agentName', data.content);
+              // Only save to cache if user hasn't filled in agent name themselves
+              // This preserves user's input even if backend generates different values
+              if (!editedAgent.name && !form.getFieldValue("agentName")?.trim()) {
+                saveGeneratedField(generationAgentId, 'agentName', data.content);
+              }
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DESCRIPTION:
               if (isSameAgent) {
@@ -883,7 +914,11 @@ export default function AgentGenerateDetail({
                   agentDescription: data.content,
                 }));
               }
-              saveGeneratedField(generationAgentId, 'agentDescription', data.content);
+              // Only save to cache if user hasn't filled in agent description themselves
+              // This preserves user's input even if backend generates different values
+              if (!editedAgent.description && !form.getFieldValue("agentDescription")?.trim()) {
+                saveGeneratedField(generationAgentId, 'agentDescription', data.content);
+              }
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DISPLAY_NAME:
               if (isSameAgent) {
@@ -896,7 +931,11 @@ export default function AgentGenerateDetail({
                   agentDisplayName: data.content,
                 }));
               }
-              saveGeneratedField(generationAgentId, 'agentDisplayName', data.content);
+              // Only save to cache if user hasn't filled in agent display name themselves
+              // This preserves user's input even if backend generates different values
+              if (!editedAgent.display_name && !form.getFieldValue("agentDisplayName")?.trim()) {
+                saveGeneratedField(generationAgentId, 'agentDisplayName', data.content);
+              }
               break;
           }
         },

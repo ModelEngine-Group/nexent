@@ -7,6 +7,46 @@
 import { TFunction } from "i18next";
 
 /**
+ * Mapping of unavailable reason keys to i18n translation keys
+ */
+export const UNAVAILABLE_REASON_I18N_MAP: Record<string, string> = {
+  duplicate_name: "agent.unavailableReasons.duplicate_name",
+  duplicate_display_name: "agent.unavailableReasons.duplicate_display_name",
+  tool_unavailable: "agent.unavailableReasons.tool_unavailable",
+  model_unavailable: "agent.unavailableReasons.model_unavailable",
+  all_tools_disabled: "agent.unavailableReasons.all_tools_disabled",
+  model_not_configured: "agent.unavailableReasons.model_not_configured",
+  agent_not_found: "agent.unavailableReasons.agent_not_found",
+};
+
+/**
+ * Get localized label for an unavailable reason
+ * @param reason - The unavailable reason key from backend
+ * @param t - Translation function from i18next
+ * @returns Localized reason label
+ */
+export function getUnavailableReasonLabel(reason: string, t: TFunction): string {
+  const i18nKey = UNAVAILABLE_REASON_I18N_MAP[reason];
+  if (i18nKey) {
+    return t(i18nKey);
+  }
+  return reason;
+}
+
+/**
+ * Get localized labels for multiple unavailable reasons
+ * @param reasons - Array of unavailable reason keys
+ * @param t - Translation function from i18next
+ * @returns Array of localized reason labels
+ */
+export function getUnavailableReasonLabels(
+  reasons: string[],
+  t: TFunction
+): string[] {
+  return (reasons || []).map((r) => getUnavailableReasonLabel(r, t));
+}
+
+/**
  * Map tool source to localized label
  * @param source - Tool source (local, mcp, langchain, etc.)
  * @param t - Translation function from i18next

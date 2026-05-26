@@ -141,6 +141,9 @@ class ErrorCode(Enum):
     PROFILE_UPDATE_FAILED = "110102"  # Profile update failed
     PROFILE_USER_ALREADY_EXISTS = "110103"  # User already exists
     PROFILE_INVALID_CREDENTIALS = "110104"  # Invalid credentials
+    # 02 - Password
+    PROFILE_PASSWORD_WEAK = "110201"  # Password does not meet strength requirements
+    PROFILE_PASSWORD_SAME_AS_OLD = "110202"  # New password cannot be the same as old password
 
     # ==================== 16 OAuth / 第三方登录 ====================
     # 01 - Provider
@@ -261,4 +264,8 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.OAUTH_UNLINK_LAST_METHOD: 400,
     ErrorCode.OAUTH_ACCOUNT_NOT_FOUND: 404,
     ErrorCode.OAUTH_ACCOUNT_ALREADY_LINKED: 409,
+    # Profile - Password (module 11)
+    ErrorCode.PROFILE_INVALID_CREDENTIALS: 400,
+    ErrorCode.PROFILE_PASSWORD_WEAK: 400,
+    ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD: 400,
 }

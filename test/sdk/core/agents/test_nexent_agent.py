@@ -470,6 +470,7 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         top_p=mock_model_config.top_p,
         ssl_verify=True,
         display_name=mock_model_config.cite_name,
+        timeout_seconds=mock_model_config.timeout_seconds,
     )
 
     # Verify stop_event was set
@@ -499,6 +500,7 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         top_p=mock_deep_thinking_model_config.top_p,
         ssl_verify=True,
         display_name=mock_deep_thinking_model_config.cite_name,
+        timeout_seconds=mock_deep_thinking_model_config.timeout_seconds,
     )
 
     # Verify stop_event was set

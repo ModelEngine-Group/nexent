@@ -19,6 +19,7 @@ export const API_ENDPOINTS = {
     revoke: `${API_BASE_URL}/user/revoke`,
     tokens: `${API_BASE_URL}/user/tokens`,
     deleteToken: (tokenId: number) => `${API_BASE_URL}/user/tokens/${tokenId}`,
+    updatePassword: `${API_BASE_URL}/user/password`,
   },
   oauth: {
     providers: `${API_BASE_URL}/user/oauth/providers`,
@@ -251,7 +252,7 @@ export const API_ENDPOINTS = {
     tools: `${API_BASE_URL}/mcp/tools`,
     add: `${API_BASE_URL}/mcp/add`,
     update: `${API_BASE_URL}/mcp/update`,
-    delete: `${API_BASE_URL}/mcp`,
+    delete: (mcpId: number) => `${API_BASE_URL}/mcp/${mcpId}`,
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
     addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,
@@ -262,6 +263,10 @@ export const API_ENDPOINTS = {
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
+    portCheck: `${API_BASE_URL}/mcp/port/check`,
+    portSuggest: `${API_BASE_URL}/mcp/port/suggest`,
+    enable: `${API_BASE_URL}/mcp/enable`,
+    disable: `${API_BASE_URL}/mcp/disable`,
   },
   // A2A Client endpoints
   a2a: {
@@ -293,6 +298,7 @@ export const API_ENDPOINTS = {
   },
   skills: {
     list: `${API_BASE_URL}/skills`,
+    official: `${API_BASE_URL}/skills/official`,
     upload: `${API_BASE_URL}/skills/upload`,
     get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
     update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
@@ -304,9 +310,21 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
     instanceList: `${API_BASE_URL}/skills/instance/list`,
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
+    scan: `${API_BASE_URL}/skills/scan_skill`,
     create: `${API_BASE_URL}/skills`,
     createStream: `${API_BASE_URL}/skills/create`,
     stopCreate: (taskId: string) => `${API_BASE_URL}/skills/stop/${taskId}`,
+    install: `${API_BASE_URL}/skills/install`,
+  },
+  mcpTools: {
+    // Community and Registry endpoints remain under /mcp-tools prefix
+    registryList: `${API_BASE_URL}/mcp-tools/registry/list`,
+    communityList: `${API_BASE_URL}/mcp-tools/community/list`,
+    communityPublish: `${API_BASE_URL}/mcp-tools/community/publish`,
+    communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
+    communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
+    communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
+    communityTagsStats: `${API_BASE_URL}/mcp-tools/community/tags/stats`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
