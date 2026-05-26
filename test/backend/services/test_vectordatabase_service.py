@@ -1791,20 +1791,20 @@ class TestElasticSearchService(unittest.TestCase):
         1. Files indexed in Elasticsearch are retrieved correctly
         2. Document chunks for each file are retrieved using msearch
         3. The chunks are included in the file details
-        4. The chunk count is correctly calculated
+        4. The chunk count comes from aggregation (chunk_count field)
         """
-        # Setup
+        # Setup - chunk_count from aggregation
         self.mock_vdb_core.get_documents_detail.return_value = [
             {
                 "path_or_url": "file1",
                 "filename": "file1.txt",
                 "file_size": 1024,
-                "create_time": "2023-01-01T12:00:00"
+                "create_time": "2023-01-01T12:00:00",
+                "chunk_count": 1
             }
         ]
         mock_get_files_status.return_value = {}
-        self.mock_vdb_core.client.count.return_value = {"count": 0}
-        self.mock_vdb_core.client.count.return_value = {"count": 1}
+        # Note: count() is no longer called - chunk_count comes from aggregation
 
         # Mock multi_search response
         msearch_response = {
@@ -1854,21 +1854,21 @@ class TestElasticSearchService(unittest.TestCase):
         3. Chunk count is set to 0 for affected files
         4. The overall operation doesn't fail due to msearch errors
         """
-        # Setup
+        # Setup - chunk_count from aggregation
         self.mock_vdb_core.get_documents_detail.return_value = [
             {
                 "path_or_url": "file1",
                 "filename": "file1.txt",
                 "file_size": 1024,
-                "create_time": "2023-01-01T12:00:00"
+                "create_time": "2023-01-01T12:00:00",
+                "chunk_count": 1
             }
         ]
         mock_get_files_status.return_value = {}
-        self.mock_vdb_core.client.count.return_value = {"count": 0}
+        # Note: count() is no longer called
 
         # Mock msearch error
-        self.mock_vdb_core.client.msearch.side_effect = Exception(
-            "MSSearch Error")
+        self.mock_vdb_core.multi_search.side_effect = Exception("MSSearch Error")
 
         # Execute
         async def run_test():
@@ -1883,7 +1883,7 @@ class TestElasticSearchService(unittest.TestCase):
         # Assert
         self.assertEqual(len(result["files"]), 1)
         self.assertEqual(len(result["files"][0]["chunks"]), 0)
-        self.assertEqual(result["files"][0]["chunk_count"], 0)
+        self.assertEqual(result["files"][0]["chunk_count"], 1)
 
     @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.delete_file')
