@@ -44,6 +44,16 @@ class ModelConfig(BaseModel):
         ),
         default=None,
     )
+    max_tokens: Optional[int] = Field(
+        description=(
+            "Per-call completion output cap forwarded to chat.completions.create. "
+            "Defaults to None so production keeps the provider's own default "
+            "(typically the model's max output). Benchmarks set this explicitly "
+            "(e.g. 4096) to bound pathological generation loops where a model "
+            "regurgitates context."
+        ),
+        default=None,
+    )
 
 
 class ToolConfig(BaseModel):
