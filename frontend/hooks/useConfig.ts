@@ -101,6 +101,9 @@ const defaultConfig: GlobalConfig = {
         apiKey: "",
         modelUrl: "",
       },
+      modelFactory: "dashscope",
+      modelAppid: "",
+      accessToken: "",
     },
   },
 };
