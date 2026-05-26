@@ -1237,35 +1237,33 @@ class ElasticSearchService:
         """
         try:
             files_map: Dict[str, Dict[str, Any]] = {}
-            # Get existing files from ES
+            total_start_time = time.time()
+
+            logger.info(f"[list_files] index={index_name}, include_chunks={include_chunks}")
+
+            # Step 1: Get existing files from ES (includes chunk_count via aggregation)
+            step1_start = time.time()
             existing_files = vdb_core.get_documents_detail(index_name)
+            step1_duration = time.time() - step1_start
+            logger.info(f"[list_files:step1] ES get_documents_detail: {len(existing_files)} files in {step1_duration:.3f}s")
 
-            # Get unique celery files list and the status of each file
+            # Step 2: Get celery task statuses from external service
+            step2_start = time.time()
             celery_task_files = await get_all_files_status(index_name)
+            step2_duration = time.time() - step2_start
+            logger.info(f"[list_files:step2] Celery task status: {len(celery_task_files)} tasks in {step2_duration:.3f}s")
 
-            # For files already stored in ES, add to files list
+            # Step 3: Build files_map from ES data
+            step3_start = time.time()
             for file_info in existing_files:
                 utc_create_time_str = file_info.get('create_time', '')
-                # Try to parse the create_time string, fallback to current timestamp if format is invalid
                 try:
                     utc_create_timestamp = datetime.strptime(utc_create_time_str, '%Y-%m-%dT%H:%M:%S').replace(
                         tzinfo=timezone.utc).timestamp()
                 except (ValueError, TypeError):
                     utc_create_timestamp = time.time()
 
-                # Always re-query chunk count to ensure accuracy (aggregation may be stale)
                 path_or_url = file_info.get('path_or_url')
-                chunk_count = file_info.get('chunk_count', 0)
-                try:
-                    count_result = vdb_core.client.count(
-                        index=index_name,
-                        body={"query": {"term": {"path_or_url": path_or_url}}}
-                    )
-                    chunk_count = count_result.get("count", chunk_count)
-                except Exception as count_err:
-                    logger.warning(
-                        f"Failed to get chunk count for {path_or_url}: {count_err}, using aggregation value {chunk_count}")
-
                 file_data = {
                     'path_or_url': path_or_url,
                     'file': file_info.get('filename', ''),
@@ -1273,64 +1271,39 @@ class ElasticSearchService:
                     'create_time': int(utc_create_timestamp * 1000),
                     'status': "COMPLETED",
                     'latest_task_id': '',
-                    'chunk_count': chunk_count,
+                    'chunk_count': file_info.get('chunk_count', 0),
                     'error_reason': None,
                     'has_error_info': False
                 }
                 files_map[path_or_url] = file_data
+            step3_duration = time.time() - step3_start
+            logger.info(f"[list_files:step3] Build files_map from ES: {len(existing_files)} files in {step3_duration:.3f}s")
 
-            # For files not yet stored in ES (files currently being processed)
+            # Step 4: Merge celery task data (Redis progress already fetched in get_all_files_status)
+            step4_start = time.time()
+            celery_file_count = 0
             for path_or_url, status_info in celery_task_files.items():
-                status_dict = status_info if isinstance(
-                    status_info, dict) else {}
+                celery_file_count += 1
+                status_dict = status_info if isinstance(status_info, dict) else {}
 
-                # Get source_type and original_filename, with defaults
-                source_type = status_dict.get('source_type') if status_dict.get(
-                    'source_type') else 'minio'
+                source_type = status_dict.get('source_type') if status_dict.get('source_type') else 'minio'
                 original_filename = status_dict.get('original_filename')
+                filename = original_filename or (os.path.basename(path_or_url) if path_or_url else '')
 
-                # Determine the filename
-                filename = original_filename or (
-                    os.path.basename(path_or_url) if path_or_url else '')
-
-                # Safely get file size; default to 0 on any error
                 file_size = 0
                 if path_or_url in files_map:
                     file_size = files_map[path_or_url].get('file_size', 0)
                 else:
                     try:
-                        file_size = get_file_size(
-                            source_type or 'minio', path_or_url)
+                        file_size = get_file_size(source_type or 'minio', path_or_url)
                     except Exception as size_err:
-                        logger.error(
-                            f"Failed to get file size for '{path_or_url}': {size_err}")
+                        logger.error(f"Failed to get file size for '{path_or_url}': {size_err}")
                         file_size = 0
 
-                # Get progress from status_dict first, then try Redis for real-time updates
+                # Get progress from celery_task_files (already includes Redis batch data)
                 processed_chunks = status_dict.get('processed_chunks')
                 total_chunks = status_dict.get('total_chunks')
                 task_id = status_dict.get('latest_task_id', '')
-
-                # Always try to get latest progress from Redis if task_id exists
-                # Redis has the most up-to-date progress during vectorization
-                if task_id:
-                    try:
-                        redis_service = get_redis_service()
-                        progress_info = redis_service.get_progress_info(
-                            task_id)
-                        if progress_info:
-                            redis_processed = progress_info.get(
-                                'processed_chunks')
-                            redis_total = progress_info.get('total_chunks')
-                            if redis_processed is not None:
-                                processed_chunks = redis_processed
-                            if redis_total is not None:
-                                total_chunks = redis_total
-                            logger.debug(
-                                f"Retrieved progress from Redis for task {task_id}: {processed_chunks}/{total_chunks}")
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to get progress from Redis for task {task_id}: {str(e)}")
 
                 if path_or_url in files_map:
                     file_data = files_map[path_or_url]
@@ -1346,13 +1319,12 @@ class ElasticSearchService:
                     }
                     files_map[path_or_url] = file_data
 
-                file_data['status'] = status_dict.get('state', file_data.get(
-                    'status', 'UNKNOWN'))
+                file_data['status'] = status_dict.get('state', file_data.get('status', 'UNKNOWN'))
                 file_data['latest_task_id'] = task_id
                 file_data['processed_chunk_num'] = processed_chunks
                 file_data['total_chunk_num'] = total_chunks
 
-                # Get error reason for failed documents
+                # Get error reason for failed documents (fetch from Redis batch if needed)
                 if task_id and status_dict.get('state') in ['PROCESS_FAILED', 'FORWARD_FAILED']:
                     try:
                         redis_service = get_redis_service()
@@ -1360,17 +1332,20 @@ class ElasticSearchService:
                         if error_reason:
                             file_data['error_reason'] = error_reason
                             file_data['has_error_info'] = True
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to get error info for task {task_id}: {str(e)}")
+                    except Exception:
+                        pass  # Error info is optional, don't fail the request
+            step4_duration = time.time() - step4_start
+            logger.info(f"[list_files:step4] Merge celery tasks: {celery_file_count} tasks in {step4_duration:.3f}s")
 
             files = list(files_map.values())
+            logger.info(f"[list_files:step4] Total files built: {len(files)}")
 
             # Unified chunks processing for all files
             if include_chunks:
-                # Prepare msearch body for all completed files
+                step5_start = time.time()
                 completed_files_map = {
                     f['path_or_url']: f for f in files if f['status'] == "COMPLETED"}
+                completed_count = len(completed_files_map)
                 msearch_body = []
 
                 for path_or_url in completed_files_map.keys():
@@ -1381,7 +1356,6 @@ class ElasticSearchService:
                         "_source": ["id", "title", "content", "create_time"]
                     })
 
-                # Initialize chunks for all files
                 for file_data in files:
                     file_data['chunks'] = []
                     file_data['chunk_count'] = file_data.get('chunk_count', 0)
@@ -1413,46 +1387,25 @@ class ElasticSearchService:
                                 })
 
                             file_data['chunks'] = chunks
-                            # Get accurate chunk count using count query instead of len(chunks)
-                            # because msearch may have size limits
-                            try:
-                                count_result = vdb_core.client.count(
-                                    index=index_name,
-                                    body={
-                                        "query": {"term": {"path_or_url": file_path}}}
-                                )
-                                file_data['chunk_count'] = count_result.get(
-                                    "count", len(chunks))
-                            except Exception as count_err:
-                                logger.warning(
-                                    f"Failed to get chunk count for {file_path}: {count_err}, using len(chunks)")
-                                file_data['chunk_count'] = len(chunks)
+                            # chunk_count from aggregation is already accurate
+                            # no need for additional count queries
 
                     except Exception as e:
                         logger.error(
                             f"Error during msearch for chunks: {str(e)}")
+                step5_duration = time.time() - step5_start
+                logger.info(f"[list_files:step5] ES msearch chunks: {completed_count} files in {step5_duration:.3f}s")
             else:
-                # When include_chunks=False, ensure chunk_count is accurate for completed files
+                # When include_chunks=False, chunk_count is already accurate from ES aggregation
+                # No need for additional count queries - doc_count from terms aggregation is accurate
                 for file_data in files:
                     file_data['chunks'] = []
-                    if file_data.get('status') == "COMPLETED":
-                        # Always re-query chunk count for completed files to ensure accuracy
-                        try:
-                            count_result = vdb_core.client.count(
-                                index=index_name,
-                                body={
-                                    "query": {"term": {"path_or_url": file_data.get('path_or_url')}}}
-                            )
-                            file_data['chunk_count'] = count_result.get(
-                                "count", 0)
-                        except Exception as count_err:
-                            logger.warning(
-                                f"Failed to get chunk count for {file_data.get('path_or_url')}: {count_err}")
-                            file_data['chunk_count'] = file_data.get(
-                                'chunk_count', 0)
-                    else:
-                        file_data['chunk_count'] = file_data.get(
-                            'chunk_count', 0)
+                    # chunk_count is already set from ES aggregation (doc_count)
+                    file_data['chunk_count'] = file_data.get('chunk_count', 0)
+
+            total_duration = time.time() - total_start_time
+            logger.info(f"[list_files:complete] index={index_name}, total_files={len(files)}, "
+                       f"total_duration={total_duration:.3f}s")
 
             return {"files": files}
 

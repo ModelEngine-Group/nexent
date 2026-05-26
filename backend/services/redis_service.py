@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Dict, Any, Optional, Tuple, Set
+from typing import Dict, Any, Optional, Tuple, Set, List
 
 import redis
 
@@ -24,8 +24,8 @@ class RedisService:
             if not REDIS_URL:
                 raise ValueError("REDIS_URL environment variable is not set")
             self._client = redis.from_url(
-                REDIS_URL, 
-                socket_timeout=5, 
+                REDIS_URL,
+                socket_timeout=5,
                 socket_connect_timeout=5,
                 decode_responses=True
             )
@@ -654,13 +654,13 @@ class RedisService:
             if not error_reason:
                 logger.error(f"Cannot save error info for task {task_id}: error_reason is empty")
                 return False
-            
+
             ttl_seconds = ttl_days * 24 * 60 * 60
             reason_key = f"error:reason:{task_id}"
 
             # Save error reason
             result = self.client.setex(reason_key, ttl_seconds, error_reason)
-            
+
             if result:
                 logger.info(f"Successfully saved error info to Redis for task {task_id}, key: {reason_key}")
                 # Verify the save by reading it back
@@ -695,13 +695,13 @@ class RedisService:
             if not task_id:
                 logger.error("Cannot save progress info: task_id is empty")
                 return False
-            
+
             progress_key = f"progress:{task_id}"
             progress_data = {
                 'processed_chunks': processed_chunks,
                 'total_chunks': total_chunks
             }
-            
+
             ttl_seconds = ttl_hours * 3600
             progress_json = json.dumps(progress_data)
             self.client.setex(
@@ -873,6 +873,79 @@ class RedisService:
             logger.error(
                 f"Failed to get error info for task {task_id}: {str(e)}")
             return None
+
+    def batch_get_progress_info(self, task_ids: List[str]) -> Dict[str, Optional[Dict[str, int]]]:
+        """
+        Batch get progress information for multiple tasks in a single Redis call.
+
+        Args:
+            task_ids: List of Celery task IDs
+
+        Returns:
+            Dict mapping task_id to progress info dict, or None if not found
+        """
+        if not task_ids:
+            return {}
+
+        try:
+            # Build list of keys
+            progress_keys = [f"progress:{tid}" for tid in task_ids]
+            # Use pipeline for batch operation
+            pipe = self.client.pipeline()
+            for key in progress_keys:
+                pipe.get(key)
+            results = pipe.execute()
+
+            # Build result dict
+            result = {}
+            for i, task_id in enumerate(task_ids):
+                progress_data = results[i]
+                if progress_data:
+                    try:
+                        if isinstance(progress_data, bytes):
+                            progress_data = progress_data.decode('utf-8')
+                        result[task_id] = json.loads(progress_data)
+                    except (json.JSONDecodeError, TypeError):
+                        result[task_id] = None
+                else:
+                    result[task_id] = None
+            return result
+        except Exception as e:
+            logger.warning(f"Failed to batch get progress info: {str(e)}")
+            return {tid: None for tid in task_ids}
+
+    def batch_get_error_info(self, task_ids: List[str]) -> Dict[str, Optional[str]]:
+        """
+        Batch get error information for multiple tasks in a single Redis call.
+
+        Args:
+            task_ids: List of Celery task IDs
+
+        Returns:
+            Dict mapping task_id to error reason string, or None if not found
+        """
+        if not task_ids:
+            return {}
+
+        try:
+            # Build list of keys
+            error_keys = [f"error:reason:{tid}" for tid in task_ids]
+            # Use pipeline for batch operation
+            pipe = self.client.pipeline()
+            for key in error_keys:
+                pipe.get(key)
+            results = pipe.execute()
+
+            # Build result dict
+            result = {}
+            for i, task_id in enumerate(task_ids):
+                reason = results[i]
+                # With decode_responses=True, reason is already a string
+                result[task_id] = reason if reason else None
+            return result
+        except Exception as e:
+            logger.warning(f"Failed to batch get error info: {str(e)}")
+            return {tid: None for tid in task_ids}
 
 # Global Redis service instance
 _redis_service = None

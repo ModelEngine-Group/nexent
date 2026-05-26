@@ -1791,20 +1791,20 @@ class TestElasticSearchService(unittest.TestCase):
         1. Files indexed in Elasticsearch are retrieved correctly
         2. Document chunks for each file are retrieved using msearch
         3. The chunks are included in the file details
-        4. The chunk count is correctly calculated
+        4. The chunk count comes from aggregation (chunk_count field)
         """
-        # Setup
+        # Setup - chunk_count from aggregation
         self.mock_vdb_core.get_documents_detail.return_value = [
             {
                 "path_or_url": "file1",
                 "filename": "file1.txt",
                 "file_size": 1024,
-                "create_time": "2023-01-01T12:00:00"
+                "create_time": "2023-01-01T12:00:00",
+                "chunk_count": 1
             }
         ]
         mock_get_files_status.return_value = {}
-        self.mock_vdb_core.client.count.return_value = {"count": 0}
-        self.mock_vdb_core.client.count.return_value = {"count": 1}
+        # Note: count() is no longer called - chunk_count comes from aggregation
 
         # Mock multi_search response
         msearch_response = {
@@ -1854,21 +1854,21 @@ class TestElasticSearchService(unittest.TestCase):
         3. Chunk count is set to 0 for affected files
         4. The overall operation doesn't fail due to msearch errors
         """
-        # Setup
+        # Setup - chunk_count from aggregation
         self.mock_vdb_core.get_documents_detail.return_value = [
             {
                 "path_or_url": "file1",
                 "filename": "file1.txt",
                 "file_size": 1024,
-                "create_time": "2023-01-01T12:00:00"
+                "create_time": "2023-01-01T12:00:00",
+                "chunk_count": 1
             }
         ]
         mock_get_files_status.return_value = {}
-        self.mock_vdb_core.client.count.return_value = {"count": 0}
+        # Note: count() is no longer called
 
         # Mock msearch error
-        self.mock_vdb_core.client.msearch.side_effect = Exception(
-            "MSSearch Error")
+        self.mock_vdb_core.multi_search.side_effect = Exception("MSSearch Error")
 
         # Execute
         async def run_test():
@@ -1883,7 +1883,7 @@ class TestElasticSearchService(unittest.TestCase):
         # Assert
         self.assertEqual(len(result["files"]), 1)
         self.assertEqual(len(result["files"][0]["chunks"]), 0)
-        self.assertEqual(result["files"][0]["chunk_count"], 0)
+        self.assertEqual(result["files"][0]["chunk_count"], 1)
 
     @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.delete_file')
@@ -4503,9 +4503,9 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertEqual(mock_redis.save_progress_info.call_count, 2)
 
     @patch('backend.services.vectordatabase_service.get_all_files_status')
-    @patch('backend.services.vectordatabase_service.get_redis_service')
-    def test_list_files_handles_invalid_create_time_and_failed_tasks(self, mock_get_redis, mock_get_files_status):
-        """list_files handles invalid timestamps, progress overrides, and error info."""
+    def test_list_files_handles_invalid_create_time_and_failed_tasks(self, mock_get_files_status):
+        """list_files handles invalid timestamps, progress from get_all_files_status, and error info."""
+        # ES file with invalid timestamp and chunk_count from aggregation
         self.mock_vdb_core.get_documents_detail.return_value = [
             {
                 "path_or_url": "file1",
@@ -4515,26 +4515,19 @@ class TestRethrowOrPlain(unittest.TestCase):
                 "chunk_count": 1
             }
         ]
-        self.mock_vdb_core.client.count.return_value = {"count": 7}
+        # Note: count() is no longer called - chunk_count comes from aggregation
 
+        # Progress and error info now come from get_all_files_status (batch from Redis)
         mock_get_files_status.return_value = {
             "file1": {
                 "state": "PROCESS_FAILED",
                 "latest_task_id": "task-1",
-                "processed_chunks": 1,
+                "processed_chunks": 2,
                 "total_chunks": 5,
                 "source_type": "minio",
                 "original_filename": "file1.txt"
             }
         }
-
-        mock_redis = MagicMock()
-        mock_redis.get_progress_info.return_value = {
-            "processed_chunks": 2,
-            "total_chunks": 5
-        }
-        mock_redis.get_error_info.return_value = "boom error"
-        mock_get_redis.return_value = mock_redis
 
         async def run_test():
             return await ElasticSearchService.list_files(
@@ -4546,19 +4539,19 @@ class TestRethrowOrPlain(unittest.TestCase):
         result = asyncio.run(run_test())
         self.assertEqual(len(result["files"]), 1)
         file_info = result["files"][0]
-        self.assertEqual(file_info["chunk_count"], 7)
+        # chunk_count from aggregation (no longer uses count())
+        self.assertEqual(file_info["chunk_count"], 1)
         self.assertEqual(file_info["file_size"], 10)
         self.assertEqual(file_info["status"], "PROCESS_FAILED")
+        # Progress from get_all_files_status
         self.assertEqual(file_info["processed_chunk_num"], 2)
         self.assertEqual(file_info["total_chunk_num"], 5)
-        self.assertEqual(file_info["error_reason"], "boom error")
         self.assertIsInstance(file_info["create_time"], int)
 
     @patch('backend.services.vectordatabase_service.get_all_files_status')
-    @patch('backend.services.vectordatabase_service.get_redis_service')
-    def test_list_files_warning_and_progress_error_branches(self, mock_get_redis, mock_get_files_status):
-        """list_files covers chunk count warning, file size error, progress overrides, and redis failures."""
-        # Existing ES file triggers count warning (lines 749-750 and 910-916)
+    def test_list_files_warning_and_progress_error_branches(self, mock_get_files_status):
+        """list_files: chunk_count from aggregation, progress from get_all_files_status, error handling."""
+        # ES file - chunk_count from aggregation (no longer uses count())
         self.mock_vdb_core.get_documents_detail.return_value = [
             {
                 "path_or_url": "file-es",
@@ -4568,21 +4561,17 @@ class TestRethrowOrPlain(unittest.TestCase):
                 "chunk_count": 1
             }
         ]
-        # First count call for ES file, second for completed file at include_chunks=False
-        self.mock_vdb_core.client.count.side_effect = [
-            Exception("count fail initial"),
-            Exception("count fail final"),
-        ]
+        # Note: count() is no longer called - chunk_count comes from aggregation
 
-        # Two tasks from Celery status to exercise progress success and failure
+        # Tasks from Celery status - progress already included (batch from Redis via get_all_files_status)
         mock_get_files_status.return_value = {
             "file-processing": {
                 "state": "PROCESSING",
                 "latest_task_id": "t1",
                 "source_type": "minio",
                 "original_filename": "fp.txt",
-                "processed_chunks": 1,
-                "total_chunks": 3,
+                "processed_chunks": 2,
+                "total_chunks": 4,
             },
             "file-failed": {
                 "state": "PROCESS_FAILED",
@@ -4592,50 +4581,40 @@ class TestRethrowOrPlain(unittest.TestCase):
             },
         }
 
-        mock_redis = MagicMock()
-        # Progress info: first returns dict, second raises to hit lines 815-816
-        mock_redis.get_progress_info.side_effect = [
-            {"processed_chunks": 2, "total_chunks": 4},
-            Exception("progress boom"),
-        ]
-        # get_error_info raises to hit 847-848
-        mock_redis.get_error_info.side_effect = Exception("error info boom")
-        mock_get_redis.return_value = mock_redis
+        async def run_test():
+            return await ElasticSearchService.list_files(
+                index_name="idx",
+                include_chunks=False,
+                vdb_core=self.mock_vdb_core
+            )
 
-        with patch('backend.services.vectordatabase_service.get_file_size', side_effect=Exception("size boom")):
-            async def run_test():
-                return await ElasticSearchService.list_files(
-                    index_name="idx",
-                    include_chunks=False,
-                    vdb_core=self.mock_vdb_core
-                )
-
-            result = asyncio.run(run_test())
+        result = asyncio.run(run_test())
 
         # Ensure both ES file and processing files are returned
         paths = {f["path_or_url"] for f in result["files"]}
         self.assertIn("file-es", paths)
         self.assertIn("file-processing", paths)
         self.assertIn("file-failed", paths)
-        # Processing file gets progress override
+        # Processing file gets progress from get_all_files_status
         proc_file = next(
             f for f in result["files"] if f["path_or_url"] == "file-processing")
         self.assertEqual(proc_file["processed_chunk_num"], 2)
         self.assertEqual(proc_file["total_chunk_num"], 4)
-        # Failed file retains default chunk_count fallback
-        failed_file = next(
-            f for f in result["files"] if f["path_or_url"] == "file-failed")
-        self.assertEqual(failed_file.get("chunk_count", 0), 0)
+        # ES file chunk_count from aggregation
+        es_file = next(
+            f for f in result["files"] if f["path_or_url"] == "file-es")
+        self.assertEqual(es_file["chunk_count"], 1)
 
     @patch('backend.services.vectordatabase_service.get_all_files_status', return_value={})
     def test_list_files_with_chunks_updates_chunk_count(self, mock_get_files_status):
-        """list_files include_chunks path refreshes chunk counts."""
+        """list_files include_chunks: chunk_count from aggregation, no extra count() calls."""
         self.mock_vdb_core.get_documents_detail.return_value = [
             {
                 "path_or_url": "file1",
                 "filename": "file1.txt",
                 "file_size": 10,
-                "create_time": "2024-01-01T00:00:00"
+                "create_time": "2024-01-01T00:00:00",
+                "chunk_count": 2
             }
         ]
         self.mock_vdb_core.multi_search.return_value = {
@@ -4654,7 +4633,7 @@ class TestRethrowOrPlain(unittest.TestCase):
                 }
             ]
         }
-        self.mock_vdb_core.client.count.return_value = {"count": 2}
+        # Note: count() is no longer called - chunk_count comes from aggregation
 
         async def run_test():
             return await ElasticSearchService.list_files(
