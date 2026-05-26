@@ -12,7 +12,7 @@ maintainers:
   - name: Nexent Team
 
 dependencies:
-  # Common resources (ConfigMap, Secret, RBAC, Namespace)
+  # Common resources (ConfigMap, Secret, RBAC)
   - name: nexent-common
     version: 0.1.0
     repository: "file://./charts/nexent-common"
