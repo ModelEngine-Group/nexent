@@ -1,52 +1,52 @@
 # Agent Context Compression Benchmark
 
-## 目标
+## Objectives
 
-评估压缩后 Agent 是否还能正常工作：
+Evaluate whether the compressed Agent can still function properly:
 
-- **Continuation**：压缩后是否还能继续任务？
-- **Memory Retention**：压缩后是否还能记住关键状态？
-- **Token Reduction**：token 是否有效下降？
+- **Continuation**: Can the agent continue the task after compression?
+- **Memory Retention**: Can the agent remember key states after compression?
+- **Token Reduction**: Does the token count effectively decrease?
 
 
 ---
 
-## 两条评估路径
+## Two Evaluation Paths
 
 ```
 benchmark/
-├── manual_cases/          # 手工构造的 case，完整评估流水线
-├── acon_eval/             # 基于 ACON 数据集的 QA 评估
-├── eventqa_eval/          # 基于 EventQA 数据集的长文记忆评估
-└── paths.py               # 共享路径解析
+├── manual_cases/          # Handcrafted cases, complete evaluation pipeline
+├── acon_eval/             # QA evaluation based on ACON dataset
+├── eventqa_eval/          # Long-text memory evaluation based on EventQA dataset
+└── paths.py               # Shared path resolution
 ```
 
-### 1. manual_cases — 手工 Case 评估
+### 1. manual_cases — Handcrafted Case Evaluation
 
-手工构造的测试用例，运行完整评估流水线（continuation、probe、静态检查）。
+Handcrafted test cases running the complete evaluation pipeline (continuation, probe, static inspection).
 
 ```
 manual_cases/
-├── cases/                         # test_benchmark.py 输入
+├── cases/                         # test_benchmark.py input
 │   └── <case_id>/
 │       ├── case.json              # queries, probes, checks, config
-│       └── history.json           # 对话历史
-├── inspections/                   # summary_inspector.py 输入（独立运行）
+│       └── history.json           # conversation history
+├── inspections/                   # summary_inspector.py input (standalone run)
 │   └── <name>/
 │       ├── history.json
 │       ├── checks.json            # [{"description": "...", "must_contain": [...]}]
-│       ├── _result.json           # 输出：检查结果
-│       └── _summary.txt           # 输出：原始摘要文本（--save-summary）
-├── reports/                       # test_benchmark.py 输出
-│   ├── <case_id>.json            # 单 case 完整报告
-│   └── summary.json              # 跨 case 汇总指标
-├── agent_runner.py                # agent 运行 + 追踪工具
-├── eval_utils.py                  # 关键词评估
-├── summary_inspector.py           # 独立摘要检查（低成本，不需要跑 agent）
-└── test_benchmark.py              # 完整 benchmark 运行器
+│       ├── _result.json           # output: inspection results
+│       └── _summary.txt           # output: raw summary text (--save-summary)
+├── reports/                       # test_benchmark.py output
+│   ├── <case_id>.json            # single-case complete report
+│   └── summary.json              # cross-case aggregate metrics
+├── agent_runner.py                # agent run + tracing utilities
+├── eval_utils.py                  # keyword evaluation
+├── summary_inspector.py           # standalone summary inspection (low cost, no agent run)
+└── test_benchmark.py              # complete benchmark runner
 ```
 
-`case.json` 格式：
+`case.json` format:
 
 ```json
 {
@@ -60,15 +60,15 @@ manual_cases/
 }
 ```
 
-- `id`：case 唯一标识，也作为报告文件名
-- `history_file`：对话历史文件，相对 case 目录（默认 `history.json`）
-- `queries`：continuation query
-- `probes`：记忆探针问题
-- `summary_checks`：静态摘要检查
-- `task_checks`：任务结果检查
-- `compressed_config`：压缩配置覆盖
+- `id`: unique case identifier, also used as report filename
+- `history_file`: conversation history file, relative to case directory (default `history.json`)
+- `queries`: continuation queries
+- `probes`: memory probe questions
+- `summary_checks`: static summary inspections
+- `task_checks`: task result inspections
+- `compressed_config`: compression config overrides
 
-`history.json` 格式：
+`history.json` format:
 
 ```json
 [
@@ -78,14 +78,14 @@ manual_cases/
 ```
 
 
-#### 评估指标
+#### Evaluation Metrics
 
-每个 case 跑两组：
+Each case runs two groups:
 
-1. **baseline**（不压缩）
-2. **compressed**（开启压缩）
+1. **baseline** (no compression)
+2. **compressed** (compression enabled)
 
-核心指标：
+Core metrics:
 
 ```python
 task_success_retention = compressed_task_score / baseline_task_score
@@ -98,69 +98,69 @@ token_reduction = 1 - compressed_tokens / baseline_tokens
 ---
 
 **Continuation Evaluation**
-continuation query 模拟真实多轮 Agent。
+Continuation queries simulate real multi-turn Agent interactions.
 
-允许：
+Allowed:
 
-- history 增长
-- compression 持续发生
-- ContextManager 跨轮复用
+- history growth
+- continuous compression occurrence
+- ContextManager reuse across turns
 
-这是 **有状态** 评估。
+This is a **stateful** evaluation.
 
 
 **Probe Evaluation**
-probe 用于检查压缩后 agent 能否**利用**残留信息回答问题。
+Probes check whether the compressed agent can **utilize** residual information to answer questions.
 
-重要规则：
+Important rules:
 
-- freeze 压缩后的 history snapshot（每个 probe deep copy）
-- 每个 probe 独立运行
-- probe 不允许修改原始 history（用 deep copy 隔离）
-- probe 之间不能共享上下文
+- freeze the compressed history snapshot (deep copy per probe)
+- each probe runs independently
+- probes cannot modify the original history (isolated via deep copy)
+- probes cannot share context with each other
 
-压缩只做一次，所有 probe 复用结果：
+Compression happens once, all probes reuse the result:
 
-1. 先从 compressed run 的 `export_summary()` 获取 summary + compression_boundary
-2. 用 `build_precompressed_history()` 构建预压缩 history：
-   - 被压缩的 pairs 替换为一条 (user=summary, assistant=ack)
-   - 保留的尾部 pairs 原样保留
-3. 每个 probe 用预压缩 history + compression disabled 运行
-4. 避免每个 probe 重复走压缩流程（同样的输入 → 同样的压缩结果，无需重复调 LLM）
+1. Get summary + compression_boundary from the compressed run's `export_summary()`
+2. Build precompressed history with `build_precompressed_history()`:
+   - compressed pairs replaced with a single (user=summary, assistant=ack)
+   - retained tail pairs preserved verbatim
+3. Each probe runs with precompressed history + compression disabled
+4. Avoid redundant compression LLM calls per probe (same input → same compression result, no need to call LLM repeatedly)
 
 
-### 2. acon_eval — 数据集驱动 QA 评估
+### 2. acon_eval — Dataset-driven QA Evaluation
 
-使用 ACON 的 `nq_multi_8` 数据集（多目标问题 + Wikipedia 搜索），评估压缩对 QA 准确率的影响。
+Uses ACON's `nq_multi_8` dataset (multi-objective questions + Wikipedia search) to evaluate compression's impact on QA accuracy.
 
-与 manual_cases 不同，这里**不使用**手工构造的 probe 或 continuation query，而是在标准化数据集上直接对比 baseline 与 compressed 条件下的**任务准确率**（EM/F1）。
+Unlike manual_cases, this **does not use** handcrafted probes or continuation queries, but directly compares baseline vs compressed **task accuracy** (EM/F1) on a standardized dataset.
 
 ```
 acon_eval/
-├── data/nq_multi_8/              # ACON 数据集（JSONL）
+├── data/nq_multi_8/              # ACON dataset (JSONL)
 │   ├── train.jsonl
 │   ├── test.jsonl
-│   └── folds/                    # few-shot 折叠数据
-├── outputs/                      # 各模式结果
+│   └── folds/                    # few-shot fold data
+├── outputs/                      # results per mode
 │   ├── baseline/test/
 │   │   ├── predictions.jsonl
 │   │   └── summary.json
 │   └── context_manager/test/
 │       ├── predictions.jsonl
 │       └── summary.json
-├── agent_runner.py                # agent 运行 + 追踪
-├── dataset.py                     # ACON 数据集加载器
-├── eval_utils.py                  # EM/F1 评分
-├── run_acon_qa.py                 # 主入口
-└── tools.py                       # wikipedia_search + final_answer 工具
+├── agent_runner.py                # agent run + tracing
+├── dataset.py                     # ACON dataset loader
+├── eval_utils.py                  # EM/F1 scoring
+├── run_acon_qa.py                 # main entry point
+└── tools.py                       # wikipedia_search + final_answer tools
 ```
 
-用法：
+Usage:
 
 ```bash
-# 先启动 ACON retriever 服务（参见 ACON README） https://github.com/microsoft/acon/blob/main/experiments/smolagents/README.md
+# First start ACON retriever service (see ACON README) https://github.com/microsoft/acon/blob/main/experiments/smolagents/README.md
 #  python retriever_server.py  --index_path database/wikipedia/bm25/   --corpus_path database/wikipedia/wiki-18.jsonl
-# 上述 retriever_server.py 内容有所更改(参考本目录提供的)，此外，需手动下载 bm25 索引文件 与wiki-18 数据集
+# The retriever_server.py above has been modified (see this directory's version). Also need to manually download bm25 index files and wiki-18 dataset
 # bm25: https://huggingface.co/datasets/PeterJinGo/wiki-18-bm25-index/tree/main/bm25
 # wiki-18: https://huggingface.co/datasets/PeterJinGo/wiki-18-corpus/tree/main
 python run_acon_qa.py \
@@ -182,40 +182,40 @@ python run_acon_qa.py \
 
 ```
 
-**模式**：`baseline`（不压缩）vs `context_manager`（nexent 内置压缩）。
-**说明**：这里的对话历史结构与 manual_cases 不同，该测试场景下不存在previous history，只有 current 场景下的多步。
+**Modes**: `baseline` (no compression) vs `context_manager` (nexent built-in compression).
+**Note**: The conversation history structure here differs from manual_cases. This test scenario has no previous history, only multi-step within the current session.
 
 ---
 
-### 3. eventqa_eval — EventQA 长文记忆评估
+### 3. eventqa_eval — EventQA Long-text Memory Evaluation
 
-使用 MemoryAgentBench 的 EventQA 数据集（5 部小说，每部 39 万–53 万 tokens，各 100 道"接下来发生什么"六选一 MCQ），评估压缩对**超长文档记忆**的影响。
+Uses MemoryAgentBench's EventQA dataset (5 novels, each 390K–530K tokens, 100 "what happens next" six-choice MCQs per book) to evaluate compression's impact on **ultra-long document memory**.
 
-与 acon_eval 一样是数据集驱动，但场景不同：整本小说作为待压缩的历史，MCQ 直接作为记忆探针（probe）——题目自带前序事件，天然就是"给你压缩后的摘要，问接下来发生什么"，无需额外构造 probe。
+Like acon_eval, this is dataset-driven but with a different scenario: the entire novel as history to be compressed, MCQs directly serve as memory probes—questions come with prior events, naturally asking "given the compressed summary, what happens next", no need for additional probe construction.
 
 ```
 eventqa_eval/
-├── data/                      # download_data.py 下载的小说（.gitignore，不入库）
+├── data/                      # novels downloaded by download_data.py
 │   └── eventqa_full.jsonl
-├── outputs/                   # 各书结果
+├── outputs/                   # results per book
 │   └── <book_id>/
-│   │   ├── predictions.jsonl  # 逐题 baseline vs compressed 对照
-│   │   └── summary.json       # 单书指标
-│   └── summary.json           # 跨书汇总
-├── download_data.py           # 从 HuggingFace 下载 EventQA 数据
-├── dataset.py                 # EventQA 加载器 + 六选一 MCQ 解析
-├── eval_utils.py              # 六选一准确率评分
-└── run_eventqa.py             # 主入口
+│   │   ├── predictions.jsonl  # per-question baseline vs compressed comparison
+│   │   └── summary.json       # single-book metrics
+│   └── summary.json           # cross-book aggregate
+├── download_data.py           # download EventQA data from HuggingFace
+├── dataset.py                 # EventQA loader + six-choice MCQ parser
+├── eval_utils.py              # six-choice accuracy scoring
+└── run_eventqa.py             # main entry point
 ```
 
-**两条评估臂**（同一模型，retention 比值干净）：
+**Two evaluation arms** (same model, clean retention ratio):
 
-| 臂 | 压缩 | 小说上下文 |
+| Arm | Compression | Novel Context |
 |---|---|---|
-| Baseline | 关闭 | 整本截断到模型窗口后整段喂入（窗口外的题会错） |
-| Compressed | 开启 | 整本切块、多轮喂入，真实 ContextManager 增量压缩；MCQ 作为 probe |
+| Baseline | Disabled | Entire novel truncated to model window then fed whole (questions beyond window will fail) |
+| Compressed | Enabled | Novel chunked and fed in multiple turns, real ContextManager incremental compression; MCQs as probes |
 
-两条臂回答**同一批 100 道题**，因此 retention 比值干净：
+Both arms answer **the same 100 questions**, so the retention ratio is clean:
 
 ```python
 memory_retention = compressed_accuracy / baseline_accuracy
@@ -223,102 +223,102 @@ memory_retention = compressed_accuracy / baseline_accuracy
 token_reduction  = 1 - last_compressed_tokens / last_uncompressed_tokens
 ```
 
-不评 Continuation——EventQA 的 MCQ 彼此独立，无多轮任务延续。
+No Continuation evaluation—EventQA MCQs are independent, no multi-turn task continuation.
 
-用法：
+Usage:
 
 ```bash
-# 一次性：下载 5 部小说（约 13MB，写入 data/）
+# One-time: download 5 novels (~13MB, written to data/)
 python download_data.py
 
-# 冒烟测试：1 本书、1 题、小说截断到 4.8 万字符（触发压缩）
+# Smoke test: 1 book, 1 question, novel truncated to 48K chars (trigger compression)
 python run_eventqa.py --book_limit 1 --limit 1 \
     --max_ingest_chars 48000 --chunk_chars 12000 \
     --token_threshold 3000 --keep_recent_pairs 1
 
-# 完整运行：5 本书 × 100 题
+# Full run: 5 books × 100 questions
 python run_eventqa.py
 ```
 
-**说明**：`eventqa_full` 小说 170 万–320 万字符，任何模型都无法整本不压缩喂入，所以 baseline 用"截断到窗口"作为不压缩对照（`--baseline_context_chars` 控制截断长度）。数据集另有 `eventqa_65536` / `eventqa_131072` 预截断变体，但其问题与 `eventqa_full` 不同，无法与 full 直接对照。
+**Note**: `eventqa_full` novels are 1.7M–3.2M characters, no model can ingest the entire book without compression, so baseline uses "truncate to window" as the no-compression control (`--baseline_context_chars` controls truncation length). The dataset also has `eventqa_65536` / `eventqa_131072` pre-truncated variants, but their questions differ from `eventqa_full`, cannot directly compare with full.
 
 ---
 
-## 补充说明
+## Supplementary Notes
 
-### Probe 构建原则：只指向被压缩的内容
+### Probe Construction Principle: Only Target Compressed Content
 
-probe 的核心目的是检测 memory retention，即"压缩掉的信息 agent 是否还能回答"。
-因此 **probe 应该只问被压缩区域中的信息**，而不是保留在尾部 steps 中的信息。
+The core purpose of probes is to detect memory retention, i.e., "whether the agent can answer information that was compressed away".
+Therefore **probes should only ask about content in the compressed region**, not information retained in the tail steps.
 
-压缩边界是时间性的：`keep_recent_pairs=N` 意味着最后 N 对原样保留，前面的全部进入 summary。因此：
+Compression boundary is temporal: `keep_recent_pairs=N` means the last N pairs are preserved verbatim, everything before enters the summary. Therefore:
 
-- **probe 应该只问 history 前半部分（early pairs）中的细节**
-- 如果 probe 问的是 recent pairs 中的信息，agent 不需要 summary 就能回答，probe 失效——测不出 memory retention
+- **Probes should only ask about details in the early pairs (history first half)**
+- If a probe asks about information in recent pairs, the agent can answer without the summary, the probe fails—cannot measure memory retention
 
-构建 probe 时无需提前知道压缩器具体保留了什么，只需确保 probe 依赖的信息来自 early history（必定被压缩的区域）。
+When constructing probes, no need to know exactly what the compressor retained, just ensure probe-dependent information comes from early history (region that will definitely be compressed).
 
-**验证 probe 设计**：用 `export_summary()` 的 `compression_boundary` 字段确认哪些 pairs 被压缩、哪些被保留。如果 probe 的答案在 summary 里根本没有，这是压缩器的问题（归入 Static Inspection 层面），不是 agent 的问题。
+**Verify probe design**: Use `export_summary()`'s `compression_boundary` field to confirm which pairs were compressed vs retained. If the probe's answer isn't in the summary at all, that's a compressor problem (belongs to Static Inspection layer), not an agent problem.
 
 ---
 
 ### Static Summary Inspection vs Probe Eval
 
-两者测的是不同的故障模式：
+Both test different failure modes:
 
 | | Probe Eval | Static Summary Inspection |
 |--|-----------|--------------------------|
-| 输入 | 完整压缩上下文（summary + 保留的尾部 steps + system prompt） | 仅 summary 文本 |
-| 执行方式 | 让 agent 回答问题（跑 LLM） | 直接检查 summary 文本是否包含关键信息 |
-| 测的是什么 | 压缩后 agent **能否利用**残留信息工作 | 压缩器**是否选择保留**了关键信息 |
-| 失败含义 | summary 里有但 agent 没用上 → 检索/利用能力问题 | summary 里就没有 → 压缩器丢失了 |
+| Input | Complete compressed context (summary + retained tail steps + system prompt) | Summary text only |
+| Execution | Let agent answer questions (run LLM) | Directly inspect summary text for key information |
+| What it tests | Whether agent **can utilize** residual information | Whether compressor **chose to retain** key information |
+| Failure meaning | Summary has it but agent didn't use it → retrieval/utilization capability issue | Summary doesn't have it → compressor lost it |
 
-**两个不同的故障模式**：
-1. 压缩器保留了，但 agent 回答时没能利用 → **Probe Eval** 会发现，Inspection 不会
-2. 压缩器根本没保留 → 两者都会发现，但应归因到 Inspection 层面
+**Two different failure modes**:
+1. Compressor retained, but agent didn't utilize → **Probe Eval** catches this, Inspection won't
+2. Compressor didn't retain at all → Both catch this, but should attribute to Inspection layer
 
 ---
 
 ### Static Summary Inspection
 
-直接检查 compressed summary 是否还包含关键信息。
+Directly inspect whether the compressed summary still contains key information.
 
-#### 在线方案
+#### Online Approach
 
-在 agent 运行后导出压缩状态：
+After agent run, export compression state:
 
 ```python
 compressed_state = shared_cm.export_summary()
-# compressed_state 包含:
-#   previous_summary / current_summary: 压缩后的摘要文本
-#   compression_boundary: 哪些 pairs/steps 被压缩 vs 保留
-#   previous_cache_info / current_cache_info: 缓存元信息
+# compressed_state contains:
+#   previous_summary / current_summary: compressed summary text
+#   compression_boundary: which pairs/steps were compressed vs retained
+#   previous_cache_info / current_cache_info: cache metadata
 
 for check in summary_checks:
     eval_text(compressed_state["previous_summary"], check)
 ```
 
-#### 离线方案
+#### Offline Approach
 
-脱离 agent 运行，直接用相同的 prompt 和 schema 压缩纯文本 pairs：
+Run compression on pure text pairs without agent, using the same prompt and schema:
 
 ```python
 from nexent.core.agents.agent_context import compress_history_offline
 
 result = compress_history_offline(
-    pairs=[("用户说了什么", "助手做了什么"), ...],
+    pairs=[("What user said", "What assistant did"), ...],
     model=llm_model,
     config=ContextManagerConfig(),
 )
-# result["summary"]: 压缩后的摘要
-# result["is_incremental"]: 是否使用了增量压缩
-# result["is_fallback"]: LLM 是否失败并使用了 fallback
-# result["input_text"]: 喂给 LLM 的原始文本（用于调试）
+# result["summary"]: compressed summary
+# result["is_incremental"]: whether incremental compression was used
+# result["is_fallback"]: whether LLM failed and used fallback
+# result["input_text"]: raw text fed to LLM (for debugging)
 
-eval_text(result["summary"], {"must_contain": ["关键文件名"]})
+eval_text(result["summary"], {"must_contain": ["key_filename"]})
 ```
 
-离线方案的优势：
-- 不需要跑 agent，只需一次 LLM 调用做压缩
-- 不依赖 AgentMemory、ActionStep 等运行时对象
-- 适合批量评估不同 prompt/schema 对压缩质量的影响
+Offline approach advantages:
+- No need to run agent, just one LLM call for compression
+- No dependency on AgentMemory, ActionStep and other runtime objects
+- Suitable for batch evaluation of different prompt/schema impacts on compression quality

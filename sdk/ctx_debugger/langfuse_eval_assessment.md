@@ -1,79 +1,78 @@
-# Langfuse 评测能力适配评估
+# Langfuse Evaluation Capability Adaptation Assessment
 
-针对本仓库 (`sdk/benchmark/`) 下三套 benchmark — `manual_cases` / `acon_eval` /
-`eventqa_eval` — 评估能否用 Langfuse 自带的 **Evaluation / Scores /
-LLM-as-a-Judge / Human Annotation / Datasets** 作为评测主框架的可行性与 gap。
+For the three benchmarks in this repo (`sdk/benchmark/`) — `manual_cases` / `acon_eval` / `eventqa_eval` — evaluate feasibility and gaps of using Langfuse's built-in **Evaluation / Scores / LLM-as-a-Judge / Human Annotation / Datasets** as the main evaluation framework.
 
-> 范围：仅评估 Langfuse 评测特性本身。我们已经在用 Langfuse 的 trace 可视化和
-> session 分组（`ctx_debugger/langfuse_export.py`），这部分不在本文讨论范围。
+> Scope: Only evaluate Langfuse evaluation features. We already use Langfuse's trace visualization and session grouping (`ctx_debugger/langfuse_export.py`), that part not discussed here.
 
 ---
 
-## 1. Langfuse 评测能力 vs 本仓库需求对照
+## 1. Langfuse Evaluation Capabilities vs This Repo's Needs
 
-| Langfuse 功能 | 设计用途 | 适合本仓库哪里 |
+| Langfuse Feature | Design Purpose | Where suitable in this repo |
 |---|---|---|
-| **Scores** | 把数值/类别指标贴在 trace / observation / session 上 | ✅ 把每题对错 / retention / token_reduction 推上去；dashboard 跨 session 对比 |
-| **LLM-as-a-Judge** | 让一个 judge LLM 给开放式回答打分 | ⚠️ 我们大部分评测是确定性的（MCQ、EM/F1、关键词）；judge 反而引入噪声 |
-| **Human Annotation** | trace 排队人工标注 | ⚠️ 只在开放式输出/质量主观判断时有用 |
-| **Datasets** | 输入 + 期望输出对的集合，跑 experiment | ⚠️ 数据集与 task 模型不匹配（见下） |
+| **Scores** | Attach numeric/category metrics to trace / observation / session | ✅ Attach each question's correct/incorrect / retention / token_reduction; dashboard cross-session comparison |
+| **LLM-as-a-Judge** | Let a judge LLM score open-ended answers | ⚠️ Most evaluation here is deterministic (MCQ, EM/F1, keywords); judge反而introduces noise |
+| **Human Annotation** | Queue traces for manual annotation | ⚠️ Only useful for open-ended output/quality subjective judgment |
+| **Datasets** | Collection of input + expected output pairs, run experiment | ⚠️ Dataset and task model mismatch (see below) |
 
 ---
 
-## 2. (a) 整个 benchmark 适配评估
+## 2. (a) Overall Benchmark Adaptation Assessment
 
-三个 benchmark 的评测方式：
+Three benchmarks' evaluation methods:
 
-| benchmark | 评测方式 | Langfuse 替代可行性 |
+| Benchmark | Evaluation Method | Langfuse Replacement Feasibility |
 |---|---|---|
-| `manual_cases` | `eval_text(text, check)` 关键词 `must_contain` / `must_contain_any` | 关键词检查在外做更省、更准；**但 summary inspection 那层换 LLM-as-a-Judge 有价值**——现在 `must_contain` 只能验"出现没出现"，judge 能问"这段 summary 是否保留了关键状态" |
-| `acon_eval` | EM / F1（确定性字符串） | ❌ 不需要 judge / 标注 |
-| `eventqa_eval` | 六选一字符串匹配 | ❌ 不需要 judge / 标注 |
+| `manual_cases` | `eval_text(text, check)` keyword `must_contain` / `must_contain_any` | Keyword check done externally cheaper, more accurate; **but summary inspection layer switching to LLM-as-a-Judge has value**—current `must_contain` only verifies "appeared or not", judge can ask "does this summary retain key states" |
+| `acon_eval` | EM / F1 (deterministic string) | ❌ No need for judge / annotation |
+| `eventqa_eval` | Six-choice string match | ❌ No need for judge / annotation |
 
-**结构性 gap**：Langfuse 的 Experiment 框架是 **"一个输入 → 一次 LLM 调用 → 一个输出"** 的模型。我们的 task 是**整套 agent run + 多轮 ingest + 多个 probe**——跟 Langfuse Dataset/Experiment 的 "task per item" 不匹配。硬塞进去等于把 `run_*.py` 拆成一堆 Langfuse callback，复杂度上升、收益不大。
+**Structural gap**: Langfuse's Experiment framework follows **"one input → one LLM call → one output"** model. Our task is **entire agent run + multi-turn ingest + multiple probes**—doesn't match Langfuse Dataset/Experiment's "task per item". Forcing in等于把 `run_*.py`拆成一堆 Langfuse callbacks, complexity rises, benefit small.
 
-**真实增量价值**有两块：
+**Real incremental value** in two areas:
 
-1. **Scores 推送（高优先级）**：扩展 `langfuse_export.py`，给每个 probe trace 贴一个 `correctness: 0/1` 分数、给整个 session 贴 aggregate `accuracy` / `retention` / `token_reduction`。dashboard 就能可视化时序对比不同参数/schema/模型。**性价比最高的整合**。
-2. **LLM-as-a-Judge 只用在 `manual_cases` 的 summary inspection 层**：现在 `summary_checks` 用 `must_contain` 检查关键字，会漏掉同义改写。换 judge 评 "summary 是否保留了 X 信息" 更鲁棒。但 acon/eventqa 不要碰——MCQ 上 judge 反而引入误判。
+1. **Scores push (high priority)**: Extend `langfuse_export.py`, attach each probe trace with `correctness: 0/1` score, attach entire session with aggregate `accuracy` / `retention` / `token_reduction`. Dashboard can visualize time-series comparison of different params/schema/models. **Highest ROI integration**.
+2. **LLM-as-a-Judge only for `manual_cases` summary inspection layer**: Current `summary_checks` uses `must_contain` keyword check, misses synonymous rewrites. Switch judge evaluating "does summary retain X info" more robust. But don't touch acon/eventqa—MCQ上 judge反而introduces误判.
 
 ---
 
-## 3. (b) EventQA 单独评估
+## 3. (b) EventQA Individual Assessment
 
-| 维度 | Langfuse 替代 | 评估 |
+| Dimension | Langfuse Replacement | Evaluation |
 |---|---|---|
-| 探针 MCQ 评分 | Langfuse Scores | ✅ **可行且推荐**——每个 probe trace 上贴 `correctness: 0/1`、`match_type: exact/containment/fuzzy/no_answer` |
-| Token reduction | Langfuse 内置 token tracking | ✅ Langfuse **自带 per-call token 计数**（input/output/cost），比"取最后一轮 get_token_counts" 更精准；可以把 ingest 阶段 LLM 调用总 token 数作为 Score |
-| Retention（compressed/baseline）| Langfuse 跨 session 聚合 | ⚠️ Langfuse **不自动算 retention**——只展示各自的 acc，比值要外部计算后再推一个 Score |
-| LLM-as-a-Judge | — | ❌ **不需要**——MCQ 的 gold 是六选项之一，确定性匹配就够；judge 引入不必要的 LLM 调用 |
-| Human Annotation | — | ❌ **不需要**——同上 |
-| Datasets | 把 100 题装进 Langfuse Dataset | ⚠️ **重复存数据**——我们已经有 `data/eventqa_full.jsonl`；除非要走 Langfuse Experiment 流程，否则纯重复 |
+| Probe MCQ scoring | Langfuse Scores | ✅ **Feasible and recommended**—attach each probe trace with `correctness: 0/1`, `match_type: exact/containment/fuzzy/no_answer` |
+| Token reduction | Langfuse built-in token tracking | ✅ Langfuse **自带 per-call token count** (input/output/cost), more precise than "take last turn get_token_counts"; can use ingest phase LLM calls total tokens as Score |
+| Retention (compressed/baseline) | Langfuse cross-session aggregation | ⚠️ Langfuse **不自动算 retention**—only shows各自 acc, ratio needs external calculation then push as Score |
+| LLM-as-a-Judge | — | ❌ **Not needed**—MCQ gold is one of six options, deterministic match sufficient; judge introduces unnecessary LLM calls |
+| Human Annotation | — | ❌ **Not needed**—same as above |
+| Datasets | Put 100 questions into Langfuse Dataset | ⚠️ **Duplicate data storage**—we already have `data/eventqa_full.jsonl`; unless running Langfuse Experiment flow, pure duplication |
 
-### EventQA 的具体 Gap
+### EventQA Specific Gaps
 
-1. **不能"端到端在 Langfuse 里跑 EventQA"**——它的 task model 是 "一次输入 → 一次 LLM 调用 → 一次输出"。EventQA 的"输入"是整本小说（要 24 轮 ingest 才能压缩），"输出"是 100 题答案。整个 ingest+probe 流程塞 Langfuse Experiment 不自然——还得在外面用 `run_eventqa.py` 跑、把结果导进去。
-2. **Retention 是跨 arm 比值**：Langfuse 没"跨 session/trace 自动比对"概念。要 compressed_acc / baseline_acc 必须外部算好再推。
-3. **Per-probe 上下文成本**：Langfuse 的 token 计数是 LLM 实际的 input/output tokens，**比 `manual_cases` 同款的"取最后一轮 effective tokens"更精准**。要换可以把 Langfuse 报告的真实 token cost 替代单点估算。
+1. **Cannot "end-to-end run EventQA in Langfuse"**—its task model is "one input → one LLM call → one output". EventQA's "input" is entire novel (needs 24 turns of ingest to compress), "output" is 100 question answers. Entire ingest+probe flow forcing into Langfuse Experiment unnatural—still need external `run_eventqa.py` to run, import results in.
+
+2. **Retention is cross-arm ratio**: Langfuse has no "cross session/trace automatic comparison" concept. To get compressed_acc / baseline_acc must calculate externally then push.
+
+3. **Per-probe context cost**: Langfuse's token count is LLM actual input/output tokens, **more precise than `manual_cases`同款 "take last turn effective tokens"**. Can switch to Langfuse-reported real token cost替代 single-point estimate.
 
 ---
 
-## 4. 落地方案优先级
+## 4. Implementation Priority
 
-按收益降序：
+By descending benefit:
 
-| 优先级 | 动作 | 收益 | 工作量 |
+| Priority | Action | Benefit | Work量 |
 |---|---|---|---|
-| **高（已落地）** | 扩展 `langfuse_export.py`：新增 `--benchmarkqa-outputs <dir>`；每个 probe trace 贴 `correctness`（NUMERIC 0/1）+ `match_type`（CATEGORICAL），score metadata 含 arm / schema / qid。Langfuse UI 自动按 session 聚合 `correctness`，filter by `metadata.arm` 可分 compressed / baseline。`retention` / `token_reduction` **不推**——已在 `outputs/<book>/summary.json`，再推到 Langfuse 反而要造一个 phantom "session-summary" trace 污染 trace 列表。 | dashboard 直接看时序 / 跨 session 对比；其他特性的基石 | ~80 行 |
-| **中** | 给 `manual_cases` 的 summary_checks 加一个 LLM-as-a-Judge 评测器（同义改写不漏判）| `must_contain` 关键字法的真实补充 | ~100 行 + judge prompt 设计 |
-| **低** | EventQA 数据搬进 Langfuse Dataset | 没多大新价值——已经有 jsonl 了 | ~30 行 |
-| **不做** | 把 EventQA 评测主流程搬到 Langfuse Experiments | 模型不匹配——硬塞进去等于把 `run_eventqa.py` 拆成一堆 callback | × |
-| **不做** | MCQ 上 LLM-as-a-Judge / Human Annotation | 引入噪声，无收益 | × |
+| **High (已落地)** | Extend `langfuse_export.py`: Add `--benchmarkqa-outputs <dir>`; each probe trace attach `correctness` (NUMERIC 0/1) + `match_type` (CATEGORICAL), score metadata contains arm / schema / qid. Langfuse UI auto aggregates `correctness` by session, filter by `metadata.arm` can split compressed / baseline. `retention` / `token_reduction` **不push**—already in `outputs/<book>/summary.json`, pushing to Langfuse反而needs creating phantom "session-summary" trace polluting trace list. | Dashboard directly see time-series / cross-session comparison; foundation for other features | ~80 lines |
+| **Medium** | Add LLM-as-a-Judge evaluator for `manual_cases`' summary_checks (doesn't miss synonymous rewrites) | Real complement to `must_contain` keyword method | ~100 lines + judge prompt design |
+| **Low** | Move EventQA data into Langfuse Dataset | Not much new value—already have jsonl | ~30 lines |
+| **Don't do** | Move EventQA evaluation main flow to Langfuse Experiments | Model mismatch—forcing等于把 `run_eventqa.py`拆成一堆 callbacks | × |
+| **Don't do** | LLM-as-a-Judge / Human Annotation on MCQ | Introduces noise, no benefit | × |
 
 ---
 
-## 5. 总结
+## 5. Summary
 
-- Langfuse 的评测框架**替代不了主流程**（agent 多轮 ingest + probe + 跨 arm retention 的结构与其 task model 不匹配）
-- **唯一性价比高的整合是 Scores 推送**——把已有评分结果可视化进 Langfuse，便于跨 session 对比参数/模型/schema 调整
-- LLM-as-a-Judge / Human Annotation / Datasets 只对 `manual_cases` 的 summary inspection 那一小段有边际价值；对 acon/eventqa 的确定性评测引入噪声
+- Langfuse's evaluation framework **cannot replace main flow** (agent multi-turn ingest + probe + cross-arm retention structure doesn't match its task model)
+- **Only high ROI integration is Scores push**—push existing evaluation results into Langfuse for visualization, convenient cross-session comparison of params/model/schema tuning
+- LLM-as-a-Judge / Human Annotation / Datasets only have marginal value for `manual_cases`' summary inspection一小段; for acon/eventqa deterministic evaluation introduces noise

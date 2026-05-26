@@ -1,87 +1,78 @@
-# benchmark — Nexent Agent 上下文压缩评测
+# benchmark — Nexent Agent Context Compression Evaluation
 
-评估 **Agent Context Compression** 的实用效果：压缩后 Agent 还能不能继续完成
-任务、记住关键状态，且 token 确实下降。不测 summary 与原文的文本相似度，只测
-**功能性保留**。
+Evaluate the practical effectiveness of **Agent Context Compression**: whether the compressed Agent can still complete tasks, remember key states, and tokens actually decrease. Does not measure text similarity between summary and original, only measures **functional retention**.
 
-> 评测机制的完整设计说明见 [`note_benchmark.md`](note_benchmark.md)。
-> 本文件只讲**怎么跑**。
+> For complete design documentation of the evaluation mechanism, see [`note_benchmark.md`](note_benchmark.md).
+> This file only covers **how to run**.
 
 ---
 
-## 运行前提
+## Prerequisites
 
-- 用 backend 的 venv（已装好 nexent SDK 与依赖）：`nexent/backend/.venv/bin/python`
-- LLM 凭据在仓库根的 `nexent/.env`（`agent_runner` 会 `load_dotenv`）：
+- Use backend's venv (nexent SDK and dependencies already installed): `nexent/backend/.venv/bin/python`
+- LLM credentials in repo root's `nexent/.env` (`agent_runner` will `load_dotenv`):
   `LLM_API_KEY` / `LLM_MODEL_NAME` / `LLM_API_URL`
-- 下文命令默认你站在本目录（`sdk/benchmark/`），路径用的是相对路径。
+- Commands below assume you're in this directory (`sdk/benchmark/`), using relative paths.
 
 ---
 
-## 两个入口
+## Two Entry Points
 
-### 1. `test_benchmark.py` —— 端到端 case 评测（主入口）
+### 1. `test_benchmark.py` — End-to-end Case Evaluation (Main Entry)
 
 ```bash
 nexent/backend/.venv/bin/python test_benchmark.py
 ```
 
-自动发现 `cases/*/case.json` 下的所有 case，每个 case 跑两组对比实验：
+Automatically discovers all cases under `cases/*/case.json`, each case runs two comparison experiments:
 
-| 组 | 压缩 | 作用 |
+| Group | Compression | Purpose |
 |---|---|---|
-| Baseline | `enabled=False` | 能力天花板 |
-| Compressed | `enabled=True` + case 自定义参数 | 压缩后的实际表现 |
+| Baseline | `enabled=False` | Capability ceiling |
+| Compressed | `enabled=True` + case custom params | Actual performance after compression |
 
-评三个维度：**Continuation**（多轮任务延续）、**Probe**（早期历史记忆保持）、
-**Token Reduction**（token 削减率）。无命令行参数；逐 case 报告写到
-`reports/<case_id>.json`，跨 case 汇总写到 `reports/summary.json`。
+Evaluates three dimensions: **Continuation** (multi-turn task continuation), **Probe** (early history memory retention), **Token Reduction** (token reduction rate). No CLI arguments; per-case reports written to `reports/<case_id>.json`, cross-case summary to `reports/summary.json`.
 
-### 2. `summary_inspector.py` —— 压缩器静态质量检查
+### 2. `summary_inspector.py` — Compressor Static Quality Check
 
-不跑 Agent，直接检查 summary 文本是否保留了关键信息——用来区分「压缩器漏了」
-与「Agent 没用上」两种故障根因。
+Runs without Agent, directly checks whether summary text retains key information—used to distinguish "compressor missed it" vs "Agent didn't use it" failure root causes.
 
 ```bash
-# 跑 inspections/ 下全部用例
+# Run all inspections under inspections/
 nexent/backend/.venv/bin/python summary_inspector.py
-# 只跑指定一个
+# Run only one
 nexent/backend/.venv/bin/python summary_inspector.py -n example_infra
-# 自定义压缩参数 + 顺带保存 summary 原文
+# Custom compression params + also save raw summary text
 nexent/backend/.venv/bin/python summary_inspector.py --config cfg.json --save-summary
 ```
 
 ---
 
-## 目录结构
+## Directory Structure
 
 ```
 manual_cases/
-├── test_benchmark.py     # 端到端 case 评测入口
-├── summary_inspector.py  # 静态 summary 质检入口
-├── agent_runner.py       # Agent 运行封装（构建 run info、跑带 tracking 的 agent）
-├── eval_utils.py         # LLM 评分工具（eval_text / average_score）
-├── cases/<case_id>/      # 端到端评测 case
-│   ├── case.json         #   配置：id / history_file / queries / probes /
+├── test_benchmark.py     # End-to-end case evaluation entry
+├── summary_inspector.py  # Static summary quality check entry
+├── agent_runner.py       # Agent run wrapper (build run info, run agent with tracking)
+├── eval_utils.py         # LLM scoring tools (eval_text / average_score)
+├── cases/<case_id>/      # End-to-end evaluation cases
+│   ├── case.json         # Config: id / history_file / queries / probes /
 │   │                     #         summary_checks / task_checks / compressed_config
-│   └── history.json      #   初始多轮对话历史（user/assistant pairs）
-├── inspections/<name>/   # 静态质检用例
-│   ├── history.json      #   待压缩的对话历史
-│   └── checks.json       #   summary 关键信息检查项
-├── reports/              # test_benchmark.py 输出（<case_id>.json + summary.json）
-└── note_benchmark.md     # 评测机制完整设计说明
+│   └── history.json      # Initial multi-turn conversation history (user/assistant pairs)
+├── inspections/<name>/   # Static quality check cases
+│   ├── history.json      # Conversation history to compress
+│   └── checks.json       # Summary key information check items
+├── reports/              # test_benchmark.py output (<case_id>.json + summary.json)
+└── note_benchmark.md     # Complete evaluation mechanism design documentation
 ```
 
 ---
 
-## 加一个新 case
+## Adding a New Case
 
-1. 建目录 `cases/<id>/`，放 `history.json`（初始历史）与 `case.json`。
-2. `case.json` 字段：`id`、`history_file`、`queries`（多轮延续问题）、
-   `probes`（只问被压缩区域的记忆探针）、`summary_checks`、`task_checks`、
-   `compressed_config`（压缩参数覆盖）。
-3. 跑 `test_benchmark.py`，结果出现在 `reports/<id>.json`。
+1. Create directory `cases/<id>/`, place `history.json` (initial history) and `case.json`.
+2. `case.json` fields: `id`, `history_file`, `queries` (multi-turn continuation questions), `probes` (memory probes only targeting compressed region), `summary_checks`, `task_checks`, `compressed_config` (compression param overrides).
+3. Run `test_benchmark.py`, results appear in `reports/<id>.json`.
 
-> 想看一次 benchmark 跑动时上下文构建与压缩的全过程 trace，用
-> [`../../ctx_debugger/`](../../ctx_debugger/)（`example_with_benchmark.py` 把
-> debugger 挂到 benchmark 上批量跑）。
+> To see the full trace of context construction and compression during a benchmark run, use [`../../ctx_debugger/`](../../ctx_debugger/) (`example_with_benchmark.py` attaches debugger to batch-run benchmark).

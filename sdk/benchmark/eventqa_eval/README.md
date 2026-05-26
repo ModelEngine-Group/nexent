@@ -1,135 +1,126 @@
-# eventqa_eval — EventQA 长文记忆评测
+# eventqa_eval — EventQA Long-text Memory Evaluation
 
-基于 MemoryAgentBench 的 **EventQA** 数据集，评测**上下文压缩**对超长文档记忆的
-影响：一整本小说作为待压缩历史，压缩后还能不能答对"接下来发生什么"。
+Based on **EventQA** dataset from MemoryAgentBench, evaluate the impact of **context compression** on ultra-long document memory: an entire novel as history to be compressed, can it still correctly answer "what happens next" questions?
 
-> 评测方法与维度沿用 `sdk/benchmark` 其余部分：**baseline（不压缩）vs
-> compressed（压缩）** 对照。本文件讲**怎么跑**和**每个参数什么意思**。
+> Evaluation methods and dimensions follow the rest of `sdk/benchmark`: **baseline (no compression) vs compressed (compression)** comparison. This file covers **how to run** and **what each parameter means**.
 
 ---
 
-## 数据集
+## Dataset
 
-EventQA 取自 ∞-Bench 的 5 部小说（《乱世佳人》《悲惨世界》《基督山伯爵》
-《大卫·科波菲尔》《安娜·卡列尼娜》），每部 39 万–53 万 tokens。每本书 100 道
-六选一 MCQ：给出已发生的前序事件，从 6 个候选里选出真实的后续事件
-（1 真 + 5 个 GPT-4o 干扰项）。
+EventQA comes from ∞-Bench's 5 novels (Gone with the Wind, Les Misérables, The Count of Monte Cristo, David Copperfield, Anna Karenina), each 390K–530K tokens. Each book has 100 six-choice MCQs: given prior events that have occurred, select the true continuation from 6 candidates (1 true + 5 GPT-4o distractors).
 
-数据在 HuggingFace `ai-hyz/MemoryAgentBench` 的 `Accurate_Retrieval` split 里，
-`metadata.source == "eventqa_full"` 的 5 行就是整本小说版本。
+Data is in HuggingFace `ai-hyz/MemoryAgentBench`'s `Accurate_Retrieval` split, rows with `metadata.source == "eventqa_full"` are the full novel versions.
 
 ---
 
-## 运行前提
+## Prerequisites
 
-- 用 backend 的 venv：`nexent/backend/.venv/bin/python`（需 `huggingface_hub`、
-  `pyarrow`）
-- LLM 凭据在仓库根 `nexent/.env`：`LLM_API_KEY` / `LLM_MODEL_NAME` / `LLM_API_URL`
-- 命令默认站在本目录（`sdk/benchmark/eventqa_eval/`）
+- Use backend's venv: `nexent/backend/.venv/bin/python` (requires `huggingface_hub`, `pyarrow`)
+- LLM credentials in repo root `nexent/.env`: `LLM_API_KEY` / `LLM_MODEL_NAME` / `LLM_API_URL`
+- Commands below assume you're in this directory (`sdk/benchmark/eventqa_eval/`)
 
 ---
 
-## 两步走
+## Two Steps
 
-### 第一步：下载数据
+### Step 1: Download Data
 
 ```bash
 python download_data.py
 ```
 
-从 HuggingFace 下载 `Accurate_Retrieval` split，抽出 5 个 `eventqa_full` 行，写到
-`data/eventqa_full.jsonl`（约 13MB，已 `.gitignore`，不入库）。
+Download `Accurate_Retrieval` split from HuggingFace, extract 5 `eventqa_full` rows, write to `data/eventqa_full.jsonl` (~13MB, already `.gitignore`, not committed).
 
-| 参数 | 默认 | 含义 |
+| Parameter | Default | Meaning |
 |---|---|---|
-| `--source` | `eventqa_full` | 取哪个变体：`eventqa_full`（整本）、`eventqa_65536`（截到 64K tokens）、`eventqa_131072`（截到 128K tokens）。注意截断变体的题目与 full **不同** |
-| `--output_dir` | `./data` | 输出目录 |
+| `--source` | `eventqa_full` | Which variant: `eventqa_full` (entire), `eventqa_65536` (truncated to 64K tokens), `eventqa_131072` (truncated to 128K tokens). Note truncated variants have **different questions** than full |
+| `--output_dir` | `./data` | Output directory |
 
-### 第二步：跑评测
+### Step 2: Run Evaluation
 
 ```bash
-# 冒烟测试：1 本书、1 道题、小说截断到 4.8 万字符
+# Smoke test: 1 book, 1 question, novel truncated to 48K chars
 python run_eventqa.py --book_limit 1 --limit 1 \
     --max_ingest_chars 48000 --chunk_chars 12000 \
     --token_threshold 3000 --keep_recent_pairs 1
 
-# 完整运行：5 本书 × 100 题
+# Full run: 5 books × 100 questions
 python run_eventqa.py
 ```
 
 ---
 
-## `run_eventqa.py` 参数详解
+## `run_eventqa.py` Parameter Details
 
-### 评测范围
+### Evaluation Scope
 
-| 参数 | 默认 | 含义 |
+| Parameter | Default | Meaning |
 |---|---|---|
-| `--data_file` | `data/eventqa_full.jsonl` | `download_data.py` 产出的数据文件 |
-| `--book_limit` | 全部（5） | 只评前 N 本书。冒烟时设 `1` 只跑 1 本 |
-| `--limit` | 全部（100） | 每本书只跑前 N 道题。冒烟时设 `1` 只跑 1 题 |
+| `--data_file` | `data/eventqa_full.jsonl` | Data file produced by `download_data.py` |
+| `--book_limit` | All (5) | Only evaluate first N books. For smoke test set `1` |
+| `--limit` | All (100) | Only run first N questions per book. For smoke test set `1` |
 
-### 压缩臂：ContextManager 配置
+### Compressed Arm: ContextManager Configuration
 
-整本小说会被切成多个 chunk、逐轮喂入，触发真实 ContextManager 增量压缩。
+The entire novel will be chunked and fed in multiple turns, triggering real ContextManager incremental compression.
 
-| 参数 | 默认 | 含义 |
+| Parameter | Default | Meaning |
 |---|---|---|
-| `--token_threshold` | `12000` | ContextManager 的压缩触发阈值。累计上下文超过这个 token 数就触发压缩。**越小压缩越早、越激进** |
-| `--keep_recent_pairs` | `2` | 尾部保留多少个 chunk 不压缩（其余进入 summary）。**chunk 总数必须 > 这个值，压缩才会真正发生** |
-| `--keep_recent_steps` | `4` | ContextManager 在当前轮内保留多少个 step 不压缩 |
-| `--max_observation_length` | `20000` | ContextManager 单条 observation 的最大字符数 |
-| `--chunk_chars` | `20000` | 每个小说 chunk 的字符数。小说总字符 / 这个值 = chunk 轮数。**建议 ≲ `token_threshold` 对应的字符数**，这样每轮增量压缩的输入在预算内、走快速增量路径；过大则退化为整段重压缩 |
-| `--max_ingest_chars` | `0`（整本） | 压缩臂只取小说前 N 个字符。**冒烟测试用**——设小值（如 `48000`）能大幅缩短一本书的 ingest 时间。`0` 表示用整本 |
-| `--ingest_max_steps` | `2` | 每个 ingest（确认）agent 运行的最大步数。ingest agent 只是用来触发压缩，步数给小即可 |
-| `--summary_schema` | `default` | 压缩臂用哪种摘要模板：`default` / `narrative` / `both`，见下 |
+| `--token_threshold` | `12000` | ContextManager compression trigger threshold. When cumulative context exceeds this token count, compression triggers. **Lower = earlier, more aggressive compression** |
+| `--keep_recent_pairs` | `2` | How many chunks to retain uncompressed at tail (rest enters summary). **Total chunks must > this value for compression to actually occur** |
+| `--keep_recent_steps` | `4` | ContextManager retains how many steps in current turn uncompressed |
+| `--max_observation_length` | `20000` | ContextManager single observation max character count |
+| `--chunk_chars` | `20000` | Character count per novel chunk. Total chars / this value = chunk turns. **Recommended ≲ token_threshold equivalent chars**, so each turn's incremental compression input stays within budget, uses fast incremental path; too large degrades to full re-compression |
+| `--max_ingest_chars` | `0` (entire) | Compressed arm only takes first N chars of novel. **For smoke testing**—set small value (e.g., `48000`) to drastically shorten one book's ingest time. `0` means use entire novel |
+| `--ingest_max_steps` | `2` | Max steps per ingest (acknowledge) agent run. Ingest agent only triggers compression, small step count sufficient |
+| `--summary_schema` | `default` | Which summary template compressed arm uses: `default` / `narrative` / `both`, see below |
 
-### 两种摘要 schema（`--summary_schema`）
+### Two Summary Schemas (`--summary_schema`)
 
-ContextManager 的默认摘要 schema 面向 agent 任务（`active_task` / `completed_work` / `relevant_files` …）。压缩叙事小说时，10 个字段里约 9 个变成 "None"，全书情节被挤进唯一的 `critical_context` 字段（还被限制 ≤300 词）——会大量丢失情节细节，compressed 分数被人为压低。
+ContextManager's default summary schema targets agent tasks (`active_task` / `completed_work` / `relevant_files` …). When compressing narrative novels, ~9 of 10 fields become "None", entire plot squeezed into single `critical_context` field (also capped ≤300 words)—will lose much plot detail, artificially lowering compressed scores.
 
-因此评测提供两种 schema：
+Therefore evaluation provides two schemas:
 
-| schema | 字段 | 测什么 |
+| Schema | Fields | What it tests |
 |---|---|---|
-| `default` | active_task / completed_work / relevant_files …（10 个，agent 任务向）| "生产 ContextManager 原样"在叙事文档上的表现 |
-| `narrative` | events_so_far / characters / recent_events / unresolved_threads / setting（5 个，叙事向）| 压缩**机制**在适配模板下能否保留叙事记忆 |
+| `default` | active_task / completed_work / relevant_files … (10, agent-task oriented) | "Production ContextManager as-is" performance on narrative documents |
+| `narrative` | events_so_far / characters / recent_events / unresolved_threads / setting (5, narrative oriented) | Whether compression **mechanism** with adapted template can retain narrative memory |
 
-`narrative` 仍是**真实 ContextManager 类 + 同一套增量压缩代码路径**，只替换了摘要模板（prompts + JSON schema，均为 `ContextManagerConfig` 的字段）。
+`narrative` still uses **real ContextManager class + same incremental compression code path**, only replacing summary template (prompts + JSON schema, both are `ContextManagerConfig` fields).
 
-`--summary_schema both` 让压缩臂用两种 schema 各跑一遍。两者之差能分离损失来源：
+`--summary_schema both` lets compressed arm run both schemas. Difference between them can isolate loss sources:
 
-- `default` 与 `narrative` 的差距 → 多少损失来自 **schema 错配**
-- `narrative` 与 baseline 的差距 → 多少损失来自 **压缩比本身**
+- `default` vs `narrative` gap → how much loss from **schema mismatch**
+- `narrative` vs baseline gap → how much loss from **compression ratio itself**
 
-注意：`both` 会让压缩臂（ingest + 探针）跑两遍，耗时约翻倍。
+Note: `both` makes compressed arm (ingest + probes) run twice, ~doubling time.
 
-### Baseline 臂
+### Baseline Arm
 
-`eventqa_full` 小说 170 万–320 万字符，**任何模型都无法整本不压缩喂入**，所以
-baseline 用"截断到模型窗口"作为不压缩对照。
+`eventqa_full` novels are 1.7M–3.2M chars, **no model can ingest entire book without compression**, so baseline uses "truncate to model window" as no-compression control.
 
-| 参数 | 默认 | 含义 |
+| Parameter | Default | Meaning |
 |---|---|---|
-| `--baseline_context_chars` | `480000` | baseline 臂喂给模型的小说字符数（从开头截断）。设成你的模型上下文窗口能容纳的大小。窗口外的事件相关的题目，baseline 会答错——这正是要测的 |
+| `--baseline_context_chars` | `480000` | Novel character count fed to baseline arm (truncate from start). Set to your model's context window capacity. Questions about events beyond window, baseline will fail—this is exactly what we're testing |
 
-### 探针（probe）执行
+### Probe (Probe) Execution
 
-| 参数 | 默认 | 含义 |
+| Parameter | Default | Meaning |
 |---|---|---|
-| `--probe_max_steps` | `3` | 每道 MCQ 探针 agent 运行的最大步数 |
+| `--probe_max_steps` | `3` | Max steps per MCQ probe agent run |
 
-### 跳过某一臂 / 调试
+### Skip One Arm / Debugging
 
-| 参数 | 默认 | 含义 |
+| Parameter | Default | Meaning |
 |---|---|---|
-| `--skip_baseline` | 否 | 跳过 baseline 臂（只迭代压缩臂时用） |
-| `--skip_compressed` | 否 | 跳过压缩臂（只迭代 baseline 时用） |
-| `--debug` | 否 | 打印 agent 调试输出 |
+| `--skip_baseline` | No | Skip baseline arm (use when iterating compressed arm only) |
+| `--skip_compressed` | No | Skip compressed arm (use when iterating baseline only) |
+| `--debug` | No | Print agent debug output |
 
 ---
 
-## 冒烟命令逐项解释
+## Smoke Command Item-by-item Explanation
 
 ```bash
 python run_eventqa.py --book_limit 1 --limit 1 \
@@ -137,70 +128,70 @@ python run_eventqa.py --book_limit 1 --limit 1 \
     --token_threshold 3000 --keep_recent_pairs 1
 ```
 
-- `--book_limit 1`：只评 1 本书（而非全部 5 本）
-- `--limit 1`：这本书只跑 1 道题（而非全部 100 道）
-- `--max_ingest_chars 48000`：压缩臂只取小说前 4.8 万字符，不读整本——加速冒烟
-- `--chunk_chars 12000`：每个 chunk 1.2 万字符 → `48000 / 12000 = 4` 个 chunk
-- `--token_threshold 3000`：累计上下文超 3000 tokens 就触发压缩（小值，确保冒烟时压缩一定触发）
-- `--keep_recent_pairs 1`：尾部只保留 1 个 chunk 不压缩 → 4 个 chunk 里前 3 个进入压缩区
+- `--book_limit 1`: Only evaluate 1 book (not all 5)
+- `--limit 1`: This book only runs 1 question (not all 100)
+- `--max_ingest_chars 48000`: Compressed arm only takes first 48K chars, not entire book—speeds up smoke test
+- `--chunk_chars 12000`: Each chunk 12K chars → `48000 / 12000 = 4` chunks
+- `--token_threshold 3000`: Cumulative context exceeds 3000 tokens triggers compression (small value, ensures compression triggers during smoke)
+- `--keep_recent_pairs 1`: Tail only retains 1 chunk uncompressed → 4 chunks, first 3 enter compression region
 
-整体效果：用极少的小说量和题量，确保**压缩真实触发**、端到端流程跑通。
+Overall effect: With minimal novel and question count, ensure **compression actually triggers**, end-to-end flow completes.
 
 ---
 
-## 评测维度与产出
+## Evaluation Dimensions and Output
 
-两条臂回答**同一批题目**，所以 retention 比值干净：
+Both arms answer **the same questions**, so retention ratio is clean:
 
 ```
 memory_retention = compressed_accuracy / baseline_accuracy
 token_reduction  = 1 - last_compressed_tokens / last_uncompressed_tokens
 ```
 
-**`token_reduction` 与 `manual_cases` 同法**：取压缩臂**最后一轮 ingest** 的 `ContextManager.get_token_counts()`，按 `1 - last_compressed / last_uncompressed` 计算（对应 `manual_cases/test_benchmark.py` 的主算法）。`acon_eval` 不测 token_reduction。注意这是"取最后一轮"的单点采样——若两种 schema 的最后一轮恰好落在相同 token 数，`token_reduction` 会相同，属该方法的固有行为，非异常。
+**`token_reduction` same method as `manual_cases`**: Take compressed arm's **last ingest turn**'s `ContextManager.get_token_counts()`, calculate `1 - last_compressed / last_uncompressed` (corresponds to `manual_cases/test_benchmark.py` main algorithm). `acon_eval` doesn't measure token_reduction. Note this is "last turn" single-point sampling—if two schemas' last turns happen to have same token count, `token_reduction` will be same, this is inherent behavior of this method, not anomaly.
 
-不评 Continuation——EventQA 的 MCQ 彼此独立。
+No Continuation evaluation—EventQA MCQs are independent.
 
-产出写到 `outputs/`（compressed 指标按 schema 分组，`--summary_schema both` 时含两组）：
+Output written to `outputs/` (compressed metrics grouped by schema, `--summary_schema both` includes both):
 
 ```
 outputs/
 ├── <book_id>/
-│   ├── predictions.jsonl   # 逐题：baseline 与各 schema 的 compressed 对照
-│   └── summary.json        # 单书指标 + 各 schema 的压缩信息/摘要
-└── summary.json            # 跨书汇总，含 per_schema 分组指标
+│   ├── predictions.jsonl   # Per-question: baseline vs each schema's compressed comparison
+│   └── summary.json        # Single-book metrics + each schema's compression info/summary
+└── summary.json            # Cross-book aggregate, includes per_schema grouped metrics
 ```
 
 ---
 
-## 完整运行耗时估算
+## Full Run Time Estimation
 
-基于 DeepSeek-v4-flash 的冒烟实测（《悲惨世界》整本，单步时延）：
+Based on DeepSeek-v4-flash smoke test (Les Misérables entire book, single-step latency):
 
-| 阶段 | 单位耗时（实测，粗略）| 说明 |
+| Stage | Unit Time (measured, approximate) | Notes |
 |---|---|---|
-| ingest 轮 | ~20 s/轮 | 切块喂入 + 一次增量压缩 LLM 调用 |
-| compressed 探针 | ~60 s/题 | 压缩后上下文小，但模型推理输出较长 |
-| baseline 探针 | ~110 s/题 | 整本小说喂入（40 万–74 万 tokens），agent 约 2 步 |
+| Ingest turn | ~20 s/turn | Chunk feed-in + one incremental compression LLM call |
+| Compressed probe | ~60 s/question | Compressed context small, but model reasoning output long |
+| Baseline probe | ~110 s/question | Entire novel fed in (400K–740K tokens), agent ~2 steps |
 
-- **ingest 轮数 = 小说字符数 ÷ `chunk_chars`**。默认 `chunk_chars=20000` 时 5 本合计约 590 轮。ingest 是**固定成本，与 `--limit` 无关**（整本都要压）。
-- baseline 探针是耗时大头：每题喂整本，agent 常跑约 2 步、每步重发整本。
+- **Ingest turns = novel chars ÷ chunk_chars**. Default `chunk_chars=20000` means 5 books total ~590 turns. Ingest is **fixed cost, unrelated to `--limit`** (entire book must be compressed).
+- Baseline probes are the time bottleneck: each question feeds entire book, agent often runs ~2 steps, each step re-sends entire book.
 
-**完整运行（5 本 × 100 题，默认参数）粗估：**
+**Full run (5 books × 100 questions, default params) rough estimate:**
 
-| 阶段 | 量 | 估时 |
+| Stage | Count | Estimated Time |
 |---|---|---|
-| ingest | ~590 轮 × 20s | ~3.3 h |
-| compressed 探针 | 500 题 × 60s | ~8.3 h |
-| baseline 探针 | 500 题 × 110s | ~15 h |
-| **合计** | | **~25–30 小时** |
+| Ingest | ~590 turns × 20s | ~3.3 h |
+| Compressed probes | 500 questions × 60s | ~8.3 h |
+| Baseline probes | 500 questions × 110s | ~15 h |
+| **Total** | | **~25–30 hours** |
 
-**抽样运行（`--limit 20`，5 本 × 20 题）粗估：** ingest 固定 ~3.3 h + 探针约 ~5 h ≈ **8–9 小时**。
+**Sampled run (`--limit 20`, 5 books × 20 questions) rough estimate:** Ingest fixed ~3.3 h + probes ~5 h ≈ **8–9 hours**.
 
-建议：
+Recommendations:
 
-- 先用 `--limit` 抽样（如 `--limit 20`）确认结果合理再放开。
-- ingest 想提速可调大 `--chunk_chars`（轮数减半、耗时约减半），代价是每轮压缩输入更大。
-- 只迭代某一臂时用 `--skip_baseline` / `--skip_compressed`——baseline 是耗时大头。
+- First use `--limit` sampling (e.g., `--limit 20`) to confirm results reasonable before expanding.
+- To speed up ingest, increase `--chunk_chars` (turns halved, time ~halved), trade-off is larger per-turn compression input.
+- When iterating one arm only, use `--skip_baseline` / `--skip_compressed`—baseline is time bottleneck.
 
-> 注：冒烟实测确认 **DeepSeek V4（1M 窗口）能整本喂入最大的《悲惨世界》**（3,171,853 字符 ≈ 743,179 tokens，单次调用无截断、无报错），5 本均可整本喂入 baseline 臂。
+> Note: Smoke test confirmed **DeepSeek V4 (1M window) can ingest entire Les Misérables** (3,171,853 chars ≈ 743,179 tokens, single call without truncation, no error), all 5 books can be fully ingested for baseline arm.

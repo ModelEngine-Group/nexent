@@ -1,282 +1,258 @@
-# ctx_debugger — Nexent 上下文调试器
+# ctx_debugger — Nexent Context Debugger
 
-观测 Nexent Agent 的**上下文构建与压缩**全过程的调试工具。从 system prompt、
-多轮历史、压缩决策、LLM 调用，到工具执行、observer 事件，全部记录成可分析的
-JSONL trace。
+Observation tool for the full process of **context construction and compression** in Nexent Agent. From system prompt, multi-turn history, compression decisions, LLM calls, to tool execution, observer events—all recorded as analyzable JSONL trace.
 
-> **核心定位**：Nexent agent 运行时已经在「自言自语」（observer 事件、压缩日志、
-> token 统计），ctx_debugger 就是在旁边「偷听」并结构化记录，**不改 Nexent 源码**。
+> **Core positioning**: Nexent agent runtime is already "self-talking" (observer events, compression logs, token statistics), ctx_debugger just "eavesdrops" and structurally records, **no Nexent source modification**.
 
 ---
 
-## 1. 它解决什么问题
+## 1. What Problems It Solves
 
-Agent 上下文压缩（`ContextManager`）出问题时，开发者需要回答：
+When Agent context compression (`ContextManager`) has issues, developers need to answer:
 
-- 这一步为什么触发了压缩？为什么没触发？
-- 压缩 LLM 吃进去什么、吐出来什么、花了多久？
-- 压缩后 agent 实际看到的上下文长什么样？
-- summary 保留了哪些信息、丢了哪些？
-- token 到底降了多少（含压缩调用本身的开销）？
+- Why did compression trigger/not trigger at this step?
+- What did the compression LLM take in, produce, and how long?
+- What does the context actually look like after compression?
+- What information did the summary retain/lose?
+- How much did tokens actually decrease (including compression call overhead)?
 
-这些信息散落在 `ContextManager` 内部状态、`step_metrics`、`MessageObserver`
-事件里，没有统一、可回溯的视图。ctx_debugger 把它们汇成一份 trace。
+This information is scattered across `ContextManager` internal state, `step_metrics`, `MessageObserver` events, without unified, traceable view. ctx_debugger aggregates them into one trace.
 
 ---
 
-## 2. 目录结构
+## 2. Directory Structure
 
 ```
 ctx_debugger/
-├── __init__.py              # 包入口，re-export ContextDebugger / attach_debugger
-├── __main__.py              # python -m ctx_debugger.inspector 的入口
-├── debugger.py              # 核心：ContextDebugger、attach_debugger、各层 proxy
-├── interactive.py           # 交互式 REPL（主力调试模式）
-├── inspector.py             # trace 文件的事后分析 CLI
-├── langfuse_export.py       # 把 trace 导入 Langfuse 做可视化分析
-├── example_with_benchmark.py# 把 debugger 挂到 benchmark 上批量跑
+├── __init__.py              # Package entry, re-export ContextDebugger / attach_debugger
+├── __main__.py              # Entry point for python -m ctx_debugger.inspector
+├── debugger.py              # Core: ContextDebugger, attach_debugger, layer proxies
+├── interactive.py           # Interactive REPL (main debugging mode)
+├── inspector.py             # Post-analysis CLI for trace files
+├── langfuse_export.py       # Import trace into Langfuse for visual analysis
+├── example_with_benchmark.py# Attach debugger to benchmark batch run
 └── README.md
 ```
 
-依赖方向：**ctx_debugger → 仅 import nexent SDK**，nexent 不反向依赖本包。
+Dependency direction: **ctx_debugger → only import nexent SDK**, nexent doesn't reverse-depend on this package.
 
 ---
 
-## 3. 运行前提
+## 3. Prerequisites
 
-> 下文命令默认你站在本目录（README 所在的 `ctx_debugger/`）。相对路径约定：
-> `.` = `ctx_debugger/`，`..` = `sdk/`，`../..` = nexent 仓库根目录
-> （`sdk/`、`backend/`、`.env` 所在的那一层）。
+> Commands below assume you're in this directory (README's location `ctx_debugger/`). Relative path conventions:
+> `.` = `ctx_debugger/`, `..` = `sdk/`, `../..` = nexent repo root directory
+> (where `sdk/`, `backend/`, `.env` reside).
 
-- 用 backend 的 venv Python（已装好 nexent SDK 与依赖）：
+- Use backend's venv Python (nexent SDK and dependencies installed):
   ```
   ../../backend/.venv/bin/python
   ```
-- LLM 凭据在仓库根的 `.env`，即 `../../.env`（`agent_runner` 会 `load_dotenv`）：
+- LLM credentials in repo root `.env`, i.e., `../../.env` (`agent_runner` will `load_dotenv`):
   ```
   LLM_API_KEY=...
   LLM_MODEL_NAME=...
   LLM_API_URL=...
   ```
-- trace 输出路径由环境变量 `NEXENT_CONTEXT_DEBUG` 控制，或在 `attach_debugger`
-  里显式传 `trace_path`。
+- Trace output path controlled by environment variable `NEXENT_CONTEXT_DEBUG`, or explicitly pass `trace_path` in `attach_debugger`.
 
 ---
 
-## 4. 三种使用模式
+## 4. Three Usage Modes
 
-### 4.1 交互式 REPL —— 主力模式
+### 4.1 Interactive REPL — Main Mode
 
-你一句句输入 user 消息，每行触发一轮真实 agent 执行；历史累积、
-`ContextManager` 跨轮共享，压缩到阈值自然触发。
+You type user messages line by line, each line triggers one real agent execution; history accumulates, `ContextManager` shared across turns, compression triggers naturally when threshold reached.
 
 ```bash
-# 在 ctx_debugger/ 目录下
+# In ctx_debugger/ directory
 ../../backend/.venv/bin/python interactive.py
 ```
 
-每轮自动显示 agent 回答 + context construction 面板（agent steps、main/压缩
-LLM 调用、压缩是否触发、token 削减、summary 是否更新）。
+Each turn auto-displays agent answer + context construction panel (agent steps, main/compression LLM calls, compression triggered or not, token reduction, summary updated or not).
 
-面板里 token 数分两类，已分别标注：`main LLM` / `compression LLM` 行带
-`(API)`，是 LLM 实报的 `token_usage`；`compression` 行带 `(est.)`，是
-`ContextManager` 的启发式估算（`estimate_tokens_text`，CJK 感知，不走真
-tokenizer）。**压缩阈值判断用的是估算值**，与 API 实测会有差值（中文文本上
-启发式通常偏高估）。
+Panel token counts split into two types, labeled separately: `main LLM` / `compression LLM` rows with `(API)` are LLM-reported `token_usage`; `compression` row with `(est.)` is `ContextManager` heuristic estimation (`estimate_tokens_text`, CJK-aware, no real tokenizer). **Compression threshold judgment uses estimated value**, may differ from API measured (Chinese text heuristic usually overestimates).
 
-Slash 命令：
+Slash commands:
 
-| 命令 | 作用 |
+| Command | Purpose |
 |---|---|
-| `/help` | 命令列表 |
-| `/context [N]` | 上一轮主 LLM 实际收到的 context（压缩后：system + summary + 最近几轮）；`N` 选第 N 次主调用 |
-| `/history` | 累积的 session 原始账本（每轮逐字，压缩前；REPL 自身的记账，不是模型看到的）|
-| `/summary` | 当前压缩 summary 全文 |
-| `/compress` | 上一轮压缩 LLM 的输入 prompt（喂进去的）与输出 summary（吐出来的），与主回答区分开 |
-| `/tokens` | 逐轮 token 时间线 |
-| `/stats` | 整个 session 的压缩统计——重点是「调用 LLM 的语义压缩」累计次数，外加缓存命中、token 开销 |
-| `/trace` | 上一轮原始事件表 |
-| `/step N` | 上一轮第 N 步的全部事件 JSON |
-| `/config` | 当前 `ContextManagerConfig` |
-| `/reset [threshold]` | 清空重来，可选新阈值 |
-| `/quit` `/q` | 退出 |
+| `/help` | Command list |
+| `/context [N]` | Last turn main LLM actually received context (compressed: system + summary + recent turns); `N` selects N-th main call |
+| `/history` | Accumulated session raw ledger (each turn verbatim, pre-compression; REPL's own accounting, not what model sees) |
+| `/summary` | Current compression summary full text |
+| `/compress` | Last turn's compression LLM input prompt (fed in) and output summary (produced), separate from main answer |
+| `/tokens` | Per-turn token timeline |
+| `/stats` | Entire session compression statistics—key is "LLM-invoking semantic compression" cumulative count, plus cache hits, token cost |
+| `/trace` | Last turn raw event table |
+| `/step N` | Last turn step N all events JSON |
+| `/config` | Current `ContextManagerConfig` |
+| `/reset [threshold]` | Clear and restart, optional new threshold |
+| `/quit` `/q` | Exit |
 
-默认 `token_threshold=3000`，几轮对话即可触发压缩。
+Default `token_threshold=3000`, few turns trigger compression.
 
-输入行支持上/下方向键回溯历史（shell 习惯），历史持久化在
-`~/.nexent_ctx_debugger_history`，跨 session 保留。
+Input line supports up/down arrow history recall (shell habit), history persisted in `~/.nexent_ctx_debugger_history`, retained across sessions.
 
-### 4.2 批量挂到 benchmark
+### 4.2 Batch Attach to Benchmark
 
-不改 benchmark 代码，monkey-patch `CoreAgent.__init__` 让每个 agent 自动挂
-debugger，整轮 benchmark 跑完得到一份 trace。
+Without modifying benchmark code, monkey-patch `CoreAgent.__init__` so each agent auto-attaches debugger, entire benchmark run produces one trace.
 
 ```bash
-# 在 ctx_debugger/ 目录下
+# In ctx_debugger/ directory
 NEXENT_CONTEXT_DEBUG=/tmp/trace.jsonl \
   ../../backend/.venv/bin/python example_with_benchmark.py
 ```
 
-### 4.3 事后分析 trace 文件
+### 4.3 Post-analysis of Trace Files
 
 ```bash
-# 在上一级 sdk/ 目录下
+# In parent sdk/ directory
 cd ..
-python -m ctx_debugger.inspector <子命令> <trace.jsonl> [选项]
+python -m ctx_debugger.inspector <subcommand> <trace.jsonl> [options]
 ```
 
-| 子命令 | 作用 |
+| Subcommand | Purpose |
 |---|---|
-| `summary` | 总览：事件数、run 数、token 总量、事件直方图 |
-| `runs` | 列出所有 run |
-| `timeline [--run X]` | 按时间顺序的事件列表 |
-| `compress` | 所有压缩周期的决策与 token 削减 |
-| `llm [--tag main\|compression]` | LLM 调用列表（时长、token） |
-| `step --step N [--run X]` | 某一步的全部事件 JSON |
+| `summary` | Overview: event count, run count, token totals, event histogram |
+| `runs` | List all runs |
+| `timeline [--run X]` | Chronological event list |
+| `compress` | All compression cycles' decisions and token reductions |
+| `llm [--tag main|compression]` | LLM call list (duration, tokens) |
+| `step --step N [--run X]` | One step's all events JSON |
 
-`--run` 支持用 8 位短后缀匹配。
+`--run` supports 8-char short suffix matching.
 
-### 4.4 导入 Langfuse 做可视化分析
+### 4.4 Import to Langfuse for Visual Analysis
 
-把 trace 映射进自托管的 [Langfuse](https://langfuse.com)，得到嵌套 trace、
-逐调用 drill-down、token/耗时视图、session 分组——不必自己写 web 界面。
+Map trace into self-hosted [Langfuse](https://langfuse.com), get nested traces, per-call drill-down, token/duration views, session grouping—no need to build custom web UI.
 
 ```bash
-# 在上一级 sdk/ 目录下
+# In parent sdk/ directory
 cd ..
-# 先干跑，看映射结构（不联网）
+# First dry run, see mapping structure (offline)
 python -m ctx_debugger.langfuse_export <trace.jsonl> --dry-run
-# 配好凭据后真正导入
+# After configuring credentials, real import
 LANGFUSE_HOST=http://localhost:3000 \
 LANGFUSE_PUBLIC_KEY=pk-... LANGFUSE_SECRET_KEY=sk-... \
   python -m ctx_debugger.langfuse_export <trace.jsonl>
 ```
 
-映射规则：
+Mapping rules:
 
 | ctx_debugger | Langfuse |
 |---|---|
-| 每个 agent 回合（`agent_init`） | 一条 trace |
-| `llm_call_*` | generation（input/output、token、耗时） |
-| `compress_*` | span，内部嵌套该周期的压缩 generation |
-| `tool_call_*` / `code_execute_*` | tool / span 观测 |
-| 整个 trace 文件 | 一个 Langfuse session（回合归组） |
+| Each agent turn (`agent_init`) | One trace |
+| `llm_call_*` | generation (input/output, tokens, duration) |
+| `compress_*` | span, nested compression generations inside |
+| `tool_call_*` / `code_execute_*` | tool / span observation |
+| Entire trace file | One Langfuse session (turn grouping) |
 
-依赖 `langfuse` SDK（`uv pip install langfuse`）。自托管 Langfuse 可用官方
-docker compose 一键起。**已知限制**：observation 在导出时刻创建，单条耗时真实，
-但在 Langfuse 时间轴上的绝对位置是导出时间、非原始时间。
+Depends on `langfuse` SDK (`uv pip install langfuse`). Self-hosted Langfuse can be started with official docker compose. **Known limitation**: Observations created at export time, single duration faithful, but absolute position on Langfuse timeline is export time, not original wall-clock time.
 
 ---
 
-## 5. 核心 API
+## 5. Core API
 
 ### `attach_debugger(target, ...)`
 
-把 debugger 挂到一个 agent 或 `ContextManager` 上。
+Attach debugger to an agent or `ContextManager`.
 
 ```python
 from ctx_debugger import attach_debugger
 from nexent.core.agents.agent_context import ContextManager
 
 cm = ContextManager(config=...)
-attach_debugger(cm, trace_path="/tmp/run.jsonl")          # 只挂压缩层
-# 或挂整个 agent，自动覆盖五层
+attach_debugger(cm, trace_path="/tmp/run.jsonl")          # Only attach compression layer
+# Or attach entire agent, auto-cover five layers
 attach_debugger(agent, trace_path="/tmp/run.jsonl")
 ```
 
-参数：
+Parameters:
 
-| 参数 | 说明 |
+| Parameter | Description |
 |---|---|
-| `target` | Nexent agent（CoreAgent/NexentAgent）或 `ContextManager` |
-| `trace_path` | 输出 JSONL 路径；为空时回落到 `NEXENT_CONTEXT_DEBUG` 环境变量 |
-| `layers` | `{"compression","model","observer","tools","executor"}` 的子集，默认全开 |
-| `run_id` | 显式 run 标识，默认自动生成 |
-| `capture_full_summary` | 压缩事件里是否带 summary 全文，默认 True |
-| `capture_full_messages` | 主 LLM 调用是否也存消息全文，默认 False；压缩 LLM 调用始终存全文 |
-| `append` | 追加到已有 trace 而不是覆盖 |
-| `existing` | 复用一个已有的 `ContextDebugger`（交互式 session 跨多轮共享同一 trace/run_id 用） |
+| `target` | Nexent agent (CoreAgent/NexentAgent) or `ContextManager` |
+| `trace_path` | Output JSONL path; fallback to `NEXENT_CONTEXT_DEBUG` env var when empty |
+| `layers` | Subset of `{"compression","model","observer","tools","executor"}`, default all enabled |
+| `run_id` | Explicit run identifier, auto-generated when omitted |
+| `capture_full_summary` | Compression events include full summary text, default True |
+| `capture_full_messages` | Main LLM calls also store full message text, default False; compression LLM calls always store full |
+| `append` | Append to existing trace instead of overwriting |
+| `existing` | Reuse an existing `ContextDebugger` (interactive session across multiple turns shares same trace/run_id) |
 
-未解析到 trace 路径时返回 `None` 不做任何包装（零开销）。
+When no trace path resolved, returns `None` without any wrapping (zero overhead).
 
-### 五个观测层
+### Five Observation Layers
 
-| layer | 挂点 | 捕获 |
-|---|---|---|
-| `compression` | `ContextManager.compress_if_needed` 包装 | 压缩决策、压缩调用记录、summary 前后状态 |
-| `model` | `agent.model` 换成 `_ModelProxy` | 每次 LLM 调用的输入输出/token/时长，并用 contextvar 标记 `main` vs `compression` |
-| `observer` | `agent.observer.add_message` 镜像 | Nexent 自有的所有 observer 事件 |
-| `tools` | 每个 `tool.forward` 实例级包装 | 单工具粒度的 args / return / 时长 |
-| `executor` | `agent.python_executor` 换成 `_PyExecutorProxy` | 执行的 Python 代码全文 + 输出 + 时长 |
+| Layer | Attach Point | Capture |
+|---|---|
+| `compression` | `ContextManager.compress_if_needed` wrapper | Compression decision, compression call records, summary before/after state |
+| `model` | `agent.model` replaced with `_ModelProxy` | Each LLM call's input/output/tokens/duration, tagged with contextvar `main` vs `compression` |
+| `observer` | `agent.observer.add_message` mirror | All Nexent's own observer events |
+| `tools` | Each `agent.tools[name].forward` instance-level wrapper | Single-tool granularity args / return / duration |
+| `executor` | `agent.python_executor` replaced with `_PyExecutorProxy` | Executed Python code full text + output + duration |
 
 ---
 
-## 6. Trace 事件 Schema
+## 6. Trace Event Schema
 
-每行一条 JSON，统一外层字段：
+Each line is JSON, unified outer fields:
 
 ```json
 {
-  "seq": 42,                 // 全局单调递增序号
-  "ts": 1778813372.87,       // Unix 时间戳
-  "run_id": "run_a70c9017",  // 一次 attach 对应一个 run
-  "agent_step": 1,           // 当前 agent 步号（来自 observer 的 step_count）
+  "seq": 42,                 // Global monotonically increasing sequence number
+  "ts": 1778813372.87,       // Unix timestamp
+  "run_id": "run_a70c9017",  // One attach = one run
+  "agent_step": 1,           // Current agent step number (from observer's step_count)
   "event": "compress_end",
-  "data": { ... }            // 事件专属字段
+  "data": { ... }            // Event-specific fields
 }
 ```
 
-事件类型：
+Event types:
 
-| event | 何时发 | data 关键字段 |
+| Event | When emitted | Key data fields |
 |---|---|---|
-| `run_begin` | debugger 创建时 | pid |
-| `agent_init` | attach 到 agent 时 | system_prompt 全文、tools 列表、cm config |
-| `compress_begin` | `compress_if_needed` 入口 | `predicted_decision`（决策分支 + compress_prev/curr）、`estimated_tokens` |
-| `compression_call` | step 内每次压缩调用 | call_type、cache_hit、in/out tokens |
-| `compress_end` | `compress_if_needed` 出口 | `token_counts`（压缩前后）、`summary_after`、`summary_changed` |
-| `llm_call_begin` / `llm_call_end` | 每次 LLM 调用 | `tag`（main/compression）、input messages（压缩调用每条带 `text` 全文）、output（压缩调用带 `output_full` 全文）、token、时长 |
-| `code_execute_begin` / `code_execute_end` | python executor 执行 | 代码全文、输出、logs、时长 |
-| `tool_call_begin` / `tool_call_end` | 每个工具调用 | tool 名、args、return、时长 |
-| `observer_event` | Nexent observer 每条消息 | process_type、content preview |
-| `debug_error` | debugger 内部异常 | phase、error（不会中断 agent） |
+| `run_begin` | Debugger created | pid |
+| `agent_init` | Attached to agent | system_prompt full text, tools list, cm config |
+| `compress_begin` | `compress_if_needed` entry | `predicted_decision` (decision branch + compress_prev/curr), `estimated_tokens` |
+| `compression_call` | Each compression call within step | call_type, cache_hit, in/out tokens |
+| `compress_end` | `compress_if_needed` exit | `token_counts` (before/after), `summary_after`, `summary_changed` |
+| `llm_call_begin` / `llm_call_end` | Each LLM call | `tag` (main/compression), input messages (compression calls each with full `text`), output (compression calls with `output_full`), tokens, duration |
+| `code_execute_begin` / `code_execute_end` | Python executor execution | code full text, output, logs, duration |
+| `tool_call_begin` / `tool_call_end` | Each tool call | tool name, args, return, duration |
+| `observer_event` | Each Nexent observer message | process_type, content preview |
+| `debug_error` | Debugger internal exception | phase, error (won't crash agent) |
 
-文本字段都做了 bounded 截断（头 N 字 + `...[N chars elided]...` + 尾 M 字），
-避免 trace 文件无限膨胀。
-
----
-
-## 7. 设计原则
-
-1. **零 SDK 源码改动**：靠 monkey-patch 包装 + proxy 对象，不动 `nexent/` 一行。
-2. **只读公共面 + 少量稳定内部接口**：用到的 `_step_local_log`、
-   `_effective_*_tokens` 等下划线接口，benchmark 本身也在用，视为事实稳定。
-3. **五层可选**：`layers` 参数按需收窄，trace 体积可控。
-4. **失败隔离**：每个挂点 try/except 兜底，单层失效只发 `debug_error` 事件，
-   不会让 agent 崩。
-5. **复用 Nexent 自有事件**：`observer` 层直接镜像 `MessageObserver`，不重复造轮子。
-6. **不污染前端**：observer tap 改的是 instance 的 `add_message`，原方法照常调用，
-   前端流不受影响。
-
-### 与 Nexent 的耦合点
-
-debugger 是「模拟/偷听」Nexent 行为，因此存在软耦合——Nexent 改了下列接口，
-debugger 要跟着改（其它改动一律自动适配）：
-
-- `agent.model` / `agent.observer` / `agent.python_executor` / `agent.tools` 重命名
-- `tool.forward` 改方法名
-- `compress_if_needed` 签名变化
-- `observer.add_message` 参数顺序大改
+Text fields all bounded truncation (head N chars + `...[N chars elided]...` + tail M chars),
+avoid trace file infinite growth.
 
 ---
 
-## 8. 已知限制
+## 7. Design Principles
 
-- **主 LLM 调用默认只存 digest**：压缩 LLM 调用的 input messages 与 output 已
-  逐字全量保存（每条消息带 `text`，输出带 `output_full`）；主 LLM 调用默认仍是
-  截断 digest，需要全文时给 `attach_debugger` 传 `capture_full_messages=True`。
-  交互式 REPL 已默认开启该选项，所以 `/context` 能看到全文。
-- **trace 文件不限大小**：长 session 可能几十 MB；`inspector` 目前一次性载入内存。
-- **多 agent 嵌套**：每次 attach 一个 run_id；交互式 session 用 `existing=` 复用
-  同一 debugger 来统一 run_id。
-- **交互式 REPL 需要真 TTY**：管道喂输入也可用，但体验为交互设计。
+1. **Zero SDK source modification**: Via monkey-patch wrapping + proxy objects, no changes to `nexent/`.
+2. **Read-only public interface + few stable internal interfaces**: Underscore interfaces like `_step_local_log`, `_effective_*_tokens` are also used by benchmark, treated as de-facto stable.
+3. **Five optional layers**: `layers` parameter narrows as needed, trace size controllable.
+4. **Failure isolation**: Each attach point try/except兜底, single layer failure only emits `debug_error` event, won't crash agent.
+5. **Reuse Nexent's own events**: `observer` layer directly mirrors `MessageObserver`, no reinventing wheel.
+6. **No frontend pollution**: Observer tap modifies instance's `add_message`, original method still called, frontend stream unaffected.
+
+### Coupling Points with Nexent
+
+Debugger "simulates/eavesdrops" on Nexent behavior, thus soft coupling exists—if Nexent changes following interfaces, debugger must adapt (other changes auto-compatible):
+
+- `agent.model` / `agent.observer` / `agent.python_executor` / `agent.tools` renamed
+- `tool.forward` method name changed
+- `compress_if_needed` signature changed
+- `observer.add_message` parameter order major change
+
+---
+
+## 8. Known Limitations
+
+- **Main LLM calls default only store digest**: Compression LLM calls' input messages and output already stored verbatim in full (each message with `text`, output with `output_full`); Main LLM calls default still truncated digest, need full text pass `capture_full_messages=True` to `attach_debugger`. Interactive REPL already defaults this option on, so `/context` can see full text.
+- **Trace file size unlimited**: Long session could be tens of MB; `inspector` currently one-time loads into memory.
+- **Multi-agent nesting**: Each attach one run_id; interactive session uses `existing=` to reuse same debugger to unify run_id.
+- **Interactive REPL requires real TTY**: Pipe feeding input works, but experience designed for interactive.
