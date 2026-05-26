@@ -292,6 +292,46 @@ generate_jwt() {
     echo "$header_base64.$payload_base64.$signature"
 }
 
+decode_base64() {
+    if base64 --help 2>&1 | grep -q -- '--decode'; then
+        base64 --decode
+    else
+        base64 -D
+    fi
+}
+
+get_existing_secret_value() {
+    local key="$1"
+    local encoded_value
+    encoded_value=$(kubectl get secret nexent-secrets -n "$NAMESPACE" -o jsonpath="{.data.${key}}" 2>/dev/null || true)
+    if [ -z "$encoded_value" ]; then
+        return 1
+    fi
+
+    printf '%s' "$encoded_value" | decode_base64
+}
+
+load_existing_supabase_secrets() {
+    local existing_jwt_secret
+    local existing_secret_key_base
+    local existing_vault_enc_key
+    local existing_anon_key
+    local existing_service_role_key
+
+    existing_jwt_secret="$(get_existing_secret_value "JWT_SECRET")" || return 1
+    existing_secret_key_base="$(get_existing_secret_value "SECRET_KEY_BASE")" || return 1
+    existing_vault_enc_key="$(get_existing_secret_value "VAULT_ENC_KEY")" || return 1
+    existing_anon_key="$(get_existing_secret_value "SUPABASE_KEY")" || return 1
+    existing_service_role_key="$(get_existing_secret_value "SERVICE_ROLE_KEY")" || return 1
+
+    JWT_SECRET="$existing_jwt_secret"
+    SECRET_KEY_BASE="$existing_secret_key_base"
+    VAULT_ENC_KEY="$existing_vault_enc_key"
+    SUPABASE_ANON_KEY="$existing_anon_key"
+    SUPABASE_SERVICE_ROLE_KEY="$existing_service_role_key"
+    return 0
+}
+
 # Generate Supabase secrets (only for full version)
 generate_supabase_secrets() {
     if [ "$DEPLOYMENT_VERSION" != "full" ]; then
@@ -302,6 +342,14 @@ generate_supabase_secrets() {
     echo "=========================================="
     echo "  Supabase Secrets Generation"
     echo "=========================================="
+
+    if load_existing_supabase_secrets; then
+        echo "Reusing existing Supabase secrets from Kubernetes secret."
+        echo ""
+        echo "--------------------------------"
+        echo ""
+        return 0
+    fi
 
     # Generate fresh keys for security
     JWT_SECRET=$(openssl rand -base64 32 | tr -d '[:space:]')
@@ -362,6 +410,28 @@ pull_mcp_image() {
     echo ""
     echo "--------------------------------"
     echo ""
+}
+
+restart_supabase_auth_services() {
+    if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
+        return 0
+    fi
+
+    echo ""
+    echo "Restarting Supabase auth services to pick up current secrets..."
+    for svc in supabase-auth supabase-kong; do
+        echo "  Restarting nexent-$svc..."
+        kubectl rollout restart deployment/nexent-$svc -n "$NAMESPACE" 2>/dev/null || true
+    done
+
+    for svc in supabase-auth supabase-kong; do
+        echo "  Waiting for nexent-$svc..."
+        if kubectl rollout status deployment/nexent-$svc -n "$NAMESPACE" --timeout=300s >/dev/null 2>&1; then
+            echo "  nexent-$svc is ready."
+        else
+            echo "  Warning: nexent-$svc did not become ready within timeout."
+        fi
+    done
 }
 
 render_runtime_secret_values() {
@@ -469,6 +539,8 @@ apply() {
         --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
         --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
         --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
+
+    restart_supabase_auth_services
 
     # Step 9: Wait for Elasticsearch to be ready and initialize API key
     echo ""
