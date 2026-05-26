@@ -188,7 +188,6 @@ export function useAgentGeneration({
 
           // Use store.getState() to read the latest currentAgentId at execution time
           const liveCurrentAgentId = useAgentConfigStore.getState().currentAgentId;
-          console.log(liveCurrentAgentId, generationAgentId)
           // Verify the user is still on the same agent to avoid updating wrong data
           if (liveCurrentAgentId !== null && liveCurrentAgentId !== generationAgentId) {
             // User has switched to another agent, keep the cache for later use
@@ -213,7 +212,6 @@ export function useAgentGeneration({
             constraint_prompt: cached?.constraintPrompt || editedAgent.constraint_prompt || "",
             few_shots_prompt: cached?.fewShotsPrompt || editedAgent.few_shots_prompt || "",
           };
-          console.log(configUpdates)
           // Update agent config in store
           updateAgentConfig(configUpdates);
 
