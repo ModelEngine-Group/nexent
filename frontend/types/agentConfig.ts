@@ -135,12 +135,8 @@ export interface ToolSubGroup {
 
 // Skill interface for skill management
 export interface Skill {
-<<<<<<< HEAD
   skill_id: number;
-=======
-  skill_id: string;
   tenant_id?: string;
->>>>>>> develop
   name: string;
   description: string;
   source: string;
