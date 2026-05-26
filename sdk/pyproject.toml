@@ -51,6 +51,7 @@ dependencies = [
     "pymysql>=1.1.0",
     "psycopg2-binary>=2.9.9",
     "pymssql>=2.2.11",
+    "pandas>=2.2.0",
     "openpyxl>=3.1.5",
     "orjson==3.10",
     "pypdf==6.9.1",
