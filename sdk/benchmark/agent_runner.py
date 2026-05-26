@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-此模块提供了构建 Agent 测试所需的基础功能：
-1. Prompt 构建（system prompt, prompt templates）
-2. AgentRunInfo 构造
-3. 消息流处理和统计
+Shared utilities for building and running nexent agents in benchmarks.
+
+Provides:
+1. Prompt construction (system prompt, prompt templates)
+2. AgentRunInfo construction (standard and custom-prompt variants)
+3. Message-stream processing and statistics
 """
 import sys
 import io
@@ -21,10 +23,10 @@ from dotenv import load_dotenv
 import string
 
 # ============ Environment Setup ============
-# Add benchmark/ to sys.path so paths.py can be found, then import it.
+# Add parent directory to sys.path so paths.py can be found, then import it.
 # paths.py resolves PROJECT_ROOT/SDK_DIR/BACKEND_DIR via .git discovery and
 # injects them into sys.path automatically — no manual path manipulation needed.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import paths  # noqa: F401 — side-effect: adds sdk/, backend/ to sys.path
 
 from utils.prompt_template_utils import get_agent_prompt_template
@@ -42,69 +44,52 @@ logging.getLogger("smolagents").setLevel(logging.WARNING)
 import random
 load_dotenv()
 
-# ============ 全局配置 ============
+# ============ Global Configuration ============
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME")
 LLM_API_URL = os.getenv("LLM_API_URL")
 
-# Optional provider-specific knobs forwarded to chat.completions.create as
-# the OpenAI SDK's ``extra_body`` parameter. Two layered sources:
-#   * LLM_EXTRA_BODY — raw JSON, wins when set. Example:
-#       LLM_EXTRA_BODY={"chat_template_kwargs":{"enable_thinking":false}}
-#   * LLM_ENABLE_THINKING — convenience flag. When set to a falsey value
-#       ("false"/"0"/"no"/"off") this produces the Qwen3 thinking-off body.
-# Default behaviour (both unset) leaves extra_body=None — fully backwards
-# compatible.
-_LLM_EXTRA_BODY_RAW = (os.getenv("LLM_EXTRA_BODY") or "").strip()
-_LLM_ENABLE_THINKING_RAW = (os.getenv("LLM_ENABLE_THINKING") or "true").strip().lower()
-
-
-def _resolve_llm_extra_body():
-    if _LLM_EXTRA_BODY_RAW:
-        try:
-            return json.loads(_LLM_EXTRA_BODY_RAW)
-        except json.JSONDecodeError as exc:
-            logging.getLogger(__name__).warning(
-                "Ignoring LLM_EXTRA_BODY (not valid JSON): %s", exc
-            )
-            return None
-    if _LLM_ENABLE_THINKING_RAW in ("false", "0", "no", "off"):
-        return {"chat_template_kwargs": {"enable_thinking": False}}
-    return None
-
-
-LLM_EXTRA_BODY = _resolve_llm_extra_body()
+# Disable model thinking for benchmark runs. Both vendor dialects are kept in
+# one payload so the same agent_runner.py works against either backend without
+# code changes: Qwen-on-vLLM/SGLang reads `chat_template_kwargs.enable_thinking`
+# and ignores `thinking`; Anthropic reads `thinking.type` and ignores
+# `chat_template_kwargs`. Unknown keys are silently dropped by each provider.
+THINKING_OFF_EXTRA_BODY = {
+    "chat_template_kwargs": {"enable_thinking": False},
+    "thinking": {"type": "disabled"},
+}
 
 APP_NAME = os.getenv("APP_NAME", "Nexent")
-APP_DESCRIPTION = os.getenv("APP_DESCRIPTION", "Nexent 是一个开源智能体SDK和平台")
+APP_DESCRIPTION = os.getenv("APP_DESCRIPTION", "Nexent is an open-source agent SDK and platform")
 
-# ============ 默认 Prompt 模板 ============
-DEFAULT_DUTY_PROMPT = """你是一个智能助手，专注于帮助用户解决问题。你需要：
-1. 理解用户的需求并提供准确的回答
-2. 保持友好和专业的态度
-3. 记住对话中的关键信息"""
+# ============ Default Prompt Templates ============
+DEFAULT_DUTY_PROMPT = """You are an intelligent assistant focused on helping users solve problems. You need to:
+1. Understand the user's needs and provide accurate answers
+2. Maintain a friendly and professional attitude
+3. Remember key information from the conversation"""
 
-DEFAULT_CONSTRAINT_PROMPT = """1. 不得生成有害内容
-2. 遵守法律法规
-3. 不确定时诚实告知用户"""
+DEFAULT_CONSTRAINT_PROMPT = """1. Do not generate harmful content
+2. Comply with laws and regulations
+3. Be honest with users when uncertain"""
 
 DEFAULT_FEW_SHOTS_PROMPT = ""
 
-DEFAULT_FALLBACK_PROMPT = """你是一个有用的 AI 助手，可以帮助用户解决各种问题。请记住对话中的重要信息。"""
+DEFAULT_FALLBACK_PROMPT = """You are a helpful AI assistant that can help users solve various problems. Please remember important information from the conversation."""
 
-# ============ 消息类型常量 ============
+# ============ Message Type Constants ============
 TRACKED_MESSAGE_TYPES = {
-    "agent_new_run",          # 任务开始
-    "step_count",              # 步骤计数
-    "model_output_thinking",   # 思考过程
-    "model_output",            # 模型输出
-    "code_output",             # 代码执行结果
-    "final_answer",            # 最终答案
-    "error",                   # 错误
+    "agent_new_run",          # task start
+    "step_count",              # step count
+    "model_output_thinking",   # thinking process
+    "model_output",            # model output
+    "code_output",             # code execution result
+    "final_answer",            # final answer
+    "error",                   # error
+    "token_count",             # per-step token usage stats
 }
 
 
-# ============ Prompt 构建函数 ============
+# ============ Prompt Construction Functions ============
 
 def build_system_prompt(
     duty: str = "",
@@ -120,21 +105,21 @@ def build_system_prompt(
     skills: list = None
 ) -> str:
     """
-    构建 System Prompt
+    Build System Prompt
 
     Args:
-        duty: 职责描述
-        constraint: 约束条件
-        few_shots: Few-shot 示例
-        tools: 工具列表
-        managed_agents: 管理的子 Agent 列表
-        memory_list: 记忆列表
-        knowledge_base_summary: 知识库摘要
-        language: 语言 (zh/en)
-        is_manager: 是否为管理 Agent
+        duty: Duty description
+        constraint: Constraints
+        few_shots: Few-shot examples
+        tools: Tool list
+        managed_agents: Managed sub-agent list
+        memory_list: Memory list
+        knowledge_base_summary: Knowledge base summary
+        language: Language (zh/en)
+        is_manager: Whether this is a manager agent
 
     Returns:
-        渲染后的 system prompt 字符串
+        Rendered system prompt string
     """
     tools = tools or []
     managed_agents = managed_agents or []
@@ -171,22 +156,22 @@ def build_prompt_templates(
     is_manager: bool = False
 ) -> dict:
     """
-    构建完整的 prompt_templates 字典
+    Build complete prompt_templates dict
 
     Args:
-        system_prompt: 系统提示词
-        language: 语言
-        is_manager: 是否为管理 Agent
+        system_prompt: System prompt string
+        language: Language
+        is_manager: Whether this is a manager agent
 
     Returns:
-        prompt_templates 字典
+        prompt_templates dict
     """
     prompt_templates = get_agent_prompt_template(is_manager=is_manager, language=language)
     prompt_templates["system_prompt"] = system_prompt
     return prompt_templates
 
 
-# ============ AgentRunInfo 构建函数 ============
+# ============ AgentRunInfo Construction Functions ============
 
 def build_agent_run_info(
     query: str,
@@ -200,37 +185,42 @@ def build_agent_run_info(
     max_steps: int = 10,
     temperature: float = 0.1,
     agent_name: str = "test_agent",
-    agent_description: str = "测试 Agent",
+    agent_description: str = "Test Agent",
     language: str = "zh",
     is_manager: bool = False,
     context_manager_config: Optional[ContextManagerConfig] = None,
     user_id: str = "",
-    skills: list = None
+    skills: list = None,
+    max_tokens: Optional[int] = 4096,
 ) -> AgentRunInfo:
     """
-    构造 AgentRunInfo
+    Construct AgentRunInfo with template-based system prompt.
 
     Args:
-        query: 用户查询
-        history: 对话历史
-        duty_prompt: 职责提示词（为空则使用默认）
-        constraint_prompt: 约束提示词（为空则使用默认）
-        few_shots_prompt: Few-shot 提示词
-        fallback_prompt: 降级提示词（为空则使用默认）
-        tools: 工具列表
-        managed_agents: 管理的子 Agent 列表
-        max_steps: 最大执行步骤
-        temperature: 温度参数
-        agent_name: Agent 名称
-        agent_description: Agent 描述
-        language: 语言
-        is_manager: 是否为管理 Agent
-        context_manager_config: 上下文管理器配置，None则使用默认配置
+        query: User query
+        history: Conversation history
+        duty_prompt: Duty prompt (empty uses default)
+        constraint_prompt: Constraint prompt (empty uses default)
+        few_shots_prompt: Few-shot prompt
+        fallback_prompt: Fallback prompt (empty uses default)
+        tools: Tool list
+        managed_agents: Managed sub-agent list
+        max_steps: Max execution steps
+        temperature: Temperature parameter
+        agent_name: Agent name
+        agent_description: Agent description
+        language: Language
+        is_manager: Whether this is a manager agent
+        context_manager_config: Context manager config (None uses default)
+        user_id: User ID
+        skills: Skill list
+        max_tokens: Per-call completion output cap forwarded to the main LLM
+                    (default 4096 — bounds runaway / degenerate-loop probes).
 
     Returns:
-        AgentRunInfo 对象
+        AgentRunInfo object
     """
-    # 使用默认值
+    # Use defaults
     duty = duty_prompt or DEFAULT_DUTY_PROMPT
     constraint = constraint_prompt or DEFAULT_CONSTRAINT_PROMPT
     few_shots = few_shots_prompt or DEFAULT_FEW_SHOTS_PROMPT
@@ -245,7 +235,8 @@ def build_agent_run_info(
         url=LLM_API_URL,
         temperature=temperature,
         ssl_verify=False,
-        extra_body=LLM_EXTRA_BODY,
+        extra_body=THINKING_OFF_EXTRA_BODY,
+        max_tokens=max_tokens,
     )
 
     if duty or constraint or few_shots:
@@ -271,7 +262,7 @@ def build_agent_run_info(
         is_manager=is_manager
     )
 
-    # 设置上下文管理器配置
+    # Set context manager config
     cm_config = context_manager_config
 
 
@@ -348,8 +339,8 @@ def build_agent_run_info_with_custom_prompt(
         url=LLM_API_URL,
         temperature=temperature,
         ssl_verify=False,
-        extra_body=LLM_EXTRA_BODY,
-    )
+        extra_body=THINKING_OFF_EXTRA_BODY,
+        )
 
     prompt_templates = build_prompt_templates(
         system_prompt,
@@ -380,17 +371,17 @@ def build_agent_run_info_with_custom_prompt(
     )
 
 
-# ============ 消息处理函数 ============
+# ============ Message Processing Functions ============
 
 def process_agent_message(chunk: str) -> tuple[str, str]:
     """
-    解析 agent_run 返回的 JSON 消息
+    Parse JSON message returned by agent_run
 
     Args:
-        chunk: JSON 字符串
+        chunk: JSON string
 
     Returns:
-        (message_type, message_content) 元组
+        (message_type, message_content) tuple
     """
     try:
         data = json.loads(chunk)
@@ -400,13 +391,15 @@ def process_agent_message(chunk: str) -> tuple[str, str]:
 
 
 class AgentRunResult:
-    """Agent 运行结果封装"""
+    """Agent run result wrapper"""
     def __init__(self):
         self.final_answer: str = ""
         self.full_response: str = ""
         self.message_type_count: dict = {}
         self.step_count: int = 0
         self.errors: list = []
+        self.total_input_tokens: int = 0
+        self.total_output_tokens: int = 0
 
     def __repr__(self):
         return f"AgentRunResult(final_answer_len={len(self.final_answer)}, " \
@@ -420,16 +413,16 @@ async def run_agent_with_tracking(
     debug: bool = False
 ) -> AgentRunResult:
     """
-    运行 Agent 并跟踪消息统计
+    Run Agent and track message statistics
 
     Args:
-        agent_run_info: Agent 运行信息
-        on_final_answer: 收到 final_answer 时的回调函数
-        on_error: 收到 error 时的回调函数
-        debug: 是否打印调试信息
+        agent_run_info: Agent run info
+        on_final_answer: Callback when final_answer is received
+        on_error: Callback when error is received
+        debug: Whether to print debug info
 
     Returns:
-        AgentRunResult 对象，包含最终结果和统计信息
+        AgentRunResult object containing final result and statistics
 
     Example:
         >>> result = await run_agent_with_tracking(agent_run_info)
@@ -448,29 +441,38 @@ async def run_agent_with_tracking(
             print(f"[DEBUG] Type={msg_type}, Content Length={len(msg_content)}",
                   file=sys.stderr, flush=True)
 
-        # 统计消息类型
+        # Count message types
         if msg_type in TRACKED_MESSAGE_TYPES:
             result.message_type_count[msg_type] = result.message_type_count.get(msg_type, 0) + 1
 
             if msg_type in ["step_count", "final_answer"]:
                 result.step_count += 1
 
-        # 处理最终答案
+        # Handle final answer
         if msg_type == "final_answer":
             result.final_answer = msg_content
             result.full_response += msg_content
             if on_final_answer:
                 on_final_answer(msg_content)
 
-        # 处理错误
+        # Handle error
         elif msg_type == "error":
             result.errors.append(msg_content)
             if on_error:
                 on_error(msg_content)
 
-    # 降级处理
+        # Handle token_count — accumulate real main-LLM token usage
+        elif msg_type == "token_count":
+            try:
+                token_data = json.loads(msg_content)
+                result.total_input_tokens += token_data.get("step_input_tokens", 0) or 0
+                result.total_output_tokens += token_data.get("step_output_tokens", 0) or 0
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # Fallback when no final answer
     if not result.final_answer:
-        result.final_answer = result.full_response if result.full_response else "（未获得回应）"
+        result.final_answer = result.full_response if result.full_response else "(No response received)"
 
     return result
 

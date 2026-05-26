@@ -250,6 +250,8 @@ async def ingest_and_compress(book: EventQABook, cm_config: ContextManagerConfig
 
     conversation_history: list[AgentHistory] = []
     token_counts = None
+    ingest_main_input_tokens = 0
+    ingest_main_output_tokens = 0
 
     for idx, chunk in enumerate(chunks):
         chunk_msg = f"[Novel part {idx + 1} of {len(chunks)}]\n\n{chunk}"
@@ -274,7 +276,9 @@ async def ingest_and_compress(book: EventQABook, cm_config: ContextManagerConfig
         )
         run_info.context_manager = shared_cm
 
-        await run_agent_with_tracking(run_info, debug=args.debug)
+        chunk_result = await run_agent_with_tracking(run_info, debug=args.debug)
+        ingest_main_input_tokens += chunk_result.total_input_tokens
+        ingest_main_output_tokens += chunk_result.total_output_tokens
         token_counts = shared_cm.get_token_counts()
 
         # Store a clean (chunk, ack) pair. The agent's own reply carries no
@@ -289,49 +293,66 @@ async def ingest_and_compress(book: EventQABook, cm_config: ContextManagerConfig
         "cm_stats": shared_cm.get_all_compression_stats(),
         "num_chunks": len(chunks),
         "ingest_chars": len(context),
+        "ingest_main_input_tokens": ingest_main_input_tokens,
+        "ingest_main_output_tokens": ingest_main_output_tokens,
     }
 
 
 # ============ Probe runner (shared by both arms) ============
 
-async def run_probes(items, history: list[AgentHistory], args) -> list[dict]:
+async def run_probes(items, history: list[AgentHistory], args) -> tuple[list[dict], dict]:
     """Run each EventQA question against a frozen history snapshot.
 
     Compression is disabled — the history is already in its final form
     (pre-compressed summary, or truncated novel). Each probe gets its own
-    deep copy and runs fully independently.
+    deep copy and runs fully independently, so we can fan them out under
+    a bounded semaphore (--probe_concurrency). Result order is preserved
+    via asyncio.gather and matches the items order.
+
+    Returns ``(rows, token_totals)`` where ``token_totals`` aggregates the
+    main-LLM input/output tokens across all probes (compression is disabled
+    in this arm so no compression cost is incurred here).
     """
     disabled_cm = ContextManagerConfig(enabled=False, token_threshold=10 ** 9)
-    results: list[dict] = []
+    concurrency = max(1, args.probe_concurrency)
+    sem = asyncio.Semaphore(concurrency)
 
-    for it in items:
-        probe_history = copy.deepcopy(history)
-        run_info = build_agent_run_info(
-            it.question,
-            probe_history,
-            duty_prompt=PROBE_DUTY,
-            max_steps=args.probe_max_steps,
-            context_manager_config=disabled_cm,
-            language="en",
-            agent_name="eventqa_answerer",
-            agent_description="EventQA multiple-choice answering agent",
-        )
-        result = await run_agent_with_tracking(run_info, debug=args.debug)
-        mcq = score_mcq(result.final_answer, it.options, it.gold)
+    async def _one(it):
+        async with sem:
+            probe_history = copy.deepcopy(history)
+            run_info = build_agent_run_info(
+                it.question,
+                probe_history,
+                duty_prompt=PROBE_DUTY,
+                max_steps=args.probe_max_steps,
+                context_manager_config=disabled_cm,
+                language="en",
+                agent_name="eventqa_answerer",
+                agent_description="EventQA multiple-choice answering agent",
+                max_tokens=args.probe_max_tokens,
+            )
+            result = await run_agent_with_tracking(run_info, debug=args.debug)
+            mcq = score_mcq(result.final_answer, it.options, it.gold)
+            return {
+                "qid": it.qid,
+                "answer": result.final_answer,
+                "selected_index": mcq.selected_index,
+                "selected": mcq.selected,
+                "gold": it.gold,
+                "gold_index": mcq.gold_index,
+                "correct": mcq.correct,
+                "score": mcq.score,
+                "match_type": mcq.match_type,
+                "_main_input_tokens": result.total_input_tokens,
+                "_main_output_tokens": result.total_output_tokens,
+            }
 
-        results.append({
-            "qid": it.qid,
-            "answer": result.final_answer,
-            "selected_index": mcq.selected_index,
-            "selected": mcq.selected,
-            "gold": it.gold,
-            "gold_index": mcq.gold_index,
-            "correct": mcq.correct,
-            "score": mcq.score,
-            "match_type": mcq.match_type,
-        })
-
-    return results
+    rows = await asyncio.gather(*(_one(it) for it in items))
+    totals = {
+        "main_input_tokens": sum(r.pop("_main_input_tokens", 0) for r in rows),
+        "main_output_tokens": sum(r.pop("_main_output_tokens", 0) for r in rows),
+    }
+    return rows, totals
 
 
 # ============ Per-book run ============
@@ -366,11 +387,16 @@ async def run_book(book: EventQABook, args) -> dict:
                 compression["conversation_history"], compression["cm_summary"]
             )
             print(f"  [compressed:{schema_name}] running {len(items)} probes ...")
-            results = await run_probes(items, precompressed_history, args)
-            compressed[schema_name] = {"results": results, "compression": compression}
+            results, probe_tokens = await run_probes(items, precompressed_history, args)
+            compressed[schema_name] = {
+                "results": results,
+                "compression": compression,
+                "probe_tokens": probe_tokens,
+            }
 
     # ---- Baseline arm (schema-independent, runs once) ----
     baseline_results: list[dict] = []
+    baseline_probe_tokens = {"main_input_tokens": 0, "main_output_tokens": 0}
     if not args.skip_baseline:
         truncated = book.context[:args.baseline_context_chars]
         baseline_history = [
@@ -382,7 +408,9 @@ async def run_book(book: EventQABook, args) -> dict:
         ]
         print(f"  [baseline] novel truncated to {len(truncated)} chars, "
               f"running {len(items)} probes ...")
-        baseline_results = await run_probes(items, baseline_history, args)
+        baseline_results, baseline_probe_tokens = await run_probes(
+            items, baseline_history, args
+        )
 
     # ---- Metrics ----
     def accuracy(rows: list[dict]) -> float:
@@ -421,13 +449,16 @@ async def run_book(book: EventQABook, args) -> dict:
             },
         }
 
+    cost = _build_cost(baseline_probe_tokens, compressed)
     report = {
         "book_id": book.book_id,
         "book_title": book.book_title,
         "novel_chars": len(book.context),
         "num_questions": len(items),
+        "config": _build_run_config(args),
         "baseline": {"accuracy": baseline_acc, "n": len(baseline_results)},
         "compressed": compressed_report,
+        "cost": cost,
         "predictions": _merge_predictions(baseline_results, compressed),
     }
 
@@ -437,7 +468,140 @@ async def run_book(book: EventQABook, args) -> dict:
                  f"retention={_fmt(c['memory_retention'])} "
                  f"token_reduction={_fmt(c['token_reduction'])}")
     print(line)
+    base_total = cost["baseline"]["total_tokens"]
+    if base_total and cost.get("compressed"):
+        for schema_name, c in cost["compressed"].items():
+            r = (cost.get("ratio") or {}).get(schema_name, {}).get("total")
+            print(f"  COST[{schema_name}]: baseline_total={base_total:,}  "
+                  f"compressed_total={c['total_tokens']:,} "
+                  f"(main={c['main_input_tokens'] + c['main_output_tokens']:,} "
+                  f"+ compression={c['compression_input_tokens'] + c['compression_output_tokens']:,})  "
+                  f"ratio={_fmt(r)}")
     return report
+
+
+def _build_run_config(args) -> dict:
+    """Snapshot the run's compression/ingest/probe/baseline params.
+
+    Stored verbatim in summary.json so each output stands alone for
+    later analysis without grepping shell history for the command line.
+    """
+    return {
+        "token_threshold": args.token_threshold,
+        "keep_recent_pairs": args.keep_recent_pairs,
+        "keep_recent_steps": args.keep_recent_steps,
+        "max_observation_length": args.max_observation_length,
+        "summary_schemas": resolve_schemas(args.summary_schema),
+        "chunk_chars": args.chunk_chars,
+        "max_ingest_chars": args.max_ingest_chars,
+        "ingest_max_steps": args.ingest_max_steps,
+        "probe_max_steps": args.probe_max_steps,
+        "probe_concurrency": args.probe_concurrency,
+        "probe_max_tokens": args.probe_max_tokens,
+        "baseline_context_chars": args.baseline_context_chars,
+        "limit": args.limit,
+        "question_start": args.question_start,
+    }
+
+
+def _build_cost(baseline_probe_tokens: dict, compressed: dict[str, dict]) -> dict:
+    """Aggregate end-to-end token cost (main LLM + compression LLM) per arm.
+
+    EventQA supports multiple schemas per book, so the compressed side is a
+    dict keyed by ``schema_name``. Baseline arm has zero compression cost
+    since compression is disabled in its probe-only runs.
+    """
+    base_main_in = baseline_probe_tokens.get("main_input_tokens", 0)
+    base_main_out = baseline_probe_tokens.get("main_output_tokens", 0)
+    baseline = {
+        "main_input_tokens": base_main_in,
+        "main_output_tokens": base_main_out,
+        "compression_input_tokens": 0,
+        "compression_output_tokens": 0,
+        "total_input_tokens": base_main_in,
+        "total_output_tokens": base_main_out,
+        "total_tokens": base_main_in + base_main_out,
+    }
+
+    if not compressed:
+        return {"baseline": baseline, "compressed": None, "ratio": None}
+
+    def _ratio(c: int, b: int):
+        return (c / b) if b > 0 else None
+
+    compressed_costs: dict[str, dict] = {}
+    ratios: dict[str, dict] = {}
+    for schema_name, data in compressed.items():
+        comp = data["compression"]
+        cm_stats = comp.get("cm_stats") or {}
+        probe = data.get("probe_tokens") or {}
+
+        comp_main_in = comp.get("ingest_main_input_tokens", 0) + probe.get("main_input_tokens", 0)
+        comp_main_out = comp.get("ingest_main_output_tokens", 0) + probe.get("main_output_tokens", 0)
+        comp_cmp_in = cm_stats.get("total_input_tokens", 0) or 0
+        comp_cmp_out = cm_stats.get("total_output_tokens", 0) or 0
+        compressed_costs[schema_name] = {
+            "main_input_tokens": comp_main_in,
+            "main_output_tokens": comp_main_out,
+            "compression_input_tokens": comp_cmp_in,
+            "compression_output_tokens": comp_cmp_out,
+            "ingest_main_input_tokens": comp.get("ingest_main_input_tokens", 0),
+            "ingest_main_output_tokens": comp.get("ingest_main_output_tokens", 0),
+            "probe_main_input_tokens": probe.get("main_input_tokens", 0),
+            "probe_main_output_tokens": probe.get("main_output_tokens", 0),
+            "compression_calls": cm_stats.get("total_calls", 0),
+            "total_input_tokens": comp_main_in + comp_cmp_in,
+            "total_output_tokens": comp_main_out + comp_cmp_out,
+            "total_tokens": comp_main_in + comp_main_out + comp_cmp_in + comp_cmp_out,
+        }
+        ratios[schema_name] = {
+            "input": _ratio(compressed_costs[schema_name]["total_input_tokens"], baseline["total_input_tokens"]),
+            "output": _ratio(compressed_costs[schema_name]["total_output_tokens"], baseline["total_output_tokens"]),
+            "total": _ratio(compressed_costs[schema_name]["total_tokens"], baseline["total_tokens"]),
+        }
+    return {"baseline": baseline, "compressed": compressed_costs, "ratio": ratios}
+
+
+def _aggregate_costs(costs: list[dict | None]) -> dict:
+    """Sum per-arm token totals across books for the top-level summary.
+
+    Compressed side is keyed by schema, so the aggregate is also keyed by
+    schema; ratios are recomputed at the aggregate level from summed totals
+    rather than averaged from per-book ratios.
+    """
+    base_keys = ["main_input_tokens", "main_output_tokens",
+                 "compression_input_tokens", "compression_output_tokens",
+                 "total_input_tokens", "total_output_tokens", "total_tokens"]
+    comp_keys = base_keys + ["ingest_main_input_tokens", "ingest_main_output_tokens",
+                             "probe_main_input_tokens", "probe_main_output_tokens",
+                             "compression_calls"]
+    baseline_agg = {k: 0 for k in base_keys}
+    compressed_agg: dict[str, dict] = {}
+    for c in costs:
+        if not c:
+            continue
+        for k in base_keys:
+            baseline_agg[k] += c.get("baseline", {}).get(k, 0) or 0
+        for schema_name, sub in (c.get("compressed") or {}).items():
+            slot = compressed_agg.setdefault(schema_name, {k: 0 for k in comp_keys})
+            for k in comp_keys:
+                slot[k] += sub.get(k, 0) or 0
+
+    def _ratio(c: int, b: int):
+        return (c / b) if b > 0 else None
+
+    ratios: dict[str, dict] = {}
+    for schema_name, sub in compressed_agg.items():
+        ratios[schema_name] = {
+            "input": _ratio(sub["total_input_tokens"], baseline_agg["total_input_tokens"]),
+            "output": _ratio(sub["total_output_tokens"], baseline_agg["total_output_tokens"]),
+            "total": _ratio(sub["total_tokens"], baseline_agg["total_tokens"]),
+        }
+    return {
+        "baseline": baseline_agg,
+        "compressed": compressed_agg or None,
+        "ratio": ratios or None,
+    }
 
 
 def _merge_predictions(
@@ -531,12 +695,18 @@ async def main(args):
                 [r["compressed"][schema_name]["token_reduction"] for r in books_with]),
         }
 
+    # Cross-book cost aggregate: sum absolute tokens across books so the
+    # top-level number reflects the full benchmark wallet, not an average.
+    cost_agg = _aggregate_costs([r.get("cost") for r in reports])
+
     summary = {
         "total_books": len(reports),
         "questions_per_book": args.limit or 100,
         "summary_schemas": schemas,
+        "config": _build_run_config(args),
         "avg_baseline_accuracy": _avg([r["baseline"]["accuracy"] for r in reports]),
         "per_schema": per_schema,
+        "cost": cost_agg,
         "per_book": {
             r["book_id"]: {
                 "book_title": r["book_title"],
@@ -549,11 +719,17 @@ async def main(args):
                     }
                     for s, c in r["compressed"].items()
                 },
+                "cost": r.get("cost"),
             }
             for r in reports
         },
     }
-    summary_path = os.path.join(outputs_root, "summary.json")
+    summary_name = (
+        f"summary_{args.book_index}.json"
+        if args.book_index is not None
+        else "summary.json"
+    )
+    summary_path = os.path.join(outputs_root, summary_name)
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2, default=str)
 
@@ -564,6 +740,15 @@ async def main(args):
         print(f"  [compressed:{schema_name}] acc={_fmt(m['avg_compressed_accuracy'])}  "
               f"retention={_fmt(m['avg_memory_retention'])}  "
               f"token_reduction={_fmt(m['avg_token_reduction'])}")
+    if cost_agg.get("compressed") and cost_agg["baseline"]["total_tokens"]:
+        b = cost_agg["baseline"]
+        print(f"  cost (sum across books):")
+        print(f"    baseline    main={b['main_input_tokens']:>12,} in / {b['main_output_tokens']:>10,} out  total={b['total_tokens']:,}")
+        for schema_name, c in cost_agg["compressed"].items():
+            r = cost_agg["ratio"][schema_name]
+            print(f"    compressed[{schema_name}]  main={c['main_input_tokens']:>12,} in / {c['main_output_tokens']:>10,} out  "
+                  f"compression={c['compression_input_tokens']:,} in / {c['compression_output_tokens']:,} out  total={c['total_tokens']:,}")
+            print(f"      ratio  input={_fmt(r['input'])}  output={_fmt(r['output'])}  total={_fmt(r['total'])}")
     print(f"  Summary saved to {summary_path}")
     print(f"{'=' * 60}")
 
@@ -605,6 +790,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                         help="Max agent steps per ingest (acknowledge) run")
     parser.add_argument("--probe_max_steps", type=int, default=3,
                         help="Max agent steps for each question-answering probe")
+    parser.add_argument("--probe_concurrency", type=int, default=5,
+                        help="Bounded asyncio concurrency for probe LLM calls "
+                             "(default 5; set 1 for serial). Only affects probes — "
+                             "ingest stays serial since compressions are ordered.")
+    parser.add_argument("--probe_max_tokens", type=int, default=4096,
+                        help="Per-call completion output cap for probe LLM calls "
+                             "(default 4096 — matches SDK production default). "
+                             "Lower to 1024-2048 for tighter loop containment.")
     parser.add_argument("--skip_baseline", action="store_true",
                         help="Skip the baseline arm (compressed-only iteration)")
     parser.add_argument("--skip_compressed", action="store_true",
