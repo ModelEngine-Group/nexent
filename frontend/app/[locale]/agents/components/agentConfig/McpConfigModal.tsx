@@ -88,6 +88,7 @@ export default function McpConfigModal({
   const [newServerName, setNewServerName] = useState("");
   const [newServerUrl, setNewServerUrl] = useState("");
   const [newServerAuthorizationToken, setNewServerAuthorizationToken] = useState("");
+  const [newServerCustomHeaders, setNewServerCustomHeaders] = useState("");
 
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
   const [currentServerTools, setCurrentServerTools] = useState<any[]>([]);
@@ -167,6 +168,16 @@ export default function McpConfigModal({
       return;
     }
 
+    // Validate custom headers JSON if provided
+    if (newServerCustomHeaders.trim()) {
+      try {
+        JSON.parse(newServerCustomHeaders.trim());
+      } catch {
+        message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        return;
+      }
+    }
+
     if (serverList.some((s) => s.service_name === serverName || s.mcp_url === newServerUrl.trim())) {
       message.error(t("mcpConfig.message.serverExists"));
       return;
@@ -176,12 +187,14 @@ export default function McpConfigModal({
     const result = await handleAddServer(
       newServerUrl.trim(),
       serverName,
-      newServerAuthorizationToken.trim() || null
+      newServerAuthorizationToken.trim() || null,
+      newServerCustomHeaders.trim() || null
     );
     if (result.success) {
       setNewServerName("");
       setNewServerUrl("");
       setNewServerAuthorizationToken("");
+      setNewServerCustomHeaders("");
       message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addServerSuccess"));
     } else {
       message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addServerFailed")));
@@ -269,7 +282,7 @@ export default function McpConfigModal({
     setEditServerModalVisible(true);
     setLoadingMcpRecord(true);
 
-    // If mcp_id is available, fetch the latest record data including authorization_token
+    // If mcp_id is available, fetch the latest record data including authorization_token and custom_headers
     if (server.mcp_id) {
       const result = await handleGetMcpRecord(server.mcp_id);
       if (result.success && result.data) {
@@ -278,6 +291,7 @@ export default function McpConfigModal({
           service_name: result.data.mcp_name,
           mcp_url: result.data.mcp_server,
           authorization_token: result.data.authorization_token,
+          custom_headers: result.data.custom_headers,
         });
       } else {
         message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.getMcpRecordFailed")));
@@ -286,7 +300,7 @@ export default function McpConfigModal({
     setLoadingMcpRecord(false);
   };
 
-  const onSaveEditedServer = async (name: string, url: string, authorizationToken?: string | null) => {
+  const onSaveEditedServer = async (name: string, url: string, authorizationToken?: string | null, customHeaders?: string | null) => {
     if (!editingServer) return;
     if (!name.trim() || !url.trim()) {
       message.error(t("mcpConfig.message.nameAndUrlRequired"));
@@ -310,7 +324,8 @@ export default function McpConfigModal({
       editingServer.mcp_url,
       name.trim(),
       url.trim(),
-      authorizationToken
+      authorizationToken,
+      customHeaders
     );
     if (result.success) {
       setEditServerModalVisible(false);
@@ -859,6 +874,22 @@ export default function McpConfigModal({
                           style={{
                             display: "flex",
                             gap: 8,
+                            alignItems: "flex-start",
+                          }}
+                        >
+                          <Input.TextArea
+                            placeholder={t("mcpConfig.editServer.customHeadersPlaceholder")}
+                            value={newServerCustomHeaders}
+                            onChange={(e) => setNewServerCustomHeaders(e.target.value)}
+                            disabled={actionsLocked || addingServer}
+                            style={{ flex: 1 }}
+                            rows={2}
+                          />
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
                             alignItems: "center",
                           }}
                         >
@@ -1304,6 +1335,7 @@ export default function McpConfigModal({
         initialName={editingServer?.service_name || ""}
         initialUrl={editingServer?.mcp_url || ""}
         initialAuthorizationToken={editingServer?.authorization_token || null}
+        initialCustomHeaders={editingServer?.custom_headers || null}
         loading={updatingServer || loadingMcpRecord}
       />
 

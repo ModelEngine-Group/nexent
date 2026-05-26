@@ -641,6 +641,8 @@ class MCPUpdateRequest(BaseModel):
     new_mcp_url: str = Field(..., description="New MCP server URL")
     new_authorization_token: Optional[str] = Field(
         None, description="New authorization token for MCP server authentication (e.g., Bearer token)")
+    new_custom_headers: Optional[str] = Field(
+        None, description="Custom headers in JSON format for MCP server requests")
 
 
 # Tenant Management Data Models

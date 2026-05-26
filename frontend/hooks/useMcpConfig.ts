@@ -117,9 +117,9 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
   }, [refetchMcpContainers]);
 
   // Add MCP server
-  const handleAddServer = useCallback(async (url: string, name: string, authorizationToken?: string | null) => {
+  const handleAddServer = useCallback(async (url: string, name: string, authorizationToken?: string | null, customHeaders?: string | null) => {
     try {
-      const result = await addMcpServer(url, name, authorizationToken, options.tenantId);
+      const result = await addMcpServer(url, name, authorizationToken, options.tenantId, customHeaders);
       if (result.success) {
         invalidateMcpServers();
         await refreshToolsAndAgents();
@@ -198,10 +198,11 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     oldUrl: string,
     newName: string,
     newUrl: string,
-    newAuthorizationToken?: string | null
+    newAuthorizationToken?: string | null,
+    newCustomHeaders?: string | null
   ) => {
     try {
-      const result = await updateMcpServer(oldName, oldUrl, newName, newUrl, newAuthorizationToken, options.tenantId);
+      const result = await updateMcpServer(oldName, oldUrl, newName, newUrl, newAuthorizationToken, options.tenantId, newCustomHeaders);
       if (result.success) {
         // Best-effort optimistic status update for UI responsiveness
         queryClient.setQueryData([...MCP_SERVERS_QUERY_KEY, options.tenantId], (prev: any) => {

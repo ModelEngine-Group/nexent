@@ -134,6 +134,26 @@ def get_mcp_authorization_token_by_name_and_url(mcp_name: str, mcp_server: str, 
         return mcp_record.authorization_token if mcp_record else None
 
 
+def get_mcp_custom_headers_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str) -> str | None:
+    """
+    Get MCP custom headers by name, URL and tenant ID
+
+    :param mcp_name: MCP name
+    :param mcp_server: MCP server URL
+    :param tenant_id: Tenant ID
+    :return: Custom headers JSON string, None if not found
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.mcp_server == mcp_server,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).first()
+
+        return mcp_record.custom_headers if mcp_record else None
+
+
 def update_mcp_record_by_name_and_url(
     update_data,
     tenant_id: str,
@@ -160,6 +180,10 @@ def update_mcp_record_by_name_and_url(
     # Update authorization_token if provided
     if hasattr(update_data, 'new_authorization_token'):
         update_fields["authorization_token"] = update_data.new_authorization_token
+
+    # Update custom_headers if provided
+    if hasattr(update_data, 'new_custom_headers'):
+        update_fields["custom_headers"] = update_data.new_custom_headers
 
     with get_db_session() as session:
         session.query(McpRecord).filter(

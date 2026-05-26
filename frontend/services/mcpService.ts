@@ -39,6 +39,8 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           status: server.status || false,
           permission: server.permission,
           mcp_id: server.mcp_id,
+          authorization_token: server.authorization_token,
+          custom_headers: server.custom_headers,
         };
       });
 
@@ -82,7 +84,13 @@ export const getMcpServerList = async (tenantId?: string | null) => {
 /**
  * Add MCP server
  */
-export const addMcpServer = async (mcpUrl: string, serviceName: string, authorizationToken?: string | null, tenantId?: string | null) => {
+export const addMcpServer = async (
+  mcpUrl: string,
+  serviceName: string,
+  authorizationToken?: string | null,
+  tenantId?: string | null,
+  customHeaders?: string | null
+) => {
   try {
     const params = new URLSearchParams({
       mcp_url: mcpUrl,
@@ -90,6 +98,9 @@ export const addMcpServer = async (mcpUrl: string, serviceName: string, authoriz
     });
     if (authorizationToken) {
       params.append('authorization_token', authorizationToken);
+    }
+    if (customHeaders) {
+      params.append('custom_headers', customHeaders);
     }
     if (tenantId) {
       params.append('tenant_id', tenantId);
@@ -147,7 +158,8 @@ export const updateMcpServer = async (
   newServiceName: string,
   newMcpUrl: string,
   newAuthorizationToken?: string | null,
-  tenantId?: string | null
+  tenantId?: string | null,
+  newCustomHeaders?: string | null
 ) => {
   try {
     const url = tenantId
@@ -161,6 +173,9 @@ export const updateMcpServer = async (
     };
     if (newAuthorizationToken !== undefined) {
       body.new_authorization_token = newAuthorizationToken;
+    }
+    if (newCustomHeaders !== undefined) {
+      body.new_custom_headers = newCustomHeaders;
     }
     const response = await fetch(url, {
       method: "PUT",
@@ -799,6 +814,7 @@ export const getMcpRecord = async (mcpId: number, tenantId?: string | null) => {
           mcp_name: data.mcp_name,
           mcp_server: data.mcp_server,
           authorization_token: data.authorization_token,
+          custom_headers: data.custom_headers,
         },
         message: ''
       };

@@ -472,6 +472,11 @@ class McpRecord(TableBase):
         doc="Authorization token for MCP server authentication (e.g., Bearer token)",
         default=None,
     )
+    custom_headers = Column(
+        String(5000),
+        doc="Custom headers in JSON format for MCP server requests",
+        default=None,
+    )
 
 
 class UserTenant(TableBase):
