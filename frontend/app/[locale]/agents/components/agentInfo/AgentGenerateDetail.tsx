@@ -181,10 +181,9 @@ export default function AgentGenerateDetail({}) {
       initialAgentInfo.businessLogicModelId = defaultLlmModel?.id;
       initialAgentInfo.businessLogicModelName = defaultLlmModel?.displayName;
     }
-
     form.setFieldsValue(initialAgentInfo);
 
-  }, [currentAgentId, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey]);
+  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
@@ -572,107 +571,109 @@ export default function AgentGenerateDetail({}) {
               className="w-full rounded-md"
               styles={{ body: { padding: "16px" } }}
             >
-              <Input.TextArea
-                value={form.getFieldValue("businessDescription") || editedAgent.business_description || ""}
-                onChange={(e) => form.setFieldsValue({ businessDescription: e.target.value })}
-                onBlur={(e) => handleBusinessDescriptionChange(e.target.value)}
-                placeholder={t("businessLogic.placeholder")}
-                className="w-full resize-none text-sm mb-2"
-                style={{
-                  minHeight: "80px",
-                  maxHeight: "170px",
-                  border: "none",
-                  boxShadow: "none",
-                  padding: 0,
-                  background: "transparent",
-                  overflowX: "hidden",
-                  overflowY: "auto",
-                }}
-                autoSize={false}
-                disabled={!editable || isGenerating}
-              />
-
-              {/* Control area */}
-              <Flex vertical gap={12} style={{ width: "100%" }}>
-                <Flex align="center" justify="space-between" gap={12} wrap="wrap">
-                  <div
+              <Form form={form}>
+                <Form.Item name="businessDescription" className="mb-2">
+                  <Input.TextArea
+                    placeholder={t("businessLogic.placeholder")}
+                    className="w-full resize-none text-sm"
                     style={{
-                      flex: "1 1 auto",
-                      display: "flex",
-                      alignItems: "center",
-                      minWidth: 0,
-                      gap: 12,
+                      minHeight: "80px",
+                      maxHeight: "170px",
+                      border: "none",
+                      boxShadow: "none",
+                      padding: 0,
+                      background: "transparent",
+                      overflowX: "hidden",
+                      overflowY: "auto",
                     }}
-                  >
-                    <span
-                      className="text-xs text-gray-600"
-                      style={generationControlLabelStyle}
-                    >
-                      {t("businessLogic.config.template.label")}:
-                    </span>
-                    <Select
-                      value={form.getFieldValue("promptTemplateId") || editedAgent.prompt_template_id || 0}
-                      onChange={handlePromptTemplateChange}
-                      loading={loadingPromptTemplates}
-                      options={promptTemplateSelectOptions}
-                      size="middle"
-                      disabled={!editable || isGenerating}
-                      style={{ flex: "1 1 200px", minWidth: 0 }}
-                    />
-                  </div>
-                  <Button
-                    type="primary"
-                    size="middle"
-                    icon={<Settings2 size={16} />}
-                    onClick={() => setPromptTemplateManagerOpen(true)}
+                    autoSize={false}
                     disabled={!editable || isGenerating}
-                  >
-                    {t("businessLogic.config.template.manage")}
-                  </Button>
-                </Flex>
+                    onBlur={(e) => handleBusinessDescriptionChange(e.target.value)}
+                  />
+                </Form.Item>
 
-                <Flex align="center" justify="space-between" gap={12} wrap="wrap">
-                  <div
-                    style={{
-                      flex: "1 1 auto",
-                      display: "flex",
-                      alignItems: "center",
-                      minWidth: 0,
-                      gap: 12,
-                    }}
-                  >
-                    <span
-                      className="text-xs text-gray-600"
-                      style={generationControlLabelStyle}
+                {/* Control area */}
+                <Flex vertical gap={12} style={{ width: "100%" }}>
+                  <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                    <div
+                      style={{
+                        flex: "1 1 auto",
+                        display: "flex",
+                        alignItems: "center",
+                        minWidth: 0,
+                        gap: 12,
+                      }}
                     >
-                      {t("model.type.llm")}:
-                    </span>
-                    <Select
-                      value={form.getFieldValue("businessLogicModelName") || editedAgent.business_logic_model_name || ""}
-                      onChange={handleModelChange}
-                      loading={loadingModels}
-                      placeholder={t("model.select.placeholder")}
-                      options={modelSelectOptions}
+                      <span
+                        className="text-xs text-gray-600"
+                        style={generationControlLabelStyle}
+                      >
+                        {t("businessLogic.config.template.label")}:
+                      </span>
+                      <Form.Item name="promptTemplateId" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0 }}>
+                        <Select
+                          onChange={handlePromptTemplateChange}
+                          loading={loadingPromptTemplates}
+                          options={promptTemplateSelectOptions}
+                          size="middle"
+                          disabled={!editable || isGenerating}
+                        />
+                      </Form.Item>
+                    </div>
+                    <Button
+                      type="primary"
                       size="middle"
+                      icon={<Settings2 size={16} />}
+                      onClick={() => setPromptTemplateManagerOpen(true)}
                       disabled={!editable || isGenerating}
-                      style={{ flex: "1 1 200px", minWidth: 0 }}
-                    />
-                  </div>
-                  <Button
-                    type="primary"
-                    size="middle"
-                    onClick={handleGenerateAgent}
-                    disabled={!editable || loadingModels || isGenerating}
-                    icon={<Zap size={16} />}
-                  >
-                    <span className="button-text-full">
-                      {isGenerating
-                        ? t("businessLogic.config.button.generating")
-                        : t("businessLogic.config.button.generatePrompt")}
-                    </span>
-                  </Button>
+                    >
+                      {t("businessLogic.config.template.manage")}
+                    </Button>
+                  </Flex>
+
+                  <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                    <div
+                      style={{
+                        flex: "1 1 auto",
+                        display: "flex",
+                        alignItems: "center",
+                        minWidth: 0,
+                        gap: 12,
+                      }}
+                    >
+                      <span
+                        className="text-xs text-gray-600"
+                        style={generationControlLabelStyle}
+                      >
+                        {t("model.type.llm")}:
+                      </span>
+                      <Form.Item name="businessLogicModelName" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0 }}>
+                        <Select
+                          onChange={handleModelChange}
+                          loading={loadingModels}
+                          placeholder={t("model.select.placeholder")}
+                          options={modelSelectOptions}
+                          size="middle"
+                          disabled={!editable || isGenerating}
+                        />
+                      </Form.Item>
+                    </div>
+                    <Button
+                      type="primary"
+                      size="middle"
+                      onClick={handleGenerateAgent}
+                      disabled={!editable || loadingModels || isGenerating}
+                      icon={<Zap size={16} />}
+                    >
+                      <span className="button-text-full">
+                        {isGenerating
+                          ? t("businessLogic.config.button.generating")
+                          : t("businessLogic.config.button.generatePrompt")}
+                      </span>
+                    </Button>
+                  </Flex>
                 </Flex>
-              </Flex>
+              </Form>
             </Card>
           </Flex>
         </Col>
@@ -1013,7 +1014,7 @@ export default function AgentGenerateDetail({}) {
           currentContent={
             form.getFieldValue(getPromptFieldKey(optimizeModalType)) || ""
           }
-          modelId={form.getFieldValue("businessLogicModelId") || editedAgent.business_logic_model_id || 0}
+          modelId={form.getFieldValue("businessLogicModelId")}
           agentId={currentAgentId ?? 0}
           toolIds={
             Array.isArray(editedAgent.tools)

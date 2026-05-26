@@ -55,6 +55,7 @@ export function useAgentGeneration({
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const updateAgentConfig = useAgentConfigStore((state) => state.updateAgentConfig);
   const setIsGenerating = useAgentConfigStore((state) => state.setIsGenerating);
+  const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode)
 
   // Derive businessInfo from editedAgent
   const businessInfo = {
@@ -78,6 +79,7 @@ export function useAgentGeneration({
       return;
     }
 
+    // In create mode, effectiveAgentId = 0
     const effectiveAgentId = currentAgentId ?? 0;
 
     setIsGenerating(true);
@@ -116,13 +118,9 @@ export function useAgentGeneration({
         (data) => {
           const generationAgentId = effectiveAgentId;
 
-          // Use store.getState() to read the latest currentAgentId at execution time,
-          // avoiding stale closure captures. Guard against null and type mismatch.
           const liveCurrentAgentId = useAgentConfigStore.getState().currentAgentId;
-          const isCurrentAgent = liveCurrentAgentId !== null && liveCurrentAgentId === generationAgentId;
+          const isCurrentAgent = liveCurrentAgentId === null || liveCurrentAgentId === generationAgentId;
 
-          // Only update UI if the user is still on the same agent.
-          // Otherwise, silently update the cache only (Agent A data → localStorage, not UI).
           if (isCurrentAgent) {
             onStreamUpdate?.({
               type: data.type,
@@ -190,9 +188,9 @@ export function useAgentGeneration({
 
           // Use store.getState() to read the latest currentAgentId at execution time
           const liveCurrentAgentId = useAgentConfigStore.getState().currentAgentId;
-
+          console.log(liveCurrentAgentId, generationAgentId)
           // Verify the user is still on the same agent to avoid updating wrong data
-          if (liveCurrentAgentId === null || liveCurrentAgentId !== generationAgentId) {
+          if (liveCurrentAgentId !== null && liveCurrentAgentId !== generationAgentId) {
             // User has switched to another agent, keep the cache for later use
             // when they return to this agent
             log.info(
@@ -214,13 +212,8 @@ export function useAgentGeneration({
             duty_prompt: cached?.dutyPrompt || editedAgent.duty_prompt || "",
             constraint_prompt: cached?.constraintPrompt || editedAgent.constraint_prompt || "",
             few_shots_prompt: cached?.fewShotsPrompt || editedAgent.few_shots_prompt || "",
-            author: editedAgent.author,
-            model: editedAgent.model,
-            max_step: editedAgent.max_step,
-            ingroup_permission: editedAgent.ingroup_permission,
-            provide_run_summary: editedAgent.provide_run_summary,
           };
-
+          console.log(configUpdates)
           // Update agent config in store
           updateAgentConfig(configUpdates);
 
