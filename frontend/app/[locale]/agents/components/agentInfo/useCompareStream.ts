@@ -2,6 +2,8 @@
 
 import {
   useCallback,
+  useEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -29,12 +31,51 @@ interface UseCompareStreamOptions {
     history: CompareHistoryItem[];
   }) => RunAgentParams;
   getHistory?: () => CompareHistoryItem[];
+  persistenceKey?: string;
+  persistenceEnabled?: boolean;
+  persistenceFallbackKeys?: string[];
+  debugStateLabel?: string;
 }
+
+const COMPARE_STORAGE_PREFIX = "agent-compare-session";
+const COMPARE_STORAGE_SCHEMA_VERSION = 1;
+const COMPARE_DEBUG_FLAG = "__NEXENT_COMPARE_DEBUG__";
+
+interface PersistedCompareSession {
+  version: number;
+  savedAt: number;
+  leftMessages: PersistedChatMessage[];
+  rightMessages: PersistedChatMessage[];
+  histories: CompareHistoryMap;
+  conversationIds: {
+    left: number | null;
+    right: number | null;
+  };
+}
+
+type PersistedChatMessage = {
+  id: string;
+  role: ChatMessageType["role"];
+  content: string;
+  timestamp: string;
+  isComplete?: boolean;
+  finalAnswer?: string;
+  error?: string;
+  steps?: ChatMessageType["steps"];
+  searchResults?: ChatMessageType["searchResults"];
+  images?: ChatMessageType["images"];
+  attachments?: ChatMessageType["attachments"];
+  thinking?: ChatMessageType["thinking"];
+};
 
 export function useCompareStream({
   t,
   buildRunParams,
   getHistory,
+  persistenceKey,
+  persistenceEnabled = true,
+  persistenceFallbackKeys = [],
+  debugStateLabel,
 }: UseCompareStreamOptions) {
   const translate = useCallback(
     (key: string, defaultText?: string) =>
@@ -69,6 +110,390 @@ export function useCompareStream({
     right: { current: 0 },
   });
   const compareInFlightRef = useRef(0);
+  const hasHydratedRef = useRef(false);
+  const pendingHydratedMessageCountsRef = useRef<{
+    left: number;
+    right: number;
+  } | null>(null);
+  const [debugPersistenceState, setDebugPersistenceState] = useState("");
+  const storageKey = persistenceKey
+    ? `${COMPARE_STORAGE_PREFIX}:${persistenceKey}`
+    : null;
+  const fallbackKeySignature = persistenceFallbackKeys.join("||");
+  const fallbackStorageKeys = useMemo(
+    () =>
+      persistenceFallbackKeys
+        .map((key) => `${COMPARE_STORAGE_PREFIX}:${key}`)
+        .filter((key) => key !== storageKey),
+    [fallbackKeySignature, storageKey]
+  );
+  const isPersistenceActive = Boolean(storageKey && persistenceEnabled);
+  const debugCompareLog = useCallback(
+    (event: string, payload?: Record<string, unknown>) => {
+      if (typeof window === "undefined") return;
+      const debugFlag = (window as unknown as { [key: string]: unknown })[
+        COMPARE_DEBUG_FLAG
+      ];
+      if (!debugFlag) return;
+      log.info(`[compare-persistence] ${event}`, {
+        storageKey,
+        persistenceEnabled,
+        ...payload,
+      });
+    },
+    [persistenceEnabled, storageKey]
+  );
+
+  const setDebugState = useCallback(
+    (event: string, extra?: string) => {
+      const label = debugStateLabel ? `[${debugStateLabel}]` : "";
+      setDebugPersistenceState(
+        `${label}${event}${extra ? ` ${extra}` : ""}`.trim()
+      );
+    },
+    [debugStateLabel]
+  );
+
+  const serializeMessages = useCallback(
+    (messages: ChatMessageType[]): PersistedChatMessage[] =>
+      messages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        timestamp: message.timestamp.toISOString(),
+        isComplete: message.isComplete,
+        finalAnswer: message.finalAnswer,
+        error: message.error,
+        steps: message.steps,
+        searchResults: message.searchResults,
+        images: message.images,
+        attachments: message.attachments,
+        thinking: message.thinking,
+      })),
+    []
+  );
+
+  const deserializeMessages = useCallback(
+    (messages: PersistedChatMessage[]) =>
+      messages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        timestamp: new Date(message.timestamp),
+        isComplete: message.isComplete,
+        finalAnswer: message.finalAnswer,
+        error: message.error,
+        steps: message.steps,
+        searchResults: message.searchResults,
+        images: message.images,
+        attachments: message.attachments,
+        thinking: message.thinking,
+      })),
+    []
+  );
+
+  const sanitizeHistory = useCallback(
+    (history: unknown): CompareHistoryItem[] => {
+      if (!Array.isArray(history)) return [];
+      return history
+        .filter(
+          (item): item is CompareHistoryItem =>
+            typeof item === "object" &&
+            item !== null &&
+            "role" in item &&
+            "content" in item &&
+            typeof (item as { role: unknown }).role === "string" &&
+            typeof (item as { content: unknown }).content === "string"
+        )
+        .map((item) => ({ role: item.role, content: item.content }));
+    },
+    []
+  );
+
+  const sanitizeSteps = useCallback((steps: unknown): ChatMessageType["steps"] => {
+    if (!Array.isArray(steps)) return undefined;
+    return steps as ChatMessageType["steps"];
+  }, []);
+
+  const sanitizeSearchResults = useCallback(
+    (searchResults: unknown): ChatMessageType["searchResults"] => {
+      if (!Array.isArray(searchResults)) return undefined;
+      return searchResults as ChatMessageType["searchResults"];
+    },
+    []
+  );
+
+  const sanitizeStringArray = useCallback((items: unknown): string[] | undefined => {
+    if (!Array.isArray(items)) return undefined;
+    return items.filter((item): item is string => typeof item === "string");
+  }, []);
+
+  const sanitizePersistedMessages = useCallback(
+    (messages: unknown): PersistedChatMessage[] => {
+      if (!Array.isArray(messages)) return [];
+      return messages
+        .filter(
+          (item): item is PersistedChatMessage =>
+            typeof item === "object" &&
+            item !== null &&
+            typeof (item as { id?: unknown }).id === "string" &&
+            ((item as { role?: unknown }).role === MESSAGE_ROLES.USER ||
+              (item as { role?: unknown }).role === MESSAGE_ROLES.ASSISTANT ||
+              (item as { role?: unknown }).role === MESSAGE_ROLES.SYSTEM) &&
+            typeof (item as { content?: unknown }).content === "string" &&
+            typeof (item as { timestamp?: unknown }).timestamp === "string"
+        )
+        .map((item) => ({
+          id: item.id,
+          role: item.role,
+          content: item.content,
+          timestamp: item.timestamp,
+          isComplete:
+            typeof item.isComplete === "boolean" ? item.isComplete : undefined,
+          finalAnswer:
+            typeof item.finalAnswer === "string" ? item.finalAnswer : undefined,
+          error: typeof item.error === "string" ? item.error : undefined,
+          steps: sanitizeSteps(item.steps),
+          searchResults: sanitizeSearchResults(item.searchResults),
+          images: sanitizeStringArray(item.images),
+          attachments: Array.isArray(item.attachments)
+            ? (item.attachments as ChatMessageType["attachments"])
+            : undefined,
+          thinking: Array.isArray(item.thinking) ? item.thinking : undefined,
+        }));
+    },
+    [sanitizeSearchResults, sanitizeSteps, sanitizeStringArray]
+  );
+
+  const cloneHistory = useCallback(
+    (history: CompareHistoryItem[]) => history.map((item) => ({ ...item })),
+    []
+  );
+
+  const readSnapshotByKey = useCallback(
+    (targetKey: string): PersistedCompareSession | null => {
+      if (!targetKey || typeof window === "undefined") return null;
+
+      try {
+        const raw = window.sessionStorage.getItem(targetKey);
+        if (!raw) return null;
+
+        const parsed = JSON.parse(raw) as Partial<PersistedCompareSession>;
+        if (parsed.version !== COMPARE_STORAGE_SCHEMA_VERSION) return null;
+        const leftMessages = sanitizePersistedMessages(parsed.leftMessages);
+        const rightMessages = sanitizePersistedMessages(parsed.rightMessages);
+        if (leftMessages.length === 0 && rightMessages.length === 0) {
+          return null;
+        }
+
+        return {
+          version: COMPARE_STORAGE_SCHEMA_VERSION,
+          savedAt: Number(parsed.savedAt) || Date.now(),
+          leftMessages,
+          rightMessages,
+          histories: {
+            left: sanitizeHistory(parsed.histories?.left),
+            right: sanitizeHistory(parsed.histories?.right),
+          },
+          conversationIds: {
+            left:
+              typeof parsed.conversationIds?.left === "number"
+                ? parsed.conversationIds.left
+                : null,
+            right:
+              typeof parsed.conversationIds?.right === "number"
+                ? parsed.conversationIds.right
+                : null,
+          },
+        };
+      } catch (error) {
+        log.error("Failed to load compare session from storage", error);
+        window.sessionStorage.removeItem(targetKey);
+        return null;
+      }
+    },
+    [sanitizeHistory, sanitizePersistedMessages]
+  );
+
+  const getPersistedSnapshot = useCallback(
+    (): { snapshot: PersistedCompareSession; sourceKey: string } | null => {
+      if (!isPersistenceActive || !storageKey || typeof window === "undefined") return null;
+
+      const primarySnapshot = readSnapshotByKey(storageKey);
+      if (primarySnapshot) {
+        return { snapshot: primarySnapshot, sourceKey: storageKey };
+      }
+
+      for (const fallbackKey of fallbackStorageKeys) {
+        const fallbackSnapshot = readSnapshotByKey(fallbackKey);
+        if (fallbackSnapshot) {
+          return { snapshot: fallbackSnapshot, sourceKey: fallbackKey };
+        }
+      }
+
+      return null;
+    },
+    [fallbackStorageKeys, isPersistenceActive, readSnapshotByKey, storageKey]
+  );
+
+  useEffect(() => {
+    hasHydratedRef.current = false;
+    pendingHydratedMessageCountsRef.current = null;
+
+    if (!isPersistenceActive || !storageKey || typeof window === "undefined") {
+      setDebugState("persistence-inactive");
+      hasHydratedRef.current = true;
+      return;
+    }
+
+    const restored = getPersistedSnapshot();
+    if (!restored) {
+      debugCompareLog("hydrate-miss");
+      setDebugState("hydrate-miss", `key=${storageKey}`);
+      setLeftMessages([]);
+      setRightMessages([]);
+      compareHistoriesRef.current = { left: [], right: [] };
+      compareConversationIdsRef.current = { left: null, right: null };
+      hasHydratedRef.current = true;
+      return;
+    }
+
+    const { snapshot, sourceKey } = restored;
+    pendingHydratedMessageCountsRef.current = {
+      left: snapshot.leftMessages.length,
+      right: snapshot.rightMessages.length,
+    };
+    setLeftMessages(deserializeMessages(snapshot.leftMessages));
+    setRightMessages(deserializeMessages(snapshot.rightMessages));
+    compareHistoriesRef.current = {
+      left: sanitizeHistory(snapshot.histories.left),
+      right: sanitizeHistory(snapshot.histories.right),
+    };
+    compareConversationIdsRef.current = {
+      left: snapshot.conversationIds.left,
+      right: snapshot.conversationIds.right,
+    };
+    compareStepIdCountersRef.current.left.current = 0;
+    compareStepIdCountersRef.current.right.current = 0;
+    debugCompareLog("hydrate-hit", {
+      leftMessages: snapshot.leftMessages.length,
+      rightMessages: snapshot.rightMessages.length,
+      sourceKey,
+    });
+    setDebugState(
+      "hydrate-hit",
+      `from=${sourceKey.split(":").slice(-1)[0]} left=${snapshot.leftMessages.length} right=${snapshot.rightMessages.length}`
+    );
+
+    if (sourceKey !== storageKey) {
+      const migratedPayload: PersistedCompareSession = {
+        ...snapshot,
+        histories: {
+          left: cloneHistory(snapshot.histories.left),
+          right: cloneHistory(snapshot.histories.right),
+        },
+        conversationIds: {
+          ...snapshot.conversationIds,
+        },
+      };
+      try {
+        window.sessionStorage.setItem(storageKey, JSON.stringify(migratedPayload));
+        window.sessionStorage.removeItem(sourceKey);
+        debugCompareLog("hydrate-migrate", { from: sourceKey, to: storageKey });
+        setDebugState(
+          "hydrate-migrate",
+          `from=${sourceKey.split(":").slice(-1)[0]} to=${storageKey.split(":").slice(-1)[0]}`
+        );
+      } catch (error) {
+        log.error("Failed to migrate compare session storage key", error);
+      }
+    }
+    hasHydratedRef.current = true;
+  }, [
+    cloneHistory,
+    debugCompareLog,
+    deserializeMessages,
+    fallbackStorageKeys,
+    getPersistedSnapshot,
+    isPersistenceActive,
+    setDebugState,
+    sanitizeHistory,
+    storageKey,
+  ]);
+
+  useEffect(() => {
+    if (!isPersistenceActive || !storageKey || typeof window === "undefined") return;
+    if (!hasHydratedRef.current) return;
+
+    const pendingHydratedMessageCounts = pendingHydratedMessageCountsRef.current;
+    if (pendingHydratedMessageCounts) {
+      const hasHydratedMessages =
+        leftMessages.length === pendingHydratedMessageCounts.left &&
+        rightMessages.length === pendingHydratedMessageCounts.right;
+      if (!hasHydratedMessages) {
+        debugCompareLog("persist-skip-hydration-pending", {
+          expectedLeft: pendingHydratedMessageCounts.left,
+          expectedRight: pendingHydratedMessageCounts.right,
+          currentLeft: leftMessages.length,
+          currentRight: rightMessages.length,
+        });
+        setDebugState(
+          "persist-skip-hydration",
+          `expected=${pendingHydratedMessageCounts.left}/${pendingHydratedMessageCounts.right} current=${leftMessages.length}/${rightMessages.length}`
+        );
+        return;
+      }
+      pendingHydratedMessageCountsRef.current = null;
+    }
+
+    const hasPersistData =
+      leftMessages.length > 0 ||
+      rightMessages.length > 0 ||
+      compareHistoriesRef.current.left.length > 0 ||
+      compareHistoriesRef.current.right.length > 0;
+
+    if (!hasPersistData) {
+      window.sessionStorage.removeItem(storageKey);
+      debugCompareLog("persist-clear");
+      setDebugState("persist-clear", `key=${storageKey}`);
+      return;
+    }
+
+    const payload: PersistedCompareSession = {
+      version: COMPARE_STORAGE_SCHEMA_VERSION,
+      savedAt: Date.now(),
+      leftMessages: serializeMessages(leftMessages),
+      rightMessages: serializeMessages(rightMessages),
+      histories: {
+        left: cloneHistory(compareHistoriesRef.current.left),
+        right: cloneHistory(compareHistoriesRef.current.right),
+      },
+      conversationIds: { ...compareConversationIdsRef.current },
+    };
+
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify(payload));
+      debugCompareLog("persist-save", {
+        leftMessages: leftMessages.length,
+        rightMessages: rightMessages.length,
+      });
+      setDebugState(
+        "persist-save",
+        `key=${storageKey.split(":").slice(-1)[0]} left=${leftMessages.length} right=${rightMessages.length}`
+      );
+    } catch (error) {
+      log.error("Failed to persist compare session to storage", error);
+    }
+  }, [
+    cloneHistory,
+    debugCompareLog,
+    isPersistenceActive,
+    leftMessages,
+    rightMessages,
+    serializeMessages,
+    setDebugState,
+    storageKey,
+  ]);
 
   const resetCompareTimeout = useCallback(() => {
     if (compareTimeoutRef.current) {
@@ -93,11 +518,6 @@ export function useCompareStream({
       });
     },
     [translate]
-  );
-
-  const cloneHistory = useCallback(
-    (history: CompareHistoryItem[]) => history.map((item) => ({ ...item })),
-    []
   );
 
   const ensureCompareConversationIds = useCallback(() => {
@@ -413,5 +833,6 @@ export function useCompareStream({
     runCompare,
     stopCompare,
     resetCompareState,
+    debugPersistenceState,
   };
 }

@@ -149,6 +149,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const prevAgentIdRef = useRef<number | null | undefined>(undefined);
   // Maintain an independent step ID counter per Agent
   const stepIdCounter = useRef<{ current: number }>({ current: 0 });
   const [isComparePanelOpen, setIsComparePanelOpen] = useState(false);
@@ -160,6 +161,12 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     agentId === undefined || agentId === null || Number.isNaN(Number(agentId))
       ? undefined
       : Number(agentId);
+  const comparePersistenceKey =
+    parsedAgentId === undefined
+      ? "debug-compare:anonymous"
+      : `debug-compare:agent-${parsedAgentId}`;
+  const comparePersistenceFallbackKeys =
+    parsedAgentId === undefined ? [] : ["debug-compare:anonymous"];
 
   const {
     leftMessages: compareLeftMessages,
@@ -181,6 +188,8 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       agent_id: parsedAgentId,
       model_id: side === "left" ? compareLeftModelId ?? undefined : compareRightModelId ?? undefined,
     }),
+    persistenceKey: comparePersistenceKey,
+    persistenceFallbackKeys: comparePersistenceFallbackKeys,
     getHistory: () =>
       messages
         .filter((msg) => msg.isComplete !== false && msg.content?.trim())
@@ -189,6 +198,15 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
   // Reset debug state when agentId changes
   useEffect(() => {
+    const normalizedAgentId = parsedAgentId ?? null;
+    const previousAgentId = prevAgentIdRef.current;
+    prevAgentIdRef.current = normalizedAgentId;
+    const hasSwitchedAgent =
+      previousAgentId !== undefined &&
+      previousAgentId !== null &&
+      normalizedAgentId !== null &&
+      previousAgentId !== normalizedAgentId;
+
     // Clear debug history
     setMessages([]);
     // Reset step ID counter
@@ -239,11 +257,14 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       }
     }
 
-    // Reset compare state when switching agents
-    setIsComparePanelOpen(false);
-    stopCompare();
-    resetCompareState();
-  }, [agentId, resetCompareState, stopCompare]);
+    // Reset compare state only when switching to a different agent.
+    // On initial mount/re-mount with the same agent, keep persisted compare history.
+    if (hasSwitchedAgent) {
+      setIsComparePanelOpen(false);
+      stopCompare();
+      resetCompareState();
+    }
+  }, [agentId]);
 
   useEffect(() => {
     if (!hasMultipleLlmModels) {
@@ -566,15 +587,8 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       // Enter compare mode: clear default chat history and compare outputs
       setMessages([]);
       stepIdCounter.current.current = 0;
-      if (isCompareStreaming) {
-        stopCompare();
-      }
-      resetCompareState();
-    } else {
-      if (isCompareStreaming) {
-        stopCompare();
-      }
-      resetCompareState();
+    } else if (isCompareStreaming) {
+      stopCompare();
     }
   };
 
