@@ -28,7 +28,6 @@ def search_version_by_version_no(
     with get_db_session() as session:
         version = session.query(AgentVersion).filter(
             AgentVersion.agent_id == agent_id,
-            AgentVersion.tenant_id == tenant_id,
             AgentVersion.version_no == version_no,
             AgentVersion.delete_flag == 'N',
         ).first()
@@ -96,7 +95,6 @@ def query_agent_snapshot(
         # Query agent info snapshot
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
-            AgentInfo.tenant_id == tenant_id,
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag == 'N',
         ).first()
@@ -104,7 +102,7 @@ def query_agent_snapshot(
         # Query tool instances snapshot
         tools = session.query(ToolInstance).filter(
             ToolInstance.agent_id == agent_id,
-            ToolInstance.tenant_id == tenant_id,
+            ToolInstance.tenant_id == agent.tenant_id, # TODO 需要保留这个条件吗
             ToolInstance.version_no == version_no,
             ToolInstance.delete_flag == 'N',
         ).all()
@@ -112,7 +110,7 @@ def query_agent_snapshot(
         # Query relations snapshot
         relations = session.query(AgentRelation).filter(
             AgentRelation.parent_agent_id == agent_id,
-            AgentRelation.tenant_id == tenant_id,
+            AgentRelation.tenant_id == agent.tenant_id, # TODO 需要保留这个条件吗
             AgentRelation.version_no == version_no,
             AgentRelation.delete_flag == 'N',
         ).all()

@@ -10,6 +10,8 @@ import httpx
 from fastapi import UploadFile
 
 from consts.const import (
+    ASSET_OWNER_ATTACHMENTS_PREFIX,
+    ASSET_OWNER_TENANT_ID,
     DATA_PROCESS_SERVICE,
     FILE_PREVIEW_SIZE_LIMIT,
     MAX_CONCURRENT_UPLOADS,
@@ -17,6 +19,7 @@ from consts.const import (
     OFFICE_MIME_TYPES,
     UPLOAD_FOLDER,
 )
+from services.asset_owner_visibility import can_access_file
 from consts.exceptions import FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
 from database.attachment_db import (
     copy_file,
@@ -51,59 +54,70 @@ _conversion_locks_guard = asyncio.Lock()
 logger = logging.getLogger("file_management_service")
 
 
-def check_file_access(object_name: str, user_id: Optional[str]) -> bool:
+def resolve_minio_upload_folder(
+    folder: Optional[str],
+    user_id: Optional[str] = None,
+    uploader_tenant_id: Optional[str] = None,
+) -> str:
+    """
+    Resolve the MinIO prefix for an upload.
+
+    ASSET_OWNER virtual-tenant uploads use attachments/asset_owner/{user_id}/.
+    Other attachment uploads use attachments/{user_id}/.
+    """
+    normalized = folder or "attachments"
+    if normalized == "knowledge_base":
+        return "knowledge_base"
+    remainder = normalized[len("attachments/"):] if normalized.startswith("attachments/") else ""
+    if normalized.startswith("attachments/") and "/" in remainder:
+        return normalized
+    if uploader_tenant_id == ASSET_OWNER_TENANT_ID and user_id:
+        return f"{ASSET_OWNER_ATTACHMENTS_PREFIX}/{user_id}"
+    if user_id:
+        return f"attachments/{user_id}"
+    return normalized
+
+
+def check_file_access(
+    object_name: str,
+    user_id: Optional[str],
+    caller_tenant_id: Optional[str] = None,
+) -> bool:
     """
     Check if user has permission to access the file.
 
-    Access rules:
-    - knowledge_base/*: All authenticated users can access
-    - attachments/{user_id}/*: Only the owner (user_id) can access
-    - preview/*: Accessible if the original file is accessible
-
-    Args:
-        object_name: File object name in storage
-        user_id: Current user ID
-
-    Returns:
-        True if access is allowed, False otherwise
+    Access rules are implemented in asset_owner_visibility.can_access_file.
     """
-    if not user_id:
-        return False
-
-    if object_name.startswith("knowledge_base/"):
-        # Knowledge base files: all authenticated users can access
-        return True
-
-    # Check if file is in user's attachments folder
-    # Pattern: attachments/{user_id}/*
-    if object_name.startswith(f"attachments/{user_id}/"):
-        return True
-
-    # For backward compatibility, allow access to files in root attachments folder
-    # Pattern: attachments/{filename} (no user_id subfolder)
-    if object_name.startswith("attachments/") and "/" not in object_name.replace("attachments/", "", 1):
-        # Old format: attachments/filename (no subdirectory)
-        # Allow access for backward compatibility
-        return True
-
-    return False
+    return can_access_file(object_name, user_id, caller_tenant_id)
 
 
-def check_file_access_batch(object_names: List[str], user_id: Optional[str]) -> Dict[str, bool]:
+def check_file_access_batch(
+    object_names: List[str],
+    user_id: Optional[str],
+    caller_tenant_id: Optional[str] = None,
+) -> Dict[str, bool]:
     """
     Batch check file access permissions.
 
     Args:
         object_names: List of file object names
         user_id: Current user ID
+        caller_tenant_id: Caller's tenant ID for ASSET_OWNER path checks
 
     Returns:
         Dict mapping object_name to access permission (True/False)
     """
-    return {obj_name: check_file_access(obj_name, user_id) for obj_name in object_names}
+    return {
+        obj_name: check_file_access(obj_name, user_id, caller_tenant_id)
+        for obj_name in object_names
+    }
 
 
-def validate_s3_url_access(object_name: str, user_id: Optional[str]) -> None:
+def validate_s3_url_access(
+    object_name: str,
+    user_id: Optional[str],
+    caller_tenant_id: Optional[str] = None,
+) -> None:
     """
     Validate if user has permission to access the S3 URL.
 
@@ -117,12 +131,16 @@ def validate_s3_url_access(object_name: str, user_id: Optional[str]) -> None:
     if not user_id:
         raise PermissionError("User authentication required to access files")
 
-    if not check_file_access(object_name, user_id):
+    if not check_file_access(object_name, user_id, caller_tenant_id):
         logger.warning(f"[validate_s3_url_access] Access denied: object_name={object_name}, user_id={user_id}")
         raise PermissionError(f"Access denied: You don't have permission to access this file ({object_name})")
 
 
-def validate_urls_access(urls: List[str], user_id: Optional[str]) -> None:
+def validate_urls_access(
+    urls: List[str],
+    user_id: Optional[str],
+    caller_tenant_id: Optional[str] = None,
+) -> None:
     """
     Validate if user has permission to access the given URLs.
 
@@ -147,7 +165,7 @@ def validate_urls_access(urls: List[str], user_id: Optional[str]) -> None:
         if url.startswith("s3://"):
             try:
                 _, object_name = parse_s3_url(url)
-                validate_s3_url_access(object_name, user_id)
+                validate_s3_url_access(object_name, user_id, caller_tenant_id)
             except ValueError as e:
                 logger.warning(f"[validate_urls_access] Failed to parse S3 URL: {url}, error: {e}")
                 raise PermissionError(f"Invalid S3 URL format: {url}")
@@ -156,10 +174,17 @@ def validate_urls_access(urls: List[str], user_id: Optional[str]) -> None:
             parts = url.strip("/").split("/", 1)
             if len(parts) == 2:
                 bucket, object_name = parts
-                validate_s3_url_access(object_name, user_id)
+                validate_s3_url_access(object_name, user_id, caller_tenant_id)
 
 
-async def upload_files_impl(destination: str, file: List[UploadFile], folder: str = None, index_name: Optional[str] = None, user_id: Optional[str] = None) -> tuple:
+async def upload_files_impl(
+    destination: str,
+    file: List[UploadFile],
+    folder: str = None,
+    index_name: Optional[str] = None,
+    user_id: Optional[str] = None,
+    uploader_tenant_id: Optional[str] = None,
+) -> tuple:
     """
     Upload files to local storage or MinIO based on destination.
 
@@ -169,6 +194,7 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
         folder: Folder name for MinIO uploads
         index_name: Knowledge base index for conflict resolution
         user_id: User ID for attachment path isolation
+        uploader_tenant_id: Uploader tenant ID (ASSET_OWNER uses dedicated prefix)
 
     Returns:
         tuple: (errors, uploaded_file_paths, uploaded_filenames)
@@ -195,19 +221,7 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
                     errors.append(f"Failed to save file: {f.filename}")
 
     elif destination == "minio":
-        # Determine actual folder path based on file type
-        # knowledge_base: accessible by all authenticated users
-        # other folders (attachments): user-isolated path (attachments/{user_id}/...)
-        if folder == "knowledge_base":
-            actual_folder = "knowledge_base"
-        else:
-            # User isolation for personal attachments
-            if user_id:
-                actual_folder = f"attachments/{user_id}"
-            else:
-                # Fallback to old behavior if no user_id provided
-                actual_folder = folder or "attachments"
-
+        actual_folder = resolve_minio_upload_folder(folder, user_id, uploader_tenant_id)
         minio_results = await upload_to_minio(files=file, folder=actual_folder)
         for result in minio_results:
             if result.get("success"):
@@ -261,18 +275,25 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
     return errors, uploaded_file_paths, uploaded_filenames
 
 
-async def upload_to_minio(files: List[UploadFile], folder: str, user_id: Optional[str] = None) -> List[dict]:
+async def upload_to_minio(
+    files: List[UploadFile],
+    folder: str,
+    user_id: Optional[str] = None,
+    uploader_tenant_id: Optional[str] = None,
+) -> List[dict]:
     """
     Helper function to upload files to MinIO and return results.
 
     Args:
         files: List of files to upload
-        folder: Storage folder path (will be prefixed with user_id if user_id is provided for attachments)
-        user_id: User ID for attachment path isolation
+        folder: Storage folder path or resolved MinIO prefix
+        user_id: User ID for attachment path isolation when folder is generic
+        uploader_tenant_id: Uploader tenant ID for ASSET_OWNER attachment prefix
 
     Returns:
         List of upload results
     """
+    actual_folder = resolve_minio_upload_folder(folder, user_id, uploader_tenant_id)
     results = []
     for f in files:
         try:
@@ -281,17 +302,6 @@ async def upload_to_minio(files: List[UploadFile], folder: str, user_id: Optiona
 
             # Convert file content to BytesIO object
             file_obj = BytesIO(file_content)
-
-            # Determine actual folder path
-            # knowledge_base: no user isolation
-            # other folders: append user_id to path for isolation
-            if folder == "knowledge_base":
-                actual_folder = "knowledge_base"
-            else:
-                if user_id:
-                    actual_folder = f"attachments/{user_id}"
-                else:
-                    actual_folder = folder or "attachments"
 
             # Upload file
             result = upload_fileobj(

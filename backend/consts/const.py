@@ -114,6 +114,9 @@ ASSET_OWNER_ROLE = "ASSET_OWNER"
 # Tenant ID for asset administrators (virtual tenant, not a real tenant)
 ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
 
+# MinIO prefix for ASSET_OWNER-scoped attachment uploads (attachments/asset_owner/{user_id}/...)
+ASSET_OWNER_ATTACHMENTS_PREFIX = "attachments/asset_owner"
+
 # Roles that can edit all resources within a tenant (permission = EDIT).
 # Keep this centralized to avoid drifting role logic across modules.
 CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED", "ASSET_OWNER"}
@@ -122,6 +125,9 @@ CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED", "ASSET_OWNER"}
 PERMISSION_READ = "READ_ONLY"
 PERMISSION_EDIT = "EDIT"
 PERMISSION_PRIVATE = "PRIVATE"
+
+# Response flag when system prompts are withheld from non-ASSET_OWNER callers.
+AGENT_PROMPTS_HIDDEN_FLAG = "prompts_hidden"
 
 
 # Deployment Version Configuration
@@ -378,7 +384,7 @@ NORTHBOUND_EXTERNAL_URL = os.getenv(
 
 
 # APP Version
-APP_VERSION = "v2.1.1"
+APP_VERSION = "latest"
 
 
 # Skill Creation Streaming Configuration

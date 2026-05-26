@@ -5,7 +5,6 @@ from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
 from consts.model import ToolSourceEnum
-from utils.tenant_scope_utils import apply_tool_info_visibility_filter
 from utils.tool_utils import get_local_tools_description_zh
 
 
@@ -77,14 +76,15 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
 
 def query_all_tools(tenant_id: str):
     """
-    Query ToolInfo visible to the caller.
-
-    Tenant admins see tenant-owned tools plus prefabricated local tools (source=local).
-    Asset owners see tools with author == ASSET_OWNER only.
+    Query ToolInfo in the database based on tenant_id and agent_id, optional user_id.
+    Filter tools that belong to the specific tenant_id or have tenant_id as "tenant_id"
+    :return: List of ToolInfo objects
     """
     with get_db_session() as session:
-        query = session.query(ToolInfo).filter(ToolInfo.delete_flag != 'Y')
-        query = apply_tool_info_visibility_filter(query, tenant_id, ToolInfo)
+        query = session.query(ToolInfo).filter(
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.author == tenant_id)
+
         tools = query.all()
         return [as_dict(tool) for tool in tools]
 
@@ -188,9 +188,11 @@ def check_tool_list_initialized(tenant_id: str) -> bool:
     """
     with get_db_session() as session:
         # Check if any tools exist for this tenant
-        query = session.query(ToolInfo).filter(ToolInfo.delete_flag != 'Y')
-        query = apply_tool_info_visibility_filter(query, tenant_id, ToolInfo)
-        return query.count() > 0
+        count = session.query(ToolInfo).filter(
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.author == tenant_id
+        ).count()
+        return count > 0
 
 
 def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_list: List[ToolInfo]):

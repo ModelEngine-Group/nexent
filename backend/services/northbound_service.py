@@ -18,7 +18,6 @@ from services.agent_service import (
     run_agent_stream,
     stop_agent_tasks,
     list_all_agent_info_impl,
-    list_all_asset_agent_info_impl,
     get_agent_id_by_name
 )
 from services.conversation_management_service import (
@@ -285,9 +284,7 @@ async def get_conversation_history(ctx: NorthboundContext, conversation_id: int)
 
 async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
     try:
-        own_agent_info_list = await list_all_agent_info_impl(tenant_id=ctx.tenant_id, user_id=ctx.user_id)
-        asset_agent_info_list = await list_all_asset_agent_info_impl(tenant_id=ctx.tenant_id, user_id=ctx.user_id)
-        agent_info_list = own_agent_info_list + asset_agent_info_list
+        agent_info_list = await list_all_agent_info_impl(tenant_id=ctx.tenant_id, user_id=ctx.user_id)
         # Remove internal information that partner don't need
         for agent_info in agent_info_list:
             agent_info.pop("agent_id", None)

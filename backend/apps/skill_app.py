@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Hea
 from starlette.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from consts.const import APP_VERSION, ASSET_OWNER_TENANT_ID, STREAMABLE_CONTENT_TYPES
+from consts.const import APP_VERSION, STREAMABLE_CONTENT_TYPES
 from consts.exceptions import SkillException, UnauthorizedError
 from services.skill_service import (
     SkillService,
@@ -16,12 +16,22 @@ from services.skill_service import (
 )
 from consts.model import SkillInstanceInfoRequest, SkillCreateRequest, SkillCreateInteractiveRequest, SkillUpdateRequest, SkillResponse
 from utils.auth_utils import get_current_user_id, get_current_user_info
+from services.asset_owner_visibility import can_view_skill
+
+ASSET_OWNER_SKILL_VIEW_DENIED = {"content": "您无权限查看"}
 from nexent.core.agents.agent_model import ModelConfig
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
+
+
+def _asset_owner_skill_view_denied_response(skill: Optional[Dict[str, Any]], tenant_id: str):
+    """Return a denial JSONResponse when the caller cannot view an ASSET_OWNER-scoped skill."""
+    if skill and not can_view_skill(tenant_id, skill.get("tenant_id")):
+        return JSONResponse(content=ASSET_OWNER_SKILL_VIEW_DENIED)
+    return None
 
 
 # List routes first (no path parameters)
@@ -141,12 +151,9 @@ async def get_skill_file_tree(
         if not skill:
             raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
 
-        skill_tenant_id = skill.get("tenant_id")
-        if (
-            skill_tenant_id == ASSET_OWNER_TENANT_ID
-            and tenant_id != ASSET_OWNER_TENANT_ID
-        ):
-            return JSONResponse(content={"content": "您无权限查看"})
+        denied = _asset_owner_skill_view_denied_response(skill, tenant_id)
+        if denied:
+            return denied
 
         tree = service.get_skill_file_tree(skill_name)
         if not tree:
@@ -166,7 +173,8 @@ async def get_skill_file_tree(
 @router.get("/{skill_name}/files/{file_path:path}")
 async def get_skill_file_content(
     skill_name: str,
-    file_path: str
+    file_path: str,
+    authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Get content of a specific file within a skill.
 
@@ -175,13 +183,24 @@ async def get_skill_file_content(
         file_path: Relative path to the file within the skill directory
     """
     try:
+        _, tenant_id = get_current_user_id(authorization)
         service = SkillService()
+        skill = service.get_skill(skill_name)
+        if not skill:
+            raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
+
+        denied = _asset_owner_skill_view_denied_response(skill, tenant_id)
+        if denied:
+            return denied
+
         content = service.get_skill_file_content(skill_name, file_path)
         if content is None:
             raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
         return JSONResponse(content={"content": content})
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:

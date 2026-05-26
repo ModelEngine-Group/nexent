@@ -14,7 +14,8 @@ from consts.exceptions import FileTooLargeException, NotFoundException, Unsuppor
 from consts.model import ProcessParams
 from services.file_management_service import upload_to_minio, upload_files_impl, \
     get_file_url_impl, get_file_stream_impl, delete_file_impl, list_files_impl, \
-    resolve_preview_file, get_preview_stream, check_file_access, check_file_access_batch
+    resolve_preview_file, get_preview_stream, check_file_access, check_file_access_batch, \
+    resolve_minio_upload_folder
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import trigger_data_process
 
@@ -101,7 +102,9 @@ async def upload_files(
                                 detail="No files in the request")
 
         user_id, tenant_id = get_current_user_id(authorization)
-        errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(destination, file, folder, index_name, user_id)
+        errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(
+            destination, file, folder, index_name, user_id, uploader_tenant_id=tenant_id
+        )
 
         if uploaded_file_paths:
             return JSONResponse(
@@ -199,7 +202,7 @@ async def get_storage_file(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
 
-        if not check_file_access(object_name, user_id):
+        if not check_file_access(object_name, user_id, tenant_id):
             logger.warning(f"[get_storage_file] Access denied: object_name={object_name}, user_id={user_id}")
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
@@ -282,15 +285,8 @@ async def storage_upload_files(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
 
-        if folder == "knowledge_base":
-            actual_folder = "knowledge_base"
-        else:
-            if user_id:
-                actual_folder = f"attachments/{user_id}"
-            else:
-                actual_folder = folder or "attachments"
-
-        results = await upload_to_minio(files=files, folder=actual_folder, user_id=user_id)
+        actual_folder = resolve_minio_upload_folder(folder, user_id, tenant_id)
+        results = await upload_to_minio(files=files, folder=actual_folder)
 
         return {
             "message": f"Processed {len(results)} files",
@@ -344,7 +340,7 @@ async def get_storage_files(
         if user_id:
             filtered_files = [
                 f for f in files
-                if f.get("key") and check_file_access(f.get("key"), user_id)
+                if f.get("key") and check_file_access(f.get("key"), user_id, tenant_id)
             ]
         else:
             filtered_files = [
@@ -592,7 +588,7 @@ async def remove_storage_file(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
 
-        if not check_file_access(object_name, user_id):
+        if not check_file_access(object_name, user_id, tenant_id):
             logger.warning(f"[remove_storage_file] Access denied: object_name={object_name}, user_id={user_id}")
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
@@ -643,7 +639,7 @@ async def get_storage_file_batch_urls(
         results = []
 
         for object_name in object_names:
-            if not check_file_access(object_name, user_id):
+            if not check_file_access(object_name, user_id, tenant_id):
                 results.append({
                     "object_name": object_name,
                     "success": False,
@@ -693,6 +689,7 @@ async def preview_file(
     Access control:
     - knowledge_base/*: All authenticated users can access
     - attachments/{user_id}/*: Only the owner (user_id) can access
+    - attachments/asset_owner/{user_id}/*: ASSET_OWNER virtual tenant and owner only
 
     - **object_name**: File object name in storage
     - **filename**: Original filename for Content-Disposition header (optional)
@@ -703,7 +700,7 @@ async def preview_file(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
 
-        if not check_file_access(object_name, user_id):
+        if not check_file_access(object_name, user_id, tenant_id):
             logger.warning(f"[preview_file] Access denied: object_name={object_name}, user_id={user_id}")
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,

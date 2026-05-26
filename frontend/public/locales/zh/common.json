@@ -352,6 +352,7 @@
   "agent.error.fetchAgentListRetry": "获取智能体列表失败，请稍后重试",
   "agent.debug.title": "智能体调试",
   "agent.noEditPermission": "无智能体编辑权限",
+  "agent.prompts.noPermission": "您无权查看提示词内容。",
   "mcpConfig.permission.noEdit": "无MCP编辑权限",
   "agent.action.create": "创建智能体",
   "agent.action.modify": "编辑智能体信息",

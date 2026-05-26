@@ -15,6 +15,7 @@ import {
   Flex,
   Card,
   App,
+  Alert,
 } from "antd";
 import type { TabsProps } from "antd";
 import { Sparkles, Zap, Maximize2 } from "lucide-react";
@@ -45,6 +46,7 @@ import { Can } from "@/components/permission/Can";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
 import PromptOptimizeModal from "./PromptOptimizeModal";
+import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
 
@@ -542,6 +544,8 @@ export default function AgentGenerateDetail({
     );
   };
 
+  const promptsHidden = isAgentPromptsHidden(editedAgent);
+
   const renderPromptSection = (
     type: "duty" | "constraint" | "few-shots",
     fieldName: "dutyPrompt" | "constraintPrompt" | "fewShotsPrompt",
@@ -550,6 +554,14 @@ export default function AgentGenerateDetail({
   ) => {
     return (
       <div className="overflow-y-auto overflow-x-hidden h-full flex flex-col agent-config-form">
+        {promptsHidden && (
+          <Alert
+            type="warning"
+            showIcon
+            className="mb-3 shrink-0"
+            message={t("agent.prompts.noPermission", "You do not have permission to view prompts.")}
+          />
+        )}
         {renderPromptToolbar(type, title)}
         <div className="h-full flex-1 min-h-0">
           {renderPromptEditor(fieldName, title, onBlurUpdate)}
@@ -568,7 +580,7 @@ export default function AgentGenerateDetail({
         <TextArea
           placeholder={placeholder}
           style={promptEditorStyle}
-          disabled={!editable || isGenerating}
+          disabled={!editable || isGenerating || promptsHidden}
           onBlur={(e) => onBlurUpdate(e.target.value)}
         />
       </Form.Item>

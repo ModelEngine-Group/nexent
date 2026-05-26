@@ -3,8 +3,6 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import and_, desc, func, insert, select, update
 
 from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
-from utils.tenant_scope_utils import apply_model_tenant_filter
-
 from .client import as_dict, db_client, get_db_session
 from .db_models import ModelRecord
 from .utils import add_creation_tracking, add_update_tracking
@@ -136,7 +134,8 @@ def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List
         # Base query
         stmt = select(ModelRecord).where(ModelRecord.delete_flag == 'N')
 
-        stmt = apply_model_tenant_filter(stmt, tenant_id, ModelRecord)
+        if tenant_id:
+            stmt = stmt.where(ModelRecord.tenant_id == tenant_id)
 
         # Add filter conditions
         if filters:
@@ -237,7 +236,9 @@ def get_model_by_model_id(model_id: int, tenant_id: Optional[str] = None) -> Opt
             ModelRecord.delete_flag == 'N'
         )
 
-        stmt = apply_model_tenant_filter(stmt, tenant_id, ModelRecord)
+        # If tenant ID is provided, add tenant filter
+        if tenant_id:
+            stmt = stmt.where(ModelRecord.tenant_id == tenant_id)
 
         # Execute query
         result = session.scalars(stmt).first()

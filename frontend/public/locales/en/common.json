@@ -350,6 +350,7 @@
   "agent.error.fetchAgentListRetry": "Failed to get agent list, please try again later",
   "agent.debug.title": "Agent Debug",
   "agent.noEditPermission": "No permission to edit this agent",
+  "agent.prompts.noPermission": "You do not have permission to view prompts.",
   "mcpConfig.permission.noEdit": "No permission to edit MCP",
   "agent.action.create": "Create Agent",
   "agent.action.modify": "Edit Agent Information",

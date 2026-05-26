@@ -3,12 +3,12 @@ import logging
 from http import HTTPStatus
 from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, Body, Depends, File, Form, Path, Path as PathParam, Query, Request, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, Path, Path as PathParam, Query, Request, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
-from consts.const import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE
+from consts.const import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, VectorDatabaseType
 from consts.exceptions import (
     LimitExceededError,
     UnauthorizedError,
@@ -23,7 +23,6 @@ from database.client import get_db_session
 from database.db_models import UserTenant
 from services.invitation_service import create_invitation_code
 from services.user_management_service import signup_user_with_invitation
-from nexent.vector_database.base import VectorDatabaseCore
 from services.file_management_service import (
     upload_files_impl,
     get_file_url_impl,
@@ -157,13 +156,10 @@ async def _require_asset_owner_context(request: Request) -> NorthboundContext:
     return ctx
 
 
-@router.get("indices")
+@router.get("/indices")
 async def get_list_indices(
     request: Request,
     pattern: str = Query("*", description="Pattern to match index names"),
-    include_stats: bool = Query(
-        False, description="Whether to include index stats"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
 ):
     """List knowledge bases visible to the asset-owner tenant.
 
@@ -171,8 +167,9 @@ async def get_list_indices(
     """
     try:
         ctx = await _require_asset_owner_context(request)
+        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
         return ElasticSearchService.list_indices(
-            pattern, include_stats, ctx.tenant_id, ctx.user_id, vdb_core
+            pattern, True, ctx.tenant_id, ctx.user_id, vdb_core
         )
     except LimitExceededError as e:
         logger.error(
@@ -201,7 +198,6 @@ async def create_new_index(
     body: Optional[Dict[str, Any]] = Body(
         None,
         description="Request body with optional fields (ingroup_permission, group_ids, embedding_model_name)"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
 ):
     """Create a new vector index and store it in the knowledge table.
 
@@ -211,6 +207,7 @@ async def create_new_index(
     """
     try:
         ctx = await _require_asset_owner_context(request)
+        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
 
         ingroup_permission = None
         group_ids = None
@@ -253,7 +250,6 @@ async def create_new_index(
 async def delete_index(
     request: Request,
     index_name: str = Path(..., description="Name of the index to delete"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
 ):
     """Delete a knowledge base and all related data.
 
@@ -262,6 +258,7 @@ async def delete_index(
     logger.debug(f"Received northbound request to delete knowledge base: {index_name}")
     try:
         ctx = await _require_asset_owner_context(request)
+        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
         return await ElasticSearchService.full_delete_knowledge_base(
             index_name, vdb_core, ctx.user_id
         )
@@ -288,7 +285,6 @@ async def delete_index(
 async def get_index_files(
     request: Request,
     index_name: str = Path(..., description="Name of the index"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
 ):
     """Get all files from an index, including those that are not yet stored in ES.
 
@@ -296,6 +292,7 @@ async def get_index_files(
     """
     try:
         ctx = await _require_asset_owner_context(request)
+        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
         logger.debug(
             "Listing files for index %s, tenant_id=%s, user_id=%s",
             index_name,
@@ -336,7 +333,6 @@ async def delete_documents(
     index_name: str = Path(..., description="Name of the index"),
     path_or_url: str = Query(
         ..., description="Path or URL of documents to delete"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
 ):
     """Delete documents by path or URL and clean up related Redis records.
 
@@ -344,6 +340,7 @@ async def delete_documents(
     """
     try:
         ctx = await _require_asset_owner_context(request)
+        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
         logger.debug(
             "Deleting documents for index %s, path_or_url=%s, tenant_id=%s, user_id=%s",
             index_name,
@@ -414,19 +411,16 @@ async def delete_documents(
 async def upload_files(
     request: Request,
     file: List[UploadFile] = File(..., alias="file"),
-    destination: str = Form(
-        ..., description="Upload destination: 'local' or 'minio'"),
-    folder: str = Form(
-        "attachments", description="Storage folder path for MinIO (optional)"),
-    index_name: Optional[str] = Form(
-        None, description="Knowledge base index for conflict resolution"),
+    index_name: str = Form(..., description="Knowledge base index"),
 ):
-    """Upload files for knowledge base processing.
+    """Upload files to MinIO and trigger knowledge base data processing.
 
-    Restricted to asset administrators (same auth as create_new_index).
+    Uses chunking_strategy=basic. Restricted to asset administrators
+    (same auth as create_new_index).
     """
     try:
         ctx = await _require_asset_owner_context(request)
+        destination = "minio"
         if not file:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
@@ -434,20 +428,44 @@ async def upload_files(
             )
 
         errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(
-            destination, file, folder, index_name, ctx.user_id
+            destination, file, None, index_name, ctx.user_id, uploader_tenant_id=ctx.tenant_id
         )
 
         if uploaded_file_paths:
+            files = [
+                {"path_or_url": path, "filename": name}
+                for path, name in zip(uploaded_file_paths, uploaded_filenames)
+            ]
+            process_params = ProcessParams(
+                chunking_strategy="basic",
+                source_type="minio",
+                index_name=index_name,
+                authorization=ctx.authorization,
+            )
+            process_result = await trigger_data_process(files, process_params)
+
+            if process_result is None or (
+                isinstance(process_result, dict)
+                and process_result.get("status") == "error"
+            ):
+                error_message = "Data process service failed"
+                if isinstance(process_result, dict) and "message" in process_result:
+                    error_message = process_result["message"]
+                raise HTTPException(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    detail=error_message,
+                )
+
             return JSONResponse(
-                status_code=HTTPStatus.OK,
+                status_code=HTTPStatus.CREATED,
                 content={
                     "message": (
-                        f"Files uploaded successfully to {destination}, "
-                        "ready for processing."
+                        "Files uploaded and processing triggered successfully"
                     ),
                     "uploaded_filenames": uploaded_filenames,
                     "uploaded_file_paths": uploaded_file_paths,
                     "errors": errors,
+                    "process_tasks": process_result,
                 },
             )
         raise HTTPException(
@@ -470,68 +488,6 @@ async def upload_files(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="File upload error.")
-
-
-@router.post("/file/process")
-async def process_files(
-    request: Request,
-    files: List[dict] = Body(
-        ..., description="List of file details with path_or_url and filename"),
-    chunking_strategy: Optional[str] = Body("basic"),
-    index_name: str = Body(...),
-    destination: str = Body(...),
-):
-    """Trigger data processing for uploaded files.
-
-    Restricted to asset administrators (same auth as create_new_index).
-    """
-    try:
-        ctx = await _require_asset_owner_context(request)
-        process_params = ProcessParams(
-            chunking_strategy=chunking_strategy,
-            source_type=destination,
-            index_name=index_name,
-            authorization=ctx.authorization,
-            tenant_id=ctx.tenant_id,
-        )
-
-        process_result = await trigger_data_process(files, process_params)
-
-        if process_result is None or (
-            isinstance(process_result, dict)
-            and process_result.get("status") == "error"
-        ):
-            error_message = "Data process service failed"
-            if isinstance(process_result, dict) and "message" in process_result:
-                error_message = process_result["message"]
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                detail=error_message,
-            )
-
-        return JSONResponse(
-            status_code=HTTPStatus.CREATED,
-            content={
-                "message": "Files processing triggered successfully",
-                "process_tasks": process_result,
-            },
-        )
-    except LimitExceededError as e:
-        logger.error(
-            f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
-        raise HTTPException(
-            status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            detail="Too Many Requests: rate limit exceeded")
-    except UnauthorizedError as e:
-        raise HTTPException(
-            status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"File process error: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="File process error.")
 
 
 @router.get("/file/download/{object_name:path}")
@@ -559,7 +515,7 @@ async def get_storage_file(
     try:
         ctx = await _require_asset_owner_context(request)
 
-        if not check_file_access(object_name, ctx.user_id):
+        if not check_file_access(object_name, ctx.user_id, ctx.tenant_id):
             logger.warning(
                 "[get_storage_file] Access denied: object_name=%s, user_id=%s",
                 object_name,

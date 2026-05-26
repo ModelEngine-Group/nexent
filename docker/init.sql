@@ -694,7 +694,7 @@ COMMENT ON COLUMN nexent.tenant_invitation_code_t.group_ids IS 'Associated group
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.capacity IS 'Invitation code capacity';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.expiry_date IS 'Invitation code expiry date';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.status IS 'Invitation code status: IN_USE, EXPIRE, DISABLE, RUN_OUT';
-COMMENT ON COLUMN nexent.tenant_invitation_code_t.code_type IS 'Invitation code type: ADMIN_INVITE, DEV_INVITE, USER_INVITE';
+COMMENT ON COLUMN nexent.tenant_invitation_code_t.code_type IS 'Invitation code type: ADMIN_INVITE, DEV_INVITE, USER_INVITE, ASSET_OWNER_INVITE';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.create_time IS 'Create time';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.created_by IS 'Created by';
@@ -1128,6 +1128,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
     skill_content TEXT,
     params JSON,
     source VARCHAR(30) DEFAULT 'official',
+    tenant_id VARCHAR(100),
     created_by VARCHAR(100),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(100),
@@ -1142,7 +1143,8 @@ COMMENT ON TABLE nexent.ag_skill_info_t IS 'Skill information table for managing
 
 -- Add comments to the columns
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_id IS 'Skill ID, unique primary key';
-COMMENT ON COLUMN nexent.ag_skill_info_t.skill_name IS 'Skill name, globally unique';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_name IS 'Skill name, unique per tenant';
+COMMENT ON COLUMN nexent.ag_skill_info_t.tenant_id IS 'Tenant ID; asset_owner_tenant_id for ASSET_OWNER-created skills, otherwise tenant-scoped';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_description IS 'Skill description text';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_tags IS 'Skill tags stored as JSON array';
 COMMENT ON COLUMN nexent.ag_skill_info_t.skill_content IS 'Skill content or prompt text';
