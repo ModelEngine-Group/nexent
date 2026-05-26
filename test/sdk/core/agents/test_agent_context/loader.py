@@ -19,7 +19,7 @@ import sys
 from types import ModuleType
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from stubs import register_smolagents_mocks
+from stubs import register_smolagents_mocks, restore_real_smolagents
 
 # ── 1. Register smolagents mocks (idempotent) ──────────────────
 register_smolagents_mocks()
@@ -265,6 +265,14 @@ def _load_agent_model():
 
 
 _agent_model_mod = _load_agent_model()
+
+# Restore real smolagents in sys.modules so sibling test trees (e.g.
+# test/backend/utils/test_context_utils.py) that import the real
+# nexent.core.agents path can do "from smolagents.memory import AgentMemory"
+# without picking up our mock. The mock classes captured above as
+# module-level attributes on _ctx_mod / _agent_model_mod stay valid for our
+# own unit tests, which never touch sys.modules['smolagents.*'] at runtime.
+restore_real_smolagents()
 
 # ── 6. Re-export public names (mirrors original monolithic imports) ──
 

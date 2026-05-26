@@ -271,6 +271,39 @@ agent_model_module = _load_agent_model_module()
 summary_config_module = _load_summary_config_module()
 
 
+def _restore_real_modules() -> None:
+    """
+    Roll back every sys.modules entry this file installed at import time so
+    sibling test trees (e.g. test_context_utils.py) can still import the
+    real packages. agent_model_module already captured the mock classes it
+    needs as module-level attributes, so swapping sys.modules back is safe
+    for our own tests.
+
+    Strategy: for every name we injected, drop it from sys.modules if it
+    still points at a bare ModuleType (no __spec__, no __file__), then
+    force-reimport so real packages reload from disk.
+    """
+    import importlib
+
+    injected_names = list(_module_mocks.keys())
+
+    for key in injected_names:
+        mod = sys.modules.get(key)
+        if mod is not None and getattr(mod, "__spec__", None) is None and not hasattr(mod, "__file__"):
+            del sys.modules[key]
+
+    for key in injected_names:
+        try:
+            importlib.import_module(key)
+        except (ImportError, Exception):
+            # Some mocked names (e.g. botocore.crt, sdk.nexent.core.agents.a2a_agent_proxy)
+            # may not exist as real packages — tolerate.
+            pass
+
+
+_restore_real_modules()
+
+
 class TestSystemPromptComponent:
     """Tests for SystemPromptComponent."""
 
