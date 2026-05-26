@@ -105,6 +105,20 @@ class _VectorDatabaseCore:
     pass
 
 
+class MockOpenAICompatibleEmbedding:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+class MockJinaEmbedding:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+class MockBaseEmbedding:
+    pass
+
+
 embedding_model_module.OpenAICompatibleEmbedding = MockOpenAICompatibleEmbedding
 embedding_model_module.JinaEmbedding = MockJinaEmbedding
 embedding_model_module.BaseEmbedding = MockBaseEmbedding

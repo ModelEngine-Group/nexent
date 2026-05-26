@@ -3,7 +3,16 @@ import importlib.machinery
 import pytest
 import sys
 import os
-from typing import Optional
+
+# Import exception classes and models
+from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+
+# Import the modules we need
+from unittest.mock import MagicMock, AsyncMock, patch
+
+
+# Import exceptions
+from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
 
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
@@ -29,18 +38,7 @@ patch('backend.database.client.MinioClient', return_value=minio_mock).start()
 patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-# Import exception classes and models
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
-from consts.model import TenantCreateRequest, TenantUpdateRequest, PaginationRequest
 
-# Import the modules we need
-from fastapi.testclient import TestClient
-from http import HTTPStatus
-from unittest.mock import MagicMock, AsyncMock
-
-
-# Import exceptions
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
 
 
 services_module = types.ModuleType("services")

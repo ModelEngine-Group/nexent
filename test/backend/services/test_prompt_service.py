@@ -3,6 +3,7 @@ import importlib.machinery
 import types
 import unittest
 import json
+import sys
 from unittest.mock import patch, MagicMock
 
 # Mock nexent module hierarchy BEFORE any backend imports that depend on it
@@ -31,6 +32,11 @@ sys.modules['boto3'] = MagicMock()
 sys.modules['elasticsearch'] = MagicMock()
 sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.create_engine'] = MagicMock()
+sys.modules['sqlalchemy.orm'] = MagicMock()
+sys.modules['sqlalchemy.dialects'] = MagicMock()
+sys.modules['sqlalchemy.dialects.postgresql'] = MagicMock()
+sys.modules['sqlalchemy.sql'] = MagicMock()
+
 
 # DO NOT mock consts - import real ones
 # The backend path is already in sys.path via sys.path.insert above
