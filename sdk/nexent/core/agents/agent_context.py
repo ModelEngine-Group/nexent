@@ -49,6 +49,208 @@ class SummaryTaskStep(TaskStep):
         return [ChatMessage(role=MessageRole.USER, content=content)]
 
 
+# ============================================================
+#  Standalone utilities (no ContextManager state required)
+# ============================================================
+
+def format_summary_output(raw_output: str) -> Optional[str]:
+    """Clean and validate LLM summary output.
+
+    Strips markdown code fences, attempts JSON parse for normalization,
+    falls back to plain text if not valid JSON.
+    """
+    cleaned = raw_output.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    if not cleaned:
+        return None
+    try:
+        parsed = json.loads(cleaned)
+        return json.dumps(parsed, ensure_ascii=False, indent=2)
+    except json.JSONDecodeError:
+        logger.warning("Summary output is not valid JSON; using as plain text")
+        return cleaned
+
+
+def _is_context_length_error(err: Exception) -> bool:
+    """Check if an exception indicates a context length / token limit error."""
+    msg = str(err).lower()
+    return any(k in msg for k in (
+        "context_length", "context length", "maximum context", "maximum context length",
+        "prompt is too long", "reduce the length", "too many tokens",
+        "token limit", "exceeds the maximum", "input is too long",
+        "input length", "exceeds context", "context window",
+    ))
+
+
+def compress_history_offline(
+    pairs: List[Tuple[str, str]],
+    model,
+    config: Optional[ContextManagerConfig] = None,
+    previous_summary: Optional[str] = None,
+) -> dict:
+    """Compress conversation history offline, without ContextManager or AgentMemory.
+
+    This is a standalone function for **Static Compression Inspection** in
+    benchmarks. It takes plain-text (user, assistant) pairs and produces a
+    summary using the same prompts and schema as the in-agent compression path,
+    but without any stateful cache, offload store, or agent runtime.
+
+    Args:
+        pairs: List of (user_text, assistant_text) tuples representing
+               conversation turns to compress.
+        model: An LLM model object compatible with smolagents' call interface.
+        config: ContextManagerConfig providing prompts, schema, and token budgets.
+                Defaults to a fresh ContextManagerConfig() if not provided.
+        previous_summary: Optional existing summary text for incremental
+                          compression. If provided, uses the incremental prompt
+                          to update rather than create from scratch.
+
+    Returns:
+        dict with:
+          - "summary": the compressed summary text (str or None on failure)
+          - "is_incremental": whether incremental compression was used
+          - "is_fallback": whether the LLM failed and fallback truncation was used
+          - "input_text": the raw text that was fed to the LLM (for debugging)
+          - "input_chars": character count of the input text
+    """
+    config = config or ContextManagerConfig()
+    # Same compensation as ContextManager.__init__: when max_summary_input_tokens
+    # is left at the default 0, derive it from token_threshold so that truncation
+    # logic doesn't accidentally chop all input.
+    if config.max_summary_input_tokens <= 0:
+        config.max_summary_input_tokens = int(config.token_threshold * 1.2)
+    if not pairs and not previous_summary:
+        return {
+            "summary": None,
+            "is_incremental": False,
+            "is_fallback": False,
+            "input_text": "",
+            "input_chars": 0,
+        }
+
+    # Build input text from pairs
+    parts = []
+    for user_text, assistant_text in pairs:
+        parts.append(f"user: {user_text}\nassistant: {assistant_text}")
+    pairs_text = "\n\n".join(parts)
+
+    # Determine compression mode
+    is_incremental = previous_summary is not None
+
+    if is_incremental:
+        input_text = (
+            f"## Previous Summary\n{previous_summary}\n\n"
+            f"## New Conversations\n{pairs_text}"
+        )
+    else:
+        input_text = pairs_text
+
+    # Truncate if exceeds budget
+    from ..utils.token_estimation import estimate_tokens_text
+    input_tokens = estimate_tokens_text(input_text)
+    if input_tokens > config.max_summary_input_tokens:
+        # Simple tail-truncation for offline mode
+        approx_chars = int(config.max_summary_input_tokens * config.chars_per_token * 0.9)
+        input_text = "...[Earlier content truncated]...\n" + input_text[-approx_chars:]
+
+    # Build prompt
+    schema_desc = json.dumps(config.summary_json_schema, ensure_ascii=False, indent=2)
+    if is_incremental:
+        system_prompt = config.incremental_summary_system_prompt
+        user_prompt = (
+            f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
+            f"{input_text}"
+        )
+    else:
+        system_prompt = config.summary_system_prompt
+        user_prompt = (
+            f"Create a structured checkpoint summary following this JSON structure:\n{schema_desc}\n\n"
+            f"TURNS TO SUMMARIZE:\n{input_text}"
+        )
+
+    messages = [
+        ChatMessage(role=MessageRole.SYSTEM,
+                    content=[{"type": "text", "text": system_prompt}]),
+        ChatMessage(role=MessageRole.USER,
+                    content=[{"type": "text", "text": user_prompt}]),
+    ]
+
+    # Call LLM with error handling
+    is_fallback = False
+    summary = None
+
+    try:
+        response = model(messages, stop_sequences=[])
+        raw_output = response.content
+        if isinstance(raw_output, list):
+            raw_output = " ".join(
+                block.get("text", "")
+                for block in raw_output
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        if not isinstance(raw_output, str):
+            raw_output = str(raw_output)
+        summary = format_summary_output(raw_output)
+    except Exception as e:
+        if _is_context_length_error(e):
+            logger.warning("Offline compression exceeds context limit; retrying with 2/3 budget")
+            approx_chars = int(config.max_summary_input_tokens * config.chars_per_token * 0.6)
+            truncated_input = input_text[-approx_chars:] if len(input_text) > approx_chars else input_text
+            if is_incremental:
+                user_prompt = (
+                    f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
+                    f"{truncated_input}"
+                )
+            else:
+                user_prompt = (
+                    f"Create a structured checkpoint summary following this JSON structure:\n{schema_desc}\n\n"
+                    f"TURNS TO SUMMARIZE:\n{truncated_input}"
+                )
+            messages[-1] = ChatMessage(
+                role=MessageRole.USER,
+                content=[{"type": "text", "text": user_prompt}],
+            )
+            try:
+                response = model(messages, stop_sequences=[])
+                raw_output = response.content
+                if isinstance(raw_output, list):
+                    raw_output = " ".join(
+                        block.get("text", "")
+                        for block in raw_output
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    )
+                if not isinstance(raw_output, str):
+                    raw_output = str(raw_output)
+                summary = format_summary_output(raw_output)
+            except Exception as e2:
+                logger.error(f"Offline compression retry still failed: {e2}")
+
+        if summary is None:
+            # L3 fallback: hard truncation
+            is_fallback = True
+            first_task = pairs[0][0][:200] if pairs else ""
+            reduced_chars = int(config.max_summary_reduce_tokens * config.chars_per_token)
+            reduced_text = pairs_text[-reduced_chars:] if len(pairs_text) > reduced_chars else pairs_text
+            summary = (
+                "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier steps were removed to free context space. "
+                "The removed content cannot be summarized. Continue based on the steps below.\n\n"
+                f"Original task: {first_task}\n\n"
+                f"Steps removed: {len(pairs)} of {len(pairs)}\n\n"
+                "Remaining compressed history:\n"
+                + reduced_text
+            )
+
+    return {
+        "summary": summary,
+        "is_incremental": is_incremental,
+        "is_fallback": is_fallback,
+        "input_text": input_text,
+        "input_chars": len(input_text),
+    }
+
+
 class ContextManager:
     def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: Optional[int] = None):
         self.config = config or ContextManagerConfig()
