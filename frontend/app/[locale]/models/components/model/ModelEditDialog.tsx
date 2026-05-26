@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Modal, Input, Button, App } from "antd";
+import { Modal, Select, Input, Button, App } from "antd";
 
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
@@ -13,6 +13,8 @@ import {
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
 } from "./ModelChunkSizeSilder";
+
+const { Option } = Select;
 
 interface ModelEditDialogProps {
   isOpen: boolean;
@@ -47,6 +49,10 @@ export const ModelEditDialog = ({
       DEFAULT_MAXIMUM_CHUNK_SIZE,
     ] as [number, number],
     chunkingBatchSize: "10",
+    // Voice model fields (STT/TTS)
+    modelFactory: "",
+    modelAppid: "",
+    accessToken: "",
   });
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
@@ -75,6 +81,9 @@ export const ModelEditDialog = ({
           model.maximumChunkSize || DEFAULT_MAXIMUM_CHUNK_SIZE,
         ] as [number, number],
         chunkingBatchSize: (model.chunkingBatchSize || 10).toString(),
+        modelFactory: model.modelFactory || "",
+        modelAppid: model.modelAppid || "",
+        accessToken: model.accessToken || "",
       });
     }
   }, [model]);
@@ -82,7 +91,17 @@ export const ModelEditDialog = ({
   const handleFormChange = (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     // If the key configuration item changes, clear the verification status
-    if (["url", "apiKey", "maxTokens", "timeoutSeconds", "vectorDimension"].includes(field)) {
+    if ([
+      "url",
+      "apiKey",
+      "maxTokens",
+      "timeoutSeconds",
+      "concurrencyLimit",
+      "vectorDimension",
+      "modelFactory",
+      "modelAppid",
+      "accessToken",
+    ].includes(field)) {
       setConnectivityStatus({ status: null, message: "" });
     }
   };
@@ -95,8 +114,20 @@ export const ModelEditDialog = ({
     form.type === MODEL_TYPES.VLM2 || form.type === MODEL_TYPES.VLM3
       ? (MODEL_TYPES.VLM as ModelType)
       : form.type;
+  const isVoiceModel =
+    form.type === MODEL_TYPES.STT || form.type === MODEL_TYPES.TTS;
 
   const isFormValid = () => {
+    if (isVoiceModel) {
+      if (form.modelFactory === "volcengine") {
+        return (
+          form.modelAppid.trim() !== "" &&
+          form.accessToken.trim() !== ""
+        );
+      } else {
+        return form.name.trim() !== "" && form.apiKey.trim() !== "";
+      }
+    }
     return form.name.trim() !== "" && form.url.trim() !== "";
   };
 
@@ -114,7 +145,7 @@ export const ModelEditDialog = ({
     });
 
     try {
-      const config = {
+      const config: any = {
         modelName: form.name,
         modelType: connectivityModelType,
         baseUrl: form.url,
@@ -130,6 +161,15 @@ export const ModelEditDialog = ({
             ? parseInt(form.vectorDimension)
             : undefined,
       };
+
+      // Add voice model fields for STT/TTS
+      if (isVoiceModel) {
+        config.modelFactory = form.modelFactory;
+        if (form.modelFactory === "volcengine") {
+          config.modelAppid = form.modelAppid;
+          config.accessToken = form.accessToken;
+        }
+      }
 
       const result = await modelService.verifyModelConfigConnectivity(config);
 
@@ -182,6 +222,9 @@ export const ModelEditDialog = ({
           expectedChunkSize: isEmbeddingModel ? form.chunkSizeRange[0] : undefined,
           maximumChunkSize: isEmbeddingModel ? form.chunkSizeRange[1] : undefined,
           chunkingBatchSize: isEmbeddingModel ? parseInt(form.chunkingBatchSize) || 10 : undefined,
+          modelFactory: isVoiceModel ? form.modelFactory : undefined,
+          modelAppid: isVoiceModel && form.modelFactory === "volcengine" ? form.modelAppid : undefined,
+          accessToken: isVoiceModel && form.modelFactory === "volcengine" ? form.accessToken : undefined,
           timeoutSeconds: !isEmbeddingModel && !isRerankModel ? parseInt(form.timeoutSeconds) || 120 : undefined,
           concurrencyLimit: !isEmbeddingModel && !isRerankModel ? (form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined) : undefined,
         });
@@ -202,6 +245,14 @@ export const ModelEditDialog = ({
                 expectedChunkSize: form.chunkSizeRange[0],
                 maximumChunkSize: form.chunkSizeRange[1],
                 chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
+              }
+            : {}),
+          // Send voice model fields
+          ...(isVoiceModel
+            ? {
+                modelFactory: form.modelFactory,
+                modelAppid: form.modelFactory === "volcengine" ? form.modelAppid : undefined,
+                accessToken: form.modelFactory === "volcengine" ? form.accessToken : undefined,
               }
             : {}),
           // Send timeout for non-embedding models
@@ -237,6 +288,13 @@ export const ModelEditDialog = ({
           },
           ...(isEmbeddingModel
             ? { dimension: parseInt(form.vectorDimension) }
+            : {}),
+          ...(isVoiceModel
+            ? {
+                modelFactory: form.modelFactory,
+                modelAppid: form.modelFactory === "volcengine" ? form.modelAppid : "",
+                accessToken: form.modelFactory === "volcengine" ? form.accessToken : "",
+              }
             : {}),
         },
       });
@@ -287,15 +345,63 @@ export const ModelEditDialog = ({
         </div>
 
         {/* URL */}
-        <div>
-          <label className="block mb-1 text-sm font-medium text-gray-700">
-            {t("model.dialog.label.url")}
-          </label>
-          <Input
-            value={form.url}
-            onChange={(e) => handleFormChange("url", e.target.value)}
-          />
-        </div>
+        {!isVoiceModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.url")}
+            </label>
+            <Input
+              value={form.url}
+              onChange={(e) => handleFormChange("url", e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* Voice Model Factory */}
+        {isVoiceModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {form.type === MODEL_TYPES.TTS
+                ? t("model.dialog.label.ttsProvider")
+                : t("model.dialog.label.sttProvider")}
+            </label>
+            <Select
+              style={{ width: "100%" }}
+              value={form.modelFactory || "dashscope"}
+              onChange={(value) => handleFormChange("modelFactory", value)}
+            >
+              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
+              <Option value="volcengine">{t("model.provider.volcengine")}</Option>
+            </Select>
+          </div>
+        )}
+
+        {/* Voice Model App ID and Access Token (Volcengine) */}
+        {isVoiceModel && form.modelFactory === "volcengine" && (
+          <>
+            <div>
+              <label className="block mb-1 text-sm font-medium text-gray-700">
+                {t("model.dialog.label.modelAppid")}
+              </label>
+              <Input
+                value={form.modelAppid}
+                onChange={(e) => handleFormChange("modelAppid", e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+            <div>
+              <label className="block mb-1 text-sm font-medium text-gray-700">
+                {t("model.dialog.label.accessToken")}
+              </label>
+              <Input.Password
+                value={form.accessToken}
+                onChange={(e) => handleFormChange("accessToken", e.target.value)}
+                autoComplete="new-password"
+                visibilityToggle={false}
+              />
+            </div>
+          </>
+        )}
 
         {/* API Key */}
         <div>

@@ -49,7 +49,8 @@ export interface ModelOption {
   expectedChunkSize?: number;
   maximumChunkSize?: number;
   chunkingBatchSize?: number;
-  // STT specific fields
+  // STT/TTS specific fields
+  modelFactory?: string;
   modelAppid?: string;
   accessToken?: string;
   timeoutSeconds?: number;

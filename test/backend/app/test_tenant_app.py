@@ -5,12 +5,34 @@ These tests verify the tenant endpoint logic by directly testing the exception h
 and response patterns used in the tenant_app router.
 """
 import pytest
+import sys
+import types
 from http import HTTPStatus
 from unittest.mock import MagicMock, AsyncMock
 
 
 # Import exceptions
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+
+
+services_module = types.ModuleType("services")
+tenant_service_module = types.ModuleType("services.tenant_service")
+tenant_service_module.create_tenant = MagicMock()
+tenant_service_module.get_tenant_info = MagicMock()
+tenant_service_module.get_tenants_paginated = MagicMock()
+tenant_service_module.update_tenant_info = MagicMock()
+tenant_service_module.delete_tenant = AsyncMock(return_value=True)
+services_module.tenant_service = tenant_service_module
+
+utils_module = types.ModuleType("utils")
+auth_utils_module = types.ModuleType("utils.auth_utils")
+auth_utils_module.get_current_user_id = MagicMock()
+utils_module.auth_utils = auth_utils_module
+
+sys.modules["services"] = services_module
+sys.modules["services.tenant_service"] = tenant_service_module
+sys.modules["utils"] = utils_module
+sys.modules["utils.auth_utils"] = auth_utils_module
 
 
 class TestTenantExceptions:
@@ -130,6 +152,12 @@ class TestTenantServiceCalls:
         import sys
         self.mock_tenant_service = sys.modules['services'].tenant_service
         self.mock_utils = sys.modules['utils'].auth_utils
+        self.mock_tenant_service.create_tenant.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.get_tenant_info.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.get_tenants_paginated.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.update_tenant_info.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.delete_tenant.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.delete_tenant.return_value = True
 
     def test_create_tenant_calls_service(self):
         """Test that create_tenant is called with correct parameters."""
@@ -241,6 +269,7 @@ class TestTenantAuth:
         """Set up mocks for each test."""
         import sys
         self.mock_utils = sys.modules['utils'].auth_utils
+        self.mock_utils.get_current_user_id.reset_mock(side_effect=True, return_value=True)
 
     def test_get_current_user_id_is_called(self):
         """Test that get_current_user_id is used for authorization."""
@@ -274,6 +303,12 @@ class TestTenantEndpointExceptionHandling:
         import sys
         self.mock_tenant_service = sys.modules['services'].tenant_service
         self.mock_utils = sys.modules['utils'].auth_utils
+        self.mock_tenant_service.create_tenant.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.get_tenant_info.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.get_tenants_paginated.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.update_tenant_info.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.delete_tenant.reset_mock(side_effect=True, return_value=True)
+        self.mock_tenant_service.delete_tenant.return_value = True
 
     def test_not_found_exception_handling(self):
         """Test that NotFoundException is caught and raises HTTPException 404."""

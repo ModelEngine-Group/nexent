@@ -238,7 +238,7 @@ Nexent 支持任何 **遵循OpenAI API规范** 的大语言模型供应商，包
 - **网站**: [volcengine.com/product/voice-tech](https://www.volcengine.com/product/voice-tech)
 - **免费额度**: 个人使用可用
 - **特色**: 高质量中英文语音合成
-
+- 推荐使用**豆包语音合成模型2.0和大模型流式语音识别模型**
 - **开始使用**:
 
    1. 注册火山引擎账户
@@ -248,7 +248,7 @@ Nexent 支持任何 **遵循OpenAI API规范** 的大语言模型供应商，包
 
 **阿里灵积**
 - **网站**: [aliyun.com/benefit/scene/voice](https://www.aliyun.com/benefit/scene/voice)
-
+- 推荐使用**千问3-TTS-Instruct-Flash-Realtime/千问3-TTS-Flash-Realtime和千问3-ASR-Flash-Realtime**
 - **开始使用**:
 
    1. 注册阿里云账户
