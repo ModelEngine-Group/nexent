@@ -367,6 +367,21 @@ deployment_tui_cancel() {
   return 130
 }
 
+deployment_tui_back() {
+  printf '\033[?25h'
+  printf '\033[2J\033[H'
+  return 131
+}
+
+deployment_tui_is_back_key() {
+  case "$1" in
+    b|B|$'\177'|$'\010')
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 deployment_tui_multiselect_components() {
   [ -t 0 ] || return 0
   [ -n "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ] && return 0
@@ -450,8 +465,13 @@ deployment_tui_multiselect_components() {
         deployment_tui_cancel
         return $?
         ;;
-	    esac
-	  done
+      *)
+        if deployment_tui_is_back_key "$key"; then
+          continue
+        fi
+        ;;
+    esac
+  done
   printf '\033[?25h'
   printf '\033[2J\033[H'
 }
@@ -460,6 +480,7 @@ deployment_tui_select_monitoring_provider() {
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" || return 0
   [ -t 0 ] || return 0
   [ -n "${DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT:-}" ] && return 0
+  [ "$DEPLOYMENT_CONFIG_FILE_LOADED" = "true" ] && return 0
 
   local providers=(otlp phoenix langfuse langsmith grafana zipkin)
   local cursor=0
@@ -475,7 +496,7 @@ deployment_tui_select_monitoring_provider() {
   deployment_tui_render_monitoring_provider() {
     printf '\033[2J\033[H'
     printf 'Select monitoring provider\n'
-    printf 'Use Up/Down or j/k to move, Enter to confirm, q to quit.\n\n'
+    printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
     local row marker radio
     for row in "${!providers[@]}"; do
       marker=" "
@@ -513,6 +534,12 @@ deployment_tui_select_monitoring_provider() {
         deployment_tui_cancel
         return $?
         ;;
+      *)
+        if deployment_tui_is_back_key "$key"; then
+          deployment_tui_back
+          return $?
+        fi
+        ;;
     esac
   done
   printf '\033[?25h'
@@ -542,7 +569,7 @@ deployment_tui_select_port_policy() {
   deployment_tui_render_port_policy() {
     printf '\033[2J\033[H'
     printf 'Select port policy\n'
-    printf 'Use Up/Down or j/k to move, Enter to confirm, q to quit.\n\n'
+    printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
     local row marker radio
     for row in "${!policies[@]}"; do
       marker=" "
@@ -580,6 +607,12 @@ deployment_tui_select_port_policy() {
         deployment_tui_cancel
         return $?
         ;;
+      *)
+        if deployment_tui_is_back_key "$key"; then
+          deployment_tui_back
+          return $?
+        fi
+        ;;
     esac
   done
   printf '\033[?25h'
@@ -610,7 +643,7 @@ deployment_tui_select_image_source() {
   deployment_tui_render_image_source() {
     printf '\033[2J\033[H'
     printf 'Select image source\n'
-    printf 'Use Up/Down or j/k to move, Enter to confirm, q to quit.\n\n'
+    printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
     local row marker radio
     for row in "${!sources[@]}"; do
       marker=" "
@@ -648,11 +681,116 @@ deployment_tui_select_image_source() {
         deployment_tui_cancel
         return $?
         ;;
+      *)
+        if deployment_tui_is_back_key "$key"; then
+          deployment_tui_back
+          return $?
+        fi
+        ;;
     esac
   done
   printf '\033[?25h'
   printf '\033[2J\033[H'
 
+}
+
+deployment_tui_step_should_run() {
+  local step="$1"
+  [ -t 0 ] || return 1
+
+  case "$step" in
+    0)
+      [ -z "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
+      ;;
+    1)
+      [ -z "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
+      ;;
+    2)
+      [ -z "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
+      ;;
+    3)
+      deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" && [ -z "${DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+deployment_tui_next_step() {
+  local step="$1"
+  step=$((step + 1))
+  while [ "$step" -lt 4 ]; do
+    if deployment_tui_step_should_run "$step"; then
+      printf '%s' "$step"
+      return 0
+    fi
+    step=$((step + 1))
+  done
+  printf '4'
+}
+
+deployment_tui_previous_step() {
+  local current_step="$1"
+  local step=$((current_step - 1))
+  while [ "$step" -ge 0 ]; do
+    if deployment_tui_step_should_run "$step"; then
+      printf '%s' "$step"
+      return 0
+    fi
+    step=$((step - 1))
+  done
+  printf '%s' "$current_step"
+}
+
+deployment_run_tui_configuration() {
+  local step=0
+  local result=0
+
+  if ! deployment_tui_step_should_run "$step"; then
+    step="$(deployment_tui_next_step "$step")"
+  fi
+
+  while [ "$step" -lt 4 ]; do
+    case "$step" in
+      0)
+        deployment_ensure_required_components
+        deployment_tui_multiselect_components
+        result=$?
+        [ "$result" -eq 0 ] && deployment_ensure_required_components
+        ;;
+      1)
+        deployment_tui_select_port_policy
+        result=$?
+        ;;
+      2)
+        deployment_tui_select_image_source
+        result=$?
+        ;;
+      3)
+        deployment_tui_select_monitoring_provider
+        result=$?
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+
+    case "$result" in
+      0)
+        step="$(deployment_tui_next_step "$step")"
+        ;;
+      130)
+        return 130
+        ;;
+      131)
+        step="$(deployment_tui_previous_step "$step")"
+        ;;
+      *)
+        return "$result"
+        ;;
+    esac
+  done
 }
 
 deployment_maybe_select_local_config() {
@@ -1076,12 +1214,10 @@ deployment_prepare_config() {
     DEPLOYMENT_IMAGE_SOURCE="$DEPLOYMENT_REGISTRY_PROFILE"
   fi
   deployment_ensure_required_components
-  deployment_tui_multiselect_components || return 1
-  deployment_ensure_required_components
-  deployment_tui_select_port_policy || return 1
-  deployment_tui_select_image_source || return 1
+  local tui_result=0
+  deployment_run_tui_configuration || tui_result=$?
+  [ "$tui_result" -eq 0 ] || return "$tui_result"
   deployment_normalize_image_source || return 1
-  deployment_tui_select_monitoring_provider || return 1
   deployment_validate || return 1
   deployment_compute_selection
 }

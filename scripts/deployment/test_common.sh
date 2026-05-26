@@ -34,6 +34,15 @@ assert_contains() {
   fi
 }
 
+assert_success() {
+  local message="$1"
+  shift
+  if ! "$@"; then
+    echo "FAIL: $message"
+    exit 1
+  fi
+}
+
 write_full_config() {
   local file="$1"
   {
@@ -125,5 +134,27 @@ if grep -q 'registryProfile' "$LOCAL_CONFIG"; then
   echo "FAIL: persisted local config should not contain registryProfile"
   exit 1
 fi
+
+assert_success "b should be treated as TUI back key" deployment_tui_is_back_key "b"
+assert_success "Backspace should be treated as TUI back key" deployment_tui_is_back_key $'\177'
+if deployment_tui_is_back_key "q"; then
+  echo "FAIL: q should remain the TUI quit key"
+  exit 1
+fi
+
+deployment_tui_step_should_run() {
+  case "$1" in
+    0|1|2)
+      return 0
+      ;;
+    3)
+      return 1
+      ;;
+  esac
+  return 1
+}
+assert_eq "1" "$(deployment_tui_next_step 0)" "TUI next step should advance to the next runnable step"
+assert_eq "4" "$(deployment_tui_next_step 2)" "TUI next step should skip non-runnable monitoring provider"
+assert_eq "2" "$(deployment_tui_previous_step 3)" "TUI previous step should skip non-runnable steps"
 
 echo "All deployment common tests passed."
