@@ -49,7 +49,10 @@ async def create_tenant_endpoint(
         # Create tenant
         tenant_info = create_tenant(
             tenant_name=request.tenant_name,
-            created_by=user_id
+            created_by=user_id,
+            skill_ids=request.skill_ids,
+            skill_names=request.skill_names,
+            locale=request.locale,
         )
 
         logger.info(f"Created tenant {tenant_info['tenant_id']} by user {user_id}")
