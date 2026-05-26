@@ -11,13 +11,11 @@ for _path in (str(PROJECT_ROOT), str(TEST_ROOT)):
 
 
 class TestFormatFunctions:
-    """Tests for formatting helper functions."""
-    
     def test_format_tools_empty(self):
         from backend.utils.context_utils import _format_tools_description
-        result = _format_tools_description({})
-        assert result == ""
-    
+        result = _format_tools_description({}, language="zh")
+        assert result == "- 当前没有可用的工具"
+
     def test_format_tools_single(self):
         from backend.utils.context_utils import _format_tools_description
         class MockTool:
@@ -25,75 +23,74 @@ class TestFormatFunctions:
             description = "Search tool"
             inputs = '{"query": "str"}'
             output_type = "string"
-        result = _format_tools_description({"search": MockTool()})
-        assert "Available tools:" in result
+            source = "local"
+        result = _format_tools_description({"search": MockTool()}, language="zh")
         assert "search" in result
-    
+        assert "Search tool" in result
+
     def test_format_skills_empty(self):
         from backend.utils.context_utils import _format_skills_description
-        result = _format_skills_description([])
+        result = _format_skills_description([], language="zh")
         assert result == ""
-    
+
     def test_format_skills_single(self):
         from backend.utils.context_utils import _format_skills_description
         skills = [{"name": "skill1", "description": "Test skill"}]
-        result = _format_skills_description(skills)
-        assert "Available skills:" in result
+        result = _format_skills_description(skills, language="zh")
         assert "skill1" in result
-    
+        assert "Test skill" in result
+
     def test_format_memory_empty(self):
         from backend.utils.context_utils import _format_memory_context
-        result = _format_memory_context([])
+        result = _format_memory_context([], language="zh")
         assert result == ""
-    
+
     def test_format_memory_dict(self):
         from backend.utils.context_utils import _format_memory_context
-        memory = [{"memory": "test memory"}]
-        result = _format_memory_context(memory)
+        memory = [{"memory": "test memory", "memory_level": "user", "score": 0.9}]
+        result = _format_memory_context(memory, language="zh")
         assert "test memory" in result
-    
+
     def test_format_memory_string(self):
         from backend.utils.context_utils import _format_memory_context
-        memory = ["simple string"]
-        result = _format_memory_context(memory)
+        memory = [{"memory": "simple string", "memory_level": "user", "score": 0.5}]
+        result = _format_memory_context(memory, language="zh")
         assert "simple string" in result
-    
+
     def test_format_managed_agents_empty(self):
         from backend.utils.context_utils import _format_managed_agents_description
-        result = _format_managed_agents_description({})
+        result = _format_managed_agents_description({}, language="zh")
         assert result == ""
-    
+
     def test_format_managed_agents_single(self):
         from backend.utils.context_utils import _format_managed_agents_description
         class MockAgent:
             name = "research"
             description = "Research assistant"
-        result = _format_managed_agents_description({"research": MockAgent()})
-        assert "Available sub-agents" in result
-    
+        result = _format_managed_agents_description({"research": MockAgent()}, language="zh")
+        assert "research" in result
+
     def test_format_external_agents_empty(self):
         from backend.utils.context_utils import _format_external_agents_description
-        result = _format_external_agents_description({})
+        result = _format_external_agents_description({}, language="zh")
         assert result == ""
-    
+
     def test_format_external_agents_single(self):
         from backend.utils.context_utils import _format_external_agents_description
         class MockAgent:
             agent_id = "ext-1"
             name = "External"
             description = "External agent"
-        result = _format_external_agents_description({"ext-1": MockAgent()})
-        assert "Available external agents" in result
+        result = _format_external_agents_description({"ext-1": MockAgent()}, language="zh")
+        assert "External" in result
 
 
 class TestBuildComponents:
-    """Tests for component builder functions."""
-    
     def test_build_tools_component_empty(self):
         from backend.utils.context_utils import build_tools_component
-        comp = build_tools_component({})
+        comp = build_tools_component({}, language="zh")
         assert comp.tools == []
-    
+
     def test_build_tools_component_with_tools(self):
         from backend.utils.context_utils import build_tools_component
         class MockTool:
@@ -101,54 +98,55 @@ class TestBuildComponents:
             description = "desc"
             inputs = "{}"
             output_type = "str"
-        comp = build_tools_component({"tool": MockTool()})
+            source = "local"
+        comp = build_tools_component({"tool": MockTool()}, language="zh")
         assert len(comp.tools) == 1
-    
+
     def test_build_skills_component_empty(self):
         from backend.utils.context_utils import build_skills_component
-        comp = build_skills_component([])
+        comp = build_skills_component([], language="zh")
         assert comp.skills == []
-    
+
     def test_build_skills_component_with_skills(self):
         from backend.utils.context_utils import build_skills_component
-        comp = build_skills_component([{"name": "skill"}])
+        comp = build_skills_component([{"name": "skill"}], language="zh")
         assert len(comp.skills) == 1
-    
+
     def test_build_memory_component_empty(self):
         from backend.utils.context_utils import build_memory_component
-        comp = build_memory_component([])
+        comp = build_memory_component([], language="zh")
         assert comp.memories == []
-    
+
     def test_build_memory_component_with_search_query(self):
         from backend.utils.context_utils import build_memory_component
-        comp = build_memory_component([], search_query="test query")
+        comp = build_memory_component([], search_query="test query", language="zh")
         assert comp.search_query == "test query"
-    
+
     def test_build_knowledge_base_component_empty(self):
         from backend.utils.context_utils import build_knowledge_base_component
         comp = build_knowledge_base_component("")
         assert comp.summary == ""
-    
+
     def test_build_knowledge_base_component_with_summary(self):
         from backend.utils.context_utils import build_knowledge_base_component
         comp = build_knowledge_base_component("KB text", kb_ids=["kb-1"])
         assert comp.summary == "KB text"
-    
+
     def test_build_managed_agents_component_empty(self):
         from backend.utils.context_utils import build_managed_agents_component
-        comp = build_managed_agents_component({})
+        comp = build_managed_agents_component({}, language="zh")
         assert comp.agents == []
-    
+
     def test_build_external_agents_component_empty(self):
         from backend.utils.context_utils import build_external_agents_component
-        comp = build_external_agents_component({})
+        comp = build_external_agents_component({}, language="zh")
         assert comp.agents == []
-    
+
     def test_build_system_prompt_component_empty(self):
         from backend.utils.context_utils import build_system_prompt_component
         comp = build_system_prompt_component("")
         assert comp.content == ""
-    
+
     def test_build_system_prompt_component_with_template(self):
         from backend.utils.context_utils import build_system_prompt_component
         comp = build_system_prompt_component("test", template_name="template.yaml")
@@ -156,13 +154,22 @@ class TestBuildComponents:
 
 
 class TestBuildContextComponents:
-    """Tests for main build_context_components function."""
-    
-    def test_empty_inputs(self):
+    def test_empty_inputs_produces_skeleton(self):
         from backend.utils.context_utils import build_context_components
-        components = build_context_components()
-        assert components == []
-    
+        components = build_context_components(
+            duty="Help users.",
+            constraint="Be helpful.",
+            few_shots="Q: hi?\nA: Hello!",
+            app_name="Test",
+            app_description="Test",
+            time_str="2026-01-01",
+            user_id="test",
+            language="zh",
+            is_manager=False,
+        )
+        types = [c.component_type for c in components]
+        assert "system_prompt" in types
+
     def test_with_tools_only(self):
         from backend.utils.context_utils import build_context_components
         class MockTool:
@@ -170,22 +177,46 @@ class TestBuildContextComponents:
             description = "desc"
             inputs = "{}"
             output_type = "str"
-        components = build_context_components(tools={"tool": MockTool()})
-        assert len(components) == 1
-    
-    def test_include_flags(self):
+            source = "local"
+        components = build_context_components(
+            duty="Help users.",
+            constraint="Be helpful.",
+            few_shots="Q?",
+            app_name="Test",
+            app_description="Test",
+            time_str="2026-01-01",
+            user_id="test",
+            language="zh",
+            is_manager=False,
+            tools={"tool": MockTool()},
+        )
+        types = [c.component_type for c in components]
+        assert "tools" in types
+
+    def test_include_flags_skip_tools(self):
         from backend.utils.context_utils import build_context_components
         class MockTool:
             name = "tool"
             description = "desc"
             inputs = "{}"
             output_type = "str"
+            source = "local"
         components = build_context_components(
+            duty="Help users.",
+            constraint="Be helpful.",
+            few_shots="Q?",
+            app_name="Test",
+            app_description="Test",
+            time_str="2026-01-01",
+            user_id="test",
+            language="zh",
+            is_manager=False,
             tools={"tool": MockTool()},
             include_tools=False,
         )
-        assert components == []
-    
+        types = [c.component_type for c in components]
+        assert "tools" not in types
+
     def test_app_context_string(self):
         from backend.utils.context_utils import build_app_context_string
         result = build_app_context_string("Nexent", "Platform", "user-1")
