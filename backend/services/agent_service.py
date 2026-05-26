@@ -1,10 +1,13 @@
 import asyncio
+import base64
+import io
 import json
 import logging
 import os
 import uuid
+import zipfile
 from collections import deque
-from typing import Callable, Optional, Dict
+from typing import Callable, Optional, Dict, List
 
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -19,6 +22,7 @@ from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
+from consts.exceptions import MemoryPreparationException, SkillDuplicateError
 from consts.exceptions import MemoryPreparationException
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from consts.model import (
@@ -30,6 +34,7 @@ from consts.model import (
     ExportAndImportDataFormat,
     MCPInfo,
     SkillInstanceInfoRequest,
+    SkillZipEntry,
     ToolInstanceInfoRequest,
     ToolSourceEnum, ModelConnectStatusEnum
 )
@@ -993,7 +998,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                             agent_id=agent_id,
                             skill_description=instance.get("skill_description"),
                             skill_content=instance.get("skill_content"),
-                            enabled=False
+                            enabled=False,
+                            config_values=instance.get("config_values"),
                         ),
                         tenant_id=tenant_id,
                         user_id=user_id
@@ -1016,6 +1022,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                         skill_description=skill_description,
                         skill_content=skill_content,
                         enabled=True,
+                        config_values=(existing_instance or {}).get("config_values"),
                     ),
                     tenant_id=tenant_id,
                     user_id=user_id
@@ -1227,7 +1234,7 @@ async def export_agent_impl(agent_id: int, authorization: str = Header(None)) ->
 
     export_data = ExportAndImportDataFormat(
         agent_id=agent_id, agent_info=export_agent_dict, mcp_info=mcp_info_list)
-    return export_data.model_dump()
+    return json.dumps(export_data.model_dump())
 
 
 async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) -> ExportAndImportAgentInfo:
@@ -1239,6 +1246,22 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
     agent_relation_in_db = query_sub_agents_id_list(
         main_agent_id=agent_id, tenant_id=tenant_id)
     tool_list = await create_tool_config_list(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+
+    # Collect skill names from skill instances
+    skill_names: List[str] = []
+    try:
+        skill_instances = skill_db.query_skill_instances_by_agent_id(
+            agent_id=agent_id, tenant_id=tenant_id, version_no=0
+        )
+        for inst in skill_instances:
+            skill_id = inst.get("skill_id")
+            skill = skill_db.get_skill_by_id(skill_id, tenant_id)
+            if skill:
+                name = skill.get("name")
+                if name:
+                    skill_names.append(name)
+    except Exception as e:
+        logger.warning(f"Failed to collect skill instances for agent {agent_id}: {e}")
 
     # Check if any tool is KnowledgeBaseSearchTool and set its metadata to empty dict
     for tool in tool_list:
@@ -1280,6 +1303,7 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
                                           model_name=model_display_name,
                                           business_logic_model_id=business_logic_model_id,
                                           business_logic_model_name=business_logic_model_display_name,
+                                          skill_names=skill_names,
                                           prompt_template_id=agent_info.get("prompt_template_id"),
                                           prompt_template_name=agent_info.get("prompt_template_name"))
     return agent_info
@@ -1288,7 +1312,8 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
 async def import_agent_impl(
     agent_info: ExportAndImportDataFormat,
     authorization: str = Header(None),
-    force_import: bool = False
+    force_import: bool = False,
+    skill_name_to_id: Optional[Dict[str, int]] = None
 ):
     """
     Import agent using DFS.
@@ -2220,3 +2245,127 @@ def get_agent_call_relationship_impl(agent_id: int, tenant_id: str) -> dict:
         logger.exception(
             f"Failed to get agent call relationship for agent {agent_id}: {str(e)}")
         raise ValueError(f"Failed to get agent call relationship: {str(e)}")
+
+
+async def export_agent_with_skills_impl(agent_id: int, authorization: str) -> dict:
+    """Export an agent, returning a ZIP if it has skill instances, otherwise plain JSON.
+
+    The response is either:
+      - A dict with {"_zip": True, "data": bytes, "filename": str} when the agent has skills
+      - A plain dict (JSON string) when the agent has no skills
+    """
+    from services.skill_service import SkillService
+
+    user_id, tenant_id, _ = get_current_user_info(authorization)
+
+    skill_instances = skill_db.query_skill_instances_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=0
+    )
+
+    if not skill_instances:
+        return await export_agent_impl(agent_id, authorization)
+
+    skill_names = []
+    for inst in skill_instances:
+        skill_id = inst.get("skill_id")
+        skill = skill_db.get_skill_by_id(skill_id, tenant_id)
+        if skill:
+            skill_names.append(skill.get("name"))
+
+    if not skill_names:
+        return await export_agent_impl(agent_id, authorization)
+
+    agent_json_str = await export_agent_impl(agent_id, authorization)
+
+    skill_service = SkillService(tenant_id=tenant_id)
+    skill_zip_entries = skill_service.export_skills_by_names(skill_names, tenant_id)
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("agent.json", agent_json_str)
+        for entry in skill_zip_entries:
+            skill_zip_bytes = base64.b64decode(entry["skill_zip_base64"])
+            zf.writestr(f"skills/{entry['skill_name']}.zip", skill_zip_bytes)
+
+    zip_buffer.seek(0)
+    zip_data = zip_buffer.read()
+
+    agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id)
+    agent_name = agent_info.get("name", "anonymous") if agent_info else "anonymous"
+
+    filename = f"{agent_name}.zip"
+
+    return {
+        "_zip": True,
+        "data": zip_data,
+        "filename": filename
+    }
+
+
+async def import_agent_with_skills_impl(
+    agent_info: "ExportAndImportDataFormat",
+    skills: List[SkillZipEntry],
+    authorization: str,
+    force_import: bool = False
+):
+    """Import an agent with skills bundled from a ZIP export.
+
+    For each skill in the bundle:
+      1. Check if a skill with the same name already exists in the target tenant.
+      2. If duplicates exist, raise SkillDuplicateError (do not create anything).
+      3. If no duplicates, create the skill from ZIP bytes via SkillService.
+      4. Create a SkillInstance linking the new skill_id to the new agent_id.
+
+    Then proceeds with the standard agent import flow using the mapped skill IDs.
+    """
+    from services.skill_service import SkillService
+
+    user_id, tenant_id, _ = get_current_user_info(authorization)
+
+    skill_name_to_zip_base64 = {entry.skill_name: entry.skill_zip_base64 for entry in skills}
+
+    existing_skills = skill_db.list_skills(tenant_id)
+    existing_skill_names = {s.get("name") for s in existing_skills}
+
+    import_skill_names = set(skill_name_to_zip_base64.keys())
+    duplicate_names = list(import_skill_names & existing_skill_names)
+
+    if duplicate_names:
+        raise SkillDuplicateError(duplicate_names)
+
+    skill_name_to_id: Dict[str, int] = {}
+    skill_service = SkillService(tenant_id=tenant_id)
+
+    for skill_name, zip_base64 in skill_name_to_zip_base64.items():
+        zip_bytes = base64.b64decode(zip_base64)
+        result = skill_service.create_skill_from_zip_bytes(
+            zip_bytes=zip_bytes,
+            skill_name=skill_name,
+            source="导入",
+            user_id=user_id,
+            tenant_id=tenant_id,
+            skip_duplicate_check=True
+        )
+        skill_name_to_id[skill_name] = result.get("skill_id")
+
+    agent_id_mapping = await import_agent_impl(
+        agent_info, authorization, force_import,
+        skill_name_to_id=skill_name_to_id
+    )
+
+    main_agent_id = agent_id_mapping.get(agent_info.agent_id)
+    if main_agent_id:
+        for skill_name, new_skill_id in skill_name_to_id.items():
+            skill_db.create_or_update_skill_by_skill_info(
+                skill_info=SkillInstanceInfoRequest(
+                    skill_id=new_skill_id,
+                    agent_id=main_agent_id,
+                    enabled=True,
+                    version_no=0
+                ),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                version_no=0
+            )
+
+    return agent_id_mapping

@@ -60,9 +60,11 @@ from backend.database.skill_db import (
     search_skills_for_agent,
     delete_skills_by_agent_id,
     delete_skill_instances_by_skill_id,
+    delete_skill_instances_by_tenant,
     list_skills,
     get_skill_by_name,
     get_skill_by_id,
+    get_skill_by_id_global,
     create_skill,
     update_skill,
     delete_skill,
@@ -70,6 +72,9 @@ from backend.database.skill_db import (
     get_tool_ids_by_names,
     get_tool_names_by_skill_name,
     get_skill_with_tool_names,
+    list_global_official_skills,
+    check_skill_list_initialized,
+    upsert_scanned_skills,
     _get_tool_ids,
     _to_dict,
 )
@@ -100,10 +105,12 @@ class MockSkillInfo:
     def __init__(self, **kwargs):
         self.skill_id = kwargs.get('skill_id', 1)
         self.skill_name = kwargs.get('skill_name', 'test_skill')
+        self.tenant_id = kwargs.get('tenant_id', 'tenant1')
         self.skill_description = kwargs.get('skill_description', 'Test description')
         self.skill_tags = kwargs.get('skill_tags', ['tag1'])
         self.skill_content = kwargs.get('skill_content', 'Test content')
-        self.params = kwargs.get('params', {})
+        self.config_schemas = kwargs.get('config_schemas', {})
+        self.config_values = kwargs.get('config_values', {})
         self.source = kwargs.get('source', 'custom')
         self.created_by = kwargs.get('created_by', 'creator1')
         self.create_time = kwargs.get('create_time', datetime.now())
@@ -978,10 +985,12 @@ class TestToDict:
         skill = MockSkillInfo(
             skill_id=1,
             skill_name='test_skill',
+            tenant_id='tenant1',
             skill_description='Test description',
             skill_tags=['tag1', 'tag2'],
             skill_content='Test content',
-            params={'param1': 'value1'},
+            config_schemas={'key': 'schema'},
+            config_values={'key': 'value'},
             source='custom',
             created_by='creator1',
             create_time=datetime(2024, 1, 1, 12, 0, 0),
@@ -993,10 +1002,12 @@ class TestToDict:
 
         assert result['skill_id'] == 1
         assert result['name'] == 'test_skill'
+        assert result['tenant_id'] == 'tenant1'
         assert result['description'] == 'Test description'
         assert result['tags'] == ['tag1', 'tag2']
         assert result['content'] == 'Test content'
-        assert result['params'] == {'param1': 'value1'}
+        assert result['config_schemas'] == {'key': 'schema'}
+        assert result['config_values'] == {'key': 'value'}
         assert result['source'] == 'custom'
         assert result['created_by'] == 'creator1'
         assert result['create_time'] == '2024-01-01T12:00:00'
@@ -1010,7 +1021,8 @@ class TestToDict:
             skill_name='test',
             skill_tags=None,
             skill_content='',
-            params=None,
+            config_schemas=None,
+            config_values=None,
             create_time=None,
             update_time=None
         )
@@ -1019,7 +1031,8 @@ class TestToDict:
 
         assert result['tags'] == []
         assert result['content'] == ''
-        assert result['params'] == {}
+        assert result['config_schemas'] is None
+        assert result['config_values'] is None
 
 
 # ===== list_skills Tests =====
@@ -1031,8 +1044,8 @@ class TestListSkills:
         """Test listing all skills."""
         session, query = mock_session
 
-        skill1 = MockSkillInfo(skill_id=1, skill_name='skill1')
-        skill2 = MockSkillInfo(skill_id=2, skill_name='skill2')
+        skill1 = MockSkillInfo(skill_id=1, skill_name='skill1', tenant_id='tenant1')
+        skill2 = MockSkillInfo(skill_id=2, skill_name='skill2', tenant_id='tenant1')
 
         mock_all = MagicMock()
         mock_all.return_value = [skill1, skill2]
@@ -1050,7 +1063,7 @@ class TestListSkills:
             lambda s, skill_id: [1, 2] if skill_id == 1 else []
         )
 
-        result = list_skills()
+        result = list_skills('tenant1')
 
         assert len(result) == 2
         assert result[0]['name'] == 'skill1'
@@ -1073,7 +1086,7 @@ class TestListSkills:
         monkeypatch.setattr(
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
 
-        result = list_skills()
+        result = list_skills('tenant1')
 
         assert result == []
 
@@ -1087,7 +1100,7 @@ class TestGetSkillByName:
         """Test getting skill by name when it exists."""
         session, query = mock_session
 
-        skill = MockSkillInfo(skill_id=5, skill_name='my_skill')
+        skill = MockSkillInfo(skill_id=5, skill_name='my_skill', tenant_id='tenant1')
 
         mock_first = MagicMock()
         mock_first.return_value = skill
@@ -1105,7 +1118,7 @@ class TestGetSkillByName:
             lambda s, skill_id: [1, 2]
         )
 
-        result = get_skill_by_name('my_skill')
+        result = get_skill_by_name('my_skill', 'tenant1')
 
         assert result is not None
         assert result['skill_id'] == 5
@@ -1128,7 +1141,7 @@ class TestGetSkillByName:
         monkeypatch.setattr(
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
 
-        result = get_skill_by_name('nonexistent')
+        result = get_skill_by_name('nonexistent', 'tenant1')
 
         assert result is None
 
@@ -1142,7 +1155,7 @@ class TestGetSkillById:
         """Test getting skill by ID when it exists."""
         session, query = mock_session
 
-        skill = MockSkillInfo(skill_id=10, skill_name='specific_skill')
+        skill = MockSkillInfo(skill_id=10, skill_name='specific_skill', tenant_id='tenant1')
 
         mock_first = MagicMock()
         mock_first.return_value = skill
@@ -1160,7 +1173,7 @@ class TestGetSkillById:
             lambda s, skill_id: [3]
         )
 
-        result = get_skill_by_id(10)
+        result = get_skill_by_id(10, 'tenant1')
 
         assert result is not None
         assert result['skill_id'] == 10
@@ -1182,7 +1195,7 @@ class TestGetSkillById:
         monkeypatch.setattr(
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
 
-        result = get_skill_by_id(999)
+        result = get_skill_by_id(999, 'tenant1')
 
         assert result is None
 
@@ -1207,20 +1220,22 @@ class TestCreateSkill:
         )
 
         class MockSkillInfoClass:
-            skill_id = MagicMock()
-            skill_name = MagicMock()
-            skill_description = MagicMock()
-            skill_tags = MagicMock()
-            skill_content = MagicMock()
-            params = MagicMock()
-            source = MagicMock()
-            created_by = MagicMock()
-            create_time = MagicMock()
-            updated_by = MagicMock()
-            update_time = MagicMock()
+            skill_id = 1
+            skill_name = 'new_skill'
+            tenant_id = 'tenant1'
+            skill_description = 'A new skill'
+            skill_tags = ['tag1']
+            skill_content = 'Skill content'
+            config_schemas = None
+            config_values = None
+            source = 'custom'
+            created_by = 'creator1'
+            create_time = datetime.now()
+            updated_by = 'updater1'
+            update_time = datetime.now()
+            delete_flag = 'N'
 
             def __init__(self, **kwargs):
-                self.skill_id = 1
                 for key, value in kwargs.items():
                     setattr(self, key, value)
 
@@ -1237,14 +1252,13 @@ class TestCreateSkill:
             'description': 'A new skill',
             'tags': ['tag1'],
             'content': 'Skill content',
-            'params': {'param1': 'value1'},
             'source': 'custom',
             'created_by': 'creator1',
             'updated_by': 'updater1',
             'tool_ids': []
         }
 
-        result = create_skill(skill_data)
+        result = create_skill(skill_data, 'tenant1')
 
         session.add.assert_called()
         session.commit.assert_called()
@@ -1266,15 +1280,18 @@ class TestCreateSkill:
         class MockSkillInfoClass:
             skill_id = 1
             skill_name = 'tool_skill'
+            tenant_id = 'tenant1'
             skill_description = ''
             skill_tags = []
             skill_content = ''
-            params = {}
+            config_schemas = None
+            config_values = None
             source = 'custom'
             created_by = 'user1'
             create_time = datetime.now()
             updated_by = 'user1'
             update_time = datetime.now()
+            delete_flag = 'N'
 
             def __init__(self, **kwargs):
                 for key, value in kwargs.items():
@@ -1306,7 +1323,7 @@ class TestCreateSkill:
             'tool_ids': [1, 2, 3]
         }
 
-        result = create_skill(skill_data)
+        result = create_skill(skill_data, 'tenant1')
 
         assert result['skill_id'] == 1
         assert result['tool_ids'] == [1, 2, 3]
@@ -1335,16 +1352,17 @@ class TestUpdateSkill:
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
 
         with pytest.raises(ValueError, match="Skill not found"):
-            update_skill('nonexistent', {})
+            update_skill('nonexistent', {}, 'tenant1')
 
     def test_update_skill_basic(self, monkeypatch, mock_session):
         """Test updating basic skill fields."""
         session, query = mock_session
 
-        existing_skill = MockSkillInfo(skill_id=1, skill_name='old_name')
+        existing_skill = MockSkillInfo(skill_id=1, skill_name='old_name', tenant_id='tenant1')
         refreshed_skill = MockSkillInfo(
             skill_id=1,
             skill_name='old_name',
+            tenant_id='tenant1',
             skill_description='new description',
             skill_content='new content'
         )
@@ -1392,7 +1410,7 @@ class TestUpdateSkill:
             'content': 'new content'
         }
 
-        result = update_skill('old_name', skill_data)
+        result = update_skill('old_name', skill_data, 'tenant1')
 
         session.execute.assert_called()
 
@@ -1400,8 +1418,8 @@ class TestUpdateSkill:
         """Test updating skill with new tool IDs."""
         session, query = mock_session
 
-        existing_skill = MockSkillInfo(skill_id=5, skill_name='my_skill')
-        refreshed_skill = MockSkillInfo(skill_id=5, skill_name='my_skill')
+        existing_skill = MockSkillInfo(skill_id=5, skill_name='my_skill', tenant_id='tenant1')
+        refreshed_skill = MockSkillInfo(skill_id=5, skill_name='my_skill', tenant_id='tenant1')
 
         call_count = [0]
 
@@ -1462,7 +1480,7 @@ class TestUpdateSkill:
 
         skill_data = {'tool_ids': [1, 2, 3]}
 
-        result = update_skill('my_skill', skill_data)
+        result = update_skill('my_skill', skill_data, 'tenant1')
 
         session.execute.assert_called()
 
@@ -1470,7 +1488,7 @@ class TestUpdateSkill:
         """Test that ValueError is raised when skill is not found after refresh."""
         session, query = mock_session
 
-        existing_skill = MockSkillInfo(skill_id=1, skill_name='volatile_skill')
+        existing_skill = MockSkillInfo(skill_id=1, skill_name='volatile_skill', tenant_id='tenant1')
 
         call_count = [0]
 
@@ -1502,21 +1520,23 @@ class TestUpdateSkill:
         session.commit = MagicMock()
 
         with pytest.raises(ValueError, match="Skill not found after update"):
-            update_skill('volatile_skill', {'description': 'new'})
+            update_skill('volatile_skill', {'description': 'new'}, 'tenant1')
 
     def test_update_skill_with_all_fields(self, monkeypatch, mock_session):
         """Test updating skill with all possible fields."""
         session, query = mock_session
 
-        existing_skill = MockSkillInfo(skill_id=3, skill_name='full_update')
+        existing_skill = MockSkillInfo(skill_id=3, skill_name='full_update', tenant_id='tenant1')
         refreshed_skill = MockSkillInfo(
             skill_id=3,
             skill_name='full_update',
+            tenant_id='tenant1',
             skill_description='updated desc',
             skill_tags=['new', 'tags'],
             skill_content='updated content',
             source='builtin',
-            params={'key': 'value'}
+            config_schemas={'key': 'schema'},
+            config_values={'key': 'value'}
         )
 
         call_count = [0]
@@ -1561,10 +1581,11 @@ class TestUpdateSkill:
             'tags': ['new', 'tags'],
             'content': 'updated content',
             'source': 'builtin',
-            'params': {'key': 'value'}
+            'config_schemas': {'key': 'schema'},
+            'config_values': {'key': 'value'}
         }
 
-        result = update_skill('full_update', skill_data, updated_by='admin')
+        result = update_skill('full_update', skill_data, 'tenant1', updated_by='admin')
 
         session.execute.assert_called()
 
@@ -1572,10 +1593,11 @@ class TestUpdateSkill:
         """Test updating skill without updated_by parameter."""
         session, query = mock_session
 
-        existing_skill = MockSkillInfo(skill_id=4, skill_name='no_updater')
+        existing_skill = MockSkillInfo(skill_id=4, skill_name='no_updater', tenant_id='tenant1')
         refreshed_skill = MockSkillInfo(
             skill_id=4,
-            skill_name='no_updater'
+            skill_name='no_updater',
+            tenant_id='tenant1'
         )
 
         call_count = [0]
@@ -1613,7 +1635,7 @@ class TestUpdateSkill:
 
         skill_data = {'description': 'desc only'}
 
-        result = update_skill('no_updater', skill_data)
+        result = update_skill('no_updater', skill_data, 'tenant1')
 
         session.execute.assert_called()
 
@@ -1639,7 +1661,7 @@ class TestDeleteSkill:
         monkeypatch.setattr(
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
 
-        result = delete_skill('nonexistent')
+        result = delete_skill('nonexistent', 'tenant1')
 
         assert result is False
 
@@ -1647,7 +1669,7 @@ class TestDeleteSkill:
         """Test successfully deleting a skill."""
         session, query = mock_session
 
-        skill_to_delete = MockSkillInfo(skill_id=5, skill_name='to_delete')
+        skill_to_delete = MockSkillInfo(skill_id=5, skill_name='to_delete', tenant_id='tenant1')
         skill_to_delete.delete_flag = 'N'
 
         mock_first = MagicMock()
@@ -1666,7 +1688,7 @@ class TestDeleteSkill:
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
         session.commit = MagicMock()
 
-        result = delete_skill('to_delete', updated_by='deleter1')
+        result = delete_skill('to_delete', 'tenant1', updated_by='deleter1')
 
         assert result is True
         assert skill_to_delete.delete_flag == 'Y'
@@ -1677,7 +1699,7 @@ class TestDeleteSkill:
         """Test deleting a skill without specifying updated_by."""
         session, query = mock_session
 
-        skill_to_delete = MockSkillInfo(skill_id=5, skill_name='to_delete')
+        skill_to_delete = MockSkillInfo(skill_id=5, skill_name='to_delete', tenant_id='tenant1')
 
         mock_first = MagicMock()
         mock_first.return_value = skill_to_delete
@@ -1695,7 +1717,7 @@ class TestDeleteSkill:
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
         session.commit = MagicMock()
 
-        result = delete_skill('to_delete')
+        result = delete_skill('to_delete', 'tenant1')
 
         assert result is True
 
@@ -1715,7 +1737,7 @@ class TestDeleteSkill:
         monkeypatch.setattr(
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
 
-        result = delete_skill('already_deleted_skill')
+        result = delete_skill('already_deleted_skill', 'tenant1')
 
         assert result is False
 
@@ -1819,7 +1841,7 @@ class TestGetToolNamesBySkillName:
         monkeypatch.setattr(
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
 
-        result = get_tool_names_by_skill_name('nonexistent')
+        result = get_tool_names_by_skill_name('nonexistent', 'tenant1')
 
         assert result == []
 
@@ -1827,7 +1849,7 @@ class TestGetToolNamesBySkillName:
         """Test when skill exists."""
         session, query = mock_session
 
-        skill = MockSkillInfo(skill_id=5, skill_name='my_skill')
+        skill = MockSkillInfo(skill_id=5, skill_name='my_skill', tenant_id='tenant1')
 
         mock_first = MagicMock()
         mock_first.return_value = skill
@@ -1849,7 +1871,7 @@ class TestGetToolNamesBySkillName:
             lambda s, ids: ['tool_a', 'tool_b']
         )
 
-        result = get_tool_names_by_skill_name('my_skill')
+        result = get_tool_names_by_skill_name('my_skill', 'tenant1')
 
         assert result == ['tool_a', 'tool_b']
 
@@ -1875,7 +1897,7 @@ class TestGetSkillWithToolNames:
         monkeypatch.setattr(
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
 
-        result = get_skill_with_tool_names('nonexistent')
+        result = get_skill_with_tool_names('nonexistent', 'tenant1')
 
         assert result is None
 
@@ -1883,7 +1905,7 @@ class TestGetSkillWithToolNames:
         """Test when skill exists with tool names."""
         session, query = mock_session
 
-        skill = MockSkillInfo(skill_id=5, skill_name='my_skill')
+        skill = MockSkillInfo(skill_id=5, skill_name='my_skill', tenant_id='tenant1')
 
         mock_first = MagicMock()
         mock_first.return_value = skill
@@ -1905,12 +1927,322 @@ class TestGetSkillWithToolNames:
             lambda s, ids: ['tool_a', 'tool_b']
         )
 
-        result = get_skill_with_tool_names('my_skill')
+        result = get_skill_with_tool_names('my_skill', 'tenant1')
 
         assert result is not None
         assert result['skill_id'] == 5
         assert result['tool_ids'] == [1, 2]
         assert result['allowed_tools'] == ['tool_a', 'tool_b']
+
+
+# ===== delete_skill_instances_by_tenant Tests =====
+
+class TestDeleteSkillInstancesByTenant:
+    """Tests for delete_skill_instances_by_tenant function."""
+
+    def test_delete_by_tenant_returns_count(self, monkeypatch, mock_session):
+        """Test that delete by tenant returns the count of deleted instances."""
+        session, query = mock_session
+
+        mock_update = MagicMock()
+        mock_update.return_value = 5
+        mock_filter = MagicMock()
+        mock_filter.update = mock_update
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        session.commit = MagicMock()
+
+        result = delete_skill_instances_by_tenant('tenant1', 'user1')
+
+        assert result == 5
+
+    def test_delete_by_tenant_zero_count(self, monkeypatch, mock_session):
+        """Test that zero instances are deleted when none exist."""
+        session, query = mock_session
+
+        mock_update = MagicMock()
+        mock_update.return_value = 0
+        mock_filter = MagicMock()
+        mock_filter.update = mock_update
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        session.commit = MagicMock()
+
+        result = delete_skill_instances_by_tenant('nonexistent_tenant', 'user1')
+
+        assert result == 0
+
+
+# ===== get_skill_by_id_global Tests =====
+
+class TestGetSkillByIdGlobal:
+    """Tests for get_skill_by_id_global function."""
+
+    def test_get_skill_by_id_global_found(self, monkeypatch, mock_session):
+        """Test getting skill by ID without tenant filter when it exists."""
+        session, query = mock_session
+
+        skill = MockSkillInfo(skill_id=10, skill_name='global_skill', tenant_id=None)
+
+        mock_first = MagicMock()
+        mock_first.return_value = skill
+        mock_filter = MagicMock()
+        mock_filter.first = mock_first
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr(
+            "backend.database.skill_db._get_tool_ids",
+            lambda s, skill_id: [3]
+        )
+
+        result = get_skill_by_id_global(10)
+
+        assert result is not None
+        assert result['skill_id'] == 10
+
+    def test_get_skill_by_id_global_not_found(self, monkeypatch, mock_session):
+        """Test getting skill by ID without tenant filter when it doesn't exist."""
+        session, query = mock_session
+
+        mock_first = MagicMock()
+        mock_first.return_value = None
+        mock_filter = MagicMock()
+        mock_filter.first = mock_first
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        result = get_skill_by_id_global(999)
+
+        assert result is None
+
+
+# ===== list_global_official_skills Tests =====
+
+class TestListGlobalOfficialSkills:
+    """Tests for list_global_official_skills function."""
+
+    def test_list_global_official_skills_returns_skills(self, monkeypatch, mock_session):
+        """Test listing global official skills."""
+        session, query = mock_session
+
+        skill1 = MockSkillInfo(skill_id=1, skill_name='official_skill1', tenant_id=None, source='official')
+        skill2 = MockSkillInfo(skill_id=2, skill_name='official_skill2', tenant_id=None, source='official')
+
+        mock_all = MagicMock()
+        mock_all.return_value = [skill1, skill2]
+        mock_filter = MagicMock()
+        mock_filter.all = mock_all
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        result = list_global_official_skills()
+
+        assert len(result) == 2
+        assert result[0]['name'] == 'official_skill1'
+        assert result[1]['name'] == 'official_skill2'
+
+    def test_list_global_official_skills_empty(self, monkeypatch, mock_session):
+        """Test listing global official skills when none exist."""
+        session, query = mock_session
+
+        mock_all = MagicMock()
+        mock_all.return_value = []
+        mock_filter = MagicMock()
+        mock_filter.all = mock_all
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        result = list_global_official_skills()
+
+        assert result == []
+
+
+# ===== check_skill_list_initialized Tests =====
+
+class TestCheckSkillListInitialized:
+    """Tests for check_skill_list_initialized function."""
+
+    def test_check_skill_list_initialized_true(self, monkeypatch, mock_session):
+        """Test that True is returned when skills are initialized."""
+        session, query = mock_session
+
+        mock_count = MagicMock()
+        mock_count.return_value = 5
+        mock_filter = MagicMock()
+        mock_filter.count = mock_count
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        result = check_skill_list_initialized('tenant1')
+
+        assert result is True
+
+    def test_check_skill_list_initialized_false(self, monkeypatch, mock_session):
+        """Test that False is returned when no skills are initialized."""
+        session, query = mock_session
+
+        mock_count = MagicMock()
+        mock_count.return_value = 0
+        mock_filter = MagicMock()
+        mock_filter.count = mock_count
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        result = check_skill_list_initialized('tenant1')
+
+        assert result is False
+
+
+# ===== upsert_scanned_skills Tests =====
+
+class TestUpsertScannedSkills:
+    """Tests for upsert_scanned_skills function."""
+
+    def test_upsert_scanned_skills_creates_new_skills(self, monkeypatch, mock_session):
+        """Test that upsert creates new skills when they don't exist."""
+        session, query = mock_session
+
+        mock_all = MagicMock()
+        mock_all.return_value = []
+        mock_filter = MagicMock()
+        mock_filter.all = mock_all
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr(
+            "backend.database.skill_db._params_value_for_db",
+            lambda x: x
+        )
+        session.add = MagicMock()
+
+        skills = [
+            {
+                'name': 'new_scanned_skill',
+                'description': 'A scanned skill',
+                'tags': ['auto'],
+                'content': 'Scanned content',
+                'source': 'official'
+            }
+        ]
+
+        upsert_scanned_skills(skills, 'user1', 'tenant1')
+
+        session.add.assert_called()
+
+    def test_upsert_scanned_skills_updates_existing_skills(self, monkeypatch, mock_session):
+        """Test that upsert updates existing skills when they exist."""
+        session, query = mock_session
+
+        existing_skill = MockSkillInfo(
+            skill_id=1,
+            skill_name='existing_skill',
+            tenant_id='tenant1',
+            skill_description='Old description'
+        )
+
+        mock_all = MagicMock()
+        mock_all.return_value = [existing_skill]
+        mock_filter = MagicMock()
+        mock_filter.all = mock_all
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr(
+            "backend.database.skill_db._params_value_for_db",
+            lambda x: x
+        )
+
+        skills = [
+            {
+                'name': 'existing_skill',
+                'description': 'New description',
+                'tags': ['updated'],
+                'content': 'Updated content'
+            }
+        ]
+
+        upsert_scanned_skills(skills, 'user1', 'tenant1')
+
+        assert existing_skill.skill_description == 'New description'
+        assert existing_skill.skill_tags == ['updated']
+        assert existing_skill.skill_content == 'Updated content'
+
+    def test_upsert_scanned_skills_skips_skills_without_name(self, monkeypatch, mock_session):
+        """Test that upsert skips skill dicts without a name."""
+        session, query = mock_session
+
+        mock_all = MagicMock()
+        mock_all.return_value = []
+        mock_filter = MagicMock()
+        mock_filter.all = mock_all
+        query.filter.return_value = mock_filter
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr(
+            "backend.database.skill_db._params_value_for_db",
+            lambda x: x
+        )
+        session.add = MagicMock()
+
+        skills = [
+            {'description': 'No name skill'}
+        ]
+
+        upsert_scanned_skills(skills, 'user1', 'tenant1')
+
+        session.add.assert_not_called()
 
 
 if __name__ == "__main__":

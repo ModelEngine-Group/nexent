@@ -1,5 +1,6 @@
 import { API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
+import { arrayBufferToBase64 } from "@/lib/agentImportUtils";
 
 import { fetchWithAuth } from "@/lib/auth";
 // @ts-ignore
@@ -122,19 +123,6 @@ export function convertImageUrlToApiUrl(url: string): string {
   // Fallback to original URL if extraction fails
   return url;
 }
-
-const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-
-  return btoa(binary);
-};
 
 const fetchBase64ViaStorage = async (objectName: string) => {
   const response = await fetch(

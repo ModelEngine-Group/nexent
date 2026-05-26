@@ -15,7 +15,7 @@ import {
 } from "@/services/agentConfigService";
 import log from "@/lib/logger";
 import { DEFAULT_TYPE } from "@/const/constants";
-import { getLocalizedDescription } from "@/lib/utils";
+import { getLocalizedDescription, mapKbIdsToDisplayNames } from "@/lib/utils";
 
 const { Text, Title } = Typography;
 
@@ -620,11 +620,7 @@ export default function ToolTestPanel({
                             return cleanId;
                           });
                         } else if (knowledgeBases.length > 0) {
-                          displayNames = selectedKbIds.map((id) => {
-                            const cleanId = id.trim();
-                            const kb = knowledgeBases.find((k) => k.id === cleanId);
-                            return kb?.display_name || kb?.name || cleanId;
-                          });
+                          displayNames = mapKbIdsToDisplayNames(selectedKbIds, knowledgeBases);
                         }
                       }
 

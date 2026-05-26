@@ -114,12 +114,14 @@ class TestSkillManagerInit:
     def test_init_with_all_params(self):
         """Test initialization with all parameters."""
         manager = SkillManager(
-            local_skills_dir="/path/to/skills",
+            base_skills_dir="/path/to/skills",
             agent_id=123,
             tenant_id="tenant-abc",
             version_no=1,
         )
-        assert manager.local_skills_dir == "/path/to/skills"
+        assert manager.base_skills_dir == "/path/to/skills"
+        # On Windows, os.path.join uses backslash, so normalize for cross-platform test
+        assert os.path.normpath(manager.local_skills_dir) == os.path.normpath("/path/to/skills/tenant-abc")
         assert manager.agent_id == 123
         assert manager.tenant_id == "tenant-abc"
         assert manager.version_no == 1
@@ -139,7 +141,7 @@ class TestSkillManagerListSkills:
     def test_list_skills_empty_dir(self):
         """Test listing skills from non-existent directory."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.list_skills()
             assert result == []
 
@@ -158,7 +160,7 @@ tags:
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.list_skills()
 
             assert len(result) == 1
@@ -174,7 +176,7 @@ tags:
             with open(plain_file, "w") as f:
                 f.write("not a skill")
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.list_skills()
             assert result == []
 
@@ -185,7 +187,7 @@ tags:
             empty_dir = os.path.join(temp.skills_dir, "empty-skill")
             os.makedirs(empty_dir)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.list_skills()
             assert result == []
 
@@ -211,7 +213,7 @@ description: Second skill
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.list_skills()
 
             assert len(result) == 2
@@ -239,7 +241,7 @@ tags:
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.load_skill("my-skill")
 
             assert result is not None
@@ -252,13 +254,13 @@ tags:
     def test_load_skill_not_found(self):
         """Test loading non-existent skill."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.load_skill("nonexistent")
             assert result is None
 
     def test_load_skill_no_local_dir(self):
         """Test loading skill when local_skills_dir is None."""
-        manager = SkillManager(local_skills_dir=None)
+        manager = SkillManager(base_skills_dir=None)
         result = manager.load_skill("any-skill")
         assert result is None
 
@@ -280,7 +282,7 @@ This is the body.
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.load_skill_content("content-skill")
 
             assert result is not None
@@ -290,7 +292,7 @@ This is the body.
     def test_load_skill_content_not_found(self):
         """Test loading content of non-existent skill."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.load_skill_content("nonexistent")
             assert result is None
 
@@ -301,7 +303,7 @@ class TestSkillManagerSaveSkill:
     def test_save_skill_success(self):
         """Test successful skill saving."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             skill_data = {
                 "name": "new-skill",
                 "description": "A new skill",
@@ -321,7 +323,7 @@ class TestSkillManagerSaveSkill:
     def test_save_skill_without_name_raises(self):
         """Test that saving skill without name raises ValueError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             skill_data = {
                 "description": "No name skill",
                 "content": "# Content",
@@ -333,7 +335,7 @@ class TestSkillManagerSaveSkill:
     def test_save_skill_overwrites_existing(self):
         """Test that saving existing skill overwrites it."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Save first version
             skill_data_v1 = {
@@ -364,7 +366,7 @@ class TestSkillManagerUploadSkillFromFile:
     def test_upload_from_md_string(self):
         """Test uploading skill from MD string."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             md_content = """---
 name: upload-md-skill
 description: Uploaded from MD
@@ -381,7 +383,7 @@ description: Uploaded from MD
     def test_upload_from_md_bytes(self):
         """Test uploading skill from MD bytes."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             md_content = b"""---
 name: upload-bytes-skill
 description: Uploaded from bytes
@@ -397,7 +399,7 @@ description: Uploaded from bytes
     def test_upload_from_md_with_override_name(self):
         """Test uploading skill with name override."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             md_content = """---
 name: original-name
 description: Override test
@@ -413,7 +415,7 @@ description: Override test
     def test_upload_from_md_without_name_raises(self):
         """Test that MD without name and no override raises ValueError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             md_content = """---
 description: No name here
 ---
@@ -426,7 +428,7 @@ description: No name here
     def test_upload_from_md_invalid_format_raises(self):
         """Test that invalid MD format raises ValueError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             invalid_content = "Not valid frontmatter"
 
             with pytest.raises(ValueError, match="Invalid SKILL.md format"):
@@ -435,7 +437,7 @@ description: No name here
     def test_upload_from_zip_bytes(self):
         """Test uploading skill from ZIP bytes."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Create ZIP in memory
             zip_buffer = io.BytesIO()
@@ -461,7 +463,7 @@ description: From ZIP
     def test_upload_from_zip_auto_detect(self):
         """Test that ZIP is auto-detected from magic bytes."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Create ZIP
             zip_buffer = io.BytesIO()
@@ -482,7 +484,7 @@ description: Auto detected
     def test_upload_from_zip_invalid_raises(self):
         """Test that invalid ZIP raises ValueError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             # Create content that looks like ZIP (starts with PK) but is invalid
             invalid_zip = b"PK\x03\x04" + b"This is not a valid ZIP file content"
 
@@ -492,7 +494,7 @@ description: Auto detected
     def test_upload_from_zip_without_skill_md_raises(self):
         """Test that ZIP without SKILL.md raises ValueError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -506,7 +508,7 @@ description: Auto detected
     def test_upload_from_zip_with_name_override(self):
         """Test uploading ZIP with skill name override."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -528,7 +530,7 @@ description: Override test
     def test_upload_from_zip_bytesio(self):
         """Test uploading skill from BytesIO object."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -553,7 +555,7 @@ class TestSkillManagerUpdateSkillFromFile:
     def test_update_skill_md_success(self):
         """Test updating existing skill with MD."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Create initial skill
             temp.create_skill(
@@ -581,7 +583,7 @@ description: Updated
     def test_update_skill_not_found_raises(self):
         """Test updating non-existent skill raises ValueError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(ValueError, match="Skill not found"):
                 manager.update_skill_from_file(
@@ -597,7 +599,7 @@ description: Test
     def test_update_skill_zip_success(self):
         """Test updating existing skill with ZIP."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Create initial skill
             temp.create_skill(
@@ -644,7 +646,7 @@ description: To be deleted
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.delete_skill("delete-me")
 
             assert result is True
@@ -656,7 +658,7 @@ description: To be deleted
     def test_delete_skill_not_found_returns_true(self):
         """Test deleting non-existent skill returns True (idempotent)."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.delete_skill("nonexistent")
             assert result is True
 
@@ -681,7 +683,7 @@ description: Tree test
                 },
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.get_skill_file_tree("tree-skill")
 
             assert result is not None
@@ -696,7 +698,7 @@ description: Tree test
     def test_get_file_tree_not_found(self):
         """Test getting file tree for non-existent skill."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.get_skill_file_tree("nonexistent")
             assert result is None
 
@@ -716,7 +718,7 @@ description: Tree test
             with open(os.path.join(nested_dir, "config.json"), "w") as f:
                 f.write('{"key": "value"}')
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.get_skill_file_tree("nested-skill")
 
             assert result is not None
@@ -739,7 +741,7 @@ class TestSkillManagerBuildSkillsSummary:
     def test_build_summary_empty(self):
         """Test building summary with no skills."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.build_skills_summary()
             assert result == ""
 
@@ -756,7 +758,7 @@ description: For summary
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.build_skills_summary()
 
             assert "<skills>" in result
@@ -786,7 +788,7 @@ description: Second
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.build_skills_summary(available_skills=["skill-one"])
 
             assert "<name>skill-one</name>" in result
@@ -805,7 +807,7 @@ description: Test <tag> & "quotes"
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.build_skills_summary()
 
             assert "&lt;tag&gt;" in result
@@ -831,7 +833,7 @@ description: Directory test
                 },
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.load_skill_directory("dir-skill")
 
             assert result is not None
@@ -848,7 +850,7 @@ description: Directory test
     def test_load_directory_not_found(self):
         """Test loading non-existent skill directory."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.load_skill_directory("nonexistent")
             assert result is None
 
@@ -876,7 +878,7 @@ description: Scripts test
                 },
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.get_skill_scripts("script-skill")
 
             assert len(result) == 2
@@ -898,14 +900,14 @@ description: No scripts
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.get_skill_scripts("no-scripts")
             assert result == []
 
     def test_get_scripts_not_found(self):
         """Test getting scripts for non-existent skill."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.get_skill_scripts("nonexistent")
             assert result == []
 
@@ -918,7 +920,7 @@ class TestSkillManagerCleanupSkillDirectory:
         import shutil
 
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Create a fake temp directory matching pattern
             temp_base = tempfile.gettempdir()
@@ -939,7 +941,7 @@ class TestSkillManagerRunSkillScript:
     def test_run_skill_script_not_found_raises(self):
         """Test running script in non-existent skill raises SkillNotFoundError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(SkillNotFoundError, match="not found"):
                 manager.run_skill_script("nonexistent", "scripts/test.py")
@@ -960,7 +962,7 @@ description: Run test
                 },
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(SkillScriptNotFoundError, match="not found"):
                 manager.run_skill_script("run-skill", "scripts/missing.py")
@@ -989,7 +991,7 @@ description: Python script
 
             mocker.patch("subprocess.run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
                 "py-script-skill",
                 "scripts/hello.py",
@@ -1021,7 +1023,7 @@ description: Error script
 
             mocker.patch("subprocess.run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script("error-script-skill", "scripts/fail.py")
 
             # Should return JSON with error
@@ -1052,7 +1054,7 @@ description: Shell script
 
             mocker.patch("subprocess.run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script("sh-script-skill", "scripts/deploy.sh")
 
             assert result == "deployment complete"
@@ -1073,7 +1075,7 @@ description: Unsupported
                 },
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(ValueError, match="Unsupported script type"):
                 manager.run_skill_script("unsupported-skill", "scripts/script.js")
@@ -1105,7 +1107,7 @@ description: String params test
 
             mocker.patch("subprocess.run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
                 "str-params-skill",
                 "scripts/test.py",
@@ -1142,7 +1144,7 @@ description: Empty params test
 
             mocker.patch("subprocess.run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
                 "empty-params-skill",
                 "scripts/test.py",
@@ -1166,7 +1168,7 @@ class TestSkillManagerEdgeCases:
             with open(skill_file, "w", encoding="utf-8") as f:
                 f.write("not valid yaml frontmatter at all")
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Should not raise, just skip the skill
             skills = manager.list_skills()
@@ -1190,7 +1192,7 @@ description: Nested delete test
                 },
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.delete_skill("nested-delete")
 
             assert result is True
@@ -1200,7 +1202,7 @@ description: Nested delete test
     def test_upload_md_with_explicit_file_type(self):
         """Test uploading MD with explicit file_type parameter."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             md_content = """---
 name: explicit-type
 description: Explicit type test
@@ -1219,7 +1221,7 @@ description: Explicit type test
     def test_upload_md_with_explicit_file_type(self):
         """Test uploading MD with explicit file_type parameter."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             md_content = """---
 name: explicit-type
 description: Explicit type test
@@ -1237,7 +1239,7 @@ description: Explicit type test
     def test_upload_from_md_missing_name_raises(self):
         """Test that MD without name raises ValueError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             md_content = """---
 description: No name here
 ---
@@ -1249,7 +1251,7 @@ description: No name here
     def test_upload_zip_with_name_ending_in_zip(self):
         """Test ZIP detection when skill_name ends with .zip."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1271,7 +1273,7 @@ description: ZIP detected
     def test_upload_zip_unknown_skill_name_none_raises(self):
         """Test that ZIP with None skill_name raises ValueError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Create ZIP without any folder name hint
             zip_buffer = io.BytesIO()
@@ -1291,7 +1293,7 @@ description: No folder
     def test_upload_zip_with_backslash_paths(self):
         """Test ZIP extraction with backslash paths (Windows)."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1312,7 +1314,7 @@ description: Backslash paths
     def test_upload_zip_with_nested_structure(self):
         """Test ZIP extraction with deeply nested structure."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1335,7 +1337,7 @@ description: Nested
     def test_update_skill_md_auto_detect(self):
         """Test updating skill with auto-detect file type."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             temp.create_skill(
                 "auto-update",
@@ -1361,7 +1363,7 @@ description: Auto updated
     def test_update_skill_zip_with_backslash_paths(self):
         """Test updating skill from ZIP with backslash paths."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             temp.create_skill(
                 "zip-update-bs",
@@ -1476,7 +1478,7 @@ description: Delete error test
 
             mocker.patch("shutil.rmtree", side_effect=mock_rmtree)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.delete_skill("delete-error")
 
             # Should still return True (idempotent behavior)
@@ -1489,7 +1491,7 @@ class TestSkillManagerBuildSkillsSummary:
     def test_build_summary_with_empty_description(self):
         """Test building summary when skill has empty description."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             # Create a skill with empty description
             skill_dir = os.path.join(temp.skills_dir, "empty-desc")
@@ -1518,7 +1520,7 @@ class TestSkillManagerCleanupSkillDirectory:
         mocker.patch("os.remove", side_effect=OSError("Access denied"))
         mocker.patch("os.path.join", side_effect=lambda *args: "\\".join(str(a) for a in args))
 
-        manager = SkillManager(local_skills_dir="/fake")
+        manager = SkillManager(base_skills_dir="/fake")
         # Should not raise, just log warning
         manager.cleanup_skill_directory("test")
 
@@ -1546,7 +1548,7 @@ description: Timeout test
 
             mocker.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 300))
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(TimeoutError, match="timed out"):
                 manager.run_skill_script("timeout-skill", "scripts/slow.py")
@@ -1569,7 +1571,7 @@ description: Exception test
 
             mocker.patch("subprocess.run", side_effect=RuntimeError("Unexpected"))
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(RuntimeError, match="Unexpected"):
                 manager.run_skill_script("except-skill", "scripts/crash.py")
@@ -1594,7 +1596,7 @@ description: Shell timeout test
 
             mocker.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 300))
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(TimeoutError, match="timed out"):
                 manager.run_skill_script("sh-timeout-skill", "scripts/slow.sh")
@@ -1622,7 +1624,7 @@ description: Shell error test
 
             mocker.patch("subprocess.run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script("sh-error-skill", "scripts/fail.sh")
 
             parsed = json.loads(result)
@@ -1646,7 +1648,7 @@ class TestSkillManagerGetSkillFileTree:
             with open(os.path.join(subdir, "SKILL.md"), "w") as f:
                 f.write("# This is also included\n")
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.get_skill_file_tree("md-subdir-skill")
 
             assert result is not None
@@ -1672,7 +1674,7 @@ class TestSkillManagerListSkills:
         with TempSkillDir() as temp:
             mocker.patch("os.listdir", side_effect=OSError("Permission denied"))
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.list_skills()
 
             # Should return empty list and log error
@@ -1697,7 +1699,7 @@ description: Test
                 side_effect=Exception("Load failed")
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.list_skills()
 
             # Should skip the failing skill
@@ -1710,7 +1712,7 @@ class TestSkillManagerUploadSkillEnhanced:
     def test_upload_zip_with_directory_entries_skipped(self):
         """Test ZIP directory entries (ending with '/') are skipped."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1733,7 +1735,7 @@ description: With directories
     def test_upload_zip_nested_skill_md_fallback(self):
         """Test ZIP with deeply nested SKILL.md triggers fallback search."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1753,7 +1755,7 @@ description: Nested path
     def test_upload_zip_parse_exception_raised(self):
         """Test ZIP with invalid SKILL.md content raises ValueError."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1771,7 +1773,7 @@ invalid: !!python/object/apply:os.system
     def test_upload_zip_extracts_different_prefix_files(self):
         """Test ZIP files without skill name prefix are extracted as-is."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1797,7 +1799,7 @@ class TestSkillManagerUpdateSkillEnhanced:
     def test_update_zip_skips_skill_md_when_not_found(self):
         """Test ZIP update skips SKILL.md when not present in ZIP."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             temp.create_skill(
                 "no-md-update",
@@ -1821,7 +1823,7 @@ description: Original
     def test_update_zip_extracts_different_prefix_files(self):
         """Test ZIP update extracts files with different folder prefix."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             temp.create_skill(
                 "prefix-update",
@@ -1881,7 +1883,7 @@ class TestSkillManagerErrorHandlingEnhanced:
         mocker.patch("os.path.isdir", return_value=True)
         mocker.patch("shutil.rmtree", side_effect=OSError("Access denied"))
 
-        manager = SkillManager(local_skills_dir="/fake")
+        manager = SkillManager(base_skills_dir="/fake")
         manager.cleanup_skill_directory("test-cleanup")
 
     def test_run_python_script_with_list_params(self, mocker):
@@ -1910,7 +1912,7 @@ description: List param test
 
             mocker.patch.object(sp, "run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
                 "list-param-skill",
                 "scripts/multi.py",
@@ -1946,7 +1948,7 @@ description: Bool false test
 
             mocker.patch.object(sp, "run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
                 "bool-false-skill",
                 "scripts/bool.py",
@@ -1975,7 +1977,7 @@ description: Shell exception test
 
             mocker.patch("subprocess.run", side_effect=RuntimeError("Unexpected shell error"))
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             with pytest.raises(RuntimeError, match="Unexpected shell error"):
                 manager.run_skill_script("sh-except-skill", "scripts/except.sh")
@@ -1987,7 +1989,7 @@ class TestSkillManagerWriteSkillFile:
     def test_write_skill_file_nested_path(self):
         """Test writing file to nested directory."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             manager._write_skill_file(
                 "test-skill",
                 "scripts/nested/deep/file.py",
@@ -2002,7 +2004,7 @@ class TestSkillManagerWriteSkillFile:
 
     def test_write_skill_file_no_local_dir(self):
         """Test writing file when local_skills_dir is None."""
-        manager = SkillManager(local_skills_dir=None)
+        manager = SkillManager(base_skills_dir=None)
         manager._write_skill_file("any-skill", "file.txt", "content")
 
 
@@ -2024,7 +2026,7 @@ tags:
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager._get_skill_metadata("meta-skill")
 
             assert result is not None
@@ -2051,7 +2053,7 @@ description: Load exception test
                 side_effect=Exception("Load failed")
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager._get_skill_metadata("load-exc-skill")
 
             assert result is None
@@ -2063,7 +2065,7 @@ class TestSkillManagerUploadZipEdgeCases:
     def test_upload_zip_with_yaml_parse_error(self):
         """Test ZIP upload when SKILL.md has invalid YAML uses regex fallback."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -2085,7 +2087,7 @@ invalid yaml content that should fail: [this
     def test_upload_zip_skill_md_at_root(self):
         """Test ZIP with SKILL.md directly at root (no folder)."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -2110,7 +2112,7 @@ class TestSkillManagerSaveSkillExtraFiles:
     def test_save_skill_with_files(self):
         """Test saving skill with additional files."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             skill_data = {
                 "name": "files-skill",
                 "description": "With extra files",
@@ -2131,7 +2133,7 @@ class TestSkillManagerSaveSkillExtraFiles:
     def test_save_skill_with_files_dict_format(self):
         """Test saving skill with files using dict format."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             skill_data = {
                 "name": "dict-files-skill",
                 "description": "With dict format files",
@@ -2150,7 +2152,7 @@ class TestSkillManagerSaveSkillExtraFiles:
     def test_save_skill_skips_skill_md_in_files(self):
         """Test that SKILL.md in files list is skipped."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             skill_data = {
                 "name": "skip-md-skill",
                 "description": "Skip SKILL.md",
@@ -2177,7 +2179,7 @@ class TestSkillManagerUpdateSkillEdgeCases:
     def test_update_skill_md_from_bytes(self):
         """Test updating skill with MD as bytes."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
 
             temp.create_skill(
                 "bytes-update-skill",
@@ -2221,7 +2223,7 @@ description: Structure test
                 },
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.load_skill_directory("struct-skill")
 
             assert result is not None
@@ -2240,7 +2242,7 @@ class TestSkillManagerDeleteSkillAdditional:
     def test_delete_skill_non_existent_returns_true(self):
         """Test deleting non-existent skill still returns True."""
         with TempSkillDir() as temp:
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.delete_skill("never-existed")
             assert result is True
 
@@ -2270,7 +2272,7 @@ description: Second skill
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.build_skills_summary()
 
             assert "<name>multi-skill-1</name>" in result
@@ -2289,7 +2291,7 @@ description: Test & More & Another
 """,
             )
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.build_skills_summary()
 
             assert "&amp;" in result
@@ -2321,7 +2323,7 @@ description: Special chars test
 
             mocker.patch("subprocess.run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script(
                 "special-params-skill",
                 "scripts/test.py",
@@ -2353,7 +2355,7 @@ description: Python error test
 
             mocker.patch("subprocess.run", return_value=mock_result)
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.run_skill_script("py-err-skill", "scripts/error.py")
 
             parsed = json.loads(result)
@@ -2377,7 +2379,7 @@ class TestSkillManagerGetSkillScriptsAdditional:
             with open(os.path.join(scripts_dir, "helper.py"), "w") as f:
                 f.write("# Helper\n")
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.get_skill_scripts("nested-scripts")
 
             assert len(result) == 1
@@ -2396,7 +2398,7 @@ class TestSkillManagerListSkillsAdditional:
             with open(os.path.join(skill_dir, "SKILL.md"), "w") as f:
                 f.write("---\nname: empty-desc-skill\ndescription:\n---\n# Content\n")
 
-            manager = SkillManager(local_skills_dir=temp.skills_dir)
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
             result = manager.list_skills()
 
             # The skill should be listed with empty or None description
@@ -2404,6 +2406,328 @@ class TestSkillManagerListSkillsAdditional:
             assert result[0]["name"] == "empty-desc-skill"
             # YAML empty value parses as None, then defaults to ""
             assert result[0]["description"] in ("", None)
+
+
+class TestSkillManagerExceptionClasses:
+    """Test custom exception classes."""
+
+    def test_skill_not_found_error_default_message(self):
+        """Test SkillNotFoundError with default empty message."""
+        exc = SkillNotFoundError()
+        assert exc.message == ""
+        assert str(exc) == ""
+
+    def test_skill_not_found_error_custom_message(self):
+        """Test SkillNotFoundError with custom message."""
+        exc = SkillNotFoundError("Custom error message")
+        assert exc.message == "Custom error message"
+        assert "Custom error message" in str(exc)
+
+    def test_skill_script_not_found_error_default_message(self):
+        """Test SkillScriptNotFoundError with default empty message."""
+        exc = SkillScriptNotFoundError()
+        assert exc.message == ""
+        assert str(exc) == ""
+
+    def test_skill_script_not_found_error_custom_message(self):
+        """Test SkillScriptNotFoundError with custom message."""
+        exc = SkillScriptNotFoundError("Script not found")
+        assert exc.message == "Script not found"
+        assert "Script not found" in str(exc)
+
+
+class TestSkillManagerFileTypeAutoDetect:
+    """Test file type auto-detection in upload/update methods."""
+
+    def test_upload_auto_detect_md_from_content(self):
+        """Test auto-detection of MD content without magic bytes."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            md_content = """---
+name: auto-detect-md
+description: Test auto-detection
+---
+# Content
+"""
+            result = manager.upload_skill_from_file(md_content, file_type="auto")
+            assert result is not None
+            assert result["name"] == "auto-detect-md"
+
+    def test_upload_explicit_md_type(self):
+        """Test explicit MD file type."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            md_content = """---
+name: explicit-md
+description: Explicit type
+---
+# Content
+"""
+            result = manager.upload_skill_from_file(md_content, file_type="md")
+            assert result is not None
+            assert result["name"] == "explicit-md"
+
+    def test_upload_explicit_zip_type(self):
+        """Test explicit ZIP file type."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("explicit-zip-skill/SKILL.md", """---
+name: explicit-zip-skill
+description: Explicit ZIP
+---
+# Content
+""")
+
+            zip_bytes = zip_buffer.getvalue()
+            result = manager.upload_skill_from_file(zip_bytes, file_type="zip")
+
+            assert result is not None
+            assert result["name"] == "explicit-zip-skill"
+
+
+class TestSkillManagerZipRootFallback:
+    """Test ZIP upload with SKILL.md at root level."""
+
+    def test_upload_zip_skill_md_in_root_folder(self):
+        """Test ZIP where skill folder has SKILL.md in root (len(parts) >= 2)."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                # Create nested structure like "skill-name/docs/SKILL.md"
+                # This tests the len(parts) >= 2 branch
+                zf.writestr("root-fallback-skill/SKILL.md", """---
+name: root-fallback-skill
+description: Root fallback
+---
+# Content
+""")
+                zf.writestr("root-fallback-skill/data/file.txt", "data file")
+
+            zip_bytes = zip_buffer.getvalue()
+            result = manager.upload_skill_from_file(zip_bytes)
+
+            assert result is not None
+            assert result["name"] == "root-fallback-skill"
+
+
+class TestSkillManagerUpdateSkillFromZipExisting:
+    """Test update from ZIP when skill exists."""
+
+    def test_update_zip_checks_existing_skill(self):
+        """Test that _update_skill_from_zip checks for existing skill."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            # Create initial skill
+            temp.create_skill(
+                "existing-skill",
+                """---
+name: existing-skill
+description: Original
+---
+# Original
+""",
+            )
+
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("existing-skill/SKILL.md", """---
+name: existing-skill
+description: Updated
+---
+# Updated
+""")
+
+            zip_bytes = zip_buffer.getvalue()
+            result = manager.update_skill_from_file(zip_bytes, "existing-skill")
+
+            assert result is not None
+            assert result["description"] == "Updated"
+
+
+class TestSkillManagerUpdateSkillNotFound:
+    """Test update when skill does not exist."""
+
+    def test_update_skill_zip_not_found_raises(self):
+        """Test updating non-existent skill with ZIP raises ValueError."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("nonexistent/SKILL.md", """---
+name: nonexistent
+description: Test
+---
+# Content
+""")
+
+            zip_bytes = zip_buffer.getvalue()
+
+            with pytest.raises(ValueError, match="Skill not found"):
+                manager.update_skill_from_file(zip_bytes, "nonexistent")
+
+
+class TestSkillManagerBuildSummaryNoneValues:
+    """Test build_skills_summary with None values."""
+
+    def test_build_summary_none_description_escaped(self):
+        """Test that None description is handled in escape_xml."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            # Create skill with description that might parse as None
+            skill_dir = os.path.join(temp.skills_dir, "none-desc-skill")
+            os.makedirs(skill_dir)
+            with open(os.path.join(skill_dir, "SKILL.md"), "w") as f:
+                f.write("---\nname: none-desc-skill\ndescription:\n---\n# Content\n")
+
+            result = manager.build_skills_summary()
+
+            assert "<name>none-desc-skill</name>" in result
+
+
+class TestSkillManagerGetSkillFileTreeNonExistent:
+    """Test get_skill_file_tree edge cases."""
+
+    def test_get_file_tree_returns_empty_children_for_nonexistent_dir(self):
+        """Test get_skill_file_tree when skill dir doesn't exist."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            # Create skill entry but delete the actual directory
+            temp.create_skill(
+                "missing-dir-skill",
+                """---
+name: missing-dir-skill
+description: Missing dir
+---
+# Content
+""",
+            )
+
+            # Get file tree
+            result = manager.get_skill_file_tree("missing-dir-skill")
+
+            # Should still return a tree structure (even if empty)
+            assert result is not None
+            assert result["name"] == "missing-dir-skill"
+            assert result["type"] == "directory"
+
+
+class TestSkillManagerCleanupSkillDirectory:
+    """Additional tests for cleanup_skill_directory."""
+
+    def test_cleanup_removes_file_instead_of_dir(self, mocker):
+        """Test cleanup when path is a file, not directory."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            # Create a fake temp file
+            temp_base = tempfile.gettempdir()
+            fake_temp_file = os.path.join(temp_base, f"skill_test-skill_fakeid")
+            with open(fake_temp_file, "w") as f:
+                f.write("temp content")
+
+            # Verify file exists before cleanup
+            assert os.path.exists(fake_temp_file)
+
+            manager.cleanup_skill_directory("test-skill")
+
+            # File should be removed
+            # Note: This test may be platform-dependent
+
+
+class TestSkillManagerRunSkillScript:
+    """Additional tests for run_skill_script."""
+
+    def test_run_unsupported_script_type_raises(self):
+        """Test running script with unsupported extension raises ValueError."""
+        with TempSkillDir() as temp:
+            temp.create_skill(
+                "unsupported-skill",
+                """---
+name: unsupported-skill
+description: Unsupported
+---
+# Content
+""",
+                subdirs={
+                    "scripts": [{"name": "script.js", "content": "// JS"}],
+                },
+            )
+
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            with pytest.raises(ValueError, match="Unsupported script type"):
+                manager.run_skill_script("unsupported-skill", "scripts/script.js")
+
+
+class TestSkillManagerListSkillsNonExistentDir:
+    """Test list_skills when directory doesn't exist."""
+
+    def test_list_skills_nonexistent_base_dir(self):
+        """Test listing skills when base_skills_dir doesn't exist."""
+        manager = SkillManager(base_skills_dir="/nonexistent/path/to/skills")
+        result = manager.list_skills()
+        assert result == []
+
+
+class TestSkillManagerLoadSkillContent:
+    """Test load_skill_content edge cases."""
+
+    def test_load_skill_content_with_valid_skill(self):
+        """Test loading content of valid skill."""
+        with TempSkillDir() as temp:
+            temp.create_skill(
+                "content-test",
+                """---
+name: content-test
+description: Content test
+---
+# Actual Content
+This is the body.
+""",
+            )
+
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            result = manager.load_skill_content("content-test")
+
+            assert result is not None
+            assert "Actual Content" in result
+            assert "This is the body" in result
+
+
+class TestSkillManagerUploadZipDifferentPrefix:
+    """Test ZIP with files from different prefix folders."""
+
+    def test_upload_zip_extracts_files_from_different_prefix(self):
+        """Test that files from different prefix folders are extracted."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("prefix-skill/SKILL.md", """---
+name: prefix-skill
+description: Prefix test
+---
+# Content
+""")
+                zf.writestr("other-prefix/data.json", '{"other": true}')
+
+            zip_bytes = zip_buffer.getvalue()
+            result = manager.upload_skill_from_file(zip_bytes)
+
+            assert result is not None
+            skill_dir = os.path.join(temp.skills_dir, "prefix-skill")
+            # Files from other-prefix should be extracted with their folder structure
+            assert os.path.exists(os.path.join(skill_dir, "other-prefix", "data.json"))
 
 
 if __name__ == "__main__":

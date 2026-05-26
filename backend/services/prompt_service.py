@@ -48,7 +48,7 @@ PROMPT_SECTION_TYPE_TITLES = {
 }
 
 
-def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, prompt_template_id: Optional[int] = None, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None):
+def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, prompt_template_id: Optional[int] = None, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
     try:
         for system_prompt in generate_and_save_system_prompt_impl(
             agent_id=agent_id,
@@ -60,7 +60,8 @@ def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description:
             prompt_template_id=prompt_template_id,
             tool_ids=tool_ids,
             sub_agent_ids=sub_agent_ids,
-            knowledge_base_display_names=knowledge_base_display_names
+            knowledge_base_display_names=knowledge_base_display_names,
+            has_selected_resources=has_selected_resources,
         ):
             # SSE format, each message ends with \n\n
             yield f"data: {json.dumps({'success': True, 'data': system_prompt}, ensure_ascii=False)}\n\n"
@@ -86,7 +87,8 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                          prompt_template_id: Optional[int] = None,
                                          tool_ids: Optional[List[int]] = None,
                                          sub_agent_ids: Optional[List[int]] = None,
-                                         knowledge_base_display_names: Optional[List[str]] = None):
+                                         knowledge_base_display_names: Optional[List[str]] = None,
+                                         has_selected_resources: bool = True):
     # Get description of tool and agent from frontend-provided IDs
     # Frontend always provides tool_ids and sub_agent_ids (could be empty arrays)
 
@@ -158,6 +160,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         language,
         prompt_template_id,
         knowledge_base_display_names,
+            has_selected_resources
     ):
         result_type = result_data["type"]
         final_results[result_type] = result_data["content"]
@@ -352,8 +355,7 @@ def optimize_prompt_section_impl(
     }
 
 
-
-def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], prompt_template_id: Optional[int] = None, knowledge_base_display_names: Optional[List[str]] = None):
+def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], prompt_template_id: Optional[int] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
     """Main function for generating system prompts"""
     prompt_for_generate = resolve_prompt_generate_template(
         tenant_id=tenant_id,
@@ -369,7 +371,8 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
         task_description=task_description,
         tool_info_list=tool_info_list,
         language=language,
-        knowledge_base_display_names=knowledge_base_display_names
+        knowledge_base_display_names=knowledge_base_display_names,
+        has_selected_resources=has_selected_resources,
     )
 
     # Initialize state
@@ -388,6 +391,7 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
     # Start all generation threads with concurrency control
     threads, error_holder = _start_generation_threads(
         content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id,
+        has_selected_resources,
         concurrency_limit=concurrency_limit
     )
 
@@ -456,13 +460,8 @@ def _resolve_prompt_generation_sub_agents(
     )
 
 def _start_generation_threads(content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id,
-                                concurrency_limit: Optional[int] = None):
-    """Start all prompt generation threads with optional concurrency control.
-
-    Args:
-        concurrency_limit: Maximum concurrent LLM calls. If None or >= 6, no limit.
-                         If < 6, use semaphore to control concurrency.
-    """
+                                has_selected_resources = True, concurrency_limit: Optional[int] = None):
+    """Start all prompt generation threads with optional concurrency control."""
     # Shared error tracking across threads
     error_holder = {"error": None}
 
@@ -510,10 +509,9 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
     threads = []
     logger.info("Generating system prompt")
 
+    # Base sections always generated
     prompt_configs = [
-        ("duty", prompt_for_generate["duty_system_prompt"]),
-        ("constraint", prompt_for_generate["constraint_system_prompt"]),
-        ("few_shots", prompt_for_generate["few_shots_system_prompt"]),
+        ("duty", prompt_for_generate["DUTY_SYSTEM_PROMPT"]),
         ("agent_var_name",
          prompt_for_generate["agent_variable_name_system_prompt"]),
         ("agent_display_name",
@@ -521,6 +519,20 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
         ("agent_description",
          prompt_for_generate["agent_description_system_prompt"])
     ]
+
+    # Constraint and few_shots sections are only generated when tools or sub-agents are selected
+    if has_selected_resources:
+        prompt_configs.extend([
+            ("constraint", prompt_for_generate["CONSTRAINT_SYSTEM_PROMPT"]),
+            ("few_shots", prompt_for_generate["FEW_SHOTS_SYSTEM_PROMPT"]),
+        ])
+    else:
+        logger.info("Skipping constraint and few_shots generation: no tools or sub-agents selected")
+        # Mark these sections as already complete with empty content
+        stop_flags["constraint"] = True
+        stop_flags["few_shots"] = True
+        latest["constraint"] = ""
+        latest["few_shots"] = ""
 
     for tag, sys_prompt in prompt_configs:
         thread = threading.Thread(target=run_and_flag, args=(tag, sys_prompt))
@@ -587,7 +599,7 @@ def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
             last_results[tag] = latest[tag]
 
 
-def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None):
+def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
     input_label = "Inputs" if language == 'en' else "接受输入"
     output_label = "Output type" if language == 'en' else "返回输出类型"
 
@@ -604,7 +616,10 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
         "assistant_description": assistant_description,
         # Always include knowledge_base_names to avoid StrictUndefined errors in template.
         # An empty string is falsy, so the {% if knowledge_base_names %} block will be skipped.
-        "knowledge_base_names": ""
+        "knowledge_base_names": "",
+        # Flag indicating whether tools or sub-agents are selected;
+        # templates use this to suppress boilerplate in constraint/few_shots sections
+        "has_selected_resources": has_selected_resources,
     }
 
     # Always add knowledge_base_names to context (empty string when not available).

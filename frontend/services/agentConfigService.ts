@@ -475,7 +475,7 @@ export const deleteAgent = async (agentId: number, tenantId?: string) => {
 /**
  * export agent configuration
  * @param agentId agent id to export
- * @returns export result
+ * @returns export result with data (JSON string or null if ZIP download triggered)
  */
 export const exportAgent = async (agentId: number) => {
   try {
@@ -487,6 +487,19 @@ export const exportAgent = async (agentId: number) => {
 
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const contentType = response.headers.get("Content-Type") || "";
+
+    if (contentType.includes("application/zip")) {
+      const blob = await response.blob();
+      const filename = response.headers.get("Content-Disposition") || `agent_${agentId}.zip`;
+      downloadBlob(blob, filename.replace("attachment; filename=", ""));
+      return {
+        success: true,
+        data: null,
+        message: "Agent exported with skills as ZIP",
+      };
     }
 
     const data = await response.json();
@@ -515,27 +528,59 @@ export const exportAgent = async (agentId: number) => {
 };
 
 /**
+ * Trigger browser download of a Blob
+ */
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+/**
  * import agent configuration
  * @param agentId main agent id
  * @param agentInfo agent configuration data
+ * @param options import options including optional skill ZIPs
  * @returns import result
  */
 export const importAgent = async (
   agentInfo: any,
-  options?: { forceImport?: boolean }
+  options?: { forceImport?: boolean; skillZips?: Array<{ skill_name: string; skill_zip_base64: string }> }
 ) => {
   try {
+    const payload: any = {
+      agent_info: agentInfo,
+      force_import: options?.forceImport ?? false,
+    };
+    if (options?.skillZips && options.skillZips.length > 0) {
+      payload.skills = options.skillZips;
+    }
     const response = await fetch(API_ENDPOINTS.agent.import, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify({
-        agent_info: agentInfo,
-        force_import: options?.forceImport ?? false,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+      const errorData = await response.json().catch(() => ({}));
+      const errMsg = errorData?.message;
+      if (typeof errMsg === "object" && errMsg !== null) {
+        return {
+          success: false,
+          data: { detail: errMsg },
+          message: errMsg?.type === "skill_duplicate"
+            ? "Skill name conflict detected"
+            : (errorData?.message ?? "Failed to import Agent, please try again later"),
+        };
+      }
+      const error = new Error(`Request failed: ${response.status}`);
+      (error as any).detail = errMsg;
+      throw error;
     }
 
     const data = await response.json();
@@ -548,7 +593,7 @@ export const importAgent = async (
     log.error("Failed to import Agent:", error);
     return {
       success: false,
-      data: null,
+      data: (error as any).detail ? { detail: (error as any).detail } : null,
       message: "Failed to import Agent, please try again later",
     };
   }
@@ -942,12 +987,16 @@ export const validateTool = async (
 };
 
 /**
- * Fetch all available skills
+ * Fetch all available skills for a specific tenant (used by super admin).
+ * @param tenantId - Optional tenant ID. If not provided, fetches for the current user's tenant.
  * @returns list of skills with skill_id, name, description, source, etc.
  */
-export const fetchSkills = async () => {
+export const fetchSkills = async (tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.skills.list, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.list}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.list;
+    const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
@@ -964,7 +1013,8 @@ export const fetchSkills = async () => {
       source: skill.source || "custom",
       tags: skill.tags || [],
       content: skill.content || "",
-      params: skill.params ?? null,
+      config_schemas: skill.config_schemas ?? null,
+      config_values: skill.config_values ?? null,
       tool_ids: Array.isArray(skill.tool_ids) ? skill.tool_ids.map(Number) : [],
       update_time: skill.update_time,
       create_time: skill.create_time,
@@ -1010,6 +1060,7 @@ export const fetchSkillInstances = async (
     const formattedInstances = instances.map((instance: any) => ({
       skill_id: String(instance.skill_id),
       enabled: instance.enabled ?? true,
+      config_values: instance.config_values ?? null,
       skill_name: instance.skill_name,
       skill_description: instance.skill_description,
     }));
@@ -1041,15 +1092,19 @@ export const saveSkillInstance = async (
   skillId: number,
   agentId: number,
   enabled: boolean,
-  versionNo: number = 0
+  versionNo: number = 0,
+  params?: Record<string, any>
 ) => {
   try {
-    const requestBody = {
+    const requestBody: Record<string, any> = {
       skill_id: skillId,
       agent_id: agentId,
       enabled: enabled,
       version_no: versionNo,
     };
+    if (params !== undefined) {
+      requestBody.config_values = params;
+    }
 
     const response = await fetch(API_ENDPOINTS.skills.instanceUpdate, {
       method: "POST",
@@ -1078,6 +1133,24 @@ export const saveSkillInstance = async (
       data: null,
       message: "agentConfig.skills.saveFailed",
     };
+  }
+};
+
+/**
+ * Scan local skills and update the skill list in database
+ * @returns scan result
+ */
+export const scanSkills = async () => {
+  try {
+    const response = await fetch(API_ENDPOINTS.skills.scan, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error();
+    return { success: true, message: "Skill scan completed" };
+  } catch (error) {
+    log.error("Failed to scan skills:", error);
+    return { success: false, message: "Failed to scan skills" };
   }
 };
 
@@ -1150,7 +1223,7 @@ export const updateSkill = async (
     source?: string;
     tags?: string[];
     content?: string;
-    params?: Record<string, unknown>;
+    config_values?: Record<string, unknown>;
     files?: Array<{ path: string; content: string }>;
   }
 ) => {
@@ -1160,7 +1233,7 @@ export const updateSkill = async (
     if (skillData.source !== undefined) requestBody.source = skillData.source;
     if (skillData.tags !== undefined) requestBody.tags = normalizeTags(skillData.tags);
     if (skillData.content !== undefined) requestBody.content = skillData.content;
-    if (skillData.params !== undefined) requestBody.params = skillData.params;
+    if (skillData.config_values !== undefined) requestBody.config_values = skillData.config_values;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const response = await fetch(API_ENDPOINTS.skills.update(skillName), {
