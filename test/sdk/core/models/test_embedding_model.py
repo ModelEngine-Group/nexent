@@ -1,7 +1,7 @@
 import pytest
 import requests
 import sys
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding
 
@@ -40,6 +40,22 @@ def jina_embedding_instance():
     """Return a JinaEmbedding instance with minimal viable attributes for tests."""
 
     return JinaEmbedding(api_key="dummy-key", ssl_verify=True)
+
+
+def test_openai_embedding_default_model_type():
+    emb = OpenAICompatibleEmbedding(
+        model_name="dummy-model",
+        base_url="https://api.example.com",
+        api_key="dummy-key",
+        embedding_dim=128,
+        ssl_verify=True,
+    )
+    assert emb.model_type == "text"
+
+
+def test_jina_embedding_default_model_type():
+    emb = JinaEmbedding(api_key="dummy-key", ssl_verify=True)
+    assert emb.model_type == "multimodal"
 
 
 # ---------------------------------------------------------------------------
@@ -634,9 +650,9 @@ def test_jina_get_multimodal_embeddings_missing_data_key(monkeypatch):
 
 def test_openai_get_embeddings_calls_record_model_call(mocker):
     """OpenAICompatibleEmbedding.get_embeddings calls record_model_call with correct args."""
-    mock_ctx = mocker.MagicMock()
-    mock_ctx.__enter__ = mocker.MagicMock(return_value=None)
-    mock_ctx.__exit__ = mocker.MagicMock(return_value=False)
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__ = MagicMock(return_value=None)
+    mock_ctx.__exit__ = MagicMock(return_value=False)
     mock_record = mocker.patch(
         "nexent.core.models.embedding_model.record_model_call",
         return_value=mock_ctx,
@@ -662,9 +678,9 @@ def test_openai_get_embeddings_calls_record_model_call(mocker):
 
 def test_jina_get_embeddings_calls_record_model_call(mocker):
     """JinaEmbedding.get_multimodal_embeddings calls record_model_call with correct args."""
-    mock_ctx = mocker.MagicMock()
-    mock_ctx.__enter__ = mocker.MagicMock(return_value=None)
-    mock_ctx.__exit__ = mocker.MagicMock(return_value=False)
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__ = MagicMock(return_value=None)
+    mock_ctx.__exit__ = MagicMock(return_value=False)
     mock_record = mocker.patch(
         "nexent.core.models.embedding_model.record_model_call",
         return_value=mock_ctx,

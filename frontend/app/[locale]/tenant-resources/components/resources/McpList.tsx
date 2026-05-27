@@ -81,6 +81,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const [newServerName, setNewServerName] = useState("");
   const [newServerUrl, setNewServerUrl] = useState("");
   const [newServerAuthorizationToken, setNewServerAuthorizationToken] = useState("");
+  const [newServerCustomHeaders, setNewServerCustomHeaders] = useState("");
 
   // Tools Modal State
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
@@ -146,16 +147,29 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       return;
     }
 
+    // Parse custom headers
+    let parsedCustomHeaders: Record<string, string> | null = null;
+    if (newServerCustomHeaders.trim()) {
+      try {
+        parsedCustomHeaders = JSON.parse(newServerCustomHeaders.trim());
+      } catch {
+        message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        return;
+      }
+    }
+
     setAddingServer(true);
     const result = await handleAddServer(
       newServerUrl.trim(),
       serverName,
-      newServerAuthorizationToken.trim() || null
+      newServerAuthorizationToken.trim() || null,
+      parsedCustomHeaders
     );
     if (result.success) {
       setNewServerName("");
       setNewServerUrl("");
       setNewServerAuthorizationToken("");
+      setNewServerCustomHeaders("");
       setAddModalVisible(false);
       message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addServerSuccess"));
     } else {
@@ -231,7 +245,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     setEditServerModalVisible(true);
     setLoadingMcpRecord(true);
 
-    // If mcp_id is available, fetch the latest record data including authorization_token
+    // If mcp_id is available, fetch the latest record data including authorization_token and custom_headers
     if (server.mcp_id) {
       const result = await handleGetMcpRecord(server.mcp_id);
       if (result.success && result.data) {
@@ -240,6 +254,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
           service_name: result.data.mcp_name,
           mcp_url: result.data.mcp_server,
           authorization_token: result.data.authorization_token,
+          custom_headers: result.data.custom_headers,
         });
       } else {
         message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.getMcpRecordFailed")));
@@ -248,7 +263,12 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     setLoadingMcpRecord(false);
   };
 
-  const onSaveEditedServer = async (name: string, url: string, authorizationToken?: string | null) => {
+  const onSaveEditedServer = async (
+    name: string,
+    url: string,
+    authorizationToken?: string | null,
+    customHeaders?: Record<string, string> | null
+  ) => {
     if (!editingServer) return;
     if (!name.trim() || !url.trim()) {
       message.error(t("mcpConfig.message.nameAndUrlRequired"));
@@ -269,7 +289,8 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       editingServer.mcp_id,
       name.trim(),
       url.trim(),
-      authorizationToken
+      authorizationToken,
+      customHeaders
     );
     if (result.success) {
       setEditServerModalVisible(false);
@@ -827,6 +848,14 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         style={{ flex: 3 }}
                       />
                     </div>
+                    <Input.TextArea
+                      placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                      value={newServerCustomHeaders}
+                      onChange={(e) => setNewServerCustomHeaders(e.target.value)}
+                      rows={2}
+                      disabled={actionsLocked || addingServer}
+                      style={{ fontSize: 14 }}
+                    />
                     <div className="flex items-center gap-2 w-full">
                       <Input.Password
                         placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
@@ -1054,6 +1083,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         initialName={editingServer?.service_name || ""}
         initialUrl={editingServer?.mcp_url || ""}
         initialAuthorizationToken={editingServer?.authorization_token || null}
+        initialCustomHeaders={editingServer?.custom_headers || null}
         loading={updatingServer || loadingMcpRecord}
       />
 

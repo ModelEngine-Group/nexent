@@ -8,24 +8,24 @@ USER root
 
 # Configure apt sources based on build argument
 RUN if [ "$APT_MIRROR" = "tsinghua" ]; then \
-        rm -f /etc/apt/sources.list.d/* && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-backports main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list; \
+    rm -f /etc/apt/sources.list.d/* && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-backports main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list; \
     fi && \
     apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends --fix-missing \
-        curl \
-        libmagic1 \
-        libmagic-dev \
-        libreoffice \
-        libgl1 \
-        coreutils \
-        fontconfig \
-        fonts-noto-cjk \
+    curl \
+    libmagic1 \
+    libmagic-dev \
+    libreoffice \
+    libgl1 \
+    coreutils \
+    fontconfig \
+    fonts-noto-cjk \
     && fc-cache -fv \
     && apt-get autoremove -y \
     && apt-get clean \
@@ -35,6 +35,8 @@ RUN pip install --no-cache-dir uv $(test -n "$MIRROR" && echo "-i $MIRROR")
 # Layer 0: copy model assets
 COPY model-assets/clip-vit-base-patch32 /opt/models/clip-vit-base-patch32
 COPY model-assets/nltk_data /opt/models/nltk_data
+COPY model-assets/table-transformer-structure-recognition /opt/models/table-transformer-structure-recognition
+COPY model-assets/yolox /opt/models/yolox
 
 WORKDIR /opt/backend
 # Layer 1: install base dependencies

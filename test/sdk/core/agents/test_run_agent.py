@@ -1,3 +1,5 @@
+import types
+import importlib.machinery
 import pytest
 import importlib
 import sys
@@ -145,6 +147,10 @@ mock_nexent.skills.SkillManager = MagicMock(name="SkillManager")
 sys.modules["nexent"] = mock_nexent
 sys.modules["nexent.skills"] = mock_nexent.skills
 
+openai_module = types.ModuleType("openai")
+openai_module.__spec__ = importlib.machinery.ModuleSpec("openai", loader=None)
+sys.modules['openai'] = openai_module
+
 module_mocks = {
     "smolagents": mock_smolagents,
     "smolagents.tools": mock_smolagents_tools_mod,
@@ -163,7 +169,7 @@ module_mocks = {
     "langchain": mock_langchain,
     "langchain.tools": mock_langchain_tools,
     # Minimal openai mock needed by other modules
-    "openai": MagicMock(),
+    "openai": openai_module,
     "openai.types": MagicMock(),
     "openai.types.chat": MagicMock(),
     "openai.types.chat.chat_completion_message": MagicMock(ChatCompletionMessage=mock_openai_chat_completion_message),

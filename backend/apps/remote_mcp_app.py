@@ -122,6 +122,7 @@ async def add_mcp_service_endpoint(
             server_url=payload.server_url,
             tags=payload.tags,
             authorization_token=payload.authorization_token,
+            custom_headers=payload.custom_headers,
             container_config=payload.container_config,
             registry_json=payload.registry_json,
             enabled=payload.enabled if payload.enabled is not None else False,
@@ -239,6 +240,7 @@ async def update_mcp_service_endpoint(
             description=payload.description,
             server_url=payload.server_url,
             authorization_token=payload.authorization_token,
+            custom_headers=payload.custom_headers,
             tags=payload.tags,
         )
 
@@ -421,6 +423,7 @@ async def get_mcp_record(
                 "mcp_name": mcp_record.get("mcp_name"),
                 "mcp_server": mcp_record.get("mcp_server"),
                 "authorization_token": mcp_record.get("authorization_token"),
+                "custom_headers": mcp_record.get("custom_headers"),
                 "status": "success"
             }
         )

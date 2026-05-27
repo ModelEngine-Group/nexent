@@ -29,6 +29,7 @@ const draftFromSource = (
     service.transportType === McpTransportType.CONTAINER ? McpTransportType.CONTAINER : McpTransportType.URL,
   serverUrl: service.serverUrl || "",
   authorizationToken: "",
+  customHeaders: "",
   containerConfigJson: service.configJson ? JSON.stringify(service.configJson, null, 2) : "",
   containerPort: undefined,
   tags: service.tags || [],
@@ -84,6 +85,17 @@ export function useMcpCommunityQuickAdd({
       }
     }
 
+    // Parse custom headers JSON if provided
+    let customHeaders: Record<string, string> | undefined;
+    if (draft.customHeaders?.trim()) {
+      try {
+        customHeaders = JSON.parse(draft.customHeaders.trim());
+      } catch {
+        message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       if (isContainer) {
@@ -111,6 +123,7 @@ export function useMcpCommunityQuickAdd({
           source: McpSource.COMMUNITY,
           server_url: draft.serverUrl.trim(),
           authorization_token: draft.authorizationToken?.trim() || undefined,
+          custom_headers: customHeaders,
           tags: draft.tags,
           version: draft.version,
           registry_json: draft.registryJson,

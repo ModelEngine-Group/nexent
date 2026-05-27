@@ -559,6 +559,7 @@ export const ModelConfigSection = forwardRef<
           try {
             const isConnected = await modelService.verifyCustomModel(
               modelName,
+              modelType,
               signal
             );
 
@@ -635,7 +636,7 @@ export const ModelConfigSection = forwardRef<
     throttleTimerRef.current = setTimeout(async () => {
       try {
         // Use modelService to verify model
-        const isConnected = await modelService.verifyCustomModel(displayName);
+        const isConnected = await modelService.verifyCustomModel(displayName, modelType);
 
         // Update model status
         updateModelStatus(

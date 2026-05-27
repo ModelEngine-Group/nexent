@@ -75,6 +75,10 @@ export default function AgentVersionCompareModal({
     },
     [selectedVersionNoA, selectedVersionNoB, compareData]
   );
+  const comparePersistenceKey =
+    agentId === undefined || agentId === null
+      ? "version-compare:anonymous"
+      : `version-compare:agent-${agentId}`;
 
   const {
     leftMessages: compareLeftMessages,
@@ -96,6 +100,8 @@ export default function AgentVersionCompareModal({
       agent_id: agentId ?? undefined,
       version_no: resolveVersionNo(side) ?? undefined,
     }),
+    persistenceKey: comparePersistenceKey,
+    persistenceEnabled: open,
     getHistory: () => [],
   });
 
@@ -139,11 +145,9 @@ export default function AgentVersionCompareModal({
   useEffect(() => {
     if (!open) {
       stopCompare();
-      resetCompareState();
       setCompareQuestion("");
       return;
     }
-    resetCompareState();
     setCompareQuestion("");
   }, [open, resetCompareState, stopCompare]);
 
@@ -151,9 +155,22 @@ export default function AgentVersionCompareModal({
     if (isCompareStreaming) {
       stopCompare();
     }
-    resetCompareState();
     setCompareQuestion("");
   }, [selectedVersionNoA, selectedVersionNoB, resetCompareState, stopCompare]);
+
+  const handleClose = () => {
+    stopCompare();
+    setCompareQuestion("");
+    onCancel();
+  };
+
+  const handleClearCompareHistory = async () => {
+    if (isCompareStreaming) {
+      await stopCompare();
+    }
+    resetCompareState();
+    setCompareQuestion("");
+  };
 
   const resolveVersionLabel = (versionNo: number | null | undefined) => {
     if (versionNo === null || versionNo === undefined) return "-";
@@ -183,6 +200,7 @@ export default function AgentVersionCompareModal({
     if (versionNoA === null || versionNoA === undefined) return;
     if (versionNoB === null || versionNoB === undefined) return;
     if (versionNoA === versionNoB) return;
+    setCompareQuestion("");
     await runCompare(question);
   };
 
@@ -199,7 +217,7 @@ export default function AgentVersionCompareModal({
         </Flex>
       }
       open={open}
-      onCancel={onCancel}
+      onCancel={handleClose}
       footer={footer}
       width={800}
       centered
@@ -421,6 +439,9 @@ export default function AgentVersionCompareModal({
                   {t("agent.version.compareQaHint")}
                 </div>
                 <Flex gap={8}>
+                  <Button onClick={handleClearCompareHistory} disabled={isCompareStreaming}>
+                    {t("agent.debug.clear")}
+                  </Button>
                   {isCompareStreaming && (
                     <Button danger onClick={stopCompare}>
                       {t("agent.debug.stop")}

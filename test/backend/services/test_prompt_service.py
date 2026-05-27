@@ -1,16 +1,9 @@
-"""
-Unit tests for backend.services.prompt_service module.
-"""
-import sys
-import os
+import json
+import importlib.machinery
 import types
-
-# Add backend and sdk paths for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../sdk"))
-
 import unittest
 import json
+import sys
 from unittest.mock import patch, MagicMock
 
 # Mock nexent module hierarchy BEFORE any backend imports that depend on it
@@ -39,12 +32,48 @@ sys.modules['boto3'] = MagicMock()
 sys.modules['elasticsearch'] = MagicMock()
 sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.create_engine'] = MagicMock()
+sys.modules['sqlalchemy.orm'] = MagicMock()
+sys.modules['sqlalchemy.dialects'] = MagicMock()
+sys.modules['sqlalchemy.dialects.postgresql'] = MagicMock()
+sys.modules['sqlalchemy.sql'] = MagicMock()
+
 
 # DO NOT mock consts - import real ones
 # The backend path is already in sys.path via sys.path.insert above
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
+
+# Mock boto3 and minio client before importing the module under test
+import sys
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
+
+# Mock ElasticSearch before importing other modules
+elasticsearch_mock = MagicMock()
+sys.modules['elasticsearch'] = elasticsearch_mock
+
+# Apply critical patches before importing any modules
+# This prevents real AWS/MinIO/Elasticsearch calls during import
+patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
+
+# Patch storage factory and MinIO config validation to avoid errors during initialization
+# These patches must be started before any imports that use MinioClient
+storage_client_mock = MagicMock()
+minio_client_mock = MagicMock()
+minio_client_mock._ensure_bucket_exists = MagicMock()
+minio_client_mock.client = MagicMock()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('database.client.MinioClient', return_value=minio_client_mock).start()
+patch('backend.database.client.minio_client', minio_client_mock).start()
+patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore', return_value=MagicMock()).start()
+patch('nexent.vector_database.elasticsearch_core.Elasticsearch', return_value=MagicMock()).start()
+patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 from jinja2 import StrictUndefined
 

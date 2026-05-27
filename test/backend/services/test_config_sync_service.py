@@ -6,8 +6,10 @@ from unittest.mock import patch, MagicMock, call
 import pytest
 
 # Patch boto3 and other dependencies before importing anything from backend
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+boto3_module.client = MagicMock()
+sys.modules["boto3"] = boto3_module
 
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
@@ -487,6 +489,32 @@ class TestSaveConfigImpl:
         # Verify logger
         service_mocks['logger'].info.assert_called_once_with(
             "Configuration saved successfully")
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_passes_model_type_to_lookup(self, service_mocks):
+        config = MagicMock()
+        config.model_dump.return_value = {
+            "app": {},
+            "models": {
+                "embedding": {
+                    "modelName": "text-embedding-ada-002",
+                    "displayName": "Ada Embeddings",
+                    "apiConfig": {"apiKey": "k", "baseUrl": "https://api"}
+                }
+            }
+        }
+
+        service_mocks['tenant_config_manager'].load_config.return_value = {}
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+        service_mocks['safe_value'].side_effect = lambda value: str(value) if value is not None else ""
+        service_mocks['get_model_records'].return_value = [{"model_id": 123}]
+
+        await save_config_impl(config, "tenant-id", "user-id")
+
+        service_mocks['get_model_records'].assert_called_once_with(
+            {"display_name": "Ada Embeddings", "model_type": "embedding"},
+            "tenant-id"
+        )
 
     @pytest.mark.asyncio
     async def test_save_config_impl_model_config(self, service_mocks):

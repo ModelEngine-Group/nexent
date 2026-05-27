@@ -712,6 +712,52 @@ class TestCreateToolConfigList:
             assert last_call[1]['class_name'] == "KnowledgeBaseSearchTool"
 
     @pytest.mark.asyncio
+    async def test_create_tool_config_list_knowledge_base_multimodal(self):
+        """Ensure multimodal param is forwarded to embedding model selection."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding_by_index, \
+                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
+                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config:
+            
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "knowledge_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [
+                        {"name": "index_names", "default": ["idx1", "idx2"]},  # 添加这个
+                        {"name": "multimodal", "default": True},
+                        {"name": "rerank", "default": False},
+                    ],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "mock_elastic_core"
+            mock_embedding_by_index.return_value = ("mock_embedding_model", 123, {"status": "ok"})
+            mock_rerank.return_value = None
+            mock_get_knowledge_map.return_value = {"idx1": "KB1", "idx2": "KB2"}
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            # Verify get_embedding_model_by_index_name was called with tenant_id and first index_name
+            mock_embedding_by_index.assert_called_once_with("tenant_1", "idx1")
+            
+            # Verify that multimodal parameter was removed from params (popped)
+            assert "multimodal" not in result[0].params
+
+    @pytest.mark.asyncio
     async def test_create_tool_config_list_with_analyze_image_tool(self):
         """Ensure AnalyzeImageTool receives VLM model metadata."""
         mock_tool_instance = MagicMock()
@@ -831,20 +877,21 @@ class TestCreateToolConfigList:
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool_metadata(self):
         """
-        Test that KnowledgeBaseSearchTool metadata contains only vdb_core and embedding_model.
-        This test verifies the refactored behavior where index_names and name_resolver
-        have been removed from the metadata.
+        Test that KnowledgeBaseSearchTool metadata contains vdb_core, embedding_model, 
+        rerank_model, display_name_to_index_map, and index_name_to_display_map.
         """
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
-        mock_tool_config.return_value = mock_tool_instance
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
                 patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
+                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config:
+
+            mock_tool_config.return_value = mock_tool_instance
 
             mock_search_tools.return_value = [
                 {
@@ -854,7 +901,7 @@ class TestCreateToolConfigList:
                     "inputs": "string",
                     "output_type": "string",
                     "params": [
-                        {"name": "index_names", "default": ["idx_a"]},  # Non-empty index_names
+                        {"name": "index_names", "default": ["idx_a"]},
                         {"name": "rerank", "default": True},
                         {"name": "rerank_model_name", "default": "gte-rerank-v2"},
                     ],
@@ -868,7 +915,7 @@ class TestCreateToolConfigList:
             mock_get_vector_db_core.return_value = mock_vdb_core
             mock_embedding.return_value = (mock_embedding_model, 123, {"status": "ok"})
             mock_rerank.return_value = mock_rerank_model
-            mock_get_knowledge_map.return_value = {"idx_a": "idx_a"}
+            mock_get_knowledge_map.return_value = {"idx_a": "Knowledge Base A"}
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -877,17 +924,25 @@ class TestCreateToolConfigList:
 
             # Verify correct functions were called with correct parameters
             mock_get_vector_db_core.assert_called_once()
+            # 修改：验证调用时使用 tenant_id 和 index_name
             mock_embedding.assert_called_once_with("tenant_1", "idx_a")
+            mock_rerank.assert_called_once_with(tenant_id="tenant_1", model_name="gte-rerank-v2")
+            mock_get_knowledge_map.assert_called_once_with(["idx_a"])
 
-            # Verify metadata contains vdb_core, embedding_model, rerank_model and display_name_to_index_map
+            # Verify metadata contains required fields
             assert "vdb_core" in mock_tool_instance.metadata
             assert "embedding_model" in mock_tool_instance.metadata
             assert "rerank_model" in mock_tool_instance.metadata
             assert "display_name_to_index_map" in mock_tool_instance.metadata
+            assert "index_name_to_display_map" in mock_tool_instance.metadata
 
-            # Explicitly verify that old fields are NOT present
-            assert "index_names" not in mock_tool_instance.metadata
-            assert "name_resolver" not in mock_tool_instance.metadata
+            # Verify mappings
+            assert mock_tool_instance.metadata["display_name_to_index_map"] == {
+                "Knowledge Base A": "idx_a"
+            }
+            assert mock_tool_instance.metadata["index_name_to_display_map"] == {
+                "idx_a": "Knowledge Base A"
+            }
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool_multiple_tools(self):
@@ -1597,36 +1652,34 @@ class TestCreateAgentConfig:
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_disabled_no_search(self):
-        with (
-            patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
-            ) as mock_search_agent,
+        with patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+        ) as mock_search_agent, \
             patch(
                 "backend.agents.create_agent_info.query_sub_agents_id_list"
-            ) as mock_query_sub,
+            ) as mock_query_sub, \
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
-            ) as mock_create_tools,
+            ) as mock_create_tools, \
             patch(
                 "backend.agents.create_agent_info.get_agent_prompt_template"
-            ) as mock_get_template,
+            ) as mock_get_template, \
             patch(
                 "backend.agents.create_agent_info.tenant_config_manager"
-            ) as mock_tenant_config,
+            ) as mock_tenant_config, \
             patch(
                 "backend.agents.create_agent_info.build_memory_context"
-            ) as mock_build_memory,
+            ) as mock_build_memory, \
             patch(
                 "backend.agents.create_agent_info.get_model_by_model_id"
-            ) as mock_get_model_by_id,
+            ) as mock_get_model_by_id, \
             patch(
                 "backend.agents.create_agent_info.search_memory_in_levels",
                 new_callable=AsyncMock,
-            ) as mock_search_memory,
+            ) as mock_search_memory, \
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
-            ) as mock_prepare_templates,
-        ):
+            ) as mock_prepare_templates:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
@@ -2941,8 +2994,214 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://test.server",
                 "transport": "streamable-http",
-                "authorization": "bearer_token_123"
+                "headers": {"Authorization": "bearer_token_123"}
             }
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_custom_headers_only(self):
+        """Test case for mcp_host with only custom_headers (no authorization_token)"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "custom_header_server",
+                    "remote_mcp_server": "http://custom-header.server",
+                    "status": True,
+                    "authorization_token": None,
+                    "custom_headers": {"X-Custom-Header": "custom-value", "X-Another-Header": "another-value"}
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://custom-header.server"]
+            mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host includes custom headers
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == {
+                "url": "http://custom-header.server",
+                "transport": "streamable-http",
+                "headers": {"X-Custom-Header": "custom-value", "X-Another-Header": "another-value"}
+            }
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_authorization_and_custom_headers(self):
+        """Test case for mcp_host with both authorization_token and custom_headers"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "both_headers_server",
+                    "remote_mcp_server": "http://both-headers.server",
+                    "status": True,
+                    "authorization_token": "bearer_token_456",
+                    "custom_headers": {"X-Custom-Header": "custom-value", "X-Request-ID": "req-123"}
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://both-headers.server"]
+            mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host includes both authorization and custom headers
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            # Authorization header should override any custom X-Authorization header
+            assert mcp_host[0]["url"] == "http://both-headers.server"
+            assert mcp_host[0]["transport"] == "streamable-http"
+            assert mcp_host[0]["headers"]["Authorization"] == "bearer_token_456"
+            assert mcp_host[0]["headers"]["X-Custom-Header"] == "custom-value"
+            assert mcp_host[0]["headers"]["X-Request-ID"] == "req-123"
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_custom_headers_null(self):
+        """Test case for mcp_host with custom_headers=None (should not add headers)"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "null_headers_server",
+                    "remote_mcp_server": "http://null-headers.server",
+                    "status": True,
+                    "authorization_token": None,
+                    "custom_headers": None
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://null-headers.server"]
+            mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host has no headers key when both auth_token and custom_headers are null
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == {
+                "url": "http://null-headers.server",
+                "transport": "streamable-http"
+            }
+            assert "headers" not in mcp_host[0]
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_custom_headers_string_not_dict(self):
+        """Test case for mcp_host with custom_headers as string (not dict) - should be ignored"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "string_headers_server",
+                    "remote_mcp_server": "http://string-headers.server",
+                    "status": True,
+                    "authorization_token": "bearer_token_789",
+                    "custom_headers": "not-a-dict-string"
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://string-headers.server"]
+            mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host only has authorization header, custom_headers string is ignored
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == {
+                "url": "http://string-headers.server",
+                "transport": "streamable-http",
+                "headers": {"Authorization": "bearer_token_789"}
+            }
+            assert mcp_host[0]["headers"]["Authorization"] == "bearer_token_789"
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_with_sse_transport(self):
@@ -3099,7 +3358,7 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://server1.com",
                 "transport": "streamable-http",
-                "authorization": "token1"
+                "headers": {"Authorization": "token1"}
             }
             # Second: dict with SSE transport, no authorization
             assert mcp_host[1] == {

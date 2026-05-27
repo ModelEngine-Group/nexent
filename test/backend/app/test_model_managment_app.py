@@ -48,7 +48,7 @@ def client(mocker):
         _sys.modules["services.vectordatabase_service"] = services_vdb_mod
     
     # Import after mocking (only backend path is required by app imports)
-    from apps.model_managment_app import router
+    from backend.apps.model_managment_app import router
     
     # Create test client
     app = FastAPI()
@@ -86,12 +86,12 @@ def sample_model_data():
 @pytest.mark.asyncio
 async def test_create_model_success(client, auth_header, user_credentials, sample_model_data, mocker):
     """Test successful model creation."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def _create(*args, **kwargs):
         return None
     
-    mock_create = mocker.patch('apps.model_managment_app.create_model_for_tenant', side_effect=_create)
+    mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
     
     response = client.post(
         "/model/create", json=sample_model_data, headers=auth_header)
@@ -105,10 +105,10 @@ async def test_create_model_success(client, auth_header, user_credentials, sampl
 @pytest.mark.asyncio
 async def test_create_model_conflict(client, auth_header, user_credentials, sample_model_data, mocker):
     """Test model creation with name conflict."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mock_create = mocker.patch(
-        'apps.model_managment_app.create_model_for_tenant', 
+        'backend.apps.model_managment_app.create_model_for_tenant', 
         side_effect=ValueError("Name 'Test Model' is already in use, please choose another display name")
     )
     
@@ -125,10 +125,10 @@ async def test_create_model_conflict(client, auth_header, user_credentials, samp
 @pytest.mark.asyncio
 async def test_create_model_exception(client, auth_header, user_credentials, sample_model_data, mocker):
     """Test model creation with internal error."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mock_create = mocker.patch(
-        'apps.model_managment_app.create_model_for_tenant', 
+        'backend.apps.model_managment_app.create_model_for_tenant', 
         side_effect=Exception("DB failure")
     )
     
@@ -146,10 +146,10 @@ async def test_create_model_exception(client, auth_header, user_credentials, sam
 @pytest.mark.asyncio
 async def test_create_provider_model_success(client, auth_header, user_credentials, mocker):
     """Test successful provider model creation."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mock_get = mocker.patch(
-        'apps.model_managment_app.create_provider_models_for_tenant', 
+        'backend.apps.model_managment_app.create_provider_models_for_tenant', 
         return_value=[{"id": "A1"}, {"id": "a0"}, {"id": "b2"}, {"id": "c3"}]
     )
     
@@ -169,10 +169,10 @@ async def test_create_provider_model_success(client, auth_header, user_credentia
 @pytest.mark.asyncio
 async def test_create_provider_model_exception(client, auth_header, user_credentials, mocker):
     """Test provider model creation with exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mock_get = mocker.patch(
-        'apps.model_managment_app.create_provider_models_for_tenant', 
+        'backend.apps.model_managment_app.create_provider_models_for_tenant', 
         side_effect=Exception("Provider API error")
     )
     
@@ -192,12 +192,12 @@ async def test_create_provider_model_exception(client, auth_header, user_credent
 @pytest.mark.asyncio
 async def test_provider_batch_create_success(client, auth_header, user_credentials, mocker):
     """Test successful batch model creation."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def _batch(*args, **kwargs):
         return None
     
-    mock_batch = mocker.patch('apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch)
+    mock_batch = mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch)
     
     payload = {
         "models": [{"id": "prov/modelA"}],
@@ -217,10 +217,10 @@ async def test_provider_batch_create_success(client, auth_header, user_credentia
 @pytest.mark.asyncio
 async def test_provider_batch_create_exception(client, auth_header, user_credentials, mocker):
     """Test batch model creation with exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mock_batch = mocker.patch(
-        'apps.model_managment_app.batch_create_models_for_tenant', 
+        'backend.apps.model_managment_app.batch_create_models_for_tenant', 
         side_effect=Exception("boom")
     )
     
@@ -244,12 +244,12 @@ async def test_provider_batch_create_exception(client, auth_header, user_credent
 @pytest.mark.asyncio
 async def test_delete_model_success(client, auth_header, user_credentials, mocker):
     """Test successful model deletion."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def _delete(*args, **kwargs):
         return "Test Model"
     
-    mock_del = mocker.patch('apps.model_managment_app.delete_model_for_tenant', side_effect=_delete)
+    mock_del = mocker.patch('backend.apps.model_managment_app.delete_model_for_tenant', side_effect=_delete)
     
     response = client.post(
         "/model/delete", params={"display_name": "Test Model"}, headers=auth_header)
@@ -264,10 +264,10 @@ async def test_delete_model_success(client, auth_header, user_credentials, mocke
 @pytest.mark.asyncio
 async def test_delete_model_not_found(client, auth_header, user_credentials, mocker):
     """Test model deletion when model not found."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mock_del = mocker.patch(
-        'apps.model_managment_app.delete_model_for_tenant', 
+        'backend.apps.model_managment_app.delete_model_for_tenant', 
         side_effect=LookupError("Model not found: Missing")
     )
     
@@ -285,7 +285,7 @@ async def test_delete_model_not_found(client, auth_header, user_credentials, moc
 @pytest.mark.asyncio
 async def test_get_model_list_success(client, auth_header, user_credentials, mocker):
     """Test successful model list retrieval."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def mock_list_models(*args, **kwargs):
         return [
@@ -305,7 +305,7 @@ async def test_get_model_list_success(client, auth_header, user_credentials, moc
             }
         ]
     
-    mock_list = mocker.patch('apps.model_managment_app.list_models_for_tenant', side_effect=mock_list_models)
+    mock_list = mocker.patch('backend.apps.model_managment_app.list_models_for_tenant', side_effect=mock_list_models)
     
     response = client.get("/model/list", headers=auth_header)
     
@@ -323,7 +323,7 @@ async def test_get_model_list_success(client, auth_header, user_credentials, moc
 @pytest.mark.asyncio
 async def test_get_llm_model_list_success(client, auth_header, user_credentials, mocker):
     """Test successful LLM model list retrieval."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def mock_list_llm_models(*args, **kwargs):
         return [
@@ -341,7 +341,7 @@ async def test_get_llm_model_list_success(client, auth_header, user_credentials,
             }
         ]
     
-    mock_list = mocker.patch('apps.model_managment_app.list_llm_models_for_tenant', side_effect=mock_list_llm_models)
+    mock_list = mocker.patch('backend.apps.model_managment_app.list_llm_models_for_tenant', side_effect=mock_list_llm_models)
     
     response = client.get("/model/llm_list", headers=auth_header)
     
@@ -359,12 +359,12 @@ async def test_get_llm_model_list_success(client, auth_header, user_credentials,
 @pytest.mark.asyncio
 async def test_get_llm_model_list_exception(client, auth_header, user_credentials, mocker):
     """Test LLM model list retrieval with exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def mock_list_llm_models(*args, **kwargs):
         raise Exception("Database connection error")
     
-    mocker.patch('apps.model_managment_app.list_llm_models_for_tenant', side_effect=mock_list_llm_models)
+    mocker.patch('backend.apps.model_managment_app.list_llm_models_for_tenant', side_effect=mock_list_llm_models)
     
     response = client.get("/model/llm_list", headers=auth_header)
     
@@ -377,12 +377,12 @@ async def test_get_llm_model_list_exception(client, auth_header, user_credential
 @pytest.mark.asyncio
 async def test_get_llm_model_list_empty(client, auth_header, user_credentials, mocker):
     """Test LLM model list retrieval with empty result."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def mock_list_llm_models(*args, **kwargs):
         return []
     
-    mock_list = mocker.patch('apps.model_managment_app.list_llm_models_for_tenant', side_effect=mock_list_llm_models)
+    mock_list = mocker.patch('backend.apps.model_managment_app.list_llm_models_for_tenant', side_effect=mock_list_llm_models)
     
     response = client.get("/model/llm_list", headers=auth_header)
     
@@ -397,16 +397,16 @@ async def test_get_llm_model_list_empty(client, auth_header, user_credentials, m
 @pytest.mark.asyncio
 async def test_check_model_health_success(client, auth_header, user_credentials, mocker):
     """Test successful model health check."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mock_check = mocker.patch(
-        'apps.model_managment_app.check_model_connectivity', 
+        'backend.apps.model_managment_app.check_model_connectivity', 
         return_value={"connectivity": True, "connect_status": "available"}
     )
     
     response = client.post(
         "/model/healthcheck",
-        params={"display_name": "Test Model"},
+        params={"display_name": "Test Model", "model_type": "embedding"},
         headers=auth_header
     )
     
@@ -414,22 +414,22 @@ async def test_check_model_health_success(client, auth_header, user_credentials,
     data = response.json()
     assert data["message"] == "Successfully checked model connectivity"
     assert data["data"]["connectivity"] is True
-    mock_check.assert_called_once_with("Test Model", user_credentials[1])
+    mock_check.assert_called_once_with("Test Model", user_credentials[1], "embedding")
 
 
 @pytest.mark.asyncio
 async def test_check_model_health_lookup_error(client, auth_header, user_credentials, mocker):
     """Test model health check with lookup error."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mocker.patch(
-        'apps.model_managment_app.check_model_connectivity', 
+        'backend.apps.model_managment_app.check_model_connectivity', 
         side_effect=LookupError("missing")
     )
     
     response = client.post(
         "/model/healthcheck",
-        params={"display_name": "X"},
+        params={"display_name": "X", "model_type": "embedding"},
         headers=auth_header
     )
     assert response.status_code == HTTPStatus.NOT_FOUND
@@ -440,7 +440,7 @@ async def test_check_model_health_lookup_error(client, auth_header, user_credent
 async def test_verify_model_config_success(client, auth_header, sample_model_data, mocker):
     """Test successful model config verification."""
     mock_verify = mocker.patch(
-        'apps.model_managment_app.verify_model_config_connectivity', 
+        'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={"connectivity": True, "model_name": "gpt-4"}
     )
     
@@ -460,7 +460,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
 async def test_verify_model_config_failure_with_error(client, auth_header, sample_model_data, mocker):
     """Test model config verification failure with detailed error message."""
     mock_verify = mocker.patch(
-        'apps.model_managment_app.verify_model_config_connectivity', 
+        'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={
             "connectivity": False, 
             "model_name": "gpt-4",
@@ -486,7 +486,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
 async def test_verify_model_config_exception(client, auth_header, sample_model_data, mocker):
     """Test model config verification with exception."""
     mocker.patch(
-        'apps.model_managment_app.verify_model_config_connectivity', 
+        'backend.apps.model_managment_app.verify_model_config_connectivity', 
         side_effect=Exception("err")
     )
     
@@ -499,12 +499,12 @@ async def test_verify_model_config_exception(client, auth_header, sample_model_d
 @pytest.mark.asyncio
 async def test_update_single_model_success(client, auth_header, user_credentials, mocker):
     """Test successful single model update."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def mock_update_single(*args, **kwargs):
         return None
     
-    mock_update = mocker.patch('apps.model_managment_app.update_single_model_for_tenant', side_effect=mock_update_single)
+    mock_update = mocker.patch('backend.apps.model_managment_app.update_single_model_for_tenant', side_effect=mock_update_single)
     
     update_data = {
         "model_id": "test_model_id",
@@ -536,10 +536,10 @@ async def test_update_single_model_success(client, auth_header, user_credentials
 @pytest.mark.asyncio
 async def test_update_single_model_conflict(client, auth_header, user_credentials, mocker):
     """Test single model update with name conflict."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mock_update = mocker.patch(
-        'apps.model_managment_app.update_single_model_for_tenant',
+        'backend.apps.model_managment_app.update_single_model_for_tenant',
         side_effect=ValueError("Name 'Conflicting Name' is already in use, please choose another display name"),
     )
     
@@ -575,12 +575,12 @@ async def test_update_single_model_conflict(client, auth_header, user_credential
 @pytest.mark.asyncio
 async def test_batch_update_models_success(client, auth_header, user_credentials, mocker):
     """Test successful batch model update."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def mock_batch_update(*args, **kwargs):
         return None
     
-    mock_batch_update = mocker.patch('apps.model_managment_app.batch_update_models_for_tenant', side_effect=mock_batch_update)
+    mock_batch_update = mocker.patch('backend.apps.model_managment_app.batch_update_models_for_tenant', side_effect=mock_batch_update)
     
     models = [
         {"model_id": "id1", "api_key": "k1", "max_tokens": 100},
@@ -598,12 +598,12 @@ async def test_batch_update_models_success(client, auth_header, user_credentials
 @pytest.mark.asyncio
 async def test_batch_update_models_exception(client, auth_header, user_credentials, mocker):
     """Test batch model update with exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def mock_batch_update(*args, **kwargs):
         raise Exception("Update failed")
     
-    mock_batch_update = mocker.patch('apps.model_managment_app.batch_update_models_for_tenant', side_effect=mock_batch_update)
+    mock_batch_update = mocker.patch('backend.apps.model_managment_app.batch_update_models_for_tenant', side_effect=mock_batch_update)
     
     models = [{"model_id": "id1", "api_key": "k1"}]
     response = client.post(
@@ -620,7 +620,7 @@ async def test_batch_update_models_exception(client, auth_header, user_credentia
 @pytest.mark.asyncio
 async def test_get_manage_model_list_success(client, auth_header, user_credentials, mocker):
     """Test successful manage model list retrieval for a specified tenant."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_list_models_for_admin(*args, **kwargs):
         return {
@@ -648,7 +648,7 @@ async def test_get_manage_model_list_success(client, auth_header, user_credentia
             "total_pages": 1
         }
 
-    mock_list = mocker.patch('apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
+    mock_list = mocker.patch('backend.apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -676,7 +676,7 @@ async def test_get_manage_model_list_success(client, auth_header, user_credentia
 @pytest.mark.asyncio
 async def test_get_manage_model_list_with_pagination(client, auth_header, user_credentials, mocker):
     """Test manage model list retrieval with pagination parameters."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_list_models_for_admin(*args, **kwargs):
         return {
@@ -697,7 +697,7 @@ async def test_get_manage_model_list_with_pagination(client, auth_header, user_c
             "total_pages": 3
         }
 
-    mock_list = mocker.patch('apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
+    mock_list = mocker.patch('backend.apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -720,12 +720,12 @@ async def test_get_manage_model_list_with_pagination(client, auth_header, user_c
 @pytest.mark.asyncio
 async def test_get_manage_model_list_exception(client, auth_header, user_credentials, mocker):
     """Test manage model list retrieval with exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_list_models_for_admin(*args, **kwargs):
         raise Exception("Database connection error")
 
-    mocker.patch('apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
+    mocker.patch('backend.apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -743,7 +743,7 @@ async def test_get_manage_model_list_exception(client, auth_header, user_credent
 @pytest.mark.asyncio
 async def test_get_manage_model_list_empty(client, auth_header, user_credentials, mocker):
     """Test manage model list retrieval with empty result."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_list_models_for_admin(*args, **kwargs):
         return {
@@ -756,7 +756,7 @@ async def test_get_manage_model_list_empty(client, auth_header, user_credentials
             "total_pages": 0
         }
 
-    mock_list = mocker.patch('apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
+    mock_list = mocker.patch('backend.apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
 
     request_data = {
         "tenant_id": "empty_tenant",
@@ -778,12 +778,12 @@ async def test_get_manage_model_list_empty(client, auth_header, user_credentials
 @pytest.mark.asyncio
 async def test_manage_create_model_success(client, auth_header, user_credentials, mocker):
     """Test successful model creation for a specified tenant."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _create(*args, **kwargs):
         return None
 
-    mock_create = mocker.patch('apps.model_managment_app.create_model_for_tenant', side_effect=_create)
+    mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -812,12 +812,12 @@ async def test_manage_create_model_success(client, auth_header, user_credentials
 @pytest.mark.asyncio
 async def test_manage_create_model_conflict(client, auth_header, user_credentials, mocker):
     """Test model creation with conflict error."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _create(*args, **kwargs):
         raise ValueError("Model name already exists")
 
-    mocker.patch('apps.model_managment_app.create_model_for_tenant', side_effect=_create)
+    mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -835,12 +835,12 @@ async def test_manage_create_model_conflict(client, auth_header, user_credential
 @pytest.mark.asyncio
 async def test_manage_create_model_exception(client, auth_header, user_credentials, mocker):
     """Test model creation with unexpected exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _create(*args, **kwargs):
         raise Exception("Database error")
 
-    mocker.patch('apps.model_managment_app.create_model_for_tenant', side_effect=_create)
+    mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -858,12 +858,12 @@ async def test_manage_create_model_exception(client, auth_header, user_credentia
 @pytest.mark.asyncio
 async def test_manage_update_model_success(client, auth_header, user_credentials, mocker):
     """Test successful model update for a specified tenant."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _update(*args, **kwargs):
         return None
 
-    mock_update = mocker.patch('apps.model_managment_app.update_single_model_for_tenant', side_effect=_update)
+    mock_update = mocker.patch('backend.apps.model_managment_app.update_single_model_for_tenant', side_effect=_update)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -891,12 +891,12 @@ async def test_manage_update_model_success(client, auth_header, user_credentials
 @pytest.mark.asyncio
 async def test_manage_update_model_not_found(client, auth_header, user_credentials, mocker):
     """Test model update with not found error."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _update(*args, **kwargs):
         raise LookupError("Model not found")
 
-    mocker.patch('apps.model_managment_app.update_single_model_for_tenant', side_effect=_update)
+    mocker.patch('backend.apps.model_managment_app.update_single_model_for_tenant', side_effect=_update)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -911,12 +911,12 @@ async def test_manage_update_model_not_found(client, auth_header, user_credentia
 @pytest.mark.asyncio
 async def test_manage_update_model_conflict(client, auth_header, user_credentials, mocker):
     """Test model update with conflict error."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _update(*args, **kwargs):
         raise ValueError("Display name already exists")
 
-    mocker.patch('apps.model_managment_app.update_single_model_for_tenant', side_effect=_update)
+    mocker.patch('backend.apps.model_managment_app.update_single_model_for_tenant', side_effect=_update)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -932,12 +932,12 @@ async def test_manage_update_model_conflict(client, auth_header, user_credential
 @pytest.mark.asyncio
 async def test_manage_delete_model_success(client, auth_header, user_credentials, mocker):
     """Test successful model deletion for a specified tenant."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _delete(*args, **kwargs):
         return "test-model"
 
-    mock_delete = mocker.patch('apps.model_managment_app.delete_model_for_tenant', side_effect=_delete)
+    mock_delete = mocker.patch('backend.apps.model_managment_app.delete_model_for_tenant', side_effect=_delete)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -956,12 +956,12 @@ async def test_manage_delete_model_success(client, auth_header, user_credentials
 @pytest.mark.asyncio
 async def test_manage_delete_model_not_found(client, auth_header, user_credentials, mocker):
     """Test model deletion with not found error."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _delete(*args, **kwargs):
         raise LookupError("Model not found")
 
-    mocker.patch('apps.model_managment_app.delete_model_for_tenant', side_effect=_delete)
+    mocker.patch('backend.apps.model_managment_app.delete_model_for_tenant', side_effect=_delete)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -975,12 +975,12 @@ async def test_manage_delete_model_not_found(client, auth_header, user_credentia
 @pytest.mark.asyncio
 async def test_manage_delete_model_exception(client, auth_header, user_credentials, mocker):
     """Test model deletion with unexpected exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _delete(*args, **kwargs):
         raise Exception("Database error")
 
-    mocker.patch('apps.model_managment_app.delete_model_for_tenant', side_effect=_delete)
+    mocker.patch('backend.apps.model_managment_app.delete_model_for_tenant', side_effect=_delete)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -995,12 +995,12 @@ async def test_manage_delete_model_exception(client, auth_header, user_credentia
 @pytest.mark.asyncio
 async def test_manage_batch_create_models_success(client, auth_header, user_credentials, mocker):
     """Test successful batch model creation for a specified tenant."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _batch_create(*args, **kwargs):
         return None
 
-    mock_batch_create = mocker.patch('apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
+    mock_batch_create = mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -1064,12 +1064,12 @@ async def test_manage_batch_create_models_success(client, auth_header, user_cred
 @pytest.mark.asyncio
 async def test_manage_batch_create_models_empty_list(client, auth_header, user_credentials, mocker):
     """Test batch model creation with empty models list."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _batch_create(*args, **kwargs):
         return None
 
-    mock_batch_create = mocker.patch('apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
+    mock_batch_create = mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -1090,12 +1090,12 @@ async def test_manage_batch_create_models_empty_list(client, auth_header, user_c
 @pytest.mark.asyncio
 async def test_manage_batch_create_models_exception(client, auth_header, user_credentials, mocker):
     """Test batch model creation with exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _batch_create(*args, **kwargs):
         raise Exception("Database connection error")
 
-    mocker.patch('apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
+    mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -1115,10 +1115,10 @@ async def test_manage_batch_create_models_exception(client, auth_header, user_cr
 @pytest.mark.asyncio
 async def test_manage_healthcheck_success(client, auth_header, user_credentials, mocker):
     """Test successful model connectivity check for a specified tenant."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     mock_check = mocker.patch(
-        'apps.model_managment_app.check_model_connectivity',
+        'backend.apps.model_managment_app.check_model_connectivity',
         return_value={"connectivity": True, "connect_status": "available"}
     )
 
@@ -1138,10 +1138,10 @@ async def test_manage_healthcheck_success(client, auth_header, user_credentials,
 @pytest.mark.asyncio
 async def test_manage_healthcheck_model_not_found(client, auth_header, user_credentials, mocker):
     """Test model connectivity check when model is not found."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     mocker.patch(
-        'apps.model_managment_app.check_model_connectivity',
+        'backend.apps.model_managment_app.check_model_connectivity',
         side_effect=LookupError("Model configuration not found for test-model")
     )
 
@@ -1158,10 +1158,10 @@ async def test_manage_healthcheck_model_not_found(client, auth_header, user_cred
 @pytest.mark.asyncio
 async def test_manage_healthcheck_invalid_config(client, auth_header, user_credentials, mocker):
     """Test model connectivity check with invalid model configuration."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     mocker.patch(
-        'apps.model_managment_app.check_model_connectivity',
+        'backend.apps.model_managment_app.check_model_connectivity',
         side_effect=ValueError("Invalid model configuration")
     )
 
@@ -1178,10 +1178,10 @@ async def test_manage_healthcheck_invalid_config(client, auth_header, user_crede
 @pytest.mark.asyncio
 async def test_manage_healthcheck_exception(client, auth_header, user_credentials, mocker):
     """Test model connectivity check with unexpected exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     mocker.patch(
-        'apps.model_managment_app.check_model_connectivity',
+        'backend.apps.model_managment_app.check_model_connectivity',
         side_effect=Exception("Database connection error")
     )
 
@@ -1198,7 +1198,7 @@ async def test_manage_healthcheck_exception(client, auth_header, user_credential
 @pytest.mark.asyncio
 async def test_manage_provider_list_success(client, auth_header, user_credentials, mocker):
     """Test successful provider model list retrieval for a specified tenant."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_list_provider_models(*args, **kwargs):
         return [
@@ -1222,7 +1222,7 @@ async def test_manage_provider_list_success(client, auth_header, user_credential
             }
         ]
 
-    mock_list = mocker.patch('apps.model_managment_app.list_provider_models_for_tenant', side_effect=mock_list_provider_models)
+    mock_list = mocker.patch('backend.apps.model_managment_app.list_provider_models_for_tenant', side_effect=mock_list_provider_models)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -1241,12 +1241,12 @@ async def test_manage_provider_list_success(client, auth_header, user_credential
 @pytest.mark.asyncio
 async def test_manage_provider_list_exception(client, auth_header, user_credentials, mocker):
     """Test provider model list retrieval with exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_list_provider_models(*args, **kwargs):
         raise Exception("Provider API error")
 
-    mocker.patch('apps.model_managment_app.list_provider_models_for_tenant', side_effect=mock_list_provider_models)
+    mocker.patch('backend.apps.model_managment_app.list_provider_models_for_tenant', side_effect=mock_list_provider_models)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -1261,12 +1261,12 @@ async def test_manage_provider_list_exception(client, auth_header, user_credenti
 @pytest.mark.asyncio
 async def test_manage_provider_list_empty(client, auth_header, user_credentials, mocker):
     """Test provider model list retrieval with empty result."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_list_provider_models(*args, **kwargs):
         return []
 
-    mock_list = mocker.patch('apps.model_managment_app.list_provider_models_for_tenant', side_effect=mock_list_provider_models)
+    mock_list = mocker.patch('backend.apps.model_managment_app.list_provider_models_for_tenant', side_effect=mock_list_provider_models)
 
     request_data = {
         "tenant_id": "empty_tenant",
@@ -1284,7 +1284,7 @@ async def test_manage_provider_list_empty(client, auth_header, user_credentials,
 @pytest.mark.asyncio
 async def test_manage_provider_create_success(client, auth_header, user_credentials, mocker):
     """Test successful provider model creation for a specified tenant."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_create_provider_models(*args, **kwargs):
         return [
@@ -1304,7 +1304,7 @@ async def test_manage_provider_create_success(client, auth_header, user_credenti
             }
         ]
 
-    mock_create = mocker.patch('apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
+    mock_create = mocker.patch('backend.apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -1328,7 +1328,7 @@ async def test_manage_provider_create_success(client, auth_header, user_credenti
 @pytest.mark.asyncio
 async def test_manage_provider_create_with_base_url(client, auth_header, user_credentials, mocker):
     """Test provider model creation with base URL for modelengine provider."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_create_provider_models(*args, **kwargs):
         return [
@@ -1341,7 +1341,7 @@ async def test_manage_provider_create_with_base_url(client, auth_header, user_cr
             }
         ]
 
-    mock_create = mocker.patch('apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
+    mock_create = mocker.patch('backend.apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -1362,12 +1362,12 @@ async def test_manage_provider_create_with_base_url(client, auth_header, user_cr
 @pytest.mark.asyncio
 async def test_manage_provider_create_exception(client, auth_header, user_credentials, mocker):
     """Test provider model creation with exception."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_create_provider_models(*args, **kwargs):
         raise Exception("Provider API error")
 
-    mocker.patch('apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
+    mocker.patch('backend.apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
 
     request_data = {
         "tenant_id": "target_tenant",
@@ -1384,12 +1384,12 @@ async def test_manage_provider_create_exception(client, auth_header, user_creden
 @pytest.mark.asyncio
 async def test_manage_provider_create_empty(client, auth_header, user_credentials, mocker):
     """Test provider model creation with empty result."""
-    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def mock_create_provider_models(*args, **kwargs):
         return []
 
-    mock_create = mocker.patch('apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
+    mock_create = mocker.patch('backend.apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
 
     request_data = {
         "tenant_id": "target_tenant",

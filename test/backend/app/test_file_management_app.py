@@ -129,11 +129,12 @@ sys.modules.setdefault("consts", consts_pkg)
 
 model_stub = types.ModuleType("consts.model")
 class ProcessParams:  # minimal stub
-    def __init__(self, chunking_strategy: str, source_type: str, index_name: str, authorization: str | None):
+    def __init__(self, chunking_strategy: str, source_type: str, index_name: str, authorization: str | None, model_id: int | None = None):
         self.chunking_strategy = chunking_strategy
         self.source_type = source_type
         self.index_name = index_name
         self.authorization = authorization
+        self.model_id = model_id
 model_stub.ProcessParams = ProcessParams
 sys.modules.setdefault("consts.model", model_stub)
 setattr(consts_pkg, "model", model_stub)
@@ -249,6 +250,7 @@ async def test_process_files_success(monkeypatch):
         index_name="kb1",
         destination="local",
         authorization="Bearer x",
+        model_id=1,
     )
     assert resp.status_code == 201
     assert "Files processing triggered successfully" in resp.body.decode()
@@ -267,6 +269,7 @@ async def test_process_files_error_none(monkeypatch):
             index_name="kb",
             destination="local",
             authorization=None,
+            model_id=1,
         )
     assert "Data process service failed" in str(ei.value)
 
@@ -284,6 +287,7 @@ async def test_process_files_error_message(monkeypatch):
             index_name="kb",
             destination="local",
             authorization=None,
+            model_id=1,
         )
     assert "boom" in str(ei.value)
 

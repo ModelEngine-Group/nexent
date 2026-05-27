@@ -32,7 +32,10 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
   activeKnowledgeBase: KnowledgeBase | null;
-  currentEmbeddingModel: string | null;
+  configuredEmbeddingModels?: Array<{
+    displayName: string;
+    type: string;
+  }>;
   isLoading?: boolean;
   syncLoading?: boolean;
   onClick: (kb: KnowledgeBase) => void;
@@ -57,7 +60,7 @@ interface KnowledgeBaseListProps {
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   knowledgeBases,
   activeKnowledgeBase,
-  currentEmbeddingModel,
+  configuredEmbeddingModels = [],
   isLoading = false,
   syncLoading = false,
   onClick,
@@ -126,6 +129,34 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   // Get permission tooltip key
   const getPermissionTooltipKey = (permission: string) => {
     return `knowledgeBase.ingroup.permission.${permission || "DEFAULT"}`;
+  };
+
+  const configuredModelTypesByName = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    configuredEmbeddingModels.forEach((model) => {
+      const modelName = (model.displayName || "").trim();
+      const modelType = (model.type || "").trim().toLowerCase();
+      if (!modelName) return;
+      if (modelType !== "embedding" && modelType !== "multi_embedding") return;
+      if (!map.has(modelName)) {
+        map.set(modelName, new Set<string>());
+      }
+      map.get(modelName)!.add(modelType);
+    });
+    return map;
+  }, [configuredEmbeddingModels]);
+
+  const isModelMismatch = (kb: KnowledgeBase) => {
+    if (kb.embeddingModel === "unknown") return false;
+    if (kb.source === "datamate") return false;
+    const modelTypes = configuredModelTypesByName.get(
+      (kb.embeddingModel || "").trim()
+    );
+    return !modelTypes;
+  };
+
+  const hasIndexedDocumentsAndChunks = (kb: KnowledgeBase) => {
+    return (kb.documentCount || 0) > 0 && (kb.chunkCount || 0) > 0;
   };
 
   // Search and filter states
@@ -578,6 +609,21 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 {t("knowledgeBase.tag.model", {
                                   model: getModelDisplayName(kb.embeddingModel),
                                 })}
+                              </span>
+                            )}
+                            {kb.is_multimodal &&
+                              hasIndexedDocumentsAndChunks(kb) && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.red} mr-1`}
+                              >
+                                multimodal
+                              </span>
+                            )}
+                            {isModelMismatch(kb) && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.warning} mr-1`}
+                              >
+                                {t("knowledgeBase.tag.modelMismatch")}
                               </span>
                             )}
 
