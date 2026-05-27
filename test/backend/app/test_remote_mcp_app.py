@@ -139,6 +139,38 @@ class TestAddMcpService:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_with_custom_headers(self, mock_add, mock_auth):
+        """Test that custom_headers is passed to add_mcp_service (line 125)."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "description": "desc",
+            "source": "local", "server_url": "http://srv/mcp",
+            "tags": [], "enabled": False,
+            "custom_headers": {"X-Custom-Header": "test-value", "X-Api-Key": "secret"},
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["status"] == "success"
+        mock_add.assert_called_once()
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["custom_headers"] == {"X-Custom-Header": "test-value", "X-Api-Key": "secret"}
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_with_empty_custom_headers(self, mock_add, mock_auth):
+        """Test that empty custom_headers is passed correctly (line 125)."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "description": "desc",
+            "source": "local", "server_url": "http://srv/mcp",
+            "tags": [], "enabled": False,
+            "custom_headers": {},
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["custom_headers"] == {}
+
 
 # ============================================================================
 # POST /mcp/add-from-config
@@ -201,6 +233,33 @@ class TestUpdateMcpService:
             "mcp_id": 999, "name": "x", "server_url": "http://u",
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_mcp_service')
+    def test_update_with_custom_headers(self, mock_update, mock_auth):
+        """Test that custom_headers is passed to update_mcp_service (line 243)."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.put("/mcp/update", json={
+            "mcp_id": 1, "name": "new-name", "server_url": "http://new.url",
+            "custom_headers": {"X-Updated-Header": "new-value"},
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        mock_update.assert_called_once()
+        call_kwargs = mock_update.call_args[1]
+        assert call_kwargs["custom_headers"] == {"X-Updated-Header": "new-value"}
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_mcp_service')
+    def test_update_clears_custom_headers(self, mock_update, mock_auth):
+        """Test that empty custom_headers can be passed (line 243)."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.put("/mcp/update", json={
+            "mcp_id": 1, "name": "new-name", "server_url": "http://new.url",
+            "custom_headers": {},
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_update.call_args[1]
+        assert call_kwargs["custom_headers"] == {}
 
 
 # ============================================================================
@@ -308,6 +367,39 @@ class TestGetMcpRecord:
         resp = client.get("/mcp/record/1", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["mcp_name"] == "svc"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.get_mcp_record_by_id')
+    def test_get_record_with_custom_headers(self, mock_get, mock_auth):
+        """Test that custom_headers is returned in response (line 426)."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_get.return_value = {
+            "mcp_name": "svc",
+            "mcp_server": "http://srv",
+            "authorization_token": "tok",
+            "custom_headers": {"X-Custom-Header": "test-value", "X-Api-Key": "secret"},
+        }
+        resp = client.get("/mcp/record/1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        data = resp.json()
+        assert data["custom_headers"] == {"X-Custom-Header": "test-value", "X-Api-Key": "secret"}
+        assert data["mcp_name"] == "svc"
+        assert data["authorization_token"] == "tok"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.get_mcp_record_by_id')
+    def test_get_record_with_empty_custom_headers(self, mock_get, mock_auth):
+        """Test that empty custom_headers is returned correctly (line 426)."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_get.return_value = {
+            "mcp_name": "svc",
+            "mcp_server": "http://srv",
+            "authorization_token": "tok",
+            "custom_headers": {},
+        }
+        resp = client.get("/mcp/record/1", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["custom_headers"] == {}
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.get_mcp_record_by_id')

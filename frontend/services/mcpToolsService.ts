@@ -275,6 +275,7 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       healthStatus: s.status ? McpHealthStatus.HEALTHY : McpHealthStatus.UNCHECKED,
       containerStatus: s.container_status as McpContainerStatus,
       authorizationToken: s.authorization_token,
+      customHeaders: s.custom_headers ?? undefined,
     } as McpServiceItem;
   });
   return { success: true, data: items } as McpToolsApiResult<McpServiceItem[]>;

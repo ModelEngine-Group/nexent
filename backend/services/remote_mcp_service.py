@@ -34,6 +34,7 @@ from database.remote_mcp_db import (
     delete_mcp_record_by_id,
     get_mcp_authorization_token_by_name_and_url,
     get_mcp_record_by_id_and_tenant,
+    get_mcp_custom_headers_by_name_and_url,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from services.mcp_container_service import MCPContainerManager
@@ -46,11 +47,15 @@ logger = logging.getLogger("remote_mcp_service")
 # Health Check
 # ---------------------------------------------------------------------------
 
-async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None) -> bool:
+async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None, custom_headers: dict | None = None) -> bool:
     """Check if an MCP server is healthy and reachable."""
     try:
         url_stripped = remote_mcp_server.strip()
-        headers = {"Authorization": authorization_token} if authorization_token else {}
+        headers = {}
+        if authorization_token:
+            headers["Authorization"] = authorization_token
+        if custom_headers:
+            headers.update(custom_headers)
 
         if url_stripped.endswith("/sse"):
             transport = SSETransport(url=url_stripped, headers=headers)
@@ -165,6 +170,7 @@ async def add_remote_mcp_server_list(
     remote_mcp_server_name: str,
     container_id: str | None = None,
     authorization_token: str | None = None,
+    custom_headers: dict | None = None,
     source: str | None = "local",
     container_port: int | None = None,
 ):
@@ -177,6 +183,7 @@ async def add_remote_mcp_server_list(
         remote_mcp_server_name: MCP service name
         container_id: Docker container ID (optional)
         authorization_token: Authorization token (optional)
+        custom_headers: Custom HTTP headers (optional)
 
     Raises:
         MCPNameIllegal: If MCP name already exists
@@ -186,7 +193,7 @@ async def add_remote_mcp_server_list(
         logger.error(f"MCP name already exists: {remote_mcp_server_name}")
         raise MCPNameIllegal("MCP name already exists")
 
-    if not await mcp_server_health(remote_mcp_server=remote_mcp_server, authorization_token=authorization_token):
+    if not await mcp_server_health(remote_mcp_server=remote_mcp_server, authorization_token=authorization_token, custom_headers=custom_headers):
         raise MCPConnectionError("MCP connection failed")
 
     insert_mcp_data = {
@@ -195,6 +202,7 @@ async def add_remote_mcp_server_list(
         "status": True,
         "container_id": container_id,
         "authorization_token": authorization_token,
+        "custom_headers": custom_headers,
         "source": source,
         "container_port": container_port,
     }
@@ -211,6 +219,7 @@ async def add_mcp_service(
     server_url: str,
     tags: list | None,
     authorization_token: str | None,
+    custom_headers: dict | None,
     container_config: dict | None,
     registry_json: dict | None,
     enabled: bool = False,
@@ -228,6 +237,7 @@ async def add_mcp_service(
         server_url: MCP server URL
         tags: MCP tags
         authorization_token: Authorization token for MCP server
+        custom_headers: Custom HTTP headers
         container_config: Container configuration
         registry_json: Registry metadata JSON
         enabled: Whether the MCP is enabled
@@ -244,7 +254,7 @@ async def add_mcp_service(
             logger.error(f"MCP name already exists: {name}")
             raise MCPNameIllegal("MCP name already exists")
 
-        if not await mcp_server_health(remote_mcp_server=server_url, authorization_token=authorization_token):
+        if not await mcp_server_health(remote_mcp_server=server_url, authorization_token=authorization_token, custom_headers=custom_headers):
             raise MCPConnectionError("MCP connection failed")
 
         status = True
@@ -257,6 +267,7 @@ async def add_mcp_service(
             "container_id": normalized_container_id,
             "container_port": container_port,
             "authorization_token": authorization_token,
+            "custom_headers": custom_headers,
             "source": source,
             "registry_json": registry_json,
             "enabled": enabled,
@@ -404,11 +415,13 @@ async def update_remote_mcp_server_list(update_data, tenant_id: str, user_id: st
             raise MCPNameIllegal("New MCP name already exists")
 
     authorization_token = update_data.new_authorization_token
+    custom_headers = getattr(update_data, 'custom_headers', None)
 
     try:
         status = await mcp_server_health(
             remote_mcp_server=update_data.new_mcp_url,
-            authorization_token=authorization_token
+            authorization_token=authorization_token,
+            custom_headers=custom_headers,
         )
     except BaseException:
         status = False
@@ -433,6 +446,7 @@ def update_mcp_service(
     description: str | None,
     server_url: str,
     authorization_token: str | None,
+    custom_headers: dict | None,
     tags: list | None,
 ) -> None:
     """Update an MCP service record by ID.
@@ -445,6 +459,7 @@ def update_mcp_service(
         description: MCP service description
         server_url: New MCP server URL
         authorization_token: Authorization token
+        custom_headers: Custom HTTP headers
         tags: MCP tags
 
     Raises:
@@ -468,6 +483,7 @@ def update_mcp_service(
         server_url=server_url,
         source=(current_record.get("source") or "local"),
         authorization_token=authorization_token,
+        custom_headers=custom_headers,
         config_json=config_json,
         tags=tags,
     )
@@ -511,6 +527,7 @@ async def update_mcp_service_enabled(
                     raise McpNameConflictError("An enabled service already uses this name")
 
     authorization_token = current_record.get("authorization_token")
+    custom_headers = current_record.get("custom_headers") if isinstance(current_record.get("custom_headers"), dict) else None
 
     if _is_container_record(current_record):
         if enabled:
@@ -579,6 +596,7 @@ async def update_mcp_service_enabled(
                     health_ok = await mcp_server_health(
                         remote_mcp_server=next_server_url,
                         authorization_token=authorization_token,
+                        custom_headers=custom_headers,
                     )
                 except MCPConnectionError:
                     health_ok = False
@@ -635,6 +653,7 @@ async def update_mcp_service_enabled(
         health_ok = await mcp_server_health(
             remote_mcp_server=server_url,
             authorization_token=authorization_token,
+            custom_headers=custom_headers,
         )
         update_mcp_record_status_by_id(
             mcp_id=mcp_id,
@@ -782,6 +801,7 @@ async def get_remote_mcp_server_list(
         }
         if is_need_auth:
             record_dict["authorization_token"] = record.get("authorization_token")
+            record_dict["custom_headers"] = record.get("custom_headers")
         mcp_records_list.append(record_dict)
     return mcp_records_list
 
@@ -843,7 +863,7 @@ async def get_mcp_record_by_id(mcp_id: int, tenant_id: str) -> dict | None:
         tenant_id: Tenant ID
 
     Returns:
-        Dictionary containing mcp_name, mcp_server, and authorization_token, or None if not found
+        Dictionary containing mcp_name, mcp_server, authorization_token, and custom_headers, or None if not found
     """
     mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not mcp_record:
@@ -853,6 +873,7 @@ async def get_mcp_record_by_id(mcp_id: int, tenant_id: str) -> dict | None:
         "mcp_name": mcp_record.get("mcp_name"),
         "mcp_server": mcp_record.get("mcp_server"),
         "authorization_token": mcp_record.get("authorization_token"),
+        "custom_headers": mcp_record.get("custom_headers"),
     }
 
 
@@ -877,11 +898,17 @@ async def check_mcp_health_and_update_db(mcp_url, service_name, tenant_id, user_
         mcp_server=mcp_url,
         tenant_id=tenant_id
     )
+    custom_headers = get_mcp_custom_headers_by_name_and_url(
+        mcp_name=service_name,
+        mcp_server=mcp_url,
+        tenant_id=tenant_id
+    )
 
     try:
         status = await mcp_server_health(
             remote_mcp_server=mcp_url,
-            authorization_token=authorization_token
+            authorization_token=authorization_token,
+            custom_headers=custom_headers,
         )
     except BaseException:
         status = False
@@ -927,11 +954,13 @@ async def check_mcp_service_health(
         raise McpValidationError("MCP server URL is empty")
 
     authorization_token = record.get("authorization_token")
+    custom_headers = record.get("custom_headers")
 
     try:
         status = await mcp_server_health(
             remote_mcp_server=server_url,
             authorization_token=authorization_token,
+            custom_headers=custom_headers,
         )
     except MCPConnectionError:
         update_mcp_record_status_by_id(
@@ -992,10 +1021,15 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
     if not service_name or not server_url:
         raise McpValidationError("MCP record is missing runtime connection fields")
 
+    authorization_token = record.get("authorization_token")
+    custom_headers = record.get("custom_headers")
+
     tools_info = await get_tool_from_remote_mcp_server(
         mcp_server_name=service_name,
         remote_mcp_server=server_url,
         tenant_id=tenant_id,
+        authorization_token=authorization_token,
+        custom_headers=custom_headers,
     )
     return [tool.__dict__ for tool in tools_info]
 

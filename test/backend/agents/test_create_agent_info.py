@@ -2878,8 +2878,214 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://test.server",
                 "transport": "streamable-http",
-                "authorization": "bearer_token_123"
+                "headers": {"Authorization": "bearer_token_123"}
             }
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_custom_headers_only(self):
+        """Test case for mcp_host with only custom_headers (no authorization_token)"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "custom_header_server",
+                    "remote_mcp_server": "http://custom-header.server",
+                    "status": True,
+                    "authorization_token": None,
+                    "custom_headers": {"X-Custom-Header": "custom-value", "X-Another-Header": "another-value"}
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://custom-header.server"]
+            mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host includes custom headers
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == {
+                "url": "http://custom-header.server",
+                "transport": "streamable-http",
+                "headers": {"X-Custom-Header": "custom-value", "X-Another-Header": "another-value"}
+            }
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_authorization_and_custom_headers(self):
+        """Test case for mcp_host with both authorization_token and custom_headers"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "both_headers_server",
+                    "remote_mcp_server": "http://both-headers.server",
+                    "status": True,
+                    "authorization_token": "bearer_token_456",
+                    "custom_headers": {"X-Custom-Header": "custom-value", "X-Request-ID": "req-123"}
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://both-headers.server"]
+            mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host includes both authorization and custom headers
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            # Authorization header should override any custom X-Authorization header
+            assert mcp_host[0]["url"] == "http://both-headers.server"
+            assert mcp_host[0]["transport"] == "streamable-http"
+            assert mcp_host[0]["headers"]["Authorization"] == "bearer_token_456"
+            assert mcp_host[0]["headers"]["X-Custom-Header"] == "custom-value"
+            assert mcp_host[0]["headers"]["X-Request-ID"] == "req-123"
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_custom_headers_null(self):
+        """Test case for mcp_host with custom_headers=None (should not add headers)"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "null_headers_server",
+                    "remote_mcp_server": "http://null-headers.server",
+                    "status": True,
+                    "authorization_token": None,
+                    "custom_headers": None
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://null-headers.server"]
+            mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host has no headers key when both auth_token and custom_headers are null
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == {
+                "url": "http://null-headers.server",
+                "transport": "streamable-http"
+            }
+            assert "headers" not in mcp_host[0]
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_custom_headers_string_not_dict(self):
+        """Test case for mcp_host with custom_headers as string (not dict) - should be ignored"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "string_headers_server",
+                    "remote_mcp_server": "http://string-headers.server",
+                    "status": True,
+                    "authorization_token": "bearer_token_789",
+                    "custom_headers": "not-a-dict-string"
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://string-headers.server"]
+            mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host only has authorization header, custom_headers string is ignored
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == {
+                "url": "http://string-headers.server",
+                "transport": "streamable-http",
+                "headers": {"Authorization": "bearer_token_789"}
+            }
+            assert mcp_host[0]["headers"]["Authorization"] == "bearer_token_789"
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_with_sse_transport(self):
@@ -3036,7 +3242,7 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://server1.com",
                 "transport": "streamable-http",
-                "authorization": "token1"
+                "headers": {"Authorization": "token1"}
             }
             # Second: dict with SSE transport, no authorization
             assert mcp_host[1] == {

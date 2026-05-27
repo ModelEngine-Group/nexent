@@ -158,6 +158,7 @@ export interface McpServiceItem {
   healthStatus: McpHealthStatus;
   containerStatus?: McpContainerStatus;
   authorizationToken?: string;
+  customHeaders?: Record<string, string>;
 }
 
 export interface McpTagStat {
@@ -173,6 +174,7 @@ export interface AddMcpServicePayload {
   server_url: string;
   tags: string[];
   authorization_token?: string;
+  custom_headers?: Record<string, string>;
   container_config?: Record<string, unknown>;
   version?: string;
   registry_json?: Record<string, unknown>;
@@ -185,6 +187,7 @@ export interface UpdateMcpServicePayload {
   server_url: string;
   tags: string[];
   authorization_token?: string;
+  custom_headers?: Record<string, string>;
 }
 
 export interface ToggleMcpServicePayload {
@@ -222,6 +225,7 @@ export interface LocalAddMcpDraft {
   transportType: McpTransportType;
   serverUrl: string;
   authorizationToken?: string;
+  customHeaders?: string;
   containerConfigJson: string;
   containerPort?: number;
   tags: string[];
@@ -236,6 +240,7 @@ export interface CommunityQuickAddDraft {
   transportType: McpTransportType;
   serverUrl: string;
   authorizationToken?: string;
+  customHeaders?: string;
   containerConfigJson?: string;
   containerPort?: number;
   tags: string[];

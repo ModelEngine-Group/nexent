@@ -83,6 +83,7 @@ export function useMcpServiceDetail({
         server_url: currentDraft.serverUrl.trim(),
         tags: newTags,
         authorization_token: (currentDraft.authorizationToken ?? "").trim() || undefined,
+        custom_headers: currentDraft.customHeaders,
       });
       // Update local state
       setDraft((prev) => {
@@ -215,6 +216,7 @@ export function useMcpServiceDetail({
         server_url: nextUrl,
         tags: nextTags,
         authorization_token: nextToken || undefined,
+        custom_headers: currentDraft.customHeaders,
       });
       message.success(t("mcpTools.service.saveSuccess"));
       invalidateServices();

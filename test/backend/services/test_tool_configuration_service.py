@@ -984,6 +984,74 @@ class TestGetAllMcpTools:
         assert result[0].name == "default_tool"
         assert mock_get_tools.call_count == 1  # Only call default server once
 
+    @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
+    @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    @patch('backend.services.tool_configuration_service.LOCAL_MCP_SERVER', "http://default-server.com")
+    @patch('backend.services.tool_configuration_service.urljoin')
+    async def test_get_all_mcp_tools_with_custom_headers(self, mock_urljoin, mock_get_tools, mock_get_records):
+        """Test get_all_mcp_tools passes custom_headers from records to get_tool_from_remote_mcp_server."""
+        mock_get_records.return_value = [
+            {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True,
+             "authorization_token": "Bearer token1", "custom_headers": {"X-Custom": "value1"}},
+            {"mcp_name": "server2", "mcp_server": "http://server2.com", "enabled": True, "status": True,
+             "authorization_token": "Bearer token2", "custom_headers": {"X-API-Key": "key2"}}
+        ]
+
+        mock_tools = [
+            ToolInfo(name="tool1", description="Tool 1", params=[], source=ToolSourceEnum.MCP.value,
+                     inputs="{}", output_type="string", class_name="Tool1", usage="server1")
+        ]
+        mock_default_tools = [
+            ToolInfo(name="default_tool", description="Default Tool", params=[], source=ToolSourceEnum.MCP.value,
+                     inputs="{}", output_type="string", class_name="DefaultTool", usage="nexent")
+        ]
+        mock_get_tools.side_effect = [mock_tools, mock_tools, mock_default_tools]
+        mock_urljoin.return_value = "http://default-server.com/sse"
+
+        from backend.services.tool_configuration_service import get_all_mcp_tools
+
+        result = await get_all_mcp_tools("test_tenant")
+
+        # Verify calls include custom_headers parameter
+        assert mock_get_tools.call_count == 3
+        calls = mock_get_tools.call_args_list
+        # First call for server1 with custom headers
+        assert calls[0].kwargs.get("custom_headers") == {"X-Custom": "value1"}
+        assert calls[0].kwargs.get("authorization_token") == "Bearer token1"
+        # Second call for server2 with different custom headers
+        assert calls[1].kwargs.get("custom_headers") == {"X-API-Key": "key2"}
+        assert calls[1].kwargs.get("authorization_token") == "Bearer token2"
+
+    @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
+    @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    @patch('backend.services.tool_configuration_service.LOCAL_MCP_SERVER', "http://default-server.com")
+    @patch('backend.services.tool_configuration_service.urljoin')
+    async def test_get_all_mcp_tools_with_null_custom_headers(self, mock_urljoin, mock_get_tools, mock_get_records):
+        """Test get_all_mcp_tools handles null custom_headers in records."""
+        mock_get_records.return_value = [
+            {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True,
+             "custom_headers": None}
+        ]
+
+        mock_tools = [
+            ToolInfo(name="tool1", description="Tool 1", params=[], source=ToolSourceEnum.MCP.value,
+                     inputs="{}", output_type="string", class_name="Tool1", usage="server1")
+        ]
+        mock_default_tools = [
+            ToolInfo(name="default_tool", description="Default Tool", params=[], source=ToolSourceEnum.MCP.value,
+                     inputs="{}", output_type="string", class_name="DefaultTool", usage="nexent")
+        ]
+        mock_get_tools.side_effect = [mock_tools, mock_default_tools]
+        mock_urljoin.return_value = "http://default-server.com/sse"
+
+        from backend.services.tool_configuration_service import get_all_mcp_tools
+
+        result = await get_all_mcp_tools("test_tenant")
+
+        # Verify calls include custom_headers as None
+        calls = mock_get_tools.call_args_list
+        assert calls[0].kwargs.get("custom_headers") is None
+
 
 class TestGetToolFromRemoteMcpServer:
     """Test get_tool_from_remote_mcp_server function"""
@@ -1042,7 +1110,7 @@ class TestGetToolFromRemoteMcpServer:
         assert result[1].description == "Test tool 2 description"
 
         # Verify calls
-        mock_create_transport.assert_called_once_with("http://test-server.com", None)
+        mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
         mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=10)
         assert mock_client.list_tools.call_count == 1
 
@@ -1051,10 +1119,13 @@ class TestGetToolFromRemoteMcpServer:
     @patch('backend.services.tool_configuration_service._sanitize_function_name')
     @patch('backend.services.tool_configuration_service._create_mcp_transport')
     @patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url')
-    async def test_get_tool_from_remote_mcp_server_with_token_from_db(self, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
+    @patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url')
+    async def test_get_tool_from_remote_mcp_server_with_token_from_db(self, mock_get_headers, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
         """Test getting tools from remote MCP server with authorization token from database"""
         # Mock authorization token from database
         mock_get_token.return_value = "Bearer token_from_db"
+        # Mock custom headers from database (default to None)
+        mock_get_headers.return_value = None
 
         # Mock transport
         mock_transport = Mock()
@@ -1097,14 +1168,18 @@ class TestGetToolFromRemoteMcpServer:
         )
 
         # Verify transport was created with token
-        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token_from_db")
+        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token_from_db", None)
 
     @patch('backend.services.tool_configuration_service.Client')
     @patch('backend.services.tool_configuration_service.jsonref.replace_refs')
     @patch('backend.services.tool_configuration_service._sanitize_function_name')
     @patch('backend.services.tool_configuration_service._create_mcp_transport')
-    async def test_get_tool_from_remote_mcp_server_with_provided_token(self, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
+    @patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url')
+    async def test_get_tool_from_remote_mcp_server_with_provided_token(self, mock_get_headers, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
         """Test getting tools from remote MCP server with directly provided authorization token"""
+        # Mock custom headers from database (returns None since we're providing our own headers)
+        mock_get_headers.return_value = None
+
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
@@ -1139,7 +1214,7 @@ class TestGetToolFromRemoteMcpServer:
         assert result[0].name == "test_tool"
 
         # Verify transport was created with provided token (not fetched from DB)
-        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer provided_token")
+        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer provided_token", None)
 
     @patch('backend.services.tool_configuration_service.Client')
     @patch('backend.services.tool_configuration_service._create_mcp_transport')
@@ -1176,7 +1251,7 @@ class TestGetToolFromRemoteMcpServer:
             await get_tool_from_remote_mcp_server("test_server", "http://test-server.com")
 
         # Verify transport was created before connection error
-        mock_create_transport.assert_called_once_with("http://test-server.com", None)
+        mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
 
     @patch('backend.services.tool_configuration_service.Client')
     @patch('backend.services.tool_configuration_service.jsonref.replace_refs')
@@ -1212,6 +1287,162 @@ class TestGetToolFromRemoteMcpServer:
         # Verify default values are added
         assert "see tool description" in str(result[0].inputs)
         assert "string" in str(result[0].inputs)
+
+    @patch('backend.services.tool_configuration_service.Client')
+    @patch('backend.services.tool_configuration_service.jsonref.replace_refs')
+    @patch('backend.services.tool_configuration_service._sanitize_function_name')
+    @patch('backend.services.tool_configuration_service._create_mcp_transport')
+    @patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url')
+    @patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url')
+    async def test_get_tool_from_remote_mcp_server_with_custom_headers_from_db(self, mock_get_headers, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
+        """Test getting tools from remote MCP server with custom headers fetched from database."""
+        # Mock custom headers from database
+        mock_get_headers.return_value = {"X-Custom-Header": "custom_value", "X-API-Key": "api_key_123"}
+        # Mock authorization token (returns None since we're only testing custom_headers here)
+        mock_get_token.return_value = None
+
+        # Mock transport
+        mock_transport = Mock()
+        mock_create_transport.return_value = mock_transport
+
+        # Mock client
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
+
+        # Mock tool list
+        mock_tool = Mock()
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool description"
+        mock_tool.inputSchema = {"properties": {"param1": {"type": "string"}}}
+
+        mock_client.list_tools.return_value = [mock_tool]
+
+        # Mock JSON schema processing
+        mock_replace_refs.return_value = {"properties": {"param1": {"type": "string", "description": "see tool description"}}}
+
+        # Mock name sanitization
+        mock_sanitize.return_value = "test_tool"
+
+        from backend.services.tool_configuration_service import get_tool_from_remote_mcp_server
+
+        result = await get_tool_from_remote_mcp_server(
+            "test_server", "http://test-server.com", tenant_id="tenant1"
+        )
+
+        # Verify results
+        assert len(result) == 1
+        assert result[0].name == "test_tool"
+
+        # Verify custom headers were fetched from database
+        mock_get_headers.assert_called_once_with(
+            mcp_name="test_server",
+            mcp_server="http://test-server.com",
+            tenant_id="tenant1"
+        )
+
+        # Verify transport was created with custom headers
+        mock_create_transport.assert_called_once_with(
+            "http://test-server.com", None, {"X-Custom-Header": "custom_value", "X-API-Key": "api_key_123"}
+        )
+
+    @patch('backend.services.tool_configuration_service.Client')
+    @patch('backend.services.tool_configuration_service.jsonref.replace_refs')
+    @patch('backend.services.tool_configuration_service._sanitize_function_name')
+    @patch('backend.services.tool_configuration_service._create_mcp_transport')
+    @patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url')
+    @patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url')
+    async def test_get_tool_from_remote_mcp_server_with_token_and_custom_headers(self, mock_get_headers, mock_get_token, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
+        """Test getting tools with both authorization token and custom headers from database."""
+        # Mock both token and custom headers from database
+        mock_get_token.return_value = "Bearer token_from_db"
+        mock_get_headers.return_value = {"X-Custom-Header": "custom_value"}
+
+        # Mock transport
+        mock_transport = Mock()
+        mock_create_transport.return_value = mock_transport
+
+        # Mock client
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
+
+        # Mock tool list
+        mock_tool = Mock()
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool description"
+        mock_tool.inputSchema = {"properties": {"param1": {"type": "string"}}}
+
+        mock_client.list_tools.return_value = [mock_tool]
+
+        # Mock JSON schema processing
+        mock_replace_refs.return_value = {"properties": {"param1": {"type": "string", "description": "see tool description"}}}
+
+        # Mock name sanitization
+        mock_sanitize.return_value = "test_tool"
+
+        from backend.services.tool_configuration_service import get_tool_from_remote_mcp_server
+
+        result = await get_tool_from_remote_mcp_server(
+            "test_server", "http://test-server.com", tenant_id="tenant1"
+        )
+
+        # Verify results
+        assert len(result) == 1
+        assert result[0].name == "test_tool"
+
+        # Verify both token and custom headers were fetched from database
+        mock_get_token.assert_called_once()
+        mock_get_headers.assert_called_once()
+
+        # Verify transport was created with both token and custom headers
+        mock_create_transport.assert_called_once_with(
+            "http://test-server.com", "Bearer token_from_db", {"X-Custom-Header": "custom_value"}
+        )
+
+    @patch('backend.services.tool_configuration_service.Client')
+    @patch('backend.services.tool_configuration_service.jsonref.replace_refs')
+    @patch('backend.services.tool_configuration_service._sanitize_function_name')
+    @patch('backend.services.tool_configuration_service._create_mcp_transport')
+    async def test_get_tool_from_remote_mcp_server_with_provided_custom_headers(self, mock_create_transport, mock_sanitize, mock_replace_refs, mock_client_cls):
+        """Test getting tools with directly provided custom headers (not from DB)."""
+        # Mock transport
+        mock_transport = Mock()
+        mock_create_transport.return_value = mock_transport
+
+        # Mock client
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
+
+        # Mock tool list
+        mock_tool = Mock()
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool description"
+        mock_tool.inputSchema = {"properties": {"param1": {"type": "string"}}}
+
+        mock_client.list_tools.return_value = [mock_tool]
+
+        # Mock JSON schema processing
+        mock_replace_refs.return_value = {"properties": {"param1": {"type": "string", "description": "see tool description"}}}
+
+        # Mock name sanitization
+        mock_sanitize.return_value = "test_tool"
+
+        from backend.services.tool_configuration_service import get_tool_from_remote_mcp_server
+
+        # Provide custom headers directly
+        custom_headers = {"X-Direct-Header": "direct_value"}
+        result = await get_tool_from_remote_mcp_server(
+            "test_server", "http://test-server.com", custom_headers=custom_headers
+        )
+
+        # Verify results
+        assert len(result) == 1
+        assert result[0].name == "test_tool"
+
+        # Verify transport was created with provided custom headers (not None)
+        mock_create_transport.assert_called_once_with("http://test-server.com", None, {"X-Direct-Header": "direct_value"})
 
 
 class TestUpdateToolList:
@@ -1726,7 +1957,7 @@ class TestLoadLastToolConfigImpl:
         result = await _call_mcp_tool("http://test-server.com", "test_tool", {"param": "value"})
 
         assert result == "test result"
-        mock_create_transport.assert_called_once_with("http://test-server.com", None)
+        mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
         mock_client_cls.assert_called_once_with(transport=mock_transport)
         mock_client.call_tool.assert_called_once_with(
             name="test_tool", arguments={"param": "value"})
@@ -1761,7 +1992,7 @@ class TestLoadLastToolConfigImpl:
         )
 
         assert result == "test result with token"
-        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token123")
+        mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token123", None)
         mock_client_cls.assert_called_once_with(transport=mock_transport)
         mock_client.call_tool.assert_called_once_with(
             name="test_tool", arguments={"param": "value"})
@@ -1788,7 +2019,7 @@ class TestLoadLastToolConfigImpl:
             await _call_mcp_tool("http://test-server.com", "test_tool", {"param": "value"})
 
         # Verify client was created and connection was checked
-        mock_create_transport.assert_called_once_with("http://test-server.com", None)
+        mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
         mock_client_cls.assert_called_once_with(transport=mock_transport)
         mock_client.is_connected.assert_called_once()
 
@@ -1809,12 +2040,14 @@ class TestLoadLastToolConfigImpl:
             "http://nexent-server.com/sse", "test_tool", {"param": "value"})
 
     @patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url')
+    @patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url')
     @patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant')
     @patch('backend.services.tool_configuration_service._call_mcp_tool')
-    async def test_validate_mcp_tool_remote_success(self, mock_call_tool, mock_get_server, mock_get_token):
+    async def test_validate_mcp_tool_remote_success(self, mock_call_tool, mock_get_server, mock_get_headers, mock_get_token):
         """Test successful remote MCP tool validation with authorization token from database"""
         mock_get_server.return_value = "http://remote-server.com"
         mock_get_token.return_value = "Bearer token_from_db"
+        mock_get_headers.return_value = None
         mock_call_tool.return_value = "validation result"
 
         from backend.services.tool_configuration_service import _validate_mcp_tool_remote
@@ -1830,11 +2063,13 @@ class TestLoadLastToolConfigImpl:
         )
         # _call_mcp_tool is called with authorization_token as positional argument
         mock_call_tool.assert_called_once_with(
-            "http://remote-server.com", "test_tool", {"param": "value"}, "Bearer token_from_db")
+            "http://remote-server.com", "test_tool", {"param": "value"}, "Bearer token_from_db", None)
 
+    @patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url')
+    @patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url')
     @patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant')
     @patch('backend.services.tool_configuration_service._call_mcp_tool')
-    async def test_validate_mcp_tool_remote_without_tenant_id(self, mock_call_tool, mock_get_server):
+    async def test_validate_mcp_tool_remote_without_tenant_id(self, mock_call_tool, mock_get_server, mock_get_headers, mock_get_token):
         """Test remote MCP tool validation when tenant_id is None (no token fetched)"""
         mock_get_server.return_value = "http://remote-server.com"
         mock_call_tool.return_value = "validation result"
@@ -1847,7 +2082,7 @@ class TestLoadLastToolConfigImpl:
         mock_get_server.assert_called_once_with("test_server", None)
         # Verify _call_mcp_tool was called with authorization_token as positional argument (None)
         mock_call_tool.assert_called_once_with(
-            "http://remote-server.com", "test_tool", {"param": "value"}, None)
+            "http://remote-server.com", "test_tool", {"param": "value"}, None, None)
 
     @patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant')
     async def test_validate_mcp_tool_remote_server_not_found(self, mock_get_server):
@@ -1858,6 +2093,59 @@ class TestLoadLastToolConfigImpl:
 
         with pytest.raises(NotFoundException, match="MCP server not found for name: test_server"):
             await _validate_mcp_tool_remote("test_tool", {"param": "value"}, "test_server", "tenant1")
+
+    @patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url')
+    @patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url')
+    @patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant')
+    @patch('backend.services.tool_configuration_service._call_mcp_tool')
+    async def test_validate_mcp_tool_remote_with_custom_headers_from_db(self, mock_call_tool, mock_get_server, mock_get_headers, mock_get_token):
+        """Test remote MCP tool validation with custom headers fetched from database."""
+        mock_get_server.return_value = "http://remote-server.com"
+        mock_get_token.return_value = "Bearer token_from_db"
+        mock_get_headers.return_value = {"X-Custom-Header": "custom_value", "X-API-Key": "api_key"}
+        mock_call_tool.return_value = "validation result with custom headers"
+
+        from backend.services.tool_configuration_service import _validate_mcp_tool_remote
+
+        result = await _validate_mcp_tool_remote("test_tool", {"param": "value"}, "test_server", "tenant1")
+
+        assert result == "validation result with custom headers"
+        mock_get_server.assert_called_once_with("test_server", "tenant1")
+        mock_get_token.assert_called_once_with(
+            mcp_name="test_server",
+            mcp_server="http://remote-server.com",
+            tenant_id="tenant1"
+        )
+        mock_get_headers.assert_called_once_with(
+            mcp_name="test_server",
+            mcp_server="http://remote-server.com",
+            tenant_id="tenant1"
+        )
+        # _call_mcp_tool is called with both token and custom headers
+        mock_call_tool.assert_called_once_with(
+            "http://remote-server.com", "test_tool", {"param": "value"}, "Bearer token_from_db", {"X-Custom-Header": "custom_value", "X-API-Key": "api_key"}
+        )
+
+    @patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url')
+    @patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url')
+    @patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant')
+    @patch('backend.services.tool_configuration_service._call_mcp_tool')
+    async def test_validate_mcp_tool_remote_with_empty_custom_headers(self, mock_call_tool, mock_get_server, mock_get_headers, mock_get_token):
+        """Test remote MCP tool validation when custom headers are empty from database."""
+        mock_get_server.return_value = "http://remote-server.com"
+        mock_get_token.return_value = None
+        mock_get_headers.return_value = None
+        mock_call_tool.return_value = "validation result"
+
+        from backend.services.tool_configuration_service import _validate_mcp_tool_remote
+
+        result = await _validate_mcp_tool_remote("test_tool", {"param": "value"}, "test_server", "tenant1")
+
+        assert result == "validation result"
+        # _call_mcp_tool is called with None for both token and custom headers
+        mock_call_tool.assert_called_once_with(
+            "http://remote-server.com", "test_tool", {"param": "value"}, None, None
+        )
 
     @patch('backend.services.tool_configuration_service.importlib.import_module')
     def test_get_tool_class_by_name_success(self, mock_import):
@@ -3739,17 +4027,18 @@ class TestValidateMcpToolRemote:
 
         with patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant', return_value=mock_url):
             with patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url', return_value=mock_token):
-                with patch('backend.services.tool_configuration_service._call_mcp_tool', return_value="tool result") as mock_call:
-                    from backend.services.tool_configuration_service import _validate_mcp_tool_remote
-                    result = await _validate_mcp_tool_remote(
-                        "test_tool",
-                        {"param": "value"},
-                        "remote_mcp",
-                        "tenant1"
-                    )
+                with patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url', return_value=None):
+                    with patch('backend.services.tool_configuration_service._call_mcp_tool', return_value="tool result") as mock_call:
+                        from backend.services.tool_configuration_service import _validate_mcp_tool_remote
+                        result = await _validate_mcp_tool_remote(
+                            "test_tool",
+                            {"param": "value"},
+                            "remote_mcp",
+                            "tenant1"
+                        )
 
-                    assert result == "tool result"
-                    mock_call.assert_called_once_with(mock_url, "test_tool", {"param": "value"}, mock_token)
+                        assert result == "tool result"
+                        mock_call.assert_called_once_with(mock_url, "test_tool", {"param": "value"}, mock_token, None)
 
     @pytest.mark.asyncio
     async def test_validate_mcp_tool_remote_server_not_found(self):
@@ -3766,18 +4055,19 @@ class TestValidateMcpToolRemote:
 
         with patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant', return_value=mock_url):
             with patch('backend.services.tool_configuration_service.get_mcp_authorization_token_by_name_and_url', return_value=None):
-                with patch('backend.services.tool_configuration_service._call_mcp_tool', return_value="tool result") as mock_call:
-                    from backend.services.tool_configuration_service import _validate_mcp_tool_remote
-                    result = await _validate_mcp_tool_remote(
-                        "test_tool",
-                        {"param": "value"},
-                        "remote_mcp",
-                        "tenant1"
-                    )
+                with patch('backend.services.tool_configuration_service.get_mcp_custom_headers_by_name_and_url', return_value=None):
+                    with patch('backend.services.tool_configuration_service._call_mcp_tool', return_value="tool result") as mock_call:
+                        from backend.services.tool_configuration_service import _validate_mcp_tool_remote
+                        result = await _validate_mcp_tool_remote(
+                            "test_tool",
+                            {"param": "value"},
+                            "remote_mcp",
+                            "tenant1"
+                        )
 
-                    assert result == "tool result"
-                    # Token should be None
-                    mock_call.assert_called_once_with(mock_url, "test_tool", {"param": "value"}, None)
+                        assert result == "tool result"
+                        # Token should be None
+                        mock_call.assert_called_once_with(mock_url, "test_tool", {"param": "value"}, None, None)
         # Should still call with None token
         mock_call.assert_called_once()
 
@@ -3807,7 +4097,8 @@ class TestCallMcpTool:
                     "http://mcp-server/sse",
                     "test_tool",
                     {"param": "value"},
-                    "auth_token"
+                    "auth_token",
+                    None  # custom_headers
                 )
 
         assert result == "tool output"
@@ -3832,6 +4123,69 @@ class TestCallMcpTool:
                 from backend.services.tool_configuration_service import _call_mcp_tool
                 with pytest.raises(MCPConnectionError, match="Failed to connect to MCP server"):
                     await _call_mcp_tool("http://mcp-server/sse", "test_tool", {}, None)
+
+    @pytest.mark.asyncio
+    async def test_call_mcp_tool_with_custom_headers(self):
+        """Test successful MCP tool call with custom headers."""
+        from fastmcp import Client
+
+        mock_transport_instance = Mock()
+        mock_client_instance = AsyncMock()
+        mock_client_instance.is_connected.return_value = True
+        mock_result = Mock()
+        mock_result.content = [Mock(text="tool output with custom headers")]
+        mock_client_instance.call_tool.return_value = mock_result
+
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+
+        with patch('backend.services.tool_configuration_service.Client', return_value=mock_client_instance):
+            with patch('backend.services.tool_configuration_service._create_mcp_transport', return_value=mock_transport_instance) as mock_transport:
+                from backend.services.tool_configuration_service import _call_mcp_tool
+                custom_headers = {"X-Custom-Header": "custom_value", "X-API-Key": "api_key"}
+                result = await _call_mcp_tool(
+                    "http://mcp-server/sse",
+                    "test_tool",
+                    {"param": "value"},
+                    "auth_token",
+                    custom_headers
+                )
+
+        assert result == "tool output with custom headers"
+        # Verify transport was created with custom headers
+        mock_transport.assert_called_once_with(
+            "http://mcp-server/sse", "auth_token", {"X-Custom-Header": "custom_value", "X-API-Key": "api_key"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_call_mcp_tool_with_empty_custom_headers(self):
+        """Test MCP tool call with empty custom headers dict."""
+        from fastmcp import Client
+
+        mock_transport_instance = Mock()
+        mock_client_instance = AsyncMock()
+        mock_client_instance.is_connected.return_value = True
+        mock_result = Mock()
+        mock_result.content = [Mock(text="tool output")]
+        mock_client_instance.call_tool.return_value = mock_result
+
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+
+        with patch('backend.services.tool_configuration_service.Client', return_value=mock_client_instance):
+            with patch('backend.services.tool_configuration_service._create_mcp_transport', return_value=mock_transport_instance) as mock_transport:
+                from backend.services.tool_configuration_service import _call_mcp_tool
+                result = await _call_mcp_tool(
+                    "http://mcp-server/sse",
+                    "test_tool",
+                    {"param": "value"},
+                    None,
+                    {}
+                )
+
+        assert result == "tool output"
+        # Verify transport was created with empty custom headers
+        mock_transport.assert_called_once_with("http://mcp-server/sse", None, {})
 
 
 class TestValidateLangChainTool:
@@ -3939,6 +4293,40 @@ class TestCreateMcpTransport:
 
         from fastmcp.client.transports import StreamableHttpTransport
         assert isinstance(transport, StreamableHttpTransport)
+
+    def test_create_mcp_transport_with_custom_headers(self):
+        """Test creating transport with custom headers."""
+        from backend.services.tool_configuration_service import _create_mcp_transport
+        custom_headers = {"X-Custom-Header": "custom_value", "X-Another-Header": "another_value"}
+        transport = _create_mcp_transport("http://server/sse", "auth_token", custom_headers)
+
+        from fastmcp.client.transports import SSETransport
+        assert isinstance(transport, SSETransport)
+        assert transport.headers.get("Authorization") == "auth_token"
+        assert transport.headers.get("X-Custom-Header") == "custom_value"
+        assert transport.headers.get("X-Another-Header") == "another_value"
+
+    def test_create_mcp_transport_with_auth_and_custom_headers(self):
+        """Test creating transport with both auth token and custom headers."""
+        from backend.services.tool_configuration_service import _create_mcp_transport
+        custom_headers = {"X-API-Key": "api_key_123"}
+        transport = _create_mcp_transport("http://server/mcp", "Bearer token", custom_headers)
+
+        from fastmcp.client.transports import StreamableHttpTransport
+        assert isinstance(transport, StreamableHttpTransport)
+        assert transport.headers.get("Authorization") == "Bearer token"
+        assert transport.headers.get("X-API-Key") == "api_key_123"
+
+    def test_create_mcp_transport_empty_custom_headers(self):
+        """Test creating transport with empty custom headers dict."""
+        from backend.services.tool_configuration_service import _create_mcp_transport
+        transport = _create_mcp_transport("http://server/sse", "token", {})
+
+        from fastmcp.client.transports import SSETransport
+        assert isinstance(transport, SSETransport)
+        assert transport.headers.get("Authorization") == "token"
+
+
 class TestValidateMcpToolNexent:
     """Test cases for _validate_mcp_tool_nexent function."""
 
