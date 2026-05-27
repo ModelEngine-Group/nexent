@@ -511,7 +511,7 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
 
     # Base sections always generated
     prompt_configs = [
-        ("duty", prompt_for_generate["DUTY_SYSTEM_PROMPT"]),
+        ("duty", prompt_for_generate["duty_system_prompt"]),
         ("agent_var_name",
          prompt_for_generate["agent_variable_name_system_prompt"]),
         ("agent_display_name",
@@ -523,8 +523,8 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
     # Constraint and few_shots sections are only generated when tools or sub-agents are selected
     if has_selected_resources:
         prompt_configs.extend([
-            ("constraint", prompt_for_generate["CONSTRAINT_SYSTEM_PROMPT"]),
-            ("few_shots", prompt_for_generate["FEW_SHOTS_SYSTEM_PROMPT"]),
+            ("constraint", prompt_for_generate["constraint_system_prompt"]),
+            ("few_shots", prompt_for_generate["few_shots_system_prompt"]),
         ])
     else:
         logger.info("Skipping constraint and few_shots generation: no tools or sub-agents selected")

@@ -18,6 +18,7 @@ interface ToolManagementProps {
   toolGroups: ToolGroup[];
   isCreatingMode?: boolean;
   currentAgentId?: number | undefined;
+  isReadOnly?: boolean;
 }
 
 // Tool types that require knowledge base selection
@@ -74,20 +75,15 @@ export default function ToolManagement({
   toolGroups,
   isCreatingMode,
   currentAgentId,
+  isReadOnly: isReadOnlyProp,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const { confirm } = useConfirmModal();
 
-  // Get current agent permission from store
-  const currentAgentPermission = useAgentConfigStore(
-    (state) => state.currentAgentPermission
-  );
-
-  // Check if current agent is read-only (only when agent is selected and permission is READ_ONLY)
-  const isReadOnly = !isCreatingMode && currentAgentId !== undefined && currentAgentPermission === "READ_ONLY";
-
-  const editable = (currentAgentId || isCreatingMode) && !isReadOnly;
+  // Use prop if provided, otherwise fall back to store
+  const storeIsReadOnly = useAgentConfigStore((state) => state.isReadOnly());
+  const isReadOnly = isReadOnlyProp ?? storeIsReadOnly;
 
   // Get state from store
   const originalSelectedTools = useAgentConfigStore(
@@ -304,7 +300,7 @@ export default function ToolManagement({
           <span
             style={{
               display: "block",
-              maxWidth: "70px",
+              maxWidth: "100px",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -380,9 +376,9 @@ export default function ToolManagement({
                                 isSelected
                                   ? "bg-blue-100 border-blue-400 shadow-md"
                                   : "border-gray-200 hover:border-blue-300 hover:shadow-md"
-                              } ${editable && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                              } ${!isReadOnly && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
                               onClick={
-                                editable && !isDisabled
+                                !isReadOnly && !isDisabled
                                   ? () => handleToolClick(tool.id)
                                   : undefined
                               }
@@ -428,9 +424,9 @@ export default function ToolManagement({
                               </div>
                               <Settings
                                 size={16}
-                                className={`${editable && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
+                                className={`${!isReadOnly && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
                                 onClick={
-                                  editable && !isDisabled
+                                  !isReadOnly && !isDisabled
                                     ? (e) => {
                                         e.stopPropagation();
                                         handleToolSettingsClick(tool);
@@ -485,9 +481,9 @@ export default function ToolManagement({
                         isSelected
                           ? "bg-blue-100 border-blue-400 shadow-md"
                           : "border-gray-200 hover:border-blue-300 hover:shadow-md"
-                      } ${editable && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                      } ${!isReadOnly && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
                     onClick={
-                      editable && !isDisabled ? () => handleToolClick(tool.id) : undefined
+                      !isReadOnly && !isDisabled ? () => handleToolClick(tool.id) : undefined
                     }
                   >
                     <div className="flex items-center gap-2">
@@ -531,9 +527,9 @@ export default function ToolManagement({
                     </div>
                     <Settings
                       size={16}
-                      className={`${editable && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
+                      className={`${!isReadOnly && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
                       onClick={
-                        editable && !isDisabled
+                        !isReadOnly && !isDisabled
                           ? (e) => {
                               e.stopPropagation();
                               handleToolSettingsClick(tool);
@@ -575,8 +571,8 @@ export default function ToolManagement({
             height: "100%",
           }}
           tabBarStyle={{
-            minWidth: "80px",
-            maxWidth: "100px",
+            minWidth: "120px",
+            maxWidth: "120px",
             padding: "4px 0",
             margin: 0,
           }}

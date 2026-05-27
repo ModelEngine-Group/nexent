@@ -1,4 +1,4 @@
-{{- if eq .Values.global.deploymentVersion "full" }}
+{{- if or (eq .Values.global.deploymentVersion "full") (index .Values.global.deploymentComponents "supabase") }}
 ---
 apiVersion: apps/v1
 kind: Deployment

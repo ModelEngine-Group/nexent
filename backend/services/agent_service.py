@@ -67,10 +67,11 @@ from database.tool_db import (
     search_tools_for_sub_agent
 )
 from database import skill_db
+from services.skill_service import SkillService
 from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
-from database.a2a_agent_db import get_server_agent_ids
+from database.a2a_agent_db import get_server_agent_ids, query_external_sub_agents
 from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_ID,
     SYSTEM_PROMPT_TEMPLATE_NAME,
@@ -753,12 +754,30 @@ async def get_creating_sub_agent_id_service(tenant_id: str, user_id: str = None)
         return create_agent(agent_info={"enabled": False}, tenant_id=tenant_id, user_id=user_id)["agent_id"]
 
 
-async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0):
+async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0, user_id: Optional[str] = None):
     try:
         agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
         raise ValueError(f"Failed to get agent info: {str(e)}")
+
+    # Calculate permission if user_id is provided
+    if user_id is not None:
+        try:
+            user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
+            user_role = str(user_tenant_record.get("user_role") or "").upper()
+            can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+
+            # Permission logic (same as agent list):
+            # - If creator or can_edit_all: PERMISSION_EDIT
+            # - Otherwise: use ingroup_permission, default to PERMISSION_READ if None
+            if can_edit_all or str(agent_info.get("created_by")) == str(user_id):
+                agent_info["permission"] = PERMISSION_EDIT
+            else:
+                ingroup_permission = agent_info.get("ingroup_permission")
+                agent_info["permission"] = ingroup_permission if ingroup_permission is not None else PERMISSION_READ
+        except Exception as e:
+            logger.warning(f"Failed to calculate agent permission: {str(e)}")
 
     try:
         tool_info = search_tools_for_sub_agent(
@@ -775,6 +794,28 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     except Exception as e:
         logger.error(f"Failed to get sub agent id list: {str(e)}")
         agent_info["sub_agent_id_list"] = []
+
+    try:
+        skill_service = SkillService()
+        instances = skill_service.list_skill_instances(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no
+        )
+        agent_info["skills"] = instances
+    except Exception as e:
+        logger.exception(f"Failed to get agent skills: {str(e)}")
+        agent_info["skills"] = []
+
+    try:
+        external_agents = query_external_sub_agents(
+            local_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+        agent_info["external_sub_agent_id_list"] = [
+            ea["external_agent_id"] for ea in external_agents
+        ]
+    except Exception as e:
+        logger.error(f"Failed to get external sub agents: {str(e)}")
+        agent_info["external_sub_agent_id_list"] = []
 
     if agent_info["model_id"] is not None:
         model_info = get_model_by_model_id(agent_info["model_id"])

@@ -7,8 +7,8 @@ import os
 import sys
 from unittest.mock import MagicMock
 
-# Stub out mem0 modules before anything else imports them.
-# The sdk imports mem0 at module level, so stubs must be registered first.
+# Stub out mem0 and smolagents modules before anything else imports them.
+# The sdk imports these at module level, so stubs must be registered first.
 _mem0_stubs = {
     "mem0": MagicMock(),
     "mem0.memory": MagicMock(),
@@ -19,9 +19,6 @@ _mem0_stubs = {
     "mem0.configs.embeddings": MagicMock(),
     "mem0.configs.embeddings.base": MagicMock(),
 }
-for _mod_name in _mem0_stubs:
-    if _mod_name not in sys.modules:
-        sys.modules[_mod_name] = _mem0_stubs[_mod_name]
 
 # Add backend and sdk directories to sys.path so that modules can be imported
 # as `from backend.xxx import ...` and `from sdk.xxx import ...`

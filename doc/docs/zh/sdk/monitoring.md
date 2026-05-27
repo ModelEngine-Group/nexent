@@ -16,7 +16,7 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 
 ```bash
 cd docker
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 cp monitoring/monitoring.env.example monitoring/monitoring.env
 
 vim .env

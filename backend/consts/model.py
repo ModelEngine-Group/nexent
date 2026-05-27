@@ -177,6 +177,16 @@ class STTModelConfig(BaseModel):
     accessToken: Optional[str] = None
 
 
+class TTSModelConfig(BaseModel):
+    """TTS model specific configuration with factory, appid, and access token fields"""
+    modelName: str
+    displayName: str
+    apiConfig: Optional[ModelApiConfig] = None
+    modelFactory: Optional[str] = None
+    modelAppid: Optional[str] = None
+    accessToken: Optional[str] = None
+
+
 class ModelConfig(BaseModel):
     llm: SingleModelConfig
     embedding: SingleModelConfig
@@ -184,6 +194,7 @@ class ModelConfig(BaseModel):
     rerank: SingleModelConfig
     vlm: SingleModelConfig
     stt: STTModelConfig
+    tts: TTSModelConfig
 
 
 class AppConfig(BaseModel):
@@ -598,7 +609,7 @@ class MemoryAgentShareMode(str, Enum):
 class VoiceConnectivityRequest(BaseModel):
     """Request model for voice service connectivity check"""
     model_type: str = Field(...,
-                            description="Type of model to check ('stt')")
+                            description="Type of model to check ('stt' or 'tts')")
 
 
 class VoiceConnectivityResponse(BaseModel):
