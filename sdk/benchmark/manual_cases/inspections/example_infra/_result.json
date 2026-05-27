@@ -3,7 +3,7 @@
   "is_fallback": false,
   "is_incremental": false,
   "input_chars": 21935,
-  "summary_chars": 2170,
+  "summary_chars": 1715,
   "checks": [
     {
       "check": {
@@ -12,13 +12,13 @@
           "85%"
         ]
       },
-      "passed": true,
-      "score": 1.0,
+      "passed": false,
+      "score": 0.0,
       "details": {
         "must_contain": {
-          "matched": 1,
+          "matched": 0,
           "total": 1,
-          "ok": true
+          "ok": false
         }
       }
     },
@@ -132,13 +132,13 @@
           "localhost"
         ]
       },
-      "passed": false,
-      "score": 0.5,
+      "passed": true,
+      "score": 1.0,
       "details": {
         "must_contain": {
-          "matched": 1,
+          "matched": 2,
           "total": 2,
-          "ok": false
+          "ok": true
         }
       }
     },
@@ -178,7 +178,7 @@
       }
     }
   ],
-  "score": 0.75,
+  "score": 0.7,
   "passed": 7,
   "total": 10
 }
