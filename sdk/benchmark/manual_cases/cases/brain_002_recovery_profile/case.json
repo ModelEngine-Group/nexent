@@ -1,0 +1,184 @@
+{
+  "id": "brain_002_recovery_profile",
+  "history_file": "./history.json",
+  "queries": [
+    "请完整总结Nakamura等人论文中恢复轮廓框架的指标体系，包括每个指标的定义、作用和它们之间的层级关系。",
+    "假设你正在评估两个视觉模型与fMRI数据的对齐程度，模型A精度略高但TopKCov曲线形状与大脑源差异大，模型B精度略低但形状更接近。从理解大脑表征的角度，你会选择哪个模型？为什么？",
+    "解释为什么恢复轮廓框架不是在模型坐标系中分解分数，也不是学习新的公共空间。这种设计选择有什么优势和代价？"
+  ],
+  "probes": [
+    {
+      "question": "DirCov高是否意味着该方向上的标量预测好？为什么覆盖率和预测精度测的是不同的东西？",
+      "must_contain_any": [
+        "不",
+        "不是",
+        "覆盖",
+        "不代表",
+        "even if",
+        "即使"
+      ]
+    },
+    {
+      "question": "恢复轮廓框架是在什么空间中定义参考的？为什么不在模型坐标系中分解分数？",
+      "must_contain_any": [
+        "目标大脑",
+        "target brain",
+        "响应空间",
+        "目标空间"
+      ]
+    },
+    {
+      "question": "TopKCov是DirCov的什么类型的聚合？",
+      "must_contain_any": [
+        "前缀平均",
+        "prefix average",
+        "加权前缀平均",
+        "参考加权前缀"
+      ]
+    },
+    {
+      "question": "大脑到大脑的top-k覆盖率在k=1时是多少？",
+      "must_contain": [
+        "0.959"
+      ]
+    },
+    {
+      "question": "大脑到大脑的top-k覆盖率在k=10时是多少？",
+      "must_contain": [
+        "0.868"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "DirCov definition as projection overlap",
+      "must_contain_any": [
+        "投影",
+        "projection",
+        "DirCov"
+      ]
+    },
+    {
+      "description": "TopKCov as prefix average",
+      "must_contain_any": [
+        "前缀平均",
+        "prefix average",
+        "前缀"
+      ]
+    },
+    {
+      "description": "BrainRefScore does not mean more brain-like",
+      "must_contain_any": [
+        "不代表",
+        "不意味着",
+        "不等于",
+        "not imply"
+      ]
+    },
+    {
+      "description": "Prediction accuracy and profile are complementary",
+      "must_contain_any": [
+        "互补",
+        "complementary",
+        "精度",
+        "覆盖"
+      ]
+    },
+    {
+      "description": "K=10 for main profile display",
+      "must_contain": [
+        "10"
+      ]
+    },
+    {
+      "description": "Brain-to-brain top-k coverage at k=1",
+      "must_contain": [
+        "0.959"
+      ]
+    },
+    {
+      "description": "Brain-to-brain top-k coverage at k=10",
+      "must_contain": [
+        "0.868"
+      ]
+    },
+    {
+      "description": "Disjoint-fold stress test correlation",
+      "must_contain": [
+        "0.90"
+      ]
+    },
+    {
+      "description": "Target PCA 1-component full-spectrum coverage",
+      "must_contain": [
+        "0.18"
+      ]
+    },
+    {
+      "description": "Brain-to-brain full-spectrum coverage",
+      "must_contain": [
+        "0.85"
+      ]
+    },
+    {
+      "description": "ShapeDist normalizes by own mean",
+      "must_contain_any": [
+        "归一化",
+        "normalize",
+        "均值"
+      ]
+    },
+    {
+      "description": "Framework fixes reference in target brain space",
+      "must_contain_any": [
+        "目标大脑",
+        "target brain",
+        "响应空间",
+        "重复测量"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "DirCov",
+        "TopKCov",
+        "ProfileMean",
+        "BrainRefScore",
+        "ShapeDist",
+        "FullRefCov",
+        "恢复"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "形状",
+        "shape",
+        "覆盖",
+        "大脑表征",
+        "理解",
+        "TopKCov",
+        "ShapeDist"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain_any": [
+        "目标",
+        "target",
+        "不是模型",
+        "重复测量",
+        "参考",
+        "覆盖"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 4718,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}

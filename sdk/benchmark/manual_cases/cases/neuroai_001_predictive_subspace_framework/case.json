@@ -1,0 +1,176 @@
+{
+  "id": "neuroai_001_predictive_subspace_framework",
+  "history_file": "./history.json",
+  "queries": [
+    "请总结 predictive subspace framework 的核心思想，包括它解决了什么问题、主要步骤是什么、以及它与传统 prediction accuracy 评估有什么本质区别。",
+    "如果我想用这个框架评估一个新的视觉模型，需要满足什么条件？请列出数据要求、方法要求和适用场景。",
+    "比较 reproducible target reference 和 PCA 的区别，解释为什么前者更适合作为评估坐标系。"
+  ],
+  "probes": [
+    {
+      "question": "Reproducible target reference 的排序标准是什么？它与 PCA 的排序标准有何本质区别？",
+      "must_contain_any": [
+        "预测可复现性",
+        "predictive reproducibility",
+        "可跨分割复现",
+        "非响应方差"
+      ]
+    },
+    {
+      "question": "前三个 target-reference 维度平均占多少比例的归一化 reference weight？",
+      "must_contain": [
+        "88.6"
+      ]
+    },
+    {
+      "question": "为什么 subspace regularization 和 readout regularization 要分开选择而不是共享一个参数？",
+      "must_contain_any": [
+        "不同目的",
+        "预测几何",
+        "标量预测",
+        "目的不同"
+      ]
+    },
+    {
+      "question": "Brain-to-brain recovery profile 从 k=1 到 k=10 的 top-k reference coverage 分别是多少？",
+      "must_contain": [
+        "0.959",
+        "0.868"
+      ]
+    },
+    {
+      "question": "所有源的 predictive subspace 为什么可以在同一个目标响应空间中直接比较？",
+      "must_contain_any": [
+        "投影矩阵",
+        "projector",
+        "同一目标空间"
+      ]
+    },
+    {
+      "question": "NSD-core-shared 数据集包含多少个被试和多少张共享重复自然图像？",
+      "must_contain": [
+        "8",
+        "515"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "Probe 1 match: reference ranked by predictive reproducibility not variance",
+      "must_contain_any": [
+        "预测可复现性",
+        "predictive reproducibility"
+      ]
+    },
+    {
+      "description": "Probe 2 match: first 3 dimensions 88.6% reference weight",
+      "must_contain": [
+        "88.6"
+      ]
+    },
+    {
+      "description": "Probe 3 match: subspace and readout regularization serve different purposes",
+      "must_contain_any": [
+        "不同目的",
+        "预测几何",
+        "标量预测"
+      ]
+    },
+    {
+      "description": "Probe 4 match: brain-to-brain coverage 0.959 at k=1, 0.868 at k=10",
+      "must_contain": [
+        "0.959",
+        "0.868"
+      ]
+    },
+    {
+      "description": "Probe 5 match: all sources as projectors in same target space",
+      "must_contain_any": [
+        "投影矩阵",
+        "projector",
+        "同一目标空间"
+      ]
+    },
+    {
+      "description": "Probe 6 match: DirCov 1 means fully within, 0 means orthogonal",
+      "must_contain_any": [
+        "完全落在",
+        "正交",
+        "fully within",
+        "orthogonal"
+      ]
+    },
+    {
+      "description": "Probe 7 match: 8 subjects, 515 images in NSD-core-shared",
+      "must_contain": [
+        "8",
+        "515"
+      ]
+    },
+    {
+      "description": "Probe 8 match: individual directions unstable when nearby weights similar",
+      "must_contain_any": [
+        "不稳定",
+        "unstable",
+        "相近特征值",
+        "tied eigenvalues"
+      ]
+    },
+    {
+      "description": "Additional: median entropy effective rank 5.12",
+      "must_contain": [
+        "5.12"
+      ]
+    },
+    {
+      "description": "Additional: K=10 captures 97.4% reference weight",
+      "must_contain": [
+        "97.4"
+      ]
+    },
+    {
+      "description": "Additional: Ky Fan maximum principle justifies average projector",
+      "must_contain": [
+        "Ky Fan"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "prediction accuracy",
+        "维度",
+        "dimension",
+        "恢复",
+        "recovery"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "重复测量",
+        "repeated",
+        "reproducible target reference",
+        "分割",
+        "split"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain_any": [
+        "预测可复现性",
+        "predictive reproducibility",
+        "方差",
+        "variance",
+        "不同于PCA"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 3918,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}

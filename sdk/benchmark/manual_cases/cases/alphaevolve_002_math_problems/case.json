@@ -1,0 +1,177 @@
+{
+  "id": "alphaevolve_002_math_problems",
+  "history_file": "./history.json",
+  "queries": [
+    "请总结AlphaEvolve在开放数学问题发现上的方法核心和主要成果。",
+    "比较AlphaEvolve与传统定制方法在数学问题求解中的优劣，并评估其可推广性。",
+    "解释AlphaEvolve进化搜索算法而非直接进化构造的方法论创新，以及为什么这种策略自动涌现了多阶段搜索行为。",
+    "评估AlphaEvolve多指标优化能力对数学发现的意义，举例说明在哪些问题上多指标比单指标更关键。",
+    "讨论AlphaEvolve的数学发现是否及如何推广到纯证明类问题，分析可行路径和根本障碍。"
+  ],
+  "probes": [
+    {
+      "question": "AlphaEvolve的应用覆盖了至少多少个数学分支？",
+      "must_contain": [
+        "5"
+      ]
+    },
+    {
+      "question": "AlphaEvolve在约百分之多少的问题上匹配了已知最优构造？",
+      "must_contain": [
+        "75%"
+      ]
+    },
+    {
+      "question": "AlphaEvolve在11维Kissing number问题中找到了多少个互不重叠的单位球与中心球相切的构造？",
+      "must_contain": [
+        "593"
+      ]
+    },
+    {
+      "question": "AlphaEvolve的关键方法论创新是什么？是直接进化数学构造还是进化搜索算法？",
+      "must_contain": [
+        "进化搜索算法",
+        "启发式搜索算法"
+      ]
+    },
+    {
+      "question": "哪两位外部数学家为AlphaEvolve的数学问题研究提供了开放问题建议和形式化指导？",
+      "must_contain_any": [
+        "Javier Gomez Serrano",
+        "Gomez Serrano",
+        "Terence Tao",
+        "陶哲轩"
+      ]
+    },
+    {
+      "question": "为什么AlphaEvolve的多阶段搜索策略很难被手动复现？",
+      "must_contain_any": [
+        "自动涌现",
+        "进化压力",
+        "不同阶段需要不同策略",
+        "难以预见"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "number of mathematical problems applied",
+      "must_contain": [
+        "50"
+      ]
+    },
+    {
+      "description": "number of math branches covered",
+      "must_contain": [
+        "5"
+      ]
+    },
+    {
+      "description": "percentage matching SOTA",
+      "must_contain": [
+        "75%"
+      ]
+    },
+    {
+      "description": "percentage surpassing SOTA",
+      "must_contain": [
+        "20%"
+      ]
+    },
+    {
+      "description": "11-dimensional kissing number result",
+      "must_contain": [
+        "593"
+      ]
+    },
+    {
+      "description": "previous kissing number record",
+      "must_contain": [
+        "592"
+      ]
+    },
+    {
+      "description": "heuristic search time budget",
+      "must_contain": [
+        "1000"
+      ]
+    },
+    {
+      "description": "FunSearch limitation vs AlphaEvolve scope",
+      "must_contain_any": [
+        "单个函数",
+        "整个代码库"
+      ]
+    },
+    {
+      "description": "external mathematicians involved",
+      "must_contain_any": [
+        "Gomez Serrano",
+        "Tao",
+        "陶哲轩"
+      ]
+    },
+    {
+      "description": "multi-stage search strategy emergence",
+      "must_contain_any": [
+        "多阶段",
+        "自动涌现",
+        "早期",
+        "后期"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "75%",
+        "20%",
+        "50",
+        "5",
+        "进化搜索算法"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "构造",
+        "定制",
+        "FunSearch",
+        "单指标",
+        "多指标"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain": [
+        "进化搜索算法",
+        "多阶段"
+      ]
+    },
+    {
+      "turn": 4,
+      "must_contain_any": [
+        "多指标",
+        "单指标",
+        "Kissing",
+        "Heilbronn"
+      ]
+    },
+    {
+      "turn": 5,
+      "must_contain_any": [
+        "证明",
+        "构造",
+        "验证",
+        "fitness"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 7855,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}

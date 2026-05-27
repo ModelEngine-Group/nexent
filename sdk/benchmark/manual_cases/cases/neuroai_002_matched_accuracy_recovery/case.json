@@ -1,0 +1,195 @@
+{
+  "id": "neuroai_002_matched_accuracy_recovery",
+  "history_file": "./history.json",
+  "queries": [
+    "请详细解释论文中关于'近等预测精度对应不同恢复维度'的发现，包括具体的数值证据和其含义。",
+    "ImageNet 预训练是如何改变模型的 recovery profile 的？这种改变是只影响领先维度还是影响整体模式？请用具体数字说明。",
+    "如果你要在早期视觉皮层比较两个模型与大脑的对齐程度，除了 prediction accuracy 还应该报告什么指标？为什么？"
+  ],
+  "probes": [
+    {
+      "question": "为什么 prediction accuracy 相近的模型可能恢复不同的目标脑响应维度？这说明了什么问题？",
+      "must_contain_any": [
+        "标量汇总",
+        "维度",
+        "方向",
+        "不匹配",
+        "mismatch",
+        "掩盖"
+      ]
+    },
+    {
+      "question": "ImageNet 预训练对 recovery profile 的影响是仅限于领先维度还是扩展到更广的范围？具体数字是什么？",
+      "must_contain_any": [
+        "0.178",
+        "0.189",
+        "k=2",
+        "广度扩展"
+      ]
+    },
+    {
+      "question": "ViT-B/16 的随机初始化种子间标准差和预训练-随机差距分别是多少？",
+      "must_contain": [
+        "0.005",
+        "0.258"
+      ]
+    },
+    {
+      "question": "为什么随机 ViT 在 NSD-synthetic 上显示出高 brain-source-referenced profile score？这说明什么？",
+      "must_contain_any": [
+        "归纳偏置",
+        "inductive bias",
+        "架构",
+        "architecture",
+        "合成图像"
+      ]
+    },
+    {
+      "question": "为什么论文用脑源对的 profile-mean difference 第90百分位数作为人类变异阈值，而不是用均值或标准差？",
+      "must_contain_any": [
+        "90百分位",
+        "阈值",
+        "变异上界",
+        "descriptive",
+        "描述性",
+        "保守"
+      ]
+    },
+    {
+      "question": "L2-robust ResNet-50 在 objective sweep 中有什么特殊表现？",
+      "must_contain_any": [
+        "最平坦",
+        "最高",
+        "flattest",
+        "highest brain-source-referenced"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "Probe 1 match: prediction accuracy can mask model-brain mismatches",
+      "must_contain_any": [
+        "标量汇总",
+        "不匹配",
+        "mismatch",
+        "掩盖"
+      ]
+    },
+    {
+      "description": "Probe 2 match: pretrained-minus-random profile-mean gain 0.177",
+      "must_contain": [
+        "0.177"
+      ]
+    },
+    {
+      "description": "Probe 3 match: top-k coverage difference 0.178-0.189 for k=2-10",
+      "must_contain_any": [
+        "0.178",
+        "0.189"
+      ]
+    },
+    {
+      "description": "Probe 4 match: ViT-B/16 seed SD 0.005, gap 0.258",
+      "must_contain": [
+        "0.005",
+        "0.258"
+      ]
+    },
+    {
+      "description": "Probe 5 match: architectural inductive biases interact with synthetic images",
+      "must_contain_any": [
+        "归纳偏置",
+        "inductive bias",
+        "架构偏置"
+      ]
+    },
+    {
+      "description": "Probe 6 match: 90th percentile of brain-source differences as descriptive threshold",
+      "must_contain_any": [
+        "0.035",
+        "90百分位",
+        "descriptive"
+      ]
+    },
+    {
+      "description": "Probe 7 match: L2-robust has highest BrainRefScore and flattest profile",
+      "must_contain_any": [
+        "最平坦",
+        "flattest",
+        "highest brain-source-referenced"
+      ]
+    },
+    {
+      "description": "Probe 8 match: BrainRefScore is brain-source-referenced not general correction",
+      "must_contain_any": [
+        "脑源参考",
+        "非通用",
+        "实证脑源",
+        "conditional"
+      ]
+    },
+    {
+      "description": "Additional: signed profile-mean difference 0.149, CI [0.100, 0.199]",
+      "must_contain": [
+        "0.149"
+      ]
+    },
+    {
+      "description": "Additional: prediction-accuracy difference mean 0.0024",
+      "must_contain": [
+        "0.0024"
+      ]
+    },
+    {
+      "description": "Additional: 79% same-architecture pairs exceed human-variation threshold",
+      "must_contain": [
+        "79"
+      ]
+    },
+    {
+      "description": "Additional: top-k coverage difference 0.137 at k=1",
+      "must_contain": [
+        "0.137"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "0.149",
+        "profile-mean",
+        "预训练",
+        "随机",
+        "精度相近"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "0.137",
+        "0.178",
+        "0.189",
+        "广度",
+        "整体模式",
+        "k=2"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain_any": [
+        "recovery profile",
+        "prediction accuracy",
+        "互补",
+        "维度",
+        "target-reference"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 3711,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}

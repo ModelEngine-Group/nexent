@@ -1,0 +1,23 @@
+[
+  {"fact": "nASR input shape: (B, C, W) = batch, channels, window samples", "type": "architectural"},
+  {"fact": "K_Offset >= 0.1, default 0.1", "type": "exact_value"},
+  {"fact": "K_init = 0.9^2 - K_Offset (corresponds to 90% normalized std)", "type": "exact_value"},
+  {"fact": "tau_D = 20 (STE temperature for Discard)", "type": "exact_value"},
+  {"fact": "tau_L = 20 (STE temperature for Noise)", "type": "exact_value"},
+  {"fact": "epsilon = 1e-6 (NormDiff denominator floor)", "type": "exact_value"},
+  {"fact": "Clean reference threshold: mu +/- 3.5*sigma", "type": "exact_value"},
+  {"fact": "28 channels from 9 ROIs out of 59 available", "type": "exact_value"},
+  {"fact": "Sliding window: 256 samples (2.56s), step 20 samples (200ms)", "type": "exact_value"},
+  {"fact": "Min resolvable frequency: ~0.39 Hz with 256 samples", "type": "exact_value"},
+  {"fact": "Butterworth BPF: 6th-order, 0.5-30 Hz", "type": "exact_value"},
+  {"fact": "EMG dominates EEG above ~25 Hz", "type": "causal"},
+  {"fact": "Adjacency matrix: L2 distance < 0.05 in 10-20 system", "type": "exact_value"},
+  {"fact": "STE enables hard binary decisions forward, smooth gradients backward", "type": "design_decision"},
+  {"fact": "K governs artifact detection in PC variance; L quantifies eigen-spread for channel-level classification", "type": "architectural"},
+  {"fact": "nASR reconstructs channels, not PC subspace - preserves clean channels", "type": "design_decision"},
+  {"fact": "asrpy version 0.0.8 for baseline ASR, threshold=20", "type": "exact_value"},
+  {"fact": "BCI Competition IV Dataset 1, 100 Hz version, subjects a and f", "type": "exact_value"},
+  {"fact": "Adam optimizer, lr=0.001, clipnorm=1.0, dropout=20%, batch=64, max 250 epochs", "type": "exact_value"},
+  {"fact": "Loss = 0.5*BCE + 0.5*Dice; LR halved after 5 epochs plateau, min 1e-7; early stop at 50 epochs", "type": "exact_value"},
+  {"fact": "Dual GPU: 2x NVIDIA RTX 6000 Ada, 48GB VRAM each, Python 3.11.15, TF 2.16.1, Keras 3.14.0", "type": "exact_value"}
+]

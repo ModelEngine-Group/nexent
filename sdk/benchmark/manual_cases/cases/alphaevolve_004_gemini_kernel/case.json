@@ -1,0 +1,192 @@
+{
+  "id": "alphaevolve_004_gemini_kernel",
+  "history_file": "./history.json",
+  "queries": [
+    "请总结AlphaEvolve在工程应用方面的三大领域及其核心成果。",
+    "对比传统的工程优化方法与AlphaEvolve的方法，分析AlphaEvolve的关键优势。",
+    "为什么Gemini内核优化被称为自我改进？这有什么重要意义？",
+    "AlphaEvolve在三个不同抽象层次的优化分别是什么？这种跨层次能力说明了什么？",
+    "XLA编译器优化中，如何保证修改的正确性？结果如何？"
+  ],
+  "probes": [
+    {
+      "question": "AlphaEvolve优化的矩阵乘法内核平均加速了多少？对Gemini整体训练时间缩减了多少？",
+      "must_contain": [
+        "23%",
+        "1%"
+      ]
+    },
+    {
+      "question": "Tiling策略的核心目标是什么？它需要平衡哪两个方面？",
+      "must_contain_any": [
+        "计算",
+        "数据搬运",
+        "计算量",
+        "数据移动"
+      ]
+    },
+    {
+      "question": "搜索式自动调优的两个主要问题是什么？",
+      "must_contain_any": [
+        "中断工作流程",
+        "重新调优",
+        "输入形状",
+        "工作流"
+      ]
+    },
+    {
+      "question": "AlphaEvolve在TPU电路设计中优化的是什么语言的实现？",
+      "must_contain": [
+        "Verilog"
+      ]
+    },
+    {
+      "question": "XLA编译器优化中，FlashAttention内核获得了多少加速？预处理和后处理获得了多少加速？",
+      "must_contain": [
+        "32%",
+        "15%"
+      ]
+    },
+    {
+      "question": "XLA编译器生成的IR有什么特殊性，使得直接编辑它非常困难？",
+      "must_contain_any": [
+        "调试",
+        "不是",
+        "编辑",
+        "已经高度优化",
+        "高度优化"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "Mentions JAX as Gemini's underlying framework",
+      "must_contain": [
+        "JAX"
+      ]
+    },
+    {
+      "description": "Mentions Pallas as JAX extension for custom kernels",
+      "must_contain": [
+        "Pallas"
+      ]
+    },
+    {
+      "description": "Contains 23% average kernel speedup figure",
+      "must_contain": [
+        "23%"
+      ]
+    },
+    {
+      "description": "Contains 1% Gemini training time reduction",
+      "must_contain": [
+        "1%"
+      ]
+    },
+    {
+      "description": "Mentions Verilog as the language for TPU circuit optimization",
+      "must_contain": [
+        "Verilog"
+      ]
+    },
+    {
+      "description": "Contains FlashAttention kernel 32% speedup",
+      "must_contain": [
+        "32%"
+      ]
+    },
+    {
+      "description": "Contains pre/postprocessing 15% speedup",
+      "must_contain": [
+        "15%"
+      ]
+    },
+    {
+      "description": "Mentions XLA compiler or intermediate representations",
+      "must_contain_any": [
+        "XLA",
+        "IR",
+        "中间表示"
+      ]
+    },
+    {
+      "description": "Mentions self-improvement or Gemini optimizing itself",
+      "must_contain_any": [
+        "自我改进",
+        "自我优化",
+        "优化自身",
+        "自己训练"
+      ]
+    },
+    {
+      "description": "Mentions optimization time reduction from months to days",
+      "must_contain_any": [
+        "数月",
+        "几天",
+        "月",
+        "天"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "description": "Query 1: Summarizes three engineering domains and core results",
+      "turn": 1,
+      "must_contain_any": [
+        "Gemini",
+        "内核",
+        "TPU",
+        "电路",
+        "XLA",
+        "编译器"
+      ]
+    },
+    {
+      "description": "Query 2: Compares traditional vs AlphaEvolve approaches",
+      "turn": 2,
+      "must_contain_any": [
+        "搜索",
+        "调优",
+        "启发式",
+        "自动调优",
+        "手工"
+      ]
+    },
+    {
+      "description": "Query 3: Explains self-improvement significance",
+      "turn": 3,
+      "must_contain_any": [
+        "自我改进",
+        "自己训练",
+        "优化自身",
+        "Gemini"
+      ]
+    },
+    {
+      "description": "Query 4: Identifies three abstraction levels",
+      "turn": 4,
+      "must_contain_any": [
+        "软件",
+        "硬件",
+        "编译器",
+        "层次"
+      ]
+    },
+    {
+      "description": "Query 5: Describes correctness verification and results for XLA optimization",
+      "turn": 5,
+      "must_contain_any": [
+        "随机",
+        "正确性",
+        "32%",
+        "15%"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 3062,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}

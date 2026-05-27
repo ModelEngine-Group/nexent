@@ -1,0 +1,163 @@
+{
+  "id": "agentrm_003_empirical_study",
+  "history_file": "./history.json",
+  "queries": [
+    "Based on our discussion of the AgentRM empirical study and evaluation, what are the most critical gaps between the paper's claims and the actual evaluation results? Be specific about which numbers don't align.",
+    "Compare AgentRM's approach to resource management with how Kubernetes handles cluster resources. What are the key similarities and differences in their problem scope and solution approach?",
+    "If you were to extend AgentRM to handle a new type of resource (e.g., GPU compute for agent inference), which existing component would you modify and what OS-inspired techniques would you apply?"
+  ],
+  "probes": [
+    {
+      "question": "What is the formal definition of a Lane in AgentRM's system model? Why is lane-based scheduling more appropriate than queue-based scheduling for agents?",
+      "must_contain_any": [
+        "execution slot",
+        "concurrent"
+      ]
+    },
+    {
+      "question": "What technique does AgentRM adopt from the ATM Forum (1996) for rate limit handling? Why is admission control better than reactive throttling for agent systems?",
+      "must_contain_any": [
+        "admission control",
+        "Admission control"
+      ]
+    },
+    {
+      "question": "Why does AgentRM-CLM consistently achieve 0.95 quality while FIFO Truncation and MemGPT-style only achieve 0.87? What mechanism enables this difference?",
+      "must_contain_any": [
+        "0.95",
+        "95%",
+        "95"
+      ]
+    },
+    {
+      "question": "How many GitHub issues were analyzed in the AgentRM empirical study?",
+      "must_contain_any": [
+        "40,000",
+        "40000",
+        "over 40"
+      ]
+    },
+    {
+      "question": "Which OpenClaw issue documents rate limit cascades from a runaway heartbeat loop?",
+      "must_contain": [
+        "3181"
+      ]
+    },
+    {
+      "question": "What was the zombie count for AgentRM-MLFQ in the normal scenario?",
+      "must_contain": [
+        "0"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "Issue count",
+      "must_contain_any": [
+        "40,000",
+        "40000"
+      ]
+    },
+    {
+      "description": "Framework count",
+      "must_contain_any": [
+        "6",
+        "six"
+      ]
+    },
+    {
+      "description": "OpenClaw zombie issue",
+      "must_contain": [
+        "25992"
+      ]
+    },
+    {
+      "description": "OpenClaw amnesia issue",
+      "must_contain": [
+        "39282"
+      ]
+    },
+    {
+      "description": "OpenClaw RAM crash",
+      "must_contain_any": [
+        "6.3GB",
+        "6.3"
+      ]
+    },
+    {
+      "description": "CLM quality score",
+      "must_contain": [
+        "0.95"
+      ]
+    },
+    {
+      "description": "Baseline quality score",
+      "must_contain": [
+        "0.87"
+      ]
+    },
+    {
+      "description": "Faulty scenario parameters",
+      "must_contain_any": [
+        "63",
+        "30%"
+      ]
+    },
+    {
+      "description": "OS analogy insight",
+      "must_contain_any": [
+        "analogous",
+        "OS resources",
+        "operating system"
+      ]
+    },
+    {
+      "description": "Agent frameworks listed",
+      "must_contain_any": [
+        "AutoGen",
+        "CrewAI",
+        "LangGraph",
+        "OpenClaw"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "discrepancy",
+        "inconsistency",
+        "align",
+        "45.2",
+        "27",
+        "29"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "Kubernetes",
+        "infrastructure",
+        "application-level",
+        "Borg",
+        "complementary"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain_any": [
+        "MLFQ",
+        "DRF",
+        "token bucket",
+        "scheduler",
+        "admission"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 4238,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}

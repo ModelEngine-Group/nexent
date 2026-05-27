@@ -1,0 +1,22 @@
+[
+  {"fact": "Three-tier storage: Tier 0 Active (0ms), Tier 1 Warm (~1s, SQLite), Tier 2 Cold (~3s, JSONL)", "type": "architectural"},
+  {"fact": "Value function: v(m) = alpha*recency + beta*importance + gamma*key_info_bonus", "type": "algorithm"},
+  {"fact": "Compress don't discard principle (analogous to zswap)", "type": "design_decision"},
+  {"fact": "Compression threshold adapts like Linux vm.swappiness", "type": "causal"},
+  {"fact": "Approximates Belady MIN algorithm using semantic similarity", "type": "causal"},
+  {"fact": "50-turn session: 100 msgs, 51K tokens, 13 key msgs, 50K window", "type": "exact_value"},
+  {"fact": "100-turn session: 200 msgs, 105K tokens, 27 key msgs", "type": "exact_value"},
+  {"fact": "200-turn session: 400 msgs, 202K tokens, 47 key msgs", "type": "exact_value"},
+  {"fact": "Multi-topic: 240 msgs, 116K tokens, 35 key msgs", "type": "exact_value"},
+  {"fact": "200-turn AgentRM-CLM: 99.0% retention, 0.95 quality, 34330 cost", "type": "comparative"},
+  {"fact": "200-turn MemGPT: 65.1% retention, 0.87 quality, 17212 cost", "type": "comparative"},
+  {"fact": "200-turn No Management: 23.4% retention, 0.63 quality", "type": "comparative"},
+  {"fact": "200-turn Sliding Window: 6.4% retention", "type": "comparative"},
+  {"fact": "Multi-topic AgentRM-CLM: 99.6% retention, 0.95 quality, 16498 cost", "type": "comparative"},
+  {"fact": "OpenClaw #39282: agent wrote own issue reporting amnesia after context overflow", "type": "exact_value"},
+  {"fact": "OpenClaw #24031: contextTokens limit violations, unexpected truncation", "type": "exact_value"},
+  {"fact": "OpenClaw #28629: 6.3GB RAM crash from unbounded log accumulation", "type": "exact_value"},
+  {"fact": "Hibernation inspired by CRIU, VM live migration, ARIES WAL", "type": "causal"},
+  {"fact": "Self-monitoring via PSI-inspired context utilization metrics in system prompt", "type": "design_decision"},
+  {"fact": "Compaction cost ratio: AgentRM ~2x MemGPT (34330 vs 17212 in 200-turn)", "type": "comparative"}
+]

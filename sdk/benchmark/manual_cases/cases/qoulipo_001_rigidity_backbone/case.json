@@ -1,0 +1,153 @@
+{
+  "id": "qoulipo_001_rigidity_backbone",
+  "history_file": "./history.json",
+  "queries": [
+    "If you were to apply the rigidity metric to a modern novel with clear act structure (three acts, each with multiple chapters), what rigidity range would you expect and why? Compare with the paper's corpus.",
+    "The paper shows that k-center clustering and greedy facility-location overlap with MIS backbone at only ~30% and ~20% median respectively. Explain why MIS produces a fundamentally different kind of summary and when you would prefer MIS over these methods.",
+    "If the embedder were changed from e5-large-instruct to a domain-specific model fine-tuned on Renaissance Latin and Italian, how would you expect the rigidity rankings to change? What does the paper's cross-embedder study tell us about this?"
+  ],
+  "probes": [
+    {
+      "question": "Why does rigidity depend on both the text and the embedding? What would happen if you changed the embedder from e5-large-instruct to a domain-specific model?",
+      "must_contain_any": [
+        "text, embedding",
+        "embedding) pair",
+        "situated metric"
+      ]
+    },
+    {
+      "question": "Why does the persistent core in the Twelve Hours example form an intersection of MIS solutions? What does this tell us about textual structure?",
+      "must_contain_any": [
+        "intersection",
+        "persistent core",
+        "persistency"
+      ]
+    },
+    {
+      "question": "What is the rigidity value for Marguerite de Navarre's Heptameron at k=16?",
+      "must_contain": [
+        "0.857"
+      ]
+    },
+    {
+      "question": "What is the cosine similarity threshold t used in graph construction?",
+      "must_contain": [
+        "0.78"
+      ]
+    },
+    {
+      "question": "What was the OCR character error rate (CER) for the Giambullari edition?",
+      "must_contain": [
+        "2.48"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "Heptameron rigidity",
+      "must_contain": [
+        "0.857"
+      ]
+    },
+    {
+      "description": "Boethius rigidity zero",
+      "must_contain": [
+        "0"
+      ]
+    },
+    {
+      "description": "Giambullari rigidity",
+      "must_contain": [
+        "0.878"
+      ]
+    },
+    {
+      "description": "Embedding dimension",
+      "must_contain": [
+        "1024"
+      ]
+    },
+    {
+      "description": "Cosine threshold",
+      "must_contain": [
+        "0.78"
+      ]
+    },
+    {
+      "description": "MIS/N range",
+      "must_contain_any": [
+        "0.10",
+        "0.30"
+      ]
+    },
+    {
+      "description": "Rigidity is (text, embedding) pair property",
+      "must_contain_any": [
+        "text, embedding",
+        "embedding) pair",
+        "situated metric"
+      ]
+    },
+    {
+      "description": "OCR CER",
+      "must_contain": [
+        "2.48"
+      ]
+    },
+    {
+      "description": "Persistent core definition",
+      "must_contain_any": [
+        "intersection",
+        "persistent core",
+        "persistency"
+      ]
+    },
+    {
+      "description": "e5-large-instruct embedder name",
+      "must_contain_any": [
+        "e5-large-instruct",
+        "multilingual-e5"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "rigidity",
+        "rho",
+        "0.10-0.30",
+        "MIS/N",
+        "substitutable",
+        "irreplaceable"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "independence",
+        "non-redundant",
+        "dissimilar",
+        "forbids",
+        "adjacent"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain_any": [
+        "embedder",
+        "e5-large-instruct",
+        "bge-m3",
+        "stable",
+        "MIS/N",
+        "rigidity"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 3927,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}

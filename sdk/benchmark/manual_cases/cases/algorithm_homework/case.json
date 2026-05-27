@@ -1,0 +1,150 @@
+{
+  "id": "algorithm_homework",
+  "history_file": "./history.json",
+  "queries": [
+    "请总结我们之前讨论的五个算法练习的核心结论和它们之间的递进关系。",
+    "如果有人告诉你他用局部搜索解决了一个 NP-hard 问题并声称效果很好，你会如何基于我们的讨论评价这个说法？",
+    "结合之前的讨论，解释为什么顶点覆盖有常数近似比但独立集却没有——两者不是互补的吗？"
+  ],
+  "probes": [
+    {
+      "question": "我们讨论 UFL 归约时，为什么 c_{ij} = d_{ij} + t_i 构成的是 quasi-metric 而不是标准 metric？t_i 的归属为什么影响度量性质？",
+      "must_contain": [
+        "quasi-metric",
+        "非对称度量"
+      ]
+    },
+    {
+      "question": "为什么 k-means 和 k-median 用同样的投影论证但近似因子不同？造成这个差异的数学原因是什么？",
+      "must_contain": [
+        "平方"
+      ]
+    },
+    {
+      "question": "我们在讨论 SDP 的价值时，为什么说它用 12.2% 的精度换取了质变？这个质变是什么？",
+      "must_contain": [
+        "指数时间",
+        "多项式时间"
+      ]
+    },
+    {
+      "question": "我们讨论中用了一个'分蛋糕'的类比来解释 Max Cut，那个类比中'敌对关系最多'对应图论中的什么概念？",
+      "must_contain": [
+        "割边"
+      ]
+    },
+    {
+      "question": "我们讨论 SDP 时用了一个比喻来说明 TRUE 和 FALSE 的向量编码，那个比喻说真和假分别对应向量的什么方向关系？",
+      "must_contain": [
+        "朝北",
+        "朝南"
+      ]
+    },
+    {
+      "question": "我们讨论独立集不可近似性时，用了一个'称大象 vs 称蚂蚁'的类比，其中'称蚂蚁'代表哪个问题？",
+      "must_contain": [
+        "独立集"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "k-means projection target set",
+      "must_contain": [
+        "P"
+      ]
+    },
+    {
+      "description": "UFL t_i belongs to which side",
+      "must_contain": [
+        "客户"
+      ]
+    },
+    {
+      "description": "c_ij = d_ij + t_i metric type",
+      "must_contain": [
+        "quasi-metric"
+      ]
+    },
+    {
+      "description": "Max Cut counting error correction",
+      "must_contain": [
+        "同侧边"
+      ]
+    },
+    {
+      "description": "Max Cut cake analogy: hostility = ?",
+      "must_contain": [
+        "割边"
+      ]
+    },
+    {
+      "description": "SDP TRUE/FALSE vector direction analogy",
+      "must_contain": [
+        "朝北"
+      ]
+    },
+    {
+      "description": "SDP precision vs complexity tradeoff",
+      "must_contain": [
+        "多项式"
+      ]
+    },
+    {
+      "description": "independent set analogy: weighing ant",
+      "must_contain": [
+        "独立集"
+      ]
+    },
+    {
+      "description": "k-means vs k-median factor difference cause",
+      "must_contain": [
+        "平方"
+      ]
+    },
+    {
+      "description": "reduction analogy name",
+      "must_contain": [
+        "杀牛杀猪"
+      ]
+    },
+    {
+      "description": "Hastad inapproximability year",
+      "must_contain": [
+        "1999"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "4倍",
+        "0.878",
+        "1/2",
+        "不可近似"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "局部搜索",
+        "1/2",
+        "局部最优",
+        "近似比"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain": [
+        "互补",
+        "不可近似"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 12969,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4
+  }
+}

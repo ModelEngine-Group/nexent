@@ -1,0 +1,92 @@
+[
+  {
+    "id": "f01",
+    "type": "numeric",
+    "fact": "Matched-rank target PCA FullRefCov = 0.43, brain-to-brain recovery profile FullRefCov = 0.85; 1-component PCA: 0.18; 2-component PCA: 0.37",
+    "source_location": "Appendix D, paragraph on PCA controls"
+  },
+  {
+    "id": "f02",
+    "type": "numeric",
+    "fact": "Session/run-balanced reference: soft reference similarity 0.994±0.0002 SEM, hard reference capture 0.980±0.003, profile mean Pearson r=0.996, mean shift -0.0015",
+    "source_location": "Appendix D, paragraph on session/run-balanced splits"
+  },
+  {
+    "id": "f03",
+    "type": "numeric",
+    "fact": "Pretrained-random profile-mean difference with main reference: 0.2140, with session/run-balanced reference: 0.2143",
+    "source_location": "Appendix D, paragraph on session/run-balanced splits"
+  },
+  {
+    "id": "f04",
+    "type": "numeric",
+    "fact": "Fixed rank BrainRefScore: adaptive pretrained 0.833 vs random 0.594; fixed rank 2: 0.958 vs 0.801; fixed rank 3: 0.980 vs 0.819",
+    "source_location": "Appendix D, paragraph on rank-rule sensitivity"
+  },
+  {
+    "id": "f05",
+    "type": "conceptual",
+    "fact": "Fixed-rank controls rule out the alternative explanation that pretrained models simply select higher ranks; even with identical ranks, pretrained models recover more target-reference dimensions",
+    "source_location": "Appendix D, paragraph on rank-rule sensitivity"
+  },
+  {
+    "id": "f06",
+    "type": "numeric",
+    "fact": "K sensitivity: K=5 +0.214 CI[0.199,0.228], K=10 +0.214 CI[0.198,0.229], K=20 +0.213 CI[0.197,0.228]",
+    "source_location": "Appendix G, Table 2"
+  },
+  {
+    "id": "f07",
+    "type": "conceptual",
+    "fact": "K=10 choice is not cherry-picking; results are stable across K=5,10,20 because first 10 reference directions capture 97.4% of normalized reference weight",
+    "source_location": "Appendix G"
+  },
+  {
+    "id": "f08",
+    "type": "numeric",
+    "fact": "Disjoint-fold stress test: same-fold vs next-fold profile mean correlation r=0.90, mean next/same ratio 1.01",
+    "source_location": "Appendix I, Figure 9E-F"
+  },
+  {
+    "id": "f09",
+    "type": "conceptual",
+    "fact": "Proposition 1's independence assumption is an idealization in fMRI; session effects, trial-order effects, and shared fluctuations can create noise components partially reproduced across trial views, but empirical controls show this is not a major issue in current data",
+    "source_location": "Appendix C, paragraph after Proposition 1 proof"
+  },
+  {
+    "id": "f10",
+    "type": "numeric",
+    "fact": "Direction-wise held-out prediction control: donor r=0.83 (78400 dirs), pretrained r=0.73 (44800 dirs), random r=0.63 (44800 dirs); DirCov is positively related but distinct from direction-wise held-out prediction",
+    "source_location": "Appendix G, Table 2"
+  },
+  {
+    "id": "f11",
+    "type": "numeric",
+    "fact": "Source-side diagnostics: selected source rank median 2.2, source effective rank median 1.76; pretrained mean effective rank 2.01, random 1.57; fold stability median projector overlap 0.40 (pretrained) vs 0.43 (random)",
+    "source_location": "Appendix H, paragraph on source-side diagnostics"
+  },
+  {
+    "id": "f12",
+    "type": "conceptual",
+    "fact": "NSD-synthetic differs from NSD-core-shared in both stimulus distribution and response preprocessing (single synthetic beta series vs session-wise z-scoring), making it a dataset-shift stress test rather than a pure replication",
+    "source_location": "Appendix A, paragraph 'Dataset selection' and Appendix F"
+  },
+  {
+    "id": "f13",
+    "type": "numeric",
+    "fact": "NSD-synthetic: 284 unique synthetic stimuli, 170-171 training images and 56-57 test images per fold; same 8 subjects",
+    "source_location": "Appendix A, paragraph 'Dataset selection'"
+  },
+  {
+    "id": "f14",
+    "type": "conceptual",
+    "fact": "Target-unit block bootstrap resamples subject-hemisphere-ROI combinations together to preserve dependence among model comparisons sharing the same target responses; directions, folds, and sources are not treated as independent inferential samples",
+    "source_location": "Appendix B, paragraph 'Uncertainty estimates'"
+  },
+  {
+    "id": "f15",
+    "type": "conceptual",
+    "fact": "Recovery profiles are not explained by arbitrary low-dimensional structure or response shuffling; PCA controls, null controls, fixed-rank variants, and disjoint-fold tests all confirm the framework measures recovery of target-reference dimensions specifically",
+    "source_location": "Appendix D, opening paragraph"
+  }
+]

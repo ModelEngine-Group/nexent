@@ -1,0 +1,122 @@
+[
+  {
+    "role": "user",
+    "content": "我最近在研究如何评估视觉模型和人脑之间的对齐程度。目前大家主要用 prediction accuracy，但我觉得这个指标可能不够。你能帮我想想为什么吗？"
+  },
+  {
+    "role": "assistant",
+    "content": "这是一个很好的问题。Prediction accuracy 确实是一个广泛使用的指标，但它有一个根本性的局限：它只告诉你预测的总体质量，却不告诉你预测恢复了目标脑响应空间的哪些维度。具体来说，对于一个固定的 ROI，目标响应空间是由该 ROI 的体素或顶点定义的——每张图像在这个空间中产生一个响应向量。一个预测可能在平均意义上很好地匹配目标响应，但只恢复了其中某些方向，或者恢复了与另一个具有相似精度的预测不同的方向。这就是为什么仅靠 prediction accuracy 无法区分那些预测精度相近但恢复了不同响应维度的模型。"
+  },
+  {
+    "role": "user",
+    "content": "所以你的意思是，即使两个模型有几乎相同的 prediction accuracy，它们恢复的可能是目标脑的不同维度？那怎么才能知道具体恢复了哪些维度呢？"
+  },
+  {
+    "role": "assistant",
+    "content": "没错，这正是核心问题。要回答这个问题，我们需要两样东西：第一，一个定义在目标脑响应空间中的参考坐标系；第二，将每个源的预测子空间与这个参考进行比较的方法。这个框架的核心概念是 'reproducible target reference'——它是通过重复测量来定义的。具体来说，对同一个目标脑，我们将重复试验随机分成两半，形成两个平均视图，然后在两个方向上做 target-to-target 预测，得到两个 target-side bases，然后将它们的投影矩阵取平均。这个平均投影矩阵就是 reproducible target reference。"
+  },
+  {
+    "role": "user",
+    "content": "这个 reproducible target reference 和 PCA 有什么区别？我觉得听起来有点像 PCA——都是找主要方向。"
+  },
+  {
+    "role": "assistant",
+    "content": "这是一个常见的误解，但两者有本质区别。PCA 是按响应方差来排序的——方差最大的方向排在前面。而 reproducible target reference 是按 '预测可复现性' 来排序的——即某个方向在独立试验分割中是否被一致地恢复。一个方向可能方差很大但不可复现（噪声占主导），也可能方差不大但高度可复现（稳定的信号）。Reference weight 越大，说明该方向在越多的分割中被一致恢复。论文中的数据显示，前三个 target-reference 维度平均占 88.6% 的归一化 reference weight，中位数熵有效秩为 5.12。这说明早期-中级视觉皮层的响应确实包含一个低维的可复现结构。"
+  },
+  {
+    "role": "user",
+    "content": "你提到 '源' 这个概念，能具体解释一下什么是 source 吗？另外，'predictive subspace' 是怎么得到的？"
+  },
+  {
+    "role": "assistant",
+    "content": "Source 就是预测的输入端——可以是另一个被试的脑响应（brain source），也可以是视觉模型的内部表征（model source）。对于源 s，我们有数据矩阵 X_s ∈ R^{n×p_s}，其中 n 是图像数，p_s 是源表征的维度。对每个目标单元（被试-半球-ROI 组合），有目标响应矩阵 Y ∈ R^{n×q}，q 是保留的体素或顶点数。\n\nPredictive subspace 的构造过程如下：首先用 ridge-regularized low-rank linear fit 将源映射到目标，这个拟合诱导出一个正交目标基 Q_s ∈ R^{q×k_s}，其列张成了从源 s 预测出的目标响应模式。对应的投影矩阵是 P_s = Q_s Q_s^T。因为所有源都在同一个目标响应空间中表示为投影矩阵，所以脑源和模型源可以直接比较，尽管它们的原生坐标系不同。"
+  },
+  {
+    "role": "user",
+    "content": "那 recovery profile 具体是怎么计算的呢？怎么比较 predictive subspace 和 reproducible target reference？"
+  },
+  {
+    "role": "assistant",
+    "content": "Recovery profile 的核心度量是 directional reference coverage：对于源 s 和第 j 个 target-reference 方向 u_j，\n\nDirCov_{s,j} = ||Q_s^T u_j||^2 = u_j^T P_s u_j\n\n这个值在 0 到 1 之间：1 表示该参考方向完全落在预测子空间内，0 表示正交。但由于单个参考方向在附近 reference weight 相近时可能不稳定，主要图表用的是 top-k reference coverage：\n\nTopKCov_{s,k} = (∑_{j=1}^{k} ω_j DirCov_{s,j}) / (∑_{j=1}^{k} ω_j)\n\n这是前 k 个 target-reference 方向的 reference-weighted 重叠。注意这是一个 prefix average，不是累积和，所以曲线不一定随 k 单调递增——加入一个低覆盖的方向可能拉低平均值。还有 profile mean 作为紧凑摘要：ProfileMean = (1/K) ∑_{k=1}^{K} TopKCov_{s,k}。"
+  },
+  {
+    "role": "user",
+    "content": "我注意到你提到 brain-to-brain prediction 可以提供 human reference。这个和传统的 noise ceiling 有什么不同？"
+  },
+  {
+    "role": "assistant",
+    "content": "这是另一个重要的区别。传统的 noise ceiling 分析将 brain-to-brain 预测仅用作一个标量基准或上限参考。但在我们的框架中，brain-to-brain 比较不仅仅是一个标量——它是一个 recovery profile，告诉你哪些 target-reference 维度通常可以从其他人的大脑中恢复。论文中的数据显示，brain source 的 top-k reference coverage 从 k=1 的 0.959 下降到 k=10 的 0.868。这个下降模式本身就有诊断价值：它说明 brain-to-brain 比较包含的信息比单个上限值多得多。预测精度与曲线整体高度相关，但不决定曲线形状，所以 brain-to-brain 比较作为 recovery profile 比作为标量 ceiling 更有信息量。"
+  },
+  {
+    "role": "user",
+    "content": "我现在大概理解框架了。但有一个关键的问题：为什么你要把源子空间和目标参考放在同一个目标响应空间里比较？直接在源的坐标系里比较不行吗？"
+  },
+  {
+    "role": "assistant",
+    "content": "这是框架设计的一个关键决策。如果我们在源的坐标系里比较，不同源（比如 ResNet 和 VGG）有不同的特征维度和坐标系，无法直接比较。而将所有源映射到同一个目标响应空间后，每个源都表示为同一个空间中的投影矩阵，就可以直接比较了——即使脑源和模型源的原生坐标系完全不同。\n\n这也意味着 recovery profile 问的问题始终是：在目标脑的响应空间中，这个源恢复了多少可复现的响应维度？而不是问源的哪些特征与脑相似。后者是源侧诊断（source-side diagnostics）的任务，论文也定义了相关的度量如 block-use diagnostic 和 source stability，但这些是补充性的，不是主要评估对象。"
+  },
+  {
+    "role": "user",
+    "content": "那模型的表征是怎么选择的？论文里用了哪些模型？"
+  },
+  {
+    "role": "assistant",
+    "content": "论文使用了四个模型架构：ResNet-18（960 个特征，来自 residual stages 1-4）、ResNet-50（3840 个特征，stages 1-4）、VGG-16（1472 个特征，来自五个卷积特征抽取点）和 ViT-B/16（3072 个特征，来自 transformer blocks 0, 3, 7, 11）。每个架构都评估了 ImageNet 预训练和架构匹配的随机初始化两种状态。所有模型层和表征定义在外测试评估之前就固定了，没有用外测试的目标响应来选择层、超参数或模型表征。\n\n对于每个图像，卷积层的激活值在空间维度上取平均，transformer 层则在序列位置上取平均，然后跨层拼接。预训练和随机状态使用完全相同的固定特征定义。"
+  },
+  {
+    "role": "user",
+    "content": "hyperparameter 的选择呢？我看到有 subspace regularization 和 readout regularization，这两个为什么分开？"
+  },
+  {
+    "role": "assistant",
+    "content": "这是设计中的一个重要选择。Subspace regularization α_sub 用于选择降秩预测子空间和诱导源侧目标基，它的网格是 {10, 10^2, 10^3, 10^4, 10^5, 10^6}。Readout regularization α_read 只用于从选定的源坐标到目标响应的低维 ridge readout，用于报告 prediction accuracy，网格是 {10^{-6}, 10^{-3}, 10^{-1}, 1, 10, 10^2, 10^3, 10^4, 10^5, 10^6}。\n\n分开的原因是它们服务于不同目的：α_sub 定义了用于 recovery profile 的预测几何（秩选择、源侧坐标、源诱导目标基），而 α_read 只定义从选定坐标到完整目标响应的标量预测。如果耦合两者，就会迫使用于 recovery profile 的几何和用于标量预测的收缩共享一个调参变量，尽管它们的目的是不同的。\n\n实证上也支持这个分离：在 10640 个源-目标-折叠行中，α_sub 的中位数是 10^3（IQR: 10^3-10^4），α_read 的中位数是 10^{-6}（IQR: 10^{-6}-1），两者仅在 0.4% 的行中完全相等，对数尺度的 Pearson 相关只有 0.044。"
+  },
+  {
+    "role": "user",
+    "content": "cross-validation 是怎么做的？rank 的选择有什么规则？"
+  },
+  {
+    "role": "assistant",
+    "content": "对于 target-reference 构造和 recovery profile 的拟合，(k, α_sub) 通过五折内交叉验证选择，秩范围是 1 ≤ k ≤ k_max^eff，其中 k_max^eff = min(20, p_s, q_r, ⌊n_train/2⌋)。对每个候选对，在内训练图像上学习降秩基，然后将内训练和内验证的源响应投影到所得的 k 个源坐标中，用相同的 α_sub 拟合临时 ridge readout。验证分数是内验证图像上的平均体素级 Pearson 相关。\n\nRank 选择使用 one-standard-error 规则：找到最佳平均验证分数，保留所有在该分数一个标准误差内的 (k, α_sub) 对，选择其中最小的秩，然后按更高验证分数和更小 α_sub 打破剩余平局。在 NSD-core-shared 的 recovery profile 拟合中，选定的预测秩的中位数是 3.33，熵有效秩的中位数是 5.12。"
+  },
+  {
+    "role": "user",
+    "content": "还有一个小问题：recovery profile 的长度 K=10 是怎么确定的？这不是一个硬性秩约束吧？"
+  },
+  {
+    "role": "assistant",
+    "content": "对，K=10 不是硬性秩约束，而是一个报告约定。完整的 reproducible target reference 是在所有保留的目标体素上计算的——在 NSD-core-shared 分析中，这从 307 到 1117 个方向不等，中位数为 604.5。但前 10 个参考方向平均捕获了 97.4% 的归一化 reference weight，所以 K=10 几乎总结了完整的可复现目标参考，同时保持图表可读。\n\n重要的是，(k, α_sub) 的选择允许选择高达 k_max^eff 的秩，不受 K=10 的限制。对于同一目标折叠，参考方向和 q_r 对所有源都是相同的，所以不同源的 profile 直接可比。"
+  },
+  {
+    "role": "user",
+    "content": "最后一个问题：这个框架的适用范围是什么？什么情况下不适合用？"
+  },
+  {
+    "role": "assistant",
+    "content": "这个框架在以下情况有用：目标不仅是预测目标响应，还要理解不同源恢复了目标响应空间的哪些部分。它需要重复测量来定义 reproducible target reference，所以没有重复测量的数据不适用。它最适合有不同维度可能被不同源恢复的测量响应模式（如体素或神经群体响应）。\n\n在这种情况下，prediction accuracy 和 recovery profile 可以一起报告：前者表示预测质量，后者表示恢复了哪些可复现维度。\n\n不适合的情况包括：没有重复目标测量（无法定义参考），或者目标是单个确定性标签而不是有维度可恢复的响应空间。另外，高恢复分数只支持条件性解释——对于评估的 ROI、数据集、预处理和 readout 类，源到目标的拟合恢复了可复现的响应维度——不应该被解释为整个模型表征是 brain-like 的证据。"
+  },
+  {
+    "role": "user",
+    "content": "总结一下，这个框架的核心贡献是什么？"
+  },
+  {
+    "role": "assistant",
+    "content": "三个核心贡献：\n\n1. 引入了目标空间框架，通过识别预测恢复了目标脑的哪些响应维度来评估模型-脑和脑-脑对齐。\n\n2. 使用重复 fMRI 测量识别可跨独立试验分割复现预测的目标脑响应维度，并用脑到脑预测表征其中哪些维度可以从其他人脑中恢复。\n\n3. 利用 Natural Scenes Dataset 的子集表明，预测精度几乎相同的模型在恢复这些可复现响应维度的程度和模式上可能不同。\n\n核心结论是：prediction accuracy alone 可以掩盖模型-脑的不匹配。我们的框架通过显式展示每个预测恢复了哪些可复现响应维度来揭示这些不匹配。"
+  },
+  {
+    "role": "user",
+    "content": "谢谢，这很清楚了。那 reproducible target reference 的数学理论基础是什么？有形式化的证明吗？"
+  },
+  {
+    "role": "assistant",
+    "content": "有的，论文在附录中提供了三个命题：\n\n**命题1**（交叉视图协方差反映可复现信号协方差）：在加性重复测量模型下，Y^{(1)} = S + E^{(1)}, Y^{(2)} = S + E^{(2)}，其中 S 是图像锁定的可复现信号，E 是独立零均值试验噪声，则 Cov(Y^{(1)}, Y^{(2)}) = Cov(S)。这解释了为什么使用独立重复试验视图可以抑制跨视图不复现的试验噪声。\n\n**命题2**（平均投影矩阵共识）：在所有秩 k 正交投影矩阵中，与 M 个分割特定投影矩阵的平均重叠 tr(P P̄) 由投影到 P̄ 的前 k 个特征子空间的投影矩阵最大化。这是 Ky Fan 最大原理的应用。\n\n**命题3**（分裂参考的蒙特卡罗一致性）：有限随机试验分割估计的 RMSE Frobenius 误差以 O(N^{-1/2}) 的速率衰减，因为 E[||R̂_N - R_*||^2_F | D] ≤ k_max/N。所以增加分割次数可以减少分裂参考构造中的蒙特卡罗误差。\n\n注意，这些命题不声称恢复了唯一的生物学真值子空间——它们论证的是构造提供了一个原则性的目标空间参考。"
+  },
+  {
+    "role": "user",
+    "content": "好的，那我现在想在另一个数据集上验证这个框架的鲁棒性。论文里做了哪些鲁棒性检查？"
+  },
+  {
+    "role": "assistant",
+    "content": "论文做了大量鲁棒性检查，包括：试验分割重采样、固定秩变体（k=2 和 k=3）、PCA 和零控制、NSD-synthetic 验证、报告选择敏感性、方向级 held-out 预测控制、随机初始化种子敏感性、session/run 平衡的试验分割、以及不相交折叠压力测试。\n\n关键发现包括：固定秩控制下，预训练-随机分离仍然成立（brain-source-referenced profile scores: 自适应规则 0.833 vs 0.594，固定秩2 0.958 vs 0.801，固定秩3 0.980 vs 0.819）。匹配秩的目标 PCA 仅达到 0.43 的全谱参考覆盖，而脑到脑恢复 profile 达到 0.85。Session/run 平衡分割产生的参考与主参考几乎相同（软参考相似度 0.994±0.0002），不相交折叠的 profile mean 高度相关（r=0.90，next/same ratio 1.01）。"
+  }
+]

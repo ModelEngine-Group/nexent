@@ -1,0 +1,156 @@
+{
+  "id": "agentrm_001_scheduling",
+  "history_file": "./history.json",
+  "queries": [
+    "Based on our discussion of AgentRM's scheduling component, if I were deploying an agent system that experiences frequent API rate limit cascades, which specific mechanisms should I enable and how would they work together to prevent system-wide failures?",
+    "Compare the performance of AgentRM-MLFQ across all five evaluation scenarios. In which scenario does it show the smallest improvement over baselines, and why?",
+    "If you had to implement a simplified version of the AgentRM scheduler for a system with only 2 execution lanes and no rate limit concerns, which components would you keep and which could you safely omit?"
+  ],
+  "probes": [
+    {
+      "question": "How many priority queues does AgentRM's MLFQ scheduler use?",
+      "must_contain": [
+        "3",
+        "three"
+      ]
+    },
+    {
+      "question": "Which OpenClaw issue number documents cross-channel blocking where a user message was blocked for over 6 hours?",
+      "must_contain": [
+        "12442"
+      ]
+    },
+    {
+      "question": "What scheduling technique from Solaris inspires AgentRM's priority boosting mechanism?",
+      "must_contain_any": [
+        "Solaris TS",
+        "TS scheduling",
+        "Solaris"
+      ]
+    },
+    {
+      "question": "What congestion control algorithm inspired AgentRM's rate limit handling approach?",
+      "must_contain_any": [
+        "TCP",
+        "Jacobson",
+        "AIMD"
+      ]
+    },
+    {
+      "question": "In the high-load scenario, how many zombies does the FIFO baseline produce?",
+      "must_contain": [
+        "29"
+      ]
+    },
+    {
+      "question": "In the cascade scenario, what was the oscillating hang rate range?",
+      "must_contain_any": [
+        "5-40",
+        "5% to 40%",
+        "5%-40%"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "MLFQ queue count",
+      "must_contain": [
+        "3"
+      ]
+    },
+    {
+      "description": "Zombie reaper interval",
+      "must_contain": [
+        "5"
+      ]
+    },
+    {
+      "description": "Zombie threshold",
+      "must_contain": [
+        "30"
+      ]
+    },
+    {
+      "description": "Recovery probability",
+      "must_contain": [
+        "50"
+      ]
+    },
+    {
+      "description": "OpenClaw blocking issue",
+      "must_contain": [
+        "12442"
+      ]
+    },
+    {
+      "description": "CTSS inspiration",
+      "must_contain_any": [
+        "CTSS",
+        "Corbato"
+      ]
+    },
+    {
+      "description": "Token bucket mechanism",
+      "must_contain_any": [
+        "token bucket",
+        "Token bucket"
+      ]
+    },
+    {
+      "description": "DRF fairness",
+      "must_contain_any": [
+        "DRF",
+        "Dominant Resource"
+      ]
+    },
+    {
+      "description": "Faulty scenario zombie recovery count",
+      "must_contain": [
+        "15"
+      ]
+    },
+    {
+      "description": "High-load P95 latency for AgentRM",
+      "must_contain_any": [
+        "323001",
+        "323,001"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "token bucket",
+        "AIMD",
+        "admission control",
+        "rate limit"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "burst",
+        "smallest",
+        "modest",
+        "similar"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain_any": [
+        "MLFQ",
+        "zombie",
+        "priority",
+        "reaper",
+        "lane"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 4205,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}

@@ -1,0 +1,161 @@
+{
+  "id": "nasr_002_ablation_results",
+  "history_file": "./history.json",
+  "queries": [
+    "Based on the ablation results, if you had to deploy nASR in a real-time BCI system with limited compute, which variant would you choose and why? Consider both subjects' results.",
+    "The paper shows that neighborhood reconstruction underperforms global mean reconstruction. Does this finding generalize? Under what conditions might neighborhood reconstruction be preferred?",
+    "If traditional ASR (m01) has competitive validation performance but poor test performance, what does this imply about the role of artifact removal in the overall BCI pipeline?",
+    "请详细总结上述对话，并对出现的核心概念进行解释"
+  ],
+  "probes": [
+    {
+      "question": "Why does m01 (traditional ASR) have competitive validation performance but poor test performance? What does this overfitting pattern imply about artifact removal?",
+      "must_contain_any": [
+        "0.688",
+        "0.624",
+        "overfit"
+      ]
+    },
+    {
+      "question": "Which model variant achieved the best test performance across all three metrics for Subject 'f'?",
+      "must_contain": [
+        "m02"
+      ]
+    },
+    {
+      "question": "What was the inference time for nASR variants (m02-m05)?",
+      "must_contain_any": [
+        "1.0",
+        "1.3",
+        "1.0-1.3"
+      ]
+    },
+    {
+      "question": "What was the total inference time for m01 on Subject 'a'?",
+      "must_contain_any": [
+        "8.9",
+        "8.9 ms"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "Best test variant Subject a",
+      "must_contain_any": [
+        "m05",
+        "0.677",
+        "0.680"
+      ]
+    },
+    {
+      "description": "Best test variant Subject f",
+      "must_contain": [
+        "m02"
+      ]
+    },
+    {
+      "description": "Inference time reduction",
+      "must_contain_any": [
+        "6-8",
+        "6--8",
+        "6x",
+        "8x"
+      ]
+    },
+    {
+      "description": "nASR inference time range",
+      "must_contain_any": [
+        "1.0",
+        "1.3"
+      ]
+    },
+    {
+      "description": "m01 inference time",
+      "must_contain_any": [
+        "8.9",
+        "8.1"
+      ]
+    },
+    {
+      "description": "m01 overfitting pattern",
+      "must_contain_any": [
+        "0.688",
+        "0.624",
+        "overfit"
+      ]
+    },
+    {
+      "description": "Full-window covariance detrimental",
+      "must_contain_any": [
+        "m04",
+        "detrimental",
+        "underperformed"
+      ]
+    },
+    {
+      "description": "m01 ASR threshold",
+      "must_contain": [
+        "20"
+      ]
+    },
+    {
+      "description": "Noise mask percentage m01",
+      "must_contain_any": [
+        "30%",
+        "30"
+      ]
+    },
+    {
+      "description": "Pareto frontier model",
+      "must_contain": [
+        "m02"
+      ]
+    },
+    {
+      "description": "Subject f m02 metrics",
+      "must_contain_any": [
+        "0.618",
+        "0.660",
+        "0.623"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "m02",
+        "Pareto",
+        "inference",
+        "accuracy",
+        "fastest"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "correlated",
+        "residual noise",
+        "EMG",
+        "volume conduction",
+        "generali"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain_any": [
+        "over-correct",
+        "task-relevant",
+        "generaliz",
+        "threshold",
+        "learnable"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 3325,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}

@@ -1,0 +1,22 @@
+[
+  {"fact": "MLFQ uses 3 priority queues: Q0 Interactive, Q1 Sub-agent, Q2 Background", "type": "architectural"},
+  {"fact": "Zombie reaper scans every 5 seconds", "type": "exact_value"},
+  {"fact": "Zombie threshold: 30 seconds hang time", "type": "exact_value"},
+  {"fact": "Probabilistic recovery: 50% success rate on retry", "type": "exact_value"},
+  {"fact": "MLFQ inspired by CTSS (Corbato 1962) and Linux CFS (Molnar 2007)", "type": "causal"},
+  {"fact": "Priority boosting inspired by Solaris TS scheduling and CFS vruntime", "type": "causal"},
+  {"fact": "Rate limit handling: token bucket per model API, AIMD backoff, admission control", "type": "architectural"},
+  {"fact": "Fairness via DRF from YARN (Vavilapalli 2013, Ghodsi 2011)", "type": "causal"},
+  {"fact": "Normal scenario: 27 turns, 3 agents, 5% hang rate, AgentRM P95=4495ms, zombies=0", "type": "comparative"},
+  {"fact": "High Load: 280 turns, 10 agents, 10% hang, AgentRM P95=323001ms, zombies=7, recovered=22", "type": "comparative"},
+  {"fact": "Faulty: 63 turns, 5 agents, 30% hang, AgentRM P95=77524ms, zombies=5, recovered=15, throughput=11.0", "type": "comparative"},
+  {"fact": "Cascade: 149 turns, 5 agents, 5-40% oscillating hang, AgentRM zombies=4, recovered=21", "type": "comparative"},
+  {"fact": "Burst: 30 turns in 3s, 8% hang, AgentRM zombies=0, recovered=2", "type": "comparative"},
+  {"fact": "OpenClaw #12442: 6+ hours blocking, 6+ unresponsive episodes in 12 hours", "type": "exact_value"},
+  {"fact": "OpenClaw #25992: zombie subagents held lanes 11+ minutes", "type": "exact_value"},
+  {"fact": "OpenClaw #3181: runaway heartbeat loop caused rate limit cascade", "type": "causal"},
+  {"fact": "Scheduler uses O(log n) priority queues, semaphore-controlled lane pool", "type": "architectural"},
+  {"fact": "Work-conserving: lends idle resources from high-priority to low-priority tasks", "type": "design_decision"},
+  {"fact": "Abstract claims 86% P95 reduction and 168% throughput increase - these match faulty scenario", "type": "comparative"},
+  {"fact": "Introduction claims 0 vs 27 zombies and 45.2 vs 45.1 throughput - not directly found in tables", "type": "inconsistency"}
+]

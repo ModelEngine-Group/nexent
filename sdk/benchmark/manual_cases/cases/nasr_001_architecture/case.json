@@ -1,0 +1,158 @@
+{
+  "id": "nasr_001_architecture",
+  "history_file": "./history.json",
+  "queries": [
+    "If I wanted to implement nASR for a different EEG montage with 32 channels instead of 28, what components would need to change and what would remain the same?",
+    "Explain why nASR uses two separate learnable thresholds (K and L) instead of a single threshold. What would go wrong if you only used K?",
+    "Compare the Straight-Through Estimator (STE) approach in nASR with Gumbel-Softmax. Why is STE more appropriate for this application?"
+  ],
+  "probes": [
+    {
+      "question": "Why does nASR reconstruct in channel space rather than PC subspace? What advantage does per-channel masking provide?",
+      "must_contain_any": [
+        "per-channel",
+        "channel-level",
+        "locate",
+        "which channel",
+        "contaminated channel"
+      ]
+    },
+    {
+      "question": "Why is the Straight-Through Estimator (STE) more appropriate than Gumbel-Softmax for nASR's binary mask? What does each approach trade off?",
+      "must_contain_any": [
+        "STE",
+        "Straight-Through",
+        "binary",
+        "gradient",
+        "stop-gradient"
+      ]
+    },
+    {
+      "question": "How many EEG channels were used in the study out of the 59 available?",
+      "must_contain": [
+        "28"
+      ]
+    },
+    {
+      "question": "How many regions of interest (ROI) were the 28 channels grouped into?",
+      "must_contain": [
+        "9"
+      ]
+    },
+    {
+      "question": "What is the value of tau_D used in the Discard mask computation?",
+      "must_contain": [
+        "20"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "K_Offset value",
+      "must_contain": [
+        "0.1"
+      ]
+    },
+    {
+      "description": "K initialization",
+      "must_contain_any": [
+        "0.9",
+        "0.81",
+        "K_init"
+      ]
+    },
+    {
+      "description": "tau_D value",
+      "must_contain": [
+        "20"
+      ]
+    },
+    {
+      "description": "epsilon value",
+      "must_contain_any": [
+        "1e-6",
+        "10^-6"
+      ]
+    },
+    {
+      "description": "STE mechanism",
+      "must_contain_any": [
+        "Straight-Through",
+        "stop-gradient",
+        "STE"
+      ]
+    },
+    {
+      "description": "Channel count",
+      "must_contain": [
+        "28"
+      ]
+    },
+    {
+      "description": "ROI count",
+      "must_contain": [
+        "9"
+      ]
+    },
+    {
+      "description": "Window samples",
+      "must_contain": [
+        "256"
+      ]
+    },
+    {
+      "description": "Step size",
+      "must_contain": [
+        "20"
+      ]
+    },
+    {
+      "description": "Adjacency distance threshold",
+      "must_contain_any": [
+        "0.05"
+      ]
+    },
+    {
+      "description": "Sampling rate",
+      "must_contain": [
+        "100"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "adjacency",
+        "channels",
+        "covariance",
+        "threshold"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "K",
+        "L",
+        "artifact",
+        "channel",
+        "spread"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain_any": [
+        "STE",
+        "binary",
+        "gradient",
+        "Gumbel"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 3158,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4,
+    "max_observation_length": 20000
+  }
+}
