@@ -23,7 +23,7 @@ def setup_partition_mock(mocker: MockFixture, return_value):
         "unstructured.partition.auto": fake_auto_mod,
     })
 
-    mock_partition = mocker.Mock(return_value=return_value)
+    mock_partition = Mock(return_value=return_value)
     fake_auto_mod.partition = mock_partition
     return mock_partition
 

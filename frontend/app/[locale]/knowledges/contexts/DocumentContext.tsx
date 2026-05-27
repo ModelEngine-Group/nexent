@@ -112,7 +112,7 @@ export const DocumentContext = createContext<{
   state: DocumentState;
   dispatch: React.Dispatch<DocumentAction>;
   fetchDocuments: (kbId: string, forceRefresh?: boolean, kbSource?: string) => Promise<void>;
-  uploadDocuments: (kbId: string, files: File[]) => Promise<void>;
+  uploadDocuments: (kbId: string, files: File[], modelId?: number) => Promise<void>;
   deleteDocument: (kbId: string, docId: string) => Promise<void>;
 }>({
   state: {
@@ -202,11 +202,11 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({ children }) 
   }, [state.loadingKbIds, state.documentsMap, t]);
 
   // Upload documents to a knowledge base
-  const uploadDocuments = useCallback(async (kbId: string, files: File[]) => {
+  const uploadDocuments = useCallback(async (kbId: string, files: File[], modelId?: number) => {
     dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOADING, payload: true });
     
     try {
-      await knowledgeBaseService.uploadDocuments(kbId, files);
+      await knowledgeBaseService.uploadDocuments(kbId, files, undefined, modelId);
       
       // Set loading state before fetching latest documents
       dispatch({ type: DOCUMENT_ACTION_TYPES.SET_LOADING_DOCUMENTS, payload: true });

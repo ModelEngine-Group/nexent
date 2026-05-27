@@ -58,6 +58,7 @@ def check_file_access(object_name: str, user_id: Optional[str]) -> bool:
     Access rules:
     - knowledge_base/*: All authenticated users can access
     - attachments/{user_id}/*: Only the owner (user_id) can access
+    - images_in_attachments/*: All authenticated users can access
     - preview/*: Accessible if the original file is accessible
 
     Args:
@@ -72,6 +73,11 @@ def check_file_access(object_name: str, user_id: Optional[str]) -> bool:
 
     if object_name.startswith("knowledge_base/"):
         # Knowledge base files: all authenticated users can access
+        return True
+
+    if object_name.startswith("images_in_attachments/"):
+        # Extracted image files used by knowledge-base image chunks.
+        # Keep them readable for authenticated users to avoid broken image citations.
         return True
 
     # Check if file is in user's attachments folder

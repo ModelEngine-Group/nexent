@@ -8,12 +8,18 @@ enable/disable lifecycle, and tool listing.
 
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
+import importlib.machinery
+import types
 import sys
 import os
 
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
-sys.modules['boto3'] = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
 # Patch storage factory and MinIO config validation to avoid errors during initialization

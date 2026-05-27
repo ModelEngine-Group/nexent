@@ -1251,15 +1251,17 @@ class TestRemoveLocalSkillConfigYaml:
 class TestParseYamlWithRuamel:
     """Test _parse_yaml_with_ruamel_merge_eol_comments function."""
 
-    def test_parse_simple_yaml(self, mocker):
+    def test_parse_simple_yaml(self):
         yaml_content = "key: value\nnested:\n  inner: test"
 
-        with patch.dict('sys.modules', {'ruamel.yaml': MagicMock()}):
-            try:
-                result = _parse_yaml_with_ruamel_merge_eol_comments(yaml_content)
-                assert isinstance(result, dict)
-            except ImportError:
-                pytest.skip("ruamel.yaml not available")
+        try:
+            result = _parse_yaml_with_ruamel_merge_eol_comments(yaml_content)
+        except ImportError:
+            pytest.skip("ruamel.yaml not available")
+
+        assert isinstance(result, dict)
+        assert result["key"] == "value"
+        assert result["nested"]["inner"] == "test"
 
 
 class TestParseYamlFallbackPyyaml:

@@ -340,6 +340,9 @@ export function useConfig() {
   // Whether config has selected an Embedding model
   const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);
 
+  // Whether config has selected a Multi-Embedding model
+  const isMultiEmbeddingAvailable = !!(config?.models?.multiEmbedding?.modelName || config?.models?.multiEmbedding?.displayName);
+
   // Default LLM model name from config (modelName or displayName)
   const defaultLlmModelName = config?.models?.llm?.modelName || config?.models?.llm?.displayName || "";
 
@@ -424,6 +427,7 @@ export function useConfig() {
     isImageUnderstandingAvailable,
     isVideoUnderstandingAvailable,
     isEmbeddingAvailable,
+    isMultiEmbeddingAvailable,
     defaultLlmModelName,
     defaultLlmModelConfig,
     updateAppConfig,

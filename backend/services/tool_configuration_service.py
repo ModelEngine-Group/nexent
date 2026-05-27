@@ -695,6 +695,8 @@ def _validate_local_tool(
         if not tool_class:
             raise NotFoundException(f"Tool class not found for {tool_name}")
 
+        runtime_inputs = dict(inputs or {})
+
         # Parse instantiation parameters first
         instantiation_params = params or {}
         # Get signature and extract default values for all parameters
@@ -718,6 +720,7 @@ def _validate_local_tool(
 
         if tool_name == "knowledge_base_search":
             index_names = instantiation_params.get("index_names", [])
+            is_multimodal = instantiation_params.pop("multimodal", False)
 
             # Must have embedding model for knowledge base search
             if not index_names or not tenant_id:
@@ -831,7 +834,18 @@ def _validate_local_tool(
         else:
             tool_instance = tool_class(**instantiation_params)
 
-        result = tool_instance.forward(**(inputs or {}))
+        # Only pass declared runtime inputs to forward() to avoid unexpected kwargs.
+        declared_inputs = getattr(tool_class, "inputs", {}) or {}
+        allowed_input_names = (
+            set(declared_inputs.keys()) if isinstance(declared_inputs, dict) else set()
+        )
+        filtered_runtime_inputs = (
+            {k: v for k, v in runtime_inputs.items() if k in allowed_input_names}
+            if allowed_input_names
+            else runtime_inputs
+        )
+
+        result = tool_instance.forward(**filtered_runtime_inputs)
         return result
     except Exception as e:
         logger.error(f"Local tool validation failed for {tool_name}: {e}")

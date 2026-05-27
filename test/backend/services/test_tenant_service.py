@@ -1,5 +1,7 @@
 import sys
 import os
+import importlib.machinery
+import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 import pytest
@@ -7,7 +9,11 @@ from unittest.mock import patch, MagicMock
 
 # Mock external dependencies before importing
 sys.modules['psycopg2'] = MagicMock()
-sys.modules['boto3'] = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 sys.modules['supabase'] = MagicMock()
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
