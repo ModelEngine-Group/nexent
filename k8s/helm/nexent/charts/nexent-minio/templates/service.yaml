@@ -9,8 +9,14 @@ spec:
     - port: 9000
       targetPort: 9000
       name: api
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePorts.api }}
+      nodePort: {{ .Values.service.nodePorts.api }}
+      {{- end }}
     - port: 9001
       targetPort: 9001
       name: console
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePorts.console }}
+      nodePort: {{ .Values.service.nodePorts.console }}
+      {{- end }}
   selector:
     app: nexent-minio

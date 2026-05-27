@@ -1,23 +1,38 @@
 "use client";
 
-import { Card, Row, Col, Flex, Button } from "antd";
+import { Layout, Row, Col, Card } from "antd";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-
 import { useSetupFlow } from "@/hooks/useSetupFlow";
+import { useConfig } from "@/hooks/useConfig";
 import { motion } from "framer-motion";
-import AgentManageComp from "./components/AgentManageComp";
 import AgentConfigComp from "./components/AgentConfigComp";
 import AgentInfoComp from "./components/AgentInfoComp";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import AgentVersionManage from "./AgentVersionManage";
+import AgentSelectorHeader from "./components/AgentSelectorHeader";
+
+const { Header, Content } = Layout;
 
 export default function AgentSetupOrchestrator() {
   const { pageVariants, pageTransition } = useSetupFlow();
   const searchParams = useSearchParams();
   const enterCreateMode = useAgentConfigStore((state) => state.enterCreateMode);
   const reset = useAgentConfigStore((state) => state.reset);
+  const setDefaultLlmConfig = useAgentConfigStore((state) => state.setDefaultLlmConfig);
+  const { config } = useConfig();
+
+  // Sync default LLM config from load_config
+  useEffect(() => {
+    if (config?.models?.llm) {
+      setDefaultLlmConfig({
+        id: config.models.llm.id || 0,
+        name: config.models.llm.modelName || "",
+        displayName: config.models.llm.displayName || "",
+      });
+    }
+  }, [config, setDefaultLlmConfig]);
 
   // Local UI state for version panel
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] = useState(false);
@@ -26,7 +41,6 @@ export default function AgentSetupOrchestrator() {
   useEffect(() => {
     const create = searchParams.get('create');
     if (create === 'true') {
-      // Small delay to ensure component is fully mounted
       setTimeout(() => {
         enterCreateMode();
       }, 100);
@@ -40,86 +54,110 @@ export default function AgentSetupOrchestrator() {
     };
   }, [reset]);
 
+  const headerStyle: React.CSSProperties = {
+    padding: 0,
+    height: 120,
+    lineHeight: '120px',
+    background: '#fff',
+    flexShrink: 0,
+  };
+
+  const contentStyle: React.CSSProperties = {
+    padding: '32px',
+    background: '#fff',
+    overflow: 'auto',
+    flex: 1,
+    minHeight: 0,
+  };
+
   return (
-    <div className="w-full h-full p-8">
-      <motion.div
-        initial="initial"
-        animate="in"
-        exit="out"
-        variants={pageVariants}
-        transition={pageTransition}
-        style={{ width: "100%", height: "100%" }}
-      >
-        {/* Main content area with adaptive width */}
-        <Flex className="h-full w-full" gap={16}>
-          <Card
-            className="h-full min-h-0 flex-1"
-            style={{ minHeight: 400, overflow: "hidden" }}
-          >
-            <style jsx global>{`
-              .ant-card-body {
-                height: 100%;
-              }
-            `}</style>
-            {/* Three-column layout using Ant Design Grid */}
-            <Row
-              gutter={[16, 16]}
-              className="h-full min-h-0 w-full"
-              align="stretch"
+    <div className="w-full h-full">
+      <Layout className="h-full bg-white" style={{ borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
+        {/* Fixed Header */}
+        <Header style={headerStyle}>
+          <AgentSelectorHeader
+            onOpenVersionManage={() => setIsShowVersionManagePanel(true)}
+            isShowVersionManagePanel={isShowVersionManagePanel}
+            onCloseVersionManagePanel={() => setIsShowVersionManagePanel(false)}
+          />
+        </Header>
+        <motion.div
+          initial="initial"
+          animate="in"
+          exit="out"
+          variants={pageVariants}
+          transition={pageTransition}
+          style={{ width: "100%", flex: 1, minHeight: 0, display: 'flex' }}
+        >
+          <Content style={contentStyle}>
+            <div
+              className="h-full"
+              style={{
+                display: 'flex',
+                gap: isShowVersionManagePanel ? 18 : 0,
+                width: '100%',
+                height: '100%',
+              }}
             >
-              {/* Left column: Agent Management */}
-              <Col
-                xs={24}
-                sm={24}
-                md={24}
-                lg={8}
-                className="flex flex-col h-full w-full"
+              {/* Main content area with two columns */}
+              <div
+                style={{
+                  flex: isShowVersionManagePanel ? 1 : 'none',
+                  width: isShowVersionManagePanel ? 'auto' : '100%',
+                  height: '100%',
+                }}
               >
-                <AgentManageComp />
-              </Col>
+                <Row
+                  gutter={{ lg: 32, md: 32, sm: 16 }}
+                  className="h-full px-4"
+                  align="stretch"
+                  style={{ height: '100%' }}
+                >
+                  {/* Left column: Agent Config */}
+                  <Col
+                    xs={24}
+                    sm={24}
+                    md={24}
+                    lg={12}
+                    className="flex flex-col h-full"
+                  >
+                    <Card className="h-full" styles={{ body: { height: '100%' } }}>
+                      <AgentConfigComp />
+                    </Card>
+                  </Col>
+                  {/* Right column: Agent Info */}
+                  <Col
+                    xs={24}
+                    sm={24}
+                    md={24}
+                    lg={12}
+                    className="flex flex-col h-full"
+                  >
+                    <Card className="h-full" styles={{ body: { height: '100%' } }}>
+                      <AgentInfoComp />
+                    </Card>
+                  </Col>
+                </Row>
+              </div>
 
-              {/* Middle column: Agent Config */}
-              <Col
-                xs={24}
-                sm={24}
-                md={24}
-                lg={8}
-                className="flex flex-col h-full w-full"
-              >
-                <AgentConfigComp />
-              </Col>
+              {/* Version Management Panel - Fixed width */}
+              {isShowVersionManagePanel && (
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ width: 360, height: "100%", flexShrink: 0 }}
+                >
+                  <AgentVersionManage />
+                </motion.div>
+              )}
+            </div>
+          </Content>
+          
 
-              {/* Right column: Agent Info */}
-              <Col
-                xs={24}
-                sm={24}
-                md={24}
-                lg={8}
-                className="flex flex-col h-full w-full"
-              >
-                <AgentInfoComp
-                  isShowVersionManagePanel={isShowVersionManagePanel}
-                  openVersionManagePanel={() => setIsShowVersionManagePanel(true)}
-                  closeVersionManagementPanel={() => setIsShowVersionManagePanel(false)}
-                />
-              </Col>
-            </Row>
-          </Card>
-
-          {/* Version Management Panel - Fixed width */}
-          {isShowVersionManagePanel && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.2 }}
-              style={{ width: 400, height: "100%", flexShrink: 0 }}
-            >
-              <AgentVersionManage />
-            </motion.div>
-          )}
-        </Flex>
-      </motion.div>
+        </motion.div>
+      </Layout>
     </div>
-  )
+  );
 }

@@ -35,21 +35,29 @@ cd nexent/k8s/helm
 Run the deployment script:
 
 ```bash
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
-After executing this command, the system will prompt for configuration options:
+After running the command, the script opens Bash TUI menus for configuration. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
 
-**Version Selection:**
-- **Speed version (Lightweight & Fast Deployment, Default)**: Quick startup of core features, suitable for individual users and small teams
-- **Full version (Complete Feature Edition)**: Provides enterprise-level tenant management and resource isolation features, includes Supabase authentication
+**Deployment Components:**
+- **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
+- **application (selected by default, optional)**: config, runtime, mcp, northbound, web
+- **data-process (optional)**: data processing service
+- **supabase (optional)**: enables user, tenant, and authentication features
+- **terminal (optional)**: enables the OpenSSH terminal tool
+- **monitoring (optional)**: enables observability components and then prompts for a provider
 
-**Image Source Selection:**
-- **Mainland China**: Uses optimized regional mirrors for faster image pulling
-- **General**: Uses standard Docker Hub registries
+**Port Policy:**
+- **development (default)**: uses NodePort for Web and selected debug/internal services
+- **production**: keeps internal services as ClusterIP and exposes only production entrypoints
 
-**Optional Components:**
-- **Terminal Tool**: Enables openssh-server for AI agent shell command execution
+**Image Source:**
+- **general (default)**: uses standard public registries
+- **mainland**: uses mainland China mirrors
+- **local-latest**: uses local `latest` images and local-friendly pull policies for Nexent application images
+
+After a successful deployment, non-sensitive choices are saved to `k8s/helm/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
 ### ⚠️ Important Notes
 
@@ -72,7 +80,7 @@ kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
 # Step 3: Re-deploy and record the su account password
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
 ### 4. Access Your Installation
@@ -113,7 +121,7 @@ Nexent uses a microservices architecture deployed via Helm charts:
 | nexent-redis | Caching layer |
 | nexent-minio | S3-compatible object storage |
 
-**Supabase Services (Full Version Only):**
+**Supabase Services (when `supabase` is selected):**
 | Service | Description |
 |---------|-------------|
 | nexent-supabase-kong | API Gateway |
@@ -124,13 +132,14 @@ Nexent uses a microservices architecture deployed via Helm charts:
 | Service | Description |
 |---------|-------------|
 | nexent-openssh-server | SSH terminal for AI agents |
+| nexent-monitoring | Optional observability stack |
 
 ## 🔌 Port Mapping
 
 | Service | Internal Port | NodePort | Description |
 |---------|---------------|----------|-------------|
 | Web Interface | 3000 | 30000 | Main application access |
-| Northbound API | 5010 | 30013 | Northbound API service |
+| Northbound API | 5013 | 30013 | Northbound API service |
 | SSH Server | 22 | 30022 | Terminal tool access |
 
 For internal service communication, services use Kubernetes internal DNS (e.g., `http://nexent-config:5010`).
@@ -141,34 +150,49 @@ Nexent uses PersistentVolumes for data persistence:
 
 | Data Type | PersistentVolume | Default Host Path |
 |-----------|------------------|-------------------|
-| Elasticsearch | nexent-elasticsearch-pv | `{dataDir}/elasticsearch` |
-| PostgreSQL | nexent-postgresql-pv | `{dataDir}/postgresql` |
-| Redis | nexent-redis-pv | `{dataDir}/redis` |
-| MinIO | nexent-minio-pv | `{dataDir}/minio` |
-| Supabase DB (Full) | nexent-supabase-db-pv | `{dataDir}/supabase-db` |
+| Elasticsearch | nexent-elasticsearch-pv | `/var/lib/nexent-data/nexent-elasticsearch` |
+| PostgreSQL | nexent-postgresql-pv | `/var/lib/nexent-data/nexent-postgresql` |
+| Redis | nexent-redis-pv | `/var/lib/nexent-data/nexent-redis` |
+| MinIO | nexent-minio-pv | `/var/lib/nexent-data/nexent-minio` |
+| Supabase DB (when `supabase` is selected) | nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
 
-Default `dataDir` is `/var/lib/nexent-data` (configurable in `values.yaml`).
+Helm uninstall does not delete local hostPath data by default. Use `./uninstall.sh --delete-local-data true` to delete known Nexent local volume contents under `/var/lib/nexent-data/nexent-*`, or `--keep-local-data` to preserve them explicitly.
 
 ## 🔧 Deployment Commands
 
 ```bash
 # Deploy with interactive prompts
-./deploy-helm.sh apply
+./deploy.sh
+
+# Non-interactive deployment with the default component set
+./deploy.sh --components infrastructure,application --port-policy development --image-source general
+
+# Enable user/tenant features, data processing, and terminal
+./deploy.sh --components infrastructure,application,supabase,data-process,terminal
 
 # Deploy with mainland China image sources
-./deploy-helm.sh apply --is-mainland Y
+./deploy.sh --image-source mainland
 
-# Deploy full version (with Supabase)
-./deploy-helm.sh apply --deployment-version full
+# Use local latest images
+./deploy.sh --image-source local-latest
 
 # Clean helm state only (fixes stuck releases)
-./deploy-helm.sh clean
+./uninstall.sh clean
 
-# Uninstall but preserve data
-./deploy-helm.sh delete
+# Uninstall; local data is preserved by default, with interactive prompts for namespace and local data deletion
+./uninstall.sh
 
-# Complete uninstall including all data
-./deploy-helm.sh delete-all
+# Uninstall and delete the namespace
+./uninstall.sh --delete-namespace true
+
+# Uninstall and delete local hostPath data
+./uninstall.sh --delete-local-data true
+
+# Complete uninstall including namespace and local hostPath data
+./uninstall.sh delete-all
+
+# Complete uninstall but preserve local hostPath data
+./uninstall.sh delete-all --keep-local-data
 ```
 
 ## 🔍 Troubleshooting

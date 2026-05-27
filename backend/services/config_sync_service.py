@@ -196,6 +196,7 @@ def build_models_config(tenant_id: str) -> dict:
 def build_model_config(model_config: dict) -> dict:
     if not model_config:
         return {
+            "id": None,
             "name": "",
             "displayName": "",
             "apiConfig": {
@@ -205,6 +206,7 @@ def build_model_config(model_config: dict) -> dict:
         }
 
     config = {
+        "id": model_config.get("model_id"),
         "name": get_model_name_from_config(model_config) if model_config else "",
         "displayName": model_config.get("display_name", ""),
         "apiConfig": {

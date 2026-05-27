@@ -85,12 +85,13 @@ async def search_agent_info_api(
     """
     Search agent info by agent_id and version_no
     version_no defaults to 0 (current/draft version)
+    Returns permission field indicating whether the user can edit this agent.
     """
     try:
-        _, auth_tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id = get_current_user_id(authorization)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
-        return await get_agent_info_impl(agent_id, effective_tenant_id, version_no)
+        return await get_agent_info_impl(agent_id, effective_tenant_id, version_no, user_id)
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(

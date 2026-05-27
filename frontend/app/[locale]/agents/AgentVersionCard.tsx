@@ -254,11 +254,7 @@ export function VersionCardItem({
         if (store.currentAgentId === agentId) {
           const agentResult = await searchAgentInfo(agentId);
           if (agentResult.success && agentResult.data) {
-            const permissionFromList = currentAgent?.permission ?? undefined;
-            store.setCurrentAgent({
-              ...agentResult.data,
-              permission: permissionFromList,
-            });
+            store.setCurrentAgent(agentResult.data);
             store.triggerForceRefresh();
           }
         }

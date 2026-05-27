@@ -1,4 +1,4 @@
-{{- if eq .Values.global.deploymentVersion "full" }}
+{{- if or (eq .Values.global.deploymentVersion "full") (index .Values.global.deploymentComponents "supabase") }}
 ---
 apiVersion: v1
 kind: Service
@@ -6,11 +6,14 @@ metadata:
   name: nexent-supabase-auth
   namespace: {{ .Values.global.namespace }}
 spec:
-  type: ClusterIP
+  type: {{ default "ClusterIP" .Values.service.type }}
   ports:
     - port: 9999
       targetPort: 9999
       name: auth
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
   selector:
     app: nexent-supabase-auth
 {{- end }}

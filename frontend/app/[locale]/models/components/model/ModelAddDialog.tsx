@@ -848,7 +848,9 @@ export const ModelAddDialog = ({
       }
 
       // Create the model configuration object
+      // Note: id is set to 0 as placeholder; backend assigns the actual id when saving
       let modelConfig: SingleModelConfig | STTModelConfig | TTSModelConfig = {
+        id: 0,
         modelName: form.name,
         displayName: form.displayName || form.name,
         apiConfig: {
