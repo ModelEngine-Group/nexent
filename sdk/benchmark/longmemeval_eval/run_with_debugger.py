@@ -2,21 +2,21 @@
 """Run LongMemEval benchmark with ContextDebugger attached for Langfuse export.
 
 Usage:
-    # 方案1: 冒烟测试 (default schema)
+    # Option 1: Smoke test (default schema)
     NEXENT_CONTEXT_DEBUG=/tmp/longmemeval_smoke.jsonl \
       python run_with_debugger.py \
         --dialogue_index 0 --limit 1 --max_ingest_sessions 20 \
         --token_threshold 200000 --baseline_context_chars 800000 \
         --sessions_per_batch 12 --keep_recent_pairs 10 --summary_schema default
 
-    # 方案2: 单对话10问题 (multi_topic schema - 推荐)
+    # Option 2: Single dialogue with 10 questions (multi_topic schema - recommended)
     NEXENT_CONTEXT_DEBUG=/tmp/longmemeval_q10_multi.jsonl \
       python run_with_debugger.py \
         --dialogue_index 0 --limit 10 \
         --token_threshold 200000 --baseline_context_chars 800000 \
         --sessions_per_batch 12 --keep_recent_pairs 10 --summary_schema multi_topic
 
-    # 方案3: 完整60问题 (multi_topic schema)
+    # Option 3: Full 60 questions (multi_topic schema)
     NEXENT_CONTEXT_DEBUG=/tmp/longmemeval_q60_multi.jsonl \
       python run_with_debugger.py \
         --dialogue_index 0 --limit 60 \
